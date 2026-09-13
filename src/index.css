@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+@media print {
+  @page {
+    margin: 8mm 12mm;
+  }
+  @page duty-register-page {
+    size: landscape;
+    margin: 5mm;
+  }
+  .duty-register-print {
+    page: duty-register-page;
+  }
+  .duty-register-print table {
+    white-space: nowrap;
+    width: max-content !important; /* Let it expand to fit content */
+  }
+  .duty-register-print th, .duty-register-print td {
+    white-space: nowrap !important;
+  }
+  html, body {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  header, nav, footer, aside, .print\:hidden, .no-print, [role="navigation"] {
+    display: none !important;
+  }
+  #root {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    min-height: 0 !important;
+    height: auto !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    width: 100% !important;
+  }
+}
+
+/* Hide scrollbars globally */
+::-webkit-scrollbar {
+  display: none;
+}
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+/* Global Table Alternating Row Colors */
+@media screen {
+  table:not(.no-zebra) tbody tr:nth-child(even) {
+    background-color: rgb(248 250 252 / 0.7);
+  }
+  table:not(.no-zebra) tbody tr:nth-child(odd) {
+    background-color: #ffffff;
+  }
+  
+  html.dark table:not(.no-zebra) tbody tr:nth-child(even),
+  .dark table:not(.no-zebra) tbody tr:nth-child(even) {
+    background-color: rgb(30 41 59 / 0.5);
+  }
+  
+  html.dark table:not(.no-zebra) tbody tr:nth-child(odd),
+  .dark table:not(.no-zebra) tbody tr:nth-child(odd) {
+    background-color: #0f172a;
+  }
+}
+
+@media print {
+  table {
+    table-layout: auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+}
+
+@media print {
+  /* We still want flex containers to work if they are row, but column containers might stretch. */
+  /* Actually, setting position: static on everything might break some layouts if they rely on relative/absolute inside the print content. */
+}
