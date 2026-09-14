@@ -218,13 +218,15 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
         setActiveIdaShift(undefined);
     } else {
         if (activeFlight !== 'All') {
-            const shifts: IDAShift[] = ['Morning', 'Afternoon', 'Night'];
-            const targetShift = shifts.find(s => getFlightDutyQuotaForDate(fromDate, activeFlight, activeDutyCode, s) > 0);
-            if (targetShift) {
-                setActiveIdaShift(targetShift);
-            } else {
-                setActiveIdaShift(undefined);
-            }
+            setActiveIdaShift(prev => {
+                // If there's already a valid shift selected for this flight, keep it
+                if (prev && getFlightDutyQuotaForDate(fromDate, activeFlight, activeDutyCode, prev) > 0) {
+                    return prev;
+                }
+                const shifts: IDAShift[] = ['Morning', 'Afternoon', 'Night'];
+                const targetShift = shifts.find(s => getFlightDutyQuotaForDate(fromDate, activeFlight, activeDutyCode, s) > 0);
+                return targetShift || undefined;
+            });
         }
     }
   }, [activeDutyCode, fromDate, activeFlight]);

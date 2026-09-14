@@ -1,5 +1,16 @@
-import { supabase } from '../supabase';
+import { supabase, isSupabaseConfigured } from '../supabase';
+import { Rank, FlightName } from '../types';
 
+export interface UserPresence {
+  bdNo: string;
+  name: string;
+  rank: Rank | string;
+  flightName: FlightName | string;
+  role?: string;
+  lastActive?: string;
+  status?: string;
+  deviceInfo?: string;
+}
 
 // Call this when user logs in
 const isQuotaExceeded = () => typeof window !== 'undefined' && window.localStorage.getItem('firebase_quota_exceeded') === new Date().toDateString();
@@ -10,8 +21,8 @@ export const logUserLogin = async (user: Omit<UserPresence, 'lastActive' | 'stat
     
     // In Supabase we'd write to a presence table or update user_profiles
     // We'll update the user_profiles status instead since there's no presence table in Supabase schema requested
-    if (supabase) {
-       await supabase.from('user_profiles').update({ status: 'ACTIVE' }).eq('bd_no', user.bdNo);
+    if (isSupabaseConfigured) {
+       await supabase.from('user_profiles').update({ 'Status': 'ACTIVE' }).eq('User ID', user.bdNo);
     }
     
     // Also save locally
@@ -73,7 +84,7 @@ export const subscribeToLoginHistory = (callback: (logs: any[]) => void) => {
   
   callback(JSON.parse(localStorage.getItem('baf_user_login_history') || '[]'));
   
-  if (supabase) {
+  if (isSupabaseConfigured) {
     supabase.from('parade_states').select('*').eq('type', 'SYSTEM').order('created_at', { ascending: false }).limit(100).then(({ data, error }) => {
       if (!error && data) {
          callback(data);

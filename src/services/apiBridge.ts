@@ -21,6 +21,10 @@ export function installApiInterceptor() {
 
     // Only intercept /api/* routes
     if (urlStr.startsWith('/api/') || urlStr.startsWith('api/') || urlStr.includes('/api/')) {
+      // Do not intercept supabase proxy calls
+      if (urlStr.includes('/api/supabase')) {
+        return originalFetch(input, init);
+      }
       try {
         const networkResponse = await originalFetch(input, init);
         const contentType = networkResponse.headers.get('content-type') || '';
@@ -116,7 +120,7 @@ async function handleLocalApiRequest(urlStr: string, init?: RequestInit): Promis
     }
 
     if (pathname.startsWith('/api/airmen/')) {
-      const id = pathname.replace('/api/airmen/', '');
+      const id = (pathname || "").replace('/api/airmen/', '');
       if (method === 'PUT') {
         const updated = localDb.updateAirman(id, body);
         return updated ? jsonResponse(updated) : jsonResponse({ error: 'Airman not found' }, 404);
@@ -126,12 +130,12 @@ async function handleLocalApiRequest(urlStr: string, init?: RequestInit): Promis
         const ok = localDb.deleteAirman(id);
         if (ok) {
            try {
-              const { supabase } = await import('../supabase');
-              if (supabase) {
+              const { supabase, isSupabaseConfigured } = await import('../supabase');
+              if (isSupabaseConfigured) {
                  await supabase.from('duty_rosters').delete().eq('airman_id', id);
                  await supabase.from('staff').delete().eq('airman_id', id);
                  if (target?.bdNo) {
-                    await supabase.from('user_profiles').delete().eq('bd_no', target.bdNo);
+                    await supabase.from('user_profiles').delete().eq('User ID', target.bdNo);
                  }
               }
            } catch(e) {
@@ -143,7 +147,7 @@ async function handleLocalApiRequest(urlStr: string, init?: RequestInit): Promis
     }
 
     if (pathname.startsWith('/api/users/')) {
-       const bdNo = pathname.replace('/api/users/', '');
+       const bdNo = (pathname || "").replace('/api/users/', '');
        if (method === 'DELETE') {
           if (localDb.db.detailedUsers) {
              localDb.db.detailedUsers = localDb.db.detailedUsers.filter(u => u.bdNo !== bdNo);
@@ -307,7 +311,7 @@ async function handleLocalApiRequest(urlStr: string, init?: RequestInit): Promis
     }
 
     if (pathname.startsWith('/api/import/history/')) {
-      const batchId = pathname.replace('/api/import/history/', '');
+      const batchId = (pathname || "").replace('/api/import/history/', '');
       const ok = localDb.deleteImportHistory(batchId);
       return jsonResponse({ success: ok });
     }
@@ -345,7 +349,7 @@ async function handleLocalApiRequest(urlStr: string, init?: RequestInit): Promis
     // Default fallback: return empty object or success
     return jsonResponse({ success: true, message: 'Handled by Local Bridge' });
   } catch (err: any) {
-    console.error('Local Bridge API Error:', err);
+    console.error('Local Bridge API Error:', err.stack);
     return jsonResponse({ error: err.message || 'Internal local bridge error' }, 500);
   }
 }

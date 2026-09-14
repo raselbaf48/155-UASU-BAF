@@ -27,8 +27,8 @@ export function sortAirmenBySeniority(airmen: Airman[]): Airman[] {
     }
 
     // Extract numbers from BD No (e.g. BD/468582 -> 468582)
-    const numA = parseInt(a.bdNo.replace(/\D/g, ''), 10) || 0;
-    const numB = parseInt(b.bdNo.replace(/\D/g, ''), 10) || 0;
+    const numA = parseInt((a.bdNo || '').replace(/\D/g, ''), 10) || 0;
+    const numB = parseInt((b.bdNo || '').replace(/\D/g, ''), 10) || 0;
 
     if (numA !== numB) {
       return numA - numB;

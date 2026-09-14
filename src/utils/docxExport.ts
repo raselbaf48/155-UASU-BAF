@@ -360,7 +360,7 @@ export async function exportNominalRollDocx(
     return new TableRow({
       children: [
         createArialDataCell(String(idx + 1), 700, AlignmentType.CENTER),
-        createArialDataCell(a.bdNo.replace(/^BD\//i, ''), 1400, AlignmentType.CENTER),
+        createArialDataCell((a.bdNo || "").replace(/^BD\//i, ''), 1400, AlignmentType.CENTER),
         createArialDataCell(formatRunningLetter(a.rank), 1000, AlignmentType.LEFT),
         createArialDataCell(formatRunningLetter(a.fullName || a.name), 2200, AlignmentType.LEFT),
         createArialDataCell(a.trade, 1400, AlignmentType.LEFT),

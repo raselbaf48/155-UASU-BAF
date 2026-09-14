@@ -3,6 +3,7 @@ import Tesseract from 'tesseract.js';
 import mammoth from 'mammoth';
 import path from 'path';
 import fs from 'fs';
+import { createProxyMiddleware } from 'http-proxy-middleware';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import pdfParsePkg from 'pdf-parse/lib/pdf-parse.js';
@@ -140,6 +141,69 @@ function saveDatabase(db: LocalDB, eventType: string = 'DATA_UPDATED') {
 async function startServer() {
   const app = express();
   const PORT = 3000;
+
+  // Supabase Proxy to bypass Adblockers
+  const supabaseUrl = 'https://asevtncnoytawykhcleg.supabase.co';
+  const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFzZXZ0bmNub3l0YXd5a2hjbGVnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkyNjEzMjksImV4cCI6MjEwNDgzNzMyOX0.YpeamrrHPpZdxGcj03PGIm4Z8OC9ShbLpJ16x9cl6RE';
+  
+  app.all('/api/supabase/*', async (req, res) => {
+    let targetUrl = '';
+    try {
+      targetUrl = `${supabaseUrl}${req.originalUrl.replace('/api/supabase', '')}`;
+      const headers = { ...req.headers };
+      delete headers.host;
+      delete headers.origin;
+      delete headers.referer;
+      delete headers.connection;
+      delete headers['content-length'];
+      delete headers['accept-encoding']; // Let fetch handle this
+      
+      headers['apikey'] = supabaseAnonKey;
+      if (!headers['authorization']) {
+        headers['authorization'] = `Bearer ${supabaseAnonKey}`;
+      }
+      
+      const reqOptions: RequestInit = {
+        method: req.method,
+        headers: headers as Record<string, string>,
+      };
+      
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        // Stream the request body
+        const chunks = [];
+        for await (const chunk of req) {
+          chunks.push(chunk);
+        }
+        reqOptions.body = Buffer.concat(chunks);
+      }
+      
+      const supabaseRes = await fetch(targetUrl, reqOptions);
+      
+      supabaseRes.headers.forEach((val, key) => {
+        // Node fetch auto-decompresses the response, so we must strip these headers
+        // otherwise the browser will fail to parse the decompressed stream
+        if (key.toLowerCase() !== 'content-encoding' && key.toLowerCase() !== 'content-length') {
+          res.setHeader(key, val);
+        }
+      });
+      res.status(supabaseRes.status);
+      
+      if (supabaseRes.body) {
+        const reader = supabaseRes.body.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          res.write(value);
+        }
+        res.end();
+      } else {
+        res.end();
+      }
+    } catch (e: any) {
+      console.error('Supabase proxy error:', e, 'Target:', targetUrl);
+      res.status(502).json({ error: 'Proxy error', details: e.message, cause: e.cause ? String(e.cause) : null, targetUrl });
+    }
+  });
 
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -850,7 +914,7 @@ ${combinedText.substring(0, 30000)}
             try {
               const currentParts = retries <= 3 ? partsForGemini.filter(p => !p.inlineData) : partsForGemini;
               response = await ai.models.generateContent({
-                model: 'gemini-3.6-flash',
+                model: 'gemini-2.5-flash',
                 contents: [{ role: 'user', parts: currentParts }],
                 config: {
                   responseMimeType: 'application/json',

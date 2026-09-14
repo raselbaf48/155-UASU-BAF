@@ -321,12 +321,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [pendingRestoreFile, setPendingRestoreFile] = useState<File | null>(null);
 
   useEffect(() => {
-    if (!activeSection) {
-      setActiveSection('appearance');
-    }
-  }, [activeSection]);
-
-  useEffect(() => {
     if (true) {
       const unsubUsers = subscribeToActiveUsers((users) => {
         setActiveUsers(users);
@@ -685,24 +679,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
         </div>
       )}
-      {/* 2-Column Split View Desktop / Fullscreen Mobile */}
-      <div className="w-full max-w-6xl h-full sm:h-[85vh] bg-white dark:bg-[#1e293b] border-0 sm:border border-slate-200 dark:border-slate-700 sm:rounded-3xl shadow-2xl flex flex-col sm:flex-row overflow-hidden relative">
+      {/* Single Pane View for All Screens */}
+      <div className="w-full max-w-3xl h-full sm:h-[85vh] bg-white dark:bg-[#1e293b] border-0 sm:border border-slate-200 dark:border-slate-700 sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden relative">
         
-        {/* Left Column: Tabs Navigation (approx 30%) */}
-        <div className={`w-full sm:w-[30%] sm:max-w-[320px] bg-slate-50 dark:bg-slate-900 border-b sm:border-b-0 sm:border-r border-slate-200 dark:border-slate-800 flex-col shrink-0 ${mobileView === 'detail' ? 'hidden sm:flex' : 'flex'}`}>
-          <div className="p-6 pb-2 flex items-center justify-between sm:justify-start">
+        {/* Menu View (Shown when no activeSection is selected) */}
+        <div className={`w-full h-full bg-slate-50 dark:bg-slate-900 flex-col shrink-0 ${!activeSection ? 'flex' : 'hidden'}`}>
+          <div className="p-6 pb-2 flex items-center justify-between">
             <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
               <Settings className="w-6 h-6 text-emerald-500" />
               Settings
             </h2>
             <button
               onClick={onClose}
-              className="sm:hidden p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 transition-colors cursor-pointer"
+              className="p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
-          <div className="flex-col overflow-y-auto sm:flex-1 px-4 pb-4 sm:pb-6 gap-2 sm:gap-1 sm:space-y-1 scrollbar-hide">
+          <div className="flex-col overflow-y-auto flex-1 px-4 pb-4 sm:pb-6 gap-2 sm:gap-3 mt-4 scrollbar-hide">
             {sections.map(sec => (
               <button
                 key={sec.id}
@@ -711,32 +705,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     onOpenUserManagement();
                   } else {
                     setActiveSection(sec.id as SettingSection);
-                    setMobileView('detail');
                   }
                 }}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all cursor-pointer text-left mb-2 ${
-                  activeSection === sec.id
-                    ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-300 dark:border-emerald-500/40 shadow-sm'
-                    : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50 border border-slate-200 dark:border-slate-700 shadow-sm font-medium'
-                }`}
+                className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all cursor-pointer text-left mb-3 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 shadow-sm font-medium hover:shadow-md`}
               >
-                <div className={`${activeSection === sec.id ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500'}`}>
+                <div className="text-slate-500 dark:text-slate-400">
                   {sec.icon}
                 </div>
-                <span className="text-sm">{sec.label}</span>
+                <span className="text-base flex-1">{sec.label}</span>
+                <ChevronRight className="w-5 h-5 text-slate-400" />
               </button>
             ))}
           </div>
         </div>
 
-        {/* Right Column: Active Tab Content (approx 70%) */}
-        <div className={`flex-1 bg-white dark:bg-[#1e293b] flex-col relative overflow-hidden ${mobileView === 'list' ? 'hidden sm:flex' : 'flex'}`}>
+        {/* Detail View (Shown when an activeSection is selected) */}
+        <div className={`flex-1 w-full h-full bg-white dark:bg-[#1e293b] flex-col relative overflow-hidden ${!activeSection ? 'hidden' : 'flex'}`}>
           {/* Header */}
           <div className="flex items-center justify-between px-4 sm:px-8 py-4 sm:py-6 border-b border-slate-200 dark:border-slate-700/50 bg-white dark:bg-[#1e293b]">
             <div className="flex items-center gap-3">
               <button 
-                onClick={() => setMobileView('list')}
-                className="sm:hidden p-2 -ml-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 transition-colors"
+                onClick={() => setActiveSection(null)}
+                className="p-2 -ml-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 transition-colors"
               >
                 <ArrowLeft className="w-5 h-5" />
               </button>
@@ -839,12 +829,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               }
                             }} 
                             disabled={restoreStatus === 'Uploading...' || restoreStatus === 'Downloading...'}
-                            className="w-full py-4 bg-[#1b2234] border border-slate-700/50 hover:bg-[#252f48] hover:border-blue-500/50 text-white rounded-xl font-bold flex flex-col items-center justify-center gap-2 transition-all duration-300 shadow-lg disabled:opacity-50"
+                            className="relative group w-full overflow-hidden rounded-xl p-[1px] transition-all hover:shadow-[0_0_15px_-5px_rgba(59,130,246,0.3)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none"
                           >
-                            <Upload className={`w-6 h-6 text-blue-400 ${restoreStatus === 'Uploading...' ? 'animate-bounce' : ''}`} />
-                            <span className="text-sm tracking-wide">{restoreStatus === 'Uploading...' && syncProgress === 100 ? 'Success!' : restoreStatus === 'Uploading...' ? 'Uploading...' : 'Upload Data'}</span>
+                            <div className="absolute inset-0 bg-gradient-to-r from-blue-600/40 to-indigo-600/40 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                            <div className="relative flex flex-row items-center justify-center gap-2 w-full h-full bg-[#1e293b] px-4 py-3.5 rounded-xl border border-slate-700/50 transition-colors group-hover:bg-[#1e293b]/80">
+                               <Upload className={`w-4 h-4 text-blue-400 ${restoreStatus === 'Uploading...' ? 'animate-bounce' : ''}`} />
+                               <span className="text-sm font-medium tracking-wide text-slate-200 group-hover:text-white transition-colors">
+                                  {restoreStatus === 'Uploading...' && syncProgress === 100 ? 'Success!' : restoreStatus === 'Uploading...' ? 'Uploading...' : 'Push to Cloud'}
+                               </span>
+                            </div>
                           </button>
-
                           <button 
                             onClick={async () => {
                               setRestoreStatus('Downloading...');
@@ -873,10 +867,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               }
                             }} 
                             disabled={restoreStatus === 'Uploading...' || restoreStatus === 'Downloading...'}
-                            className="w-full py-4 bg-[#1b2234] border border-slate-700/50 hover:bg-[#252f48] hover:border-emerald-500/50 text-white rounded-xl font-bold flex flex-col items-center justify-center gap-2 transition-all duration-300 shadow-lg disabled:opacity-50"
+                            className="relative group w-full overflow-hidden rounded-xl p-[1px] transition-all hover:shadow-[0_0_15px_-5px_rgba(16,185,129,0.3)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none"
                           >
-                            <Download className={`w-6 h-6 text-emerald-400 ${restoreStatus === 'Downloading...' ? 'animate-bounce' : ''}`} />
-                            <span className="text-sm tracking-wide">{restoreStatus === 'Downloading...' && syncProgress === 100 ? 'Success!' : restoreStatus === 'Downloading...' ? 'Downloading...' : 'Download Data'}</span>
+                            <div className="absolute inset-0 bg-gradient-to-r from-emerald-600/40 to-teal-600/40 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                            <div className="relative flex flex-row items-center justify-center gap-2 w-full h-full bg-[#1e293b] px-4 py-3.5 rounded-xl border border-slate-700/50 transition-colors group-hover:bg-[#1e293b]/80">
+                               <Download className={`w-4 h-4 text-emerald-400 ${restoreStatus === 'Downloading...' ? 'animate-bounce' : ''}`} />
+                               <span className="text-sm font-medium tracking-wide text-slate-200 group-hover:text-white transition-colors">
+                                  {restoreStatus === 'Downloading...' && syncProgress === 100 ? 'Success!' : restoreStatus === 'Downloading...' ? 'Downloading...' : 'Pull from Cloud'}
+                               </span>
+                            </div>
                           </button>
                         </div>
                       </div>

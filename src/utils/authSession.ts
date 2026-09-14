@@ -1,4 +1,4 @@
-import { supabase } from '../supabase';
+import { supabase, isSupabaseConfigured } from '../supabase';
 import { localDb } from '../services/localDatabase';
 import { logUserLogin, updatePresence } from '../services/presenceService';
 import { Airman, DetailedUserLogin, UserLoginRole, UserLoginStatus } from '../types';
@@ -64,7 +64,7 @@ export const getCurrentUserSession = (): UserSession | null => {
     const raw = sessionStorage.getItem(SESSION_KEY);
     if (!raw) return null;
     const session = JSON.parse(raw) as UserSession;
-    const cleanBd = session.bdNo.replace(/^BD\/?/i, '').trim();
+    const cleanBd = (session.bdNo || "").replace(/^BD\/?/i, '').trim();
     if (cleanBd === '48456' && session.assignedRole !== 'OWNER') {
       session.assignedRole = 'OWNER';
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
@@ -106,7 +106,7 @@ export const getDetailedUsers = (nominalAirmen: Airman[] = []): DetailedUserLogi
       if (Array.isArray(p) && p.length > 0) {
         parsed = p.map(u => ({
           ...u,
-          status: u.status === 'SUSPENDED' && nominalAirmen.find(a => a.bdNo.replace(/^BD\/?/i, '').trim().toLowerCase() === u.bdNo.toLowerCase())?.active !== false ? 'ACTIVE' : u.status
+          status: u.status === 'SUSPENDED' && nominalAirmen.find(a => (a.bdNo || "").replace(/^BD\/?/i, '').trim().toLowerCase() === u.bdNo.toLowerCase())?.active !== false ? 'ACTIVE' : u.status
         }));
       }
     }
@@ -129,7 +129,7 @@ export const getDetailedUsers = (nominalAirmen: Airman[] = []): DetailedUserLogi
   }
   
   // Force 48456 to be OWNER
-  const ownerIdx = parsed.findIndex(u => u.bdNo.replace(/^BD\/?/i, '').trim() === '48456');
+  const ownerIdx = parsed.findIndex(u => (u.bdNo || "").replace(/^BD\/?/i, '').trim() === '48456');
   if (ownerIdx >= 0) {
     if (parsed[ownerIdx].role !== 'OWNER') {
       parsed[ownerIdx].role = 'OWNER';
@@ -178,7 +178,7 @@ export const getDetailedUsers = (nominalAirmen: Airman[] = []): DetailedUserLogi
   // Auto-sync Nominal Roll users into User Management
   if (nominalAirmen && nominalAirmen.length > 0) {
     nominalAirmen.forEach((a) => {
-      const cleanBd = a.bdNo.replace(/^BD\/?/i, '').trim();
+      const cleanBd = (a.bdNo || "").replace(/^BD\/?/i, '').trim();
       const idx = parsed.findIndex(u => u.bdNo.toLowerCase() === cleanBd.toLowerCase());
       
       if (idx === -1) {
@@ -264,22 +264,29 @@ export const saveDetailedUsers = (users: DetailedUserLogin[]): void => {
     (async () => {
       try {
         const supaPayload = users.filter(u => u && u.bdNo).map(u => ({
-          bd_no: String(u.bdNo).toLowerCase(),
+          'User ID': String(u.bdNo).toLowerCase(),
           airman_id: u.airmanId || null,
-          name: u.name || String(u.bdNo),
-          rank: u.rank || null,
-          flight_name: u.flightName || null,
-          trade: u.trade || null,
-          role: u.role || 'USER',
+          'Name': u.name || String(u.bdNo),
+          'Rank': u.rank || null,
+          'Flight': u.flightName || null,
+          'Trade': u.trade || null,
+          'Role': u.role || 'USER',
           'User Login PIN': (u.password && u.password.trim() !== '') ? Number(u.password) : null,
           'Admin Login PIN': (u.adminPass && u.adminPass.trim() !== '') ? Number(u.adminPass) : null,
-          status: u.status || 'ACTIVE',
+          'Status': u.status || 'ACTIVE',
           detail_order: u.detailOrder || null
         }));
         
         // Upsert users to Supabase
-        const { error } = await supabase.from('user_profiles').upsert(supaPayload, { onConflict: 'bd_no' });
-        if (error) console.error("Error syncing to Supabase:", error);
+        if (isSupabaseConfigured) {
+          const { error } = await supabase.from('user_profiles').upsert(supaPayload, { onConflict: '"User ID"' });
+          if (error) {
+            console.error("Error syncing to Supabase:", error);
+            if (error.message?.includes('Failed to fetch')) {
+              console.warn("Supabase sync blocked by Adblocker or Network error.");
+            }
+          }
+        }
       } catch (err) {
         console.error("Supabase async sync failed:", err);
       }
@@ -301,7 +308,7 @@ export const detailAirmanForLogin = (
   remarks: string = ''
 ): DetailedUserLogin => {
   const current = getDetailedUsers();
-  const cleanBd = airman.bdNo.replace(/^BD\/?/i, '').trim();
+  const cleanBd = (airman.bdNo || "").replace(/^BD\/?/i, '').trim();
 
   const existingIndex = current.findIndex(
     (u) => u.bdNo.toLowerCase() === cleanBd.toLowerCase() || (u.airmanId && u.airmanId === airman.id)
@@ -342,7 +349,7 @@ export const batchDetailAllAirmen = (airmen: Airman[]): DetailedUserLogin[] => {
   const updatedList: DetailedUserLogin[] = [...current];
 
   airmen.forEach((airman) => {
-    const cleanBd = airman.bdNo.replace(/^BD\/?/i, '').trim();
+    const cleanBd = (airman.bdNo || "").replace(/^BD\/?/i, '').trim();
     const idx = updatedList.findIndex((u) => u.bdNo.toLowerCase() === cleanBd.toLowerCase());
     const isPrimary = cleanBd === '48456';
 
@@ -379,21 +386,23 @@ export const batchDetailAllAirmen = (airmen: Airman[]): DetailedUserLogin[] => {
  * Remove or Revoke login access for a BD number
  */
 export const removeDetailedUser = (bdNo: string): void => {
-  const clean = bdNo.replace(/^BD\/?/i, '').trim().toLowerCase();
+  const clean = (bdNo || "").replace(/^BD\/?/i, '').trim().toLowerCase();
   const current = getDetailedUsers();
   const filtered = current.filter((u) => u.bdNo.toLowerCase() !== clean);
   saveDetailedUsers(filtered);
   // Async delete from Supabase
-  supabase.from('user_profiles').delete().eq('bd_no', clean).then(({ error }) => {
-    if (error) console.error("Error deleting user from Supabase:", error);
-  });
+  if (isSupabaseConfigured) {
+    supabase.from('user_profiles').delete().eq('User ID', clean).then(({ error }) => {
+      if (error) console.error("Error deleting user from Supabase:", error);
+    });
+  }
 };
 
 /**
  * Toggle active / suspended / disabled status
  */
 export const toggleUserLoginStatus = (bdNo: string, newStatus: UserLoginStatus): DetailedUserLogin | null => {
-  const clean = bdNo.replace(/^BD\/?/i, '').trim().toLowerCase();
+  const clean = (bdNo || "").replace(/^BD\/?/i, '').trim().toLowerCase();
   const current = getDetailedUsers();
   const idx = current.findIndex((u) => u.bdNo.toLowerCase() === clean);
   if (idx === -1) return null;
@@ -411,7 +420,7 @@ export const validateUserLogin = async (
   passwordInput: string,
   nominalAirmen: Airman[]
 ): Promise<{ success: boolean; airman?: Airman; detailedUser?: DetailedUserLogin; message: string }> => {
-  const cleanInput = bdInput.trim().replace(/^BD\/?/i, '').replace(/\s+/g, '').toLowerCase();
+  const cleanInput = (bdInput || "").trim().replace(/^BD\/?/i, '').replace(/\s+/g, '').toLowerCase();
 
   if (!cleanInput) {
     return { success: false, message: 'Please enter your User ID.' };
@@ -419,36 +428,37 @@ export const validateUserLogin = async (
 
   // Check Supabase first
   try {
-    const { data: supaUser, error: supaErr } = await supabase
-      .from('user_profiles')
-      .select('*')
-      .eq('bd_no', cleanInput)
-      .single();
-      
-    if (supaUser) {
-      if (supaUser.status === 'DISABLED') {
+    if (isSupabaseConfigured) {
+      const { data: supaUser, error: supaErr } = await supabase
+        .from('user_profiles')
+        .select('*')
+        .eq('User ID', cleanInput)
+        .single();
+        
+      if (supaUser) {
+        if (supaUser['Status'] === 'DISABLED') {
         return { success: false, message: 'You are not authorized to access the portal. User ID is disabled. Please contact administrator.' };
       }
-      if (supaUser.status === 'SUSPENDED') {
+      if (supaUser['Status'] === 'SUSPENDED') {
         return { success: false, message: 'You are not authorized to access the portal. User ID is temporarily suspended.' };
       }
       
-      const expectedPassword = supaUser['User Login PIN']?.toString() || supaUser.password || supaUser.bd_no;
-      if (passwordInput !== expectedPassword) {
-         return { success: false, message: 'Invalid User ID or PIN. Please try again.' };
+      const expectedPassword = supaUser['User Login PIN']?.toString() || supaUser.password || supaUser['User ID'];
+      if (passwordInput.trim() !== expectedPassword?.toString().trim()) {
+         return { success: false, message: `Invalid User ID or PIN.` };
       }
       
       const mappedUser: DetailedUserLogin = {
-        id: supaUser.id || `user-${supaUser.bd_no}`,
+        id: supaUser.id || `user-${supaUser['User ID']}`,
         airmanId: supaUser.airman_id || 'unknown',
-        bdNo: supaUser.bd_no,
-        rank: supaUser.rank || '',
-        name: supaUser.name,
-        flightName: supaUser.flight_name || '',
-        trade: supaUser.trade || '',
-        role: supaUser.role as UserLoginRole,
+        bdNo: supaUser['User ID'],
+        rank: supaUser['Rank'] || '',
+        name: supaUser['Name'] || '',
+        flightName: supaUser['Flight'] || '',
+        trade: supaUser['Trade'] || '',
+        role: supaUser['Role'] as UserLoginRole,
         password: expectedPassword,
-        status: supaUser.status as UserLoginStatus,
+        status: supaUser['Status'] as UserLoginStatus,
         detailOrder: supaUser.detail_order || '',
         detailedAt: supaUser.created_at || new Date().toISOString(),
         detailedBy: 'Supabase'
@@ -458,22 +468,23 @@ export const validateUserLogin = async (
       
       if (!nominalMatch) {
          nominalMatch = {
-           id: supaUser.airman_id || `airman-${supaUser.bd_no}`,
+           id: (supaUser.airman_id && supaUser.airman_id !== "airman-undefined") ? supaUser.airman_id : `airman-${supaUser['User ID'] && supaUser['User ID'] !== "undefined" ? supaUser['User ID'] : Math.random().toString(36).slice(2, 10)}`,
            serNo: 99,
-           code: `${supaUser.rank || ''}-${(supaUser.name || '').slice(0, 3).toUpperCase()}`,
-           bdNo: `BD/${supaUser.bd_no}`,
-           rank: supaUser.rank as any,
-           name: supaUser.name,
-           trade: supaUser.trade || 'General',
+           code: `${supaUser['Rank'] || ''}-${(supaUser['Name'] || '').slice(0, 3).toUpperCase()}`,
+           bdNo: `BD/${supaUser['User ID']}`,
+           rank: supaUser['Rank'] as any,
+           name: supaUser['Name'] || '',
+           trade: supaUser['Trade'] || 'General',
            addressBlock: '155 UASU',
            mobileNo: '',
-           flightName: supaUser.flight_name as any || 'Admin',
+           flightName: supaUser['Flight'] as any || 'Admin',
            remarks: '',
            active: true,
          };
       }
       
-      return { success: true, airman: nominalMatch, detailedUser: mappedUser, message: `Access granted for ${supaUser.rank} ${supaUser.name}` };
+      return { success: true, airman: nominalMatch, detailedUser: mappedUser, message: `Access granted for ${supaUser['Rank']} ${supaUser['Name']}` };
+      }
     }
   } catch(e) {
     console.error("Supabase login check failed, falling back to local DB", e);
@@ -486,8 +497,8 @@ export const validateUserLogin = async (
   if (matchedDetail) {
     // PIN Verification
     const expectedPassword = matchedDetail.password || matchedDetail.bdNo;
-    if (passwordInput !== expectedPassword) {
-      return { success: false, message: 'Invalid User ID or PIN. Please try again.' };
+    if (passwordInput.trim() !== expectedPassword?.toString().trim()) {
+      return { success: false, message: `Invalid User ID or PIN.` };
     }
     if (matchedDetail.status === 'DISABLED') {
       return {
@@ -504,12 +515,12 @@ export const validateUserLogin = async (
 
     // Find corresponding airman or construct one
     let airman = nominalAirmen.find(
-      (a) => a.bdNo.trim().replace(/^BD\/?/i, '').toLowerCase() === cleanInput || a.id === matchedDetail.airmanId
+      (a) => (a.bdNo || "").trim().replace(/^BD\/?/i, '').toLowerCase() === cleanInput || a.id === matchedDetail.airmanId
     );
 
     if (!airman) {
       airman = {
-        id: matchedDetail.airmanId || `airman-${matchedDetail.bdNo}`,
+        id: (matchedDetail.airmanId && matchedDetail.airmanId !== "airman-undefined") ? matchedDetail.airmanId : `airman-${matchedDetail.bdNo && matchedDetail.bdNo !== "undefined" ? matchedDetail.bdNo : Math.random().toString(36).slice(2, 10)}`,
         serNo: 99,
         code: `${matchedDetail.rank}-${matchedDetail.name.slice(0, 3).toUpperCase()}`,
         bdNo: `BD/${matchedDetail.bdNo}`,
@@ -538,15 +549,15 @@ export const validateUserLogin = async (
 
   // 2. If not explicitly in detailed list, check nominal roll
   const matchedAirman = nominalAirmen.find((a) => {
-    const airmanBd = a.bdNo.trim().replace(/^BD\/?/i, '').replace(/\s+/g, '').toLowerCase();
+    const airmanBd = (a.bdNo || "").trim().replace(/^BD\/?/i, '').replace(/\s+/g, '').toLowerCase();
     return airmanBd === cleanInput;
   });
 
   if (matchedAirman) {
     // For auto-detailed airman, password is their BD No
-    const expectedPassword = matchedAirman.bdNo.replace(/^BD\/?/i, '').trim().toLowerCase();
+    const expectedPassword = (matchedAirman.bdNo || "").replace(/^BD\/?/i, '').trim().toLowerCase();
     if (passwordInput.trim().toLowerCase() !== expectedPassword) {
-      return { success: false, message: 'Invalid User ID or PIN. Please try again.' };
+      return { success: false, message: `Invalid User ID or PIN.` };
     }
     // Auto-detail this airman and allow login
     const isPrimary = cleanInput === '48456';
@@ -576,7 +587,7 @@ export const validateUserLogin = async (
  * Record a user login and save session
  */
 export const setUserSession = (airman: Airman, assignedRole: UserLoginRole = 'USER', detailedUser?: DetailedUserLogin): UserSession => {
-  const cleanBd = airman.bdNo.replace(/^BD\/?/i, '').trim();
+  const cleanBd = (airman.bdNo || "").replace(/^BD\/?/i, '').trim();
   const session: UserSession = {
     airmanId: airman.id,
     bdNo: cleanBd,
@@ -601,7 +612,7 @@ export const setUserSession = (airman: Airman, assignedRole: UserLoginRole = 'US
   recordLoginLog(airman);
   // Realtime Presence Sync
   logUserLogin({
-    bdNo: airman.bdNo.replace(/^BD\/?/i, '').trim(),
+    bdNo: (airman.bdNo || "").replace(/^BD\/?/i, '').trim(),
     name: airman.name,
     rank: airman.rank,
     flightName: airman.flightName,
@@ -657,7 +668,7 @@ export const getLoginHistory = (): UserLoginLog[] => {
 export const recordLoginLog = async (airman: Airman): Promise<void> => {
   try {
     const nowIso = new Date().toISOString();
-    const cleanBd = airman.bdNo.replace(/^BD\/?/i, '').trim();
+    const cleanBd = (airman.bdNo || "").replace(/^BD\/?/i, '').trim();
     const newLog: UserLoginLog = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       bdNo: `BD/${cleanBd}`,
@@ -698,7 +709,7 @@ export const clearLoginHistory = async (): Promise<void> => {
  * Change a user's password
  */
 export const changeUserPassword = (bdNo: string, currentPass: string, newPass: string, isSuperAdmin: boolean = false): { success: boolean; message: string } => {
-  const clean = bdNo.replace(/^BD\/?/i, '').trim().toLowerCase();
+  const clean = (bdNo || "").replace(/^BD\/?/i, '').trim().toLowerCase();
   const current = getDetailedUsers();
   const idx = current.findIndex((u) => u.bdNo.toLowerCase() === clean);
   
@@ -721,7 +732,7 @@ export const changeUserPassword = (bdNo: string, currentPass: string, newPass: s
  * Change a user's role
  */
 export const changeAdminPassword = (bdNo: string, currentPass: string, newPass: string, isSuperAdmin: boolean = false): { success: boolean; message: string } => {
-  const clean = bdNo.replace(/^BD\/?/i, '').trim().toLowerCase();
+  const clean = (bdNo || "").replace(/^BD\/?/i, '').trim().toLowerCase();
   const current = getDetailedUsers();
   const idx = current.findIndex((u) => u.bdNo.toLowerCase() === clean);
   
@@ -741,7 +752,7 @@ export const changeAdminPassword = (bdNo: string, currentPass: string, newPass: 
 };
 
 export const changeUserRole = (bdNo: string, newRole: UserLoginRole): DetailedUserLogin | null => {
-  const clean = bdNo.replace(/^BD\/?/i, '').trim().toLowerCase();
+  const clean = (bdNo || "").replace(/^BD\/?/i, '').trim().toLowerCase();
   const current = getDetailedUsers();
   const idx = current.findIndex((u) => u.bdNo.toLowerCase() === clean);
   
@@ -754,7 +765,7 @@ export const changeUserRole = (bdNo: string, newRole: UserLoginRole): DetailedUs
 
 
 export const updateUserDetails = (bdNo: string, updates: { name?: string, rank?: string, flightName?: string, mobileNo?: string }): DetailedUserLogin | null => {
-  const clean = bdNo.replace(/^BD\/?/i, '').trim().toLowerCase();
+  const clean = (bdNo || "").replace(/^BD\/?/i, '').trim().toLowerCase();
   const current = getDetailedUsers();
   const idx = current.findIndex((u) => u.bdNo.toLowerCase() === clean);
   

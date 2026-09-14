@@ -1,4 +1,4 @@
-import { supabase } from '../supabase';
+import { supabase, isSupabaseConfigured } from '../supabase';
 import {
   Airman,
   DutyAssignment,
@@ -138,7 +138,8 @@ export class LocalDatabaseEngine {
     this.db = this.loadInitialLocalState();
     this.lastSyncedDbStr = JSON.stringify(this.db);
     if (typeof window !== 'undefined') {
-      if (window.localStorage.getItem('baf_pending_sync') === 'true') {
+      window.localStorage.removeItem('baf_pending_sync');
+      if (false) {
         this.saveToFirebase(this.db, true).then(() => this.syncFromFirebase());
       } else {
         this.syncFromFirebase();
@@ -188,6 +189,11 @@ export class LocalDatabaseEngine {
    */
   public async syncFromFirebase(): Promise<boolean> {
     if (typeof window === 'undefined') return false;
+    
+    if (!isSupabaseConfigured) {
+      return false;
+    }
+    
     if (this.isFirebaseSyncing) return false;
     
     this.isFirebaseSyncing = true;
@@ -214,37 +220,45 @@ export class LocalDatabaseEngine {
       };
 
       // 1. Pull Airmen (Staff)
-      let staffData, staffErr;
+      let staffData;
       try {
          staffData = await fetchAll('staff');
-      } catch(e) { staffErr = e; }
-      if (!staffErr && staffData) {
-        const parsedAirmen = staffData.map(s => ({
-          id: s.airman_id || 'airman-' + s.bd_no,
-          bdNo: s.bd_no,
-          rank: s.rank || '',
-          name: s.surname || s.name || '',
-          fullName: s['Full Name'] || s.surname || s.name || '',
-          flightName: s.flight_name || '',
-          trade: s.trade || '',
-          mobileNo: s.phone || '',
-          addressBlock: s.address || 'L/O',
-          active: s.status === 'ACTIVE' || s.status === null || s.status === undefined,
-          status: s.status || 'ACTIVE',
+      } catch(e: any) { 
+         throw new Error("Failed to fetch staff from Cloud: " + e.message); 
+      }
+      
+      if (staffData) {
+        const parsedAirmen = staffData.map((s: any, idx: number) => ({
+          id: (s.airman_id && s.airman_id !== "airman-undefined") ? s.airman_id : 'airman-' + (s['BD No'] && String(s['BD No']) !== "undefined" ? s['BD No'] : Math.random().toString(36).slice(2, 10)),
+          serNo: idx + 1,
+          code: `${s['Rank'] || ''}-${(s['Surname'] || '').slice(0, 3).toUpperCase()}`,
+          bdNo: String(s['BD No'] || ''),
+          rank: s['Rank'] || '',
+          name: s['Surname'] || '',
+          fullName: s['Full Name'] || s['Surname'] || '',
+          flightName: s['Flight'] || '',
+          trade: s['Trade'] || '',
+          mobileNo: s['Mobile No'] || '',
+          addressBlock: s['Address'] || 'L/O',
+          active: s['Status'] === 'ACTIVE' || s['Status'] === null || s['Status'] === undefined,
+          status: s['Status'] || 'ACTIVE',
           dateLeft: s['Unit Left date'] || undefined
         }));
-        if (JSON.stringify(parsedAirmen) !== JSON.stringify(this.db.airmen)) {
-           newDb.airmen = parsedAirmen;
-           dataChanged = true;
-        }
+        
+        // Force replace to ensure 48 rows overrides 61 rows
+        newDb.airmen = parsedAirmen;
+        dataChanged = true;
       }
       
       // 2. Pull Assignments (Duty Rosters)
-      let dutyData, dutyErr;
+      let dutyData;
       try {
          dutyData = await fetchAll('duty_rosters');
-      } catch(e) { dutyErr = e; }
-      if (!dutyErr && dutyData) {
+      } catch(e: any) { 
+         throw new Error("Failed to fetch duties from Cloud: " + e.message); 
+      }
+      
+      if (dutyData) {
          const newAssignments: Record<string, DutyAssignment[]> = {};
          dutyData.forEach((d: any) => {
             const dateStr = d.duty_date;
@@ -261,19 +275,20 @@ export class LocalDatabaseEngine {
                });
             }
          });
-         if (JSON.stringify(newAssignments) !== JSON.stringify(this.db.assignments)) {
-            newDb.assignments = newAssignments;
-            dataChanged = true;
-         }
+         newDb.assignments = newAssignments;
+         dataChanged = true;
       }
       
       // 3. Pull Activity History (Parade States)
-      let histData, histErr;
+      let histData;
       try {
          histData = await fetchAll('parade_states');
-      } catch(e) { histErr = e; }
-      if (!histErr && histData) {
-         const parsedHistory = histData.map(h => ({
+      } catch(e: any) { 
+         throw new Error("Failed to fetch history from Cloud: " + e.message); 
+      }
+      
+      if (histData) {
+         const parsedHistory = histData.map((h: any) => ({
             id: h.log_id || 'log-' + Math.random().toString(36).substring(2, 9),
             date: h.date || '',
             type: h.type || 'SYSTEM',
@@ -282,32 +297,32 @@ export class LocalDatabaseEngine {
             performedByUserId: h.user_id || undefined,
             performedByUserName: h.user_name || undefined,
             timestamp: h.created_at || new Date().toISOString()
-         })).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+         })).sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
          
-         if (JSON.stringify(parsedHistory) !== JSON.stringify(this.db.activityHistory)) {
-            newDb.activityHistory = parsedHistory;
-            dataChanged = true;
-         }
+         newDb.activityHistory = parsedHistory;
+         dataChanged = true;
       }
       
       // 4. Pull User Profiles
-      let userData, userErr;
+      let userData;
       try {
          userData = await fetchAll('user_profiles');
-      } catch(e) { userErr = e; }
-      if (!userErr && userData && userData.length > 0) {
-         // Create a map to merge with local detailedUsers or override
-         const parsedUsers = userData.map(u => ({
-            id: u.id || 'user-' + u.bd_no,
+      } catch(e: any) { 
+         throw new Error("Failed to fetch users from Cloud: " + e.message); 
+      }
+      
+      if (userData && userData.length > 0) {
+         const parsedUsers = userData.map((u: any) => ({
+            id: u.id || 'user-' + u['User ID'],
             airmanId: u.airman_id || undefined,
-            bdNo: u.bd_no || '',
-            name: u.name || String(u.bdNo),
-            rank: u.rank || '',
-            flightName: u.flight_name || '',
-            trade: u.trade || '',
-            role: u.role || 'USER',
-            status: u.status || 'ACTIVE',
-            password: u['User Login PIN']?.toString() || u.password || String(u.bd_no),
+            bdNo: u['User ID'] || '',
+            name: u['Name'] || String(u['User ID']),
+            rank: u['Rank'] || '',
+            flightName: u['Flight'] || '',
+            trade: u['Trade'] || '',
+            role: u['Role'] || 'USER',
+            status: u['Status'] || 'ACTIVE',
+            password: u['User Login PIN']?.toString() || u.password || String(u['User ID']),
             adminPass: u['Admin Login PIN']?.toString() || u.adminPass || '',
             detailedAt: new Date().toISOString(),
             detailedBy: 'System'
@@ -317,16 +332,18 @@ export class LocalDatabaseEngine {
       }
       
       // 5. Pull App Settings
-      let settingsData, settingsErr;
+      let settingsData;
       try {
          settingsData = await fetchAll('app_settings');
-      } catch(e) { settingsErr = e; }
+      } catch(e: any) { 
+         console.warn("Settings fetch failed, but continuing:", e); 
+      }
       
-      if (!settingsErr && settingsData && settingsData.length > 0) {
+      if (settingsData && settingsData.length > 0) {
          if (typeof window !== 'undefined') {
             let settingsChanged = false;
             settingsData.forEach((row: any) => {
-               if (row.setting_key && row.setting_value) {
+               if (row.setting_key && row.setting_value && row.setting_key !== 'baf_official_duty_matrix_v4') {
                   const currentVal = window.localStorage.getItem(row.setting_key);
                   if (currentVal !== row.setting_value) {
                      window.localStorage.setItem(row.setting_key, row.setting_value);
@@ -340,10 +357,63 @@ export class LocalDatabaseEngine {
          }
       }
       
+      // 6. Pull Duty Ratio Matrix
+      try {
+         const matrixData = await fetchAll('duty_ratio_matrix');
+         if (matrixData && matrixData.length > 0 && typeof window !== 'undefined') {
+             const dutyMap = new Map<string, any>();
+             matrixData.forEach((row: any) => {
+                 if (!dutyMap.has(row.duty_id)) {
+                     dutyMap.set(row.duty_id, {
+                         id: row.duty_id,
+                         title: row.duty_title,
+                         dutyCode: row.duty_code,
+                         shiftLabel: row.shift_label,
+                         totalRequiredMonth: 0,
+                         totalRequiredDaily: row.duty_total_daily || 0,
+                         isDisabled: row.is_disabled || false,
+                         data: {
+                             Mechanics: Array(31).fill(0),
+                             Avionics: Array(31).fill(0),
+                             GCS: Array(31).fill(0),
+                             Admin: Array(31).fill(0)
+                         }
+                     });
+                 }
+                 const duty = dutyMap.get(row.duty_id);
+                 const f = row.flight;
+                 if (duty.data[f]) {
+                     for (let i = 0; i < 31; i++) {
+                         duty.data[f][i] = row[`day_${i + 1}`] || 0;
+                     }
+                 }
+             });
+             
+             const formattedMatrix = Array.from(dutyMap.values()).map(duty => {
+                 let total = 0;
+                 ['Mechanics', 'Avionics', 'GCS', 'Admin'].forEach(f => {
+                     total += duty.data[f].reduce((sum: number, val: number) => sum + val, 0);
+                 });
+                 duty.totalRequiredMonth = total;
+                 return duty;
+             });
+
+             const currentRaw = window.localStorage.getItem('baf_official_duty_matrix_v4');
+             const newRaw = JSON.stringify(formattedMatrix);
+             if (currentRaw !== newRaw) {
+                 window.localStorage.setItem('baf_official_duty_matrix_v4', newRaw);
+                 window.dispatchEvent(new CustomEvent('baf_duty_ratio_updated', { detail: { matrix: formattedMatrix } }));
+             }
+         }
+      } catch (e: any) {
+         console.warn("Duty ratio matrix fetch failed:", e);
+      }
+      
       if (dataChanged) {
         newDb.lastUpdated = new Date().toISOString();
         this.db = newDb;
         this.saveToStorage(newDb, true, false, false);
+        if (typeof window !== 'undefined') window.localStorage.removeItem('baf_pending_sync');
         if (typeof window !== 'undefined' && window.localStorage) {
           window.localStorage.setItem(STORAGE_KEY, JSON.stringify(newDb));
         }
@@ -368,6 +438,12 @@ export class LocalDatabaseEngine {
    */
   public async saveToFirebase(dbToSave: LocalStorageDB, immediate = false): Promise<boolean> {
     if (typeof window === 'undefined') return false;
+    
+    if (!isSupabaseConfigured) {
+      // Don't attempt to sync if Supabase isn't configured
+      if (typeof window !== 'undefined') window.localStorage.removeItem('baf_pending_sync');
+      return false;
+    }
     
     // Prevent accidental pushes if we haven't finished our initial sync pull yet
     if (this.isFirebaseSyncing) {
@@ -438,15 +514,15 @@ export class LocalDatabaseEngine {
         if (changedAirmen.length > 0) {
           let staffPayload = changedAirmen.map(a => ({
             airman_id: a.id,
-            bd_no: a.bdNo,
-            rank: a.rank,
-            surname: a.name,
+            'BD No': a.bdNo,
+            'Rank': a.rank,
+            'Surname': a.name,
             'Full Name': a.fullName || a.name,
-            flight_name: a.flightName,
-            trade: a.trade || null,
-            phone: a.mobileNo || null,
-            address: a.addressBlock || null,
-            status: a.active === false ? 'SUSPENDED' : 'ACTIVE',
+            'Flight': a.flightName,
+            'Trade': a.trade || null,
+            'Mobile No': a.mobileNo || null,
+            'Address': a.addressBlock || null,
+            'Status': a.active === false ? 'SUSPENDED' : 'ACTIVE',
             'Unit Left date': a.dateLeft || null
           }));
           // Deduplicate
@@ -464,7 +540,9 @@ export class LocalDatabaseEngine {
              if (staffErr) {
                console.error("Error syncing staff to Supabase:", staffErr);
                hasError = true;
-               errorMessage = staffErr.message || 'Staff error';
+               errorMessage = staffErr.message?.includes('Failed to fetch') 
+                  ? 'Network error (Failed to fetch). If you have an Adblocker or Brave Shields enabled, it might be blocking Supabase. Please disable it for this site.'
+                  : (staffErr.message || 'Staff error');
                break;
              }
           }
@@ -513,7 +591,9 @@ export class LocalDatabaseEngine {
             if (assignErr) {
                console.error("Error syncing duties to Supabase:", assignErr);
                hasError = true;
-               errorMessage = assignErr.message || 'Duties error';
+               errorMessage = assignErr.message?.includes('Failed to fetch') 
+                  ? 'Network error (Failed to fetch). If you have an Adblocker or Brave Shields enabled, it might be blocking Supabase. Please disable it for this site.'
+                  : (assignErr.message || 'Duties error');
                break;
             }
           }
@@ -550,7 +630,9 @@ export class LocalDatabaseEngine {
               } else if (histErr && histErr.code !== '23505') {
                  console.error("Error syncing history to Supabase:", histErr);
                  hasError = true;
-                 errorMessage = histErr.message || 'History error';
+                 errorMessage = histErr.message?.includes('Failed to fetch')
+                    ? 'Network error (Failed to fetch). If you have an Adblocker or Brave Shields enabled, it might be blocking Supabase.'
+                    : (histErr.message || 'History error');
                  break;
               }
            }
@@ -560,26 +642,26 @@ export class LocalDatabaseEngine {
         if (changedUsers.length > 0) {
            let usersPayload = changedUsers.filter(u => u && u.bdNo).map((u: any) => ({
               airman_id: u.airmanId || null,
-              bd_no: u.bdNo,
-              rank: u.rank || '',
-              name: u.name || '',
-              flight_name: u.flightName || '',
-              trade: u.trade || '',
-              role: u.role || 'USER',
+              'User ID': u.bdNo,
+              'Rank': u.rank || '',
+              'Name': u.name || '',
+              'Flight': u.flightName || '',
+              'Trade': u.trade || '',
+              'Role': u.role || 'USER',
               'User Login PIN': (u.password && String(u.password).trim() !== '') ? Number(u.password) : null,
               'Admin Login PIN': (u.adminPass && String(u.adminPass).trim() !== '') ? Number(u.adminPass) : null
            }));
            
            // Deduplicate
            const uniqueUsersMap = new Map();
-           usersPayload.forEach(a => uniqueUsersMap.set(a.bd_no, a));
+           usersPayload.forEach(a => uniqueUsersMap.set(a['User ID'], a));
            usersPayload = Array.from(uniqueUsersMap.values());
            
            const usersChunkSize = 50;
            for (let i = 0; i < usersPayload.length; i += usersChunkSize) {
               const chunk = usersPayload.slice(i, i + usersChunkSize);
               emitSyncProgress(90 + Math.round((i / usersPayload.length) * 10), `Uploading users ${i} of ${usersPayload.length}...`);
-              const { data: usersDataRes, error: usersErr } = await supabase.from('user_profiles').upsert(chunk, { onConflict: 'bd_no' }).select();
+              const { data: usersDataRes, error: usersErr } = await supabase.from('user_profiles').upsert(chunk, { onConflict: '"User ID"' }).select();
               await delay(100);
               
               if (!usersErr && (!usersDataRes || usersDataRes.length === 0) && chunk.length > 0) {
@@ -590,7 +672,9 @@ export class LocalDatabaseEngine {
               } else if (usersErr) {
                  console.error("Error syncing users to Supabase:", usersErr);
                  hasError = true;
-                 errorMessage = usersErr.message || 'Users error';
+                 errorMessage = usersErr.message?.includes('Failed to fetch')
+                    ? 'Network error (Failed to fetch). If you have an Adblocker or Brave Shields enabled, it might be blocking Supabase.'
+                    : (usersErr.message || 'Users error');
                  break;
               }
            }
@@ -599,7 +683,7 @@ export class LocalDatabaseEngine {
         // 5. Sync Settings / Configurations
         const settingsPayload: any[] = [];
         const SETTING_PREFIXES = ['baf_', 'savedDisposalKeys', 'parade_historical', 'flg_wg_'];
-        const IGNORED_KEYS = ['baf_database_v2', 'baf_sync_logs', 'baf_pending_sync', 'baf_presence', 'baf_user_login_history', 'baf_recent_logins', 'baf_theme_pref', 'baf_last_used_id', 'baf_dismissed_notice_sig', 'baf_cleared_notices_v4'];
+        const IGNORED_KEYS = ['baf_official_duty_matrix_v4', 'baf_database_v2', 'baf_sync_logs', 'baf_pending_sync', 'baf_presence', 'baf_user_login_history', 'baf_recent_logins', 'baf_theme_pref', 'baf_last_used_id', 'baf_dismissed_notice_sig', 'baf_cleared_notices_v4'];
         
         if (typeof window !== 'undefined') {
           for (let i = 0; i < window.localStorage.length; i++) {
@@ -627,6 +711,47 @@ export class LocalDatabaseEngine {
            const { error: settingsErr } = await supabase.from('app_settings').upsert(settingsPayload, { onConflict: 'setting_key' });
            if (settingsErr) {
               console.warn("Could not sync settings. (app_settings table might not exist yet)", settingsErr);
+           }
+        }
+        
+        // 6. Sync Duty Ratio Matrix
+        if (typeof window !== 'undefined') {
+           const matrixRaw = window.localStorage.getItem('baf_official_duty_matrix_v4');
+           if (matrixRaw) {
+               try {
+                   const matrix = JSON.parse(matrixRaw);
+                   if (Array.isArray(matrix)) {
+                       const matrixPayload: any[] = [];
+                       matrix.forEach((m: any) => {
+                           const flights = ['Mechanics', 'Avionics', 'GCS', 'Admin'];
+                           flights.forEach(f => {
+                               const days = m.data?.[f] || Array(31).fill(0);
+                               const flightTotal = days.reduce((sum: number, val: number) => sum + val, 0);
+                               const row: any = {
+                                   id: `${m.id || m.dutyCode}_${f}`,
+                                   duty_id: m.id || m.dutyCode || 'unknown',
+                                   duty_title: m.title || m.dutyCode || 'Unknown Duty',
+                                   duty_code: m.dutyCode || 'UNKNOWN',
+                                   shift_label: m.shiftLabel || null,
+                                   flight: f,
+                                   flight_total: flightTotal,
+                                   duty_total_daily: m.totalRequiredDaily || 0,
+                                   is_disabled: m.isDisabled || false
+                               };
+                               for (let i = 0; i < 31; i++) {
+                                   row[`day_${i + 1}`] = days[i] || 0;
+                               }
+                               matrixPayload.push(row);
+                           });
+                       });
+                       const { error: matrixErr } = await supabase.from('duty_ratio_matrix').upsert(matrixPayload, { onConflict: 'id' });
+                       if (matrixErr) {
+                           console.error("Error syncing duty matrix to Supabase:", matrixErr);
+                       }
+                   }
+               } catch(e) {
+                   console.error("Error parsing matrix for Supabase sync:", e);
+               }
            }
         }
 
@@ -673,7 +798,7 @@ export class LocalDatabaseEngine {
           const parsed = JSON.parse(raw);
           if (parsed && Array.isArray(parsed.airmen) && parsed.airmen.length > 0) {
             const db: LocalStorageDB = {
-              airmen: parsed.airmen.sort((a: Airman, b: Airman) => a.serNo - b.serNo),
+              airmen: (() => { const seenIds = new Set<string>(); return parsed.airmen.map((a: Airman) => { let newId = a.id; if (!newId || newId === "airman-undefined" || seenIds.has(newId)) { newId = "airman-" + Math.random().toString(36).slice(2, 10); } seenIds.add(newId); return { ...a, id: newId }; }).sort((a: Airman, b: Airman) => a.serNo - b.serNo); })(),
               assignments: parsed.assignments || {},
               activityHistory: parsed.activityHistory || [],
               adminPasscode: parsed.adminPasscode || DEFAULT_ADMIN_PASSCODE,
@@ -682,12 +807,6 @@ export class LocalDatabaseEngine {
               lastUpdated: parsed.lastUpdated || new Date().toISOString(),
             };
 
-            if (!db.assignments['2026-07']) {
-              db.assignments['2026-07'] = generateOfficialMonthAssignments(2026, 7);
-            }
-            if (!db.assignments['2026-08']) {
-              db.assignments['2026-08'] = generateOfficialMonthAssignments(2026, 8);
-            }
 
             return db;
           }
@@ -700,10 +819,10 @@ export class LocalDatabaseEngine {
     // Default fresh DB
     const initialPasscode = DEFAULT_ADMIN_PASSCODE;
     const initialDb: LocalStorageDB = {
-      airmen: [...INITIAL_AIRMEN],
+      airmen: [],
       assignments: {
-        '2026-07': generateOfficialMonthAssignments(2026, 7),
-        '2026-08': generateOfficialMonthAssignments(2026, 8),
+        
+        
       },
       activityHistory: [],
       adminPasscode: initialPasscode,
@@ -1246,8 +1365,8 @@ export class LocalDatabaseEngine {
 
   public resetToOfficialData(): void {
     this.db.assignments = {
-      '2026-07': generateOfficialMonthAssignments(2026, 7),
-      '2026-08': generateOfficialMonthAssignments(2026, 8),
+      
+      
     };
     this.saveToStorage();
   }
@@ -1431,7 +1550,7 @@ export class LocalDatabaseEngine {
             else offShort = ass.notes;
           }
 
-          offShort = offShort
+          offShort = (offShort || "")
             .replace(/DUTY_OFF/g, 'Duty')
             .replace(/Off Off/g, 'Off')
             .replace(/Duty Off Off/g, 'Duty Off');
@@ -1558,7 +1677,7 @@ export class LocalDatabaseEngine {
           else if (yestAss.dutyCode === 'ON_PARADE') offShort = 'GD Off';
           else offShort = `${yestAss.dutyCode} Off`;
 
-          offShort = offShort
+          offShort = (offShort || "")
             .replace(/DUTY_OFF/g, 'Duty')
             .replace(/Off Off/g, 'Off')
             .replace(/Duty Off Off/g, 'Duty Off');
@@ -1846,7 +1965,7 @@ export class LocalDatabaseEngine {
 
   private extractTextFromPdfBase64(base64Str: string): string {
     try {
-      const clean = base64Str.replace(/^data:[^;]+;base64,/, '');
+      const clean = (base64Str || "").replace(/^data:[^;]+;base64,/, '');
       const binary = atob(clean);
       const textParts: string[] = [];
 
@@ -1911,7 +2030,7 @@ export class LocalDatabaseEngine {
 
         if (isText) {
           try {
-            const clean = f.base64.replace(/^data:[^;]+;base64,/, '');
+            const clean = (f.base64 || "").replace(/^data:[^;]+;base64,/, '');
             const decoded = atob(clean);
             extractedText += `\n${decoded}`;
           } catch {
