@@ -637,7 +637,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     ...((role === 'SUPER_ADMIN' || role === 'OWNER' || role === 'ADMIN') ? [{ id: 'users', label: 'User Management', icon: <ShieldCheck className="w-5 h-5" />, color: 'text-purple-500 bg-purple-100 dark:bg-purple-950 dark:text-purple-400' }] : []),
     { id: 'security', label: 'Security & Passcode', icon: <Lock className="w-5 h-5" />, color: 'text-amber-500 bg-amber-100 dark:bg-amber-950 dark:text-amber-400' },
     ...((role === 'SUPER_ADMIN' || role === 'OWNER' || role === 'ADMIN') ? [{ id: 'database', label: 'Backup & Restore', icon: <Database className="w-5 h-5" />, color: 'text-emerald-500 bg-emerald-100 dark:bg-emerald-950 dark:text-emerald-400' }] : []),
-    ...((role === 'SUPER_ADMIN' || role === 'OWNER') ? [{ id: 'history', label: 'Login History', icon: <History className="w-5 h-5" />, color: 'text-sky-500 bg-sky-100 dark:bg-sky-950 dark:text-sky-400' }] : []),
+    ...((role === 'SUPER_ADMIN' || role === 'OWNER' || role === 'ADMIN') ? [{ id: 'history', label: 'Login History', icon: <History className="w-5 h-5" />, color: 'text-sky-500 bg-sky-100 dark:bg-sky-950 dark:text-sky-400' }] : []),
   ];
 
   const getSectionTitle = (id: SettingSection) => {
@@ -1268,7 +1268,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
 
 
-{activeSection === 'history' && (role === 'SUPER_ADMIN' || role === 'OWNER') && (
+{activeSection === 'history' && (role === 'SUPER_ADMIN' || role === 'OWNER' || role === 'ADMIN') && (
             <div className="space-y-6">
               
               {selectedHistoryUser ? (
