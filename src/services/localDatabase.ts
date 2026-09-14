@@ -228,6 +228,15 @@ export class LocalDatabaseEngine {
       }
       
       if (staffData) {
+        staffData.sort((a, b) => {
+           const getNum = (id) => {
+              if (!id) return 9999;
+              const match = id.match(/\d+/);
+              return match ? parseInt(match[0], 10) : 9999;
+           };
+           return getNum(a.airman_id) - getNum(b.airman_id);
+        });
+
         const parsedAirmen = staffData.map((s: any, idx: number) => ({
           id: (s.airman_id && s.airman_id !== "airman-undefined") ? s.airman_id : 'airman-' + (s['BD No'] && String(s['BD No']) !== "undefined" ? s['BD No'] : Math.random().toString(36).slice(2, 10)),
           serNo: idx + 1,
@@ -1073,13 +1082,16 @@ export class LocalDatabaseEngine {
           (a) => a.airmanId === assignment.airmanId && a.date === assignment.date && (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night'
         );
       } else {
+        // Any day duty that is IDAC day
         index = list.findIndex(
-          (a) => a.airmanId === assignment.airmanId && a.date === assignment.date && (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift !== 'Night'
+          (a) => a.airmanId === assignment.airmanId && a.date === assignment.date && !((a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night')
         );
       }
     } else {
-      const scope = assignment.disposalScope || 'ALL';
-      index = list.findIndex((a) => a.airmanId === assignment.airmanId && a.date === assignment.date && (a.disposalScope || 'ALL') === scope);
+      // Overwrite any existing day duty for this date
+      index = list.findIndex(
+        (a) => a.airmanId === assignment.airmanId && a.date === assignment.date && !((a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night')
+      );
     }
 
     const prevAssignment = index >= 0 ? { ...list[index] } : null;
@@ -1161,14 +1173,10 @@ export class LocalDatabaseEngine {
         if (idaShift === 'Night') {
           index = list.findIndex((a) => a.airmanId === airmanId && a.date === dateStr && (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night');
         } else {
-          index = list.findIndex((a) => a.airmanId === airmanId && a.date === dateStr && (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift !== 'Night');
+          index = list.findIndex((a) => a.airmanId === airmanId && a.date === dateStr && !((a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night'));
         }
-      } else if (dutyCode === 'AIRPORT' || dutyCode === 'ATT' || dutyCode === 'DETT') {
-        const scope = disposalScope || 'ALL';
-        index = list.findIndex((a) => a.airmanId === airmanId && a.date === dateStr && (a.dutyCode === 'AIRPORT' || a.dutyCode === 'ATT' || a.dutyCode === 'DETT') && (a.disposalScope || 'ALL') === scope);
       } else {
-        const scope = disposalScope || 'ALL';
-        index = list.findIndex((a) => a.airmanId === airmanId && a.date === dateStr && (a.disposalScope || 'ALL') === scope);
+        index = list.findIndex((a) => a.airmanId === airmanId && a.date === dateStr && !((a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night'));
       }
 
       if (index >= 0) {

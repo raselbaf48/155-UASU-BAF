@@ -118,7 +118,13 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
   
   const getGroupedList = (list) => {
     if (list.length === 0) return [];
-    const sorted = [...list].sort((a, b) => a.date.localeCompare(b.date));
+    
+    // Sort by dutyCode then date to group correctly and detect duplicates
+    const sorted = [...list].sort((a, b) => {
+      if (a.dutyCode !== b.dutyCode) return (a.dutyCode || '').localeCompare(b.dutyCode || '');
+      return a.date.localeCompare(b.date);
+    });
+    
     const groups = [];
     let currentGroup = [sorted[0]];
     
@@ -129,7 +135,12 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
       const currDate = new Date(current.date);
       const prevDate = new Date(prev.date);
       const diffTime = Math.abs(currDate.getTime() - prevDate.getTime());
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+      
+      if (diffDays === 0 && current.dutyCode === prev.dutyCode) {
+        // Exact duplicate date for same duty type, ignore it
+        continue;
+      }
       
       if (diffDays === 1 && current.dutyCode === prev.dutyCode && current.notes === prev.notes) {
         currentGroup.push(current);

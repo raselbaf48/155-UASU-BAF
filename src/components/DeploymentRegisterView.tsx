@@ -37,9 +37,10 @@ interface AttRecord {
 
 export const DeploymentRegisterView: React.FC<DeploymentRegisterViewProps> = ({
   role = 'ADMIN',
-  airmen,
+  airmen: rawAirmen,
   onViewProfile,
 }) => {
+  const airmen = React.useMemo(() => rawAirmen.filter(a => a.active !== false), [rawAirmen]);
   const session = getCurrentUserSession();
   const isAdmin = session?.assignedRole === 'ADMIN';
   const isSuperAdmin = (role === 'SUPER_ADMIN' || role === 'OWNER');

@@ -147,7 +147,8 @@ export interface PersonnelStatusItem {
 export interface ActivityHistoryItem {
   id: string;
   timestamp: string;
-  actionType: 'ASSIGN_DUTY' | 'ASSIGN_RANGE' | 'GRANT_LEAVE' | 'DELETE_ASSIGNMENT' | 'CLEAR_RANGE' | 'EDIT_DUTY' | 'IMPORT_PDF_ROSTER' | 'SYSTEM_ACTION';
+  actionType?: 'ASSIGN_DUTY' | 'ASSIGN_RANGE' | 'GRANT_LEAVE' | 'DELETE_ASSIGNMENT' | 'CLEAR_RANGE' | 'EDIT_DUTY' | 'IMPORT_PDF_ROSTER' | 'SYSTEM_ACTION';
+  type?: string;
   airmanId: string;
   airmanName: string;
   airmanRank?: string;

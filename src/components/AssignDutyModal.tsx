@@ -784,14 +784,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
         if (isAInCurrent && !isBInCurrent) return -1;
         if (!isAInCurrent && isBInCurrent) return 1;
 
-        const infoA = getDutyStatusInfo(a.id);
-        const infoB = getDutyStatusInfo(b.id);
-
-        // Put On Parade and Night-Off first when unassigned
-        const isAAvailable = infoA.type === 'ON_PARADE' || infoA.type === 'NIGHT_OFF' || infoA.type === 'DUTY_OFF';
-        const isBAvailable = infoB.type === 'ON_PARADE' || infoB.type === 'NIGHT_OFF' || infoB.type === 'DUTY_OFF';
-        if (isAAvailable && !isBAvailable) return -1;
-        if (!isAAvailable && isBAvailable) return 1;
+        
 
         // Priority for Airport in Avionics: Sgt Mustakim
         if (activeDutyCode === 'ATT' || activeDutyCode === 'AIRPORT') {

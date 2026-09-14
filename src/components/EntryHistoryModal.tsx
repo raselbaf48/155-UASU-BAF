@@ -202,6 +202,8 @@ export const EntryHistoryModal: React.FC<EntryHistoryModalProps> = ({
   const last10Entries = historyList.slice(0, visibleCount);
 
   const filteredHistory = last10Entries.filter((item) => {
+    // Hide corrupted logs that have neither actionType nor type
+    if (!item.actionType && !item.type) return false;
     if (filterType === 'LEAVE' && item.dutyCode !== 'LEAVE') return false;
     if (filterType === 'TDY' && item.dutyCode !== 'TDY') return false;
     if (filterType === 'DEPLOYMENT' && item.dutyCode !== 'DEPLOYMENT') return false;
@@ -211,8 +213,8 @@ export const EntryHistoryModal: React.FC<EntryHistoryModalProps> = ({
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
     return (
-      item.airmanName.toLowerCase().includes(q) ||
-      item.dutyCode.toLowerCase().includes(q) ||
+      (item.airmanName || '').toLowerCase().includes(q) ||
+      (item.dutyCode || '').toLowerCase().includes(q) ||
       (item.notes && item.notes.toLowerCase().includes(q)) ||
       item.fromDate.includes(q) ||
       item.toDate.includes(q)
@@ -457,7 +459,7 @@ export const EntryHistoryModal: React.FC<EntryHistoryModalProps> = ({
                     </div>
 
                     <div className="space-y-1.5">
-                      {item.actionType === 'SYSTEM_ACTION' ? (
+                      {(item.actionType === 'SYSTEM_ACTION' || item.type === 'SYSTEM_ACTION') ? (
                         <div className="flex flex-col space-y-1">
                           <div className="flex items-center space-x-2 flex-wrap">
                             <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300">
@@ -482,7 +484,7 @@ export const EntryHistoryModal: React.FC<EntryHistoryModalProps> = ({
                             ? 'bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300'
                             : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
                         }`}>
-                          {item.actionType.replace('_', ' ')}
+                          {(item.actionType || item.type || 'UNKNOWN ACTION').replace('_', ' ')}
                         </span>
 
                         <span className="font-extrabold text-slate-900 dark:text-slate-100 text-sm">

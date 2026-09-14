@@ -128,9 +128,10 @@ export const calculateLeaveDaysWithF295 = (
 
 export const LeaveRegisterView: React.FC<LeaveRegisterViewProps> = ({
   role = 'ADMIN',
-  airmen,
+  airmen: rawAirmen,
   onViewProfile,
 }) => {
+  const airmen = React.useMemo(() => rawAirmen.filter(a => a.active !== false), [rawAirmen]);
   const session = getCurrentUserSession();
   const isAdmin = session?.assignedRole === 'ADMIN';
   const adminFlight = session?.flightName;

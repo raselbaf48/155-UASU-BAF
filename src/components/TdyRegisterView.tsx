@@ -37,9 +37,10 @@ interface TdyRecord {
 
 export const TdyRegisterView: React.FC<TdyRegisterViewProps> = ({
   role = 'ADMIN',
-  airmen,
+  airmen: rawAirmen,
   onViewProfile,
 }) => {
+  const airmen = React.useMemo(() => rawAirmen.filter(a => a.active !== false), [rawAirmen]);
   const session = getCurrentUserSession();
   const isAdmin = session?.assignedRole === 'ADMIN';
   const adminFlight = session?.flightName;
