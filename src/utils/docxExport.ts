@@ -15,6 +15,7 @@ import {
   HeightRule,
   TableLayoutType,
 } from 'docx';
+import { addAssignmentToMap, resolveAirmanDutyForDate } from '../data/rosterGenerator';
 import { saveAs } from 'file-saver';
 import { Airman, DutyAssignment, FlightName } from '../types';
 import { DutyRatioTable } from '../data/officialDutyRatioMatrix';
@@ -1453,13 +1454,7 @@ export async function exportMonthlyDutyRegisterDocx(
       : airmen.filter((a) => a.flightName === flightFilter);
 
   const assignmentMap = new Map<string, DutyAssignment>();
-  assignments.forEach((ass) => {
-    const key = `${ass.airmanId}_${ass.date}`;
-    const existing = assignmentMap.get(key);
-    if (!existing || (existing.disposalScope || 'ALL') !== 'ALL') {
-      assignmentMap.set(key, ass);
-    }
-  });
+  assignments.forEach((ass) => addAssignmentToMap(assignmentMap, ass));
 
   const docChildren: any[] = [
     new Paragraph({

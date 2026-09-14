@@ -158,7 +158,15 @@ export const DeploymentRegisterView: React.FC<DeploymentRegisterViewProps> = ({
       Object.keys(recordMap).forEach((airmanId) => {
         const rec = recordMap[airmanId];
         const airmanAttAssignments = allAssignments
-          .filter((ass: any) => ass && (ass.dutyCode === 'ATT' || ass.dutyCode === 'BAKE_N_BITE') && ass.airmanId === airmanId && ass.date)
+          .filter((ass: any) => ass && ['ATT', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(ass.dutyCode) && ass.airmanId === airmanId && ass.date)
+          .reduce((acc: any[], curr: any) => {
+            // Because we now store both deployment and base duties, 
+            // deduplicate by date so we don't count the same day twice for deployments
+            if (!acc.some(a => a.date === curr.date)) {
+              acc.push(curr);
+            }
+            return acc;
+          }, [])
           .sort((a: any, b: any) => a.date.localeCompare(b.date));
 
         airmanAttAssignments.forEach((ass: any) => {
@@ -218,7 +226,7 @@ export const DeploymentRegisterView: React.FC<DeploymentRegisterViewProps> = ({
 
     setSavingAtt(true);
     try {
-      const notes = attRemarks ? `${finalDest} - ${attRemarks}` : finalDest;
+      const notes = finalDest;
       
       const dutyCodeToUse = finalDest === 'Canteen' ? 'CANTEEN' : finalDest.includes('Bake') ? 'BAKE_N_BITE' : 'ATT';
       await fetch('/api/roster/assign-range', {
@@ -438,6 +446,7 @@ export const DeploymentRegisterView: React.FC<DeploymentRegisterViewProps> = ({
                 <th className="py-3 px-3 text-center bg-emerald-50 dark:bg-emerald-950/30 text-emerald-900 dark:text-emerald-300 font-black">
                   Total Deployment Days ({selectedYear})
                 </th>
+                <th className="py-3 px-4 text-center">Destination</th>
                 <th className="py-3 px-4 text-center">Current Status</th>
                 
               </tr>
@@ -505,6 +514,9 @@ export const DeploymentRegisterView: React.FC<DeploymentRegisterViewProps> = ({
                         ) : (
                           <span className="text-slate-300 dark:text-slate-600">0</span>
                         )}
+                      </td>
+                      <td className="py-3 px-4 text-center text-slate-700 dark:text-slate-300 font-bold">
+                        {rec.currentlyOnAtt ? (rec.currentAttLocation || 'Outstation') : '-'}
                       </td>
                       <td className="py-3 px-4 text-center">
                         {rec.currentlyOnAtt ? (
@@ -675,20 +687,6 @@ export const DeploymentRegisterView: React.FC<DeploymentRegisterViewProps> = ({
                 )}
               </div>
               
-              {/* Remarks (Optional) */}
-              <div>
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
-                  Remarks (Optional)
-                </label>
-                <input
-                  type="text"
-                  value={attRemarks}
-                  onChange={(e) => setAttRemarks(e.target.value)}
-                  placeholder="Additional notes..."
-                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white outline-none"
-                />
-              </div>
-
               {/* Date Range */}
               <div className="grid grid-cols-2 gap-3">
                 <div>

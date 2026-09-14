@@ -2,7 +2,7 @@ import { DateNavigator } from './DateNavigator';
 import React, { useState, useEffect } from 'react';
 import { Airman, DutyAssignment, DutyCategoryCode, FlightName, UserRole, ConflictAlert, IDAShift } from '../types';
 import { DUTY_TYPES, DUTY_TYPE_MAP } from '../data/dutyTypes';
-import { getDaysInMonth, calculateDutyStats, detectConflicts, resolveAirmanDutyForDate, getAirmanShortCode } from '../data/rosterGenerator';
+import { getDaysInMonth, calculateDutyStats, detectConflicts, resolveAirmanDutyForDate, addAssignmentToMap, getAirmanShortCode } from '../data/rosterGenerator';
 import { DutyCellPopover } from './DutyCellPopover';
 import { exportTableToCSV } from '../utils/csvExport';
 import { getOptimalMinColumnWidth } from '../utils/tableUtils';
@@ -582,13 +582,7 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
 
   // Map assignments by key "airmanId_YYYY-MM-DD"
   const assignmentMap = new Map<string, DutyAssignment>();
-  assignments.forEach((ass) => {
-    const key = `${ass.airmanId}_${ass.date}`;
-    const existing = assignmentMap.get(key);
-    if (!existing || (existing.disposalScope || 'ALL') !== 'ALL') {
-      assignmentMap.set(key, ass);
-    }
-  });
+  assignments.forEach((ass) => addAssignmentToMap(assignmentMap, ass));
 
   // Calculate duty stats & conflicts
   const statsList = calculateDutyStats(
@@ -668,10 +662,10 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
       const res = await fetch('/api/roster/delete-assignment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ airmanId: activeCell.airman.id, date: activeCell.date }),
+        body: JSON.stringify({ airmanId: activeCell.airman.id, date: activeCell.date, dutyCode: activeCell.assignment?.dutyCode }),
       });
       if (res.ok) {
-        setAssignments((prev) => prev.filter((a) => !(a.airmanId === activeCell.airman.id && a.date === activeCell.date)));
+        setAssignments((prev) => prev.filter((a) => !(a.airmanId === activeCell.airman.id && a.date === activeCell.date && a.dutyCode === activeCell.assignment?.dutyCode)));
         setLastUndoAction({
           label: `Deleted duty for ${activeCell.airman.name} (${activeCell.date})`,
           items: [{ airmanId: activeCell.airman.id, date: activeCell.date, assignment: prevAss }],
@@ -784,126 +778,108 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
   return (
     <div className="duty-register-print space-y-6">
       {/* Top Banner & Month/Year Selector */}
-      <div className="bg-white dark:bg-slate-900 rounded-xl p-5 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900 dark:text-slate-100 flex items-center space-x-2">
-            <span>Monthly Duty Register & Auto-Counter</span>
+      <div className="bg-white dark:bg-slate-900 rounded-xl p-5 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col lg:flex-row justify-between items-center lg:items-start gap-6">
+        
+        {/* Left - Title */}
+        <div className="flex-1 text-center lg:text-left flex flex-col items-center lg:items-start">
+          <h1 className="text-xl font-bold text-slate-900 dark:text-slate-100 flex flex-col sm:flex-row items-center gap-2">
+            <span>Monthly Duty Register</span>
             <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300">
               {isFullYearView ? `Full Year ${currentYear}` : `1st to ${daysCount}th`}
             </span>
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Dynamic Roster Matrix for 155 UASU BAF • Automatic duty counting per airman
+            Dynamic Roster Matrix for 155 UASU BAF
           </p>
         </div>
 
-        {/* Month / Year & Holiday Controls */}
-        <div className="flex flex-wrap items-center gap-2.5">
-          {/* Year Selector */}
-          <div className="flex items-center bg-slate-100 dark:bg-slate-800 px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700">
-            <span className="text-[11px] font-bold text-slate-400 mr-1.5 uppercase">Year:</span>
-            <select
-              value={currentYear}
-              onChange={(e) => setCurrentYear(parseInt(e.target.value, 10))}
-              className="bg-transparent font-bold text-xs text-slate-900 dark:text-slate-100 outline-none cursor-pointer"
-            >
-              {[2024, 2025, 2026, 2027, 2028, 2029, 2030].map((y) => (
-                <option key={y} value={y} className="bg-white dark:bg-slate-900">
-                  {y}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Month Selector */}
-          <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
+        {/* Center - Calendar & Holiday Controls */}
+        <div className="flex-[1.5] flex flex-col items-center justify-center gap-3">
+          <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
             <button
               onClick={handlePrevMonth}
               disabled={isFullYearView}
-              className={`p-1.5 rounded-lg transition-colors ${
+              className={`p-2 rounded-xl transition-colors ${
                 isFullYearView
                   ? 'opacity-30 cursor-not-allowed'
-                  : 'text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700'
+                  : 'text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700 hover:shadow-xs'
               }`}
               title="Previous Month"
             >
-              <ChevronLeft className="w-4 h-4" />
+              <ChevronLeft className="w-5 h-5" />
             </button>
-
-            <select
-              value={isFullYearView ? 'FULL_YEAR' : currentMonth}
-              onChange={(e) => {
-                if (e.target.value === 'FULL_YEAR') {
-                  setIsFullYearView(true);
-                } else {
-                  setIsFullYearView(false);
-                  setCurrentMonth(parseInt(e.target.value, 10));
-                }
-              }}
-              className="px-2 font-bold text-xs text-slate-900 dark:text-slate-100 bg-transparent outline-none cursor-pointer text-center"
-            >
-              {[
-                { m: 1, name: '01 - January' },
-                { m: 2, name: '02 - February' },
-                { m: 3, name: '03 - March' },
-                { m: 4, name: '04 - April' },
-                { m: 5, name: '05 - May' },
-                { m: 6, name: '06 - June' },
-                { m: 7, name: '07 - July' },
-                { m: 8, name: '08 - August' },
-                { m: 9, name: '09 - September' },
-                { m: 10, name: '10 - October' },
-                { m: 11, name: '11 - November' },
-                { m: 12, name: '12 - December' },
-              ].map((opt) => (
-                <option key={opt.m} value={opt.m} className="bg-white dark:bg-slate-900">
-                  {opt.name}
-                </option>
-              ))}
-              <option value="FULL_YEAR" className="bg-emerald-50 dark:bg-emerald-950 font-bold text-emerald-800 dark:text-emerald-300">
-                ⭐ Full Year (Jan - Dec)
-              </option>
-            </select>
+            
+            <div className="relative px-6 flex items-center justify-center min-w-[200px]">
+               <span className="font-black text-lg text-slate-800 dark:text-slate-200 pointer-events-none">
+                  {isFullYearView ? 'Full Year (Jan-Dec)' : new Date(currentYear, currentMonth - 1).toLocaleString('en-US', { month: 'long', year: 'numeric' })}
+               </span>
+               <input
+                  type="month"
+                  value={`${currentYear}-${currentMonth.toString().padStart(2, '0')}`}
+                  onChange={(e) => {
+                     const val = e.target.value;
+                     if(val) {
+                        const [y, m] = val.split('-');
+                        setCurrentYear(parseInt(y, 10));
+                        setCurrentMonth(parseInt(m, 10));
+                        setIsFullYearView(false);
+                     }
+                  }}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+               />
+            </div>
 
             <button
               onClick={handleNextMonth}
               disabled={isFullYearView}
-              className={`p-1.5 rounded-lg transition-colors ${
+              className={`p-2 rounded-xl transition-colors ${
                 isFullYearView
                   ? 'opacity-30 cursor-not-allowed'
-                  : 'text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700'
+                  : 'text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700 hover:shadow-xs'
               }`}
               title="Next Month"
             >
-              <ChevronRight className="w-4 h-4" />
+              <ChevronRight className="w-5 h-5" />
             </button>
           </div>
 
-          {/* Holiday Filter Toggle */}
-          <button
-            onClick={() => setOnlyHolidaysFilter(!onlyHolidaysFilter)}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
-              onlyHolidaysFilter
-                ? 'bg-amber-600 text-white border-amber-700 shadow-xs'
-                : 'bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-300 border-amber-300 dark:border-amber-800 hover:bg-amber-100'
-            }`}
-            title="Filter to show only Friday/Saturday and designated official holidays"
-          >
-            <span>{onlyHolidaysFilter ? '🏖️ Holidays Only' : '📅 All Days'}</span>
-          </button>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => setIsFullYearView(!isFullYearView)}
+              className={`flex items-center space-x-2 px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${
+                isFullYearView
+                  ? 'bg-emerald-600 text-white border-emerald-700 shadow-sm'
+                  : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-100'
+              }`}
+              title="Toggle Full Year View"
+            >
+              <span>{isFullYearView ? '⭐ Full Year' : '⭐ Full Year'}</span>
+            </button>
+            <button
+              onClick={() => setOnlyHolidaysFilter(!onlyHolidaysFilter)}
+              className={`flex items-center space-x-2 px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${
+                onlyHolidaysFilter
+                  ? 'bg-amber-600 text-white border-amber-700 shadow-sm'
+                  : 'bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-300 border-amber-300 dark:border-amber-800 hover:bg-amber-100'
+              }`}
+              title="Filter to show only Friday/Saturday and designated official holidays"
+            >
+              <span>{onlyHolidaysFilter ? '🏖️ Holidays Only' : '📅 All Days'}</span>
+            </button>
+          </div>
+        </div>
 
-          
-
+        {/* Right - Action Buttons */}
+        <div className="flex-1 flex flex-wrap justify-center lg:justify-end gap-2 mt-4 lg:mt-0">
           {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') && (
-            <div className="flex items-center space-x-2">
-              
+            <div className="flex flex-wrap justify-center lg:justify-end gap-2">
               <button
                 onClick={() => exportTableToCSV('duty-register-container', `Duty_Register_${currentYear}_${currentMonth}.csv`)}
                 className="flex items-center space-x-1.5 px-3 py-2 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-all active:scale-95"
                 title="Export current view to CSV"
               >
                 <Download className="w-4 h-4" />
-                <span className="hidden sm:inline">Export CSV</span>
+                <span className="hidden xl:inline">Export</span>
               </button>
 
               <button
@@ -912,7 +888,7 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                 title="View Last 10 Entries, revert wrong entries, or edit"
               >
                 <History className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                <span>Last Entry</span>
+                <span className="hidden xl:inline">History</span>
               </button>
 
               <button
@@ -920,10 +896,8 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                 className="flex items-center space-x-2 px-3.5 py-2 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-all active:scale-95"
               >
                 <CalendarRange className="w-4 h-4" />
-                <span>Assign Duty Range</span>
+                <span className="hidden xl:inline">Assign</span>
               </button>
-
-              
             </div>
           )}
         </div>

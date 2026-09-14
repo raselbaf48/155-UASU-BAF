@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Airman, AirmanDutyStats, ConflictAlert, FlightName, DutyAssignment } from '../types';
 import { DUTY_TYPES, DUTY_TYPE_MAP } from '../data/dutyTypes';
-import { BarChart3, ShieldCheck, AlertCircle, Award, Scale, Layers, RefreshCw, Calendar, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { BarChart3, ShieldCheck, AlertCircle, Award, Scale, Layers, RefreshCw, Calendar, X, ChevronLeft, ChevronRight, Printer } from 'lucide-react';
 import { calculateDutyStats, getDaysInMonth } from '../data/rosterGenerator';
 
 interface DutyAnalyticsProps {
   airmen: Airman[];
-  onViewProfile: (airman: Airman) => void;
+  onViewProfile: (airman: Airman, config?: any) => void;
 }
 
 export const DutyAnalytics: React.FC<DutyAnalyticsProps> = ({ airmen, onViewProfile }) => {
@@ -158,9 +158,9 @@ export const DutyAnalytics: React.FC<DutyAnalyticsProps> = ({ airmen, onViewProf
   return (
     <div className="space-y-6 relative">
       <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 shadow-xs">
-        <div className="flex flex-col md:flex-row items-center justify-between mb-4 gap-4">
-          <div>
-            <h1 className="text-xl font-black text-slate-900 dark:text-slate-100 flex items-center space-x-2">
+        <div className="flex flex-col items-center justify-center mb-4 gap-4 relative">
+          <div className="text-center">
+            <h1 className="text-xl font-black text-slate-900 dark:text-slate-100 flex items-center justify-center space-x-2">
               <BarChart3 className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
               <span>Duty Analysis & Fairness Equity Monitor</span>
             </h1>
@@ -168,85 +168,94 @@ export const DutyAnalytics: React.FC<DutyAnalyticsProps> = ({ airmen, onViewProf
               Workload distribution, duty posts, and flight comparisons.
             </p>
           </div>
-          <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-xl p-1 shadow-inner">
-            <button
-              onClick={() => setFilterMode('ALL')}
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${filterMode === 'ALL' ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
-            >
-              All Days
-            </button>
-            <button
-              onClick={() => setFilterMode('HOLIDAY')}
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${filterMode === 'HOLIDAY' ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
-            >
-              Holidays Only
-            </button>
-          </div>
-        </div>
 
-        {/* Full Calendar */}
-        <div className="mt-4">
-          <button onClick={() => setIsCalendarOpen(!isCalendarOpen)} className="flex items-center space-x-2 text-sm font-bold text-slate-700 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors bg-slate-100 dark:bg-slate-800 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700">
-            <Calendar className="w-4 h-4" />
-            <span>Calendar</span>
-          </button>
-          {isCalendarOpen && (
-        <div className="max-w-sm mt-4 border border-slate-200 dark:border-slate-700/50 rounded-xl overflow-hidden bg-slate-50 dark:bg-slate-900/50">
-          <div className="flex items-center justify-between px-4 py-3 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700/50">
-            <button
-              onClick={() => {
-                if (currentMonth === 1) { setCurrentMonth(12); setCurrentYear(y => y - 1); }
-                else setCurrentMonth(m => m - 1);
-              }}
-              className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
-            >
-              <ChevronLeft className="w-5 h-5 text-slate-600 dark:text-slate-300" />
-            </button>
-            <h2 className="text-sm font-black text-slate-800 dark:text-slate-200">
-              {monthNames[currentMonth - 1]} {currentYear}
-            </h2>
-            <button
-              onClick={() => {
-                if (currentMonth === 12) { setCurrentMonth(1); setCurrentYear(y => y + 1); }
-                else setCurrentMonth(m => m + 1);
-              }}
-              className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
-            >
-              <ChevronRight className="w-5 h-5 text-slate-600 dark:text-slate-300" />
-            </button>
-          </div>
-          <div className="grid grid-cols-7 text-center border-b border-slate-200 dark:border-slate-700/50 bg-slate-100 dark:bg-slate-800/80">
-            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-              <div key={day} className="py-1.5 text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                {day}
+          <div className="flex flex-col items-center justify-center gap-3 w-full">
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => {
+                  if (currentMonth === 1) { setCurrentMonth(12); setCurrentYear(y => y - 1); }
+                  else setCurrentMonth(m => m - 1);
+                }}
+                className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                title="Previous Month"
+              >
+                <ChevronLeft className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+              </button>
+
+              <button onClick={() => setIsCalendarOpen(!isCalendarOpen)} className="flex items-center justify-center space-x-2 text-sm font-bold text-slate-700 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors bg-slate-100 dark:bg-slate-800 px-5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm w-auto">
+                <Calendar className="w-4 h-4" />
+                <span>{monthNames[currentMonth - 1]} {currentYear}</span>
+              </button>
+              
+              <button
+                onClick={() => {
+                  if (currentMonth === 12) { setCurrentMonth(1); setCurrentYear(y => y + 1); }
+                  else setCurrentMonth(m => m + 1);
+                }}
+                className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                title="Next Month"
+              >
+                <ChevronRight className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+              </button>
+            </div>
+{isCalendarOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setIsCalendarOpen(false)}></div>
+                <div className="max-w-sm border border-slate-200 dark:border-slate-700/50 rounded-xl overflow-hidden bg-slate-50 dark:bg-slate-900/50 shadow-lg absolute top-[110px] z-20">
+                <div className="flex items-center justify-center px-4 py-3 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700/50">
+                  <h2 className="text-sm font-black text-slate-800 dark:text-slate-200">
+                    {monthNames[currentMonth - 1]} {currentYear}
+                  </h2>
+                </div>
+                <div className="grid grid-cols-7 text-center border-b border-slate-200 dark:border-slate-700/50 bg-slate-100 dark:bg-slate-800/80">
+                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+                    <div key={day} className="py-1.5 text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                      {day}
+                    </div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-7 bg-white dark:bg-slate-900">
+                  {emptyCells.map(i => (
+                    <div key={`empty-${i}`} className="p-1.5 border-b border-r border-slate-100 dark:border-slate-800/50 bg-slate-50 dark:bg-slate-900/20" />
+                  ))}
+                  {daysArray.map(day => {
+                    const dateStr = `${currentYear}-${currentMonth.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+                    const dObj = new Date(currentYear, currentMonth - 1, day);
+                    const isHoliday = isHolidayDate(dateStr, dObj);
+                    return (
+                      <button
+                        key={day}
+                        onClick={() => handleToggleHoliday(dateStr)}
+                        title="Click to toggle custom holiday"
+                        className={`p-1.5 h-12 border-b border-r border-slate-100 dark:border-slate-800/50 flex flex-col items-center justify-center transition-colors ${isHoliday ? 'bg-red-50/50 dark:bg-red-950/20 hover:bg-red-100 dark:hover:bg-red-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                      >
+                        <span className={`text-xs font-bold ${isHoliday ? 'text-red-600 dark:text-red-400' : 'text-slate-700 dark:text-slate-300'}`}>
+                          {day}
+                        </span>
+                        {isHoliday && <span className="text-[8px] leading-tight font-bold text-red-500 dark:text-red-400 uppercase mt-0.5">Holiday</span>}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            ))}
+              </>
+            )}
+            
+            <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-xl p-1 shadow-inner relative z-20">
+              <button
+                onClick={() => setFilterMode('ALL')}
+                className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${filterMode === 'ALL' ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+              >
+                All Days
+              </button>
+              <button
+                onClick={() => setFilterMode('HOLIDAY')}
+                className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${filterMode === 'HOLIDAY' ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+              >
+                Holidays Only
+              </button>
+            </div>
           </div>
-          <div className="grid grid-cols-7 bg-white dark:bg-slate-900">
-            {emptyCells.map(i => (
-              <div key={`empty-${i}`} className="p-1.5 border-b border-r border-slate-100 dark:border-slate-800/50 bg-slate-50 dark:bg-slate-900/20" />
-            ))}
-            {daysArray.map(day => {
-              const dateStr = `${currentYear}-${currentMonth.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
-              const dObj = new Date(currentYear, currentMonth - 1, day);
-              const isHoliday = isHolidayDate(dateStr, dObj);
-              return (
-                <button
-                  key={day}
-                  onClick={() => handleToggleHoliday(dateStr)}
-                  title="Click to toggle custom holiday"
-                  className={`p-1.5 h-12 border-b border-r border-slate-100 dark:border-slate-800/50 flex flex-col items-center justify-center transition-colors ${isHoliday ? 'bg-red-50/50 dark:bg-red-950/20 hover:bg-red-100 dark:hover:bg-red-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-                >
-                  <span className={`text-xs font-bold ${isHoliday ? 'text-red-600 dark:text-red-400' : 'text-slate-700 dark:text-slate-300'}`}>
-                    {day}
-                  </span>
-                  {isHoliday && <span className="text-[8px] leading-tight font-bold text-red-500 dark:text-red-400 uppercase mt-0.5">Holiday</span>}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-          )}
         </div>
       </div>
 
@@ -260,11 +269,11 @@ export const DutyAnalytics: React.FC<DutyAnalyticsProps> = ({ airmen, onViewProf
           {/* Overview Cards (Full names for all duties) */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             {[
+              { id: 'ALL', label: 'All Duties', count: (totals.totalGD || 0) + (totals.totalBTF || 0) + (totals.totalNTF || 0) + (totals.totalHalishahar || 0) + (totals.totalIDAC || 0), color: 'emerald' },
               { id: 'GD', label: 'Base Security Duty', count: totals.totalGD || 0, color: 'red' },
               { id: 'BTF', label: 'Base Taskforce Duty', count: totals.totalBTF || 0, color: 'amber' },
               { id: 'NTF', label: 'Najirpara Taskforce', count: totals.totalNTF || 0, color: 'orange' },
               { id: 'HTF', label: 'Halishahar Taskforce', count: totals.totalHalishahar || 0, color: 'blue' },
-              { id: 'AIRPORT', label: 'Airfield Duty', count: totals.totalAirport || 0, color: 'cyan' },
               { id: 'IDAC', label: 'IDAC Duty', count: totals.totalIDAC || 0, color: 'teal' },
             ].map(duty => (
               <button
@@ -457,7 +466,7 @@ const DutyDetailsModal: React.FC<{
   currentYear: number;
   currentMonth: number;
   onClose: () => void;
-  onViewProfile: (airman: Airman) => void;
+  onViewProfile: (airman: Airman, config?: any) => void;
 }> = ({ dutyId, assignments, airmen, currentYear, currentMonth, onClose, onViewProfile }) => {
   
   const mapDutyIdToType = (id: string) => {
@@ -473,6 +482,9 @@ const DutyDetailsModal: React.FC<{
   const targetType = mapDutyIdToType(dutyId);
 
   const relevantAssignments = assignments.filter(a => {
+    if (dutyId === 'ALL') {
+      return ['GD', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA'].includes(a.dutyCode);
+    }
     if (dutyId === 'IDAC') {
       return a.dutyCode === 'IDAC' || a.dutyCode === 'IDA';
     }
@@ -481,12 +493,29 @@ const DutyDetailsModal: React.FC<{
 
   // Unique airmen who have done this duty this month
   const uniqueAirmanIds = Array.from(new Set(relevantAssignments.map(a => a.airmanId)));
+  const isHeavyDuty = ['GD', 'BTF', 'NTF', 'AIRPORT', 'HALISHAHAR', 'IDAC'].includes(dutyId);
   const dutyAirmen = airmen
-    .filter(a => uniqueAirmanIds.includes(a.id))
-    .sort((a, b) => a.serNo - b.serNo); // Sorted by SerNo
+    .filter(a => {
+      if (!a.active) return false;
+      // ONLY show airmen who have ACTUALLY done the duty this month
+      return uniqueAirmanIds.includes(a.id);
+    })
+    .sort((a, b) => {
+      const getUniqueCount = (id: string) => {
+        return relevantAssignments.filter(x => x.airmanId === id).length;
+      };
+      const aCount = getUniqueCount(a.id);
+      const bCount = getUniqueCount(b.id);
+      if (bCount !== aCount) return bCount - aCount;
+      return a.serNo - b.serNo;
+    }); // Sorted by SerNo
 
   const daysInMonth = getDaysInMonth(currentYear, currentMonth);
-  const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  const allDaysMatrix = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  const activeDaysMatrix = new Set(
+    relevantAssignments.map(a => parseInt(a.date.split('-')[2], 10))
+  );
+  const daysArray = allDaysMatrix.filter(day => activeDaysMatrix.has(day));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
@@ -499,9 +528,14 @@ const DutyDetailsModal: React.FC<{
             </h2>
             <p className="text-xs text-slate-500 font-semibold mt-1">Showing capable personnel and duty dates</p>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-colors">
-            <X className="w-5 h-5 text-slate-500 dark:text-slate-400" />
-          </button>
+          <div className="flex items-center space-x-2">
+            <button onClick={() => window.print()} className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-colors print:hidden" title="Print Matrix">
+              <Printer className="w-5 h-5 text-slate-500 dark:text-slate-400" />
+            </button>
+            <button onClick={onClose} className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-colors print:hidden" title="Close">
+              <X className="w-5 h-5 text-slate-500 dark:text-slate-400" />
+            </button>
+          </div>
         </div>
         
         <div className="p-0 overflow-auto flex-1">
@@ -510,48 +544,83 @@ const DutyDetailsModal: React.FC<{
               No assignments found for this duty.
             </div>
           ) : (
-            <table className="w-full text-left text-xs border-collapse min-w-max">
+            <table className="w-full text-left text-xs border-collapse">
               <thead className="sticky top-0 bg-slate-100 dark:bg-slate-800/90 z-10 shadow-xs backdrop-blur-md">
                 <tr>
                   <th className="px-3 py-2.5 font-black text-slate-600 dark:text-slate-300 border-b border-r border-slate-200 dark:border-slate-700 w-12 text-center">Ser</th>
-                  <th className="px-3 py-2.5 font-black text-slate-600 dark:text-slate-300 border-b border-r border-slate-200 dark:border-slate-700 min-w-[120px]">Name</th>
-                  <th className="px-3 py-2.5 font-black text-slate-600 dark:text-slate-300 border-b border-r border-slate-200 dark:border-slate-700 w-16 text-center">Flt</th>
-                  {daysArray.map(day => (
-                    <th key={day} className="px-1 py-2.5 font-bold text-slate-600 dark:text-slate-400 border-b border-r border-slate-200 dark:border-slate-700 w-6 text-center">
-                      {day}
-                    </th>
-                  ))}
+                  <th className="px-3 py-2.5 font-black text-slate-600 dark:text-slate-300 border-b border-r border-slate-200 dark:border-slate-700 whitespace-nowrap" style={{ width: '1%' }}>Name</th>
+                  
+                  <th className="px-3 py-2.5 font-black text-emerald-600 dark:text-emerald-400 border-b border-r border-slate-200 dark:border-slate-700 w-16 text-center">Total</th>
+                  {daysArray.map(day => {
+                    const dateObj = new Date(currentYear, currentMonth - 1, day);
+                    const dayOfWeek = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
+                    return (
+                      <th key={day} className="px-1 py-2 font-bold text-slate-600 dark:text-slate-400 border-b border-r border-slate-200 dark:border-slate-700 w-10 text-center leading-tight">
+                        <div className="text-[14px]">{day}</div>
+                        <div className="text-[9px] font-medium text-slate-400 uppercase tracking-tighter">{dayOfWeek}</div>
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                 {dutyAirmen.map((airman, index) => (
                   <tr key={airman.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
                     <td className="px-3 py-2 font-bold text-slate-500 text-center border-r border-slate-200 dark:border-slate-700">
-                      {airman.serNo || index + 1}
+                      {index + 1}
                     </td>
-                    <td className="px-3 py-2 border-r border-slate-200 dark:border-slate-700">
+                    <td className="px-3 py-2 border-r border-slate-200 dark:border-slate-700 whitespace-nowrap" style={{ width: '1%' }}>
                       <button 
-                        onClick={() => { onClose(); onViewProfile(airman); }}
+                        onClick={() => { onClose(); onViewProfile(airman, { initialTab: 'history', initialCategory: dutyId, historyOnly: true }); }}
                         className="font-black text-slate-900 dark:text-slate-100 hover:text-emerald-600 whitespace-nowrap"
+                        title={`Click to view ${dutyId} history`}
                       >
                         {airman.rank} {airman.name}
                       </button>
                     </td>
+                    
                     <td className="px-3 py-2 text-center border-r border-slate-200 dark:border-slate-700">
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-sm bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                        {airman.flightName.substring(0, 3).toUpperCase()}
+                      <span className="text-sm font-black text-emerald-600 dark:text-emerald-400">
+                        {relevantAssignments.filter(a => a.airmanId === airman.id).length}
                       </span>
                     </td>
                     {daysArray.map(day => {
                       const dateStr = `${currentYear}-${currentMonth.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
-                      const assignedOnDate = relevantAssignments.find(a => a.airmanId === airman.id && a.date === dateStr);
+                      const assignmentsOnDate = relevantAssignments
+                        .filter(a => a.airmanId === airman.id && a.date === dateStr)
+                        .sort((a, b) => {
+                          const getWeight = (shift) => {
+                            if (shift === 'Morning') return 1;
+                            if (shift === 'Afternoon') return 2;
+                            if (shift === 'Night') return 3;
+                            return 0;
+                          };
+                          return getWeight(a.idaShift) - getWeight(b.idaShift);
+                        });
                       return (
                         <td key={day} className="p-0 border-r border-slate-200 dark:border-slate-700 text-center relative group">
-                          {assignedOnDate ? (
-                            <div className="w-full h-full min-h-[30px] flex items-center justify-center bg-emerald-50 dark:bg-emerald-900/20" title={assignedOnDate.dutyCode}>
-                              <span className="text-[10px] font-black text-emerald-700 dark:text-emerald-400">
-                                {assignedOnDate.dutyCode.substring(0, 3)}
-                              </span>
+                          {assignmentsOnDate.length > 0 ? (
+                            <div className="w-full h-full min-h-[30px] flex flex-col items-center justify-center bg-emerald-50 dark:bg-emerald-900/20" title={assignmentsOnDate.map(a => a.dutyCode).join(', ')}>
+                              {assignmentsOnDate.map((a, i) => {
+                                let label = a.dutyCode;
+                                if (dutyId === 'IDAC' || dutyId === 'ALL') {
+                                  if (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') {
+                                    if (a.idaShift === 'Morning') label = 'IDAC-A';
+                                    else if (a.idaShift === 'Afternoon') label = 'IDAC-B';
+                                    else if (a.idaShift === 'Night') label = 'IDAC-C';
+                                    else label = 'IDAC-A'; // Default fallback
+                                  } else {
+                                    label = label.substring(0, 3);
+                                  }
+                                } else {
+                                  label = label.substring(0, 3);
+                                }
+                                return (
+                                  <span key={i} className="text-[9px] leading-tight font-black text-emerald-700 dark:text-emerald-400">
+                                    {label}
+                                  </span>
+                                );
+                              })}
                             </div>
                           ) : null}
                         </td>

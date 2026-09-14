@@ -2,6 +2,35 @@ import { Airman, DutyAssignment, DutyCategoryCode, ConflictAlert, AirmanDutyStat
 import { DUTY_TYPE_MAP } from './dutyTypes';
 import { generateOfficialMonthAssignments } from './officialJulyAugustData';
 
+
+
+export function addAssignmentToMap(assignmentMap: Map<string, DutyAssignment>, ass: DutyAssignment) {
+  const scope = ass.disposalScope || 'ALL';
+  if (scope !== 'ALL') return; // We only build the map for the main roster
+  
+  const key = `${ass.airmanId}_${ass.date}`;
+  const existing = assignmentMap.get(key);
+  
+  if (!existing) {
+    assignmentMap.set(key, ass);
+  } else {
+    // Both exist. Determine priority.
+    const isDeployment = (code: string) => ['ATT', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(code);
+    const existingIsDep = isDeployment(existing.dutyCode);
+    const newIsDep = isDeployment(ass.dutyCode);
+    
+    // If the existing is a deployment and the new one is not, the new one overwrites it.
+    if (existingIsDep && !newIsDep) {
+      assignmentMap.set(key, ass);
+    } 
+    // If both are not deployments, or both are deployments, usually the latest assignment wins
+    // but just overwrite normally.
+    else if (!existingIsDep && !newIsDep) {
+      assignmentMap.set(key, ass);
+    }
+  }
+}
+
 export function getDaysInMonth(year: number, month: number): number {
   return new Date(year, month, 0).getDate();
 }
@@ -22,9 +51,7 @@ export function resolveAirmanDutyForDate(
   assignmentMap: Map<string, DutyAssignment>
 ): DutyAssignment {
   const directKey = `${airmanId}_${dateStr}`;
-  if (assignmentMap.has(directKey)) {
-    return assignmentMap.get(directKey)!;
-  }
+  const currentAss = assignmentMap.get(directKey);
 
   // Calculate previous date D-1
   const d = new Date(dateStr);
@@ -36,11 +63,15 @@ export function resolveAirmanDutyForDate(
   const yestKey = `${airmanId}_${yestStr}`;
 
   const yestAss = assignmentMap.get(yestKey);
-  if (yestAss) {
-    const isHeavyDuty =
-      ['GD', 'BTF', 'NTF', 'AIRPORT'].includes(yestAss.dutyCode) ||
-      ((yestAss.dutyCode === 'IDAC' || yestAss.dutyCode === 'IDA') && yestAss.idaShift === 'Night');
+  const isHeavyDuty = yestAss ? (
+    ['GD', 'BTF', 'NTF', 'AIRPORT', 'ATT', 'HALISHAHAR'].includes(yestAss.dutyCode) ||
+    ((yestAss.dutyCode === 'IDAC' || yestAss.dutyCode === 'IDA') && yestAss.idaShift === 'Night') ||
+    (yestAss.notes || '').toLowerCase().includes('idac')
+  ) : false;
 
+  const isDeployment = currentAss && ['ATT', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(currentAss.dutyCode);
+
+  if (!currentAss || isDeployment) {
     if (isHeavyDuty) {
       return {
         airmanId,
@@ -49,6 +80,10 @@ export function resolveAirmanDutyForDate(
         notes: 'Auto Duty Off (Post Night/Heavy Duty)',
       };
     }
+  }
+
+  if (currentAss) {
+    return currentAss;
   }
 
   // Default: On Parade
@@ -93,27 +128,18 @@ export function calculateDutyStats(
   });
 
   const assignmentMap = new Map<string, DutyAssignment>();
-  assignments.forEach((ass) => {
-    const key = `${ass.airmanId}_${ass.date}`;
-    const existing = assignmentMap.get(key);
-    if (!existing || (existing.disposalScope || 'ALL') !== 'ALL') {
-      assignmentMap.set(key, ass);
-    }
-  });
+  assignments.forEach((ass) => addAssignmentToMap(assignmentMap, ass));
 
   if (year && month) {
-    const totalDays = getDaysInMonth(year, month);
     const monthStr = month < 10 ? `0${month}` : `${month}`;
-
-    airmen.forEach((airman) => {
-      const stat = map.get(airman.id);
-      if (!stat) return;
-
-      for (let day = 1; day <= totalDays; day++) {
-        const dayStr = day < 10 ? `0${day}` : `${day}`;
-        const dateStr = `${year}-${monthStr}-${dayStr}`;
-        const ass = resolveAirmanDutyForDate(airman.id, dateStr, assignmentMap);
-
+    
+    // First, process all explicit assignments for the given month
+    assignments.forEach((ass) => {
+      const d = new Date(ass.date);
+      if (d.getFullYear() === year && (d.getMonth() + 1) === month) {
+        const stat = map.get(ass.airmanId);
+        if (!stat) return;
+        
         switch (ass.dutyCode) {
           case 'GD':
             stat.totalGD++;
@@ -158,6 +184,7 @@ export function calculateDutyStats(
           case 'LEAVE':
             stat.totalLeave++;
             break;
+
           case 'DUTY_OFF':
             stat.totalDutyOff++;
             break;

@@ -86,14 +86,15 @@ export const AssignDeploymentTab: React.FC<AssignDeploymentTabProps> = ({ airmen
     setDeploymentSuccessMsg('');
 
     try {
-      const fullNotes = deploymentRemarks.trim() ? `${finalDest} - ${deploymentRemarks.trim()}` : finalDest;
+      const fullNotes = finalDest;
+      const dutyCodeToUse = finalDest === 'Canteen' ? 'CANTEEN' : finalDest.includes('Bake') ? 'BAKE_N_BITE' : 'ATT';
 
       const res = await fetch('/api/roster/assign-range', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           airmanId: deploymentAirmanId,
-          dutyCode: 'DEPLOYMENT',
+          dutyCode: dutyCodeToUse,
           fromDate: deploymentFromDate,
           toDate: deploymentToDate,
           notes: fullNotes
@@ -236,19 +237,7 @@ export const AssignDeploymentTab: React.FC<AssignDeploymentTabProps> = ({ airmen
             )}
           </div>
 
-          {/* Remarks */}
-          <div>
-            <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
-              Remarks (Optional)
-            </label>
-            <input
-              type="text"
-              value={deploymentRemarks}
-              onChange={(e) => setDeploymentRemarks(e.target.value)}
-              placeholder="Additional notes..."
-              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-emerald-500"
-            />
-          </div>
+
 
           {/* Date Range */}
           <div className="grid grid-cols-2 gap-3">

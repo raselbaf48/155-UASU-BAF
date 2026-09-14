@@ -212,7 +212,7 @@ export const TdyRegisterView: React.FC<TdyRegisterViewProps> = ({
 
     setSavingTdy(true);
     try {
-      const notes = tdyRemarks ? `${finalDest} - ${tdyRemarks}` : finalDest;
+      const notes = finalDest;
       
       await fetch('/api/roster/assign-range', {
         method: 'POST',
@@ -431,6 +431,7 @@ export const TdyRegisterView: React.FC<TdyRegisterViewProps> = ({
                 <th className="py-3 px-3 text-center bg-emerald-50 dark:bg-emerald-950/30 text-emerald-900 dark:text-emerald-300 font-black">
                   Total TDY Days ({selectedYear})
                 </th>
+                <th className="py-3 px-4 text-center">Destination</th>
                 <th className="py-3 px-4 text-center">Current Status</th>
                 
               </tr>
@@ -498,6 +499,9 @@ export const TdyRegisterView: React.FC<TdyRegisterViewProps> = ({
                         ) : (
                           <span className="text-slate-300 dark:text-slate-600">0</span>
                         )}
+                      </td>
+                      <td className="py-3 px-4 text-center text-slate-700 dark:text-slate-300 font-bold">
+                        {rec.currentlyOnTdy ? (rec.currentTdyLocation || 'Outstation') : '-'}
                       </td>
                       <td className="py-3 px-4 text-center">
                         {rec.currentlyOnTdy ? (
@@ -667,20 +671,6 @@ export const TdyRegisterView: React.FC<TdyRegisterViewProps> = ({
                 )}
               </div>
               
-              {/* Remarks (Optional) */}
-              <div>
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
-                  Remarks (Optional)
-                </label>
-                <input
-                  type="text"
-                  value={tdyRemarks}
-                  onChange={(e) => setTdyRemarks(e.target.value)}
-                  placeholder="Additional notes..."
-                  className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white outline-none"
-                />
-              </div>
-
               {/* Assignment Date Presets */}
               <div>
                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">

@@ -445,7 +445,14 @@ export const EntryHistoryModal: React.FC<EntryHistoryModalProps> = ({
               // Calculate number of days
               const fD = new Date(item.fromDate);
               const tD = new Date(item.toDate || item.fromDate);
-              const diffDays = Math.max(1, Math.round((tD.getTime() - fD.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+              let diffDays = Math.max(1, Math.round((tD.getTime() - fD.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+              
+              if (item.notes && (item.dutyCode === 'LEAVE' || item.actionType === 'GRANT_LEAVE')) {
+                  const match = item.notes.match(/\(F-295: (\d+) Free Days\)/);
+                  if (match && match[1]) {
+                      diffDays = Math.max(0, diffDays - parseInt(match[1], 10));
+                  }
+              }
 
               return (
                 <div

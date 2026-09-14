@@ -91,7 +91,7 @@ export const AssignTdyTab: React.FC<AssignTdyTabProps> = ({ airmen, onClose, onS
     setTdySuccessMsg('');
 
     try {
-      const fullNotes = tdyRemarks.trim() ? `${finalDest} - ${tdyRemarks.trim()}` : finalDest;
+      const fullNotes = finalDest;
 
       const res = await fetch('/api/roster/assign-range', {
         method: 'POST',
@@ -238,20 +238,6 @@ export const AssignTdyTab: React.FC<AssignTdyTabProps> = ({ airmen, onClose, onS
                 required
               />
             )}
-          </div>
-
-          {/* Remarks */}
-          <div>
-            <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
-              Remarks (Optional)
-            </label>
-            <input
-              type="text"
-              value={tdyRemarks}
-              onChange={(e) => setTdyRemarks(e.target.value)}
-              placeholder="Additional notes..."
-              className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-amber-500"
-            />
           </div>
 
           {/* Assignment Date Presets */}
