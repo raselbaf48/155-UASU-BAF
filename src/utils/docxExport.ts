@@ -21,6 +21,16 @@ import { Airman, DutyAssignment, FlightName } from '../types';
 import { DutyRatioTable } from '../data/officialDutyRatioMatrix';
 
 
+
+export const formatRank = (rank: string) => {
+  if (!rank) return '';
+  const upper = rank.toUpperCase();
+  if (upper === 'SGT' || upper === 'CPL') {
+    return upper.charAt(0) + upper.slice(1).toLowerCase();
+  }
+  return upper;
+};
+
 const formatRunningLetter = (text: string) => {
   if (!text) return '';
   return text.toLowerCase().split(' ').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
@@ -145,7 +155,7 @@ export async function exportDutyRosterDocx(
         createHeaderCell('Block', 1100),
         createHeaderCell('Mobile No', 1600),
         createHeaderCell('Date', 1000),
-        createHeaderCell('Section', 1200),
+
       ],
     });
 
@@ -156,13 +166,13 @@ export async function exportDutyRosterDocx(
         children: [
           createDataCell(item.serNo || displaySer, 800, AlignmentType.CENTER),
           createDataCell(item.bdNo, 1100, AlignmentType.CENTER),
-          createDataCell(formatRunningLetter(item.rank), 900, AlignmentType.CENTER),
+          createDataCell(formatRank(item.rank), 900, AlignmentType.CENTER),
           createDataCell(formatRunningLetter(item.name), 1400, AlignmentType.LEFT),
           createDataCell(item.trade, 1300, AlignmentType.CENTER),
           createDataCell(item.block || 'L/O', 1100, AlignmentType.CENTER),
           createDataCell(item.mobileNo || '-', 1600, AlignmentType.CENTER),
           createDataCell(item.dateStr, 1000, AlignmentType.CENTER),
-          createDataCell(item.section || '155 UASU', 1200, AlignmentType.CENTER),
+
         ],
       });
     });
@@ -362,7 +372,7 @@ export async function exportNominalRollDocx(
       children: [
         createArialDataCell(String(idx + 1), 700, AlignmentType.CENTER),
         createArialDataCell((a.bdNo || "").replace(/^BD\//i, ''), 1400, AlignmentType.CENTER),
-        createArialDataCell(formatRunningLetter(a.rank), 1000, AlignmentType.LEFT),
+        createArialDataCell(formatRank(a.rank), 1000, AlignmentType.LEFT),
         createArialDataCell(formatRunningLetter(a.fullName || a.name), 2200, AlignmentType.LEFT),
         createArialDataCell(a.trade, 1400, AlignmentType.LEFT),
         createArialDataCell(a.flightName, 1300, AlignmentType.LEFT),
@@ -737,7 +747,7 @@ export async function exportParadeStateSingleDocx(
   };
 
   // Format airman names
-  const toDisplay = (airmenList: Airman[]) => airmenList.map((a) => ({ displayName: `${formatRunningLetter(a.rank)} ${formatRunningLetter(a.name)}` }));
+  const toDisplay = (airmenList: Airman[]) => airmenList.map((a) => ({ displayName: `${formatRank(a.rank)} ${formatRunningLetter(a.name)}` }));
 
   // Format Duty Off as: `${rank} ${name} - ${duty} Off`
   const dutyOffDisplay = dutyOff.map((item) => {
@@ -747,14 +757,14 @@ export async function exportParadeStateSingleDocx(
       dutyNote = `${dutyNote} Off`;
     }
     return {
-      displayName: `${formatRunningLetter(item.airman.rank)} ${formatRunningLetter(item.airman.name)} - ${dutyNote}`,
+      displayName: `${formatRank(item.airman.rank)} ${formatRunningLetter(item.airman.name)} - ${dutyNote}`,
     };
   });
 
   const dutyOnDisplay = dutyOn.map((item) => {
     const dutyNote = item.note && !item.note.toLowerCase().includes('imported') ? item.note : 'GD';
     return {
-      displayName: `${formatRunningLetter(item.airman.rank)} ${formatRunningLetter(item.airman.name)} - ${dutyNote}`,
+      displayName: `${formatRank(item.airman.rank)} ${formatRunningLetter(item.airman.name)} - ${dutyNote}`,
     };
   });
 
@@ -792,7 +802,7 @@ export async function exportParadeStateSingleDocx(
           spacing: { after: 15, line: 240 },
           children: [
             new TextRun({
-              text: `${idx + 1}. ${formatRunningLetter(a.rank)} ${formatRunningLetter(a.name)}`,
+              text: `${idx + 1}. ${formatRank(a.rank)} ${formatRunningLetter(a.name)}`,
               font: 'Arial',
               size: 22,
             }),
@@ -808,9 +818,9 @@ export async function exportParadeStateSingleDocx(
       const col2Item = onParade16To30[i];
       const col3Item = onParade31Plus[i];
       
-      const col1Text = col1Item ? `${i + 1}. ${formatRunningLetter(col1Item.rank)} ${formatRunningLetter(col1Item.name)}` : '';
-      const col2Text = col2Item ? `${16 + i}. ${formatRunningLetter(col2Item.rank)} ${formatRunningLetter(col2Item.name)}` : '';
-      const col3Text = col3Item ? `${31 + i}. ${formatRunningLetter(col3Item.rank)} ${formatRunningLetter(col3Item.name)}` : '';
+      const col1Text = col1Item ? `${i + 1}. ${formatRank(col1Item.rank)} ${formatRunningLetter(col1Item.name)}` : '';
+      const col2Text = col2Item ? `${16 + i}. ${formatRank(col2Item.rank)} ${formatRunningLetter(col2Item.name)}` : '';
+      const col3Text = col3Item ? `${31 + i}. ${formatRank(col3Item.rank)} ${formatRunningLetter(col3Item.name)}` : '';
 
       innerRows.push(
         new TableRow({
@@ -1503,7 +1513,7 @@ export async function exportMonthlyDutyRegisterDocx(
       children: [
         createArialDataCell(String(idx + 1), 500, AlignmentType.CENTER),
         createArialDataCell(a.bdNo, 1100, AlignmentType.CENTER),
-        createArialDataCell(formatRunningLetter(a.rank), 800, AlignmentType.CENTER),
+        createArialDataCell(formatRank(a.rank), 800, AlignmentType.CENTER),
         createArialDataCell(formatRunningLetter(a.name), 1800, AlignmentType.LEFT),
         createArialDataCell(a.flightName.slice(0, 3), 700, AlignmentType.CENTER),
         ...Array.from({ length: daysInMonth }, (_, i) => {

@@ -39,7 +39,10 @@ export const AddEditAirmanModal: React.FC<AddEditAirmanModalProps> = ({
   const [livingType, setLivingType] = useState<'L_IN' | 'L_OUT' | null>(() => {
     if (airmanToEdit?.addressBlock) {
       const lower = airmanToEdit.addressBlock.toLowerCase();
-      if (lower.includes('qtr') || lower.includes('quarter') || lower.includes('outside') || lower.includes('maizpara')) {
+      if (lower.includes('mess') || lower.match(/block/i) || lower === 'l/i' || lower === 'live in') {
+        return 'L_IN';
+      }
+      if (lower.trim() !== '' && lower !== '-' && lower !== 'n/a' && lower !== 'l/o') {
         return 'L_OUT';
       }
     }
@@ -58,7 +61,11 @@ export const AddEditAirmanModal: React.FC<AddEditAirmanModalProps> = ({
 
   // L/Out specific states
   const [livingOutType, setLivingOutType] = useState<'QUARTER' | 'OUTSIDE_BASE'>(() => {
-    if (airmanToEdit?.addressBlock && (airmanToEdit.addressBlock.toLowerCase().includes('outside') || airmanToEdit.addressBlock.toLowerCase().includes('maizpara'))) {
+    if (airmanToEdit?.addressBlock) {
+      const lower = airmanToEdit.addressBlock.toLowerCase();
+      if (lower.includes('qtr') || lower.includes('quarter')) {
+        return 'QUARTER';
+      }
       return 'OUTSIDE_BASE';
     }
     return 'QUARTER';
@@ -76,8 +83,11 @@ export const AddEditAirmanModal: React.FC<AddEditAirmanModalProps> = ({
   });
 
   const [outsideAddress, setOutsideAddress] = useState<string>(() => {
-    if (airmanToEdit?.addressBlock && (airmanToEdit.addressBlock.toLowerCase().includes('outside') || airmanToEdit.addressBlock.toLowerCase().includes('maizpara'))) {
-      return airmanToEdit.addressBlock.replace(/Outside\s*Base[:\s]*/gi, '').trim();
+    if (airmanToEdit?.addressBlock) {
+      const lower = airmanToEdit.addressBlock.toLowerCase();
+      if (!lower.includes('qtr') && !lower.includes('quarter') && !lower.includes('mess') && !lower.match(/block/i)) {
+        return airmanToEdit.addressBlock.replace(/Outside\s*Base[:\s]*/gi, '').trim();
+      }
     }
     return '';
   });

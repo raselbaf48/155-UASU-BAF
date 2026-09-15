@@ -481,6 +481,18 @@ export class LocalDatabaseEngine {
         
         // Compute delta for duties
         const changedAssignments: any[] = [];
+        const deletedAssignments: any[] = [];
+        Object.keys(lastSyncedDb.assignments || {}).forEach(monthKey => {
+           const prevMonth = lastSyncedDb.assignments[monthKey] || [];
+           const currentMonth = dbToSave.assignments[monthKey] || [];
+           prevMonth.forEach((prevA: any) => {
+              const stillExists = currentMonth.find((c: any) => c.airmanId === prevA.airmanId && c.date === prevA.date && c.dutyCode === prevA.dutyCode && c.idaShift === prevA.idaShift && (c.disposalScope || 'ALL') === (prevA.disposalScope || 'ALL'));
+              if (!stillExists) {
+                 deletedAssignments.push(prevA);
+              }
+           });
+        });
+        
         Object.keys(dbToSave.assignments || {}).forEach(monthKey => {
            const currentMonth = dbToSave.assignments[monthKey] || [];
            const prevMonth = (lastSyncedDb.assignments && lastSyncedDb.assignments[monthKey]) ? lastSyncedDb.assignments[monthKey] : [];
@@ -507,7 +519,7 @@ export class LocalDatabaseEngine {
            return !prev || JSON.stringify(prev) !== JSON.stringify(u);
         });
         
-        if (changedAirmen.length === 0 && changedAssignments.length === 0 && changedHistory.length === 0 && changedUsers.length === 0) {
+        if (changedAirmen.length === 0 && changedAssignments.length === 0 && deletedAssignments.length === 0 && changedHistory.length === 0 && changedUsers.length === 0) {
            console.log("No data changes detected. Skipping Supabase upload.");
            if (typeof window !== 'undefined') window.localStorage.removeItem('baf_pending_sync');
            this.isPushing = false;
@@ -559,6 +571,19 @@ export class LocalDatabaseEngine {
         
         // 2. Sync Assignments (Duty Rosters)
         const assignmentsPayload: any[] = [];
+        if (deletedAssignments.length > 0) {
+           const deletedIds = deletedAssignments.map((a: any) => a.id || ('asn_' + a.airmanId + '_' + a.date + '_' + (a.dutyCode || 'u') + '_' + (a.idaShift || 'n') + '_' + (a.disposalScope || 'ALL')));
+           
+           // Break deletes into chunks
+           const delChunkSize = 100;
+           for (let i = 0; i < deletedIds.length; i += delChunkSize) {
+              const chunk = deletedIds.slice(i, i + delChunkSize);
+              // Wait for delete to complete before continuing
+              const { error } = await supabase.from('duty_rosters').delete().in('assignment_id', chunk);
+              if (error) console.error("Error deleting old duties:", error);
+           }
+        }
+        
         if (changedAssignments.length > 0) {
           changedAssignments.forEach((a: any) => {
              // Generate an ID if it doesn't exist, using airmanId + date as a composite-like key
@@ -1305,7 +1330,7 @@ export class LocalDatabaseEngine {
     return { count: assignments.length * assignedDates.length, assignedDates };
   }
 
-  public deleteAssignment(airmanId: string, date: string, dutyCode?: DutyCategoryCode): boolean {
+  public deleteAssignment(airmanId: string, date: string, dutyCode?: DutyCategoryCode, idaShift?: any): boolean {
     const monthKey = date.slice(0, 7);
     if (!this.db.assignments[monthKey]) return false;
 
@@ -1313,21 +1338,22 @@ export class LocalDatabaseEngine {
     let removed = false;
 
     if (dutyCode) {
-      const idx = list.findIndex((a) => {
-        if (a.airmanId !== airmanId || a.date !== date) return false;
+      const initialLen = list.length;
+      this.db.assignments[monthKey] = list.filter((a) => {
+        if (a.airmanId !== airmanId || a.date !== date) return true; // keep others
         const isDep = (code) => code && ['ATT', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(code);
         if (isDep(dutyCode)) {
-          return isDep(a.dutyCode);
+          return !isDep(a.dutyCode); // remove if matches
         }
         if (dutyCode === 'IDAC' || dutyCode === 'IDA') {
-          return a.dutyCode === 'IDAC' || a.dutyCode === 'IDA';
+          if (idaShift) {
+            return !((a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === idaShift);
+          }
+          return !(a.dutyCode === 'IDAC' || a.dutyCode === 'IDA');
         }
-        return a.dutyCode === dutyCode;
+        return a.dutyCode !== dutyCode;
       });
-      if (idx >= 0) {
-        list.splice(idx, 1);
-        removed = true;
-      }
+      removed = this.db.assignments[monthKey].length < initialLen;
     } else {
       const initialLen = list.length;
       this.db.assignments[monthKey] = list.filter((a) => !(a.airmanId === airmanId && a.date === date));
@@ -1346,13 +1372,14 @@ export class LocalDatabaseEngine {
     fromDate: string;
     toDate: string;
     dutyCode?: DutyCategoryCode;
+    idaShift?: any;
   }): number {
-    const { airmanId, fromDate, toDate, dutyCode } = params;
+    const { airmanId, fromDate, toDate, dutyCode, idaShift } = params;
     const dates = getDatesInRange(fromDate, toDate);
     let count = 0;
 
     for (const d of dates) {
-      if (this.deleteAssignment(airmanId, d, dutyCode)) {
+      if (this.deleteAssignment(airmanId, d, dutyCode, idaShift)) {
         count++;
       }
     }

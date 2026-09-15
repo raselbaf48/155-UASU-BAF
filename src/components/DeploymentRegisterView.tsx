@@ -31,6 +31,8 @@ interface AttRecord {
   currentAttRange?: string;
   attEntries: Array<{
     date: string;
+    endDate?: string;
+    days?: number;
     notes?: string;
   }>;
 }
@@ -169,18 +171,52 @@ export const DeploymentRegisterView: React.FC<DeploymentRegisterViewProps> = ({
           }, [])
           .sort((a: any, b: any) => a.date.localeCompare(b.date));
 
-        airmanAttAssignments.forEach((ass: any) => {
-          rec.totalAttDays++;
-          rec.attEntries.push({
-            date: ass.date,
-            notes: ass.notes,
-          });
+        
+        // Group into contiguous date spans
+        const spans: Array<Array<any>> = [];
+        let currentSpan: any[] = [];
 
-          if (ass.date === todayStr) {
-            rec.currentlyOnAtt = true;
-            rec.currentAttLocation = ass.notes || 'Deployment Outstation';
+        airmanAttAssignments.forEach((ass: any) => {
+          if (currentSpan.length === 0) {
+            currentSpan.push(ass);
+          } else {
+            const prevAss = currentSpan[currentSpan.length - 1];
+            const prevDate = new Date(prevAss.date);
+            const currDate = new Date(ass.date);
+            const diffDays = Math.round((currDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24));
+
+            if (diffDays === 1) {
+              currentSpan.push(ass);
+            } else {
+              spans.push([...currentSpan]);
+              currentSpan = [ass];
+            }
           }
         });
+        if (currentSpan.length > 0) spans.push(currentSpan);
+
+        // Process spans
+        spans.forEach((span) => {
+          const first = span[0];
+          const last = span[span.length - 1];
+          const location = first.notes || 'Outstation';
+          
+          span.forEach((ass) => {
+            rec.totalAttDays++;
+            if (ass.date === todayStr) {
+              rec.currentlyOnAtt = true;
+              rec.currentAttLocation = location;
+            }
+          });
+          
+          rec.attEntries.push({
+            date: first.date,
+            endDate: last.date,
+            notes: location,
+            days: span.length
+          });
+        });
+
       });
 
       setAttData(recordMap);

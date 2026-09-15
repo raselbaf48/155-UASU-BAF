@@ -48,6 +48,7 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
   const [categoryFilter, setCategoryFilter] = useState<string>(initialCategory);
   
   const [editingGroup, setEditingGroup] = useState<DutyAssignment[] | null>(null);
+  const [showDeleteGroupConfirm, setShowDeleteGroupConfirm] = useState<boolean>(false);
   const [editFromDate, setEditFromDate] = useState<string>('');
   const [editToDate, setEditToDate] = useState<string>('');
   const [editNotes, setEditNotes] = useState<string>('');
@@ -179,8 +180,8 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
 
   useEffect(() => {
     const handleUpdate = () => setRefreshKey(k => k + 1);
-    window.addEventListener('baf_roster_updated', handleUpdate);
-    return () => window.removeEventListener('baf_roster_updated', handleUpdate);
+    window.addEventListener('baf_state_updated', handleUpdate);
+    return () => window.removeEventListener('baf_state_updated', handleUpdate);
   }, []);
 
   const handleGroupClick = (group: DutyAssignment[]) => {
@@ -277,7 +278,7 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
             return;
         }
         finalNotes = destToUse;
-        finalDutyCode = destToUse === 'Canteen' ? 'CANTEEN' : destToUse.includes('Bake') ? 'BAKE_N_BITE' : 'ATT';
+        finalDutyCode = 'TDY';
     } else if (editingGroup[0].dutyCode === 'LEAVE') {
         // Keep user typed notes if they modified it manually, otherwise reconstruct
         const fullTypeName = editLeaveType === 'Casual' ? 'Casual Leave' : editLeaveType === 'Annual' ? 'Annual Leave' : editLeaveType === 'Sick' ? 'Sick Leave' : editLeaveType === 'Recreation' ? 'Recreation Leave' : 'Leave';
@@ -324,10 +325,8 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
       if (!res.ok) throw new Error('Failed to update entry');
       
       setEditingGroup(null);
-      
-      // refresh hack
-      setFromDate(prev => prev.slice());
-      const fetchEvt = new CustomEvent('baf_roster_updated');
+      setRefreshKey(prev => prev + 1);
+      const fetchEvt = new CustomEvent('baf_state_updated');
       window.dispatchEvent(fetchEvt);
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to save edits');
@@ -338,7 +337,12 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
 
   const handleDeleteGroup = async () => {
     if (!editingGroup) return;
-    if (!confirm('Are you sure you want to completely remove this entry?')) return;
+    setShowDeleteGroupConfirm(true);
+  };
+  
+  const confirmDeleteGroup = async () => {
+    if (!editingGroup) return;
+    setShowDeleteGroupConfirm(false);
     setDeletingGroup(true);
     setErrorMsg('');
     try {
@@ -355,8 +359,8 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
       if (!res.ok) throw new Error('Failed to delete entry');
       
       setEditingGroup(null);
-      setFromDate(prev => prev.slice());
-      const fetchEvt = new CustomEvent('baf_roster_updated');
+      setRefreshKey(prev => prev + 1);
+      const fetchEvt = new CustomEvent('baf_state_updated');
       window.dispatchEvent(fetchEvt);
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to delete');
@@ -417,6 +421,14 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
     };
 
     fetchHistory();
+    
+    const handleGlobalUpdate = () => {
+      setRefreshKey(prev => prev + 1);
+    };
+    window.addEventListener('baf_state_updated', handleGlobalUpdate);
+    return () => {
+      window.removeEventListener('baf_state_updated', handleGlobalUpdate);
+    };
   }, [airman.id, fromDate, toDate, refreshKey]);
 
   const getGroupedList = (list: any[]) => {
@@ -440,7 +452,7 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
       const diffTime = Math.abs(currDate.getTime() - prevDate.getTime());
       const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
 
-      if (current.dutyCode === prev.dutyCode && (diffDays === 1 || diffDays === 0) && current.notes === prev.notes) {
+      const isContiguous = (diffDays === 1 || diffDays === 0); const isSameDutyCode = current.dutyCode === prev.dutyCode; if (isSameDutyCode && isContiguous) {
         if (diffDays === 1) { // avoid adding same date duplicates
           currentGroup.push(current);
         }
@@ -1330,6 +1342,28 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                         </button>
                       </div>
                     </div>
+                    
+                    {showDeleteGroupConfirm && (
+                      <div className="absolute inset-0 bg-white/95 dark:bg-slate-800/95 z-20 flex flex-col items-center justify-center p-6 text-center rounded-xl backdrop-blur-sm shadow-xl">
+                        <Trash2 className="w-10 h-10 text-red-500 mb-3" />
+                        <h4 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Remove Entry?</h4>
+                        <p className="text-slate-600 dark:text-slate-400 text-sm font-medium mb-6">Are you sure you want to completely remove this entry?</p>
+                        <div className="flex w-full space-x-3">
+                          <button
+                            onClick={() => setShowDeleteGroupConfirm(false)}
+                            className="flex-1 px-4 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-white rounded-lg text-sm font-bold transition-colors"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={confirmDeleteGroup}
+                            className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-bold transition-colors shadow-sm"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : isGroupedView ? (
                   <table className="w-full text-center border-collapse text-xs">

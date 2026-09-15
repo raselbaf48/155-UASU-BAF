@@ -122,6 +122,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
   const [disposalFlight, setDisposalFlight] = useState<FlightName>(role === 'ADMIN' && userFlight ? userFlight as FlightName : 'Avionics');
   const [disposalCategory, setDisposalCategory] = useState<string>('');
   const [disposalCustomTitle, setDisposalCustomTitle] = useState<string>('');
+  const [disposalSubCategory, setDisposalSubCategory] = useState<string>('');
   const [selectedDisposalAirmenIds, setSelectedDisposalAirmenIds] = useState<string[]>([]);
   const [disposalPersonnelStatusMap, setDisposalPersonnelStatusMap] = useState<Record<string, { statusCategory: string; dutyCode: string; notes?: string; dutyName?: string }>>({});
   const [disposalFromDate, setDisposalFromDate] = useState<string>(selectedDate);
@@ -486,7 +487,32 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
     }
   };
 
+  
+  const SUB_CATEGORIES_MAP: Record<string, string[]> = {
+    'GD/TF/Airfield Duty': ['GD', 'TF', 'Airfield Duty'],
+    'ED/ EX PPGF': ['ED', 'EX PPGF'],
+    'CMH/ BNS/ BSH/Qnt': ['CMH', 'BNS', 'BSH', 'Qnt'],
+    'U/C, U/ Board': ['U/C', 'U/ Board'],
+    'Aft/ Ni flg/ Ni Duty': ['Aft', 'Ni flg', 'Ni Duty'],
+    'Mess/ Canteen / Bakery': ['Mess', 'Canteen', 'Bakery'],
+    'Games / Guard of Honor': ['Games', 'Guard of Honor']
+  };
+
+  const getSelectedDisposalLabel = () => {
+    if (!disposalCategory) return '';
+    if (disposalCategory.startsWith('OTHERS_')) {
+      const title = disposalCategory.replace('OTHERS_', '');
+      const found = ALL_DISPOSAL_OPTIONS.find(o => o.customTitle === title) || historicalCustomCats.find(o => o.customTitle === title);
+      return found ? found.label : title;
+    }
+    const found = ALL_DISPOSAL_OPTIONS.find(o => o.code === disposalCategory);
+    return found ? found.label : '';
+  };
+  
+  const currentSubCategories = SUB_CATEGORIES_MAP[getSelectedDisposalLabel()] || [];
+
   // Handle Add Disposal submit (multi-person support)
+
   const handleAddDisposalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedDisposalAirmenIds.length === 0 || !disposalFromDate || !disposalToDate || !disposalCategory) return;
@@ -494,9 +520,20 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
     setDisposalLoading(true);
     setDisposalSuccessMsg('');
     try {
-      const isCustom = disposalCategory === 'OTHERS';
+      const isCustom = disposalCategory === 'OTHERS' || disposalCategory.startsWith('OTHERS_');
       const effectiveDutyCode = isCustom ? 'OTHERS' : disposalCategory;
-      const effectiveNotes = isCustom ? (disposalCustomTitle.trim() || 'Custom Disposal') : undefined;
+      let effectiveNotes = undefined;
+      
+      if (currentSubCategories.length > 0 && disposalSubCategory) {
+        effectiveNotes = disposalSubCategory;
+      } else if (isCustom) {
+        if (disposalCategory.startsWith('OTHERS_') && disposalCategory !== 'OTHERS_Custom') {
+           effectiveNotes = disposalCategory.replace('OTHERS_', '');
+        } else {
+           effectiveNotes = disposalCustomTitle.trim() || 'Custom Disposal';
+        }
+      }
+
       if (isCustom && effectiveNotes && effectiveNotes !== 'Custom Disposal') {
         setSavedDisposals(prev => {
           const exists = prev.some(d => d.label === effectiveNotes);
@@ -676,28 +713,20 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
   // Compute Flight Stats for Single-Day Summary Matrix
   const getFlightStats = (fl: FlightName | 'Overall') => {
     const flightAirmen = (fl === 'Overall' ? airmen : airmen.filter((a) => a.flightName === fl)).filter(a => {
-    if (!['CPL', 'Cpl', 'LAC', 'AC'].includes(a.rank)) return false;
-    const block = (a.addressBlock || '').toLowerCase();
-    const isLOut = block.includes('qtr') || 
-                   block.includes('quarter') || 
-                   block.includes('outside') || block.includes('maizpara') ||
-                   block.includes('l/o') ||
-                   block.includes('l/out') ||
-                   block.includes('living out') ||
-                   block.includes('dhaka') ||
-                   block.includes('mirpur') ||
-                   block.includes('cantt') ||
-                   block === 'lo' || 
-                   block === 'l o';
-    return !isLOut;
-});
+      if (!['CPL', 'Cpl', 'LAC', 'AC'].includes(a.rank)) return false;
+      const block = (a.addressBlock || '').toLowerCase();
+      if (block.includes('qtr') || block.includes('quarter') || block.includes('outside') || block.includes('maizpara') || block.includes('dhaka') || block.includes('mirpur') || block.includes('cantt') || block.includes('ghat') || block.includes('l/o') || block.includes('l/out') || block.includes('living out') || block === 'lo' || block === 'l o') return false;
+      return true;
+    });
+
     const rawPersonnel = (singleParadeData?.personnelStatusList || []).filter(item => {
-    const a = item.airman;
-    if (!['CPL', 'Cpl', 'LAC', 'AC'].includes(a.rank)) return false;
-    const block = (a.addressBlock || '').toLowerCase();
-    if (block.includes('qtr') || block.includes('quarter') || block.includes('outside') || block.includes('maizpara')) return false;
-    return true;
-  });
+      const a = item.airman;
+      if (!['CPL', 'Cpl', 'LAC', 'AC'].includes(a.rank)) return false;
+      const block = (a.addressBlock || '').toLowerCase();
+      if (block.includes('qtr') || block.includes('quarter') || block.includes('outside') || block.includes('maizpara') || block.includes('dhaka') || block.includes('mirpur') || block.includes('cantt') || block.includes('ghat') || block.includes('l/o') || block.includes('l/out') || block.includes('living out') || block === 'lo' || block === 'l o') return false;
+      return true;
+    });
+
     const pList = fl === 'Overall' ? rawPersonnel : rawPersonnel.filter((p) => p.airman.flightName === fl);
 
     let detTdyCount = 0;
@@ -731,214 +760,148 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
         const isIdacC = codeUpper === 'IDAC' && idaShift === 'Night';
         const isBake = ['BAKE_BITE', 'BAKE_N_BITE'].includes(codeUpper) || statusCategory === 'BAKE_N_BITE';
 
-        if (codeUpper === 'ON_PARADE' || statusCategory === 'PARADE' || isNightCountIdacA || isDutyOff) {
+        if (codeUpper === 'ON_PARADE' || statusCategory === 'PARADE' || isNightCountIdacA || isDutyOff || codeUpper === 'CANTEEN' || notesLower.includes('canteen') || codeUpper === 'RECEPTION' || notesLower.includes('reception') || notesLower.includes('k/o')) {
           // Available on Parade / PT - Do not add to totalOutPt
         } else if (codeUpper === 'LEAVE' || statusCategory === 'LEAVE') {
           leaveCount++;
         } else if (['TDY', 'ATT', 'DETT', 'ATTACHMENT', 'DETACHMENT'].includes(codeUpper) || statusCategory === 'TDY') {
           detTdyCount++;
-        } else if (codeUpper === 'RECEPTION' || notesLower.includes('reception') || notesLower.includes('k/o')) {
-          koReceptionCount++;
+        
         } else if (codeUpper === 'ESSN' || notesLower.includes('essn')) {
           essnCount++;
         } else if (['CMH', 'HOSPITAL'].includes(codeUpper) || notesLower.includes('cmh')) {
           hospitalCount++;
-        } else if (['SICK_REPORT', 'SICK', 'EX_PPGF'].includes(codeUpper) || notesLower.includes('sick') || notesLower.includes('ppgf')) {
+        } else if (['SICK_REPORT', 'SICK', 'EX_PPGF', 'ED'].includes(codeUpper) || notesLower.includes('sick') || notesLower.includes('ppgf') || notesLower === 'ed' || notesLower.startsWith('ed ')) {
           sickExCount++;
         } else if (['ADMIN_ORDER', 'CAT_C', 'DRILL'].includes(codeUpper) || notesLower.includes('drill')) {
-          drillCatCCount++;
-        } else if (['ADMIN_ORDER', 'BOI', 'COMMITTEE'].includes(codeUpper) || notesLower.includes('admin order') || notesLower.includes('boi')) {
           adminCommCount++;
+        } else if (['GAMES', 'GH', 'GAME_HONOR'].includes(codeUpper) || notesLower.includes('games') || notesLower.includes('g/h')) {
+          gamesCount++;
         } else if (['CLASS_TRG', 'CLASS', 'TRG', 'LTTB'].includes(codeUpper) || notesLower.includes('class') || notesLower.includes('trg')) {
           classTrgCount++;
         } else if (['AIRPORT', 'AIR_FD', 'AIRFIELD', 'ATT'].includes(codeUpper) || notesLower.includes('air fd') || notesLower.includes('airfield')) {
           airFdDutyCount++;
-        } else if (['GAMES', 'GH', 'GAME_HONOR'].includes(codeUpper) || notesLower.includes('games') || notesLower.includes('g/h')) {
-          gamesCount++;
         } else if (['ABSENT', 'AWL', 'OSL'].includes(codeUpper) || notesLower.includes('absent')) {
           absentCount++;
-        } else if (isBake || codeUpper === 'CANTEEN' || notesLower.includes('canteen') || codeUpper === 'RECEPTION' || notesLower.includes('reception') || notesLower.includes('k/o')) {
+        } else if (isBake) {
           bakeBiteCount++;
         } else if (isIdacB || isIdacC || codeUpper === 'OFFICE' || notesLower.includes('office')) {
-          officeDutyCount++;
-        } else if (['GD', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA'].includes(codeUpper) || statusCategory === 'DUTY') {
-          guardDutyCount++;
+          othersCount++;
+        } else if (['GD', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA', 'AIRPORT', 'AIRFIELD', 'ATT', 'AIR_FD'].includes(codeUpper) || statusCategory === 'DUTY') {
+          // dutyOn handled directly by calculation
         } else {
           othersCount++;
         }
       });
     }
-    const totalStr = flightAirmen.length;
-    const effStr = Math.max(0, totalStr - detTdyCount);
-    const totalOutPt =
-      leaveCount +
-      guardDutyCount +
-      bakeBiteCount +
-      essnCount +
-      hospitalCount +
-      sickExCount +
-      koReceptionCount +
-      drillCatCCount +
-      floodCellCount +
-      adminCommCount +
-      detentionCount +
-      classTrgCount +
-      airFdDutyCount +
-      gamesCount +
-      absentCount +
-      officeDutyCount +
-      othersCount;
 
-    const onPtParadeCount = Math.max(0, effStr - totalOutPt);
+    const onPtList: { airman: Airman; note?: string }[] = [];
+    const dutyOnList: { airman: Airman; note?: string }[] = [];
+    const tdyList: { airman: Airman; note?: string }[] = [];
+    const leaveList: { airman: Airman; note?: string }[] = [];
+    const sickReportList: { airman: Airman; note?: string }[] = [];
+    const essnList: { airman: Airman; note?: string }[] = [];
+    const cmhList: { airman: Airman; note?: string }[] = [];
+    const adminOrderList: { airman: Airman; note?: string }[] = [];
+    const gamesList: { airman: Airman; note?: string }[] = [];
+    const absentList: { airman: Airman; note?: string }[] = [];
+    const classTrgList: { airman: Airman; note?: string }[] = [];
+    
+    const dutyOffList: { airman: Airman; note?: string }[] = [];
+    const bakeBiteList: { airman: Airman; note?: string }[] = [];
+    const receptionList: { airman: Airman; note?: string }[] = [];
+
+    const customDisposalsMap: Record<string, { airman: Airman; note?: string }[]> = {};
+
+    if (singleParadeData) {
+      flightAirmen.forEach((airman) => {
+        const st = singleParadeData.personnelStatusList.find((p) => p.airman.id === airman.id);
+        if (!st) {
+          onPtList.push({ airman, note: '' });
+        } else {
+          const { statusCategory, dutyCode, notes, idaShift } = st;
+          const codeUpper = (dutyCode || '').toUpperCase();
+          const notesLower = (notes || '').toLowerCase();
+          const isIdacB = codeUpper === 'IDAC' && idaShift === 'Afternoon';
+          const isIdacC = codeUpper === 'IDAC' && idaShift === 'Night';
+          const isBake = ['BAKE_BITE', 'BAKE_N_BITE'].includes(codeUpper) || statusCategory === 'BAKE_N_BITE';
+          
+          if (codeUpper === 'ON_PARADE' || codeUpper === 'PT' || codeUpper === 'PT_PARADE' || statusCategory === 'PARADE' || codeUpper === 'CANTEEN' || notesLower.includes('canteen') || codeUpper === 'RECEPTION' || notesLower.includes('reception') || notesLower.includes('k/o') || codeUpper === 'DUTY_OFF' || codeUpper === 'OFF_DUTY' || statusCategory === 'OFF' || notesLower.includes('off duty') || notesLower.includes('nt off') || notesLower.includes('night off')) {
+            onPtList.push({ airman, note: (notes && !notes.toLowerCase().includes('imported')) ? notes : '' });
+          } else if (codeUpper === 'LEAVE' || statusCategory === 'LEAVE') {
+            leaveList.push({ airman, note: '' });
+          } else if (codeUpper === 'ESSN' || notesLower.includes('essn')) {
+            essnList.push({ airman, note: 'ESSN' });
+          } else if (['CMH', 'HOSPITAL'].includes(codeUpper) || notesLower.includes('cmh')) {
+            cmhList.push({ airman, note: (notes && !notes.toLowerCase().includes('imported')) ? notes : (st.dutyName || dutyCode || 'CMH') });
+          } else if (['SICK_REPORT', 'SICK', 'EX_PPGF', 'ED'].includes(codeUpper) || notesLower.includes('sick') || notesLower.includes('ppgf') || notesLower === 'ed' || notesLower.startsWith('ed ')) {
+            sickReportList.push({ airman, note: (notes && !notes.toLowerCase().includes('imported')) ? notes : (st.dutyName || dutyCode || 'Sick Report') });
+          } else if (['ADMIN_ORDER', 'CAT_C', 'DRILL'].includes(codeUpper) || notesLower.includes('drill')) {
+            adminOrderList.push({ airman, note: "Admin Order" });
+          } else if (['TDY', 'ATT', 'DETT', 'ATTACHMENT', 'DETACHMENT'].includes(codeUpper) || statusCategory === 'TDY') {
+            tdyList.push({ airman, note: 'TDY' });
+          } else if (['AIRPORT', 'AIR_FD', 'AIRFIELD', 'ATT'].includes(codeUpper) || notesLower.includes('air fd') || notesLower.includes('airfield')) {
+            dutyOnList.push({ airman, note: (notes && !notes.toLowerCase().includes('imported')) ? notes : 'Airfield' });
+          } else if (['ADMIN_ORDER', 'BOI', 'COMMITTEE'].includes(codeUpper) || notesLower.includes('admin order') || notesLower.includes('boi')) {
+            adminOrderList.push({ airman, note: 'Admin Order' });
+          } else if (['CLASS_TRG', 'CLASS', 'TRG', 'LTTB'].includes(codeUpper) || notesLower.includes('class') || notesLower.includes('trg')) {
+            classTrgList.push({ airman, note: 'Class/Trg' });
+          } else if (['GAMES', 'GH', 'GAME_HONOR'].includes(codeUpper) || notesLower.includes('games') || notesLower.includes('g/h')) {
+            gamesList.push({ airman, note: (notes && !notes.toLowerCase().includes('imported')) ? notes : 'G/H & Games' });
+          } else if (['ABSENT', 'AWL', 'OSL'].includes(codeUpper) || notesLower.includes('absent')) {
+            absentList.push({ airman, note: 'Absent' });
+          
+          } else if (isBake) {
+            bakeBiteList.push({ airman, note: (notes && !notes.toLowerCase().includes('imported')) ? notes : '' });
+          } else if (isIdacB || isIdacC || codeUpper === 'OFFICE' || notesLower.includes('office')) {
+            dutyOnList.push({ airman, note: 'Office Duty' });
+          } else if (['GD', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA', 'AIRPORT', 'AIRFIELD', 'ATT', 'AIR_FD'].includes(codeUpper) || statusCategory === 'DUTY') {
+            const dutyDisplay = formatDutyOnShortName(codeUpper, idaShift, notes, st.dutyName);
+            dutyOnList.push({ airman, note: dutyDisplay });
+          } else {
+            let customKey = dutyCode === 'OTHERS' ? (notes || 'OTHER DISPOSAL') : (st.dutyName || dutyCode || 'OTHER DISPOSAL');
+            if (notes) {
+              if (!['LEAVE', 'ATT', 'TDY', 'DETT', 'BAKE_N_BITE', 'RECEPTION', 'ESSN', 'CMH', 'BNS', 'BSH', 'SICK_REPORT', 'ED', 'ADMIN_ORDER', 'CLASS_TRG', 'GAMES', 'ABSENT'].includes(codeUpper)) { 
+                customKey = notes; 
+              }
+            }
+            if (!customDisposalsMap[customKey]) customDisposalsMap[customKey] = [];
+            const safeNotes = notes && !notesLower.includes('imported') ? notes : undefined;
+            customDisposalsMap[customKey].push({ airman, note: safeNotes });
+          }
+        }
+      });
+    } else {
+      flightAirmen.forEach((airman) => {
+        onPtList.push({ airman });
+      });
+    }
+
+    const totalStr = flightAirmen.length;
+    const totalOutPt = leaveCount + detTdyCount + bakeBiteCount + essnCount + hospitalCount + sickExCount + adminCommCount + gamesCount + classTrgCount + absentCount + othersCount + airFdDutyCount;
+    const effStr = totalStr - totalOutPt;
 
     return {
-      totalStr,
-      detTdyCount,
-      effStr,
-      leaveCount,
-      essnCount,
-      hospitalCount,
-      sickExCount,
-      koReceptionCount,
-      drillCatCCount,
-      guardDutyCount,
-      bakeBiteCount,
-      floodCellCount,
-      adminCommCount,
-      detentionCount,
-      classTrgCount,
-      airFdDutyCount,
-      totalOutPt,
-      onPtParadeCount,
-      gamesCount,
-      absentCount,
-      othersCount,
+      totalStr, effStr, detTdyCount, leaveCount, sickExCount, hospitalCount, othersCount, koReceptionCount, airFdDutyCount, gamesCount, classTrgCount, absentCount, drillCatCCount, essnCount, guardDutyCount, bakeBiteCount, detentionCount, totalOutPt, officeDutyCount, onPtParadeCount: onPtList.length, adminCommCount,
+      onPtList, dutyOnList, tdyList, leaveList, sickReportList, essnList, cmhList, adminOrderList, gamesList, absentList, classTrgList, dutyOffList, bakeBiteList, receptionList, customDisposalsMap
     };
   };
 
+
   
-  // Single-Day Categorization for Bottom Lists
-  const targetAirmen = (selectedFlight === 'Overall' ? airmen : airmen.filter((a) => a.flightName === selectedFlight)).filter(a => {
-    if (!['CPL', 'Cpl', 'LAC', 'AC'].includes(a.rank)) return false;
-    const block = (a.addressBlock || '').toLowerCase();
-    const isLOut = block.includes('qtr') || 
-                   block.includes('quarter') || 
-                   block.includes('outside') || block.includes('maizpara') ||
-                   block.includes('l/o') ||
-                   block.includes('l/out') ||
-                   block.includes('living out') ||
-                   block.includes('dhaka') ||
-                   block.includes('mirpur') ||
-                   block.includes('cantt') ||
-                   block === 'lo' || 
-                   block === 'l o';
-    return !isLOut;
-  });
-
-
-  const onPtList: { airman: Airman; note?: string }[] = [];
-  const leaveList: { airman: Airman; note?: string }[] = [];
-  const essnList: { airman: Airman; note?: string }[] = [];
-  const cmhList: { airman: Airman; note?: string }[] = [];
-  const sickReportList: { airman: Airman; note?: string }[] = [];
-  const adminOrderList: { airman: Airman; note?: string }[] = [];
-  const tdyList: { airman: Airman; note?: string }[] = [];
-  const receptionList: { airman: Airman; note?: string }[] = [];
   
-  const classTrgList: { airman: Airman; note?: string }[] = [];
-  const dutyOnList: { airman: Airman; note?: string }[] = [];
-  const dutyOffList: { airman: Airman; note?: string }[] = [];
-  const bakeBiteList: { airman: Airman; note?: string }[] = [];
-  const gamesList: { airman: Airman; note?: string }[] = [];
-  const absentList: { airman: Airman; note?: string }[] = [];
-  const customDisposalsMap: Record<string, { airman: Airman; note?: string }[]> = {};
 
-  const rawList = (singleParadeData?.personnelStatusList || []).filter(item => {
-    const a = item.airman;
-    if (!['CPL', 'Cpl', 'LAC', 'AC'].includes(a.rank)) return false;
-    const block = (a.addressBlock || '').toLowerCase();
-    const isLOut = block.includes('qtr') || 
-                   block.includes('quarter') || 
-                   block.includes('outside') || block.includes('maizpara') ||
-                   block.includes('l/o') ||
-                   block.includes('l/out') ||
-                   block.includes('living out') ||
-                   block.includes('dhaka') ||
-                   block.includes('mirpur') ||
-                   block.includes('cantt') ||
-                   block === 'lo' || 
-                   block === 'l o';
-    return !isLOut;
-  });
-  const statusList = selectedFlight === 'Overall'
-    ? rawList
-    : rawList.filter((item) => item.airman.flightName === selectedFlight);
 
-  if (statusList && statusList.length > 0) {
-    statusList.forEach((item) => {
-      const { airman, dutyCode, statusCategory, idaShift, notes } = item;
-      const codeUpper = (dutyCode || '').toUpperCase();
-      const notesLower = (notes || '').toLowerCase();
+  const stats = getFlightStats(selectedFlight);
+  
+  const {
+    totalStr, effStr, detTdyCount, leaveCount, sickExCount, hospitalCount, othersCount, koReceptionCount, airFdDutyCount, gamesCount, classTrgCount, absentCount, adminCommCount, essnCount, onPtList, dutyOnList, tdyList, leaveList, sickReportList, essnList, cmhList, adminOrderList, gamesList, absentList, classTrgList, dutyOffList, bakeBiteList, receptionList, customDisposalsMap, totalOutPt, onPtParadeCount, guardDutyCount, drillCatCCount, bakeBiteCount, detentionCount, officeDutyCount
+  } = stats;
 
-      const isNightCountIdacA = codeUpper === 'IDAC' && idaShift === 'Morning';
-      const isDutyOff = codeUpper === 'DUTY_OFF' || codeUpper === 'OFF_DUTY' || statusCategory === 'OFF' || notesLower.includes('off duty') || notesLower.includes('nt off') || notesLower.includes('night off');
-      const isIdacB = codeUpper === 'IDAC' && idaShift === 'Afternoon';
-      const isIdacC = codeUpper === 'IDAC' && idaShift === 'Night';
-      const isBake = ['BAKE_BITE', 'BAKE_N_BITE'].includes(codeUpper) || statusCategory === 'BAKE_N_BITE';
 
-      if (statusCategory === 'PARADE' || codeUpper === 'ON_PARADE' || isNightCountIdacA || isDutyOff) {
-        onPtList.push({ airman, note: '' });
-      } else if (codeUpper === 'LEAVE' || statusCategory === 'LEAVE') {
-        leaveList.push({ airman, note: '' });
-      } else if (codeUpper === 'ESSN' || notesLower.includes('essn')) {
-        essnList.push({ airman, note: 'ESSN' });
-      } else if (['CMH', 'HOSPITAL'].includes(codeUpper) || notesLower.includes('cmh')) {
-        cmhList.push({ airman, note: item.dutyName || dutyCode || 'CMH' });
-      } else if (['SICK_REPORT', 'SICK', 'EX_PPGF'].includes(codeUpper) || notesLower.includes('sick') || notesLower.includes('ppgf')) {
-        sickReportList.push({ airman, note: item.dutyName || dutyCode || 'Sick Report' });
-      } else if (['ADMIN_ORDER', 'CAT_C', 'DRILL'].includes(codeUpper) || notesLower.includes('drill')) {
-        adminOrderList.push({ airman, note: "Admin Order" });
-      } else if (['TDY', 'ATT', 'DETT', 'ATTACHMENT', 'DETACHMENT'].includes(codeUpper) || statusCategory === 'TDY') {
-        tdyList.push({ airman, note: 'TDY' });
-      }  else if (['AIRPORT', 'AIR_FD', 'AIRFIELD', 'ATT'].includes(codeUpper) || notesLower.includes('air fd') || notesLower.includes('airfield')) {
-        dutyOnList.push({ airman, note: 'Airfield' });
-      } else if (['ADMIN_ORDER', 'BOI', 'COMMITTEE'].includes(codeUpper) || notesLower.includes('admin order') || notesLower.includes('boi')) {
-        adminOrderList.push({ airman, note: 'Admin Order' });
-      } else if (['CLASS_TRG', 'CLASS', 'TRG', 'LTTB'].includes(codeUpper) || notesLower.includes('class') || notesLower.includes('trg')) {
-        classTrgList.push({ airman, note: 'Class/Trg' });
-      } else if (['GAMES', 'GH', 'GAME_HONOR'].includes(codeUpper) || notesLower.includes('games') || notesLower.includes('g/h')) {
-        gamesList.push({ airman, note: 'G/H & Games' });
-      } else if (['ABSENT', 'AWL', 'OSL'].includes(codeUpper) || notesLower.includes('absent')) {
-        absentList.push({ airman, note: 'Absent' });
-      } else if (isBake || codeUpper === 'CANTEEN' || notesLower.includes('canteen') || codeUpper === 'RECEPTION' || notesLower.includes('reception') || notesLower.includes('k/o')) {
-        onPtList.push({ airman, note: '' });
-      } else if (isIdacB || isIdacC || codeUpper === 'OFFICE' || notesLower.includes('office')) {
-        dutyOnList.push({ airman, note: 'Office Duty' });
-      } else if (['GD', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA', 'AIRPORT', 'AIRFIELD', 'ATT', 'AIR_FD'].includes(codeUpper) || statusCategory === 'DUTY') {
-        const dutyDisplay = formatDutyOnShortName(codeUpper, idaShift, notes, item.dutyName);
-        dutyOnList.push({ airman, note: dutyDisplay });
-      } else {
-        let customKey = dutyCode === 'OTHERS' ? (notes || 'OTHER DISPOSAL') : (item.dutyName || dutyCode || 'OTHER DISPOSAL');
-        if (notes) {
-          if (!['LEAVE', 'ATT', 'TDY', 'DETT', 'BAKE_N_BITE', 'RECEPTION', 'ESSN', 'CMH', 'BNS', 'BSH', 'SICK_REPORT', 'ED', 'ADMIN_ORDER', 'ADMIN_ORDER', 'CLASS_TRG', 'GAMES', 'ABSENT'].includes(codeUpper)) { 
-            customKey = notes; 
-          }
-        }
-        if (!customDisposalsMap[customKey]) customDisposalsMap[customKey] = [];
-        const safeNotes = notes && !notesLower.includes('imported') ? notes : undefined;
-        customDisposalsMap[customKey].push({ airman, note: safeNotes });
-      }
-    });
-  } else {
-    targetAirmen.forEach((airman) => {
-      onPtList.push({ airman });
-    });
-  }
-
-  const otherDisposals: { title: string; airmen: Airman[] }[] = Object.entries(customDisposalsMap).map(
-    ([title, items]) => ({
+  const otherDisposals: { title: string; airmen: Airman[] }[] = Object.entries(customDisposalsMap).map(([title, items]: [string, any]) => ({
       title,
-      airmen: items.map((i) => i.airman),
+      airmen: items.map((i: any) => i.airman),
     })
   );
 
@@ -952,6 +915,10 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
       }))
     );
   }
+
+
+  
+  
 
   // Helper to render airman list inside multi-day table cells (without flight tags)
   const renderAirmanColumnList = (list: { airman: Airman }[]) => {
@@ -1235,10 +1202,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                   <th className="border-r border-black dark:border-slate-500 print:border-black p-2 align-middle font-bold text-center" ><div className="w-full h-36 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] leading-tight">Office Duty</div></th>
                   <th className="border-r border-black dark:border-slate-500 print:border-black p-2 align-middle font-bold text-center" ><div className="w-full h-36 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] leading-tight">Aft/Ni flg/Ni Duty</div></th>
                   <th className="border-r border-black dark:border-slate-500 print:border-black p-2 align-middle font-bold text-center" ><div className="w-full h-36 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] leading-tight">GD/TF/Airfield Duty</div></th>
-                  <th className="border-r border-black dark:border-slate-500 print:border-black p-2 align-middle font-bold text-center" ><div className="w-full h-36 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] leading-tight">Off Duty</div></th>
-                  <th className="border-r border-black dark:border-slate-500 print:border-black p-2 align-middle font-bold text-center" ><div className="w-full h-36 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] leading-tight">K/O</div></th>
-                  <th className="border-r border-black dark:border-slate-500 print:border-black p-2 align-middle font-bold text-center" ><div className="w-full h-36 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] leading-tight">Mess/ Canteen /Bakery</div></th>
-                  <th className="border-r border-black dark:border-slate-500 print:border-black p-2 align-middle font-bold text-center" ><div className="w-full h-36 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] leading-tight">Driving</div></th>
+                                                                        <th className="border-r border-black dark:border-slate-500 print:border-black p-2 align-middle font-bold text-center" ><div className="w-full h-36 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] leading-tight">Driving</div></th>
                   <th className="border-r border-black dark:border-slate-500 print:border-black p-2 align-middle font-bold text-center" ><div className="w-full h-36 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] leading-tight">Games /Guard of Honor</div></th>
                   {Object.keys(customDisposalsMap).map(key => (
                     <th key={key} className="border-r border-black dark:border-slate-500 print:border-black p-2 align-middle font-bold text-center" ><div className="w-full h-36 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] leading-tight">{key}</div></th>
@@ -1250,7 +1214,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
               </thead>
               <tbody>
                 {(() => {
-                  const stats = getFlightStats(selectedFlight);
+                  
                   
                   // For the custom missing columns not in getFlightStats, we derive them locally.
                   // We need to use `singleParadeData?.personnelStatusList || []` since we don't pass pList.
@@ -1267,6 +1231,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                    block.includes('dhaka') ||
                    block.includes('mirpur') ||
                    block.includes('cantt') ||
+                   block.includes('ghat') ||
                    block === 'lo' || 
                    block === 'l o';
     return !isLOut;
@@ -1306,10 +1271,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                       <td className="border-r border-black dark:border-slate-500 print:border-black p-1 align-middle text-center">{officeDutyCount || '-'}</td>
                       <td className="border-r border-black dark:border-slate-500 print:border-black p-1 align-middle text-center">{aftNiFlgCount || '-'}</td>
                       <td className="border-r border-black dark:border-slate-500 print:border-black p-1 align-middle text-center">{stats.guardDutyCount || stats.airFdDutyCount || '-'}</td>
-                      <td className="border-r border-black dark:border-slate-500 print:border-black p-1 align-middle text-center">{offDutyCount || '-'}</td>
-                      <td className="border-r border-black dark:border-slate-500 print:border-black p-1 align-middle text-center">{stats.koReceptionCount || '-'}</td>
-                      <td className="border-r border-black dark:border-slate-500 print:border-black p-1 align-middle text-center">{stats.bakeBiteCount || '-'}</td>
-                      <td className="border-r border-black dark:border-slate-500 print:border-black p-1 align-middle text-center">{drivingCount || '-'}</td>
+                                                                                        <td className="border-r border-black dark:border-slate-500 print:border-black p-1 align-middle text-center">{drivingCount || '-'}</td>
                       <td className="border-r border-black dark:border-slate-500 print:border-black p-1 align-middle text-center">{stats.gamesCount || '-'}</td>
                       {Object.keys(customDisposalsMap).map(key => {
                         const count = customDisposalsMap[key].length;
@@ -1399,10 +1361,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                   <th className="border-r border-black dark:border-slate-500 print:border-black p-2 align-middle font-bold text-center" ><div className="w-full h-36 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] leading-tight">Office Duty</div></th>
                   <th className="border-r border-black dark:border-slate-500 print:border-black p-2 align-middle font-bold text-center" ><div className="w-full h-36 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] leading-tight">Aft/Ni flg/Ni Duty</div></th>
                   <th className="border-r border-black dark:border-slate-500 print:border-black p-2 align-middle font-bold text-center" ><div className="w-full h-36 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] leading-tight">GD/TF/Airfield Duty</div></th>
-                  <th className="border-r border-black dark:border-slate-500 print:border-black p-2 align-middle font-bold text-center" ><div className="w-full h-36 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] leading-tight">Off Duty</div></th>
-                  <th className="border-r border-black dark:border-slate-500 print:border-black p-2 align-middle font-bold text-center" ><div className="w-full h-36 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] leading-tight">K/O</div></th>
-                  <th className="border-r border-black dark:border-slate-500 print:border-black p-2 align-middle font-bold text-center" ><div className="w-full h-36 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] leading-tight">Mess/ Canteen /Bakery</div></th>
-                  <th className="border-r border-black dark:border-slate-500 print:border-black p-2 align-middle font-bold text-center" ><div className="w-full h-36 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] leading-tight">Driving</div></th>
+                                                                        <th className="border-r border-black dark:border-slate-500 print:border-black p-2 align-middle font-bold text-center" ><div className="w-full h-36 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] leading-tight">Driving</div></th>
                   <th className="border-r border-black dark:border-slate-500 print:border-black p-2 align-middle font-bold text-center" ><div className="w-full h-36 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] leading-tight">Games /Guard of Honor</div></th>
                   {Object.keys(customDisposalsMap).map(key => (
                     <th key={key} className="border-r border-black dark:border-slate-500 print:border-black p-2 align-middle font-bold text-center" ><div className="w-full h-36 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] leading-tight">{key}</div></th>
@@ -1414,7 +1373,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
               </thead>
               <tbody>
                 {(() => {
-                  const stats = getFlightStats(selectedFlight);
+                  
                   
                   // For the custom missing columns not in getFlightStats, we derive them locally.
                   // We need to use `singleParadeData?.personnelStatusList || []` since we don't pass pList.
@@ -1431,6 +1390,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                    block.includes('dhaka') ||
                    block.includes('mirpur') ||
                    block.includes('cantt') ||
+                   block.includes('ghat') ||
                    block === 'lo' || 
                    block === 'l o';
     return !isLOut;
@@ -1470,10 +1430,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                       <td className="border-r border-black dark:border-slate-500 print:border-black p-1 align-middle text-center">{officeDutyCount || '-'}</td>
                       <td className="border-r border-black dark:border-slate-500 print:border-black p-1 align-middle text-center">{aftNiFlgCount || '-'}</td>
                       <td className="border-r border-black dark:border-slate-500 print:border-black p-1 align-middle text-center">{stats.guardDutyCount || stats.airFdDutyCount || '-'}</td>
-                      <td className="border-r border-black dark:border-slate-500 print:border-black p-1 align-middle text-center">{offDutyCount || '-'}</td>
-                      <td className="border-r border-black dark:border-slate-500 print:border-black p-1 align-middle text-center">{stats.koReceptionCount || '-'}</td>
-                      <td className="border-r border-black dark:border-slate-500 print:border-black p-1 align-middle text-center">{stats.bakeBiteCount || '-'}</td>
-                      <td className="border-r border-black dark:border-slate-500 print:border-black p-1 align-middle text-center">{drivingCount || '-'}</td>
+                                                                                        <td className="border-r border-black dark:border-slate-500 print:border-black p-1 align-middle text-center">{drivingCount || '-'}</td>
                       <td className="border-r border-black dark:border-slate-500 print:border-black p-1 align-middle text-center">{stats.gamesCount || '-'}</td>
                       {Object.keys(customDisposalsMap).map(key => {
                         const count = customDisposalsMap[key].length;
@@ -1661,7 +1618,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                       )}
 
                       {/* Dynamic Custom Disposals / Others */}
-                      {Object.entries(customDisposalsMap).map(([catName, airmenList]) => {
+                      {Object.entries(customDisposalsMap).map(([catName, airmenList]: [string, any]) => {
                         if (!airmenList || airmenList.length === 0) return null;
                         return (
                           <div key={catName}>
@@ -1887,6 +1844,27 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                   )}
                 </div>
 
+                
+                {/* Sub Category Dropdown */}
+                {currentSubCategories.length > 0 && (
+                  <div className="col-span-2 mt-2">
+                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1.5 uppercase">
+                      Sub Category <span className="text-rose-500">*</span>
+                    </label>
+                    <select
+                      value={disposalSubCategory}
+                      onChange={(e) => setDisposalSubCategory(e.target.value)}
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm font-semibold text-slate-900 dark:text-white outline-none focus:border-emerald-500"
+                      required
+                    >
+                      <option value="" disabled>Select Sub Category...</option>
+                      {currentSubCategories.map(sub => (
+                         <option key={sub} value={sub}>{sub}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
                 {/* Custom Title Input if OTHERS selected */}
                 {disposalCategory === 'OTHERS' && (!ALL_DISPOSAL_OPTIONS.find(o => o.label === disposalCustomTitle) || disposalCustomTitle === '') && !isEditingDisposals && (
                   <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl space-y-1 animate-fadeIn">
@@ -1950,6 +1928,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                    block.includes('dhaka') ||
                    block.includes('mirpur') ||
                    block.includes('cantt') ||
+                   block.includes('ghat') ||
                    block === 'lo' || 
                    block === 'l o';
     return !isLOut;

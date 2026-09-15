@@ -231,8 +231,8 @@ async function handleLocalApiRequest(urlStr: string, init?: RequestInit): Promis
     }
 
     if (pathname === '/api/roster/delete-assignment') {
-      const { airmanId, date, dutyCode } = body || {};
-      localDb.deleteAssignment(airmanId, date, dutyCode);
+      const { airmanId, date, dutyCode, idaShift } = body || {};
+      localDb.deleteAssignment(airmanId, date, dutyCode, idaShift);
       return jsonResponse({ success: true });
     }
 

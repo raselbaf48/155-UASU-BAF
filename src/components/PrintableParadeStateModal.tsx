@@ -106,7 +106,7 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  const isPtDocument = initialDocumentType === 'PT' || documentType === 'PT';
  const [fromDate, setFromDate] = useState<string>(initialFromDate || selectedDate || (date ? date.toISOString().split('T')[0] : new Date().toISOString().split('T')[0]));
  const [toDate, setToDate] = useState<string>(initialToDate || selectedDate || (date ? date.toISOString().split('T')[0] : new Date().toISOString().split('T')[0]));
- const [selectedFlight, setSelectedFlight] = useState<FlightName | 'Overall'>('Overall');
+ const [selectedFlight, setSelectedFlight] = useState<FlightName | 'Overall'>(flight || initialFlight || 'Overall');
  const [hideEmptyColumns, setHideEmptyColumns] = useState<boolean>(initialHideEmptyColumns);
 
  

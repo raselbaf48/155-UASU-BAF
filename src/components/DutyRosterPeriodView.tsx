@@ -1,4 +1,5 @@
 import { DateNavigator } from './DateNavigator';
+import { createPortal } from 'react-dom';
 import React, { useState, useEffect } from 'react';
 import { Airman, DutyAssignment, UserRole, FlightName } from '../types';
 import { getFlightDutyQuotaForDate } from '../data/officialDutyRatioMatrix';
@@ -7,6 +8,7 @@ import {
  exportIdacRosterDocx,
  RosterSectionData,
  RosterExportItem,
+ formatRank,
  IdacRosterRow,
 } from '../utils/docxExport';
 import {
@@ -19,6 +21,7 @@ import {
  Clock,
  CheckCircle2,
  ListFilter,
+ X
 } from 'lucide-react';
 import { Logo155UASU } from './Logo155UASU';
 
@@ -31,6 +34,18 @@ interface DutyRosterPeriodViewProps {
 
 export type RosterMode = 'BASE_DUTIES' | 'IDAC_DUTY';
 
+
+const formatBlockName = (block: string | undefined) => {
+  if (!block) return 'L/O';
+  let formatted = block;
+  formatted = formatted.replace(/Airmen's Mess, Block No:\s*/gi, '');
+  formatted = formatted.replace(/Sgt's Mess, Block No:\s*/gi, '');
+  formatted = formatted.replace(/\s*&\s*Svc\s*/gi, '');
+  formatted = formatted.replace(/Svc\s*Qtr\s*No:\s*/gi, 'Qtr No: ');
+  formatted = formatted.replace(/Svc\s*/gi, '');
+  return formatted.trim() || 'L/O';
+};
+
 export const DutyRosterPeriodView: React.FC<DutyRosterPeriodViewProps> = ({
  role,
  airmen,
@@ -38,6 +53,7 @@ export const DutyRosterPeriodView: React.FC<DutyRosterPeriodViewProps> = ({
  onViewProfile,
 }) => {
  const [rosterMode, setRosterMode] = useState<RosterMode>('BASE_DUTIES');
+  const [showPrintPreview, setShowPrintPreview] = useState(false);
 
  // Helper to get Friday-to-Thursday week boundaries
  const getDutyWeekRange = (refDateStr: string, offsetWeeks: number = 0) => {
@@ -264,10 +280,10 @@ export const DutyRosterPeriodView: React.FC<DutyRosterPeriodViewProps> = ({
  output.push({
  serNo: String(serCounter).padStart(2, '0'),
  bdNo: block.airman.bdNo.replace('BD/', ''),
- rank: block.airman.rank,
+ rank: formatRank(block.airman.rank),
  name: block.airman.name,
  trade: block.airman.trade,
- block: block.airman.addressBlock || 'L/O',
+ block: formatBlockName(block.airman.addressBlock),
  mobileNo: block.airman.mobileNo || '-',
  dateStr: dateRangeStr,
  section: '155 UASU',
@@ -337,10 +353,10 @@ export const DutyRosterPeriodView: React.FC<DutyRosterPeriodViewProps> = ({
  const isProxy = proxyFlight && proxyFlight !== air.flightName;
 
  if (isProxy) {
- assignedParts.push(`${air.rank} ${air.name} (${getFlightShort(proxyFlight)})`);
+ assignedParts.push(`${formatRank(air.rank)} ${air.name} (${getFlightShort(proxyFlight)})`);
  fulfilledFlights.push(proxyFlight);
  } else {
- assignedParts.push(`${air.rank} ${air.name}`);
+ assignedParts.push(`${formatRank(air.rank)} ${air.name}`);
  if (air.flightName) fulfilledFlights.push(air.flightName);
  }
  });
@@ -424,12 +440,10 @@ export const DutyRosterPeriodView: React.FC<DutyRosterPeriodViewProps> = ({
  }
  };
 
- const handlePrint = () => {
- window.print();
- };
+ const handlePrint = () => { setShowPrintPreview(true); };
 
- return (
- <div className="duty-register-print space-y-6">
+ const topContent = (
+ <>
  {/* Top Header & Option Selector Card */}
  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 dark:border-slate-700 rounded-2xl p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
  <div>
@@ -575,7 +589,13 @@ export const DutyRosterPeriodView: React.FC<DutyRosterPeriodViewProps> = ({
  </button>
  </div>
 
- {/* ========================================================================= */}
+ 
+    </>
+  );
+
+  const renderDocument = () => (
+    <>
+      {/* ========================================================================= */}
  {/* OPTION 1: BASE DUTY (Up to Najirpara Taskforce with Range 1-4 Format) */}
  {/* ========================================================================= */}
  {rosterMode === 'BASE_DUTIES' && (
@@ -628,7 +648,7 @@ export const DutyRosterPeriodView: React.FC<DutyRosterPeriodViewProps> = ({
  <th className="border border-black dark:border-white print:border-black py-1.5 px-2">Block</th>
  <th className="border border-black dark:border-white print:border-black py-1.5 px-2">Mobile No</th>
  <th className="border border-black dark:border-white print:border-black py-1.5 px-2">Date</th>
- <th className="border border-black dark:border-white print:border-black py-1.5 px-2">Section</th>
+ 
  </tr>
  </thead>
  <tbody>
@@ -658,9 +678,7 @@ export const DutyRosterPeriodView: React.FC<DutyRosterPeriodViewProps> = ({
  <td className="border border-black dark:border-white print:border-black py-1 px-2 font-bold bg-slate-50 dark:bg-slate-800">
  {item.dateStr}
  </td>
- <td className="border border-black dark:border-white print:border-black py-1 px-2 font-bold">
- {item.section}
- </td>
+ 
  </tr>
  ))}
  </tbody>
@@ -777,6 +795,51 @@ export const DutyRosterPeriodView: React.FC<DutyRosterPeriodViewProps> = ({
  </div>
  </div>
  )}
- </div>
- );
+ 
+    </>
+  );
+
+  return (
+    <div className="duty-register-print space-y-6">
+      {topContent}
+      {renderDocument()}
+      {showPrintPreview && createPortal(
+        <div className="fixed inset-0 z-[100] flex flex-col bg-slate-900/90 backdrop-blur-sm overflow-hidden print:bg-white print:static print:h-auto print:w-auto print:overflow-visible print:block">
+          <div className="flex-none bg-slate-900 border-b border-slate-700 p-4 flex items-center justify-between shadow-2xl print:hidden z-10 sticky top-0">
+            <h2 className="text-white font-bold text-lg">Print Preview</h2>
+            <div className="flex items-center space-x-3 text-white">
+              <button
+                onClick={handleExportDocx}
+                disabled={isExportingDocx}
+                className="flex items-center space-x-2 px-6 py-2.5 bg-blue-700 hover:bg-blue-600 text-white rounded-xl font-black text-sm shadow-lg shadow-blue-900/20 transition-all cursor-pointer disabled:opacity-50"
+              >
+                <FileDown className="w-5 h-5" />
+                <span>{isExportingDocx ? 'Generating...' : 'Download Document'}</span>
+              </button>
+              <button
+                onClick={() => window.print()}
+                className="flex items-center space-x-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black text-sm shadow-lg shadow-emerald-900/20 transition-all cursor-pointer"
+              >
+                <Printer className="w-5 h-5" />
+                <span>Official Export / Print</span>
+              </button>
+              <button
+                onClick={() => setShowPrintPreview(false)}
+                className="flex items-center space-x-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold text-sm transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+                <span>Close</span>
+              </button>
+            </div>
+          </div>
+          <div className="flex-1 overflow-auto bg-slate-800 p-4 sm:p-8 flex justify-center print:bg-white print:p-0 print:block print:overflow-visible h-[calc(100vh-80px)]">
+            <div className="bg-white text-black p-8 sm:p-12 shadow-2xl max-w-[1200px] w-full mx-auto print:shadow-none print:p-0 print:w-full print:max-w-none print:m-0 h-max min-h-full">
+              {renderDocument()}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+    </div>
+  );
 };
