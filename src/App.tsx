@@ -514,6 +514,27 @@ return () => mediaQuery.removeEventListener('change', listener);
 
         {/* Main View Area (Opens on Right Side based on clicked tab) */}
         <main className={`flex-1 px-4 sm:px-6 lg:px-8 py-6 max-w-[1600px] w-full mx-auto print:p-0 print:m-0 print:max-w-none print:w-full`}>
+          {activeTab === 'biodata-register' && (
+            <NominalRoll
+              variant="biodata"
+              initialFlightFilter={selectedFlight === "Overall" || selectedFlight === "All" ? "All" : selectedFlight}
+              airmen={airmen}
+              role={role}
+              userFlight={userSession?.flightName}
+              onRefresh={fetchAirmen}
+              onSyncGoogleSheet={handleSyncGoogleSheet}
+              onAddAirman={() => {
+                setAirmanToEdit(null);
+                setIsAddEditOpen(true);
+              }}
+              onEditAirman={(a) => {
+                setAirmanToEdit(a);
+                setIsAddEditOpen(true);
+              }}
+              onDeleteAirman={handleDeleteAirman}
+              onViewProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
+            />
+          )}
           {activeTab === 'overview' && (
             <DashboardParadeState
               role={role}
@@ -722,6 +743,7 @@ return () => mediaQuery.removeEventListener('change', listener);
 
       {isAddEditOpen && (
         <AddEditAirmanModal
+          variant={activeTab === 'biodata-register' ? 'biodata' : 'nominal'}
           airmanToEdit={airmanToEdit}
           onSave={handleSaveAirman}
           onClose={() => {

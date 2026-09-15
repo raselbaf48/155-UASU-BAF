@@ -32,6 +32,7 @@ interface NominalRollProps {
 }
 
 export const NominalRoll: React.FC<NominalRollProps> = ({
+  variant = 'nominal',
   initialFlightFilter = 'All',
   airmen,
   role,
@@ -99,7 +100,9 @@ export const NominalRoll: React.FC<NominalRollProps> = ({
   // Filter airmen
   const filteredAirmen = sortedAirmen.filter((airman) => {
     let matchesStatus = true;
-    if (statusFilter === 'Active') {
+    if (variant === 'nominal') {
+      matchesStatus = airman.active !== false;
+    } else if (statusFilter === 'Active') {
       matchesStatus = airman.active !== false;
     } else if (statusFilter === 'Previous Airmen') {
       matchesStatus = airman.active === false;
@@ -130,7 +133,7 @@ export const NominalRoll: React.FC<NominalRollProps> = ({
       <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-black text-slate-900 dark:text-slate-100 flex items-center space-x-2">
-            <span>Nominal Roll Directory</span>
+            <span>{variant === 'biodata' ? 'Biodata Register Directory' : 'Nominal Roll Directory'}</span>
             <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-emerald-100 text-emerald-900 dark:bg-emerald-950/80 dark:text-emerald-300">
               {filteredAirmen.length} Airmen (Seniority Order)
             </span>
@@ -162,7 +165,7 @@ export const NominalRoll: React.FC<NominalRollProps> = ({
             <span>History</span>
           </button>
 
-          {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') ? (
+          {variant === 'biodata' && (role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') ? (
             <button
               onClick={onAddAirman}
               className="flex items-center space-x-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs px-4 py-2.5 rounded-xl shadow-xs transition-all cursor-pointer"
@@ -170,12 +173,12 @@ export const NominalRoll: React.FC<NominalRollProps> = ({
               <UserPlus className="w-4 h-4" />
               <span>Add Airman</span>
             </button>
-          ) : (
+          ) : variant === 'biodata' ? (
             <div className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-300 text-xs font-bold">
               <Eye className="w-3.5 h-3.5" />
               <span>Read-Only Directory</span>
             </div>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -233,6 +236,7 @@ export const NominalRoll: React.FC<NominalRollProps> = ({
           </div>
           
           {/* Status Filter */}
+          {variant === 'biodata' && (
           <div className="flex items-center space-x-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-1.5 text-xs">
             <span className="text-slate-400 font-medium">Status:</span>
             <select
@@ -245,6 +249,7 @@ export const NominalRoll: React.FC<NominalRollProps> = ({
               <option value="Previous Airmen">Previous Airmen</option>
             </select>
           </div>
+          )}
         </div>
       </div>
 
@@ -260,9 +265,12 @@ export const NominalRoll: React.FC<NominalRollProps> = ({
                 <th className="py-3 px-4">Full Name</th>
                 <th className="py-3 px-4">Trade</th>
                 <th className="py-3 px-4">Flight</th>
-                <th className="py-3 px-4">Address</th>
+                {variant === 'biodata' && <th className="py-3 px-4">Blood Group</th>}
+                <th className="py-3 px-4">{variant === 'biodata' ? 'Present Address' : 'Address'}</th>
+                {variant === 'biodata' && <th className="py-3 px-4 text-center">Permanent Address</th>}
                 <th className="py-3 px-4">Contact</th>
-                <th className="py-3 px-4 text-center">Status</th>
+                {variant === 'biodata' && <th className="py-3 px-4 text-center">Dt of Posting</th>}
+                {variant === 'biodata' && <th className="py-3 px-4 text-center">Status</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
@@ -301,12 +309,48 @@ export const NominalRoll: React.FC<NominalRollProps> = ({
                       {airman.flightName}
                     </span>
                   </td>
+                  {variant === 'biodata' && (
+                    <td className="py-3 px-4 text-slate-600 dark:text-slate-300 font-medium">
+                      {airman.bloodGroup || '-'}
+                    </td>
+                  )}
                   <td className="py-3 px-4 text-slate-600 dark:text-slate-400">
-                    <div className="flex items-center space-x-1">
-                      <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
-                      <span>{airman.addressBlock}</span>
+                    <div className="flex items-start space-x-1">
+                      <MapPin className="w-3 h-3 text-slate-400 shrink-0 mt-0.5" />
+                      <div className="text-left leading-tight" title={airman.addressBlock}>
+                        {airman.addressBlock ? (
+                          airman.addressBlock.includes("Mess, Block No:") ? (
+                            <>
+                              <span className="block">{airman.addressBlock.split(", Block No:")[0]},</span>
+                              <span className="block text-[10px] text-slate-500 font-bold">Block No:{airman.addressBlock.split(", Block No:")[1]}</span>
+                            </>
+                          ) : (
+                            <span className="block whitespace-normal min-w-[120px]">{airman.addressBlock}</span>
+                          )
+                        ) : '-'}
+                      </div>
                     </div>
                   </td>
+                  {variant === 'biodata' && (
+                    <td className="py-3 px-4 text-slate-600 dark:text-slate-400">
+                      <div className="text-center leading-tight text-[11px] whitespace-normal min-w-[150px]" title={airman.permanentAddress}>
+                        {airman.permanentAddress ? (
+                          airman.permanentAddress.includes(';') ? (
+                            (() => {
+                              const parts = airman.permanentAddress.split(';').map(x => x.trim()).filter(Boolean);
+                              const rows = [];
+                              for (let i = 0; i < parts.length; i += 2) {
+                                rows.push(parts.slice(i, i + 2).join('; '));
+                              }
+                              return rows.map((r, i) => <span key={i} className="block">{r}</span>);
+                            })()
+                          ) : (
+                            <span className="block">{airman.permanentAddress}</span>
+                          )
+                        ) : '-'}
+                      </div>
+                    </td>
+                  )}
                   <td className="py-3 px-4 font-mono text-slate-600 dark:text-slate-400 relative">
                     <div 
                       className="flex items-center space-x-1 cursor-pointer hover:text-emerald-600 transition-colors py-1"
@@ -344,11 +388,18 @@ export const NominalRoll: React.FC<NominalRollProps> = ({
                       </div>
                     )}
                   </td>
+                  {variant === 'biodata' && (
+                    <td className="py-3 px-4 text-slate-600 dark:text-slate-300 whitespace-nowrap font-medium text-center">
+                      {airman.dateJoined ? new Date(airman.dateJoined).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '-'}
+                    </td>
+                  )}
+                  {variant === 'biodata' && (
                   <td className="py-3 px-4 text-center">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black ${airman.active !== false ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300' : 'bg-rose-100 text-rose-800 dark:bg-rose-900/60 dark:text-rose-300'}`}>
                       {airman.active !== false ? 'Active' : (airman.leaveReason || 'Inactive')}
                     </span>
                   </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -453,7 +504,7 @@ export const NominalRoll: React.FC<NominalRollProps> = ({
 
       </div>
       {isPrintModalOpen && (
-        <PrintableNominalRollModal
+        <PrintableNominalRollModal variant={variant}
           airmen={filteredAirmen}
           onClose={() => setIsPrintModalOpen(false)}
         />

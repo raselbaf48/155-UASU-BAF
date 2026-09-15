@@ -4,6 +4,7 @@ import { FlightDutyQuota } from './dutyRatios';
 
 export interface DutyRatioTable {
   id: string;
+  serNo?: number;
   title: string; // e.g., 'SECURITY DUTY (88)'
   dutyCode: DutyCategoryCode;
   shiftLabel?: string; // e.g. 'Morning', 'Afternoon', 'Night'
@@ -31,7 +32,7 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
   // 1. BASE SECURITY DUTY
   {
     id: 'security_duty',
-    title: 'BASE SECURITY DUTY',
+    title: 'SECURITY DUTY (88)',
     dutyCode: 'GD',
     totalRequiredMonth: 88,
     totalRequiredDaily: 3,
@@ -42,11 +43,10 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
       Admin:     [0,0,0,1,1,0,0,0,1,1,0,0,0,0,0,1,0,1,0,0,1,0,0,1,0,0,0,1,0,0,1],
     },
   },
-
   // 2. BASE TASKFORCE DUTY
   {
     id: 'base_tf',
-    title: 'BASE TASKFORCE DUTY',
+    title: 'BASE T/F (22)',
     dutyCode: 'BTF',
     totalRequiredMonth: 22,
     totalRequiredDaily: 1,
@@ -57,11 +57,10 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
       Admin:     [0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0],
     },
   },
-
   // 3. NAZIRPARA TARKFORCE DUTY
   {
     id: 'nazirpara_tf',
-    title: 'NAZIRPARA TARKFORCE DUTY',
+    title: 'NAZIRPARA T/F (40)',
     dutyCode: 'NTF',
     totalRequiredMonth: 40,
     totalRequiredDaily: 1,
@@ -72,11 +71,10 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
       Admin:     [0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
     },
   },
-
   // 4. IDAC MORNING
   {
     id: 'idac_mor',
-    title: 'IDAC MORNING',
+    title: 'IDAC MOR (31)',
     dutyCode: 'IDAC',
     shiftLabel: 'Morning',
     totalRequiredMonth: 31,
@@ -88,11 +86,10 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
       Admin:     [0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0],
     },
   },
-
   // 5. IDAC AFTERNOON
   {
     id: 'idac_an',
-    title: 'IDAC AFTERNOON',
+    title: 'IDAC A/N (31)',
     dutyCode: 'IDAC',
     shiftLabel: 'Afternoon',
     totalRequiredMonth: 31,
@@ -104,11 +101,10 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
       Admin:     [0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0],
     },
   },
-
   // 6. IDAC NIGHT
   {
     id: 'idac_nt',
-    title: 'IDAC NIGHT',
+    title: 'IDAC N/T (62)',
     dutyCode: 'IDAC',
     shiftLabel: 'Night',
     totalRequiredMonth: 62,
@@ -120,11 +116,10 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
       Admin:     [1,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
     },
   },
-
   // 7. AIRFIELD DUTY
   {
     id: 'airport_duty',
-    title: 'AIRFIELD DUTY',
+    title: 'AIRPORT DUTY',
     dutyCode: 'AIRPORT',
     totalRequiredMonth: 93,
     totalRequiredDaily: 3,
@@ -136,11 +131,10 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
       Admin:     [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
     },
   },
-
   // 8. HALISHAHAR TASKFIRCE DUTY
   {
     id: 'halishahar_duty',
-    title: 'HALISHAHAR TASKFIRCE DUTY',
+    title: 'HALISHAHAR T/F',
     dutyCode: 'HALISHAHAR',
     totalRequiredMonth: 7,
     totalRequiredDaily: 1,
@@ -200,7 +194,7 @@ export function getStoredDutyMatrix(): DutyRatioTable[] {
           const defT = defaultsMap.get(t.id);
           return {
             ...t,
-            title: defT?.title || t.title,
+            title: t.title || defT?.title,
             eligibleFlights: t.eligibleFlights || defT?.eligibleFlights,
             eligibleRanks: t.eligibleRanks || defT?.eligibleRanks,
           };
@@ -243,6 +237,13 @@ export function getStoredDutyMatrix(): DutyRatioTable[] {
            }
         });
 
+        finalMatrix.sort((a, b) => {
+          if (a.serNo !== undefined && b.serNo !== undefined) return a.serNo - b.serNo;
+          if (a.serNo !== undefined) return -1;
+          if (b.serNo !== undefined) return 1;
+          return 0;
+        });
+
         return finalMatrix;
       }
     }
@@ -273,12 +274,37 @@ export function getStoredDutyMatrix(): DutyRatioTable[] {
           });
       }
   });
+
+  baseMatrix.sort((a, b) => {
+    if (a.serNo !== undefined && b.serNo !== undefined) return a.serNo - b.serNo;
+    if (a.serNo !== undefined) return -1;
+    if (b.serNo !== undefined) return 1;
+    return 0;
+  });
+
   return baseMatrix;
 }
 
 export function saveDutyMatrix(matrix: DutyRatioTable[]) {
   try {
     localStorage.setItem(MATRIX_STORAGE_KEY, JSON.stringify(matrix));
+    
+    // Save metadata separately so it gets synced via app_settings
+    const metadata = matrix.map(m => ({
+        id: m.id,
+        serNo: m.serNo,
+        title: m.title,
+        dutyCode: m.dutyCode,
+        eligibleFlights: m.eligibleFlights,
+        eligibleRanks: m.eligibleRanks,
+        flightTargets: m.flightTargets,
+        isDisabled: m.isDisabled,
+        totalRequiredDaily: m.totalRequiredDaily,
+        dailyRequirements: m.dailyRequirements
+    }));
+    localStorage.setItem('baf_duty_matrix_metadata', JSON.stringify(metadata));
+    localStorage.setItem('baf_pending_sync', 'true');
+
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('baf_duty_ratio_updated', { detail: { matrix } }));
     }

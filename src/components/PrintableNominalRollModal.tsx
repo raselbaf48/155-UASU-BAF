@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Airman } from '../types';
 import { Printer, X, Download } from 'lucide-react';
 import { exportHtmlToWord } from '../utils/htmlExport';
+import { FileSpreadsheet } from 'lucide-react';
 import { getSavedPreparedBy, getSavedAuthorizedBy } from './SignatureConfigModal';
 
 
@@ -17,18 +18,83 @@ const formatAirmanName = (name: string) => {
 interface PrintableNominalRollModalProps {
   airmen: Airman[];
   title?: string;
+  variant?: 'nominal' | 'biodata';
   onClose: () => void;
 }
 
 export const PrintableNominalRollModal: React.FC<PrintableNominalRollModalProps> = ({
   airmen,
   title = "OFFICIAL NOMINAL ROLL : 155 UASU BAF",
+  variant = "nominal",
   onClose,
 }) => {
   const preparedBy = getSavedPreparedBy();
   const authorizedBy = getSavedAuthorizedBy();
 
   const getPdfTitle = () => `Nominal_Roll_${new Date().toISOString().split('T')[0]}.pdf`;
+
+
+  const handleExportCSV = () => {
+    let csvContent = "data:text/csv;charset=utf-8,";
+    
+    // Headers
+    const headers = ["Ser", "BD No", "Rank", "Full Name", "Trade", "Flight"];
+    if (variant === 'biodata') {
+      headers.push("Blood Group");
+      headers.push("Present Address");
+      headers.push("Permanent Address");
+    } else {
+      headers.push("Address");
+    }
+    headers.push("Mobile No");
+    if (variant === 'biodata') {
+      headers.push("Dt of Posting");
+    }
+    
+    csvContent += headers.join(",") + "\n";
+    
+    // Rows
+    airmen.forEach((a, index) => {
+      const escapeCsv = (str) => {
+        if (!str) return '""';
+        const cleaned = str.replace(/"/g, '""').replace(/\n/g, ' ');
+        return `"${cleaned}"`;
+      };
+      
+      const row = [
+        index + 1,
+        a.bdNo,
+        a.rank,
+        escapeCsv(a.fullName || a.name),
+        escapeCsv(a.trade),
+        a.flightName
+      ];
+      
+      if (variant === 'biodata') {
+        row.push(a.bloodGroup || '-');
+        row.push(escapeCsv(a.addressBlock || '-'));
+        row.push(escapeCsv(a.permanentAddress || '-'));
+      } else {
+        row.push(escapeCsv(a.addressBlock || '-'));
+      }
+      
+      row.push(a.mobileNo || '-');
+      
+      if (variant === 'biodata') {
+        row.push(a.dateJoined ? new Date(a.dateJoined).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '-');
+      }
+      
+      csvContent += row.join(",") + "\n";
+    });
+    
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Nominal_Roll_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   const handlePrint = () => {
     document.title = getPdfTitle();
@@ -65,6 +131,13 @@ export const PrintableNominalRollModal: React.FC<PrintableNominalRollModalProps>
           >
             <Download className="w-4 h-4" />
             <span className="text-center">Export Doc</span>
+          </button>
+          <button
+            onClick={handleExportCSV}
+            className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-3 sm:px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold text-xs transition-colors cursor-pointer"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            <span className="text-center">Export CSV</span>
           </button>
           <button
             onClick={handlePrint}
@@ -106,8 +179,11 @@ export const PrintableNominalRollModal: React.FC<PrintableNominalRollModalProps>
                     <th className="p-1.5 border border-black font-bold text-center">Full Name</th>
                     <th className="p-1.5 border border-black font-bold text-center">Trade</th>
                     <th className="p-1.5 border border-black font-bold text-center">Flight</th>
-                    <th className="p-1.5 border border-black font-bold text-center">Address</th>
+                    {variant === 'biodata' && <th className="p-1.5 border border-black font-bold text-center">Blood Group</th>}
+                    <th className="p-1.5 border border-black font-bold text-center">{variant === 'biodata' ? 'Present Address' : 'Address'}</th>
+                    {variant === 'biodata' && <th className="p-1.5 border border-black font-bold text-center">Permanent Address</th>}
                     <th className="p-1.5 border border-black font-bold text-center">Mobile No</th>
+                    {variant === 'biodata' && <th className="p-1.5 border border-black font-bold text-center">Dt of Posting</th>}
                   </tr>
                 </thead>
                 <tbody style={{ display: 'table-row-group' }}>
@@ -131,12 +207,53 @@ export const PrintableNominalRollModal: React.FC<PrintableNominalRollModalProps>
                       <td className="p-1.5 border border-black text-left">
                         {airman.flightName}
                       </td>
+                      {variant === 'biodata' && (
+                        <td className="p-1.5 border border-black text-center">
+                          {airman.bloodGroup || '-'}
+                        </td>
+                      )}
                       <td className="p-1.5 border border-black text-left">
-                        {airman.addressBlock || '-'}
+                        <div className="leading-tight whitespace-normal min-w-[100px]">
+                          {airman.addressBlock ? (
+                            airman.addressBlock.includes("Mess, Block No:") ? (
+                              <>
+                                <span className="block">{airman.addressBlock.split(", Block No:")[0]},</span>
+                                <span className="block text-[10px] text-slate-500 font-bold">Block No:{airman.addressBlock.split(", Block No:")[1]}</span>
+                              </>
+                            ) : (
+                              <span className="block">{airman.addressBlock}</span>
+                            )
+                          ) : '-'}
+                        </div>
                       </td>
+                      {variant === 'biodata' && (
+                        <td className="p-1.5 border border-black text-center">
+                          <div className="leading-tight whitespace-normal min-w-[120px]">
+                            {airman.permanentAddress ? (
+                              airman.permanentAddress.includes(';') ? (
+                                (() => {
+                                  const parts = airman.permanentAddress.split(';').map(x => x.trim()).filter(Boolean);
+                                  const rows = [];
+                                  for (let i = 0; i < parts.length; i += 2) {
+                                    rows.push(parts.slice(i, i + 2).join('; '));
+                                  }
+                                  return rows.map((r, i) => <span key={i} className="block">{r}</span>);
+                                })()
+                              ) : (
+                                <span className="block">{airman.permanentAddress}</span>
+                              )
+                            ) : '-'}
+                          </div>
+                        </td>
+                      )}
                       <td className="p-1.5 border border-black text-center">
                         {airman.mobileNo || '-'}
                       </td>
+                      {variant === 'biodata' && (
+                        <td className="p-1.5 border border-black text-center whitespace-nowrap">
+                          {airman.dateJoined ? new Date(airman.dateJoined).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '-'}
+                        </td>
+                      )}
                     </tr>
                   ))}
                   {airmen.length === 0 && (

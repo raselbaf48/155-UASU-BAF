@@ -93,6 +93,8 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
         return { category: 'ORG STRUCTURE', title: 'Nominal Roll (Seniority Order)' };
       case 'flights':
         return { category: 'ORG STRUCTURE', title: 'Flights & Section Overview' };
+      case 'biodata-register':
+        return { category: 'WORKFORCE', title: 'Biodata Register' };
       case 'leave-register':
         return { category: 'WORKFORCE', title: 'Leave Register' };
       case 'tdy-register':

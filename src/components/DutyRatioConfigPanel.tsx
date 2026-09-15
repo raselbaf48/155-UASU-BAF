@@ -1,6 +1,6 @@
 import { DUTY_TYPE_MAP } from '../data/dutyTypes';
 import React, { useState, useEffect, useMemo } from 'react';
-import { AlertCircle, Settings, Info, Users, ChevronDown, ChevronUp, Calendar, X, Save, Power, PowerOff, Trash, Filter } from 'lucide-react';
+import { AlertCircle, Settings, Info, Users, ChevronDown, ChevronUp, Calendar, X, Save, Power, PowerOff, Trash, Filter, Plus, Minus } from 'lucide-react';
 import { localDb } from '../services/localDatabase';
 import { Airman, Rank, FlightName, DutyCategoryCode } from '../types';
 import { addCustomDuty, CustomDutyConfig, removeCustomDuty } from '../utils/customDuties';
@@ -193,12 +193,14 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
   
   // Edit Duty Modal State
   const [editingDutyIdx, setEditingDutyIdx] = useState<number | null>(null);
+  const [editDutySerNo, setEditDutySerNo] = useState<number | ''>('');
   const [editDutyName, setEditDutyName] = useState('');
   const [editDutyFlights, setEditDutyFlights] = useState<FlightName[]>([]);
   const [editDutyRanks, setEditDutyRanks] = useState<Rank[]>([]);
   
   // New Duty Modal State
   const [isAddingNewDuty, setIsAddingNewDuty] = useState(false);
+  const [newDutySerNo, setNewDutySerNo] = useState<number | ''>('');
   const [newDutyName, setNewDutyName] = useState('');
   const [newDutyFlights, setNewDutyFlights] = useState<FlightName[]>(['Mechanics', 'Avionics', 'GCS', 'Admin']);
   const [newDutyRanks, setNewDutyRanks] = useState<Rank[]>(['MWO', 'SWO', 'WO', 'Sgt', 'Cpl', 'LAC', 'AC-1', 'AC-2']);
@@ -437,6 +439,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                         onClick={() => {
                           setEditingDutyIdx(idx);
                           setEditDutyName(table.title);
+                          setEditDutySerNo(table.serNo ?? '');
                           setEditDutyFlights(table.eligibleFlights || ['Mechanics', 'Avionics', 'GCS', 'Admin']);
                           setEditDutyRanks(table.eligibleRanks || ['MWO', 'SWO', 'WO', 'Sgt', 'Cpl', 'LAC', 'AC-1', 'AC-2']);
                         }}
@@ -450,7 +453,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                     {/* Duty Name */}
                     <div className="pr-16 mb-4">
                       <div className={`w-full bg-transparent font-bold text-base truncate ${table.isDisabled ? 'text-slate-500 line-through' : 'text-slate-800 dark:text-slate-200'}`}>
-                        {table.title}
+                        {table.serNo !== undefined ? `${table.serNo}. ` : ''}{table.title}
                       </div>
                     </div>
 
@@ -511,14 +514,38 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                            <h4 className="font-bold text-sm text-indigo-900 dark:text-indigo-300 mb-1">Set Requirement for All Days</h4>
                            <p className="text-xs text-indigo-700/80 dark:text-indigo-300/70">Applies a default value to the entire month.</p>
                         </div>
-                        <div className="flex items-center space-x-2 bg-white dark:bg-slate-800 p-2 rounded-lg border border-slate-200 dark:border-slate-700">
-                          <input 
-                            type="number"
-                            min="0"
-                            id="panelGlobalReqInput"
-                            className="w-16 px-2 py-1.5 text-sm font-bold font-mono text-center bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-md focus:outline-none focus:border-indigo-500"
-                            defaultValue={matrix[settingsTableIdx]?.totalRequiredDaily || 0}
-                          />
+                        <div className="flex flex-col space-y-2">
+                          <div className="flex items-center bg-white dark:bg-slate-800 p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm w-fit">
+                            <button 
+                              onClick={() => {
+                                const input = document.getElementById('panelGlobalReqInput') as HTMLInputElement;
+                                let val = parseInt(input.value, 10);
+                                if (isNaN(val)) val = 0;
+                                if (val > 0) input.value = (val - 1).toString();
+                              }}
+                              className="w-8 h-8 flex items-center justify-center rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 transition-colors"
+                            >
+                              <Minus className="w-4 h-4" />
+                            </button>
+                            <input 
+                              type="text"
+                              readOnly
+                              id="panelGlobalReqInput"
+                              className="w-12 px-1 py-1 text-base font-bold font-mono text-center bg-transparent border-none focus:outline-none text-slate-800 dark:text-slate-100"
+                              defaultValue={matrix[settingsTableIdx]?.totalRequiredDaily || 0}
+                            />
+                            <button 
+                              onClick={() => {
+                                const input = document.getElementById('panelGlobalReqInput') as HTMLInputElement;
+                                let val = parseInt(input.value, 10);
+                                if (isNaN(val)) val = 0;
+                                input.value = (val + 1).toString();
+                              }}
+                              className="w-8 h-8 flex items-center justify-center rounded-md bg-indigo-100 dark:bg-indigo-900/50 hover:bg-indigo-200 dark:hover:bg-indigo-800 text-indigo-700 dark:text-indigo-300 transition-colors"
+                            >
+                              <Plus className="w-4 h-4" />
+                            </button>
+                          </div>
                           <button 
                             onClick={() => {
                               const val = parseInt((document.getElementById('panelGlobalReqInput') as HTMLInputElement).value, 10);
@@ -529,18 +556,17 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                                 updated[settingsTableIdx].dailyRequirements = new Array(31).fill(val);
                                 updated[settingsTableIdx].totalRequiredDaily = val;
                                 updated[settingsTableIdx].totalRequiredMonth = val * 31;
-                                updated[settingsTableIdx] = autoDistributeTableData(updated[settingsTableIdx], manpower);
                                 onMatrixChange(updated);
                               }
                             }}
-                            className="px-4 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-md hover:bg-indigo-700 transition-colors shadow-sm"
+                            className="px-4 py-2 bg-indigo-600 text-white text-sm font-bold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm w-full sm:w-auto"
                           >
                             Apply to All
                           </button>
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-7 gap-2 sm:gap-3">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-3">
                         {Array.from({ length: 31 }, (_, i) => i + 1).map((dayNum, idx) => {
                           const table = matrix[settingsTableIdx];
                           let req = table?.dailyRequirements?.[idx];
@@ -552,27 +578,47 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                               }
                           }
                           return (
-                            <div key={dayNum} className="flex flex-col">
-                              <label className="text-[10px] font-bold text-slate-500 mb-1 text-center">Day {dayNum}</label>
-                              <input 
-                                type="number"
-                                min="0"
-                                value={req}
-                                onChange={(e) => {
-                                  const val = parseInt(e.target.value, 10) || 0;
-                                  if (onMatrixChange) {
-                                    const updated = [...matrix];
-                                    updated[settingsTableIdx] = { ...updated[settingsTableIdx] };
-                                    const currentReqs = updated[settingsTableIdx].dailyRequirements || new Array(31).fill(updated[settingsTableIdx].totalRequiredDaily || 0);
-                                    currentReqs[idx] = val;
-                                    updated[settingsTableIdx].dailyRequirements = currentReqs;
-                                    updated[settingsTableIdx].totalRequiredMonth = currentReqs.reduce((a, b) => a + b, 0);
-                                    updated[settingsTableIdx] = autoDistributeTableData(updated[settingsTableIdx], manpower);
-                                    onMatrixChange(updated);
-                                  }
-                                }}
-                                className="w-full text-center px-1 py-1.5 text-sm font-mono font-bold bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors shadow-sm"
-                              />
+                            <div key={dayNum} className="flex flex-col items-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-2 shadow-sm w-full max-w-[120px] mx-auto">
+                              <label className="text-[10px] font-bold text-slate-500 mb-2 uppercase tracking-wider">Day {dayNum}</label>
+                              <div className="flex items-center justify-between w-full px-1">
+                                <button 
+                                  onClick={() => {
+                                    if (onMatrixChange) {
+                                      const updated = [...matrix];
+                                      updated[settingsTableIdx] = { ...updated[settingsTableIdx] };
+                                      const currentReqs = updated[settingsTableIdx].dailyRequirements || new Array(31).fill(updated[settingsTableIdx].totalRequiredDaily || 0);
+                                      if (currentReqs[idx] > 0) {
+                                        currentReqs[idx] -= 1;
+                                        updated[settingsTableIdx].dailyRequirements = currentReqs;
+                                        updated[settingsTableIdx].totalRequiredMonth = currentReqs.reduce((a, b) => a + b, 0);
+                                        onMatrixChange(updated);
+                                      }
+                                    }
+                                  }}
+                                  className="w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 transition-colors"
+                                >
+                                  <Minus className="w-4 h-4" />
+                                </button>
+                                <span className="font-mono font-bold text-lg text-slate-800 dark:text-slate-200 w-8 text-center select-none flex-shrink-0">
+                                  {req}
+                                </span>
+                                <button 
+                                  onClick={() => {
+                                    if (onMatrixChange) {
+                                      const updated = [...matrix];
+                                      updated[settingsTableIdx] = { ...updated[settingsTableIdx] };
+                                      const currentReqs = updated[settingsTableIdx].dailyRequirements || new Array(31).fill(updated[settingsTableIdx].totalRequiredDaily || 0);
+                                      currentReqs[idx] += 1;
+                                      updated[settingsTableIdx].dailyRequirements = currentReqs;
+                                      updated[settingsTableIdx].totalRequiredMonth = currentReqs.reduce((a, b) => a + b, 0);
+                                      onMatrixChange(updated);
+                                    }
+                                  }}
+                                  className="w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-lg bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-800/50 text-indigo-600 dark:text-indigo-400 transition-colors"
+                                >
+                                  <Plus className="w-4 h-4" />
+                                </button>
+                              </div>
                             </div>
                           );
                         })}
@@ -991,6 +1037,17 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
             <div className="p-4 overflow-y-auto space-y-5">
               
               <div>
+                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1.5">Ser No (Optional)</label>
+                <input
+                  type="number"
+                  value={newDutySerNo}
+                  onChange={e => setNewDutySerNo(e.target.value === '' ? '' : Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-slate-900 dark:text-slate-100"
+                  placeholder="e.g. 1"
+                />
+              </div>
+
+              <div>
                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1.5">Duty Name <span className="text-red-500">*</span></label>
                 <input
                   type="text"
@@ -1070,10 +1127,19 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                   
                   // Add to matrix
                   if (matrix && onMatrixChange) {
+                    const newSerNo = newDutySerNo === '' ? undefined : Number(newDutySerNo);
+                    if (newSerNo !== undefined) {
+                      const isDuplicate = matrix.some((t) => t.serNo === newSerNo);
+                      if (isDuplicate) {
+                        alert('This Ser No is already in use. Please choose a different one.');
+                        return;
+                      }
+                    }
                     const newMatrix = [...matrix];
                     newMatrix.push({
                       id: newCode,
                       title: newDutyName,
+                      serNo: newSerNo,
                       dutyCode: newCode as DutyCategoryCode,
                       totalRequiredMonth: 0,
                       totalRequiredDaily: 0,
@@ -1085,6 +1151,12 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                         GCS: Array(31).fill(0),
                         Admin: Array(31).fill(0),
                       }
+                    });
+                    newMatrix.sort((a, b) => {
+                      if (a.serNo !== undefined && b.serNo !== undefined) return a.serNo - b.serNo;
+                      if (a.serNo !== undefined) return -1;
+                      if (b.serNo !== undefined) return 1;
+                      return 0;
                     });
                     onMatrixChange(newMatrix);
                   }
@@ -1113,6 +1185,17 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
             </div>
             <div className="p-4 overflow-y-auto space-y-5">
               
+              <div>
+                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1.5">Ser No (Optional)</label>
+                <input
+                  type="number"
+                  value={editDutySerNo}
+                  onChange={e => setEditDutySerNo(e.target.value === '' ? '' : Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-slate-900 dark:text-slate-100"
+                  placeholder="e.g. 1"
+                />
+              </div>
+
               <div>
                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1.5">Duty Name <span className="text-red-500">*</span></label>
                 <input
@@ -1184,14 +1267,33 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                 <button 
                   onClick={() => {
                     if (!editDutyName.trim()) return;
-                    if (matrix && onMatrixChange) {
+                    if (matrix && editingDutyIdx !== null && onMatrixChange) {
+                      const newSerNo = editDutySerNo === '' ? undefined : Number(editDutySerNo);
+                      if (newSerNo !== undefined) {
+                        const isDuplicate = matrix.some((t, i) => i !== editingDutyIdx && t.serNo === newSerNo);
+                        if (isDuplicate) {
+                          alert('This Ser No is already in use. Please choose a different one.');
+                          return;
+                        }
+                      }
                       const newMatrix = [...matrix];
-                      newMatrix[editingDutyIdx] = autoDistributeTableData({
-                        ...newMatrix[editingDutyIdx],
+                      const currentTable = newMatrix[editingDutyIdx];
+
+                      const updatedTable = {
+                        ...currentTable,
                         title: editDutyName,
+                        serNo: newSerNo,
                         eligibleFlights: editDutyFlights,
                         eligibleRanks: editDutyRanks
-                      }, manpower);
+                      };
+
+                      newMatrix[editingDutyIdx] = updatedTable;
+                      newMatrix.sort((a, b) => {
+                        if (a.serNo !== undefined && b.serNo !== undefined) return a.serNo - b.serNo;
+                        if (a.serNo !== undefined) return -1;
+                        if (b.serNo !== undefined) return 1;
+                        return 0;
+                      });
                       onMatrixChange(newMatrix);
                     }
                     setEditingDutyIdx(null);

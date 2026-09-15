@@ -942,6 +942,14 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
                 -webkit-print-color-adjust: exact !important; 
                  print-color-adjust: exact !important; 
                }
+               
+              /* Force black borders and text in print */
+              .print\:border-black, table, th, td {
+                 border-color: black !important;
+              }
+              .print\:text-black, span, div, p, h1, h2, h3, h4, th, td {
+                 color: black !important;
+              }
               /* Hide scrollbars during print */
               ::-webkit-scrollbar { display: none; }
               
@@ -967,7 +975,7 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  <X className="w-5 h-5" />
  </button>
  <div>
- <h2 className="text-lg font-black text-white">Print Preview</h2>
+ <h2 className="text-base sm:text-lg font-black text-white">Preview</h2>
  <p className="text-xs font-medium text-slate-400">Night Count State</p>
  </div>
  </div>
@@ -976,31 +984,31 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
             {onDownloadDocx && (
               <button
                 onClick={onDownloadDocx}
-                className="flex items-center space-x-2 px-6 py-2.5 bg-blue-700 hover:bg-blue-600 text-white rounded-xl font-black text-sm shadow-lg shadow-blue-900/20 transition-all cursor-pointer"
+                className="flex items-center space-x-2 px-3 sm:px-6 py-2 bg-blue-700 hover:bg-blue-600 text-white rounded-xl font-black text-sm shadow-lg shadow-blue-900/20 transition-all cursor-pointer"
                 title="Download Document"
               >
                 <Download className="w-5 h-5" />
-                <span>Download Document</span>
+                <span className="hidden sm:inline">Download Document</span><span className="inline sm:hidden">Download</span>
               </button>
             )}
 <button
  onClick={() => { document.title = getPdfTitle(); window.print(); }}
- className="flex items-center space-x-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black text-sm shadow-lg shadow-emerald-900/20 transition-all cursor-pointer"
+ className="flex items-center space-x-2 px-3 sm:px-6 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black text-sm shadow-lg shadow-emerald-900/20 transition-all cursor-pointer"
  >
  <Printer className="w-5 h-5" />
- <span>Official Export / Print</span>
+ <span className="hidden sm:inline">Official Export / Print</span><span className="inline sm:hidden">Print</span>
  </button>
  </div>
  </div>
 
  {/* SCROLLABLE DOCUMENT CONTAINER */}
- <div className="flex-1 overflow-y-auto p-4 sm:p-8 flex justify-center print:p-0 print:overflow-visible print:block">
+ <div className="flex-1 overflow-auto p-4 sm:p-8 md:flex md:justify-center print:p-0 print:overflow-visible print:block">
  {/* THE ACTUAL DOCUMENT */}
- <div className="bg-white dark:bg-slate-900 text-black dark:text-slate-100 shadow-2xl print:shadow-none w-[297mm] min-h-[210mm] relative mx-auto print:mx-0 print:w-full print:min-h-0 shrink-0">
+ <div className="bg-white dark:bg-slate-900 text-black dark:text-white shadow-2xl print:shadow-none w-[297mm] min-h-[210mm] relative mx-auto print:mx-0 print:w-full print:min-h-0 shrink-0">
 {/* OFFICIAL PARADE DOCUMENT SHEET (DISPLAYED ON SCREEN & IN PRINT) */}
  <div
  id="official-parade-document"
- className="bg-white dark:bg-slate-900 text-black dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-2xl shadow-lg p-6 overflow-x-auto"
+ className="bg-white dark:bg-slate-900 text-black dark:text-white border border-slate-300 dark:border-slate-700 rounded-2xl shadow-lg p-6 overflow-x-auto print:shadow-none print:border-none print:p-0"
  >
  {loading ? (
  <div className="py-20 text-center text-slate-400">
@@ -1015,46 +1023,46 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  {/* DOCUMENT TOP HEADER */}
  <div className="relative mb-3 text-center" style={{ fontFamily: 'Arial, sans-serif' }}>
  <div className="text-center">
- <h1 className="font-bold tracking-wide text-black underline inline-block text-base uppercase">
+ <h1 className="font-bold tracking-wide text-black dark:text-white underline inline-block text-base uppercase">
  {isPtDocument ? 'NT COUNT STATE: AIRMEN' : 'NT COUNT STATE: AIRMEN'}
  </h1>
  <br />
- <h2 className="font-bold tracking-wide text-black mt-0.5 underline inline-block text-sm uppercase">
+ <h2 className="font-bold tracking-wide text-black dark:text-white mt-0.5 underline inline-block text-sm uppercase">
  155 UASU BAF {selectedFlight !== 'Overall' ? `(${selectedFlight.toUpperCase()} FLIGHT)` : ''}
  </h2>
  </div>
- <div className="text-right font-normal text-black pr-1 text-xs mt-1">
+ <div className="text-right font-normal text-black dark:text-white pr-1 text-xs mt-1">
  Period: {formatDateShort(fromDate)} To {formatDateShort(toDate)}
  </div>
  </div>
 
  
- <div className="overflow-x-auto border border-black mb-8">
- <table className="no-zebra w-full min-w-[700px] print:min-w-0 text-center border-collapse text-[11px] text-black table-auto">
+ <div className="overflow-x-auto border border-black dark:border-slate-300 mb-8">
+ <table className="no-zebra w-full min-w-[700px] print:min-w-0 text-center border-collapse text-[11px] text-black dark:text-white table-auto">
  <thead>
- <tr className="border-b border-black">
- <th className="border-r border-black p-2 align-middle font-bold w-[120px] text-center">Sqn/Unit</th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Total Str</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Det/Tdy</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Eff Str</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Leave</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Course</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Class/Exam</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">AWOL/Detention</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Sick report</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">ED/ EX PPGF</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">CMH/ BNS/ BSH/Qrnt</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">U/C, U/Board</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Office Duty</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Aft/Ni flg/Ni Duty</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">GD/TF/Airfield Duty</div></th>
-    <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Driving</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Games /Guard of Honor</div></th>
+ <tr className="border-b border-black dark:border-slate-300">
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold w-[120px] text-center">Sqn/Unit</th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Total Str</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Det/Tdy</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Eff Str</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Leave</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Course</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Class/Exam</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">AWOL/Detention</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Sick report</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">ED/ EX PPGF</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">CMH/ BNS/ BSH/Qrnt</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">U/C, U/Board</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Office Duty</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Aft/Ni flg/Ni Duty</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">GD/TF/Airfield Duty</div></th>
+    <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Driving</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Games /Guard of Honor</div></th>
  {Object.keys(customDisposalsMap).map(key => (
- <th key={key} className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">{key}</div></th>
+ <th key={key} className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">{key}</div></th>
  ))}
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Total Out Parade</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">On Parade</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Total Out Parade</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">On Parade</div></th>
  <th className="p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Remarks</div></th>
  </tr>
  </thead>
@@ -1102,29 +1110,29 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
 
  return (
  <tr className="">
- <td className="border-r border-black p-2 font-bold whitespace-nowrap min-w-[120px] text-center align-middle">155 UASU BAF</td>
- <td className="border-r border-black p-1 text-center align-middle">{stats.totalStr || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{stats.detTdyCount || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{stats.effStr || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{stats.leaveCount || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{stats.essnCount || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{stats.classTrgCount || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{stats.detentionCount || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{stats.sickExCount || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{stats.drillCatCCount || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{stats.hospitalCount || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{ucBoardCount || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{officeDutyCount || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{aftNiFlgCount || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{stats.guardDutyCount || stats.airFdDutyCount || '-'}</td>
-    <td className="border-r border-black p-1 text-center align-middle">{drivingCount || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{stats.gamesCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-2 font-bold whitespace-nowrap min-w-[120px] text-center align-middle">155 UASU BAF</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{stats.totalStr || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{stats.detTdyCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{stats.effStr || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{stats.leaveCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{stats.essnCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{stats.classTrgCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{stats.detentionCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{stats.sickExCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{stats.drillCatCCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{stats.hospitalCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{ucBoardCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{officeDutyCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{aftNiFlgCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{stats.guardDutyCount || stats.airFdDutyCount || '-'}</td>
+    <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{drivingCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{stats.gamesCount || '-'}</td>
  {Object.keys(customDisposalsMap).map(key => {
  const count = customDisposalsMap[key].length;
- return <td key={key} className="border-r border-black p-1 text-center align-middle">{count > 0 ? count : '-'}</td>;
+ return <td key={key} className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{count > 0 ? count : '-'}</td>;
  })}
- <td className="border-r border-black p-1 text-center align-middle">{stats.totalOutPt || '-'}</td>
- <td className="border-r border-black p-1 font-bold text-center align-middle">{stats.onPtParadeCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{stats.totalOutPt || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 font-bold text-center align-middle">{stats.onPtParadeCount || '-'}</td>
  <td className="p-1 text-center align-middle"></td>
  </tr>
  );
@@ -1139,12 +1147,12 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
 
  {/* OFFICIAL SIGNATURE FOOTER FOR MULTI-DAY */}
  <div
- className="flex justify-between items-end pt-1 text-black text-xs min-w-[700px] print:min-w-0"
+ className="flex justify-between items-end pt-1 text-black dark:text-white text-xs min-w-[700px] print:min-w-0"
  style={{ fontFamily: 'Arial, sans-serif' }}
  >
  {/* LEFT SIGNATURE BLOCK (Prepared By) */}
  <div className="text-left font-bold min-w-[200px]">
- <div className="border-t border-slate-900 dark:border-slate-600 pt-1.5">
+ <div className="border-t border-slate-900 pt-1.5">
  <div className="text-xs uppercase font-black">{preparedBy.name}</div>
  <div className="text-[11px] font-normal">{preparedBy.rank}</div>
  <div className="text-[11px] font-normal">{preparedBy.designation}</div>
@@ -1154,7 +1162,7 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
 
  {/* RIGHT SIGNATURE BLOCK (Authorized By) */}
  <div className="text-left font-bold min-w-[200px]">
- <div className="border-t border-slate-900 dark:border-slate-600 pt-1.5">
+ <div className="border-t border-slate-900 pt-1.5">
  <div className="text-xs uppercase font-black">{authorizedBy.name}</div>
  <div className="text-[11px] font-normal">{authorizedBy.rank}</div>
  <div className="text-[11px] font-normal">{authorizedBy.designation}</div>
@@ -1171,47 +1179,47 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  {/* TOP DOCUMENT HEADER */}
  <div className="relative mb-3 text-center" style={{ fontFamily: 'Arial, sans-serif' }}>
  <div className="text-center">
- <h1 className="font-bold tracking-wide text-black underline inline-block text-base uppercase">
+ <h1 className="font-bold tracking-wide text-black dark:text-white underline inline-block text-base uppercase">
  {isPtDocument ? 'NT COUNT STATE: AIRMEN' : 'NT COUNT STATE: AIRMEN'}
  </h1>
  <br />
- <h2 className="font-bold tracking-wide text-black mt-0.5 underline inline-block text-sm uppercase">
+ <h2 className="font-bold tracking-wide text-black dark:text-white mt-0.5 underline inline-block text-sm uppercase">
  155 UASU BAF {selectedFlight !== 'Overall' ? `(${selectedFlight.toUpperCase()} FLT)` : ''}
  </h2>
  </div>
- <div className="text-right font-normal text-black pr-1 text-xs mt-1">
+ <div className="text-right font-normal text-black dark:text-white pr-1 text-xs mt-1">
  Date: {formatDateShort(fromDate)}
  </div>
  </div>
 
  {/* SUMMARY MATRIX TABLE: EXACT SINGLE-ROW FORMAT FOR SELECTED FLIGHT / OVERALL */}
  
- <div className="overflow-x-auto border border-black mb-8">
- <table className="no-zebra w-full min-w-[700px] print:min-w-0 text-center border-collapse text-[11px] text-black table-auto">
+ <div className="overflow-x-auto border border-black dark:border-slate-300 mb-8">
+ <table className="no-zebra w-full min-w-[700px] print:min-w-0 text-center border-collapse text-[11px] text-black dark:text-white table-auto">
  <thead>
- <tr className="border-b border-black">
- <th className="border-r border-black p-2 align-middle font-bold w-[120px] text-center">Sqn/Unit</th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Total Str</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Det/Tdy</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Eff Str</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Leave</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Course</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Class/Exam</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">AWOL/Detention</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Sick report</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">ED/ EX PPGF</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">CMH/ BNS/ BSH/Qrnt</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">U/C, U/Board</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Office Duty</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Aft/Ni flg/Ni Duty</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">GD/TF/Airfield Duty</div></th>
-    <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Driving</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Games /Guard of Honor</div></th>
+ <tr className="border-b border-black dark:border-slate-300">
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold w-[120px] text-center">Sqn/Unit</th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Total Str</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Det/Tdy</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Eff Str</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Leave</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Course</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Class/Exam</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">AWOL/Detention</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Sick report</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">ED/ EX PPGF</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">CMH/ BNS/ BSH/Qrnt</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">U/C, U/Board</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Office Duty</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Aft/Ni flg/Ni Duty</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">GD/TF/Airfield Duty</div></th>
+    <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Driving</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Games /Guard of Honor</div></th>
  {Object.keys(customDisposalsMap).map(key => (
- <th key={key} className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">{key}</div></th>
+ <th key={key} className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">{key}</div></th>
  ))}
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Total Out Parade</div></th>
- <th className="border-r border-black p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">On Parade</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Total Out Parade</div></th>
+ <th className="border-r border-black dark:border-slate-300 p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">On Parade</div></th>
  <th className="p-2 align-middle font-bold text-center p-0.5"><div className="w-full h-32 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[10px] leading-tight">Remarks</div></th>
  </tr>
  </thead>
@@ -1259,29 +1267,29 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
 
  return (
  <tr className="">
- <td className="border-r border-black p-2 font-bold whitespace-nowrap min-w-[120px] text-center align-middle">155 UASU BAF</td>
- <td className="border-r border-black p-1 text-center align-middle">{stats.totalStr || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{stats.detTdyCount || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{stats.effStr || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{stats.leaveCount || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{stats.essnCount || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{stats.classTrgCount || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{stats.detentionCount || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{stats.sickExCount || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{stats.drillCatCCount || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{stats.hospitalCount || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{ucBoardCount || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{officeDutyCount || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{aftNiFlgCount || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{stats.guardDutyCount || stats.airFdDutyCount || '-'}</td>
-    <td className="border-r border-black p-1 text-center align-middle">{drivingCount || '-'}</td>
- <td className="border-r border-black p-1 text-center align-middle">{stats.gamesCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-2 font-bold whitespace-nowrap min-w-[120px] text-center align-middle">155 UASU BAF</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{stats.totalStr || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{stats.detTdyCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{stats.effStr || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{stats.leaveCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{stats.essnCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{stats.classTrgCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{stats.detentionCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{stats.sickExCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{stats.drillCatCCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{stats.hospitalCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{ucBoardCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{officeDutyCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{aftNiFlgCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{stats.guardDutyCount || stats.airFdDutyCount || '-'}</td>
+    <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{drivingCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{stats.gamesCount || '-'}</td>
  {Object.keys(customDisposalsMap).map(key => {
  const count = customDisposalsMap[key].length;
- return <td key={key} className="border-r border-black p-1 text-center align-middle">{count > 0 ? count : '-'}</td>;
+ return <td key={key} className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{count > 0 ? count : '-'}</td>;
  })}
- <td className="border-r border-black p-1 text-center align-middle">{stats.totalOutPt || '-'}</td>
- <td className="border-r border-black p-1 font-bold text-center align-middle">{stats.onPtParadeCount || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 text-center align-middle">{stats.totalOutPt || '-'}</td>
+ <td className="border-r border-black dark:border-slate-300 p-1 font-bold text-center align-middle">{stats.onPtParadeCount || '-'}</td>
  <td className="p-1 text-center align-middle"></td>
  </tr>
  );
@@ -1304,7 +1312,7 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  <div className="flex flex-wrap items-start justify-between gap-6 min-w-[700px] print:min-w-0">
  {/* 1ST COLUMN: ON PARADE / ON PT (1 TO 15 ON LEFT, 16+ ON RIGHT, NIL IF EMPTY) */}
  <div className="min-w-[240px] flex-shrink-0">
- <h3 className="font-bold underline text-black mb-1.5">
+ <h3 className="font-bold underline text-black dark:text-white mb-1.5">
  {isPtDocument ? 'On PT' : 'On Parade'}
  </h3>
 
@@ -1342,7 +1350,7 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  )}
  </div>
  ) : (
- <div className="font-bold text-black">Nil</div>
+ <div className="font-bold text-black dark:text-white">Nil</div>
  )}
  </div>
 
@@ -1353,35 +1361,35 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  <div className="w-48 flex flex-col space-y-3">
  {leaveList.length > 0 && (
  <div>
- <h3 className="font-bold underline text-black mb-1">Leave</h3>
+ <h3 className="font-bold underline text-black dark:text-white mb-1">Leave</h3>
  {renderDisposalAirmenList(leaveList, 'LEAVE', 'Leave')}
  </div>
  )}
 
  {dutyOnList.length > 0 && (
  <div>
- <h3 className="font-bold underline text-black mb-1">Duty On</h3>
+ <h3 className="font-bold underline text-black dark:text-white mb-1">Duty On</h3>
  {renderDisposalAirmenList(dutyOnList, 'DUTY_ON', 'Duty On')}
  </div>
  )}
 
  {!isPtDocument && dutyOffList.length > 0 && (
  <div>
- <h3 className="font-bold underline text-black mb-1">Duty Off</h3>
+ <h3 className="font-bold underline text-black dark:text-white mb-1">Duty Off</h3>
  {renderDisposalAirmenList(dutyOffList, 'DUTY_OFF', 'Duty Off')}
  </div>
  )}
 
  {bakeBiteList.length > 0 && (
  <div>
- <h3 className="font-bold underline text-black mb-1">Bake & Bite</h3>
+ <h3 className="font-bold underline text-black dark:text-white mb-1">Bake & Bite</h3>
  {renderDisposalAirmenList(bakeBiteList, 'BAKE_N_BITE', 'Bake & Bite')}
  </div>
  )}
 
  {essnList.length > 0 && (
  <div>
- <h3 className="font-bold underline text-black mb-1">
+ <h3 className="font-bold underline text-black dark:text-white mb-1">
  ESSN
  </h3>
  {renderDisposalAirmenList(essnList, 'ESSN', 'ESSN')}
@@ -1395,7 +1403,7 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  <div className="w-48 flex flex-col space-y-3">
  {cmhList.length > 0 && (
  <div>
- <h3 className="font-bold underline text-black mb-1">
+ <h3 className="font-bold underline text-black dark:text-white mb-1">
  CMH
  </h3>
  {renderDisposalAirmenList(cmhList, 'CMH', 'CMH')}
@@ -1404,21 +1412,21 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
 
  {sickReportList.length > 0 && (
  <div>
- <h3 className="font-bold underline text-black mb-1">Sick Report</h3>
+ <h3 className="font-bold underline text-black dark:text-white mb-1">Sick Report</h3>
  {renderDisposalAirmenList(sickReportList, 'SICK_REPORT', 'Sick Report')}
  </div>
  )}
 
  {tdyList.length > 0 && (
  <div>
- <h3 className="font-bold underline text-black mb-1">Det/Tdy</h3>
+ <h3 className="font-bold underline text-black dark:text-white mb-1">Det/Tdy</h3>
  {renderDisposalAirmenList(tdyList, 'TDY', 'Det/Tdy')}
  </div>
  )}
 
  {receptionList.length > 0 && (
  <div>
- <h3 className="font-bold underline text-black mb-1">Reception</h3>
+ <h3 className="font-bold underline text-black dark:text-white mb-1">Reception</h3>
  {renderDisposalAirmenList(receptionList, 'RECEPTION', 'Reception')}
  </div>
  )}
@@ -1432,14 +1440,14 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
 
  {adminOrderList.length > 0 && (
  <div>
- <h3 className="font-bold underline text-black mb-1">Admin Order</h3>
+ <h3 className="font-bold underline text-black dark:text-white mb-1">Admin Order</h3>
  {renderDisposalAirmenList(adminOrderList, 'ADMIN_ORDER', 'Admin Order')}
  </div>
  )}
 
  {classTrgList.length > 0 && (
  <div>
- <h3 className="font-bold underline text-black mb-1">Class / Trg</h3>
+ <h3 className="font-bold underline text-black dark:text-white mb-1">Class / Trg</h3>
  {renderDisposalAirmenList(classTrgList, 'CLASS_TRG', 'Class / TRG')}
  </div>
  )}
@@ -1447,14 +1455,14 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
 
  {gamesList.length > 0 && (
  <div>
- <h3 className="font-bold underline text-black mb-1">G/H & Games</h3>
+ <h3 className="font-bold underline text-black dark:text-white mb-1">G/H & Games</h3>
  {renderDisposalAirmenList(gamesList, 'GAMES', 'G/H & Games')}
  </div>
  )}
 
  {absentList.length > 0 && (
  <div>
- <h3 className="font-bold underline text-black mb-1">Absent</h3>
+ <h3 className="font-bold underline text-black dark:text-white mb-1">Absent</h3>
  {renderDisposalAirmenList(absentList, 'ABSENT', 'Absent')}
  </div>
  )}
@@ -1464,7 +1472,7 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  if (!airmenList || airmenList.length === 0) return null;
  return (
     <div key={catName}>
- <h3 className="font-bold underline text-black mb-1">
+ <h3 className="font-bold underline text-black dark:text-white mb-1">
  {catName}
  </h3>
  {renderDisposalAirmenList(airmenList, 'OTHERS', catName)}
@@ -1482,13 +1490,13 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
 
  {/* OFFICIAL SIGNATURE FOOTER */}
  <div
- className="flex justify-between items-end pt-1 text-black text-xs min-w-[700px] print:min-w-0"
+ className="flex justify-between items-end pt-1 text-black dark:text-white text-xs min-w-[700px] print:min-w-0"
  style={{ fontFamily: 'Arial, sans-serif' }}
  >
  {/* LEFT SIGNATURE BLOCK (Prepared By) */}
  <div className="text-left font-bold min-w-[210px]">
  {preparedBy.signDigitally && (
- <div className="mb-1 text-center font-serif italic text-xs text-black select-none">
+ <div className="mb-1 text-center font-serif italic text-xs text-black dark:text-white select-none">
  <span className="font-bold underline">
  {preparedBy.digitalSignatureText || preparedBy.name}
  </span>
@@ -1497,7 +1505,7 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  </span>
  </div>
  )}
- <div className="border-t border-slate-900 dark:border-slate-600 pt-1.5">
+ <div className="border-t border-slate-900 pt-1.5">
  <div className="text-xs uppercase font-black">{preparedBy.name}</div>
  <div className="text-[11px] font-normal">{preparedBy.rank}</div>
  <div className="text-[11px] font-normal">{preparedBy.designation}</div>
@@ -1508,7 +1516,7 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  {/* RIGHT SIGNATURE BLOCK (Authorized By) */}
  <div className="text-left font-bold min-w-[210px]">
  {authorizedBy.signDigitally && (
- <div className="mb-1 text-center font-serif italic text-xs text-black select-none">
+ <div className="mb-1 text-center font-serif italic text-xs text-black dark:text-white select-none">
  <span className="font-bold underline">
  {authorizedBy.digitalSignatureText || authorizedBy.name}
  </span>
@@ -1517,7 +1525,7 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  </span>
  </div>
  )}
- <div className="border-t border-slate-900 dark:border-slate-600 pt-1.5">
+ <div className="border-t border-slate-900 pt-1.5">
  <div className="text-xs uppercase font-black">{authorizedBy.name}</div>
  <div className="text-[11px] font-normal">{authorizedBy.rank}</div>
  <div className="text-[11px] font-normal">{authorizedBy.designation}</div>
@@ -1556,7 +1564,7 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  <UserPlus className="w-6 h-6" />
  </div>
  <div>
- <h2 className="text-lg font-bold text-black">
+ <h2 className="text-lg font-bold text-black dark:text-white">
  Add Personnel Disposal
  </h2>
  <p className="text-xs text-slate-500 mt-0.5">
@@ -2145,7 +2153,7 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
                       placeholder="e.g. Special Escort, VVIP Detail..."
                       value={editDisposalCustomTitle}
                       onChange={(e) => setEditDisposalCustomTitle(e.target.value)}
-                      className="w-full px-3 py-1.5 text-xs rounded-lg border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white print:text-black outline-none focus:border-amber-500 shadow-xs"
+                      className="w-full px-3 py-1.5 text-xs rounded-lg border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white print:text-black dark:text-white outline-none focus:border-amber-500 shadow-xs"
                       required
                     />
                   </div>

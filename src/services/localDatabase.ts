@@ -248,7 +248,10 @@ export class LocalDatabaseEngine {
           flightName: s['Flight'] || '',
           trade: s['Trade'] || '',
           mobileNo: s['Mobile No'] || '',
-          addressBlock: s['Address'] || 'L/O',
+          bloodGroup: s['Blood Group'] || '',
+          permanentAddress: s['Parmanet Address'] || s['Permanent Address'] || '',
+          dateJoined: s['Dt of Posting'] || undefined,
+          addressBlock: s['Present Address'] || s['Address'] || 'L/O',
           active: s['Status'] === 'ACTIVE' || s['Status'] === null || s['Status'] === undefined,
           status: s['Status'] || 'ACTIVE',
           dateLeft: s['Unit Left date'] || undefined
@@ -398,16 +401,41 @@ export class LocalDatabaseEngine {
                  }
              });
              
+             const currentRaw = window.localStorage.getItem('baf_official_duty_matrix_v4');
+             const currentMatrix: any[] = currentRaw ? JSON.parse(currentRaw) : [];
+
              const formattedMatrix = Array.from(dutyMap.values()).map(duty => {
                  let total = 0;
                  ['Mechanics', 'Avionics', 'GCS', 'Admin'].forEach(f => {
                      total += duty.data[f].reduce((sum: number, val: number) => sum + val, 0);
                  });
                  duty.totalRequiredMonth = total;
+
+                 const existingDuty = currentMatrix.find((d: any) => d.id === duty.id);
+                 if (existingDuty) {
+                     // Preserve all local fields that are not explicitly updated from cloud
+                     Object.keys(existingDuty).forEach(key => {
+                         if (duty[key] === undefined) {
+                             duty[key] = existingDuty[key];
+                         }
+                     });
+                     if (existingDuty.serNo !== undefined) duty.serNo = existingDuty.serNo;
+                     if (existingDuty.title !== undefined) duty.title = existingDuty.title;
+                     if (existingDuty.eligibleFlights !== undefined) duty.eligibleFlights = existingDuty.eligibleFlights;
+                     if (existingDuty.eligibleRanks !== undefined) duty.eligibleRanks = existingDuty.eligibleRanks;
+                     if (existingDuty.flightTargets !== undefined) duty.flightTargets = existingDuty.flightTargets;
+                     if (existingDuty.dutyCode !== undefined) duty.dutyCode = existingDuty.dutyCode;
+                 }
                  return duty;
              });
+             
+             // Restore local duties that are not yet in Supabase
+             currentMatrix.forEach((localDuty: any) => {
+                 if (!formattedMatrix.find(d => d.id === localDuty.id)) {
+                     formattedMatrix.push(localDuty);
+                 }
+             });
 
-             const currentRaw = window.localStorage.getItem('baf_official_duty_matrix_v4');
              const newRaw = JSON.stringify(formattedMatrix);
              if (currentRaw !== newRaw) {
                  window.localStorage.setItem('baf_official_duty_matrix_v4', newRaw);
@@ -542,7 +570,10 @@ export class LocalDatabaseEngine {
             'Flight': a.flightName,
             'Trade': a.trade || null,
             'Mobile No': a.mobileNo || null,
-            'Address': a.addressBlock || null,
+            'Blood Group': a.bloodGroup || null,
+            'Permanent Address': a.permanentAddress || null,
+            'Dt of Posting': a.dateJoined || null,
+            'Present Address': a.addressBlock || null,
             'Status': a.active === false ? 'SUSPENDED' : 'ACTIVE',
             'Unit Left date': a.dateLeft || null
           }));

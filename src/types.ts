@@ -41,6 +41,8 @@ export interface Airman {
   name: string;        // Surname / Short name
   trade: string;       // e.g. Avionic, Aero Mech, Armt Mech, GCO, Admin
   addressBlock: string;// e.g. Block-B, Qtr 104 / Barrack-3
+  permanentAddress?: string;
+  bloodGroup?: string;
   mobileNo: string;
   flightName: FlightName;
   remarks: string;

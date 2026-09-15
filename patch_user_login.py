@@ -1,214 +1,42 @@
-import React, { useState } from 'react';
-import { Airman } from '../types';
-import { Logo155UASU } from './Logo155UASU';
-import { X, Shield, ArrowRight, AlertCircle, CheckCircle2, Lock, LogIn, ChevronRight, ChevronUp, ArrowLeft, Eye, EyeOff, Building2, Moon, Coffee } from 'lucide-react';
-import { NightCountStateView } from './NightCountStateView';
-import { getAppConfig, isFeatureActive } from '../utils/appConfig';
-import { RandomizedKeypad } from './RandomizedKeypad';
-import { setUserSession, validateUserLogin, getDetailedUsers, saveDetailedUsers } from '../utils/authSession';
+import re
 
-interface UserLoginGateProps {
-  airmen: Airman[];
-  onAuthenticated: () => void;
-}
+with open('src/components/UserLoginGate.tsx', 'r') as f:
+    content = f.read()
 
-export const UserLoginGate: React.FC<UserLoginGateProps> = ({
-  airmen,
-  onAuthenticated,
-}) => {
-  const [bdInput, setBdInput] = useState(() => {
-    try {
-      return localStorage.getItem('baf_last_used_id') || '';
-    } catch { return ''; }
-  });
-  const [passwordInput, setPasswordInput] = useState('');
-  const [showPin, setShowPin] = useState<boolean>(false);
-  const [errorMsg, setErrorMsg] = useState<string>('');
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [successAirman, setSuccessAirman] = useState<Airman | null>(null);
-  const [isUserIdFocused, setIsUserIdFocused] = useState<boolean>(false);
-  const [isPasswordFocused, setIsPasswordFocused] = useState<boolean>(true);
-  const [isConfirmFocused, setIsConfirmFocused] = useState<boolean>(false);
+# Add state for menu expansion
+state_search = "  const [activeTab, setActiveTab] = useState<'Office' | 'Nt Count' | 'Canteen'>('Office');"
+state_replace = "  const [activeTab, setActiveTab] = useState<'Office' | 'Nt Count' | 'Canteen'>('Office');\n  const [isMenuOpen, setIsMenuOpen] = useState(false);"
 
-  const [recentLogins, setRecentLogins] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('baf_recent_logins');
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
-  });
+content = content.replace(state_search, state_replace)
 
-  const removeRecent = (id: string) => {
-    const updated = recentLogins.filter(x => x !== id);
-    setRecentLogins(updated);
-    localStorage.setItem('baf_recent_logins', JSON.stringify(updated));
-  };
+# Add ChevronUp to imports if not there
+if "ChevronUp" not in content:
+    content = content.replace("ChevronRight", "ChevronRight, ChevronUp, ArrowLeft")
 
-  // Reset Password Flow States
-  const [isResetMode, setIsResetMode] = useState<boolean>(false);
-  const [resetStep, setResetStep] = useState<1 | 2 | 3 | 4>(1);
-  const [resetBd, setResetBd] = useState('');
-  const [resetName, setResetName] = useState('');
-  const [resetMobile, setResetMobile] = useState('');
-  const [newPass, setNewPass] = useState('');
-  const [confirmPass, setConfirmPass] = useState('');
-  const [targetAirman, setTargetAirman] = useState<Airman | null>(null);
-  const [activeTab, setActiveTab] = useState<'Office' | 'Nt Count' | 'Canteen'>('Office');
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
-
-  
-  
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg('');
-    setIsLoading(true);
-
-    const cleanInput = bdInput.replace(/^BD\/?/i, '').trim();
-    if (!cleanInput) {
-      setErrorMsg('Please enter a valid User ID.');
-      setIsLoading(false);
-      return;
-    }
-
-    const validation = await validateUserLogin(cleanInput, passwordInput, airmen);
-
-    if (validation.success) {
-      // Even if nominal airman is not found in local JSON, we should allow login if Supabase auth succeeds
-      const airman = validation.airman || {
-        id: validation.detailedUser?.id || cleanInput,
-        bdNo: cleanInput,
-        rank: validation.detailedUser?.rank || 'Unknown',
-        name: validation.detailedUser?.name || 'Unknown',
-        flightName: validation.detailedUser?.flightName || 'Unknown',
-        trade: validation.detailedUser?.trade || 'Unknown',
-      };
-      const config = getAppConfig();
-      const role = validation.detailedUser?.role || 'USER';
-      
-      if (isFeatureActive(config.maintenance) && role !== 'SUPER_ADMIN' && role !== 'OWNER') {
-        setErrorMsg(config.maintenance.message || 'App is currently undergoing maintenance. Please try again later.');
-        setIsLoading(false);
-        return;
-      }
-      setSuccessAirman(airman);
-      const assignedLoginRole = cleanInput === '48456' ? 'OWNER' : 'USER';
-      setUserSession(airman as any, assignedLoginRole, validation.detailedUser);
-      const updatedRecents = [cleanInput, ...recentLogins.filter(x => x !== cleanInput)].slice(0, 4);
-      setRecentLogins(updatedRecents);
-      localStorage.setItem('baf_recent_logins', JSON.stringify(updatedRecents));
-      localStorage.setItem('baf_last_used_id', cleanInput);
-      
-      setIsLoading(false);
-      onAuthenticated();
-    } else {
-      setErrorMsg(validation.message || 'Invalid User ID or PIN.');
-      setPasswordInput('');
-      setIsLoading(false);
-    }
-  };
-
-  const handleNextStep = (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg('');
-
-    if (resetStep === 1) {
-      const cleanBd = resetBd.replace(/^BD\/?/i, '').trim().toLowerCase();
-      const airman = airmen.find(a => a.bdNo.toLowerCase() === cleanBd);
-      if (!airman) {
-        setErrorMsg('User ID not found in Nominal Roll.');
-        return;
-      }
-      setTargetAirman(airman);
-      setResetStep(2);
-    } 
-    else if (resetStep === 2) {
-      if (!targetAirman) return;
-      if (resetName.trim().toLowerCase() !== targetAirman.name.toLowerCase()) {
-        setErrorMsg('Name does not match our records.');
-        return;
-      }
-      setResetStep(3);
-    }
-    else if (resetStep === 3) {
-      if (!targetAirman) return;
-      // Remove spaces or hyphens for comparison
-      const cleanInputMobile = resetMobile.replace(/\D/g, '');
-      const cleanTargetMobile = (targetAirman.mobileNo || '').replace(/\D/g, '');
-      
-      if (cleanInputMobile !== cleanTargetMobile || !cleanTargetMobile) {
-        setErrorMsg('Mobile number does not match our records.');
-        return;
-      }
-      setResetStep(4);
-    }
-    else if (resetStep === 4) {
-      if (!newPass || !confirmPass) {
-        setErrorMsg('Please enter both PIN fields.');
-        return;
-      }
-      if (newPass !== confirmPass) {
-        setErrorMsg('PINs do not match.');
-        return;
-      }
-      if (!targetAirman) return;
-
-      const users = getDetailedUsers(airmen);
-      const cleanBd = targetAirman.bdNo.toLowerCase();
-      let userDetail = users.find(u => u.bdNo.toLowerCase() === cleanBd);
-      
-      if (userDetail) {
-        userDetail.password = newPass;
-      } else {
-        // Create new if not exists
-        userDetail = {
-          id: `user-login-${cleanBd}`,
-          airmanId: targetAirman.id,
-          bdNo: cleanBd,
-          rank: targetAirman.rank,
-          name: targetAirman.name,
-          flightName: targetAirman.flightName,
-          trade: targetAirman.trade,
-          role: cleanBd === '48456' ? 'OWNER' : 'USER',
-          password: newPass,
-          status: 'ACTIVE',
-          detailedAt: new Date().toISOString(),
-          detailedBy: 'PIN Reset',
-        };
-        users.push(userDetail);
-      }
-      
-      saveDetailedUsers(users);
-      
-      // Auto login after reset
-      setSuccessAirman(targetAirman);
-      setUserSession(targetAirman, userDetail.role, userDetail);
-      setTimeout(() => {
-        onAuthenticated();
-      }, 800);
-    }
-  };
-
-  const cancelReset = () => {
-    setIsResetMode(false);
-    setResetStep(1);
-    setResetBd('');
-    setResetName('');
-    setResetMobile('');
-    setNewPass('');
-    setConfirmPass('');
-    setErrorMsg('');
-    setTargetAirman(null);
-  };
-
-  return (
+# Let's completely rewrite the return block.
+# We'll split the content at `return (` and just generate the rest.
+idx = content.find("  return (")
+if idx != -1:
+    content = content[:idx] + """  return (
     <div className={`min-h-screen flex flex-col items-center bg-slate-950 p-4 select-none overflow-x-hidden ${activeTab === 'Nt Count' ? 'justify-start pt-4' : 'justify-center'}`}>
       <div className="fixed top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-emerald-600/10 rounded-full blur-3xl pointer-events-none z-0" />
       <div className="fixed bottom-10 right-10 w-72 h-72 bg-sky-600/10 rounded-full blur-3xl pointer-events-none z-0" />
       
       {/* Content Area */}
-      <div className={`w-full ${activeTab !== 'Office' ? 'flex-1 z-10 p-0 m-0' : 'max-w-md relative z-10'}`}>
+      <div className={`w-full ${activeTab !== 'Office' ? 'max-w-6xl z-10' : 'max-w-md relative z-10'}`}>
         
+        {activeTab !== 'Office' && (
+          <div className="mb-4">
+            <button 
+              onClick={() => setActiveTab('Office')}
+              className="flex items-center space-x-2 text-slate-400 hover:text-white transition-colors bg-slate-900/50 px-4 py-2 rounded-xl border border-slate-800 backdrop-blur-md"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span className="font-bold text-sm">Back to Login</span>
+            </button>
+          </div>
+        )}
+
         {activeTab === 'Office' && (
           <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-800 rounded-3xl p-8 shadow-2xl space-y-6 text-white text-center mb-16">
             {/* Header */}
@@ -462,44 +290,21 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
         )}
 
         {activeTab === 'Nt Count' && (
-          <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto animate-fadeIn flex flex-col">
-            <div className="sticky top-0 z-50 bg-slate-950/80 backdrop-blur-md border-b border-slate-800 p-4 flex items-center">
-              <button 
-                onClick={() => setActiveTab('Office')}
-                className="flex items-center space-x-2 text-slate-400 hover:text-white transition-colors bg-slate-900/80 px-4 py-2 rounded-xl border border-slate-700 shadow-lg cursor-pointer"
-              >
-                <ArrowLeft className="w-5 h-5" />
-                <span className="font-bold text-sm">Back</span>
-              </button>
-              <h2 className="ml-4 text-white font-bold tracking-widest text-sm opacity-50">NIGHT COUNT STATE</h2>
-            </div>
-            <div className="flex-1 p-4 sm:p-6 w-full max-w-7xl mx-auto">
-              <NightCountStateView
-                role="USER"
-                airmen={airmen}
-                selectedDate={selectedDate}
-                setSelectedDate={setSelectedDate}
-              />
-            </div>
+          <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-800 rounded-3xl p-4 sm:p-8 shadow-2xl text-white mb-16 animate-fadeIn">
+            <NightCountStateView
+              role="USER"
+              airmen={airmen}
+              selectedDate={selectedDate}
+              setSelectedDate={setSelectedDate}
+            />
           </div>
         )}
 
         {activeTab === 'Canteen' && (
-          <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto animate-fadeIn flex flex-col">
-            <div className="sticky top-0 z-50 bg-slate-950/80 backdrop-blur-md border-b border-slate-800 p-4 flex items-center">
-              <button 
-                onClick={() => setActiveTab('Office')}
-                className="flex items-center space-x-2 text-slate-400 hover:text-white transition-colors bg-slate-900/80 px-4 py-2 rounded-xl border border-slate-700 shadow-lg cursor-pointer"
-              >
-                <ArrowLeft className="w-5 h-5" />
-                <span className="font-bold text-sm">Back</span>
-              </button>
-            </div>
-            <div className="flex-1 flex flex-col items-center justify-center p-8 space-y-4">
-              <Coffee className="w-20 h-20 text-slate-700" />
-              <h2 className="text-2xl font-black text-white">Canteen Portal</h2>
-              <p className="text-slate-500 font-medium">This feature is currently under development.</p>
-            </div>
+          <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-800 rounded-3xl p-8 shadow-2xl text-white text-center space-y-4 mb-16 animate-fadeIn">
+            <Coffee className="w-16 h-16 text-slate-700 mx-auto" />
+            <h2 className="text-xl font-bold">Canteen Portal</h2>
+            <p className="text-slate-500 text-sm">This feature is currently under development.</p>
           </div>
         )}
       </div>
@@ -555,3 +360,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
     </div>
   );
 };
+"""
+
+with open('src/components/UserLoginGate.tsx', 'w') as f:
+    f.write(content)

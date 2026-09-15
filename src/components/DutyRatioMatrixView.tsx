@@ -49,10 +49,9 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
   const [selectedFlightFilter, setSelectedFlightFilter] = useState<FlightName | 'Overall'>('Overall');
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState<boolean>(false);
-  const [showTableInfo, setShowTableInfo] = useState<Record<number, boolean>>({});
+  const [showAllTableInfo, setShowAllTableInfo] = useState<boolean>(false);
   const [settingsTableIdx, setSettingsTableIdx] = useState<number | null>(null);
-
-  const toggleTableInfo = (idx: number) => setShowTableInfo(prev => ({ ...prev, [idx]: !prev[idx] }));
+  const [resetConfirmTableIdx, setResetConfirmTableIdx] = useState<number | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [viewMode, setViewMode] = useState<'DUTY_DISTRIBUTION' | 'DUTY_RATIO' | 'MANPOWER' | 'DUTY_LIST'>('DUTY_RATIO');
   const [targetDate, setTargetDate] = useState(() => {
@@ -156,19 +155,24 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
   };
 
   const handleResetTable = (tableIndex: number) => {
-    if (!window.confirm('Reset this table to 0 for all flights?')) return;
+    setResetConfirmTableIdx(tableIndex);
+  };
+
+  const confirmResetTable = () => {
+    if (resetConfirmTableIdx === null) return;
     const updated = [...matrix];
-    const tableObj = { ...updated[tableIndex] };
+    const tableObj = { ...updated[resetConfirmTableIdx] };
     const flightData = { ...tableObj.data };
     flights.forEach(f => {
       flightData[f] = new Array(31).fill(0);
     });
     tableObj.data = flightData;
-    updated[tableIndex] = tableObj;
+    updated[resetConfirmTableIdx] = tableObj;
     setMatrix(updated);
     saveDutyMatrix(updated);
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 2000);
+    setResetConfirmTableIdx(null);
   };
 
 
@@ -350,27 +354,41 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
         )}
 
                 {viewMode === 'DUTY_RATIO' && (
-          <div className="flex flex-col sm:flex-row items-center justify-between bg-white dark:bg-slate-900 p-4 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 mb-6">
-            <div className="flex items-center space-x-2 text-sm font-bold text-slate-700 dark:text-slate-300">
-              <Layers className="w-4 h-4 text-indigo-500" />
-              <span>Flight Filter:</span>
+          <>
+            <div className="flex flex-col sm:flex-row items-center justify-between bg-white dark:bg-slate-900 p-4 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 mb-6">
+              <div className="flex items-center space-x-2 text-sm font-bold text-slate-700 dark:text-slate-300">
+                <Layers className="w-4 h-4 text-indigo-500" />
+                <span>Flight Filter:</span>
+              </div>
+              <div className="flex flex-wrap gap-2 mt-3 sm:mt-0">
+                {['Overall', 'Mechanics', 'Avionics', 'GCS', 'Admin'].map((fl) => (
+                  <button
+                    key={fl}
+                    onClick={() => setSelectedFlightFilter(fl as any)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      selectedFlightFilter === fl
+                        ? 'bg-indigo-600 text-white shadow-md'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    {fl}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="flex flex-wrap gap-2 mt-3 sm:mt-0">
-              {['Overall', 'Mechanics', 'Avionics', 'GCS', 'Admin'].map((fl) => (
+            
+            {selectedFlightFilter === 'Overall' && (
+              <div className="flex justify-center mb-6">
                 <button
-                  key={fl}
-                  onClick={() => setSelectedFlightFilter(fl as any)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                    selectedFlightFilter === fl
-                      ? 'bg-indigo-600 text-white shadow-md'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
-                  }`}
+                  onClick={() => setShowAllTableInfo(!showAllTableInfo)}
+                  className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-sm font-bold transition-all shadow-sm border ${showAllTableInfo ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                 >
-                  {fl}
+                  <Info className="w-4 h-4" />
+                  <span>{showAllTableInfo ? 'Hide Req & Ratio Info' : 'Show Req & Ratio Info'}</span>
                 </button>
-              ))}
-            </div>
-          </div>
+              </div>
+            )}
+          </>
         )}
 
         {/* Existing Mapping for Overall or Specific Single Flight Rendering */}
@@ -394,7 +412,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
               <div className={`px-4 py-3 flex items-center justify-between ${colors.header}`}>
                 <div className="flex items-center space-x-3">
                   <span className="font-mono font-black text-sm tracking-wider">
-                    {tableIdx + 1}. {table.title}
+                    {table.serNo !== undefined ? `${table.serNo}. ` : `${tableIdx + 1}. `}{table.title}
                   </span>
                 </div>
 
@@ -406,19 +424,13 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                         : (table.flightTargets?.[selectedFlightFilter as 'Mechanics' | 'Avionics' | 'GCS' | 'Admin'] || 0)}
                     </strong>
                   </span>
-                  {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') && (
-                    <>
-                      <button
-                        onClick={() => toggleTableInfo(tableIdx)}
-                        title="Toggle Target/Requirement Info"
-                        className={`p-1.5 rounded-lg transition-colors cursor-pointer ${showTableInfo[tableIdx] ? 'bg-indigo-500/20 text-indigo-300' : 'bg-white/10 hover:bg-white/20 text-white'}`}
-                      >
-                        <Info className="w-4 h-4" />
-                      </button>
-
-                    </>
-                  )}
-
+                  <button
+                    onClick={() => handleResetTable(tableIdx)}
+                    className="p-1.5 hover:bg-white/20 rounded-lg transition-colors group"
+                    title="Reset this duty table"
+                  >
+                    <RotateCcw className="w-4 h-4 text-white/70 group-hover:text-white" />
+                  </button>
                 </div>
               </div>
                 {/* Table Body (Days 1 to 31) */}
@@ -434,7 +446,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                             {d}
                           </th>
                         ))}
-                        {showTableInfo[tableIdx] ? (
+                        {showAllTableInfo ? (
                           <th className="p-2 w-28 min-w-28 font-bold bg-slate-200/60 dark:bg-slate-700/60 border-l border-slate-200 dark:border-slate-700 text-center align-middle leading-tight">
                             Total / Ratio
                           </th>
@@ -492,7 +504,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                                 );
                               })}
 
-                              {showTableInfo[tableIdx] ? (
+                              {showAllTableInfo ? (
                                 <td className="p-2 font-mono font-bold bg-slate-50 dark:bg-slate-800/50 border-l border-slate-200 dark:border-slate-700 text-center align-middle">
                                   <div className="flex items-center justify-center space-x-1 text-[11px]">
                                     <span className={rowSum !== Math.round(autoTargets?.[flight]?.[table.id] || table.flightTargets?.[flight] || 0) ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}>{rowSum}</span>
@@ -514,7 +526,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                         <td className="p-2 text-center font-black sticky left-0 bg-slate-100 dark:bg-slate-800 z-10 border-r border-slate-300 dark:border-slate-700 text-center align-middle">
                           <div className="flex items-center justify-between">
                             <span className="uppercase text-[11px] font-black tracking-wider text-slate-800 dark:text-slate-200">
-                              {showTableInfo[tableIdx] ? 'Total / Reqr.' : 'Daily Total'}
+                              {showAllTableInfo ? 'Total / Reqr.' : 'Daily Total'}
                             </span>
                             <span className="text-[9px] px-1 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-mono font-bold">
                               TOTAL
@@ -546,7 +558,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                                   : 'text-slate-400 dark:text-slate-600 font-normal'
                               }`}
                             >
-                              {showTableInfo[tableIdx] ? (
+                              {showAllTableInfo ? (
                                 <div className="flex items-center justify-center space-x-0.5 text-[10px]">
                                   <span className={dailySum !== dailyReq ? 'text-red-600 dark:text-red-400' : ''}>{dailySum}</span>
                                   <span className="text-slate-400 font-normal">/</span>
@@ -560,7 +572,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                         })}
 
                         <td className="p-2 font-mono font-black text-emerald-800 dark:text-emerald-300 bg-slate-200/90 dark:bg-slate-700/90 border-l border-slate-300 dark:border-slate-700 text-xs text-center align-middle">
-                          {showTableInfo[tableIdx] ? (
+                          {showAllTableInfo ? (
                             <div className="flex items-center justify-center space-x-1">
                               <span className={tableTotal !== (table.totalRequiredMonth || 0) ? 'text-red-600 dark:text-red-400' : ''}>{tableTotal}</span>
                               <span className="text-slate-400 font-normal">/</span>
@@ -616,7 +628,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                       <tr key={table.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
                         <td className="p-2 text-center font-bold text-slate-900 dark:text-white sticky left-0 bg-white dark:bg-slate-900 z-10 border-r border-slate-200 dark:border-slate-800 align-middle text-[11px] leading-tight">
                           <div className="flex items-center justify-between">
-                            <span>{table.title}</span>
+                            <span>{table.serNo !== undefined ? `${table.serNo}. ` : ''}{table.title}</span>
                             {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') ? (
                               <button
                                 onClick={() => setEditingCalendar({ tableIdx: matrix.findIndex(x => x.id === table.id), flight: selectedFlightFilter as FlightName })}
@@ -817,6 +829,35 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
         />
       )}
       </div>
-    </div>
+    
+      {/* Reset Confirmation Modal */}
+      {resetConfirmTableIdx !== null && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-2xl shadow-2xl p-6 text-center border border-slate-200 dark:border-slate-800">
+            <div className="w-16 h-16 rounded-full bg-rose-100 dark:bg-rose-900/30 flex items-center justify-center mx-auto mb-4">
+              <RotateCcw className="w-8 h-8 text-rose-600 dark:text-rose-400" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Reset Duty Table?</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
+              Are you sure you want to reset all flights for <strong className="text-slate-700 dark:text-slate-300">{matrix[resetConfirmTableIdx]?.title}</strong>? This action will set all values to 0.
+            </p>
+            <div className="flex space-x-3 justify-center">
+              <button
+                onClick={() => setResetConfirmTableIdx(null)}
+                className="px-4 py-2 font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmResetTable}
+                className="px-4 py-2 font-bold text-white bg-rose-600 hover:bg-rose-700 shadow-md rounded-xl transition-colors"
+              >
+                Reset Now
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+</div>
   );
 };
