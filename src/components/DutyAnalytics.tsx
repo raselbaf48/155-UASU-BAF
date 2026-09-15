@@ -485,7 +485,7 @@ const DutyDetailsModal: React.FC<{
 
   const targetType = mapDutyIdToType(dutyId);
 
-  const relevantAssignments = assignments.filter(a => {
+  const rawRelevantAssignments = assignments.filter(a => {
     if (dutyId === 'ALL') {
       return ['GD', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA'].includes(a.dutyCode);
     }
@@ -494,6 +494,16 @@ const DutyDetailsModal: React.FC<{
     }
     return a.dutyCode === targetType;
   });
+  
+  const uniqueRelevantAssignmentsMap = new Map();
+  rawRelevantAssignments.forEach(a => {
+      const key = a.airmanId + '-' + a.date + '-' + a.dutyCode + '-' + (a.idaShift || '');
+      if (!uniqueRelevantAssignmentsMap.has(key)) {
+          uniqueRelevantAssignmentsMap.set(key, a);
+      }
+  });
+  const relevantAssignments = Array.from(uniqueRelevantAssignmentsMap.values());
+  
 
   const uniqueAirmanIds = Array.from(new Set(relevantAssignments.map(a => a.airmanId)));
   const isHeavyDuty = ['GD', 'BTF', 'NTF', 'AIRPORT', 'HALISHAHAR', 'IDAC'].includes(dutyId);
@@ -554,8 +564,17 @@ const DutyDetailsModal: React.FC<{
             </td>
             {daysArray.map(day => {
               const dateStr = `${currentYear}-${currentMonth.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
-              const assignmentsOnDate = relevantAssignments
-                .filter(a => a.airmanId === airman.id && a.date === dateStr)
+              const assignmentsOnDateRaw = relevantAssignments
+                .filter(a => a.airmanId === airman.id && a.date === dateStr);
+                
+              const uniqueMap = new Map();
+              assignmentsOnDateRaw.forEach(a => {
+                  const key = a.dutyCode + '-' + (a.idaShift || '');
+                  if (!uniqueMap.has(key)) {
+                      uniqueMap.set(key, a);
+                  }
+              });
+              const assignmentsOnDate = Array.from(uniqueMap.values())
                 .sort((a, b) => {
                   const getWeight = (shift) => {
                     if (shift === 'Morning') return 1;

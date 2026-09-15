@@ -1867,7 +1867,17 @@ export class LocalDatabaseEngine {
     const today = new Date();
     const defaultMonthKey = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}`;
     const targetMonth = monthKey || defaultMonthKey;
-    const assignments = this.db.assignments[targetMonth] || [];
+    let assignments = this.db.assignments[targetMonth] || [];
+
+    // Deduplicate assignments
+    const uniqueMap = new Map();
+    assignments.forEach(a => {
+        const key = a.airmanId + '-' + a.date + '-' + a.dutyCode + '-' + (a.idaShift || '');
+        if (!uniqueMap.has(key)) {
+            uniqueMap.set(key, a);
+        }
+    });
+    assignments = Array.from(uniqueMap.values());
 
     const [yStr, mStr] = targetMonth.split('-');
     const yNum = parseInt(yStr, 10);

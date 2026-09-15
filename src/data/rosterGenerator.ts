@@ -97,10 +97,17 @@ export function resolveAirmanDutyForDate(
 
 export function calculateDutyStats(
   airmen: Airman[],
-  assignments: DutyAssignment[],
+  rawAssignments: DutyAssignment[],
   year?: number,
   month?: number
 ): AirmanDutyStats[] {
+  const uniqueAss = new Map();
+  rawAssignments.forEach(a => {
+      const key = a.airmanId + '-' + a.date + '-' + a.dutyCode + '-' + (a.idaShift || '');
+      if (!uniqueAss.has(key)) uniqueAss.set(key, a);
+  });
+  const assignments = Array.from(uniqueAss.values());
+
   const map = new Map<string, AirmanDutyStats>();
 
   airmen.forEach((a) => {
