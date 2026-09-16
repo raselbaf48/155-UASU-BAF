@@ -58,6 +58,8 @@ import {
   MultiParadeDayItem,
 } from '../utils/docxExport';
 
+import { exportHtmlToWord } from '../utils/htmlExport';
+
 interface NightCountStateViewProps {
   role?: UserRole;
   userFlight?: string;
@@ -708,7 +710,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
   };
 
   const handleDownloadDocx = () => {
-    document.title = getPdfTitle(); window.print();
+    exportHtmlToWord('official-parade-document', getPdfTitle() + '.doc', 'landscape');
   };
   // Compute Flight Stats for Single-Day Summary Matrix
   const getFlightStats = (fl: FlightName | 'Overall') => {

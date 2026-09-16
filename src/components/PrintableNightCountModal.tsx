@@ -929,7 +929,7 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
 
  return (
     <div className="space-y-6">
- {/* PRINT STYLES */}
+  {/* PRINT STYLES */}
  <style>{`
             @media print {
               @page {
@@ -952,20 +952,15 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
               }
               /* Hide scrollbars during print */
               ::-webkit-scrollbar { display: none; }
-              
-              /* Hide main app, only show portal */
-              #root {
-                display: none !important;
-              }
             }
           `}</style>
 
  
  {/* MODAL OVERLAY */}
- <div className="fixed inset-0 z-[100] flex flex-col bg-slate-900/90 backdrop-blur-sm overflow-hidden print:bg-white print:block">
+ <div className="fixed inset-0 z-[100] flex flex-col bg-slate-900/90 backdrop-blur-sm overflow-hidden print:bg-white print:block print:relative print:inset-auto">
  
  {/* MODAL HEADER - HIDDEN ON PRINT */}
- <div className="flex-none bg-slate-900 border-b border-slate-700 p-4 flex items-center justify-between shadow-2xl print:hidden z-10">
+ <div className="flex-none bg-slate-900 border-b border-slate-700 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between shadow-2xl print:hidden z-10 gap-4">
  <div className="flex items-center space-x-4">
  <button
  onClick={onClose}
@@ -975,28 +970,28 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  <X className="w-5 h-5" />
  </button>
  <div>
- <h2 className="text-base sm:text-lg font-black text-white">Preview</h2>
- <p className="text-xs font-medium text-slate-400">Night Count State</p>
+ <h2 className="text-base sm:text-lg font-black text-white">Print Preview: 155 UASU BAF</h2>
+ <p className="text-xs font-medium text-slate-400">Review document before printing</p>
  </div>
  </div>
- <div className="flex items-center space-x-3">
+ <div className="flex flex-wrap sm:flex-nowrap items-center gap-3">
  
             {onDownloadDocx && (
               <button
                 onClick={onDownloadDocx}
-                className="flex items-center space-x-2 px-3 sm:px-6 py-2 bg-blue-700 hover:bg-blue-600 text-white rounded-xl font-black text-sm shadow-lg shadow-blue-900/20 transition-all cursor-pointer"
-                title="Download Document"
+                className="flex items-center space-x-2 px-3 sm:px-6 py-2 sm:py-2.5 bg-blue-700 hover:bg-blue-600 text-white rounded-xl font-black text-sm shadow-lg shadow-blue-900/20 transition-all cursor-pointer"
+                title="Export Document"
               >
-                <Download className="w-5 h-5" />
-                <span className="hidden sm:inline">Download Document</span><span className="inline sm:hidden">Download</span>
+                <FileDown className="w-5 h-5" />
+                <span>Export Doc</span>
               </button>
             )}
 <button
  onClick={() => { document.title = getPdfTitle(); window.print(); }}
- className="flex items-center space-x-2 px-3 sm:px-6 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black text-sm shadow-lg shadow-emerald-900/20 transition-all cursor-pointer"
+ className="flex items-center space-x-2 px-3 sm:px-6 py-2 sm:py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black text-sm shadow-lg shadow-emerald-900/20 transition-all cursor-pointer"
  >
  <Printer className="w-5 h-5" />
- <span className="hidden sm:inline">Official Export / Print</span><span className="inline sm:hidden">Print</span>
+ <span>Official Export / Print</span>
  </button>
  </div>
  </div>

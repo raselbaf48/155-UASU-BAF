@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Airman } from '../types';
 import { Logo155UASU } from './Logo155UASU';
 import { X, Shield, ArrowRight, AlertCircle, CheckCircle2, Lock, LogIn, ChevronRight, ChevronUp, ArrowLeft, Eye, EyeOff, Building2, Moon, Coffee } from 'lucide-react';
@@ -27,7 +27,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [successAirman, setSuccessAirman] = useState<Airman | null>(null);
   const [isUserIdFocused, setIsUserIdFocused] = useState<boolean>(false);
-  const [isPasswordFocused, setIsPasswordFocused] = useState<boolean>(true);
+  const [isPasswordFocused, setIsPasswordFocused] = useState<boolean>(false);
   const [isConfirmFocused, setIsConfirmFocused] = useState<boolean>(false);
 
   const [recentLogins, setRecentLogins] = useState<string[]>(() => {
@@ -55,9 +55,27 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
   const [activeTab, setActiveTab] = useState<'Office' | 'Nt Count' | 'Canteen'>('Office');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  
+  const loginPinRef = useRef<HTMLDivElement>(null);
+  const resetPinRef = useRef<HTMLDivElement>(null);
+  const confirmPinRef = useRef<HTMLDivElement>(null);
 
-  
-  
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (loginPinRef.current && !loginPinRef.current.contains(event.target as Node)) {
+        setIsPasswordFocused(false);
+      }
+      if (resetPinRef.current && !resetPinRef.current.contains(event.target as Node)) {
+        setIsPasswordFocused(false);
+      }
+      if (confirmPinRef.current && !confirmPinRef.current.contains(event.target as Node)) {
+        setIsConfirmFocused(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -300,14 +318,13 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                   )}
                 </div>
 
-                <div className="text-left space-y-2">
+                <div className="text-left space-y-2" ref={loginPinRef}>
                   <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">PIN</label>
                   <div className="relative">
                     <input
                       type={showPin ? "text" : "password"}
                       value={passwordInput}
                       readOnly
-                      autoFocus
                       onFocus={() => { setIsPasswordFocused(true); setIsUserIdFocused(false); }}
                       className="w-full bg-slate-800/90 border border-slate-700 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-2xl px-4 py-3.5 pr-12 text-sm font-mono font-bold text-white outline-none transition-all cursor-pointer"
                       placeholder="Tap to open keypad"
@@ -405,7 +422,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
 
                 {resetStep === 4 && (
                   <div className="space-y-4 text-left">
-                    <div className="space-y-2">
+                    <div className="space-y-2" ref={resetPinRef}>
                       <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Enter New PIN</label>
                       <input
                         type="password"
@@ -421,7 +438,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                         </div>
                       )}
                     </div>
-                    <div className="space-y-2">
+                    <div className="space-y-2" ref={confirmPinRef}>
                       <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Confirm Your PIN</label>
                       <input
                         type="password"
