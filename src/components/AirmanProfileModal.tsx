@@ -22,11 +22,12 @@ interface AirmanProfileModalProps {
   initialTab?: 'profile' | 'history';
   initialCategory?: string;
   historyOnly?: boolean;
+  allowEditDelete?: boolean;
 }
 
 const presetLocations = ['AIR HQ', 'BAF AKR', 'BAF BSR', 'BAF MTR', 'BAF CXB', 'BAF SMD'];
 
-export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, onClose, onEditAirman, onRemoveAirman, role, initialTab = 'profile', initialCategory = 'ALL', historyOnly = false }) => {
+export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, onClose, onEditAirman, onRemoveAirman, role, initialTab = 'profile', initialCategory = 'ALL', historyOnly = false, allowEditDelete = false }) => {
   const [activeTab, setActiveTab] = useState<'history' | 'profile'>(historyOnly ? 'history' : initialTab);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [fromDate, setFromDate] = useState<string>(() => {
@@ -565,7 +566,7 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
 
           <div className="flex items-center space-x-2">
             
-            {onEditAirman && !historyOnly && (role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') && (
+            {allowEditDelete && onEditAirman && !historyOnly && (role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') && (
               <button
                 onClick={() => { onClose(); onEditAirman(airman); }}
                 className="p-2 rounded-xl text-emerald-400 hover:text-white hover:bg-slate-800 transition-colors"
@@ -575,7 +576,7 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
               </button>
             )}
             
-            {onRemoveAirman && !historyOnly && (role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') && (
+            {allowEditDelete && onRemoveAirman && !historyOnly && (role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') && (
               <button
                 onClick={() => setShowDeleteConfirm(true)}
                 className="p-2 rounded-xl text-red-500 hover:text-white hover:bg-red-500/20 transition-colors ml-1"

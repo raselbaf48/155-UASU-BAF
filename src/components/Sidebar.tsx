@@ -217,21 +217,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <Activity className={`w-4 h-4 shrink-0 ${activeTab === 'pt-state' ? 'text-white' : 'text-emerald-300'}`} />
                   {!collapsed && <span className="ml-3 truncate">PT State</span>}
                 </button>
-                {/* Night Count State */}
-                <button
-                  onClick={() => handleSelectTab('night-count-state')}
-                  className={`w-full flex items-center ${
-                    collapsed ? 'justify-center px-0 py-3' : 'justify-start px-3 py-3 sm:py-2.5'
-                  } rounded-xl text-xs font-bold transition-all duration-150 ${
-                    activeTab === 'night-count-state'
-                      ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-900/50 scale-[1.02] border border-emerald-400/30'
-                      : 'bg-[#084228]/50 text-emerald-100 hover:bg-[#0b4a2d] hover:text-white border border-[#0d5635]/50'
-                  }`}
-                  title="Night Count State (Airmen)"
-                >
-                  <Moon className={`w-4 h-4 shrink-0 ${activeTab === 'night-count-state' ? 'text-white' : 'text-emerald-300'}`} />
-                  {!collapsed && <span className="ml-3 truncate">Night Count State</span>}
-                </button>
               </div>
             )}
           </div>

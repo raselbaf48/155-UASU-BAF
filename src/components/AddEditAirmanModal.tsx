@@ -25,6 +25,7 @@ export const AddEditAirmanModal: React.FC<AddEditAirmanModalProps> = ({
     const [flightName, setFlightName] = useState<FlightName | ''>(airmanToEdit?.flightName || '');
   const [mobileNo, setMobileNo] = useState(airmanToEdit?.mobileNo || '');
   const [bloodGroup, setBloodGroup] = useState(airmanToEdit?.bloodGroup || '');
+  const [jcoSeniorityOrder, setJcoSeniorityOrder] = useState<number | ''>(airmanToEdit?.jcoSeniorityOrder || '');
   const [permanentAddress, setPermanentAddress] = useState(airmanToEdit?.permanentAddress || '');
 
   const [isAddressPreset, setIsAddressPreset] = useState(() => {
@@ -203,10 +204,11 @@ export const AddEditAirmanModal: React.FC<AddEditAirmanModalProps> = ({
       bloodGroup: bloodGroup || '',
       permanentAddress: isAddressPreset ? `Vill: ${addrVill.trim()}; P/O: ${addrPO.trim()}; P/S: ${addrPS.trim()}; Dist: ${addrDist.trim()}` : permanentAddress.trim(),
       remarks: remarks.trim(),
-      dateJoined: dateJoined || undefined,
-      dateLeft: dateLeft || undefined,
-      leaveReason: finalLeaveReason,
+      dateJoined: dateJoined || '',
+      dateLeft: dateLeft || '',
+      leaveReason: finalLeaveReason || '',
       active: !dateLeft, // Set active to false if dateLeft is provided
+      jcoSeniorityOrder: ['MWO', 'SWO', 'WO'].includes(rank) ? (jcoSeniorityOrder ? Number(jcoSeniorityOrder) : 9999) : 9999,
     });
     onClose();
   };
@@ -333,7 +335,7 @@ export const AddEditAirmanModal: React.FC<AddEditAirmanModalProps> = ({
                 className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-semibold text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
               >
                 <option value="" disabled>Select Trade</option>
-                {['Afr Fitt', 'Eng Fitt', 'E&I Fitt', 'Radio Fitt', 'Armt Fitt', 'GS', 'Log Asst', 'Sec Asst (GD)', 'Sec Asst (Accts)', 'Admin Asst', 'ATCA'].map((t) => (
+                {['Afr Fitt', 'Eng Fitt', 'E&I Fitt', 'Radio Fitt', 'Armt Fitt', 'GS', 'Log Asst', 'Sec Asst (GD)', 'Sec Asst (Accts)', 'Admin Asst', 'ATCA', 'Cy Asst', 'IT Asst'].map((t) => (
                   <option key={t} value={t}>
                     {t}
                   </option>
@@ -341,6 +343,25 @@ export const AddEditAirmanModal: React.FC<AddEditAirmanModalProps> = ({
               </select>
             </div>
           </div>
+
+          {/* JCO Seniority */}
+          {['MWO', 'SWO', 'WO'].includes(rank) && (
+            <div className="p-3 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-xl">
+              <label className="block text-xs font-bold text-indigo-800 dark:text-indigo-300 mb-1">
+                JCO Seniority Order (Rank Date basis)
+              </label>
+              <input
+                type="number"
+                value={jcoSeniorityOrder}
+                onChange={(e) => setJcoSeniorityOrder(e.target.value === '' ? '' : Number(e.target.value))}
+                placeholder="e.g. 1, 2, 3..."
+                className="w-full px-3.5 py-2 bg-white dark:bg-slate-800 border border-indigo-300 dark:border-indigo-700 rounded-lg text-sm font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <p className="text-[10px] text-indigo-600 dark:text-indigo-400 mt-1 leading-tight">
+                Since BD No does not determine JCO seniority, enter an explicit order number (e.g., 1 for most senior, 2 for next).
+              </p>
+            </div>
+          )}
 
           {/* Flight & Mobile */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

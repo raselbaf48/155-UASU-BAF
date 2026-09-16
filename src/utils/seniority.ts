@@ -14,8 +14,9 @@ export const RANK_SENIORITY: Record<Rank, number> = {
 /**
  * Sorts airmen strictly according to Bangladesh Air Force Seniority:
  * 1. Rank (MWO > SWO > WO > Sgt > Cpl > LAC > AC-1 > AC-2)
- * 2. BD Number (Lower BD No = more senior)
- * 3. Serial Number
+ * 2. If Rank is MWO, SWO, or WO, sort by jcoSeniorityOrder (representing date of rank).
+ * 3. Else, sort by BD Number (Lower BD No = more senior)
+ * 4. Finally, by Serial Number
  */
 export function sortAirmenBySeniority(airmen: Airman[]): Airman[] {
   return [...airmen].sort((a, b) => {
@@ -24,6 +25,17 @@ export function sortAirmenBySeniority(airmen: Airman[]): Airman[] {
 
     if (rankA !== rankB) {
       return rankA - rankB;
+    }
+
+    // For JCOs (MWO, SWO, WO), BD No doesn't determine seniority within the same rank.
+    // Instead, it is based on the date they received the rank.
+    // We use an explicit 'jcoSeniorityOrder' field for this tie-breaker.
+    if (['MWO', 'SWO', 'WO'].includes(a.rank)) {
+      const orderA = a.jcoSeniorityOrder ?? 9999;
+      const orderB = b.jcoSeniorityOrder ?? 9999;
+      if (orderA !== orderB) {
+        return orderA - orderB;
+      }
     }
 
     // Extract numbers from BD No (e.g. BD/468582 -> 468582)

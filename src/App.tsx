@@ -216,6 +216,7 @@ return () => mediaQuery.removeEventListener('change', listener);
     initialTab?: 'profile' | 'history';
     initialCategory?: string;
     historyOnly?: boolean;
+    allowEditDelete?: boolean;
   } | null>(null);
   const [isAddEditOpen, setIsAddEditOpen] = useState<boolean>(false);
   const [airmanToEdit, setAirmanToEdit] = useState<Airman | null>(null);
@@ -532,7 +533,7 @@ return () => mediaQuery.removeEventListener('change', listener);
                 setIsAddEditOpen(true);
               }}
               onDeleteAirman={handleDeleteAirman}
-              onViewProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
+              onViewProfile={(a, config) => setSelectedAirmanProfile({ airman: a, allowEditDelete: true, ...config })}
             />
           )}
           {activeTab === 'overview' && (
@@ -612,7 +613,7 @@ return () => mediaQuery.removeEventListener('change', listener);
                 setIsAddEditOpen(true);
               }}
               onDeleteAirman={handleDeleteAirman}
-              onViewProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
+              onViewProfile={(a, config) => setSelectedAirmanProfile({ airman: a, allowEditDelete: false, ...config })}
             />
           )}
 
@@ -731,6 +732,7 @@ return () => mediaQuery.removeEventListener('change', listener);
           initialTab={selectedAirmanProfile.initialTab}
           initialCategory={selectedAirmanProfile.initialCategory}
           historyOnly={selectedAirmanProfile.historyOnly}
+          allowEditDelete={selectedAirmanProfile.allowEditDelete}
           onClose={() => setSelectedAirmanProfile(null)}
           onEditAirman={(a) => {
             setAirmanToEdit(a);

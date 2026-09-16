@@ -222,13 +222,21 @@ export class LocalDatabaseEngine {
       // 1. Pull Airmen (Staff)
       let staffData;
       try {
-         staffData = await fetchAll('staff');
+         staffData = await fetchAll('Biodata Register');
       } catch(e: any) { 
          throw new Error("Failed to fetch staff from Cloud: " + e.message); 
       }
       
+
       if (staffData) {
-        staffData.sort((a, b) => {
+        if (staffData.length === 0 && this.db.airmen.length > 0) {
+           console.warn("Cloud Biodata Register is empty, but local has data. Triggering push...");
+           if (typeof window !== 'undefined') window.localStorage.setItem('baf_pending_sync', 'true');
+           dataChanged = true; 
+           // do not overwrite newDb.airmen
+        } else {
+            staffData.sort((a, b) => {
+
            const getNum = (id) => {
               if (!id) return 9999;
               const match = id.match(/\d+/);
@@ -237,29 +245,39 @@ export class LocalDatabaseEngine {
            return getNum(a.airman_id) - getNum(b.airman_id);
         });
 
-        const parsedAirmen = staffData.map((s: any, idx: number) => ({
-          id: (s.airman_id && s.airman_id !== "airman-undefined") ? s.airman_id : 'airman-' + (s['BD No'] && String(s['BD No']) !== "undefined" ? s['BD No'] : Math.random().toString(36).slice(2, 10)),
-          serNo: idx + 1,
-          code: `${s['Rank'] || ''}-${(s['Surname'] || '').slice(0, 3).toUpperCase()}`,
-          bdNo: String(s['BD No'] || ''),
-          rank: s['Rank'] || '',
-          name: s['Surname'] || '',
-          fullName: s['Full Name'] || s['Surname'] || '',
-          flightName: s['Flight'] || '',
-          trade: s['Trade'] || '',
-          mobileNo: s['Mobile No'] || '',
-          bloodGroup: s['Blood Group'] || '',
-          permanentAddress: s['Parmanet Address'] || s['Permanent Address'] || '',
-          dateJoined: s['Dt of Posting'] || undefined,
-          addressBlock: s['Present Address'] || s['Address'] || 'L/O',
-          active: s['Status'] === 'ACTIVE' || s['Status'] === null || s['Status'] === undefined,
-          status: s['Status'] || 'ACTIVE',
-          dateLeft: s['Unit Left date'] || undefined
-        }));
+        const parsedAirmen = staffData.map((s: any, idx: number) => {
+          const generatedId = (s.airman_id && s.airman_id !== "airman-undefined") ? s.airman_id : 'airman-' + (s['BD No'] && String(s['BD No']) !== "undefined" ? s['BD No'] : Math.random().toString(36).slice(2, 10));
+          const localMatch = this.db.airmen.find(a => a.id === generatedId);
+          return {
+            id: generatedId,
+            serNo: (localMatch && localMatch.serNo !== undefined) ? localMatch.serNo : idx + 1,
+            code: `${s['Rank'] || ''}-${(s['Surname'] || '').slice(0, 3).toUpperCase()}`,
+            bdNo: String(s['BD No'] || ''),
+            rank: s['Rank'] || '',
+            name: s['Surname'] || '',
+            fullName: s['Full Name'] || s['Surname'] || '',
+            flightName: s['Flight'] || '',
+            trade: s['Trade'] || '',
+            mobileNo: s['Mobile No'] || '',
+            bloodGroup: s['Blood Group'] || '',
+            permanentAddress: s['Parmanet Address'] || s['Permanent Address'] || '',
+            dateJoined: s['Dt of Posting'] || undefined,
+            addressBlock: s['Present Address'] || s['Address'] || 'L/O',
+            active: s['Status'] === 'ACTIVE' || s['Status'] === null || s['Status'] === undefined,
+            status: s['Status'] || 'ACTIVE',
+            dateLeft: s['Unit Left date'] || undefined,
+            
+            // Preserve local-only fields that are not in Supabase schema
+            jcoSeniorityOrder: localMatch ? localMatch.jcoSeniorityOrder : undefined,
+            remarks: localMatch ? localMatch.remarks : '',
+            leaveReason: localMatch ? localMatch.leaveReason : undefined
+          };
+        });
         
         // Force replace to ensure 48 rows overrides 61 rows
-        newDb.airmen = parsedAirmen;
+        newDb.airmen = parsedAirmen.sort((a: any, b: any) => (a.serNo || 9999) - (b.serNo || 9999));
         dataChanged = true;
+        }
       }
       
       // 2. Pull Assignments (Duty Rosters)
@@ -401,8 +419,15 @@ export class LocalDatabaseEngine {
                  }
              });
              
+
              const currentRaw = window.localStorage.getItem('baf_official_duty_matrix_v4');
              const currentMatrix: any[] = currentRaw ? JSON.parse(currentRaw) : [];
+             
+             let metadataMatrix: any[] = [];
+             const metadataRaw = window.localStorage.getItem('baf_duty_matrix_metadata');
+             if (metadataRaw) {
+                 try { metadataMatrix = JSON.parse(metadataRaw); } catch(e) {}
+             }
 
              const formattedMatrix = Array.from(dutyMap.values()).map(duty => {
                  let total = 0;
@@ -412,22 +437,28 @@ export class LocalDatabaseEngine {
                  duty.totalRequiredMonth = total;
 
                  const existingDuty = currentMatrix.find((d: any) => d.id === duty.id);
-                 if (existingDuty) {
-                     // Preserve all local fields that are not explicitly updated from cloud
-                     Object.keys(existingDuty).forEach(key => {
+                 const metaDuty = metadataMatrix.find((d: any) => d.id === duty.id);
+                 
+                 const sourceForPreserve = metaDuty || existingDuty;
+
+                 if (sourceForPreserve) {
+                     Object.keys(sourceForPreserve).forEach(key => {
                          if (duty[key] === undefined) {
-                             duty[key] = existingDuty[key];
+                             duty[key] = sourceForPreserve[key];
                          }
                      });
-                     if (existingDuty.serNo !== undefined) duty.serNo = existingDuty.serNo;
-                     if (existingDuty.title !== undefined) duty.title = existingDuty.title;
-                     if (existingDuty.eligibleFlights !== undefined) duty.eligibleFlights = existingDuty.eligibleFlights;
-                     if (existingDuty.eligibleRanks !== undefined) duty.eligibleRanks = existingDuty.eligibleRanks;
-                     if (existingDuty.flightTargets !== undefined) duty.flightTargets = existingDuty.flightTargets;
-                     if (existingDuty.dutyCode !== undefined) duty.dutyCode = existingDuty.dutyCode;
+                     if (sourceForPreserve.serNo !== undefined) duty.serNo = sourceForPreserve.serNo;
+                     if (sourceForPreserve.title !== undefined) duty.title = sourceForPreserve.title;
+                     if (sourceForPreserve.eligibleFlights !== undefined) duty.eligibleFlights = sourceForPreserve.eligibleFlights;
+                     if (sourceForPreserve.eligibleRanks !== undefined) duty.eligibleRanks = sourceForPreserve.eligibleRanks;
+                     if (sourceForPreserve.flightTargets !== undefined) duty.flightTargets = sourceForPreserve.flightTargets;
+                     if (sourceForPreserve.dutyCode !== undefined) duty.dutyCode = sourceForPreserve.dutyCode;
+                     if (sourceForPreserve.dailyRequirements !== undefined) duty.dailyRequirements = sourceForPreserve.dailyRequirements;
+                     if (sourceForPreserve.isDisabled !== undefined) duty.isDisabled = sourceForPreserve.isDisabled;
                  }
                  return duty;
              });
+
              
              // Restore local duties that are not yet in Supabase
              currentMatrix.forEach((localDuty: any) => {
@@ -586,7 +617,7 @@ export class LocalDatabaseEngine {
           for (let i = 0; i < staffPayload.length; i += staffChunkSize) {
              const chunk = staffPayload.slice(i, i + staffChunkSize);
              emitSyncProgress(Math.round((i / staffPayload.length) * 30), `Uploading staff ${i} of ${staffPayload.length}...`);
-             const { data: staffDataRes, error: staffErr } = await supabase.from('staff').upsert(chunk, { onConflict: 'airman_id' }).select();
+             const { data: staffDataRes, error: staffErr } = await supabase.from('Biodata Register').upsert(chunk, { onConflict: 'airman_id' }).select();
              if (!staffErr && (!staffDataRes || staffDataRes.length === 0) && chunk.length > 0) { console.error('Staff upsert blocked by RLS'); hasError = true; errorMessage = 'Row Level Security (RLS) is blocking the Staff upload in Supabase. Please disable RLS or add policies.'; break; }
              await delay(100);
              if (staffErr) {
@@ -855,6 +886,7 @@ export class LocalDatabaseEngine {
     }
   }
 
+
   private loadInitialLocalState(): LocalStorageDB {
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
@@ -862,9 +894,40 @@ export class LocalDatabaseEngine {
         if (raw) {
           const parsed = JSON.parse(raw);
           if (parsed && Array.isArray(parsed.airmen) && parsed.airmen.length > 0) {
+            
+            // LOCAL ID MIGRATION TO BD FORMAT
+            const idMap = new Map<string, string>();
+            const migratedAirmen = parsed.airmen.map((a: any) => {
+               const cleanBd = String(a.bdNo || '').replace(/[^0-9]/g, '');
+               let newId = cleanBd ? `BD/${cleanBd}` : a.id;
+               if (!newId || newId === "airman-undefined") {
+                  newId = "airman-" + Math.random().toString(36).slice(2, 10);
+               }
+               if (a.id !== newId) idMap.set(a.id, newId);
+               return { ...a, id: newId };
+            });
+            
+            const migratedAssignments = parsed.assignments || {};
+            if (idMap.size > 0) {
+                Object.keys(migratedAssignments).forEach(month => {
+                    migratedAssignments[month] = migratedAssignments[month].map((asn: any) => {
+                        if (idMap.has(asn.airmanId)) {
+                             asn.airmanId = idMap.get(asn.airmanId);
+                             asn.id = `asn_${asn.airmanId}_${asn.date}_${asn.dutyCode}_${asn.idaShift || 'n'}_${asn.disposalScope || 'ALL'}`;
+                        }
+                        return asn;
+                    });
+                });
+                
+                if (typeof window !== 'undefined') {
+                   window.localStorage.setItem('baf_pending_sync', 'true');
+                }
+            }
+
             const db: LocalStorageDB = {
-              airmen: (() => { const seenIds = new Set<string>(); return parsed.airmen.map((a: Airman) => { let newId = a.id; if (!newId || newId === "airman-undefined" || seenIds.has(newId)) { newId = "airman-" + Math.random().toString(36).slice(2, 10); } seenIds.add(newId); return { ...a, id: newId }; }).sort((a: Airman, b: Airman) => a.serNo - b.serNo); })(),
-              assignments: parsed.assignments || {},
+              airmen: migratedAirmen.sort((a: any, b: any) => a.serNo - b.serNo),
+              assignments: migratedAssignments,
+
               activityHistory: parsed.activityHistory || [],
               adminPasscode: parsed.adminPasscode || DEFAULT_ADMIN_PASSCODE,
               detailedUsers: parsed.detailedUsers || [],
@@ -986,9 +1049,11 @@ export class LocalDatabaseEngine {
     } as any);
   }
 
+
   public addAirman(data: Partial<Airman>): Airman {
     const newSerNo = this.db.airmen.length > 0 ? Math.max(...this.db.airmen.map((a) => a.serNo)) + 1 : 1;
-    const id = `airman-${Date.now()}`;
+    const cleanBd = String(data.bdNo || '').replace(/[^0-9]/g, '');
+    const id = cleanBd ? `BD/${cleanBd}` : `airman-${Date.now()}`;
     const newAirman: Airman = {
       id,
       serNo: newSerNo,

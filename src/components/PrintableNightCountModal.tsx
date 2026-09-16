@@ -957,7 +957,7 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
 
  
  {/* MODAL OVERLAY */}
- <div className="fixed inset-0 z-[100] flex flex-col bg-slate-900/90 backdrop-blur-sm overflow-hidden print:bg-white print:block print:relative print:inset-auto">
+ <div className="fixed inset-0 z-[100] flex flex-col bg-slate-900/90 backdrop-blur-sm overflow-hidden print:bg-white print:block print:static print:top-0 print:left-0 print:w-full print:h-auto print:z-[9999]">
  
  {/* MODAL HEADER - HIDDEN ON PRINT */}
  <div className="flex-none bg-slate-900 border-b border-slate-700 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between shadow-2xl print:hidden z-10 gap-4">

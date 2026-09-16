@@ -220,9 +220,9 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
   };
 
   return (
-    <div className={`min-h-screen flex flex-col items-center bg-slate-950 p-4 select-none overflow-x-hidden ${activeTab === 'Nt Count' ? 'justify-start pt-4' : 'justify-center'}`}>
-      <div className="fixed top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-emerald-600/10 rounded-full blur-3xl pointer-events-none z-0" />
-      <div className="fixed bottom-10 right-10 w-72 h-72 bg-sky-600/10 rounded-full blur-3xl pointer-events-none z-0" />
+    <div className={`min-h-screen flex flex-col items-center bg-slate-950 print:bg-white p-4 print:p-0 select-none overflow-x-hidden print:overflow-visible ${activeTab === 'Nt Count' ? 'justify-start pt-4 print:pt-0' : 'justify-center'}`}>
+      <div className="fixed top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-emerald-600/10 rounded-full blur-3xl pointer-events-none z-0 print:hidden" />
+      <div className="fixed bottom-10 right-10 w-72 h-72 bg-sky-600/10 rounded-full blur-3xl pointer-events-none z-0 print:hidden" />
       
       {/* Content Area */}
       <div className={`w-full ${activeTab !== 'Office' ? 'flex-1 z-10 p-0 m-0' : 'max-w-md relative z-10'}`}>
@@ -325,7 +325,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                       type={showPin ? "text" : "password"}
                       value={passwordInput}
                       readOnly
-                      onFocus={() => { setIsPasswordFocused(true); setIsUserIdFocused(false); }}
+                      onClick={() => { setIsPasswordFocused(true); setIsUserIdFocused(false); }}
                       className="w-full bg-slate-800/90 border border-slate-700 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-2xl px-4 py-3.5 pr-12 text-sm font-mono font-bold text-white outline-none transition-all cursor-pointer"
                       placeholder="Tap to open keypad"
                     />
@@ -428,7 +428,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                         type="password"
                         value={newPass}
                         readOnly
-                        onFocus={() => { setIsPasswordFocused(true); setIsConfirmFocused(false); }}
+                        onClick={() => { setIsPasswordFocused(true); setIsConfirmFocused(false); }}
                         className="w-full px-4 py-3.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition-all cursor-pointer"
                         required
                       />
@@ -444,7 +444,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                         type="password"
                         value={confirmPass}
                         readOnly
-                        onFocus={() => { setIsConfirmFocused(true); setIsPasswordFocused(false); }}
+                        onClick={() => { setIsConfirmFocused(true); setIsPasswordFocused(false); }}
                         className="w-full px-4 py-3.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition-all cursor-pointer"
                         required
                       />
@@ -479,8 +479,8 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
         )}
 
         {activeTab === 'Nt Count' && (
-          <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto animate-fadeIn flex flex-col">
-            <div className="sticky top-0 z-50 bg-slate-950/80 backdrop-blur-md border-b border-slate-800 p-4 flex items-center">
+          <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto animate-fadeIn flex flex-col print:static print:bg-white print:text-black print:overflow-visible">
+            <div className="sticky top-0 z-50 bg-slate-950/80 backdrop-blur-md border-b border-slate-800 p-4 flex items-center print:hidden">
               <button 
                 onClick={() => setActiveTab('Office')}
                 className="flex items-center space-x-2 text-slate-400 hover:text-white transition-colors bg-slate-900/80 px-4 py-2 rounded-xl border border-slate-700 shadow-lg cursor-pointer"
@@ -490,7 +490,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
               </button>
               <h2 className="ml-4 text-white font-bold tracking-widest text-sm opacity-50">NIGHT COUNT STATE</h2>
             </div>
-            <div className="flex-1 p-4 sm:p-6 w-full max-w-7xl mx-auto">
+            <div className="flex-1 p-4 sm:p-6 w-full max-w-7xl mx-auto print:p-0 print:max-w-none">
               <NightCountStateView
                 role="USER"
                 airmen={airmen}
@@ -503,7 +503,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
 
         {activeTab === 'Canteen' && (
           <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto animate-fadeIn flex flex-col">
-            <div className="sticky top-0 z-50 bg-slate-950/80 backdrop-blur-md border-b border-slate-800 p-4 flex items-center">
+            <div className="sticky top-0 z-50 bg-slate-950/80 backdrop-blur-md border-b border-slate-800 p-4 flex items-center print:hidden">
               <button 
                 onClick={() => setActiveTab('Office')}
                 className="flex items-center space-x-2 text-slate-400 hover:text-white transition-colors bg-slate-900/80 px-4 py-2 rounded-xl border border-slate-700 shadow-lg cursor-pointer"

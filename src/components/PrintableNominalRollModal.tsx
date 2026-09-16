@@ -104,7 +104,7 @@ export const PrintableNominalRollModal: React.FC<PrintableNominalRollModalProps>
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex flex-col bg-slate-100 print:bg-white animate-fadeIn  print:block print:h-auto print:overflow-visible text-black">
+    <div className="fixed inset-0 z-[100] flex flex-col bg-slate-100 print:bg-white animate-fadeIn  print:block print:static print:h-auto print:overflow-visible text-black">
       {/* Top Header Controls (Hidden on Print) */}
       <div className="flex-none bg-slate-900 border-b border-slate-700 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0 shadow-2xl print:hidden z-10">
         <div className="flex items-center space-x-3 text-white">

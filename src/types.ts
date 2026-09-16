@@ -50,6 +50,7 @@ export interface Airman {
   dateJoined?: string; // YYYY-MM-DD
   dateLeft?: string;   // YYYY-MM-DD
   leaveReason?: string;
+  jcoSeniorityOrder?: number; // Tie-breaker for MWO, SWO, WO based on date of rank
 }
 
 export interface DutyTypeInfo {

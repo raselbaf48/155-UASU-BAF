@@ -998,7 +998,7 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
 
  if (isOpen === false) return null;
  return createPortal(
-    <div className="fixed inset-0 z-[100] flex flex-col bg-slate-900/90 backdrop-blur-sm overflow-hidden print:bg-white print:static print:h-auto print:w-auto print:overflow-visible print:block">
+    <div className="fixed inset-0 z-[100] flex flex-col bg-slate-900/90 backdrop-blur-sm overflow-hidden print:bg-white print:static print:w-full print:h-auto print:z-[9999] print:overflow-visible print:block">
  {/* MODAL HEADER - HIDDEN ON PRINT */}
         <div className="flex-none bg-slate-900 border-b border-slate-700 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-2xl print:hidden z-10 sticky top-0">
           <div className="flex items-center space-x-3 text-white">
