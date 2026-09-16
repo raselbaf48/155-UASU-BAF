@@ -56,6 +56,8 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
   const [confirmPass, setConfirmPass] = useState('');
   const [targetAirman, setTargetAirman] = useState<Airman | null>(null);
   const [activeTab, setActiveTab] = useState<'Office' | 'Nt Count' | 'Canteen'>('Office');
+  const [isCanteenAuth, setIsCanteenAuth] = useState<boolean>(false);
+  const [isCanteenManagerMode, setIsCanteenManagerMode] = useState<boolean>(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
   
@@ -117,7 +119,27 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
       return;
     }
 
+    
+    
+
+    
+    if (activeTab === 'Canteen') {
+      const airman = airmen.find(a => a.bdNo.toLowerCase() === cleanInput.toLowerCase());
+      if (airman) {
+        setIsLoading(false);
+        setIsCanteenAuth(true);
+        setSuccessAirman(airman);
+        return;
+      } else {
+        setErrorMsg('Member ID not found.');
+        setIsLoading(false);
+        return;
+      }
+    }
+
     const validation = await validateUserLogin(cleanInput, passwordInput, airmen);
+
+
 
     if (validation.success) {
       // Even if nominal airman is not found in local JSON, we should allow login if Supabase auth succeeds
@@ -253,9 +275,9 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
       <div className="fixed bottom-10 right-10 w-72 h-72 bg-sky-600/10 rounded-full blur-3xl pointer-events-none z-0 print:hidden" />
       
       {/* Content Area */}
-      <div className={`w-full ${activeTab !== 'Office' ? 'flex-1 z-10 p-0 m-0' : 'max-w-md relative z-10'}`}>
+      <div className={`w-full ${(activeTab === 'Nt Count' || (activeTab === 'Canteen' && isCanteenAuth)) ? 'flex-1 z-10 p-0 m-0' : 'max-w-md relative z-10'}`}>
         
-        {activeTab === 'Office' && (
+        {(activeTab === 'Office' || (activeTab === 'Canteen' && !isCanteenAuth)) && (
           <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-800 rounded-3xl p-8 shadow-2xl space-y-6 text-white text-center mb-16">
             {/* Header */}
             <div className="flex flex-col items-center space-y-3">
@@ -265,9 +287,11 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
               <div>
                 <div className="inline-flex items-center space-x-1.5 px-3 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-500/30 text-emerald-400 text-[11px] font-black uppercase tracking-widest mb-1.5">
                   <Shield className="w-3 h-3" />
-                  <span>{isResetMode ? 'PASSWORD RECOVERY' : 'USER LOGIN PORTAL'}</span>
+                  <span>{isResetMode ? 'PASSWORD RECOVERY' : (activeTab === 'Canteen' ? 'CANTEEN LOGIN PORTAL' : 'USER LOGIN PORTAL')}</span>
                 </div>
-                <h1 className="text-2xl font-black tracking-tight text-white">155 UASU BAF</h1>
+                <h1 className="text-2xl font-black tracking-tight text-white flex items-center justify-center space-x-3">
+            <span>{activeTab === 'Canteen' ? 'Canteen Management' : '155 UASU BAF'}</span>
+          </h1>
               </div>
             </div>
 
@@ -288,7 +312,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
             {!isResetMode ? (
               <form onSubmit={handleSubmit} className="space-y-5" ref={loginPinRef}>
                 <div className="text-left space-y-2">
-                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">User ID</label>
+                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">{activeTab === 'Canteen' ? 'Member ID' : 'User ID'}</label>
                   <div className="relative">
                     <input
                       type="text"
@@ -346,7 +370,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                   )}
                 </div>
 
-                <div className="text-left space-y-2">
+                {activeTab !== 'Canteen' && (<div className="text-left space-y-2">
                   <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">PIN</label>
                   <div className="relative">
                     <input
@@ -375,7 +399,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                       />                    
                     </div>
                   )}
-                </div>
+                </div>)}
                 
                 <button
                   type="submit"
@@ -385,7 +409,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                   {isLoading ? <span>Verifying...</span> : <> <LogIn className="w-4 h-4" /> <span>Login</span> </>}
                 </button>
 
-                <div className="text-center mt-4">
+                {activeTab !== 'Canteen' && (<div className="text-center mt-4">
                   <button
                     type="button"
                     onClick={() => { setIsResetMode(true); setErrorMsg(''); }}
@@ -393,7 +417,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                   >
                     Forgot Login PIN?
                   </button>
-                </div>
+                </div>)}
               </form>
             ) : (
               /* PIN Reset Flow */
@@ -529,13 +553,16 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
           </div>
         )}
 
-        {activeTab === 'Canteen' && (
-          <CanteenLayout onBack={() => setActiveTab('Office')} />
+        {activeTab === 'Canteen' && isCanteenAuth && (
+          <CanteenLayout 
+             initialMember={successAirman ? { name: successAirman.rank + ' ' + successAirman.name, bdNo: successAirman.bdNo, role: 'employee' } : undefined}
+             onBack={() => { setIsCanteenAuth(false); setBdInput(''); setPasswordInput(''); setSuccessAirman(null); }} 
+          />
         )}
       </div>
 
       {/* Floating Menu Toggle */}
-      {activeTab === 'Office' && (
+      {(activeTab === 'Office' || (activeTab === 'Canteen' && !isCanteenAuth)) && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center">
           <button
             onClick={() => setIsMenuOpen(!isMenuOpen)}

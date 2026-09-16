@@ -1,158 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { Search, Plus, ShoppingCart, Minus, Trash2, CheckCircle2, X, History, Calendar } from 'lucide-react';
-import { supabase } from '../../../supabase';
+const fs = require('fs');
+let code = fs.readFileSync('src/features/canteen/pages/PosSales.tsx', 'utf8');
 
-export const PosSales: React.FC = () => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [catalog, setCatalog] = useState<any[]>([]);
-  const [basket, setBasket] = useState<any[]>([]);
-  
-  // Member Search State
-  const [members, setMembers] = useState<any[]>([]);
-  const [selectedMembers, setSelectedMembers] = useState<any[]>([]);
-  const [memberSearchTerm, setMemberSearchTerm] = useState('');
-  const [showMemberDropdown, setShowMemberDropdown] = useState(false);
-  const [recentMembers, setRecentMembers] = useState<any[]>([]);
-
-  // Sale Options
-  const [saleDate, setSaleDate] = useState(() => {
-      // Format YYYY-MM-DD for input default
-      const d = new Date();
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  });
-
-  // History Modal State
-  const [showHistoryModal, setShowHistoryModal] = useState(false);
-  const [showSuccessModal, setShowSuccessModal] = useState(false);
-  const [successMessage, setSuccessMessage] = useState('');
-  const [salesHistory, setSalesHistory] = useState<any[]>([]);
-
-  useEffect(() => {
-    fetchCatalog();
-    fetchMembers();
-    const stored = localStorage.getItem('canteen_recent_members');
-    if (stored) {
-        try { setRecentMembers(JSON.parse(stored)); } catch(e){}
-    }
-  }, []);
-
-  const loadHistory = () => {
-      const history = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-      setSalesHistory(history);
-      setShowHistoryModal(true);
-  };
-
-  const removeHistoryItem = async (txId: string) => {
-      const txToRemove = salesHistory.find(tx => tx.id === txId);
-      if (!txToRemove) return;
-
-      // Reverse Due
-      const m = members.find(m => m.airman_id === txToRemove.airman_id);
-      if (m) {
-          const newBaki = Math.max(0, (m.baki || 0) - txToRemove.amount);
-          await supabase.from('Canteen').update({ baki: newBaki }).eq('airman_id', txToRemove.airman_id);
-          // Update local member state to reflect immediate change
-          setMembers(members.map(member => member.airman_id === txToRemove.airman_id ? {...member, baki: newBaki} : member));
-      }
-
-      const updatedHistory = salesHistory.filter(tx => tx.id !== txId);
-      setSalesHistory(updatedHistory);
-      localStorage.setItem('canteen_txs', JSON.stringify(updatedHistory));
-      alert("Entry removed and member DUE reversed successfully.");
-  };
-
-  const fetchMembers = async () => {
-    const { data, error } = await supabase.from('Canteen').select('*');
-    if (!error && data) {
-        setMembers(data);
-    }
-  };
-
-  const fetchCatalog = async () => {
-    const { data, error } = await supabase.from('Canteen_Inventory').select('*');
-    if (!error && data) {
-      setCatalog(data);
-    }
-  };
-
-  const addToBasket = (item: any) => {
-      const existing = basket.find(b => b.id === item.id);
-      if (existing) {
-          setBasket(basket.map(b => b.id === item.id ? { ...b, qty: b.qty + 1 } : b));
-      } else {
-          setBasket([...basket, { ...item, qty: 1 }]);
-      }
-  };
-
-  const updateQty = (id: string, delta: number) => {
-      setBasket(basket.map(b => {
-          if (b.id === id) {
-              const newQty = Math.max(1, b.qty + delta);
-              return { ...b, qty: newQty };
-          }
-          return b;
-      }));
-  };
-
-  const removeFromBasket = (id: string) => {
-      setBasket(basket.filter(b => b.id !== id));
-  };
-
-  const handleCheckout = async () => {
-      if (basket.length === 0 || selectedMembers.length === 0) return;
-      
-      const memberChargeAmount = basketTotal;
-      const multiplier = selectedMembers.length > 0 ? selectedMembers.length : 1;
-
-      if (selectedMembers.length > 0) {
-          for (const m of selectedMembers) {
-              const newBaki = (m.baki || 0) + memberChargeAmount;
-              await supabase.from('Canteen').update({ baki: newBaki }).eq('airman_id', m.airman_id);
-              
-              // save tx to localstorage for statement
-              const txDateStr = new Date(saleDate).toLocaleDateString('bn-BD');
-              const tx = {
-                  id: Date.now() + Math.random(),
-                  date: txDateStr,
-                  airman_id: m.airman_id,
-                  items: basket.map(b => `${b.name} (${b.qty})`).join(', '),
-                  amount: memberChargeAmount
-              };
-              const existingTx = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-              localStorage.setItem('canteen_txs', JSON.stringify([tx, ...existingTx]));
-          }
-          
-          const newRecents = [...selectedMembers, ...recentMembers].reduce((acc, curr) => {
-              if (!acc.find((x: any) => x.airman_id === curr.airman_id)) acc.push(curr);
-              return acc;
-          }, []).slice(0, 5);
-          setRecentMembers(newRecents);
-          localStorage.setItem('canteen_recent_members', JSON.stringify(newRecents));
-      }
-
-      for (const b of basket) {
-          const totalQtySold = b.qty * multiplier;
-          const newStock = Math.max(0, (b.stock || 0) - totalQtySold);
-          await supabase.from('Canteen_Inventory').update({ stock: newStock }).eq('id', b.id);
-      }
-
-      setSuccessMessage(`Sale completed successfully for ৳${memberChargeAmount * multiplier}!`);
-      setShowSuccessModal(true);
-      
-      setBasket([]);
-      setSelectedMembers([]);
-      setMemberSearchTerm('');
-      fetchCatalog();
-  };
-
-  const filteredCatalog = catalog.filter(item => 
-      item.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-      item.category.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  const basketTotal = basket.reduce((sum, item) => sum + (item.price * item.qty), 0);
-
-  
+// I will just replace the whole return statement because it's completely botched.
+const fixedReturn = `
   return (
     <>
     <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300 pb-10 flex flex-col md:flex-row gap-8">
@@ -170,7 +20,7 @@ export const PosSales: React.FC = () => {
                className="flex items-center space-x-2 px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-bold tracking-widest hover:bg-slate-700 transition-colors shadow-sm"
             >
                <History className="w-4 h-4" />
-               <span>HISTORY & EDIT ENTRY</span>
+               <span>VIEW SALES HISTORY</span>
             </button>
          </div>
 
@@ -191,21 +41,21 @@ export const PosSales: React.FC = () => {
             {filteredCatalog.map((item, i) => {
                const inBasket = basket.find(b => b.id === item.id);
                return (
-               <div key={i} onClick={() => addToBasket(item)} className={`bg-slate-900 rounded-2xl p-4 flex items-center justify-between border transition-all duration-300 cursor-pointer hover:-translate-y-1 hover:shadow-[0_15px_30px_-10px_rgba(79,70,229,0.3)] group ${inBasket ? 'border-[#4f46e5] shadow-[0_10px_20px_-10px_rgba(79,70,229,0.2)]' : 'border-slate-800 hover:border-indigo-500/50'}`}>
+               <div key={i} className={\`bg-slate-900 rounded-2xl p-4 flex items-center justify-between border-2 transition-all shadow-sm \${inBasket ? 'border-[#4f46e5]' : 'border-slate-800'}\`}>
                   <div className="flex items-center space-x-4">
-                     <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-inner transition-colors duration-300 ${inBasket ? 'bg-indigo-500/20 text-indigo-400' : 'bg-[#0f172a] text-slate-400 group-hover:bg-slate-800 group-hover:text-indigo-300'}`}>
-                        <PackageIcon className="w-6 h-6 group-hover:scale-110 transition-transform duration-300" />
+                     <div className="w-10 h-10 rounded-xl bg-slate-800 text-slate-400 flex items-center justify-center shadow-inner">
+                        <PackageIcon className="w-5 h-5" />
                      </div>
                      <div>
-                        <p className="text-[10px] font-black text-[#4f46e5] uppercase tracking-widest mb-0.5">{item.category}</p>
-                        <h3 className="font-black text-white text-base group-hover:text-indigo-400 transition-colors">{item.name}</h3>
-                        <p className="text-[9px] font-bold text-emerald-500 uppercase tracking-widest mt-0.5">STOCK: {item.stock}</p>
+                        <p className="text-[8px] font-black text-[#4f46e5] uppercase tracking-widest mb-0.5">{item.category}</p>
+                        <h3 className="font-black text-white text-sm">{item.name}</h3>
+                        <p className="text-[8px] font-bold text-emerald-500 uppercase">STOCK: {item.stock}</p>
                      </div>
                   </div>
                   <div className="flex items-center space-x-6">
-                     <p className="text-xl font-black tracking-tighter text-white">৳{item.price}</p>
-                     <button onClick={(e) => { e.stopPropagation(); addToBasket(item); }} className={`w-10 h-10 rounded-xl flex items-center justify-center font-black shadow-sm transition-all duration-300 ${inBasket ? 'bg-[#4f46e5] text-white hover:bg-[#4338ca] hover:scale-110' : 'bg-[#0f172a] text-white group-hover:bg-[#4f46e5] group-hover:scale-110'}`}>
-                        <Plus className="w-5 h-5" />
+                     <p className="text-lg font-black tracking-tighter text-white">৳{item.price}</p>
+                     <button onClick={() => addToBasket(item)} className={\`w-8 h-8 rounded-lg flex items-center justify-center text-white font-black shadow-sm transition-colors \${inBasket ? 'bg-[#4f46e5] hover:bg-[#4338ca]' : 'bg-[#0f172a] hover:bg-slate-800'}\`}>
+                        <Plus className="w-4 h-4" />
                      </button>
                   </div>
                </div>
@@ -347,8 +197,8 @@ export const PosSales: React.FC = () => {
                 </div>
                 <button 
                     onClick={handleCheckout}
-                    disabled={basket.length === 0 || selectedMembers.length === 0}
-                    className={`w-full py-4 rounded-xl text-[10px] font-black tracking-widest uppercase flex items-center justify-center space-x-2 transition-all shadow-md ${(basket.length > 0 && selectedMembers.length > 0) ? 'bg-emerald-900/30 hover:bg-emerald-600 text-white shadow-emerald-500/20' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
+                    disabled={basket.length === 0}
+                    className={\`w-full py-4 rounded-xl text-[10px] font-black tracking-widest uppercase flex items-center justify-center space-x-2 transition-all shadow-md \${basket.length > 0 ? 'bg-emerald-900/30 hover:bg-emerald-600 text-white shadow-emerald-500/20' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}\`}
                 >
                     <CheckCircle2 className="w-4 h-4" />
                     <span>COMPLETE SALE</span>
@@ -386,7 +236,7 @@ export const PosSales: React.FC = () => {
                     ) : (
                         salesHistory.map(tx => {
                             const m = members.find(m => m.airman_id === tx.airman_id);
-                            const memberName = m ? `${m['Rank']} ${m['Surname']}` : tx.airman_id;
+                            const memberName = m ? \`\${m['Rank']} \${m['Surname']}\` : tx.airman_id;
                             
                             return (
                                 <div key={tx.id} className="bg-slate-800 p-4 rounded-xl flex items-center justify-between border border-slate-700">
@@ -399,7 +249,7 @@ export const PosSales: React.FC = () => {
                                         <button 
                                             onClick={() => removeHistoryItem(tx.id)}
                                             className="p-2 text-rose-400 hover:text-rose-600 hover:bg-rose-900/30 rounded-lg transition-colors"
-                                            title="Remove Entry & Reverse Due"
+                                            title="Remove Entry & Reverse Baki"
                                         >
                                             <Trash2 className="w-4 h-4" />
                                         </button>
@@ -410,33 +260,18 @@ export const PosSales: React.FC = () => {
                     )}
                 </div>
             </div>
-        
-      {/* Success Modal */}
-      {showSuccessModal && (
-          <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
-              <div className="bg-slate-900 rounded-3xl p-8 w-full max-w-sm shadow-2xl border border-slate-800 animate-in zoom-in-95 text-center">
-                  <div className="w-20 h-20 bg-emerald-900/30 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6">
-                      <CheckCircle2 className="w-10 h-10" />
-                  </div>
-                  <h2 className="text-2xl font-black text-white uppercase tracking-tighter mb-2">Success!</h2>
-                  <p className="text-sm font-bold text-slate-400 mb-8">{successMessage}</p>
-                  
-                  <button 
-                      onClick={() => setShowSuccessModal(false)}
-                      className="w-full py-4 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl text-xs font-black tracking-widest transition-colors shadow-md shadow-indigo-500/20"
-                  >
-                      CONTINUE
-                  </button>
-              </div>
-          </div>
-      )}
-</div>
+        </div>
     )}
     </>
   );
+`;
 
+const newCode = code.slice(0, code.indexOf('return (')) + fixedReturn + `
 };
 
 const PackageIcon: React.FC<{className?: string}> = ({className}) => (
    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
 );
+`;
+
+fs.writeFileSync('src/features/canteen/pages/PosSales.tsx', newCode);

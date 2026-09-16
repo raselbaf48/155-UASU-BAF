@@ -1,20 +1,17 @@
 import React from 'react';
 import { History } from 'lucide-react';
 
-const mockAudit = [
-  { date: '9/13/2026', type: 'CREDIT SALE', items: 'Swarma, Milk Tea', gateway: 'BAKI', amount: 112 },
-  { date: '9/13/2026', type: 'CREDIT SALE', items: 'Milk Tea', gateway: 'BAKI', amount: 12 },
-  { date: '9/13/2026', type: 'CREDIT SALE', items: 'Lemon Juice', gateway: 'BAKI', amount: 10 },
-  { date: '9/13/2026', type: 'CREDIT SALE', items: 'Milk Tea, Normal Biscuit', gateway: 'BAKI', amount: 83 },
-  { date: '9/13/2026', type: 'CREDIT SALE', items: 'Milk Tea, Normal Biscuit', gateway: 'BAKI', amount: 17 },
-  { date: '9/13/2026', type: 'CREDIT SALE', items: 'Normal Biscuit, Milk Tea, Swarma', gateway: 'BAKI', amount: 72 },
-  { date: '9/13/2026', type: 'CREDIT SALE', items: 'Milk Tea, Normal Biscuit', gateway: 'BAKI', amount: 17 },
-  { date: '9/13/2026', type: 'CREDIT SALE', items: 'Egg Fry', gateway: 'BAKI', amount: 18 },
-  { date: '9/13/2026', type: 'CREDIT SALE', items: 'Egg Fry, Black Coffee, Normal Biscuit', gateway: 'BAKI', amount: 48 },
-  { date: '9/13/2026', type: 'CREDIT SALE', items: 'Boiled Egg, Lemon Juice, Swarma', gateway: 'BAKI', amount: 75 },
-];
+
 
 export const CanteenReports: React.FC = () => {
+  const [reports, setReports] = React.useState<any[]>([]);
+  
+  React.useEffect(() => {
+     try {
+         const txs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+         setReports(txs);
+     } catch(e) {}
+  }, []);
   return (
     <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300 pb-10">
       
@@ -41,19 +38,27 @@ export const CanteenReports: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
          <div className="bg-slate-900 rounded-[2rem] p-6 shadow-sm border border-slate-800">
             <p className="text-[8px] font-black text-slate-400 tracking-widest uppercase mb-1">SALES TOTAL</p>
-            <h3 className="text-3xl font-black text-white tracking-tighter">৳13,904</h3>
+            <h3 className="text-3xl font-black text-white tracking-tighter">
+                ৳{reports.filter(r => r.type !== 'BILL PAYMENT').reduce((a, b) => a + (b.amount || 0), 0)}
+            </h3>
          </div>
          <div className="bg-emerald-900/30 rounded-[2rem] p-6 shadow-sm border border-emerald-900/50">
             <p className="text-[8px] font-black text-emerald-500 tracking-widest uppercase mb-1">COLLECTIONS</p>
-            <h3 className="text-3xl font-black text-emerald-600 tracking-tighter">৳1,830,048</h3>
+            <h3 className="text-3xl font-black text-emerald-600 tracking-tighter">
+                ৳{reports.filter(r => r.type === 'BILL PAYMENT').reduce((a, b) => a + (b.amount || 0), 0)}
+            </h3>
          </div>
          <div className="bg-rose-900/30 rounded-[2rem] p-6 shadow-sm border border-rose-900/50">
-            <p className="text-[8px] font-black text-rose-500 tracking-widest uppercase mb-1">NEW BAKI</p>
-            <h3 className="text-3xl font-black text-rose-600 tracking-tighter">৳13,904</h3>
+            <p className="text-[8px] font-black text-rose-500 tracking-widest uppercase mb-1">NEW DUE</p>
+            <h3 className="text-3xl font-black text-rose-600 tracking-tighter">
+                ৳{reports.filter(r => r.type !== 'BILL PAYMENT' && r.gateway === 'DUE').reduce((a, b) => a + (b.amount || 0), 0)}
+            </h3>
          </div>
          <div className="bg-indigo-900/30 rounded-[2rem] p-6 shadow-sm border border-indigo-900/50">
             <p className="text-[8px] font-black text-indigo-500 tracking-widest uppercase mb-1">NET CASH</p>
-            <h3 className="text-3xl font-black text-indigo-600 tracking-tighter">৳1,830,048</h3>
+            <h3 className="text-3xl font-black text-indigo-600 tracking-tighter">
+                ৳{reports.filter(r => r.type === 'BILL PAYMENT' || (r.type !== 'BILL PAYMENT' && r.gateway !== 'DUE')).reduce((a, b) => a + (b.amount || 0), 0)}
+            </h3>
          </div>
       </div>
 
@@ -64,7 +69,7 @@ export const CanteenReports: React.FC = () => {
                <History className="w-4 h-4 text-indigo-500" />
                <span>AUDIT TRAIL</span>
             </h3>
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">253 RECORDS</span>
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{reports.length} RECORDS</span>
          </div>
          <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -78,7 +83,7 @@ export const CanteenReports: React.FC = () => {
                   </tr>
                </thead>
                <tbody className="divide-y divide-slate-800">
-                  {mockAudit.map((row, i) => (
+                  {reports.map((row, i) => (
                      <tr key={i} className="hover:bg-slate-800/50 transition-colors">
                         <td className="py-4 px-6 text-[10px] font-bold text-slate-400 whitespace-nowrap">{row.date}</td>
                         <td className="py-4 px-6 text-center">

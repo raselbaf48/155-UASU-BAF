@@ -27,7 +27,7 @@ export const PlaceDemand: React.FC = () => {
     setTimeout(() => setShowSuccess(false), 3000);
   };
 
-  const totalSelected = Object.values(quantities).reduce((a,b) => a+b, 0);
+  const totalSelected = Object.values(quantities).reduce((a, b) => (a as number) + (b as number), 0);
 
   return (
     <div className="max-w-6xl mx-auto space-y-8 animate-in fade-in duration-300">

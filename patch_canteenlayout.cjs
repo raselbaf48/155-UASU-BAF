@@ -1,11 +1,28 @@
 const fs = require('fs');
 let code = fs.readFileSync('src/features/canteen/components/CanteenLayout.tsx', 'utf8');
 
-// The earlier attempt to patch the sidebar in CanteenLayout failed because it wasn't matched properly.
-// Let's rewrite the sidebar bottom section manually.
+// 1. Add initialMember prop
+code = code.replace(
+    "interface CanteenLayoutProps {",
+    "interface CanteenLayoutProps {\n  initialMember?: { name: string, bdNo: string };"
+);
+code = code.replace(
+    "export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack }) => {",
+    "export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMember }) => {"
+);
 
-const sidebarBottomOld = `<div className="p-6 space-y-4">
-          {currentUser.name === 'Guest' ? (
+// 2. Initialize currentUser from initialMember and set showLogin to false by default
+code = code.replace(
+    "const [currentUser, setCurrentUser] = useState({ name: 'Guest', role: 'employee' as 'employee'|'manager' });\n  const [showLogin, setShowLogin] = useState(false);",
+    "const [currentUser, setCurrentUser] = useState({ name: initialMember ? initialMember.name : 'Guest', role: 'employee' as 'employee'|'manager' });\n  const [showLogin, setShowLogin] = useState(false);"
+);
+code = code.replace(
+    "const [loginTab, setLoginTab] = useState<'member'|'manager'>('member');",
+    "const [loginTab, setLoginTab] = useState<'member'|'manager'>('manager');"
+);
+
+// 3. In the sidebar, replace the Guest/Login logic with Manager switch / Logout
+const oldSidebarLogin = `{currentUser.name === 'Guest' ? (
               <button
                   onClick={() => { setShowLogin(true); setLoginError(''); setLoginInput(''); }}
                  className="w-full flex items-center justify-center space-x-2 px-4 py-3.5 rounded-2xl text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors font-bold text-xs uppercase tracking-widest"
@@ -24,34 +41,29 @@ const sidebarBottomOld = `<div className="p-6 space-y-4">
                  <LogIn className="w-4 h-4 rotate-180" />
                  <span>LOGOUT</span>
               </button>
-          )}
-          
-          <div className="flex items-center space-x-3 p-3 rounded-2xl bg-slate-900 text-white cursor-pointer" onClick={onBack}>`;
+          )}`;
 
-const sidebarBottomNew = `<div className="p-6 space-y-3">
-          {currentUser.role !== 'manager' && (
+const newSidebarLogin = `{currentUser.role !== 'manager' ? (
               <button
-                 onClick={() => { setLoginTab('manager'); setShowLogin(true); setLoginError(''); setLoginInput(''); }}
-                 className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors font-bold text-xs uppercase tracking-widest"
+                  onClick={() => { setLoginTab('manager'); setShowLogin(true); setLoginError(''); setLoginInput(''); }}
+                 className="w-full flex items-center justify-center space-x-2 px-4 py-3.5 rounded-2xl text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors font-bold text-xs uppercase tracking-widest mb-2"
               >
                  <LogIn className="w-4 h-4" />
                  <span>MANAGER LOGIN</span>
               </button>
-          )}
+          ) : null}
           <button
               onClick={onBack}
-              className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl text-rose-600 bg-rose-50 hover:bg-rose-100 transition-colors font-bold text-xs uppercase tracking-widest"
+              className="w-full flex items-center justify-center space-x-2 px-4 py-3.5 rounded-2xl text-rose-600 bg-rose-50 hover:bg-rose-100 transition-colors font-bold text-xs uppercase tracking-widest"
           >
               <LogIn className="w-4 h-4 rotate-180" />
               <span>LOGOUT</span>
-          </button>
-          
-          <div className="flex items-center space-x-3 p-3 rounded-2xl bg-slate-900 text-white mt-4 cursor-pointer">`;
+          </button>`;
 
-code = code.replace(sidebarBottomOld, sidebarBottomNew);
+code = code.replace(oldSidebarLogin, newSidebarLogin);
 
-const mobileSidebarBottomOld = `<div className="p-4 border-t border-slate-800">
-                      {currentUser.name === 'Guest' ? (
+// 4. Do the same for the mobile menu sidebar
+const oldMobileSidebarLogin = `{currentUser.name === 'Guest' ? (
                           <button
                               onClick={() => { setShowLogin(true); setMobileMenuOpen(false); }}
                              className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl text-indigo-600 bg-indigo-50 font-bold text-xs uppercase"
@@ -71,37 +83,33 @@ const mobileSidebarBottomOld = `<div className="p-4 border-t border-slate-800">
                              <LogIn className="w-4 h-4 rotate-180" />
                              <span>LOGOUT</span>
                           </button>
-                      )}
-                  </div>`;
+                      )}`;
 
-const mobileSidebarBottomNew = `<div className="p-4 border-t border-slate-800 space-y-2">
-                      {currentUser.role !== 'manager' && (
+const newMobileSidebarLogin = `{currentUser.role !== 'manager' ? (
                           <button
                               onClick={() => { setLoginTab('manager'); setShowLogin(true); setMobileMenuOpen(false); }}
-                             className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl text-indigo-600 bg-indigo-50 font-bold text-xs uppercase"
+                             className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl text-indigo-600 bg-indigo-50 font-bold text-xs uppercase mb-2"
                           >
                              <LogIn className="w-4 h-4" />
                              <span>MANAGER LOGIN</span>
                           </button>
-                      )}
+                      ) : null}
                       <button
                           onClick={onBack}
                           className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl text-rose-600 bg-rose-50 font-bold text-xs uppercase"
                       >
                           <LogIn className="w-4 h-4 rotate-180" />
                           <span>LOGOUT</span>
-                      </button>
-                  </div>`;
+                      </button>`;
+code = code.replace(oldMobileSidebarLogin, newMobileSidebarLogin);
 
-code = code.replace(mobileSidebarBottomOld, mobileSidebarBottomNew);
 
-// In handleLogin, we need to handle manager PIN login and also remove the popup cancel functionality if we removed X
-// The previous patch may have set it up correctly, let's verify login popup.
-const loginPopupTabsOld = `<div className="bg-slate-200/20 backdrop-blur-md p-1 rounded-full flex mb-6 mx-8 shadow-inner">
+// 5. Hide the login tabs inside the login popup (so it just shows Manager PIN)
+const loginTabsStr = `<div className="bg-slate-200/20 backdrop-blur-md p-1 rounded-full flex mb-6 mx-8 shadow-inner">
                 <button onClick={() => { setLoginTab('member'); setLoginInput(''); setLoginError(''); }} className={\`flex-1 py-3 rounded-full text-xs font-bold tracking-widest transition-all \${loginTab === 'member' ? 'bg-slate-900 text-[#4f46e5] shadow-sm' : 'text-slate-300 hover:text-white'}\`}>MEMBER</button>
                 <button onClick={() => { setLoginTab('manager'); setLoginInput(''); setLoginError(''); }} className={\`flex-1 py-3 rounded-full text-xs font-bold tracking-widest transition-all \${loginTab === 'manager' ? 'bg-slate-900 text-[#4f46e5] shadow-sm' : 'text-slate-300 hover:text-white'}\`}>MANAGER</button>
              </div>`;
-// Just remove the tabs as manager is the only one needed here now
-code = code.replace(loginPopupTabsOld, "");
+             
+code = code.replace(loginTabsStr, "");
 
 fs.writeFileSync('src/features/canteen/components/CanteenLayout.tsx', code);

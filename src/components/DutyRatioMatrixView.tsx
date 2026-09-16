@@ -227,15 +227,57 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
          Admin: { cpl: manpower.adminCpl, sgt: manpower.adminSgt, total: manpower.adminCpl + manpower.adminSgt },
       };
 
-      matrix.filter(t => !t.isDisabled).forEach(table => {
-         const isSecurity = table.id === 'security_duty';
-         const poolSize = isSecurity ? totalCpl : totalAll;
-         const dutyTotal = table.totalRequiredMonth || 0;
-         const dpp = poolSize > 0 ? (dutyTotal / poolSize) : 0;
+      let tieBreakerTracker = { Mechanics: 0, Avionics: 0, GCS: 0, Admin: 0 };
+      matrix.filter(t => !t.isDisabled).forEach(t => {
+         const isSecurity = t.id === 'security_duty';
+         const dutyTotal = t.totalRequiredMonth || 0;
+         let actualPoolSize = 0;
+         let flightPools = { Mechanics: 0, Avionics: 0, GCS: 0, Admin: 0 };
          
          flights.forEach(fl => {
-             const flightPool = isSecurity ? fltStrength[fl].cpl : fltStrength[fl].total;
-             autoTargets[fl][table.id] = dpp * flightPool;
+            let fltPool = isSecurity ? fltStrength[fl].cpl : fltStrength[fl].total;
+            if (t.eligibleFlights && !t.eligibleFlights.includes(fl)) {
+              fltPool = 0;
+            }
+            flightPools[fl] = fltPool;
+            actualPoolSize += fltPool;
+         });
+         
+         if (dutyTotal === 0 || actualPoolSize === 0) {
+            flights.forEach(fl => { autoTargets[fl][t.id] = 0; });
+            return;
+         }
+         
+         const exactVals = flights.map(fl => {
+            const exact = (flightPools[fl] / actualPoolSize) * dutyTotal;
+            return {
+              flight: fl,
+              exact: exact,
+              floor: Math.floor(exact),
+              remainder: exact - Math.floor(exact)
+            };
+         });
+         
+         const allocated = exactVals.reduce((sum, item) => sum + item.floor, 0);
+         const remaining = dutyTotal - allocated;
+         
+         const sortedForDistribution = [...exactVals]
+           .filter(item => flightPools[item.flight] > 0)
+           .sort((a, b) => {
+             const diff = b.remainder - a.remainder;
+             if (Math.abs(diff) > 1e-9) return diff;
+             const floorDiff = a.floor - b.floor;
+             if (floorDiff !== 0) return floorDiff;
+             return tieBreakerTracker[a.flight] - tieBreakerTracker[b.flight];
+           });
+           
+         for (let i = 0; i < remaining && i < sortedForDistribution.length; i++) {
+           sortedForDistribution[i].floor += 1;
+           tieBreakerTracker[sortedForDistribution[i].flight] += 1;
+         }
+         
+         exactVals.forEach(item => {
+           autoTargets[item.flight][t.id] = item.floor;
          });
       });
     } catch(e){}
@@ -384,7 +426,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                   className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-sm font-bold transition-all shadow-sm border ${showAllTableInfo ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                 >
                   <Info className="w-4 h-4" />
-                  <span>{showAllTableInfo ? 'Hide Req & Ratio Info' : 'Show Req & Ratio Info'}</span>
+                  <span>{showAllTableInfo ? 'Hide Info' : 'Show Info'}</span>
                 </button>
               </div>
             )}
@@ -507,9 +549,9 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                               {showAllTableInfo ? (
                                 <td className="p-2 font-mono font-bold bg-slate-50 dark:bg-slate-800/50 border-l border-slate-200 dark:border-slate-700 text-center align-middle">
                                   <div className="flex items-center justify-center space-x-1 text-[11px]">
-                                    <span className={rowSum !== Math.round(autoTargets?.[flight]?.[table.id] || table.flightTargets?.[flight] || 0) ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}>{rowSum}</span>
+                                    <span className={rowSum !== (autoTargets?.[flight]?.[table.id] ?? table.flightTargets?.[flight] ?? 0) ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}>{rowSum}</span>
                                     <span className="text-slate-400">/</span>
-                                    <span className="text-slate-600 dark:text-slate-400">{Math.round(autoTargets?.[flight]?.[table.id] || table.flightTargets?.[flight] || 0)}</span>
+                                    <span className="text-slate-600 dark:text-slate-400">{(autoTargets?.[flight]?.[table.id] ?? table.flightTargets?.[flight] ?? 0)}</span>
                                   </div>
                                 </td>
                               ) : (
