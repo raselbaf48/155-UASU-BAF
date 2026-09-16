@@ -59,20 +59,10 @@
 /* Global Table Alternating Row Colors */
 @media screen {
   table:not(.no-zebra) tbody tr:nth-child(even) {
-    background-color: rgb(248 250 252 / 0.7);
+    background-color: rgb(30 41 59 / 0.5); /* slate-800 with opacity */
   }
   table:not(.no-zebra) tbody tr:nth-child(odd) {
-    background-color: #ffffff;
-  }
-  
-  html.dark table:not(.no-zebra) tbody tr:nth-child(even),
-  .dark table:not(.no-zebra) tbody tr:nth-child(even) {
-    background-color: rgb(30 41 59 / 0.5);
-  }
-  
-  html.dark table:not(.no-zebra) tbody tr:nth-child(odd),
-  .dark table:not(.no-zebra) tbody tr:nth-child(odd) {
-    background-color: #0f172a;
+    background-color: transparent;
   }
 }
 

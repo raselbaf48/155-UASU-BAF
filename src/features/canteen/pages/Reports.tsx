@@ -29,7 +29,7 @@ export const Reports: React.FC = () => {
     <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in duration-300">
       
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-slate-800 dark:text-white flex items-center space-x-2">
+        <h2 className="text-2xl font-bold text-white dark:text-white flex items-center space-x-2">
            <BarChart2 className="w-6 h-6 text-emerald-600" />
            <span>{t('reports')}</span>
         </h2>
@@ -38,8 +38,8 @@ export const Reports: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
         {/* Revenue Chart */}
-        <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-            <h3 className="font-bold text-lg text-slate-700 dark:text-slate-300 mb-6 flex items-center space-x-2">
+        <div className="bg-slate-900 dark:bg-slate-900 p-6 rounded-2xl border border-slate-700 dark:border-slate-800 shadow-sm">
+            <h3 className="font-bold text-lg text-slate-200 dark:text-slate-300 mb-6 flex items-center space-x-2">
                 <BarChart2 className="w-5 h-5 text-emerald-500" />
                 <span>{t('revenue_trend')} (This Week)</span>
             </h3>
@@ -60,8 +60,8 @@ export const Reports: React.FC = () => {
         </div>
 
         {/* Popular Items Chart */}
-        <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-            <h3 className="font-bold text-lg text-slate-700 dark:text-slate-300 mb-6 flex items-center space-x-2">
+        <div className="bg-slate-900 dark:bg-slate-900 p-6 rounded-2xl border border-slate-700 dark:border-slate-800 shadow-sm">
+            <h3 className="font-bold text-lg text-slate-200 dark:text-slate-300 mb-6 flex items-center space-x-2">
                 <PieChart className="w-5 h-5 text-blue-500" />
                 <span>{t('popular_items')} (By Category)</span>
             </h3>
@@ -92,7 +92,7 @@ export const Reports: React.FC = () => {
                 {popularItems.map((entry, index) => (
                     <div key={entry.name} className="flex items-center space-x-1 text-sm">
                         <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }}></div>
-                        <span className="text-slate-500 font-medium">{entry.name}</span>
+                        <span className="text-slate-400 font-medium">{entry.name}</span>
                     </div>
                 ))}
             </div>

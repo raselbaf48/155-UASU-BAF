@@ -15,7 +15,7 @@ export const MyDemands: React.FC = () => {
   return (
     <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in duration-300">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <h2 className="text-2xl font-bold text-slate-800 dark:text-white">{t('my_demands')}</h2>
+        <h2 className="text-2xl font-bold text-white dark:text-white">{t('my_demands')}</h2>
         
         <div className="flex items-center space-x-3">
           <div className="relative">
@@ -23,19 +23,19 @@ export const MyDemands: React.FC = () => {
             <input 
               type="text" 
               placeholder={t('search')} 
-              className="pl-9 pr-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 outline-none w-full md:w-64"
+              className="pl-9 pr-4 py-2 bg-slate-900 dark:bg-slate-900 border border-slate-700 dark:border-slate-800 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 outline-none w-full md:w-64"
             />
           </div>
-          <button className="p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-600 hover:text-emerald-600 transition-colors">
+          <button className="p-2 bg-slate-900 dark:bg-slate-900 border border-slate-700 dark:border-slate-800 rounded-xl text-slate-300 hover:text-emerald-600 transition-colors">
             <Filter className="w-4 h-4" />
           </button>
         </div>
       </div>
 
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
+      <div className="bg-slate-900 dark:bg-slate-900 rounded-2xl border border-slate-700 dark:border-slate-800 overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm whitespace-nowrap">
-            <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 font-medium">
+            <thead className="bg-slate-800 dark:bg-slate-800/50 text-slate-400 font-medium">
               <tr>
                 <th className="px-6 py-4">{t('date')}</th>
                 <th className="px-6 py-4">{t('item')}</th>
@@ -45,9 +45,9 @@ export const MyDemands: React.FC = () => {
                 <th className="px-6 py-4 text-right">{t('action')}</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50 text-slate-700 dark:text-slate-300">
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50 text-slate-200 dark:text-slate-300">
               {dummyHistory.map((row) => (
-                <tr key={row.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/20 transition-colors">
+                <tr key={row.id} className="hover:bg-slate-800 dark:hover:bg-slate-800/20 transition-colors">
                   <td className="px-6 py-4 font-medium">{row.date}</td>
                   <td className="px-6 py-4">
                     <div className="font-bold">{i18n.language === 'bn' ? row.item_bn : row.item_en}</div>
@@ -66,7 +66,7 @@ export const MyDemands: React.FC = () => {
                   </td>
                   <td className="px-6 py-4 text-right">
                     {row.status === 'confirmed' && (
-                      <button className="text-rose-500 hover:text-rose-700 font-bold text-xs bg-rose-50 px-3 py-1.5 rounded-lg transition-colors">
+                      <button className="text-rose-500 hover:text-rose-700 font-bold text-xs bg-rose-900/30 px-3 py-1.5 rounded-lg transition-colors">
                         {t('cancel')}
                       </button>
                     )}

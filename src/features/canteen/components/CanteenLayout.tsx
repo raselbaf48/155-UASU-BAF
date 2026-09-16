@@ -114,12 +114,12 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack }) => {
       case 'expenditures': return <Expenditures />;
       case 'reports': return <CanteenReports />;
       case 'settings': return <CanteenSettings />;
-      default: return <div className="text-center p-10 font-bold text-slate-500 animate-pulse">Under Construction ({activeTab})</div>;
+      default: return <div className="text-center p-10 font-bold text-slate-400 animate-pulse">Under Construction ({activeTab})</div>;
     }
   };
 
   return (
-    <div className={`fixed inset-0 z-[100] bg-slate-50 dark:bg-slate-950 overflow-hidden flex flex-col md:flex-row transition-all duration-300 ${i18n.language === 'bn' ? 'font-hind-siliguri text-[105%] leading-relaxed' : 'font-sans'}`}>
+    <div className={`fixed inset-0 z-[100] bg-slate-800 dark:bg-slate-950 overflow-hidden flex flex-col md:flex-row transition-all duration-300 ${i18n.language === 'bn' ? 'font-hind-siliguri text-[105%] leading-relaxed' : 'font-sans'}`}>
       
       {/* Dynamic Font Style Injection for the module */}
       <style>{`
@@ -129,9 +129,9 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack }) => {
       `}</style>
 
       {/* Sidebar */}
-      <div className="w-64 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col shrink-0 h-full overflow-y-auto hidden md:flex rounded-br-[40px]">
+      <div className="w-64 bg-slate-900 dark:bg-slate-900 border-r border-slate-700 dark:border-slate-800 flex flex-col shrink-0 h-full overflow-y-auto hidden md:flex rounded-br-[40px]">
         <div className="p-8 pb-4">
-          <h1 className="font-black text-2xl text-slate-800 dark:text-white tracking-widest flex items-center space-x-2">
+          <h1 className="font-black text-2xl text-white dark:text-white tracking-widest flex items-center space-x-2">
             <Utensils className="w-6 h-6 text-[#4f46e5]" />
             <span>CAFEUAV</span>
           </h1>
@@ -151,7 +151,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack }) => {
                 className={`w-full flex items-center space-x-3 px-5 py-3.5 rounded-2xl transition-all font-bold ${
                   isActive 
                   ? 'bg-[#4f46e5] text-white shadow-lg shadow-indigo-500/30' 
-                  : 'text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-600'
+                  : 'text-slate-400 hover:bg-slate-800 dark:hover:bg-slate-800 hover:text-slate-300'
                 }`}
               >
                 <item.icon className="w-5 h-5" />
@@ -186,12 +186,12 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack }) => {
       <div className="flex-1 flex flex-col h-full overflow-hidden relative">
          
          {/* Top Header for Mobile only */}
-         <div className="md:hidden h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-4 z-10 sticky top-0">
+         <div className="md:hidden h-16 bg-slate-900 dark:bg-slate-900 border-b border-slate-700 dark:border-slate-800 flex items-center justify-between px-4 z-10 sticky top-0">
             <div className="flex items-center space-x-3">
-              <button onClick={onBack} className="p-2 text-slate-500 bg-slate-100 rounded-lg">
+              <button onClick={onBack} className="p-2 text-slate-400 bg-slate-800 rounded-lg">
                 <ArrowLeft className="w-5 h-5" />
               </button>
-              <span className="font-bold text-lg text-slate-800 dark:text-white">CAFEUAV</span>
+              <span className="font-bold text-lg text-white dark:text-white">CAFEUAV</span>
             </div>
             <button onClick={() => { setShowLogin(true); setLoginError(''); setLoginInput(''); }}>
                <LogIn className="w-5 h-5 text-indigo-600" />
@@ -208,7 +208,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack }) => {
           <div className="w-full max-w-md animate-in zoom-in-95 duration-200">
              
              <div className="text-center mb-8">
-               <div className="inline-flex items-center justify-center w-16 h-16 bg-white rounded-2xl shadow-sm mb-4">
+               <div className="inline-flex items-center justify-center w-16 h-16 bg-slate-900 rounded-2xl shadow-sm mb-4">
                   <Coffee className="w-8 h-8 text-[#4f46e5]" />
                </div>
                <h2 className="text-2xl font-black text-white tracking-widest flex items-center justify-center space-x-2">
@@ -217,12 +217,12 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack }) => {
              </div>
 
              <div className="bg-slate-200/20 backdrop-blur-md p-1 rounded-full flex mb-6 mx-8 shadow-inner">
-                <button onClick={() => { setLoginTab('member'); setLoginInput(''); setLoginError(''); }} className={`flex-1 py-3 rounded-full text-xs font-bold tracking-widest transition-all ${loginTab === 'member' ? 'bg-white text-[#4f46e5] shadow-sm' : 'text-slate-300 hover:text-white'}`}>MEMBER</button>
-                <button onClick={() => { setLoginTab('manager'); setLoginInput(''); setLoginError(''); }} className={`flex-1 py-3 rounded-full text-xs font-bold tracking-widest transition-all ${loginTab === 'manager' ? 'bg-white text-[#4f46e5] shadow-sm' : 'text-slate-300 hover:text-white'}`}>MANAGER</button>
+                <button onClick={() => { setLoginTab('member'); setLoginInput(''); setLoginError(''); }} className={`flex-1 py-3 rounded-full text-xs font-bold tracking-widest transition-all ${loginTab === 'member' ? 'bg-slate-900 text-[#4f46e5] shadow-sm' : 'text-slate-300 hover:text-white'}`}>MEMBER</button>
+                <button onClick={() => { setLoginTab('manager'); setLoginInput(''); setLoginError(''); }} className={`flex-1 py-3 rounded-full text-xs font-bold tracking-widest transition-all ${loginTab === 'manager' ? 'bg-slate-900 text-[#4f46e5] shadow-sm' : 'text-slate-300 hover:text-white'}`}>MANAGER</button>
              </div>
 
-             <div className="bg-white dark:bg-slate-900 rounded-3xl p-8 shadow-2xl relative border border-slate-100 dark:border-slate-800">
-                <button onClick={() => setShowLogin(false)} className="absolute top-6 right-6 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+             <div className="bg-slate-900 dark:bg-slate-900 rounded-3xl p-8 shadow-2xl relative border border-slate-800 dark:border-slate-800">
+                <button onClick={() => setShowLogin(false)} className="absolute top-6 right-6 text-slate-400 hover:text-slate-300 dark:hover:text-slate-300">
                   <X className="w-5 h-5" />
                 </button>
 
@@ -235,7 +235,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack }) => {
                      value={loginInput}
                      onChange={e => { setLoginInput(e.target.value); setLoginError(''); }}
                      placeholder={loginTab === 'member' ? 'e.g. 469000' : '****'}
-                     className="w-full bg-[#0f172a] text-white px-5 py-4 rounded-xl font-medium focus:outline-none focus:ring-2 focus:ring-[#4f46e5] placeholder:text-slate-600"
+                     className="w-full bg-[#0f172a] text-white px-5 py-4 rounded-xl font-medium focus:outline-none focus:ring-2 focus:ring-[#4f46e5] placeholder:text-slate-300"
                    />
                    {loginError && <p className="text-rose-500 text-xs font-bold mt-3">{loginError}</p>}
                 </div>

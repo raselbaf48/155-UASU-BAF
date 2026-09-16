@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Plus, Download, Edit2, Trash2, FileText, UserPlus, Save, X, RefreshCw } from 'lucide-react';
+import { Search, Plus, Download, Edit2, Trash2, FileText, UserPlus, Save, X, RefreshCw, Printer, MessageCircle } from 'lucide-react';
 import { supabase } from '../../../supabase';
 
 export const MemberDB: React.FC = () => {
@@ -9,6 +9,22 @@ export const MemberDB: React.FC = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [newMember, setNewMember] = useState({ bdNo: '', rank: '', surname: '', contact: '' });
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [statementMember, setStatementMember] = useState<any | null>(null);
+  const [statementTx, setStatementTx] = useState<any[]>([]);
+
+  const openStatement = (member: any) => {
+      setStatementMember(member);
+      try {
+          const txs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+          const memberTxs = txs.filter((tx: any) => tx.airman_id === member.airman_id);
+          setStatementTx(memberTxs);
+      } catch(e) {
+          setStatementTx([]);
+      }
+  };
 
   useEffect(() => {
     fetchMembers();
@@ -74,17 +90,69 @@ export const MemberDB: React.FC = () => {
         baki: 0
     };
 
-    const { error } = await supabase.from('Canteen').insert([payload]);
-    if (!error) {
-        setShowAddModal(false);
-        setNewMember({ bdNo: '', rank: '', surname: '', contact: '' });
-        fetchMembers();
+    if (isEditMode && editingId) {
+        // preserve baki, only update text fields
+        const updatePayload = {
+            "BD No": newMember.bdNo,
+            "Rank": newMember.rank,
+            "Surname": newMember.surname,
+            "Contact": newMember.contact
+        };
+        const { error } = await supabase.from('Canteen').update(updatePayload).eq('airman_id', editingId);
+        if (!error) {
+            setShowAddModal(false);
+            fetchMembers();
+        } else {
+            alert("Error updating member: " + error.message);
+        }
     } else {
-        alert("Error adding member: " + error.message);
+        const { error } = await supabase.from('Canteen').insert([payload]);
+        if (!error) {
+            setShowAddModal(false);
+            fetchMembers();
+        } else {
+            alert("Error adding member: " + error.message);
+        }
     }
+    setNewMember({ bdNo: '', rank: '', surname: '', contact: '' });
+    setIsEditMode(false);
+    setEditingId(null);
   };
 
-  const filteredMembers = members.filter(m => {
+  const handleEdit = (member: any) => {
+    setIsEditMode(true);
+    setEditingId(member.airman_id);
+    setNewMember({
+        bdNo: member['BD No'] || '',
+        rank: member['Rank'] || '',
+        surname: member['Surname'] || '',
+        contact: member['Contact'] || ''
+    });
+    setShowAddModal(true);
+  };
+
+  const confirmDelete = async (id: string) => {
+      const { error } = await supabase.from('Canteen').delete().eq('airman_id', id);
+      if(!error) {
+          fetchMembers();
+      }
+      setDeleteConfirmId(null);
+  };
+
+  const rankOrder: Record<string, number> = {
+      'MW': 1, 'SWO': 2, 'WO': 3,
+      'SGT': 4, 'CPL': 5, 'LAC': 6, 'AC': 7
+  };
+
+  const sortedMembers = [...members].sort((a, b) => {
+      const rA = (a['Rank'] || '').toUpperCase();
+      const rB = (b['Rank'] || '').toUpperCase();
+      const oA = rankOrder[rA] || 99;
+      const oB = rankOrder[rB] || 99;
+      return oA - oB;
+  });
+
+  const filteredMembers = sortedMembers.filter(m => {
       const name = m['Surname'] || '';
       const bd = m['BD No'] || '';
       return name.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -97,14 +165,14 @@ export const MemberDB: React.FC = () => {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
          <div>
-            <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tighter">MEMBER DATABASE</h2>
+            <h2 className="text-2xl font-black text-white uppercase tracking-tighter">MEMBER DATABASE</h2>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">IDENTITY MANAGEMENT NODE</p>
          </div>
          <div className="flex items-center space-x-3">
             <button 
                onClick={handleSyncBiodata}
                disabled={isSyncing}
-               className="flex items-center space-x-2 px-4 py-2 bg-emerald-50 text-emerald-600 rounded-xl text-xs font-bold tracking-widest hover:bg-emerald-100 transition-colors disabled:opacity-50"
+               className="flex items-center space-x-2 px-4 py-2 bg-emerald-900/30 text-emerald-600 rounded-xl text-xs font-bold tracking-widest hover:bg-emerald-100 transition-colors disabled:opacity-50"
             >
                <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
                <span>{isSyncing ? 'SYNCING...' : 'SYNC BIODATA'}</span>
@@ -124,16 +192,16 @@ export const MemberDB: React.FC = () => {
             placeholder="Filter SID or Name..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-white border border-slate-200 rounded-2xl pl-12 pr-4 py-3.5 text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#4f46e5]/20 focus:border-[#4f46e5] transition-all shadow-sm"
+            className="w-full bg-slate-900 border border-slate-700 rounded-2xl pl-12 pr-4 py-3.5 text-sm font-bold text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#4f46e5]/20 focus:border-[#4f46e5] transition-all shadow-sm"
          />
       </div>
 
       {loading ? (
-          <div className="text-center py-10 text-slate-500 font-bold animate-pulse">Loading members from Canteen table...</div>
+          <div className="text-center py-10 text-slate-400 font-bold animate-pulse">Loading members from Canteen table...</div>
       ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
              {filteredMembers.map((member, i) => (
-                <div key={member.airman_id || i} className={`bg-white rounded-[2rem] p-6 border-2 shadow-sm transition-all hover:shadow-md ${i === 0 ? 'border-[#4f46e5]' : 'border-transparent'}`}>
+                <div key={member.airman_id || i} className={`bg-slate-900 rounded-[2rem] p-6 border-2 shadow-sm transition-all hover:shadow-md ${i === 0 ? 'border-[#4f46e5]' : 'border-slate-800'}`}>
                    <div className="flex items-start justify-between mb-6">
                       <div className="flex items-center space-x-4">
                          <div className="w-12 h-12 rounded-2xl bg-[#0f172a] text-white flex items-center justify-center font-black text-lg shadow-sm">
@@ -141,7 +209,7 @@ export const MemberDB: React.FC = () => {
                          </div>
                          <div>
                             <p className="text-[10px] font-black text-[#4f46e5] tracking-widest">ID #{member['BD No']}</p>
-                            <h3 className="font-bold text-slate-800 text-sm leading-tight mt-0.5">{member['Rank']} {member['Surname']}</h3>
+                            <h3 className="font-bold text-white text-sm leading-tight mt-0.5">{member['Rank']} {member['Surname']}</h3>
                             {member['Contact'] && (
                                <p className="text-[10px] font-bold text-slate-400 mt-0.5 tracking-wider">{member['Contact']}</p>
                             )}
@@ -156,26 +224,26 @@ export const MemberDB: React.FC = () => {
                    </div>
 
                    <div className="grid grid-cols-2 gap-3 mb-6">
-                      <button className="py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-500 rounded-xl text-[10px] font-black tracking-widest flex items-center justify-center space-x-1.5 transition-colors">
+                      <button className="py-2.5 bg-rose-900/30 hover:bg-rose-100 text-rose-500 rounded-xl text-[10px] font-black tracking-widest flex items-center justify-center space-x-1.5 transition-colors">
                          <Plus className="w-3 h-3" />
                          <span>ADD BAKI</span>
                       </button>
-                      <button className="py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-xl text-[10px] font-black tracking-widest flex items-center justify-center space-x-1.5 transition-colors">
+                      <button className="py-2.5 bg-emerald-900/30 hover:bg-emerald-100 text-emerald-600 rounded-xl text-[10px] font-black tracking-widest flex items-center justify-center space-x-1.5 transition-colors">
                          <BanknoteIcon className="w-3 h-3" />
                          <span>PAY BILL</span>
                       </button>
                    </div>
 
-                   <div className="flex items-center justify-between pt-4 border-t border-slate-100">
-                      <button className="flex items-center space-x-1 px-3 py-1.5 bg-indigo-50 text-indigo-500 rounded-lg text-[10px] font-black tracking-widest hover:bg-indigo-100 transition-colors">
+                   <div className="flex items-center justify-between pt-4 border-t border-slate-800">
+                      <button onClick={() => openStatement(member)} className="flex items-center space-x-1 px-3 py-1.5 bg-indigo-900/30 text-indigo-500 rounded-lg text-[10px] font-black tracking-widest hover:bg-indigo-100 transition-colors">
                          <FileText className="w-3 h-3" />
                          <span>STATEMENT</span>
                       </button>
                       <div className="flex items-center space-x-2">
-                         <button className="p-1.5 text-slate-400 hover:text-indigo-500 transition-colors">
+                         <button onClick={() => handleEdit(member)} className="p-1.5 text-slate-400 hover:text-indigo-500 transition-colors">
                             <Edit2 className="w-4 h-4" />
                          </button>
-                         <button className="p-1.5 text-slate-400 hover:text-rose-500 transition-colors">
+                         <button onClick={() => setDeleteConfirmId(member.airman_id)} className="p-1.5 text-slate-400 hover:text-rose-500 transition-colors">
                             <Trash2 className="w-4 h-4" />
                          </button>
                       </div>
@@ -188,52 +256,52 @@ export const MemberDB: React.FC = () => {
       {/* Add Member Modal */}
       {showAddModal && (
          <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-3xl p-6 w-full max-w-md shadow-xl animate-in zoom-in-95">
+            <div className="bg-slate-900 rounded-3xl p-6 w-full max-w-md shadow-xl animate-in zoom-in-95">
                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-lg font-black text-slate-800">ADD NEW MEMBER</h3>
-                  <button onClick={() => setShowAddModal(false)} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full">
+                  <h3 className="text-lg font-black text-white uppercase tracking-tighter">{isEditMode ? "EDIT MEMBER" : "ADD NEW MEMBER"}</h3>
+                  <button onClick={() => setShowAddModal(false)} className="p-2 text-slate-400 hover:bg-slate-800 rounded-full">
                      <X className="w-5 h-5" />
                   </button>
                </div>
                
                <div className="space-y-4">
                   <div>
-                     <label className="text-[10px] font-black text-slate-500 tracking-widest uppercase mb-1 block">BD No (ID)</label>
+                     <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">BD No (ID)</label>
                      <input 
                         type="text" 
                         value={newMember.bdNo}
                         onChange={(e) => setNewMember({...newMember, bdNo: e.target.value})}
-                        className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                         placeholder="e.g. 102341"
                      />
                   </div>
                   <div>
-                     <label className="text-[10px] font-black text-slate-500 tracking-widest uppercase mb-1 block">Rank</label>
+                     <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Rank</label>
                      <input 
                         type="text" 
                         value={newMember.rank}
                         onChange={(e) => setNewMember({...newMember, rank: e.target.value})}
-                        className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                         placeholder="e.g. AC-1"
                      />
                   </div>
                   <div>
-                     <label className="text-[10px] font-black text-slate-500 tracking-widest uppercase mb-1 block">Name / Surname</label>
+                     <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Name / Surname</label>
                      <input 
                         type="text" 
                         value={newMember.surname}
                         onChange={(e) => setNewMember({...newMember, surname: e.target.value})}
-                        className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                         placeholder="e.g. NISHAD"
                      />
                   </div>
                   <div>
-                     <label className="text-[10px] font-black text-slate-500 tracking-widest uppercase mb-1 block">Contact No</label>
+                     <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Contact No</label>
                      <input 
                         type="text" 
                         value={newMember.contact}
                         onChange={(e) => setNewMember({...newMember, contact: e.target.value})}
-                        className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                         placeholder="e.g. 01700000000"
                      />
                   </div>
@@ -246,6 +314,127 @@ export const MemberDB: React.FC = () => {
                   <Save className="w-4 h-4" />
                   <span>SAVE TO DATABASE</span>
                </button>
+            </div>
+         </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmId && (
+         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-900 rounded-3xl p-6 w-full max-w-sm shadow-xl animate-in zoom-in-95 text-center">
+               <div className="w-16 h-16 bg-rose-100 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Trash2 className="w-8 h-8" />
+               </div>
+               <h3 className="text-lg font-black text-white uppercase tracking-tighter mb-2">Delete Member?</h3>
+               <p className="text-sm font-bold text-slate-400 mb-6">Are you sure you want to delete this member? This action cannot be undone.</p>
+               
+               <div className="flex space-x-3">
+                  <button onClick={() => setDeleteConfirmId(null)} className="flex-1 py-3 bg-slate-800 text-slate-200 rounded-xl text-xs font-black tracking-widest hover:bg-slate-200 transition-colors">
+                     CANCEL
+                  </button>
+                  <button onClick={() => confirmDelete(deleteConfirmId)} className="flex-1 py-3 bg-rose-900/300 text-white rounded-xl text-xs font-black tracking-widest hover:bg-rose-600 transition-colors shadow-md shadow-rose-500/30">
+                     DELETE
+                  </button>
+               </div>
+            </div>
+         </div>
+      )}
+
+      {/* Statement Modal */}
+      {statementMember && (
+         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-900 rounded-[2rem] p-6 w-full max-w-lg shadow-xl animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
+               <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center space-x-2">
+                      <div className="p-2 bg-indigo-900/30 text-indigo-500 rounded-lg">
+                          <FileText className="w-5 h-5" />
+                      </div>
+                      <div>
+                          <h3 className="text-xs font-black text-white uppercase tracking-widest">STATEMENT BUILDER</h3>
+                          <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">PRECISE MONTHLY AUDIT</p>
+                      </div>
+                  </div>
+                  <button onClick={() => setStatementMember(null)} className="p-2 text-slate-400 hover:bg-slate-800 rounded-full transition-colors">
+                     <X className="w-5 h-5" />
+                  </button>
+               </div>
+
+               <div id="statement-paper" className="border-2 border-slate-800 p-6 bg-slate-900 mb-6">
+                   <div className="text-center mb-4">
+                       <h2 className="text-lg font-black text-white">🍽️ CAFE UAV 🍽️</h2>
+                       <p className="text-[10px] font-bold text-white border-b border-slate-800 inline-block px-2 pb-0.5 mt-1">মাসিক বিল বিবরণী</p>
+                   </div>
+                   
+                   <table className="w-full border-collapse border border-slate-800 text-[10px] font-bold text-white text-center mb-8 no-zebra">
+                       <tbody>
+                           <tr>
+                               <td className="border border-slate-800 p-2 text-left w-1/3">মাসের নাম</td>
+                               <td className="border border-slate-800 p-2" colSpan={3}>সেপ্টেম্বর ২০২৬</td>
+                           </tr>
+                           <tr>
+                               <td className="border border-slate-800 p-2 text-left">পদবী ও নাম</td>
+                               <td className="border border-slate-800 p-2" colSpan={3}>{statementMember['Rank']} {statementMember['Surname']} ({statementMember['BD No']})</td>
+                           </tr>
+                           <tr className="bg-slate-800">
+                               <td className="border border-slate-800 p-2">তারিখ</td>
+                               <td className="border border-slate-800 p-2" colSpan={2}>বিবরণ</td>
+                               <td className="border border-slate-800 p-2">টাকা</td>
+                           </tr>
+                           
+                           {statementTx.length === 0 ? (
+                               <tr>
+                                   <td className="border border-slate-800 p-2 text-slate-400 font-normal py-4" colSpan={4}>এই মাসে কোনো ক্যান্টিন খরচ নেই</td>
+                               </tr>
+                           ) : (
+                               statementTx.map(tx => (
+                                   <tr key={tx.id}>
+                                       <td className="border border-slate-800 p-2">{tx.date}</td>
+                                       <td className="border border-slate-800 p-2" colSpan={2}>{tx.items}</td>
+                                       <td className="border border-slate-800 p-2">৳{tx.amount}</td>
+                                   </tr>
+                               ))
+                           )}
+
+                           <tr>
+                               <td className="border border-slate-800 p-2 text-right" colSpan={3}>মোট ক্যান্টিন বিল (খাবার)</td>
+                               <td className="border border-slate-800 p-2">৳{statementTx.reduce((sum, tx) => sum + (tx.amount || 0), 0)}</td>
+                           </tr>
+                           <tr>
+                               <td className="border border-slate-800 p-2 text-right" colSpan={3}>চলতি মাসের মোট (SUBTOTAL)</td>
+                               <td className="border border-slate-800 p-2">৳{statementTx.reduce((sum, tx) => sum + (tx.amount || 0), 0)}</td>
+                           </tr>
+                           <tr>
+                               <td className="border border-slate-800 p-2 text-right font-black" colSpan={3}>সর্বমোট প্রদেয়</td>
+                               <td className="border border-slate-800 p-2 font-black text-sm">৳{statementMember.baki || '0.00'}</td>
+                           </tr>
+                       </tbody>
+                   </table>
+
+                   <div className="flex justify-between items-end pt-12 px-4 text-[10px] font-bold text-white text-center">
+                       <div>
+                           <div className="w-24 border-t border-slate-800 mb-1 mx-auto"></div>
+                           <p>গ্রাহকের স্বাক্ষর</p>
+                       </div>
+                       <div>
+                           <div className="w-24 border-t border-slate-800 mb-1 mx-auto"></div>
+                           <p>ম্যানেজার</p>
+                       </div>
+                   </div>
+               </div>
+
+               <div className="flex space-x-3">
+                   <button onClick={() => window.print()} className="flex-1 flex items-center justify-center space-x-2 py-3 bg-slate-900 text-white rounded-xl text-[10px] font-black tracking-widest hover:bg-slate-800 transition-colors">
+                       <Printer className="w-4 h-4" />
+                       <span>PRINT / SAVE PDF</span>
+                   </button>
+                   <button onClick={() => window.open(`https://wa.me/?text=Canteen+Bill+for+${statementMember['Rank']}+${statementMember['Surname']}+is+%E0%A7%B3${statementMember.baki||0}`, '_blank')} className="flex-1 flex items-center justify-center space-x-2 py-3 bg-[#25D366] text-white rounded-xl text-[10px] font-black tracking-widest hover:bg-[#20bd5a] transition-colors shadow-md shadow-[#25D366]/30">
+                       <MessageCircle className="w-4 h-4" />
+                       <span>WHATSAPP SHARE</span>
+                   </button>
+                   <button onClick={() => setStatementMember(null)} className="px-6 py-3 bg-slate-800 text-slate-200 rounded-xl text-[10px] font-black tracking-widest hover:bg-slate-200 transition-colors">
+                       DISMISS
+                   </button>
+               </div>
             </div>
          </div>
       )}

@@ -17,7 +17,7 @@ export const DemandManagement: React.FC = () => {
     <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in duration-300">
       
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <h2 className="text-2xl font-bold text-slate-800 dark:text-white flex items-center space-x-2">
+        <h2 className="text-2xl font-bold text-white dark:text-white flex items-center space-x-2">
            <List className="w-6 h-6 text-emerald-600" />
            <span>{t('demand_management')}</span>
         </h2>
@@ -28,22 +28,22 @@ export const DemandManagement: React.FC = () => {
             <input 
               type="text" 
               placeholder={t('search')} 
-              className="pl-9 pr-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 outline-none w-full md:w-64"
+              className="pl-9 pr-4 py-2 bg-slate-900 dark:bg-slate-900 border border-slate-700 dark:border-slate-800 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500/20 outline-none w-full md:w-64"
             />
           </div>
         </div>
       </div>
 
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
-        <div className="p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 flex justify-between items-center">
-            <h3 className="font-bold text-slate-700 dark:text-slate-300">Today's Demands</h3>
+      <div className="bg-slate-900 dark:bg-slate-900 rounded-2xl border border-slate-700 dark:border-slate-800 overflow-hidden shadow-sm">
+        <div className="p-4 border-b border-slate-800 dark:border-slate-800 bg-slate-800 dark:bg-slate-900/50 flex justify-between items-center">
+            <h3 className="font-bold text-slate-200 dark:text-slate-300">Today's Demands</h3>
             <button className="bg-emerald-100 text-emerald-700 px-4 py-1.5 rounded-lg text-sm font-bold hover:bg-emerald-200 transition-colors">
                 Mark All as Served
             </button>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm whitespace-nowrap">
-            <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 font-medium border-b border-slate-100 dark:border-slate-800">
+            <thead className="bg-slate-800 dark:bg-slate-800/50 text-slate-400 font-medium border-b border-slate-800 dark:border-slate-800">
               <tr>
                 <th className="px-6 py-4 w-10">
                     <input type="checkbox" className="rounded text-emerald-500 focus:ring-emerald-500" />
@@ -55,12 +55,12 @@ export const DemandManagement: React.FC = () => {
                 <th className="px-6 py-4 text-right">{t('action')}</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50 text-slate-700 dark:text-slate-300">
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50 text-slate-200 dark:text-slate-300">
               {dummyDemands.map((row) => {
                  const isLangBn = i18n.language === 'bn';
                  
                  return (
-                  <tr key={row.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/20 transition-colors">
+                  <tr key={row.id} className="hover:bg-slate-800 dark:hover:bg-slate-800/20 transition-colors">
                      <td className="px-6 py-4">
                         <input type="checkbox" className="rounded text-emerald-500 focus:ring-emerald-500" disabled={row.status !== 'confirmed'} />
                      </td>
@@ -83,7 +83,7 @@ export const DemandManagement: React.FC = () => {
                      </td>
                      <td className="px-6 py-4 text-right">
                         {row.status === 'confirmed' ? (
-                            <button className="flex items-center justify-end space-x-1 text-emerald-600 hover:text-emerald-700 font-bold text-xs bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-lg transition-colors ml-auto">
+                            <button className="flex items-center justify-end space-x-1 text-emerald-600 hover:text-emerald-700 font-bold text-xs bg-emerald-900/30 hover:bg-emerald-100 px-3 py-1.5 rounded-lg transition-colors ml-auto">
                                 <CheckCircle2 className="w-4 h-4" />
                                 <span>{t('mark_as_served')}</span>
                             </button>

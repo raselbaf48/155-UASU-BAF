@@ -17,11 +17,11 @@ export const MyBill: React.FC = () => {
     <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in duration-300">
       
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <h2 className="text-2xl font-bold text-slate-800 dark:text-white flex items-center space-x-2">
+        <h2 className="text-2xl font-bold text-white dark:text-white flex items-center space-x-2">
            <CreditCard className="w-6 h-6 text-emerald-600" />
            <span>{t('my_bill')}</span>
         </h2>
-        <button className="flex items-center space-x-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 px-4 py-2 rounded-xl transition-colors text-sm font-bold shadow-sm hover:shadow-md">
+        <button className="flex items-center space-x-2 bg-slate-900 dark:bg-slate-900 border border-slate-700 dark:border-slate-800 text-slate-200 dark:text-slate-300 px-4 py-2 rounded-xl transition-colors text-sm font-bold shadow-sm hover:shadow-md">
             <Download className="w-4 h-4" />
             <span>{t('download_invoice')}</span>
         </button>
@@ -33,28 +33,28 @@ export const MyBill: React.FC = () => {
              <p className="text-emerald-100 font-medium mb-1">{t('total')} {t('due')}</p>
              <h3 className="text-4xl font-bold">{formatMoney(60, i18n.language)}</h3>
           </div>
-          <div className="absolute -right-4 -bottom-4 w-24 h-24 bg-white/10 rounded-full blur-2xl"></div>
+          <div className="absolute -right-4 -bottom-4 w-24 h-24 bg-slate-900/10 rounded-full blur-2xl"></div>
         </div>
         
-        <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-800">
-          <p className="text-slate-500 font-medium mb-1">{t('current_month_bill')}</p>
-          <h3 className="text-3xl font-bold text-slate-800 dark:text-white">{formatMoney(260, i18n.language)}</h3>
+        <div className="bg-slate-900 dark:bg-slate-900 p-6 rounded-2xl shadow-sm border border-slate-800 dark:border-slate-800">
+          <p className="text-slate-400 font-medium mb-1">{t('current_month_bill')}</p>
+          <h3 className="text-3xl font-bold text-white dark:text-white">{formatMoney(260, i18n.language)}</h3>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-800">
-          <p className="text-slate-500 font-medium mb-1">{t('paid')} ({t('current_month_bill')})</p>
-          <h3 className="text-3xl font-bold text-slate-800 dark:text-white">{formatMoney(200, i18n.language)}</h3>
+        <div className="bg-slate-900 dark:bg-slate-900 p-6 rounded-2xl shadow-sm border border-slate-800 dark:border-slate-800">
+          <p className="text-slate-400 font-medium mb-1">{t('paid')} ({t('current_month_bill')})</p>
+          <h3 className="text-3xl font-bold text-white dark:text-white">{formatMoney(200, i18n.language)}</h3>
         </div>
       </div>
 
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-sm">
-        <div className="p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 flex items-center space-x-2">
-            <FileText className="w-5 h-5 text-slate-500" />
-            <h3 className="font-bold text-slate-700 dark:text-slate-300">{t('ledger')}</h3>
+      <div className="bg-slate-900 dark:bg-slate-900 rounded-2xl border border-slate-700 dark:border-slate-800 overflow-hidden shadow-sm">
+        <div className="p-4 border-b border-slate-800 dark:border-slate-800 bg-slate-800 dark:bg-slate-900/50 flex items-center space-x-2">
+            <FileText className="w-5 h-5 text-slate-400" />
+            <h3 className="font-bold text-slate-200 dark:text-slate-300">{t('ledger')}</h3>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm whitespace-nowrap">
-            <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 font-medium border-b border-slate-100 dark:border-slate-800">
+            <thead className="bg-slate-800 dark:bg-slate-800/50 text-slate-400 font-medium border-b border-slate-800 dark:border-slate-800">
               <tr>
                 <th className="px-6 py-4">{t('date')}</th>
                 <th className="px-6 py-4">{t('description')}</th>
@@ -63,9 +63,9 @@ export const MyBill: React.FC = () => {
                 <th className="px-6 py-4 text-right">{t('balance')}</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50 text-slate-700 dark:text-slate-300">
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50 text-slate-200 dark:text-slate-300">
               {ledgerData.map((row) => (
-                  <tr key={row.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/20 transition-colors">
+                  <tr key={row.id} className="hover:bg-slate-800 dark:hover:bg-slate-800/20 transition-colors">
                      <td className="px-6 py-4 font-medium">{row.date}</td>
                      <td className="px-6 py-4 font-bold">{i18n.language === 'bn' ? row.desc_bn : row.desc_en}</td>
                      <td className="px-6 py-4 text-right font-medium text-rose-600">
@@ -74,7 +74,7 @@ export const MyBill: React.FC = () => {
                      <td className="px-6 py-4 text-right font-medium text-emerald-600">
                         {row.credit > 0 ? formatMoney(row.credit, i18n.language) : '-'}
                      </td>
-                     <td className="px-6 py-4 text-right font-bold text-slate-800 dark:text-white text-lg">
+                     <td className="px-6 py-4 text-right font-bold text-white dark:text-white text-lg">
                         {formatMoney(row.balance, i18n.language)}
                      </td>
                   </tr>

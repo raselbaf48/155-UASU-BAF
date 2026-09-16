@@ -45,9 +45,9 @@ export const ManagerDashboard: React.FC = () => {
             </div>
             
             <h2 className="text-4xl font-black text-white tracking-widest flex items-center space-x-3">
-               <span className="text-slate-500">🍽️</span> 
+               <span className="text-slate-400">🍽️</span> 
                <span>CAFEUAV</span> 
-               <span className="text-slate-500">🍽️</span>
+               <span className="text-slate-400">🍽️</span>
             </h2>
             <p className="text-[10px] tracking-widest text-slate-400 font-bold uppercase pb-2">Eat Good Food, Serve Good!</p>
             
@@ -61,8 +61,8 @@ export const ManagerDashboard: React.FC = () => {
       {/* Grid Content */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
          {/* Left Col - Cafe Performance */}
-         <div className="lg:col-span-2 bg-white rounded-[2rem] p-8 shadow-sm border border-slate-100 flex flex-col min-h-[400px]">
-            <h3 className="text-xs font-black text-slate-800 tracking-widest uppercase mb-8 flex items-center space-x-2">
+         <div className="lg:col-span-2 bg-slate-900 rounded-[2rem] p-8 shadow-sm border border-slate-800 flex flex-col min-h-[400px]">
+            <h3 className="text-xs font-black text-white tracking-widest uppercase mb-8 flex items-center space-x-2">
                <span className="text-[#4f46e5]">📈</span>
                <span>CAFE PERFORMANCE</span>
             </h3>
@@ -102,7 +102,7 @@ export const ManagerDashboard: React.FC = () => {
                         placeholder="ENTER MEMBER SID..."
                         value={memberSid}
                         onChange={(e) => setMemberSid(e.target.value)}
-                        className="w-full bg-[#1e293b] text-white px-5 py-4 rounded-2xl text-[10px] font-bold tracking-widest focus:outline-none focus:ring-2 focus:ring-[#4f46e5] placeholder:text-slate-500 border border-slate-800 text-center"
+                        className="w-full bg-[#1e293b] text-white px-5 py-4 rounded-2xl text-[10px] font-bold tracking-widest focus:outline-none focus:ring-2 focus:ring-[#4f46e5] placeholder:text-slate-400 border border-slate-800 text-center"
                      />
                   </div>
                   <button className="w-full bg-[#4f46e5] hover:bg-[#4338ca] text-white py-4 rounded-2xl text-[10px] font-black tracking-widest transition-all shadow-md shadow-indigo-500/20">
@@ -112,13 +112,13 @@ export const ManagerDashboard: React.FC = () => {
             </div>
 
             {/* Cycle Sales Card */}
-            <div className="bg-white rounded-[2rem] p-8 shadow-sm border border-slate-100 flex-1 flex flex-col justify-center">
+            <div className="bg-slate-900 rounded-[2rem] p-8 shadow-sm border border-slate-800 flex-1 flex flex-col justify-center">
                <p className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-2">CYCLE SALES</p>
-               <h2 className="text-4xl font-black text-slate-800 tracking-tighter">৳14,069</h2>
+               <h2 className="text-4xl font-black text-white tracking-tighter">৳14,069</h2>
             </div>
 
             {/* Global Debt Card */}
-            <div className="bg-rose-50 rounded-[2rem] p-8 shadow-sm border border-rose-100 flex-1 flex flex-col justify-center">
+            <div className="bg-rose-900/30 rounded-[2rem] p-8 shadow-sm border border-rose-900/50 flex-1 flex flex-col justify-center">
                <p className="text-[10px] font-black text-rose-400 tracking-widest uppercase mb-2">GLOBAL DEBT</p>
                <h2 className="text-4xl font-black text-rose-600 tracking-tighter">৳-1,816,144</h2>
             </div>
