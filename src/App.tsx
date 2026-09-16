@@ -520,7 +520,6 @@ return () => mediaQuery.removeEventListener('change', listener);
               variant="biodata"
               initialFlightFilter={selectedFlight === "Overall" || selectedFlight === "All" ? "All" : selectedFlight}
               airmen={airmen}
-              role={role}
               userFlight={userSession?.flightName}
               onRefresh={fetchAirmen}
               onSyncGoogleSheet={handleSyncGoogleSheet}
@@ -740,6 +739,7 @@ return () => mediaQuery.removeEventListener('change', listener);
           }}
           onRemoveAirman={handleDeleteAirman}
           role={role}
+          variant={activeTab === "biodata-register" ? "biodata" : "nominal"}
         />
       )}
 

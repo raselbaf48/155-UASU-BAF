@@ -1142,10 +1142,10 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
 
  {/* OFFICIAL SIGNATURE FOOTER FOR MULTI-DAY */}
  <div
- className="flex justify-between items-end pt-1 text-black dark:text-white text-xs min-w-[700px] print:min-w-0"
+ className="hidden print:hidden justify-between items-end pt-1 text-black dark:text-white text-xs min-w-[700px] print:min-w-0"
  style={{ fontFamily: 'Arial, sans-serif' }}
  >
- {/* LEFT SIGNATURE BLOCK (Prepared By) */}
+{/* LEFT SIGNATURE BLOCK (Prepared By) */}
  <div className="text-left font-bold min-w-[200px]">
  <div className="border-t border-slate-900 pt-1.5">
  <div className="text-xs uppercase font-black">{preparedBy.name}</div>
@@ -1164,6 +1164,8 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  <div className="text-[10px] uppercase font-bold">{authorizedBy.unit || '155 UASU BAF'}</div>
  </div>
  </div>
+
+ 
  </div>
  </div>
  ) : (
@@ -1343,8 +1345,7 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  ))}
  </ol>
  )}
- </div>
- ) : (
+ </div>) : (
  <div className="font-bold text-black dark:text-white">Nil</div>
  )}
  </div>
@@ -1485,10 +1486,10 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
 
  {/* OFFICIAL SIGNATURE FOOTER */}
  <div
- className="flex justify-between items-end pt-1 text-black dark:text-white text-xs min-w-[700px] print:min-w-0"
+ className="hidden print:hidden justify-between items-end pt-1 text-black dark:text-white text-xs min-w-[700px] print:min-w-0"
  style={{ fontFamily: 'Arial, sans-serif' }}
  >
- {/* LEFT SIGNATURE BLOCK (Prepared By) */}
+{/* LEFT SIGNATURE BLOCK (Prepared By) */}
  <div className="text-left font-bold min-w-[210px]">
  {preparedBy.signDigitally && (
  <div className="mb-1 text-center font-serif italic text-xs text-black dark:text-white select-none">
@@ -1867,8 +1868,7 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  {flightAirmen.length === 0 ? (
  <div className="py-4 text-center text-xs text-slate-400">
  No airmen registered in {disposalFlight} Flight
- </div>
- ) : (
+ </div>) : (
  flightAirmen.map((a) => {
  const statusInfo = getAirmanStatusLabel(a.id);
  const { isOnParade, label: statusLabel } = statusInfo;

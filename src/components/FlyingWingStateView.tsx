@@ -281,7 +281,7 @@ export function FlyingWingStateView({
   const colTotals: Record<string, number> = {};
 
   return (
-    <div className="bg-white dark:bg-slate-900 text-black dark:text-white print:text-black w-full min-h-screen p-4 sm:p-8" style={{ fontFamily: 'Arial, sans-serif' }}>
+    <div className="bg-white dark:bg-slate-900 text-black dark:text-white print:text-black w-full min-h-screen print:min-h-0 p-4 sm:p-8" style={{ fontFamily: 'Arial, sans-serif' }}>
       <div className="relative mb-6 text-center">
         <h1 className="font-bold tracking-wide underline inline-block text-base uppercase">
           CONSOLIDATED NIGHT COUNT STATE : BAF AIRMEN

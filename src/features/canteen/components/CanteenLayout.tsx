@@ -1,0 +1,256 @@
+import React, { useState } from 'react';
+import { supabase } from '../../../supabase';
+import { useTranslation } from 'react-i18next';
+import { formatMoney } from '../i18n';
+import { EmployeeDashboard } from '../pages/EmployeeDashboard';
+import { PlaceDemand } from '../pages/PlaceDemand';
+import { MyDemands } from '../pages/MyDemands';
+import { ManagerDashboard } from '../pages/ManagerDashboard';
+import { InventoryManagement } from '../pages/InventoryManagement';
+import { DemandManagement } from '../pages/DemandManagement';
+import { MenuManagement } from '../pages/MenuManagement';
+import { BillingManagement } from '../pages/BillingManagement';
+import { MyBill } from '../pages/MyBill';
+import { Reports } from '../pages/Reports';
+import { Settings } from '../pages/Settings';
+import { PosSales } from '../pages/PosSales';
+import { MemberDB } from '../pages/MemberDB';
+import { CanteenInventory } from '../pages/CanteenInventory';
+import { Expenditures } from '../pages/Expenditures';
+import { CanteenReports } from '../pages/CanteenReports';
+import { CanteenSettings } from '../pages/CanteenSettings';
+
+import { LayoutDashboard, Coffee, Search, List, CreditCard, ArrowLeft, Utensils, Wifi, HelpCircle, LogIn, Grid, Package as Pkg, ShoppingCart, Users, Banknote, BarChart2, Settings as SettingsIcon, PieChart, Package, UserCircle, X } from 'lucide-react';
+
+
+
+
+
+
+
+interface CanteenLayoutProps {
+  onBack: () => void;
+}
+
+export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack }) => {
+  const { t, i18n } = useTranslation();
+  const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const [currentUser, setCurrentUser] = useState({ name: 'Guest', role: 'employee' as 'employee'|'manager' });
+  const [showLogin, setShowLogin] = useState(false);
+  const [loginTab, setLoginTab] = useState<'member'|'manager'>('member');
+  const [loginInput, setLoginInput] = useState('');
+  const [loginError, setLoginError] = useState('');
+
+  const handleLogin = async () => {
+    if (loginTab === 'member') {
+      try {
+        setLoginError('Checking...');
+        const { data, error } = await supabase
+          .from('Canteen')
+          .select('Name, Rank')
+          .eq('BD No', loginInput)
+          .single();
+          
+        if (error || !data) {
+          setLoginError('Member not found. Check BD No.');
+        } else {
+          setCurrentUser({ name: `${data.Rank} ${data.Name}`, role: 'employee' });
+          setActiveTab('dashboard');
+          setShowLogin(false);
+          setLoginInput('');
+          setLoginError('');
+        }
+      } catch (err) {
+        setLoginError('Network Error.');
+      }
+    } else {
+      if (loginInput === '1234') {
+        setCurrentUser({ name: 'System Admin', role: 'manager' });
+        setActiveTab('manager_dashboard');
+        setShowLogin(false);
+        setLoginInput('');
+        setLoginError('');
+      } else {
+        setLoginError('Invalid Manager PIN. Try 1234');
+      }
+    }
+  };
+
+
+  const mockUsers: Record<string, {name: string, role: 'employee'}> = {
+    '469000': { name: 'LAC Nishad', role: 'employee' },
+    '469001': { name: 'Sgt Hasan', role: 'employee' },
+    '469002': { name: 'Cpl Jamil', role: 'employee' },
+    '469003': { name: 'Flt Lt Robin', role: 'employee' }
+  };
+
+  const toggleLanguage = () => {
+    const nextLang = i18n.language === 'bn' ? 'en' : 'bn';
+    i18n.changeLanguage(nextLang);
+  };
+
+  const navItems = currentUser.role === 'manager' ? [
+    { id: 'manager_dashboard', name: 'Dashboard', icon: Grid },
+    { id: 'pos_sales', name: 'POS Sales', icon: ShoppingCart },
+    { id: 'member_db', name: 'Member DB', icon: Users },
+    { id: 'inventory', name: 'Inventory', icon: Pkg },
+    { id: 'expenditures', name: 'Expenditures', icon: Banknote },
+    { id: 'reports', name: 'Reports', icon: BarChart2 },
+    { id: 'settings', name: 'Settings', icon: SettingsIcon },
+    { id: 'guide', name: 'Guide', icon: HelpCircle },
+  ] : [
+    { id: 'dashboard', name: 'Home', icon: Grid },
+    { id: 'my_bill', name: 'My Bill', icon: CreditCard },
+    { id: 'help', name: 'Help', icon: HelpCircle }
+  ];
+
+  const renderContent = () => {
+    switch(activeTab) {
+      case 'dashboard': return <EmployeeDashboard />;
+      case 'manager_dashboard': return <ManagerDashboard />;
+      case 'pos_sales': return <PosSales />;
+      case 'member_db': return <MemberDB />;
+      case 'inventory': return <CanteenInventory />;
+      case 'expenditures': return <Expenditures />;
+      case 'reports': return <CanteenReports />;
+      case 'settings': return <CanteenSettings />;
+      default: return <div className="text-center p-10 font-bold text-slate-500 animate-pulse">Under Construction ({activeTab})</div>;
+    }
+  };
+
+  return (
+    <div className={`fixed inset-0 z-[100] bg-slate-50 dark:bg-slate-950 overflow-hidden flex flex-col md:flex-row transition-all duration-300 ${i18n.language === 'bn' ? 'font-hind-siliguri text-[105%] leading-relaxed' : 'font-sans'}`}>
+      
+      {/* Dynamic Font Style Injection for the module */}
+      <style>{`
+        .font-hind-siliguri {
+          font-family: 'Hind Siliguri', sans-serif;
+        }
+      `}</style>
+
+      {/* Sidebar */}
+      <div className="w-64 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col shrink-0 h-full overflow-y-auto hidden md:flex rounded-br-[40px]">
+        <div className="p-8 pb-4">
+          <h1 className="font-black text-2xl text-slate-800 dark:text-white tracking-widest flex items-center space-x-2">
+            <Utensils className="w-6 h-6 text-[#4f46e5]" />
+            <span>CAFEUAV</span>
+          </h1>
+          <div className="mt-3 inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-100">
+            <Wifi className="w-3 h-3 text-emerald-500" />
+            <span className="text-[10px] font-black text-emerald-600 tracking-wider">CONNECTED</span>
+          </div>
+        </div>
+        
+        <div className="flex-1 py-4 px-4 space-y-2">
+          {navItems.map((item) => {
+            const isActive = activeTab === item.id;
+            return (
+              <button 
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                className={`w-full flex items-center space-x-3 px-5 py-3.5 rounded-2xl transition-all font-bold ${
+                  isActive 
+                  ? 'bg-[#4f46e5] text-white shadow-lg shadow-indigo-500/30' 
+                  : 'text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-600'
+                }`}
+              >
+                <item.icon className="w-5 h-5" />
+                <span>{item.name}</span>
+              </button>
+            )
+          })}
+        </div>
+
+        <div className="p-6 space-y-4">
+          <button 
+             onClick={() => { setShowLogin(true); setLoginError(''); setLoginInput(''); }}
+             className="w-full flex items-center justify-center space-x-2 px-4 py-3.5 rounded-2xl text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors font-bold text-xs uppercase tracking-widest"
+          >
+             <LogIn className="w-4 h-4" />
+             <span>LOGIN</span>
+          </button>
+          
+          <div className="flex items-center space-x-3 p-3 rounded-2xl bg-slate-900 text-white cursor-pointer" onClick={onBack}>
+             <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center overflow-hidden">
+               <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Nishad&backgroundColor=0f172a" alt="Avatar" className="w-full h-full object-cover" />
+             </div>
+             <div className="text-left flex-1">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">GUEST MODE</p>
+                <p className="text-sm font-bold leading-none">{currentUser.name}</p>
+             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col h-full overflow-hidden relative">
+         
+         {/* Top Header for Mobile only */}
+         <div className="md:hidden h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-4 z-10 sticky top-0">
+            <div className="flex items-center space-x-3">
+              <button onClick={onBack} className="p-2 text-slate-500 bg-slate-100 rounded-lg">
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+              <span className="font-bold text-lg text-slate-800 dark:text-white">CAFEUAV</span>
+            </div>
+            <button onClick={() => { setShowLogin(true); setLoginError(''); setLoginInput(''); }}>
+               <LogIn className="w-5 h-5 text-indigo-600" />
+            </button>
+         </div>
+
+         {/* Content View */}
+         <div className="flex-1 overflow-y-auto p-4 sm:p-8 bg-[#f8fafc] dark:bg-[#0b1120]">
+            {renderContent()}
+         </div>
+      
+      {showLogin && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+          <div className="w-full max-w-md animate-in zoom-in-95 duration-200">
+             
+             <div className="text-center mb-8">
+               <div className="inline-flex items-center justify-center w-16 h-16 bg-white rounded-2xl shadow-sm mb-4">
+                  <Coffee className="w-8 h-8 text-[#4f46e5]" />
+               </div>
+               <h2 className="text-2xl font-black text-white tracking-widest flex items-center justify-center space-x-2">
+                 <span>🍽️</span> <span>CAFEUAV</span> <span>🍽️</span>
+               </h2>
+             </div>
+
+             <div className="bg-slate-200/20 backdrop-blur-md p-1 rounded-full flex mb-6 mx-8 shadow-inner">
+                <button onClick={() => { setLoginTab('member'); setLoginInput(''); setLoginError(''); }} className={`flex-1 py-3 rounded-full text-xs font-bold tracking-widest transition-all ${loginTab === 'member' ? 'bg-white text-[#4f46e5] shadow-sm' : 'text-slate-300 hover:text-white'}`}>MEMBER</button>
+                <button onClick={() => { setLoginTab('manager'); setLoginInput(''); setLoginError(''); }} className={`flex-1 py-3 rounded-full text-xs font-bold tracking-widest transition-all ${loginTab === 'manager' ? 'bg-white text-[#4f46e5] shadow-sm' : 'text-slate-300 hover:text-white'}`}>MANAGER</button>
+             </div>
+
+             <div className="bg-white dark:bg-slate-900 rounded-3xl p-8 shadow-2xl relative border border-slate-100 dark:border-slate-800">
+                <button onClick={() => setShowLogin(false)} className="absolute top-6 right-6 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+                  <X className="w-5 h-5" />
+                </button>
+
+                <div className="mb-6 mt-2">
+                   <label className="block text-[11px] font-black text-slate-400 tracking-widest mb-3">
+                     {loginTab === 'member' ? '# MEMBER ID' : '# MANAGER PIN'}
+                   </label>
+                   <input 
+                     type={loginTab === 'member' ? 'text' : 'password'}
+                     value={loginInput}
+                     onChange={e => { setLoginInput(e.target.value); setLoginError(''); }}
+                     placeholder={loginTab === 'member' ? 'e.g. 469000' : '****'}
+                     className="w-full bg-[#0f172a] text-white px-5 py-4 rounded-xl font-medium focus:outline-none focus:ring-2 focus:ring-[#4f46e5] placeholder:text-slate-600"
+                   />
+                   {loginError && <p className="text-rose-500 text-xs font-bold mt-3">{loginError}</p>}
+                </div>
+
+                <button 
+                   onClick={handleLogin}
+                   className="w-full bg-[#4f46e5] hover:bg-[#4338ca] text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-indigo-500/30 hover:shadow-indigo-500/50 active:scale-[0.98]"
+                >
+                   ESTABLISH SESSION
+                </button>
+             </div>
+          </div>
+        </div>
+      )}
+      </div>
+    </div>
+  );
+};

@@ -594,19 +594,19 @@ export class LocalDatabaseEngine {
         if (changedAirmen.length > 0) {
           let staffPayload = changedAirmen.map(a => ({
             airman_id: a.id,
-            'BD No': a.bdNo,
-            'Rank': a.rank,
-            'Surname': a.name,
-            'Full Name': a.fullName || a.name,
-            'Flight': a.flightName,
+            'BD No': a.bdNo || '000000',
+            'Rank': a.rank || 'LAC',
+            'Surname': a.name || 'Unknown',
+            'Full Name': a.fullName || a.name || 'Unknown',
+            'Flight': a.flightName || 'Unknown',
             'Trade': a.trade || null,
             'Mobile No': a.mobileNo || null,
             'Blood Group': a.bloodGroup || null,
             'Permanent Address': a.permanentAddress || null,
-            'Dt of Posting': a.dateJoined || null,
+            'Dt of Posting': (a.dateJoined && String(a.dateJoined).trim() !== '') ? String(a.dateJoined).trim() : null,
             'Present Address': a.addressBlock || null,
             'Status': a.active === false ? 'SUSPENDED' : 'ACTIVE',
-            'Unit Left date': a.dateLeft || null
+            'Unit Left date': (a.dateLeft && String(a.dateLeft).trim() !== '') ? String(a.dateLeft).trim() : null
           }));
           // Deduplicate
           const uniqueStaffMap = new Map();
@@ -717,13 +717,11 @@ export class LocalDatabaseEngine {
            for (let i = 0; i < historyPayload.length; i += histChunkSize) {
               const chunk = historyPayload.slice(i, i + histChunkSize);
               emitSyncProgress(70 + Math.round((i / historyPayload.length) * 20), `Uploading history ${i} of ${historyPayload.length}...`);
-              const { data: histDataRes, error: histErr } = await supabase.from('parade_states').insert(chunk).select();
+              const { data: histDataRes, error: histErr } = await supabase.from('parade_states').upsert(chunk, { onConflict: 'log_id' }).select();
               if (!histErr && (!histDataRes || histDataRes.length === 0) && chunk.length > 0) { console.error('History insert blocked by RLS'); hasError = true; errorMessage = 'Row Level Security (RLS) is blocking the History upload in Supabase. Please disable RLS or add policies.'; break; }
               await delay(100);
               
-              if (histErr && histErr.code === '23505') {
-                 console.log("History chunk contains existing records, skipping duplicate error");
-              } else if (histErr && histErr.code !== '23505') {
+              if (histErr) {
                  console.error("Error syncing history to Supabase:", histErr);
                  hasError = true;
                  errorMessage = histErr.message?.includes('Failed to fetch')
@@ -744,8 +742,8 @@ export class LocalDatabaseEngine {
               'Flight': u.flightName || '',
               'Trade': u.trade || '',
               'Role': u.role || 'USER',
-              'User Login PIN': (u.password && String(u.password).trim() !== '') ? Number(u.password) : null,
-              'Admin Login PIN': (u.adminPass && String(u.adminPass).trim() !== '') ? Number(u.adminPass) : null
+              'User Login PIN': (u.password && String(u.password).trim() !== '' && !isNaN(Number(u.password))) ? Number(u.password) : null,
+              'Admin Login PIN': (u.adminPass && String(u.adminPass).trim() !== '' && !isNaN(Number(u.adminPass))) ? Number(u.adminPass) : null
            }));
            
            // Deduplicate

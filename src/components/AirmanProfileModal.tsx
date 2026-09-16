@@ -14,6 +14,7 @@ const formatAirmanName = (name: string) => {
   return name.toLowerCase().split(' ').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 };
 interface AirmanProfileModalProps {
+  variant?: "nominal" | "biodata";
   airman: Airman;
   onClose: () => void;
   onEditAirman?: (airman: Airman) => void;
@@ -27,7 +28,7 @@ interface AirmanProfileModalProps {
 
 const presetLocations = ['AIR HQ', 'BAF AKR', 'BAF BSR', 'BAF MTR', 'BAF CXB', 'BAF SMD'];
 
-export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, onClose, onEditAirman, onRemoveAirman, role, initialTab = 'profile', initialCategory = 'ALL', historyOnly = false, allowEditDelete = false }) => {
+export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, onClose, onEditAirman, onRemoveAirman, role, initialTab = 'profile', initialCategory = 'ALL', historyOnly = false, allowEditDelete = false, variant = "nominal" }) => {
   const [activeTab, setActiveTab] = useState<'history' | 'profile'>(historyOnly ? 'history' : initialTab);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [fromDate, setFromDate] = useState<string>(() => {
@@ -438,6 +439,8 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
     // Sort by dutyCode then date to group correctly and detect duplicates
     const sorted = [...list].sort((a, b) => {
       if (a.dutyCode !== b.dutyCode) return (a.dutyCode || '').localeCompare(b.dutyCode || '');
+      // Also separate by notes if they differ (e.g. different destinations)
+      if ((a.notes || '') !== (b.notes || '')) return (a.notes || '').localeCompare(b.notes || '');
       return a.date.localeCompare(b.date);
     });
     
@@ -453,7 +456,7 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
       const diffTime = Math.abs(currDate.getTime() - prevDate.getTime());
       const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
 
-      const isContiguous = (diffDays === 1 || diffDays === 0); const isSameDutyCode = current.dutyCode === prev.dutyCode; if (isSameDutyCode && isContiguous) {
+      const isContiguous = (diffDays === 1 || diffDays === 0); const isSameDutyCode = current.dutyCode === prev.dutyCode && (current.notes || '') === (prev.notes || ''); if (isSameDutyCode && isContiguous) {
         if (diffDays === 1) { // avoid adding same date duplicates
           currentGroup.push(current);
         }
@@ -489,14 +492,6 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
   };
 
   // Duty counts
-  const gdCount = assignments.filter((a) => a.dutyCode === 'GD').length;
-  const btfCount = assignments.filter((a) => a.dutyCode === 'BTF').length;
-  const ntfCount = assignments.filter((a) => a.dutyCode === 'NTF').length;
-  const halishaharCount = assignments.filter((a) => a.dutyCode === 'HALISHAHAR').length;
-  const idacCount = assignments.filter((a) => a.dutyCode === 'IDAC' || a.dutyCode === 'IDA').length;
-  const clCount = countWithF295Deduction(assignments, (a) => a.dutyCode === 'LEAVE' && ((a.notes && a.notes.toLowerCase().includes('casual')) || (a.notes && a.notes.toLowerCase().includes('cl'))));
-  const alCount = countWithF295Deduction(assignments, (a) => a.dutyCode === 'LEAVE' && ((a.notes && a.notes.toLowerCase().includes('annual')) || (a.notes && a.notes.toLowerCase().includes('al'))));
-  const totalLeave = countWithF295Deduction(assignments, (a) => a.dutyCode === 'LEAVE');
 
   
   
@@ -516,8 +511,8 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
   };
 
   const filteredList = assignments.filter((a) => {
-    if (categoryFilter === 'DUTY') return !['LEAVE', 'TDY', 'ATT', 'DUTY_OFF', 'ON_PARADE'].includes(a.dutyCode);
-    if (categoryFilter === 'ATT') return ['ATT', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(a.dutyCode);
+    if (categoryFilter === 'DUTY') return !['LEAVE', 'TDY', 'ATT', 'DUTY_OFF', 'ON_PARADE', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(a.dutyCode);
+    if (categoryFilter === 'DEPL') return ['ATT', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(a.dutyCode);
     if (categoryFilter === 'LEAVE') return a.dutyCode === 'LEAVE';
     if (categoryFilter === 'TDY') return a.dutyCode === 'TDY';
     if (categoryFilter !== 'ALL') {
@@ -528,7 +523,7 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
     return true;
   });
 
-  const isGroupedView = categoryFilter === 'LEAVE' || categoryFilter === 'TDY' || categoryFilter === 'ATT';
+  const isGroupedView = categoryFilter === 'ALL' || categoryFilter === 'LEAVE' || categoryFilter === 'TDY' || categoryFilter === 'DEPL' || categoryFilter === 'DUTY';
   const groupedList = isGroupedView ? getGroupedList(filteredList) : [];
 
   const _todayD = new Date();
@@ -537,7 +532,7 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
   const _currLastDay = new Date(_currY, _todayD.getMonth() + 1, 0).getDate();
   const isThisMonthActive = fromDate === `${_currY}-${_currM}-01` && toDate === `${_currY}-${_currM}-${_currLastDay}`;
   const isFullYearActive = fromDate === `${_currY}-01-01` && toDate === `${_currY}-12-31`;
-  const isDutyMatrixMode = historyOnly && initialCategory && !['ALL', 'DUTY', 'LEAVE', 'TDY', 'ATT'].includes(initialCategory);
+  const isDutyMatrixMode = historyOnly && initialCategory && !['ALL', 'DUTY', 'LEAVE', 'TDY', 'DEPL'].includes(initialCategory);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/75 backdrop-blur-xs p-0 sm:p-5">
@@ -669,11 +664,11 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                 {/* Category toggle */}
                 {isDutyMatrixMode ? (
                   <div className="text-[12px] font-black text-slate-800 dark:text-white px-3 py-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg">
-                    {DUTY_TYPE_MAP[initialCategory as any]?.name || initialCategory}
+                    {DUTY_TYPE_MAP.get(initialCategory as any)?.name || initialCategory}
                   </div>
                 ) : !historyOnly && (
                   <div className="flex items-center space-x-1 bg-white dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-700 text-[11px] font-bold">
-                    {(['ALL', 'DUTY', 'LEAVE', 'TDY', 'ATT'].includes(categoryFilter) ? ['ALL', 'DUTY', 'LEAVE', 'TDY', 'ATT'] : ['ALL', 'DUTY', 'LEAVE', 'TDY', 'ATT', categoryFilter]).map((cat) => (
+                    {(['ALL', 'DUTY', 'LEAVE', 'TDY', 'DEPL'].includes(categoryFilter) ? ['ALL', 'DUTY', 'LEAVE', 'TDY', 'DEPL'] : ['ALL', 'DUTY', 'LEAVE', 'TDY', 'DEPL', categoryFilter]).map((cat) => (
                       <button
                         key={cat}
                         onClick={() => setCategoryFilter(cat)}
@@ -689,38 +684,6 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                   </div>
                 )}
               </div>
-
-              {/* Counters Summary */}
-              {!historyOnly && (
-              <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-                <div className="p-2.5 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-center">
-                  <div className="text-[10px] font-bold text-red-700 dark:text-red-300 uppercase">GD</div>
-                  <div className="text-base font-black text-red-800 dark:text-red-200">{gdCount}</div>
-                </div>
-                <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-center">
-                  <div className="text-[10px] font-bold text-amber-700 dark:text-amber-300 uppercase">BTF</div>
-                  <div className="text-base font-black text-amber-800 dark:text-amber-200">{btfCount}</div>
-                </div>
-                <div className="p-2.5 rounded-xl bg-orange-50 dark:bg-orange-950/40 border border-orange-200 dark:border-orange-800 text-center">
-                  <div className="text-[10px] font-bold text-orange-700 dark:text-orange-300 uppercase">NTF</div>
-                  <div className="text-base font-black text-orange-800 dark:text-orange-200">{ntfCount}</div>
-                </div>
-                <div className="p-2.5 rounded-xl bg-teal-50 dark:bg-teal-950/40 border border-teal-200 dark:border-teal-800 text-center">
-                  <div className="text-[10px] font-bold text-teal-700 dark:text-teal-300 uppercase">IDAC</div>
-                  <div className="text-base font-black text-teal-800 dark:text-teal-200">{idacCount}</div>
-                </div>
-                <div className="p-2.5 rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 text-center">
-                  <div className="text-[10px] font-bold text-sky-700 dark:text-sky-300 uppercase">Casual (CL)</div>
-                  <div className="text-base font-black text-sky-800 dark:text-sky-200">{clCount}</div>
-                </div>
-                <div className="p-2.5 rounded-xl bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 text-center">
-                  <div className="text-[10px] font-bold text-purple-700 dark:text-purple-300 uppercase">Annual (AL)</div>
-                  <div className="text-base font-black text-purple-800 dark:text-purple-200">{alCount}</div>
-                </div>
-              </div>
-              )}
-
-              
             {/* Assignments Table */}
               <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
                 <div className="flex-1 overflow-y-auto relative">
@@ -1370,8 +1333,8 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                   <table className="w-full text-center border-collapse text-xs">
                     <thead>
                       <tr className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-extrabold uppercase text-[10px] tracking-wider">
-                        <th className="py-2.5 px-3.5">Ser No</th>
-                        <th className="py-2.5 px-3.5">{categoryFilter === 'LEAVE' ? 'Leave Type' : 'Destination'}</th>
+                        <th className="py-2.5 px-3.5">Ser</th>
+                        <th className="py-2.5 px-3.5">Description</th>
                         <th className="py-2.5 px-3.5">Period</th>
                         <th className="py-2.5 px-3.5 text-right">Total</th>
                       </tr>
@@ -1385,7 +1348,12 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                         groupedList.map((group, idx) => {
                           const first = group[0];
                           const last = group[group.length - 1];
-                          const typeOrDest = categoryFilter === 'LEAVE' ? (first.notes || 'Leave') : (first.notes || (categoryFilter === 'TDY' ? 'TDY' : 'Deployment'));
+                          const typeOrDest = (() => {
+                            if (first.dutyCode === 'LEAVE') return first.notes || 'Leave';
+                            if (first.dutyCode === 'TDY') return first.notes || 'TDY';
+                            if (['ATT', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(first.dutyCode)) return first.notes || DUTY_TYPE_MAP.get(first.dutyCode)?.name || 'Deployment';
+                            return DUTY_TYPE_MAP.get(first.dutyCode)?.name || first.dutyCode;
+                          })();
                           return (
                             <tr key={idx} onClick={() => handleGroupClick(group)} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 cursor-pointer" title="Click to edit or remove">
                               <td className="py-2.5 px-3.5 font-mono font-bold text-slate-800 dark:text-slate-200">
@@ -1446,7 +1414,7 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                         </tr>
                       ) : (
                         filteredList.map((item, idx) => {
-                          const typeInfo = DUTY_TYPE_MAP[item.dutyCode];
+                          const typeInfo = DUTY_TYPE_MAP.get(item.dutyCode);
                           return (
                             <tr key={idx} onClick={() => handleGroupClick([item])} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 cursor-pointer" title="Click to edit or remove">
                               <td className="py-2.5 px-3.5 font-mono font-bold text-slate-800 dark:text-slate-200">
@@ -1488,18 +1456,18 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
           ) : (
             /* Profile Details Tab */
             <div className="space-y-4 text-xs text-slate-700 dark:text-slate-300">
-              <div className="grid grid-cols-2 gap-3.5 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-200 dark:border-slate-800">
+                            <div className="grid grid-cols-2 gap-3.5 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-200 dark:border-slate-800">
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-bold">
-                    Serial Number
+                    BD No
                   </span>
                   <span className="font-mono font-black text-sm text-slate-900 dark:text-slate-100">
-                    #{airman.serNo}
+                    {airman.bdNo}
                   </span>
                 </div>
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-bold">
-                    Rank & Seniority
+                    Rank
                   </span>
                   <span className="font-black text-sm text-slate-900 dark:text-slate-100">
                     {formatAirmanName(airman.rank)}
@@ -1507,7 +1475,15 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                 </div>
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-bold">
-                    Trade Specialty
+                    Full Name
+                  </span>
+                  <span className="font-bold text-slate-900 dark:text-slate-100">
+                    {airman.fullName || airman.name}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-bold">
+                    Trade
                   </span>
                   <span className="font-bold text-slate-900 dark:text-slate-100">
                     {airman.trade}
@@ -1515,26 +1491,45 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                 </div>
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-bold">
-                    Assigned Flight
+                    Flight
                   </span>
                   <span className="font-black text-emerald-600 dark:text-emerald-400">
-                    {airman.flightName} Flight
+                    {airman.flightName}
                   </span>
                 </div>
               </div>
-
+              
               <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                {variant === 'biodata' && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500 font-semibold text-xs">Blood Group</span>
+                    <span className="font-bold text-slate-900 dark:text-slate-100 text-sm">{airman.bloodGroup || 'N/A'}</span>
+                  </div>
+                )}
                 <div className="flex items-center justify-between">
-                  <span className="text-slate-500 font-semibold">Block / Quarter Address:</span>
-                  <span className="font-bold text-slate-900 dark:text-slate-100">{airman.addressBlock}</span>
+                  <span className="text-slate-500 font-semibold text-xs">{variant === 'biodata' ? 'Present Address' : 'Address'}</span>
+                  <span className="font-bold text-slate-900 dark:text-slate-100 text-sm">{airman.addressBlock || 'N/A'}</span>
                 </div>
+                {variant === 'biodata' && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500 font-semibold text-xs">Permanent Address</span>
+                    <span className="font-bold text-slate-900 dark:text-slate-100 text-sm">{airman.permanentAddress || 'N/A'}</span>
+                  </div>
+                )}
                 <div className="flex items-center justify-between">
-                  <span className="text-slate-500 font-semibold">Mobile Contact Number:</span>
-                  <span className="font-mono font-bold text-slate-900 dark:text-slate-100">{airman.mobileNo}</span>
+                  <span className="text-slate-500 font-semibold text-xs">Contact</span>
+                  <span className="font-mono font-bold text-slate-900 dark:text-slate-100 text-sm">{airman.mobileNo || 'N/A'}</span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500 font-semibold">Flight In-Charge Remarks:</span>
-                  <span className="italic text-slate-600 dark:text-slate-300">{airman.remarks || 'None'}</span>
+                {variant === 'biodata' && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500 font-semibold text-xs">Dt of Posting</span>
+                    <span className="font-bold text-slate-900 dark:text-slate-100 text-sm">{airman.dateJoined || 'N/A'}</span>
+                  </div>
+                )}
+                
+                <div className="flex items-center justify-between pt-2 mt-2 border-t border-slate-200 dark:border-slate-700">
+                  <span className="text-slate-500 font-semibold text-xs">Remarks</span>
+                  <span className="italic text-slate-600 dark:text-slate-300 text-sm text-right">{airman.remarks || 'None'}</span>
                 </div>
               </div>
             </div>

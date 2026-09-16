@@ -16,8 +16,9 @@ export const PrintableFlyingWingModal = ({ date, uasuStats, onClose }: any) => {
 
  return createPortal(
     <div className="fixed inset-0 z-[200] bg-slate-900/95 backdrop-blur-sm overflow-auto print:bg-white text-black print:p-0 print:static print:w-full print:h-auto print:z-[9999]">
+      <style>{`@media print { @page { size: A4 landscape; margin: 8mm; } body { background: white !important; color: black !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }`}</style>
  {/* Top action bar - Hidden during print */}
- <div className="sticky top-0 z-10 bg-slate-900/80 backdrop-blur-md border-b border-slate-700/50 p-4 no-print shadow-2xl">
+ <div className="sticky top-0 z-10 bg-slate-900/80 backdrop-blur-md border-b border-slate-700/50 p-4 print:hidden shadow-2xl">
  <div className="max-w-[10.5in] mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
  <div className="flex items-center space-x-4 text-white">
  <div>

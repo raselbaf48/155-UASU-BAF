@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { CanteenLayout } from '../features/canteen/components/CanteenLayout';
+import { EmployeeDashboard } from '../features/canteen/pages/EmployeeDashboard';
+
 import { Airman } from '../types';
 import { Logo155UASU } from './Logo155UASU';
 import { X, Shield, ArrowRight, AlertCircle, CheckCircle2, Lock, LogIn, ChevronRight, ChevronUp, ArrowLeft, Eye, EyeOff, Building2, Moon, Coffee } from 'lucide-react';
@@ -56,9 +59,15 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
   
-  const loginPinRef = useRef<HTMLDivElement>(null);
+  const loginPinRef = useRef<HTMLFormElement>(null);
   const resetPinRef = useRef<HTMLDivElement>(null);
   const confirmPinRef = useRef<HTMLDivElement>(null);
+  const lastAutoLoginPin = useRef<string>('');
+
+  // Reset auto-login flag when bdInput changes
+  useEffect(() => {
+    lastAutoLoginPin.current = '';
+  }, [bdInput]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -76,6 +85,25 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Auto Login Check
+  useEffect(() => {
+    if (passwordInput.length > 0 && bdInput.trim().length > 0 && !isLoading && !successAirman && !isResetMode) {
+      if (passwordInput === lastAutoLoginPin.current) return;
+
+      const cleanInput = bdInput.replace(/^BD\/?/i, '').trim().toLowerCase();
+      const detailedUsers = getDetailedUsers(airmen);
+      const matchedDetail = detailedUsers.find((u) => u.bdNo.toLowerCase() === cleanInput);
+      
+      if (matchedDetail) {
+        const expectedPassword = (matchedDetail.password || matchedDetail.bdNo).toString();
+        if (passwordInput === expectedPassword) {
+           lastAutoLoginPin.current = passwordInput;
+           handleSubmit({ preventDefault: () => {} } as React.FormEvent);
+        }
+      }
+    }
+  }, [passwordInput, bdInput, isLoading, successAirman, isResetMode, airmen]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -258,7 +286,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
             )}
 
             {!isResetMode ? (
-              <form onSubmit={handleSubmit} className="space-y-5">
+              <form onSubmit={handleSubmit} className="space-y-5" ref={loginPinRef}>
                 <div className="text-left space-y-2">
                   <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">User ID</label>
                   <div className="relative">
@@ -318,7 +346,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                   )}
                 </div>
 
-                <div className="text-left space-y-2" ref={loginPinRef}>
+                <div className="text-left space-y-2">
                   <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">PIN</label>
                   <div className="relative">
                     <input
@@ -502,22 +530,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
         )}
 
         {activeTab === 'Canteen' && (
-          <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto animate-fadeIn flex flex-col">
-            <div className="sticky top-0 z-50 bg-slate-950/80 backdrop-blur-md border-b border-slate-800 p-4 flex items-center print:hidden">
-              <button 
-                onClick={() => setActiveTab('Office')}
-                className="flex items-center space-x-2 text-slate-400 hover:text-white transition-colors bg-slate-900/80 px-4 py-2 rounded-xl border border-slate-700 shadow-lg cursor-pointer"
-              >
-                <ArrowLeft className="w-5 h-5" />
-                <span className="font-bold text-sm">Back</span>
-              </button>
-            </div>
-            <div className="flex-1 flex flex-col items-center justify-center p-8 space-y-4">
-              <Coffee className="w-20 h-20 text-slate-700" />
-              <h2 className="text-2xl font-black text-white">Canteen Portal</h2>
-              <p className="text-slate-500 font-medium">This feature is currently under development.</p>
-            </div>
-          </div>
+          <CanteenLayout onBack={() => setActiveTab('Office')} />
         )}
       </div>
 

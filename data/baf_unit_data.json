@@ -12,7 +12,8 @@
       "mobileNo": "01711470696",
       "flightName": "Admin",
       "remarks": "",
-      "active": true
+      "active": true,
+      "jcoSeniorityOrder": 1
     },
     {
       "id": "airman-2",
@@ -26,7 +27,8 @@
       "mobileNo": "01711464358",
       "flightName": "Mechanics",
       "remarks": "",
-      "active": true
+      "active": true,
+      "jcoSeniorityOrder": 2
     },
     {
       "id": "airman-3",
@@ -40,7 +42,8 @@
       "mobileNo": "01711465170",
       "flightName": "GCS",
       "remarks": "",
-      "active": true
+      "active": true,
+      "jcoSeniorityOrder": 3
     },
     {
       "id": "airman-4",
@@ -54,7 +57,8 @@
       "mobileNo": "01711465199",
       "flightName": "Mechanics",
       "remarks": "",
-      "active": true
+      "active": true,
+      "jcoSeniorityOrder": 4
     },
     {
       "id": "airman-5",
@@ -68,7 +72,8 @@
       "mobileNo": "01711465669",
       "flightName": "Avionics",
       "remarks": "",
-      "active": true
+      "active": true,
+      "jcoSeniorityOrder": 5
     },
     {
       "id": "airman-6",
@@ -82,7 +87,8 @@
       "mobileNo": "01711465722",
       "flightName": "Admin",
       "remarks": "",
-      "active": true
+      "active": true,
+      "jcoSeniorityOrder": 6
     },
     {
       "id": "airman-7",
@@ -96,7 +102,8 @@
       "mobileNo": "01711465917",
       "flightName": "Avionics",
       "remarks": "",
-      "active": true
+      "active": true,
+      "jcoSeniorityOrder": 7
     },
     {
       "id": "airman-8",
@@ -110,7 +117,8 @@
       "mobileNo": "01711466218",
       "flightName": "Avionics",
       "remarks": "",
-      "active": true
+      "active": true,
+      "jcoSeniorityOrder": 8
     },
     {
       "id": "airman-9",
