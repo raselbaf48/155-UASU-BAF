@@ -1,7 +1,5 @@
 const fs = require('fs');
-let code = fs.readFileSync('src/features/canteen/pages/ManagerDashboard.tsx', 'utf8');
-
-const regex = /\)}\s*className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300 pb-10">/g;
-code = code.replace(regex, ')}');
-
-fs.writeFileSync('src/features/canteen/pages/ManagerDashboard.tsx', code);
+let code = fs.readFileSync('src/features/canteen/pages/EmployeeDashboard.tsx', 'utf8');
+code = code.replace("seed=\\${currentUser?.name || 'Guest'}", "seed=${currentUser?.name || 'Guest'}");
+code = code.replace("key={`cell-\\${index}`}", "key={`cell-${index}`}");
+fs.writeFileSync('src/features/canteen/pages/EmployeeDashboard.tsx', code);

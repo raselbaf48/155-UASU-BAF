@@ -144,7 +144,7 @@ export async function exportDutyRosterDocx(
     }
 
     // Table Header Row
-    const headerRow = new TableRow({
+    const headerRow = new TableRow({ cantSplit: true,
       tableHeader: true,
       children: [
         createHeaderCell('Ser No', 800),
@@ -162,7 +162,7 @@ export async function exportDutyRosterDocx(
     // Table Data Rows
     const dataRows = section.items.map((item, idx) => {
       const displaySer = String(idx + 1).padStart(2, '0');
-      return new TableRow({
+      return new TableRow({ cantSplit: true,
         children: [
           createDataCell(item.serNo || displaySer, 800, AlignmentType.CENTER),
           createDataCell(item.bdNo, 1100, AlignmentType.CENTER),
@@ -266,7 +266,7 @@ export async function exportIdacRosterDocx(
   ];
 
   // Table Header Row
-  const headerRow = new TableRow({
+  const headerRow = new TableRow({ cantSplit: true,
     tableHeader: true,
     children: [
       createArialHeaderCell('Date', 1500),
@@ -279,7 +279,7 @@ export async function exportIdacRosterDocx(
 
   // Table Data Rows
   const dataRows = rows.map((item) => {
-    return new TableRow({
+    return new TableRow({ cantSplit: true,
       children: [
         createArialDataCell(item.dateDisplay, 1500, AlignmentType.CENTER),
         createArialDataCell(item.dayDisplay, 1700, AlignmentType.CENTER),
@@ -354,7 +354,7 @@ export async function exportNominalRollDocx(
     }),
   ];
 
-  const headerRow = new TableRow({
+  const headerRow = new TableRow({ cantSplit: true,
     tableHeader: true,
     children: [
       createArialHeaderCell('Ser', 700),
@@ -368,7 +368,7 @@ export async function exportNominalRollDocx(
   });
 
   const dataRows = airmen.map((a, idx) => {
-    return new TableRow({
+    return new TableRow({ cantSplit: true,
       children: [
         createArialDataCell(String(idx + 1), 700, AlignmentType.CENTER),
         createArialDataCell((a.bdNo || "").replace(/^BD\//i, ''), 1400, AlignmentType.CENTER),
@@ -396,7 +396,7 @@ export async function exportNominalRollDocx(
       {
         properties: {
           page: {
-            margin: { top: 720, right: 720, bottom: 720, left: 720 },
+            margin: { top: 400, right: 400, bottom: 400, left: 400 },
             size: { orientation: PageOrientation.PORTRAIT },
           },
         },
@@ -459,7 +459,7 @@ export async function exportDutyRatioDocx(
     );
 
     const flights: FlightName[] = ['Mechanics', 'Avionics', 'GCS', 'Admin'];
-    const headerRow = new TableRow({
+    const headerRow = new TableRow({ cantSplit: true,
       tableHeader: true,
       children: [
         createArialHeaderCell('Flight Name', 1800),
@@ -480,7 +480,7 @@ export async function exportDutyRatioDocx(
     const dataRows = flights.map((fl) => {
       const rowVals = tableData.data?.[fl] || [];
       const rowTotal = rowVals.reduce((s, c) => s + c, 0);
-      return new TableRow({
+      return new TableRow({ cantSplit: true,
         children: [
           createArialDataCell(fl, 1800, AlignmentType.LEFT),
           ...Array.from({ length: 31 }, (_, i) => {
@@ -492,7 +492,7 @@ export async function exportDutyRatioDocx(
       });
     });
 
-    const dailyTotalRow = new TableRow({
+    const dailyTotalRow = new TableRow({ cantSplit: true,
       children: [
         createArialHeaderCell('Daily Total', 1800),
         ...dailySums.map((dSum) =>
@@ -518,7 +518,7 @@ export async function exportDutyRatioDocx(
         properties: {
           page: {
             size: {
-              orientation: PageOrientation.LANDSCAPE,
+              orientation: PageOrientation.PORTRAIT,
             },
             margin: { top: 500, right: 500, bottom: 500, left: 500 },
           },
@@ -660,7 +660,7 @@ export async function exportParadeStateSingleDocx(
     'Rmk',
   ];
 
-  const headerRow = new TableRow({
+  const headerRow = new TableRow({ cantSplit: true,
     tableHeader: true,
     height: { value: 1440, rule: HeightRule.ATLEAST },
     children: statHeaders.map((h, i) =>
@@ -670,7 +670,7 @@ export async function exportParadeStateSingleDocx(
 
   const valOrDash = (v: number) => (v > 0 ? String(v) : '-');
 
-  const dataRow = new TableRow({
+  const dataRow = new TableRow({ cantSplit: true,
     children: [
       createArialDataCell('155 UASU BAF', 1500, AlignmentType.CENTER),
       createArialDataCell(String(stats.totalStr), 680, AlignmentType.CENTER),
@@ -823,7 +823,7 @@ export async function exportParadeStateSingleDocx(
       const col3Text = col3Item ? `${31 + i}. ${formatRank(col3Item.rank)} ${formatRunningLetter(col3Item.name)}` : '';
 
       innerRows.push(
-        new TableRow({
+        new TableRow({ cantSplit: true,
           children: [
             new TableCell({
               width: { size: 1680, type: WidthType.DXA },
@@ -968,7 +968,7 @@ export async function exportParadeStateSingleDocx(
   });
 
   // Spacer Row between 1st & 2nd rows: height 0.6 inch = 864 DXA
-  const spacerRow = new TableRow({
+  const spacerRow = new TableRow({ cantSplit: true,
     height: { value: 864, rule: HeightRule.EXACT },
     children: [
       new TableCell({
@@ -989,7 +989,7 @@ export async function exportParadeStateSingleDocx(
   const rightSigRank = params.rightSig?.rank || 'FLT LT';
   const rightSigDesig = params.rightSig?.desig || 'Adjutant';
 
-  const signatureRow = new TableRow({
+  const signatureRow = new TableRow({ cantSplit: true,
     children: [
       new TableCell({
         width: { size: 5040, type: WidthType.DXA },
@@ -1109,7 +1109,7 @@ export async function exportParadeStateSingleDocx(
   });
 
   const disposalTableRows = [
-    new TableRow({
+    new TableRow({ cantSplit: true,
       children: [col1, col2, col3, col4],
     }),
     spacerRow,
@@ -1144,9 +1144,9 @@ export async function exportParadeStateSingleDocx(
             size: {
               width: 11906,
               height: 16838,
-              orientation: PageOrientation.LANDSCAPE,
+              orientation: PageOrientation.PORTRAIT,
             },
-            margin: { top: 720, right: 720, bottom: 720, left: 720 },
+            margin: { top: 400, right: 400, bottom: 400, left: 400 },
           },
         },
         children: docChildren,
@@ -1193,11 +1193,13 @@ export async function exportParadeStateMultiDocx(
       spacing: { after: 40 },
       children: [
         new TextRun({
-          text: 'PARADE STATE & DAILY DUTY REGISTER : AIRMEN',
+          text: 'PARADE STATE : AIRMEN',
           font: 'Arial',
           bold: true,
-          size: 26,
-          underline: {},
+          size: 20,
+          underline: {
+             type: 'single',
+          },
         }),
       ],
     }),
@@ -1209,26 +1211,27 @@ export async function exportParadeStateMultiDocx(
           text: unitHeader,
           font: 'Arial',
           bold: true,
-          size: 24,
-          underline: {},
+          size: 20,
+          underline: {
+             type: 'single',
+          },
         }),
       ],
     }),
     new Paragraph({
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 120 },
+      alignment: AlignmentType.RIGHT,
+      spacing: { after: 80 },
       children: [
         new TextRun({
-          text: `(${dateRangeHeader})`,
+          text: `Period: ${dateRangeHeader}`,
           font: 'Arial',
-          bold: true,
-          size: 24,
+          size: 16,
         }),
       ],
     }),
   ];
 
-  const headerRow1 = new TableRow({
+  const headerRow1 = new TableRow({ cantSplit: true,
     tableHeader: true,
     children: [
       createArialHeaderCell('Date', 900),
@@ -1248,7 +1251,7 @@ export async function exportParadeStateMultiDocx(
   });
 
   const dataRows = rows.map((r) => {
-    return new TableRow({
+    return new TableRow({ cantSplit: true,
       children: [
         createArialDataCell(r.dateDisplay, 900, AlignmentType.CENTER),
         createArialDataCell(r.dayDisplay, 900, AlignmentType.CENTER),
@@ -1300,7 +1303,7 @@ export async function exportParadeStateMultiDocx(
     width: { size: 100, type: WidthType.PERCENTAGE },
     borders: invisibleBorders,
     rows: [
-      new TableRow({
+      new TableRow({ cantSplit: true,
         children: [
           new TableCell({
             width: { size: 50, type: WidthType.PERCENTAGE },
@@ -1429,9 +1432,9 @@ export async function exportParadeStateMultiDocx(
             size: {
               width: 11906,
               height: 16838,
-              orientation: PageOrientation.LANDSCAPE,
+              orientation: PageOrientation.PORTRAIT,
             },
-            margin: { top: 720, right: 720, bottom: 720, left: 720 },
+            margin: { top: 400, right: 400, bottom: 400, left: 400 },
           },
         },
         children: docChildren,
@@ -1494,7 +1497,7 @@ export async function exportMonthlyDutyRegisterDocx(
     }),
   ];
 
-  const headerRow = new TableRow({
+  const headerRow = new TableRow({ cantSplit: true,
     tableHeader: true,
     children: [
       createArialHeaderCell('Ser', 500),
@@ -1509,7 +1512,7 @@ export async function exportMonthlyDutyRegisterDocx(
   });
 
   const dataRows = filteredAirmen.map((a, idx) => {
-    return new TableRow({
+    return new TableRow({ cantSplit: true,
       children: [
         createArialDataCell(String(idx + 1), 500, AlignmentType.CENTER),
         createArialDataCell(a.bdNo, 1100, AlignmentType.CENTER),
@@ -1565,9 +1568,9 @@ export async function exportMonthlyDutyRegisterDocx(
             size: {
               width: 11906,
               height: 16838,
-              orientation: PageOrientation.LANDSCAPE,
+              orientation: PageOrientation.PORTRAIT,
             },
-            margin: { top: 720, right: 720, bottom: 720, left: 720 },
+            margin: { top: 400, right: 400, bottom: 400, left: 400 },
           },
         },
         children: docChildren,

@@ -78,7 +78,7 @@ export const MenuManagement: React.FC = () => {
                      <td className="px-6 py-4 text-right font-bold text-emerald-600">{formatMoney(row.price, i18n.language)}</td>
                      <td className="px-6 py-4 text-center font-bold">{row.max}</td>
                      <td className="px-6 py-4 text-right">
-                        <button onClick={() => handleDelete(row.id)} className="text-rose-500 hover:text-rose-700 font-bold text-xs bg-rose-900/30 px-3 py-1.5 rounded-lg transition-colors">
+                        <button onClick={() => handleDelete(row.id)} className="text-rose-500 hover:text-rose-400 font-bold text-xs bg-rose-900/30 px-3 py-1.5 rounded-lg transition-colors">
                             {t('cancel')}
                         </button>
                      </td>

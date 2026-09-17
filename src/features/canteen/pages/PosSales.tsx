@@ -26,6 +26,7 @@ export const PosSales: React.FC = () => {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [salesHistory, setSalesHistory] = useState<any[]>([]);
+  const [txDeleteConfirmId, setTxDeleteConfirmId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchCatalog();
@@ -51,14 +52,31 @@ export const PosSales: React.FC = () => {
       if (m) {
           const newBaki = Math.max(0, (m.baki || 0) - txToRemove.amount);
           await supabase.from('Canteen').update({ baki: newBaki }).eq('airman_id', txToRemove.airman_id);
-          // Update local member state to reflect immediate change
           setMembers(members.map(member => member.airman_id === txToRemove.airman_id ? {...member, baki: newBaki} : member));
+      }
+
+      // Restore Stock
+      if (txToRemove.items) {
+          const itemsArray = txToRemove.items.split(',').map((s: string) => s.trim());
+          for (const itemStr of itemsArray) {
+              const match = itemStr.match(/(.+?)\s+\((\d+)\)/);
+              if (match) {
+                  const itemName = match[1];
+                  const qty = parseInt(match[2]);
+                  const itemObj = catalog.find((c: any) => c.name === itemName);
+                  if (itemObj) {
+                      const newStock = (itemObj.stock || 0) + qty;
+                      await supabase.from('Canteen_Inventory').update({ stock: newStock }).eq('id', itemObj.id);
+                  }
+              }
+          }
+          fetchCatalog(); // Refresh catalog after stock restoration
       }
 
       const updatedHistory = salesHistory.filter(tx => tx.id !== txId);
       setSalesHistory(updatedHistory);
       localStorage.setItem('canteen_txs', JSON.stringify(updatedHistory));
-      alert("Entry removed and member DUE reversed successfully.");
+      setTxDeleteConfirmId(null);
   };
 
   const fetchMembers = async () => {
@@ -170,7 +188,7 @@ export const PosSales: React.FC = () => {
                className="flex items-center space-x-2 px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-bold tracking-widest hover:bg-slate-700 transition-colors shadow-sm"
             >
                <History className="w-4 h-4" />
-               <span>HISTORY & EDIT ENTRY</span>
+               <span>HISTORY</span>
             </button>
          </div>
 
@@ -193,7 +211,7 @@ export const PosSales: React.FC = () => {
                return (
                <div key={i} onClick={() => addToBasket(item)} className={`bg-slate-900 rounded-2xl p-4 flex items-center justify-between border transition-all duration-300 cursor-pointer hover:-translate-y-1 hover:shadow-[0_15px_30px_-10px_rgba(79,70,229,0.3)] group ${inBasket ? 'border-[#4f46e5] shadow-[0_10px_20px_-10px_rgba(79,70,229,0.2)]' : 'border-slate-800 hover:border-indigo-500/50'}`}>
                   <div className="flex items-center space-x-4">
-                     <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-inner transition-colors duration-300 ${inBasket ? 'bg-indigo-500/20 text-indigo-400' : 'bg-[#0f172a] text-slate-400 group-hover:bg-slate-800 group-hover:text-indigo-300'}`}>
+                     <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-inner transition-colors duration-300 ${inBasket ? 'bg-indigo-900/300/20 text-indigo-400' : 'bg-[#0f172a] text-slate-400 group-hover:bg-slate-800 group-hover:text-indigo-300'}`}>
                         <PackageIcon className="w-6 h-6 group-hover:scale-110 transition-transform duration-300" />
                      </div>
                      <div>
@@ -348,7 +366,7 @@ export const PosSales: React.FC = () => {
                 <button 
                     onClick={handleCheckout}
                     disabled={basket.length === 0 || selectedMembers.length === 0}
-                    className={`w-full py-4 rounded-xl text-[10px] font-black tracking-widest uppercase flex items-center justify-center space-x-2 transition-all shadow-md ${(basket.length > 0 && selectedMembers.length > 0) ? 'bg-emerald-900/30 hover:bg-emerald-600 text-white shadow-emerald-500/20' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
+                    className={`w-full py-4 rounded-xl text-[10px] font-black tracking-widest uppercase flex items-center justify-center space-x-2 transition-all shadow-md ${(basket.length > 0 && selectedMembers.length > 0) ? 'bg-emerald-900/30 hover:bg-emerald-600 text-white shadow-emerald-500/20' : 'bg-slate-800 text-slate-400 cursor-not-allowed'}`}
                 >
                     <CheckCircle2 className="w-4 h-4" />
                     <span>COMPLETE SALE</span>
@@ -357,6 +375,31 @@ export const PosSales: React.FC = () => {
          </div>
       </div>
     </div>
+
+    
+      {/* Delete Confirmation Modal */}
+      {txDeleteConfirmId && (
+          <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+              <div className="bg-slate-900 rounded-3xl p-6 w-full max-w-sm shadow-xl border border-slate-800 animate-in zoom-in-95">
+                  <div className="text-center">
+                      <div className="w-16 h-16 bg-rose-900/30 text-rose-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                          <Trash2 className="w-8 h-8" />
+                      </div>
+                      <h3 className="text-lg font-black text-white uppercase tracking-tighter mb-2">Remove Record?</h3>
+                      <p className="text-sm font-bold text-slate-400 mb-6">Are you sure you want to remove this history record? Member Due will be reversed and stock will be restored.</p>
+                      
+                      <div className="flex space-x-3">
+                          <button onClick={() => setTxDeleteConfirmId(null)} className="flex-1 py-3 bg-slate-800 text-slate-200 rounded-xl text-xs font-black tracking-widest hover:bg-slate-200 transition-colors">
+                              CANCEL
+                          </button>
+                          <button onClick={() => removeHistoryItem(txDeleteConfirmId)} className="flex-1 py-3 bg-rose-900/30 text-rose-500 rounded-xl text-xs font-black tracking-widest hover:bg-rose-600 hover:text-white transition-colors shadow-md shadow-rose-500/30">
+                              REMOVE
+                          </button>
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )}
 
     {/* History Modal */}
     {showHistoryModal && (
@@ -397,7 +440,7 @@ export const PosSales: React.FC = () => {
                                     <div className="flex items-center space-x-4">
                                         <p className="text-sm font-black text-white">৳{tx.amount}</p>
                                         <button 
-                                            onClick={() => removeHistoryItem(tx.id)}
+                                            onClick={() => setTxDeleteConfirmId(tx.id)}
                                             className="p-2 text-rose-400 hover:text-rose-600 hover:bg-rose-900/30 rounded-lg transition-colors"
                                             title="Remove Entry & Reverse Due"
                                         >
@@ -423,7 +466,7 @@ export const PosSales: React.FC = () => {
                   
                   <button 
                       onClick={() => setShowSuccessModal(false)}
-                      className="w-full py-4 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl text-xs font-black tracking-widest transition-colors shadow-md shadow-indigo-500/20"
+                      className="w-full py-4 bg-indigo-900/300 hover:bg-indigo-600 text-white rounded-xl text-xs font-black tracking-widest transition-colors shadow-md shadow-indigo-500/20"
                   >
                       CONTINUE
                   </button>

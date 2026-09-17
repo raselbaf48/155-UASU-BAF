@@ -32,9 +32,9 @@ export const PlaceDemand: React.FC = () => {
   return (
     <div className="max-w-6xl mx-auto space-y-8 animate-in fade-in duration-300">
       {showSuccess && (
-        <div className="bg-emerald-100 border border-emerald-200 text-emerald-800 p-4 rounded-xl flex justify-between items-center shadow-sm animate-in slide-in-from-top-2">
+        <div className="bg-emerald-100 border border-emerald-200 text-emerald-300 p-4 rounded-xl flex justify-between items-center shadow-sm animate-in slide-in-from-top-2">
           <span className="font-bold flex items-center space-x-2"><CheckCircle2 className="w-5 h-5"/> <span>Demand Placed Successfully!</span></span>
-          <button onClick={() => setShowSuccess(false)} className="text-emerald-700 hover:text-emerald-900 font-bold text-xl">&times;</button>
+          <button onClick={() => setShowSuccess(false)} className="text-emerald-400 hover:text-emerald-900 font-bold text-xl">&times;</button>
         </div>
       )}
       

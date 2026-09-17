@@ -63,7 +63,7 @@ export const InventoryManagement: React.FC = () => {
                      </td>
                      <td className="px-6 py-4 text-center">
                         <span className={`px-3 py-1 rounded-full text-xs font-bold inline-block ${
-                           isLow ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'
+                           isLow ? 'bg-rose-100 text-rose-400' : 'bg-emerald-100 text-emerald-400'
                         }`}>
                            {isLow ? t('low') : t('sufficient')}
                         </span>

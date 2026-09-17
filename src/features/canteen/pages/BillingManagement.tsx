@@ -64,7 +64,7 @@ export const BillingManagement: React.FC = () => {
                             <Download className="w-4 h-4" />
                             <span className="hidden sm:inline">{t('download_invoice')}</span>
                         </button>
-                        <button className="flex items-center space-x-1 text-emerald-600 hover:text-emerald-700 font-bold text-xs bg-emerald-900/30 hover:bg-emerald-100 px-3 py-1.5 rounded-lg transition-colors">
+                        <button className="flex items-center space-x-1 text-emerald-600 hover:text-emerald-400 font-bold text-xs bg-emerald-900/30 hover:bg-emerald-100 px-3 py-1.5 rounded-lg transition-colors">
                             <DollarSign className="w-4 h-4" />
                             <span>{t('record_payment')}</span>
                         </button>

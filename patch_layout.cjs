@@ -1,32 +1,48 @@
 const fs = require('fs');
-let code = fs.readFileSync('src/features/canteen/components/CanteenLayout.tsx', 'utf8');
+let code = fs.readFileSync('/tmp/CanteenLayout.tsx', 'utf8');
 
-if (!code.includes('CanteenFund')) {
-    code = code.replace(
-        /import \{ CanteenSettings \} from '\.\.\/pages\/CanteenSettings';/,
-        `import { CanteenSettings } from '../pages/CanteenSettings';\nimport { CanteenFund } from '../pages/CanteenFund';`
-    );
-}
+// The original CanteenLayout has `EmployeeDashboard` mapped to dashboard and personal_portal
+code = code.replace(
+    "import { EmployeeDashboard } from '../pages/EmployeeDashboard';",
+    "import { EmployeeDashboard } from '../pages/EmployeeDashboard';\nimport { PersonalPortal } from '../pages/PersonalPortal';"
+);
 
-if (!code.includes("id: 'fund'")) {
-    const navItemString = "{ id: 'settings', name: 'Settings', icon: SettingsIcon }";
-    code = code.replace(
-        navItemString,
-        `{ id: 'fund', name: 'Fund', icon: Wallet },\n    ${navItemString}`
-    );
-    
-    // Add Wallet to lucide imports
-    if (!code.includes('Wallet')) {
-        code = code.replace(/LogOut, Menu \}/, 'LogOut, Menu, Wallet }');
-        code = code.replace(/UserCircle, X, Menu \}/, 'UserCircle, X, Menu, Wallet }');
-    }
-}
+code = code.replace(
+    "case 'personal_portal': return <EmployeeDashboard currentUser={currentUser} onManagerPortalClick={() => { setLoginTab('manager'); setShowLogin(true); setLoginInput(''); setLoginError(''); }} />;",
+    "case 'personal_portal': return <PersonalPortal currentUser={currentUser} />;"
+);
 
-if (!code.includes("<CanteenFund />")) {
-    code = code.replace(
-        /case 'settings': return <CanteenSettings \/>;/,
-        `case 'fund': return <CanteenFund />;\n      case 'settings': return <CanteenSettings />;`
-    );
-}
+// We need to add "Manager Login" in the sidebar for employees
+const oldNavItems = `  ] : [
+    { id: 'dashboard', name: 'Home', icon: Grid },
+    { id: 'personal_portal', name: 'Personal Portal', icon: UserCircle },
+    { id: 'inventory', name: 'Inventory', icon: Pkg },
+    { id: 'help', name: 'Help', icon: HelpCircle }
+  ];`;
+
+const newNavItems = `  ] : [
+    { id: 'dashboard', name: 'Home', icon: Grid },
+    { id: 'personal_portal', name: 'Personal Portal', icon: UserCircle },
+    { id: 'inventory', name: 'Inventory', icon: Pkg },
+    { id: 'help', name: 'Help', icon: HelpCircle },
+    { id: 'manager_login', name: 'Manager Login', icon: LogIn }
+  ];`;
+code = code.replace(oldNavItems, newNavItems);
+
+// We need to handle manager_login click
+const onClickOld = `onClick={() => setActiveTab(item.id)}`;
+const onClickNew = `onClick={() => {
+                  if (item.id === 'manager_login') {
+                      setLoginTab('manager'); 
+                      setShowLogin(true); 
+                      setLoginInput(''); 
+                      setLoginError('');
+                  } else {
+                      setActiveTab(item.id);
+                  }
+                }}`;
+code = code.replace(onClickOld, onClickNew);
+// The mobile one as well
+code = code.replace(onClickOld, onClickNew);
 
 fs.writeFileSync('src/features/canteen/components/CanteenLayout.tsx', code);

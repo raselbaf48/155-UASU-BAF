@@ -933,20 +933,21 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  }
 
  // Helper to render airman list inside multi-day table cells (without flight tags)
- const renderAirmanColumnList = (list: { airman: Airman }[]) => {
- if (!list || list.length === 0) {
- return <div className="text-center text-slate-400 font-normal py-1">-</div>;
- }
- return (
- <ol className="space-y-0.5 text-[11px] leading-snug font-normal text-left">
- {list.map((item, idx) => (
- <li key={idx} className="whitespace-nowrap">
- {idx + 1}. {formatAirmanName(item.airman.rank)} {formatAirmanName(item.airman.name)}
- </li>
- ))}
- </ol>
- );
- };
+ const renderAirmanColumnList = (list: { airman: Airman, notes?: string }[], showNotes: boolean = false) => {
+    if (!list || list.length === 0) {
+      return <div className="text-center text-slate-400 font-normal py-1">-</div>;
+    }
+    return (
+      <ol className="space-y-0.5 text-[11px] leading-snug font-normal text-left">
+        {list.map((item, idx) => (
+          <li key={idx} className="whitespace-nowrap">
+            {idx + 1}. {formatAirmanName(item.airman.rank)} {formatAirmanName(item.airman.name)}
+            {showNotes && item.notes && item.notes !== 'None' ? ' - ' + item.notes : ''}
+          </li>
+        ))}
+      </ol>
+    );
+  };
 
  // Helper to render interactive disposal list items (with ✏️ edit click for admin)
  const renderDisposalAirmenList = (
@@ -1297,7 +1298,7 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  {renderAirmanColumnList(idaNight)}
  </td>
  <td className="border border-slate-800 dark:border-slate-700 p-1.5 text-center align-middle">
- {renderAirmanColumnList(dutyOff)}
+ {renderAirmanColumnList(dutyOff, true)}
  </td>
  <td className="border border-slate-800 dark:border-slate-700 p-1.5 text-center align-middle">
  {renderAirmanColumnList(onParade)}

@@ -1,12 +1,9 @@
 const fs = require('fs');
-let code = fs.readFileSync('src/features/canteen/components/CanteenLayout.tsx', 'utf8');
 
-code = code.replace(
-`                      </button>
-                      )}
-                  </div>`,
-`                      </button>
-                  </div>`
-);
+let code = fs.readFileSync('src/features/canteen/pages/PersonalPortal.tsx', 'utf8');
 
-fs.writeFileSync('src/features/canteen/components/CanteenLayout.tsx', code);
+const regexActivity = /          <\/div>\s*\{\/\* Cancel Confirmation Modal \*\/\}/;
+
+code = code.replace(regexActivity, "          </div>\n      </div>\n      {/* Cancel Confirmation Modal */}");
+
+fs.writeFileSync('src/features/canteen/pages/PersonalPortal.tsx', code);

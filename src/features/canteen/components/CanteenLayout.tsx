@@ -4,6 +4,7 @@ import { localDb } from '../../../services/localDatabase';
 import { useTranslation } from 'react-i18next';
 import { formatMoney } from '../i18n';
 import { EmployeeDashboard } from '../pages/EmployeeDashboard';
+import { PersonalPortal } from '../pages/PersonalPortal';
 import { PlaceDemand } from '../pages/PlaceDemand';
 import { MyDemands } from '../pages/MyDemands';
 import { ManagerDashboard } from '../pages/ManagerDashboard';
@@ -37,7 +38,7 @@ interface CanteenLayoutProps {
 
 export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMember }) => {
   const { t, i18n } = useTranslation();
-  const [activeTab, setActiveTab] = useState<string>(initialMember?.role === 'manager' ? 'manager_dashboard' : 'dashboard');
+  const [activeTab, setActiveTab] = useState<string>(initialMember?.role === 'manager' ? 'manager_dashboard' : 'personal_portal');
   const [currentUser, setCurrentUser] = useState({ name: initialMember ? initialMember.name : 'Guest', role: (initialMember && initialMember.role) ? initialMember.role : 'employee' as 'employee'|'manager' });
   const [showLogin, setShowLogin] = useState(false);
   const [loginTab, setLoginTab] = useState<'member'|'manager'>('manager');
@@ -58,8 +59,8 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
         if (error || !data) {
           setLoginError('Member not found. Check BD No.');
         } else {
-          setCurrentUser({ name: `${data.Rank} ${data.Name}`, role: 'employee' });
-          setActiveTab('dashboard');
+          setCurrentUser({ name: `${data.Rank} ${data.Name}`, role: 'employee', bdNo: loginInput });
+          setActiveTab('personal_portal');
           setShowLogin(false);
           setLoginInput('');
           setLoginError('');
@@ -93,6 +94,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
     i18n.changeLanguage(nextLang);
   };
 
+  const isEmployee = currentUser.role === 'employee' || currentUser.name === 'Guest';
   const navItems = currentUser.role === 'manager' ? [
     { id: 'manager_dashboard', name: 'Manager Home', icon: Grid },
     { id: 'pos_sales', name: 'POS Sales', icon: ShoppingCart },
@@ -104,12 +106,17 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
     { id: 'settings', name: 'Settings', icon: SettingsIcon },
   ] : [
     { id: 'dashboard', name: 'Home', icon: Grid },
-    { id: 'help', name: 'Help', icon: HelpCircle }
+    { id: 'personal_portal', name: 'Personal Portal', icon: UserCircle },
+    { id: 'inventory', name: 'Inventory', icon: Pkg },
+    { id: 'help', name: 'Help', icon: HelpCircle },
+    { id: 'manager_login', name: 'Manager Portal', icon: LogIn }
   ];
 
   const renderContent = () => {
     switch(activeTab) {
       case 'dashboard': return <EmployeeDashboard currentUser={currentUser} onManagerPortalClick={() => { setLoginTab('manager'); setShowLogin(true); setLoginInput(''); setLoginError(''); }} />;
+      case 'personal_portal': return <PersonalPortal currentUser={currentUser} />;
+
       case 'manager_dashboard': return <ManagerDashboard />;
       case 'pos_sales': return <PosSales />;
       case 'member_db': return <MemberDB />;
@@ -133,13 +140,13 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
       `}</style>
 
       {/* Sidebar - Desktop */}
-      <div className="w-64 bg-slate-900 dark:bg-slate-900 border-r border-slate-700 dark:border-slate-800 flex-col shrink-0 h-full overflow-y-auto hidden md:flex rounded-br-[40px]">
+      <div className={`w-64 border-r flex-col shrink-0 h-full overflow-y-auto hidden md:flex rounded-br-[40px] ${"bg-slate-950 border-slate-800"}`}>
         <div className="p-8 pb-4">
-          <h1 className="font-black text-2xl text-white dark:text-white tracking-widest flex items-center space-x-2">
+          <h1 className={`font-black text-2xl tracking-widest flex items-center space-x-2 ${"text-white dark:text-white"}`}>
             <Utensils className="w-6 h-6 text-[#4f46e5]" />
             <span>CAFEUAV</span>
           </h1>
-          <div className="mt-3 inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-100">
+          <div className="mt-3 inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-emerald-900/30 border border-emerald-800/50">
             <Wifi className="w-3 h-3 text-emerald-500" />
             <span className="text-[10px] font-black text-emerald-600 tracking-wider">CONNECTED</span>
           </div>
@@ -151,7 +158,16 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
             return (
               <button 
                 key={item.id}
-                onClick={() => setActiveTab(item.id)}
+                onClick={() => {
+                  if (item.id === 'manager_login') {
+                      setLoginTab('manager'); 
+                      setShowLogin(true); 
+                      setLoginInput(''); 
+                      setLoginError('');
+                  } else {
+                      setActiveTab(item.id);
+                  }
+                }}
                 className={`w-full flex items-center space-x-3 px-5 py-3.5 rounded-2xl transition-all font-bold ${
                   isActive 
                   ? 'bg-[#4f46e5] text-white shadow-lg shadow-indigo-500/30' 
@@ -168,19 +184,19 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
         <div className="p-6 space-y-4">
               <button
                   onClick={onBack}
-                 className="w-full flex items-center justify-center space-x-2 px-4 py-3.5 rounded-2xl text-rose-600 bg-rose-50 hover:bg-rose-100 transition-colors font-bold text-xs uppercase tracking-widest"
+                 className="w-full flex items-center justify-center space-x-2 px-4 py-3.5 rounded-2xl text-rose-600 bg-rose-900/30 hover:bg-rose-100 transition-colors font-bold text-xs uppercase tracking-widest"
               >
                  <LogIn className="w-4 h-4 rotate-180" />
                  <span>LOGOUT</span>
               </button>
           
-          <div className="flex items-center space-x-3 p-3 rounded-2xl bg-slate-900 text-white cursor-pointer" onClick={onBack}>
+          <div className={`flex items-center space-x-3 p-3 rounded-2xl cursor-pointer ${isEmployee ? 'bg-slate-900 text-white' : 'bg-slate-900 text-white'}`} onClick={onBack}>
              <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center overflow-hidden">
                <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUser.name}&backgroundColor=0f172a`} alt="Avatar" className="w-full h-full object-cover" />
              </div>
              <div className="text-left flex-1">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">
-                  {currentUser.role === 'manager' ? 'MANAGER' : (currentUser.name === 'Guest' ? 'GUEST MODE' : 'MEMBER')}
+                  {currentUser.role === 'manager' ? 'MANAGER' : (currentUser.name === 'Guest' ? 'GUEST MODE' : 'CUSTOMER MODE')}
                 </p>
                 <p className="text-sm font-bold leading-none">{currentUser.name}</p>
              </div>
@@ -191,9 +207,9 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
       {/* Sidebar - Mobile Overlay */}
       {mobileMenuOpen && (
           <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[200] md:hidden flex" onClick={() => setMobileMenuOpen(false)}>
-              <div className="w-64 bg-slate-900 h-full flex flex-col shadow-2xl animate-in slide-in-from-left-4" onClick={e => e.stopPropagation()}>
+              <div className={`w-64 h-full flex flex-col shadow-2xl animate-in slide-in-from-left-4 ${"bg-slate-900"}`} onClick={e => e.stopPropagation()}>
                   <div className="p-6 pb-4 flex justify-between items-center">
-                      <h1 className="font-black text-xl text-white tracking-widest flex items-center space-x-2">
+                      <h1 className={`font-black text-xl tracking-widest flex items-center space-x-2 ${"text-white"}`}>
                           <Utensils className="w-5 h-5 text-[#4f46e5]" />
                           <span>CAFEUAV</span>
                       </h1>
@@ -208,7 +224,17 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
                           return (
                               <button 
                                   key={item.id}
-                                  onClick={() => { setActiveTab(item.id); setMobileMenuOpen(false); }}
+                                  onClick={() => {
+                                      if (item.id === 'manager_login') {
+                                          setLoginTab('manager'); 
+                                          setShowLogin(true); 
+                                          setLoginInput(''); 
+                                          setLoginError('');
+                                      } else {
+                                          setActiveTab(item.id as any);
+                                      }
+                                      setMobileMenuOpen(false);
+                                  }}
                                   className={`w-full flex items-center space-x-3 px-4 py-3 rounded-2xl transition-all font-bold ${
                                     isActive 
                                     ? 'bg-[#4f46e5] text-white shadow-lg' 
@@ -221,10 +247,10 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
                           )
                       })}
                   </div>
-                  <div className="p-4 border-t border-slate-800">
+                  <div className={`p-4 border-t ${isEmployee ? "border-slate-800" : "border-slate-800"}`}>
                       <button
                           onClick={onBack}
-                          className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl text-rose-600 bg-rose-50 font-bold text-xs uppercase"
+                          className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl text-rose-600 bg-rose-900/30 font-bold text-xs uppercase"
                       >
                           <LogIn className="w-4 h-4 rotate-180" />
                           <span>LOGOUT</span>
@@ -238,12 +264,12 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
       <div className="flex-1 flex flex-col h-full overflow-hidden relative">
          
          {/* Top Header for Mobile only */}
-         <div className="md:hidden h-16 bg-slate-900 dark:bg-slate-900 border-b border-slate-700 dark:border-slate-800 flex items-center justify-between px-4 z-10 sticky top-0">
+         <div className={`md:hidden h-16 border-b flex items-center justify-between px-4 z-10 sticky top-0 ${"bg-slate-950 border-slate-800"}`}>
             <div className="flex items-center space-x-3">
-              <button onClick={() => setMobileMenuOpen(true)} className="p-2 text-slate-400 bg-slate-800 rounded-lg">
+              <button onClick={() => setMobileMenuOpen(true)} className={`p-2 rounded-lg ${"text-slate-400 bg-slate-800"}`}>
                 <Menu className="w-5 h-5" />
               </button>
-              <span className="font-bold text-lg text-white dark:text-white">CAFEUAV</span>
+              <span className={`font-bold text-lg ${"text-white dark:text-white"}`}>CAFEUAV</span>
             </div>
             <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center overflow-hidden border-2 border-indigo-500">
                    <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUser.name}&backgroundColor=0f172a`} alt="Avatar" className="w-full h-full object-cover" />
@@ -251,7 +277,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
          </div>
 
          {/* Content View */}
-         <div className="flex-1 overflow-y-auto p-4 sm:p-8 bg-[#f8fafc] dark:bg-[#0b1120]">
+         <div className={`flex-1 overflow-y-auto p-4 sm:p-8 ${"bg-slate-950"}`}>
             {renderContent()}
          </div>
       

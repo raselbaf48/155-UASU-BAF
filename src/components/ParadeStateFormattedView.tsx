@@ -93,7 +93,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
 
  // Internal Print Modal state
  const [isInternalPrintOpen, setIsInternalPrintOpen] = useState<boolean>(false);
-  const [hideEmptyColumns, setHideEmptyColumns] = useState<boolean>(false);
+  const [hideEmptyColumns, setHideEmptyColumns] = useState<boolean>(true);
 
  // Signature Config Modal state
  const [showSignatureModal, setShowSignatureModal] = useState<boolean>(false);
@@ -730,7 +730,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  idaMorning: formatListStr(idaMorn),
  idaAfternoon: formatListStr(idaAft),
  idaNight: formatListStr(idaNight),
- dutyOff: formatListStr(dutyOff),
+ dutyOff: formatListStr(dutyOff, true),
  onParade: formatListStr(onParade),
  };
  });
@@ -1027,20 +1027,21 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  }
 
  // Helper to render airman list inside multi-day table cells (without flight tags)
- const renderAirmanColumnList = (list: { airman: Airman }[]) => {
- if (!list || list.length === 0) {
- return <div className="text-center text-slate-400 font-normal py-1">-</div>;
- }
- return (
- <ol className="space-y-0.5 text-[11px] leading-snug font-normal text-left">
- {list.map((item, idx) => (
- <li key={idx} className="whitespace-nowrap">
- {idx + 1}. {formatAirmanName(item.airman.rank)} {formatAirmanName(item.airman.name)}
- </li>
- ))}
- </ol>
- );
- };
+ const renderAirmanColumnList = (list: { airman: Airman, notes?: string }[], showNotes: boolean = false) => {
+    if (!list || list.length === 0) {
+      return <div className="text-center text-slate-400 font-normal py-1">-</div>;
+    }
+    return (
+      <ol className="space-y-0.5 text-[11px] leading-snug font-normal text-left">
+        {list.map((item, idx) => (
+          <li key={idx} className="whitespace-nowrap">
+            {idx + 1}. {formatAirmanName(item.airman.rank)} {formatAirmanName(item.airman.name)}
+            {showNotes && item.notes && item.notes !== 'None' ? ' - ' + item.notes : ''}
+          </li>
+        ))}
+      </ol>
+    );
+  };
 
  // Helper to render interactive disposal list items (with ✏️ edit click for admin)
  const renderDisposalAirmenList = (
@@ -1189,13 +1190,23 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  ) : (
  <div className="flex items-center bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold space-x-2">
  <span className="text-slate-500 font-semibold">From:</span>
- <DateNavigator
- value={fromDate}
- onChange={(e) => {
- setFromDate(e.target.value);
- setSelectedDate(e.target.value);
- }}
- className="bg-transparent text-slate-900 dark:text-white print:text-black font-black outline-none cursor-pointer"
+ <DateNavigator 
+  value={fromDate} 
+  onChange={(e) => { 
+    const newFrom = e.target.value;
+    if (activePreset === '7days' || activePreset === '15days') {
+      const gap = activePreset === '7days' ? 6 : 14;
+      const d = new Date(newFrom);
+      d.setDate(d.getDate() + gap);
+      const newTo = d.toISOString().split('T')[0];
+      setFromDate(newFrom);
+      setToDate(newTo);
+    } else {
+      setFromDate(newFrom);
+      if (toDate < newFrom) setToDate(newFrom);
+    }
+  }} 
+  className="bg-transparent text-slate-900 dark:text-white print:text-black font-black outline-none cursor-pointer" 
  />
  <span className="text-slate-400 font-semibold">To:</span>
  <DateNavigator
@@ -1509,7 +1520,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  {renderAirmanColumnList(idaNight)}
  </td>
  <td className="border border-slate-800 dark:border-white print:border-black p-1.5 text-center align-middle">
- {renderAirmanColumnList(dutyOff)}
+ {renderAirmanColumnList(dutyOff, true)}
  </td>
  <td className="border border-slate-800 dark:border-white print:border-black p-1.5 text-center align-middle">
  {renderAirmanColumnList(onParade)}

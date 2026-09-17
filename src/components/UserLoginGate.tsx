@@ -7,7 +7,7 @@ import { Logo155UASU } from './Logo155UASU';
 import { X, Shield, ArrowRight, AlertCircle, CheckCircle2, Lock, LogIn, ChevronRight, ChevronUp, ArrowLeft, Eye, EyeOff, Building2, Moon, Coffee } from 'lucide-react';
 import { NightCountStateView } from './NightCountStateView';
 import { getAppConfig, isFeatureActive } from '../utils/appConfig';
-import { RandomizedKeypad } from './RandomizedKeypad';
+
 import { setUserSession, validateUserLogin, getDetailedUsers, saveDetailedUsers } from '../utils/authSession';
 
 interface UserLoginGateProps {
@@ -33,17 +33,36 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
   const [isPasswordFocused, setIsPasswordFocused] = useState<boolean>(false);
   const [isConfirmFocused, setIsConfirmFocused] = useState<boolean>(false);
 
-  const [recentLogins, setRecentLogins] = useState<string[]>(() => {
+  const [activeTab, setActiveTab] = useState<'Office' | 'Nt Count' | 'Canteen'>('Office');
+  const [isCanteenAuth, setIsCanteenAuth] = useState<boolean>(false);
+  const [isCanteenManagerMode, setIsCanteenManagerMode] = useState<boolean>(false);
+
+  const [officeRecentLogins, setOfficeRecentLogins] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem('baf_recent_logins');
       return saved ? JSON.parse(saved) : [];
     } catch { return []; }
   });
+  
+  const [canteenRecentLogins, setCanteenRecentLogins] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('baf_canteen_recent_logins');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+
+  const recentLogins = activeTab === 'Canteen' ? canteenRecentLogins : officeRecentLogins;
 
   const removeRecent = (id: string) => {
-    const updated = recentLogins.filter(x => x !== id);
-    setRecentLogins(updated);
-    localStorage.setItem('baf_recent_logins', JSON.stringify(updated));
+    if (activeTab === 'Canteen') {
+      const updated = canteenRecentLogins.filter(x => x !== id);
+      setCanteenRecentLogins(updated);
+      localStorage.setItem('baf_canteen_recent_logins', JSON.stringify(updated));
+    } else {
+      const updated = officeRecentLogins.filter(x => x !== id);
+      setOfficeRecentLogins(updated);
+      localStorage.setItem('baf_recent_logins', JSON.stringify(updated));
+    }
   };
 
   // Reset Password Flow States
@@ -55,9 +74,6 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
   const [newPass, setNewPass] = useState('');
   const [confirmPass, setConfirmPass] = useState('');
   const [targetAirman, setTargetAirman] = useState<Airman | null>(null);
-  const [activeTab, setActiveTab] = useState<'Office' | 'Nt Count' | 'Canteen'>('Office');
-  const [isCanteenAuth, setIsCanteenAuth] = useState<boolean>(false);
-  const [isCanteenManagerMode, setIsCanteenManagerMode] = useState<boolean>(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
   
@@ -126,6 +142,10 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
     if (activeTab === 'Canteen') {
       const airman = airmen.find(a => a.bdNo.toLowerCase() === cleanInput.toLowerCase());
       if (airman) {
+        const updatedRecents = [cleanInput, ...canteenRecentLogins.filter(x => x !== cleanInput)].slice(0, 4);
+        setCanteenRecentLogins(updatedRecents);
+        localStorage.setItem('baf_canteen_recent_logins', JSON.stringify(updatedRecents));
+        
         setIsLoading(false);
         setIsCanteenAuth(true);
         setSuccessAirman(airman);
@@ -162,8 +182,8 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
       setSuccessAirman(airman);
       const assignedLoginRole = cleanInput === '48456' ? 'OWNER' : 'USER';
       setUserSession(airman as any, assignedLoginRole, validation.detailedUser);
-      const updatedRecents = [cleanInput, ...recentLogins.filter(x => x !== cleanInput)].slice(0, 4);
-      setRecentLogins(updatedRecents);
+      const updatedRecents = [cleanInput, ...officeRecentLogins.filter(x => x !== cleanInput)].slice(0, 4);
+      setOfficeRecentLogins(updatedRecents);
       localStorage.setItem('baf_recent_logins', JSON.stringify(updatedRecents));
       localStorage.setItem('baf_last_used_id', cleanInput);
       
@@ -316,7 +336,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                   <div className="relative">
                     <input
                       type="text"
-                      value={bdInput}
+                      inputMode="numeric" pattern="[0-9]*" value={bdInput}
                       onChange={(e) => {
                         setBdInput(e.target.value);
                         setErrorMsg('');
@@ -335,11 +355,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                       autoComplete="username"
                     />
                     
-                    {targetAirman && (
-                      <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center space-x-1.5 bg-emerald-900/40 text-emerald-300 px-2 py-1 rounded-lg border border-emerald-800/50">
-                         <span className="text-[10px] font-bold tracking-wider">{targetAirman.rank}</span>
-                      </div>
-                    )}
+                    {/* Rank badge removed per user request */}
                   </div>
                   
                   {recentLogins.length > 0 && isUserIdFocused && (
@@ -374,12 +390,16 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                   <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">PIN</label>
                   <div className="relative">
                     <input
-                      type={showPin ? "text" : "password"}
-                      value={passwordInput}
-                      readOnly
-                      onClick={() => { setIsPasswordFocused(true); setIsUserIdFocused(false); }}
-                      className="w-full bg-slate-800/90 border border-slate-700 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-2xl px-4 py-3.5 pr-12 text-sm font-mono font-bold text-white outline-none transition-all cursor-pointer"
-                      placeholder="Tap to open keypad"
+                      type="text"
+                      style={{ WebkitTextSecurity: showPin ? "none" : "disc" }}
+                      
+                      inputMode="numeric" pattern="[0-9]*" value={passwordInput}
+                      onChange={(e) => {
+                        setPasswordInput(e.target.value);
+                        setErrorMsg('');
+                      }}
+                      className="w-full bg-slate-800/90 border border-slate-700 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-2xl px-4 py-3.5 pr-12 text-sm font-mono font-bold text-white outline-none transition-all"
+                      placeholder="Enter PIN"
                     />
                     <button
                       type="button"
@@ -389,16 +409,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                       {showPin ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                     </button>
                   </div>
-                  {isPasswordFocused && (
-                    <div className="pt-2 animate-fadeIn">
-                      <RandomizedKeypad 
-                         value={passwordInput} 
-                         onChange={(val) => { setPasswordInput(val); setErrorMsg(''); }} 
-                         onSubmit={() => handleSubmit({ preventDefault: () => {} } as React.FormEvent)}
-                        maxLength={20}
-                      />                    
-                    </div>
-                  )}
+                  
                 </div>)}
                 
                 <button
@@ -431,7 +442,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                       </div>
                       <input
                         type="text"
-                        value={resetBd}
+                        inputMode="numeric" pattern="[0-9]*" value={resetBd}
                         onChange={(e) => setResetBd(e.target.value)}
                         className="w-full pl-4 pr-4 py-3.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition-all"
                         placeholder="474455"
@@ -477,34 +488,26 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                     <div className="space-y-2" ref={resetPinRef}>
                       <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Enter New PIN</label>
                       <input
-                        type="password"
-                        value={newPass}
-                        readOnly
-                        onClick={() => { setIsPasswordFocused(true); setIsConfirmFocused(false); }}
-                        className="w-full px-4 py-3.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition-all cursor-pointer"
+                        type="text" style={{ WebkitTextSecurity: "disc" }}
+                        
+                        inputMode="numeric" pattern="[0-9]*" value={newPass}
+                        onChange={(e) => { setNewPass(e.target.value); setErrorMsg(''); }}
+                        className="w-full px-4 py-3.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition-all"
+                        placeholder="Enter New PIN"
                         required
                       />
-                      {isPasswordFocused && (
-                        <div className="pt-2">
-                           <RandomizedKeypad value={newPass} onChange={setNewPass} onSubmit={() => setIsPasswordFocused(false)} maxLength={20} />
-                        </div>
-                      )}
                     </div>
                     <div className="space-y-2" ref={confirmPinRef}>
                       <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Confirm Your PIN</label>
                       <input
-                        type="password"
-                        value={confirmPass}
-                        readOnly
-                        onClick={() => { setIsConfirmFocused(true); setIsPasswordFocused(false); }}
-                        className="w-full px-4 py-3.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition-all cursor-pointer"
+                        type="text" style={{ WebkitTextSecurity: "disc" }}
+                        
+                        inputMode="numeric" pattern="[0-9]*" value={confirmPass}
+                        onChange={(e) => { setConfirmPass(e.target.value); setErrorMsg(''); }}
+                        className="w-full px-4 py-3.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition-all"
+                        placeholder="Confirm New PIN"
                         required
                       />
-                      {isConfirmFocused && (
-                        <div className="pt-2">
-                           <RandomizedKeypad value={confirmPass} onChange={setConfirmPass} onSubmit={() => setIsConfirmFocused(false)} maxLength={20} />
-                        </div>
-                      )}
                     </div>
                   </div>
                 )}
@@ -534,7 +537,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
           <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto animate-fadeIn flex flex-col print:static print:bg-white print:text-black print:overflow-visible">
             <div className="sticky top-0 z-50 bg-slate-950/80 backdrop-blur-md border-b border-slate-800 p-4 flex items-center print:hidden">
               <button 
-                onClick={() => setActiveTab('Office')}
+                onClick={() => { setActiveTab('Office'); setTargetAirman(null); setBdInput(''); setPasswordInput(''); }}
                 className="flex items-center space-x-2 text-slate-400 hover:text-white transition-colors bg-slate-900/80 px-4 py-2 rounded-xl border border-slate-700 shadow-lg cursor-pointer"
               >
                 <ArrowLeft className="w-5 h-5" />
@@ -556,7 +559,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
         {activeTab === 'Canteen' && isCanteenAuth && (
           <CanteenLayout 
              initialMember={successAirman ? { name: successAirman.rank + ' ' + successAirman.name, bdNo: successAirman.bdNo, role: 'employee' } : undefined}
-             onBack={() => { setIsCanteenAuth(false); setBdInput(''); setPasswordInput(''); setSuccessAirman(null); }} 
+             onBack={() => { setIsCanteenAuth(false); setBdInput(''); setPasswordInput(''); setSuccessAirman(null); setTargetAirman(null); }} 
           />
         )}
       </div>
@@ -573,7 +576,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
           
           <div className={`bg-slate-800/80 backdrop-blur-md border border-slate-700 p-1.5 rounded-2xl flex items-center space-x-1 shadow-2xl transition-all duration-300 origin-bottom ${isMenuOpen ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'}`}>
             <button
-              onClick={() => { setActiveTab('Office'); setIsMenuOpen(false); }}
+              onClick={() => { setActiveTab('Office'); setTargetAirman(null); setBdInput(''); setPasswordInput(''); setIsMenuOpen(false); }}
               className={`flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all cursor-pointer ${
                 activeTab === 'Office' 
                   ? 'bg-emerald-600 text-white shadow-md' 
@@ -584,7 +587,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
               <span>Office</span>
             </button>
             <button
-              onClick={() => { setActiveTab('Nt Count'); setIsMenuOpen(false); }}
+              onClick={() => { setActiveTab('Nt Count'); setTargetAirman(null); setBdInput(''); setPasswordInput(''); setIsMenuOpen(false); }}
               className={`flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all cursor-pointer ${
                 activeTab === 'Nt Count' 
                   ? 'bg-emerald-600 text-white shadow-md' 
@@ -595,7 +598,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
               <span>Nt Count</span>
             </button>
             <button
-              onClick={() => { setActiveTab('Canteen'); setIsMenuOpen(false); }}
+              onClick={() => { setActiveTab('Canteen'); setTargetAirman(null); setBdInput(''); setPasswordInput(''); setIsMenuOpen(false); }}
               className={`flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all cursor-pointer ${
                 activeTab === 'Canteen' 
                   ? 'bg-emerald-600 text-white shadow-md' 

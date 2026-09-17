@@ -83,14 +83,14 @@ export const ManagerDashboard: React.FC = () => {
       {/* Curate Daily Menu Modal */}
       {showCurateMenu && (
           <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
-              <div className="w-full max-w-lg bg-white rounded-[2rem] p-8 shadow-2xl relative animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
-                  <button onClick={() => setShowCurateMenu(false)} className="absolute top-6 right-6 p-2 bg-slate-100 hover:bg-slate-200 rounded-full transition-colors">
-                      <X className="w-5 h-5 text-slate-600" />
+              <div className="w-full max-w-lg bg-slate-900 rounded-[2rem] p-8 shadow-2xl relative animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+                  <button onClick={() => setShowCurateMenu(false)} className="absolute top-6 right-6 p-2 bg-slate-800 hover:bg-slate-200 rounded-full transition-colors">
+                      <X className="w-5 h-5 text-slate-400" />
                   </button>
                   
                   <div className="flex items-center space-x-3 mb-6">
                       <ChefHat className="w-6 h-6 text-[#4f46e5]" />
-                      <h2 className="text-xl font-black text-slate-900 uppercase tracking-widest">Curate Daily Menu</h2>
+                      <h2 className="text-xl font-black text-white uppercase tracking-widest">Curate Daily Menu</h2>
                   </div>
 
                   <div className="relative mb-6">
@@ -100,7 +100,7 @@ export const ManagerDashboard: React.FC = () => {
                           placeholder="Search catalog..."
                           value={searchCatalog}
                           onChange={(e) => setSearchCatalog(e.target.value)}
-                          className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-[#4f46e5]/20 focus:border-[#4f46e5] transition-all"
+                          className="w-full pl-11 pr-4 py-3 bg-slate-950 border border-slate-800 rounded-2xl text-sm font-bold text-slate-200 outline-none focus:ring-2 focus:ring-[#4f46e5]/20 focus:border-[#4f46e5] transition-all"
                       />
                   </div>
 
@@ -111,18 +111,18 @@ export const ManagerDashboard: React.FC = () => {
                               <div 
                                   key={item.id} 
                                   onClick={() => toggleSelection(item.id)}
-                                  className={`flex items-center justify-between p-4 rounded-2xl border-2 cursor-pointer transition-all ${isSelected ? 'border-[#4f46e5] bg-[#4f46e5]/5' : 'border-slate-100 hover:border-slate-200'}`}
+                                  className={`flex items-center justify-between p-4 rounded-2xl border-2 cursor-pointer transition-all ${isSelected ? 'border-[#4f46e5] bg-[#4f46e5]/5' : 'border-slate-800 hover:border-slate-800'}`}
                               >
                                   <div className="flex items-center space-x-4">
-                                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${isSelected ? 'bg-[#4f46e5] text-white' : 'bg-slate-100 text-slate-400'}`}>
+                                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${isSelected ? 'bg-[#4f46e5] text-white' : 'bg-slate-800 text-slate-400'}`}>
                                           <Utensils className="w-5 h-5" />
                                       </div>
                                       <div>
                                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{item.category || 'Snacks'}</p>
-                                          <p className="text-sm font-bold text-slate-900">{item.name}</p>
+                                          <p className="text-sm font-bold text-white">{item.name}</p>
                                       </div>
                                   </div>
-                                  <div className={`w-6 h-6 rounded-full flex items-center justify-center transition-colors ${isSelected ? 'bg-[#4f46e5] text-white' : 'bg-slate-100 text-slate-400'}`}>
+                                  <div className={`w-6 h-6 rounded-full flex items-center justify-center transition-colors ${isSelected ? 'bg-[#4f46e5] text-white' : 'bg-slate-800 text-slate-400'}`}>
                                       {isSelected ? <Check className="w-4 h-4" /> : <span className="text-lg leading-none">+</span>}
                                   </div>
                               </div>
@@ -195,13 +195,13 @@ export const ManagerDashboard: React.FC = () => {
             </div>
          </div>
 
-         <div className="lg:col-span-3 bg-white rounded-[2rem] p-8 shadow-sm border border-slate-200 flex flex-col mt-6">
-            <h3 className="text-xs font-black text-slate-900 tracking-widest uppercase mb-6 flex items-center justify-between">
+         <div className="lg:col-span-3 bg-slate-900 rounded-[2rem] p-8 shadow-sm border border-slate-800 flex flex-col mt-6">
+            <h3 className="text-xs font-black text-white tracking-widest uppercase mb-6 flex items-center justify-between">
                <div className="flex items-center space-x-2">
                   <span className="text-[#4f46e5]">🛎️</span>
                   <span>LIVE PRE-ORDERS</span>
                </div>
-               <span className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full text-[10px]">{preOrders.filter(p => p.status === 'pending').length} Pending</span>
+               <span className="bg-indigo-100 text-indigo-400 px-3 py-1 rounded-full text-[10px]">{preOrders.filter(p => p.status === 'pending').length} Pending</span>
             </h3>
             
             {preOrders.length === 0 ? (
@@ -213,7 +213,7 @@ export const ManagerDashboard: React.FC = () => {
                 <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse">
                         <thead>
-                            <tr className="border-b border-slate-100">
+                            <tr className="border-b border-slate-800">
                                 <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Time</th>
                                 <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Member</th>
                                 <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Items</th>
@@ -224,18 +224,18 @@ export const ManagerDashboard: React.FC = () => {
                         </thead>
                         <tbody className="divide-y divide-slate-50">
                             {preOrders.map((order: any, idx: number) => (
-                                <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                                    <td className="py-4 px-4 text-xs font-bold text-slate-600">
+                                <tr key={idx} className="hover:bg-slate-950 transition-colors">
+                                    <td className="py-4 px-4 text-xs font-bold text-slate-400">
                                         {new Date(order.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                                     </td>
                                     <td className="py-4 px-4">
-                                        <div className="text-xs font-bold text-slate-900">{order.memberName}</div>
+                                        <div className="text-xs font-bold text-white">{order.memberName}</div>
                                         <div className="text-[10px] font-bold text-slate-400">{order.memberId}</div>
                                     </td>
                                     <td className="py-4 px-4">
                                         <div className="flex flex-wrap gap-1">
                                             {order.items.map((it:any, i:number) => (
-                                                <span key={i} className="bg-slate-100 text-slate-600 px-2 py-1 rounded-md text-[10px] font-bold">
+                                                <span key={i} className="bg-slate-800 text-slate-400 px-2 py-1 rounded-md text-[10px] font-bold">
                                                     {it.qty}x {it.name}
                                                 </span>
                                             ))}
@@ -243,7 +243,7 @@ export const ManagerDashboard: React.FC = () => {
                                     </td>
                                     <td className="py-4 px-4 text-xs font-black text-[#4f46e5]">৳{order.total}</td>
                                     <td className="py-4 px-4">
-                                        <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${order.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                                        <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${order.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-400'}`}>
                                             {order.status}
                                         </span>
                                     </td>

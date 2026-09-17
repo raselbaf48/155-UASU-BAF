@@ -77,7 +77,7 @@ export const CanteenFund: React.FC = () => {
             <div className="flex bg-slate-800 rounded-xl p-1">
                 <button 
                     onClick={() => setActiveTab('CASH')}
-                    className={`px-6 py-2 text-[10px] font-black tracking-widest uppercase rounded-lg transition-colors ${activeTab === 'CASH' ? 'bg-emerald-500 text-white' : 'text-slate-400 hover:text-white'}`}
+                    className={`px-6 py-2 text-[10px] font-black tracking-widest uppercase rounded-lg transition-colors ${activeTab === 'CASH' ? 'bg-emerald-900/300 text-white' : 'text-slate-400 hover:text-white'}`}
                 >
                     CASH LOGS
                 </button>
@@ -103,7 +103,7 @@ export const CanteenFund: React.FC = () => {
                <tbody className="text-xs text-slate-300 font-medium">
                   {activeList.length === 0 ? (
                       <tr>
-                          <td colSpan={4} className="p-8 text-center text-slate-500 font-bold">No collections found for {activeTab}</td>
+                          <td colSpan={4} className="p-8 text-center text-slate-400 font-bold">No collections found for {activeTab}</td>
                       </tr>
                   ) : (
                       activeList.map((tx, idx) => (

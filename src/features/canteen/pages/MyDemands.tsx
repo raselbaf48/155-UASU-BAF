@@ -57,16 +57,16 @@ export const MyDemands: React.FC = () => {
                   <td className="px-6 py-4 text-right font-bold text-emerald-600">{formatMoney(row.total, i18n.language)}</td>
                   <td className="px-6 py-4 text-center">
                     <span className={`px-3 py-1 rounded-full text-xs font-bold inline-block ${
-                      row.status === 'served' ? 'bg-emerald-100 text-emerald-700' :
+                      row.status === 'served' ? 'bg-emerald-100 text-emerald-400' :
                       row.status === 'confirmed' ? 'bg-amber-100 text-amber-700' :
-                      'bg-rose-100 text-rose-700'
+                      'bg-rose-100 text-rose-400'
                     }`}>
                       {t(`order_status_${row.status}`)}
                     </span>
                   </td>
                   <td className="px-6 py-4 text-right">
                     {row.status === 'confirmed' && (
-                      <button className="text-rose-500 hover:text-rose-700 font-bold text-xs bg-rose-900/30 px-3 py-1.5 rounded-lg transition-colors">
+                      <button className="text-rose-500 hover:text-rose-400 font-bold text-xs bg-rose-900/30 px-3 py-1.5 rounded-lg transition-colors">
                         {t('cancel')}
                       </button>
                     )}

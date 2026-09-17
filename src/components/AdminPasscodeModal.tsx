@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, ShieldCheck, Loader2, Unlock, AlertCircle, ChevronRight } from 'lucide-react';
 import { getDetailedUsers, saveDetailedUsers } from '../utils/authSession';
 import { INITIAL_AIRMEN } from '../data/initialAirmen';
-import { RandomizedKeypad } from './RandomizedKeypad';
+
 import { Airman, UserRole } from '../types';
 
 interface AdminPasscodeModalProps {
@@ -235,33 +235,25 @@ export const AdminPasscodeModal: React.FC<AdminPasscodeModalProps> = ({
           {!isResetMode ? (
             <>
               <div className="mb-6">
-                <div 
-                  className="flex justify-center space-x-3 sm:space-x-4 mb-4 cursor-pointer outline-none" 
-                  onClick={() => setIsPasswordFocused(true)}
-                  tabIndex={0}
-                  onFocus={() => setIsPasswordFocused(true)}
-                >
-                  {[0, 1, 2, 3].map((index) => (
-                    <div
-                      key={index}
-                      className={`w-14 h-16 sm:w-16 sm:h-20 rounded-2xl flex items-center justify-center text-4xl font-black border-2 transition-all ${
-                        isPasswordFocused && passcode.length === index
-                          ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 ring-4 ring-emerald-500/20'
-                          : passcode.length > index
-                          ? 'border-slate-800 bg-slate-800 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900'
-                          : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50'
-                      }`}
-                    >
-                      {passcode.length > index ? '•' : ''}
-                    </div>
-                  ))}
-                </div>
-                
-                {isPasswordFocused && !isSuccess && !isVerifying && lockRemainingSec === 0 && (
-                  <div className="pt-2 animate-fadeIn">
-                    <RandomizedKeypad value={passcode} onChange={setPasscode} onSubmit={handleVerify} maxLength={4} />
-                  </div>
-                )}
+                <input
+                  type="text" style={{ WebkitTextSecurity: "disc" }}
+                  
+                  maxLength={4}
+                  inputMode="numeric" pattern="[0-9]*" value={passcode}
+                  onChange={(e) => {
+                    setPasscode(e.target.value);
+                    setErrorMsg('');
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                       handleVerify();
+                    }
+                  }}
+                  disabled={isSuccess || isVerifying || lockRemainingSec > 0}
+                  className="w-full text-center text-3xl tracking-[1em] font-black px-4 py-4 bg-slate-900 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-amber-500 transition-all"
+                  placeholder="••••"
+                  autoFocus
+                />
                 
                 {lockRemainingSec > 0 && (
                   <div className="text-xs font-bold text-red-500 mt-2 animate-pulse">
@@ -303,7 +295,7 @@ export const AdminPasscodeModal: React.FC<AdminPasscodeModalProps> = ({
                     </div>
                     <input
                       type="text"
-                      value={resetBd}
+                      inputMode="numeric" pattern="[0-9]*" value={resetBd}
                       onChange={(e) => setResetBd(e.target.value)}
                       className="w-full pl-12 pr-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-mono placeholder:text-slate-400 focus:outline-none focus:border-emerald-500 transition-all"
                       placeholder="474455"
@@ -349,35 +341,31 @@ export const AdminPasscodeModal: React.FC<AdminPasscodeModalProps> = ({
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Enter New Admin Passcode</label>
                     <input
-                      type="password"
-                      value={newPass}
-                      readOnly
-                      onFocus={() => { setIsPasswordFocused(true); setIsConfirmFocused(false); }}
-                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-mono placeholder:text-slate-400 focus:outline-none focus:border-emerald-500 transition-all text-center tracking-widest text-lg cursor-pointer"
-                      required
-                      autoFocus
-                    />
-                    {isPasswordFocused && (
-                      <div className="pt-2">
-                         <RandomizedKeypad value={newPass} onChange={setNewPass} onSubmit={() => setIsPasswordFocused(false)} maxLength={4} />
-                      </div>
-                    )}
+                        type="text" style={{ WebkitTextSecurity: "disc" }}
+                        
+                        maxLength={4}
+                        inputMode="numeric" pattern="[0-9]*" value={newPass}
+                        onChange={(e) => { setNewPass(e.target.value); setErrorMsg(''); }}
+                        className="w-full px-4 py-3.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-amber-500 transition-all"
+                        placeholder="4 Digit PIN"
+                        required
+                      />
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Confirm Admin Passcode</label>
                     <input
-                      type="password"
-                      value={confirmPass}
-                      readOnly
-                      onFocus={() => { setIsConfirmFocused(true); setIsPasswordFocused(false); }}
-                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-mono placeholder:text-slate-400 focus:outline-none focus:border-emerald-500 transition-all text-center tracking-widest text-lg cursor-pointer"
-                      required
-                    />
-                    {isConfirmFocused && (
-                      <div className="pt-2">
-                         <RandomizedKeypad value={confirmPass} onChange={setConfirmPass} onSubmit={() => setIsConfirmFocused(false)} maxLength={4} />
-                      </div>
-                    )}
+                        type="text" style={{ WebkitTextSecurity: "disc" }}
+                        
+                        maxLength={4}
+                        inputMode="numeric" pattern="[0-9]*" value={confirmPass}
+                        onChange={(e) => { setConfirmPass(e.target.value); setErrorMsg(''); }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleResetSubmit();
+                        }}
+                        className="w-full px-4 py-3.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-amber-500 transition-all"
+                        placeholder="Confirm 4 Digit PIN"
+                        required
+                      />
                   </div>
                 </div>
               )}

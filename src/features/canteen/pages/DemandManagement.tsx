@@ -37,7 +37,7 @@ export const DemandManagement: React.FC = () => {
       <div className="bg-slate-900 dark:bg-slate-900 rounded-2xl border border-slate-700 dark:border-slate-800 overflow-hidden shadow-sm">
         <div className="p-4 border-b border-slate-800 dark:border-slate-800 bg-slate-800 dark:bg-slate-900/50 flex justify-between items-center">
             <h3 className="font-bold text-slate-200 dark:text-slate-300">Today's Demands</h3>
-            <button className="bg-emerald-100 text-emerald-700 px-4 py-1.5 rounded-lg text-sm font-bold hover:bg-emerald-200 transition-colors">
+            <button className="bg-emerald-100 text-emerald-400 px-4 py-1.5 rounded-lg text-sm font-bold hover:bg-emerald-200 transition-colors">
                 Mark All as Served
             </button>
         </div>
@@ -74,16 +74,16 @@ export const DemandManagement: React.FC = () => {
                      </td>
                      <td className="px-6 py-4 text-center">
                         <span className={`px-3 py-1 rounded-full text-xs font-bold inline-block ${
-                           row.status === 'served' ? 'bg-emerald-100 text-emerald-700' :
+                           row.status === 'served' ? 'bg-emerald-100 text-emerald-400' :
                            row.status === 'confirmed' ? 'bg-amber-100 text-amber-700' :
-                           'bg-rose-100 text-rose-700'
+                           'bg-rose-100 text-rose-400'
                         }`}>
                            {t(`order_status_${row.status}`)}
                         </span>
                      </td>
                      <td className="px-6 py-4 text-right">
                         {row.status === 'confirmed' ? (
-                            <button className="flex items-center justify-end space-x-1 text-emerald-600 hover:text-emerald-700 font-bold text-xs bg-emerald-900/30 hover:bg-emerald-100 px-3 py-1.5 rounded-lg transition-colors ml-auto">
+                            <button className="flex items-center justify-end space-x-1 text-emerald-600 hover:text-emerald-400 font-bold text-xs bg-emerald-900/30 hover:bg-emerald-100 px-3 py-1.5 rounded-lg transition-colors ml-auto">
                                 <CheckCircle2 className="w-4 h-4" />
                                 <span>{t('mark_as_served')}</span>
                             </button>

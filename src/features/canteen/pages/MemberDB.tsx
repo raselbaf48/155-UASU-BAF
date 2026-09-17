@@ -390,7 +390,7 @@ export const MemberDB: React.FC = () => {
       {/* Statement Modal */}
       {statementMember && (
          <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-slate-900 rounded-[2rem] w-full max-w-2xl shadow-xl animate-in zoom-in-95 max-h-[90vh] flex flex-col overflow-hidden border border-slate-800 print:border-none print:shadow-none print:bg-white print:max-h-none print:max-w-none">
+            <div className="bg-slate-900 rounded-[2rem] w-full max-w-2xl shadow-xl animate-in zoom-in-95 max-h-[90vh] flex flex-col overflow-hidden border border-slate-800 print:border-none print:shadow-none print:bg-slate-900 print:max-h-none print:max-w-none">
                
                {/* Modal Header (Hidden on print) */}
                <div className="p-6 border-b border-slate-800 flex flex-col print:hidden">
@@ -438,14 +438,14 @@ export const MemberDB: React.FC = () => {
                   
                   {/* Tabs */}
                   <div className="flex space-x-6 border-b border-slate-800">
-                      <button onClick={() => setProfileTab('profile')} className={`pb-3 text-xs font-black tracking-widest uppercase transition-colors ${profileTab === 'profile' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-slate-500 hover:text-slate-300'}`}>Profile</button>
-                      <button onClick={() => setProfileTab('history')} className={`pb-3 text-xs font-black tracking-widest uppercase transition-colors ${profileTab === 'history' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-slate-500 hover:text-slate-300'}`}>History</button>
-                      <button onClick={() => setProfileTab('statement')} className={`pb-3 text-xs font-black tracking-widest uppercase transition-colors ${profileTab === 'statement' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-slate-500 hover:text-slate-300'}`}>Statement</button>
+                      <button onClick={() => setProfileTab('profile')} className={`pb-3 text-xs font-black tracking-widest uppercase transition-colors ${profileTab === 'profile' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-slate-400 hover:text-slate-300'}`}>Profile</button>
+                      <button onClick={() => setProfileTab('history')} className={`pb-3 text-xs font-black tracking-widest uppercase transition-colors ${profileTab === 'history' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-slate-400 hover:text-slate-300'}`}>History</button>
+                      <button onClick={() => setProfileTab('statement')} className={`pb-3 text-xs font-black tracking-widest uppercase transition-colors ${profileTab === 'statement' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-slate-400 hover:text-slate-300'}`}>Statement</button>
                   </div>
                </div>
 
                {/* Content Area */}
-               <div className="p-6 overflow-y-auto bg-slate-900/50 flex-1 print:p-0 print:bg-white print:overflow-visible">
+               <div className="p-6 overflow-y-auto bg-slate-900/50 flex-1 print:p-0 print:bg-slate-900 print:overflow-visible">
                    
                    {/* Normal UI View (Hidden on print) */}
                    <div className="print:hidden">
@@ -461,7 +461,7 @@ export const MemberDB: React.FC = () => {
                                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Due</p>
                                           <p className={`text-2xl font-black ${statementMember.baki === 0 ? 'text-emerald-500' : 'text-rose-500'}`}>৳{statementMember.baki || 0}</p>
                                       </div>
-                                      <button onClick={() => setShowPayBillModal(true)} className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-xs font-black tracking-widest transition-colors shadow-md shadow-emerald-500/20">
+                                      <button onClick={() => setShowPayBillModal(true)} className="px-4 py-2 bg-emerald-900/300 hover:bg-emerald-600 text-white rounded-lg text-xs font-black tracking-widest transition-colors shadow-md shadow-emerald-500/20">
                                           PAY BILL
                                       </button>
                                   </div>
@@ -493,7 +493,7 @@ export const MemberDB: React.FC = () => {
                                        <tbody>
                                            {statementTx.length === 0 ? (
                                                <tr>
-                                                   <td colSpan={4} className="px-4 py-8 text-center text-slate-500 font-bold">No history found</td>
+                                                   <td colSpan={4} className="px-4 py-8 text-center text-slate-400 font-bold">No history found</td>
                                                </tr>
                                            ) : (
                                                statementTx.map((tx, idx) => {
@@ -539,7 +539,7 @@ export const MemberDB: React.FC = () => {
                        {profileTab === 'statement' && (
                            <div className="flex flex-col h-full space-y-4">
                                <div className="flex justify-end space-x-3">
-                                   <button onClick={() => window.print()} className="flex items-center space-x-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-[10px] font-black tracking-widest uppercase hover:bg-indigo-500 transition-colors">
+                                   <button onClick={() => window.print()} className="flex items-center space-x-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-[10px] font-black tracking-widest uppercase hover:bg-indigo-900/300 transition-colors">
                                        <Printer className="w-4 h-4" />
                                        <span>Print PDF</span>
                                    </button>
@@ -560,7 +560,7 @@ export const MemberDB: React.FC = () => {
                                                <td className="border border-black p-2 text-left">পদবী ও নাম</td>
                                                <td className="border border-black p-2" colSpan={3}>{statementMember['Rank']} {statementMember['Surname']} ({statementMember['BD No']})</td>
                                            </tr>
-                                           <tr className="bg-gray-100">
+                                           <tr className="bg-slate-800">
                                                <td className="border border-black p-2">তারিখ</td>
                                                <td className="border border-black p-2" colSpan={2}>বিবরণ</td>
                                                <td className="border border-black p-2">টাকা</td>
@@ -624,7 +624,7 @@ export const MemberDB: React.FC = () => {
                                    <td className="border border-black p-2 text-left">পদবী ও নাম</td>
                                    <td className="border border-black p-2" colSpan={3}>{statementMember['Rank']} {statementMember['Surname']} ({statementMember['BD No']})</td>
                                </tr>
-                               <tr className="bg-gray-100">
+                               <tr className="bg-slate-800">
                                    <td className="border border-black p-2">তারিখ</td>
                                    <td className="border border-black p-2" colSpan={2}>বিবরণ</td>
                                    <td className="border border-black p-2">টাকা</td>
@@ -677,17 +677,17 @@ export const MemberDB: React.FC = () => {
       {/* Pay Bill Modal */}
       {showPayBillModal && statementMember && (
           <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
-              <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-sm shadow-2xl animate-in zoom-in-95 relative overflow-hidden">
-                  <div className="absolute -top-10 -right-10 w-40 h-40 bg-indigo-50 rounded-full blur-3xl opacity-50 pointer-events-none"></div>
+              <div className="bg-slate-900 rounded-[2.5rem] p-8 w-full max-w-sm shadow-2xl animate-in zoom-in-95 relative overflow-hidden">
+                  <div className="absolute -top-10 -right-10 w-40 h-40 bg-indigo-900/30 rounded-full blur-3xl opacity-50 pointer-events-none"></div>
                   
                   <div className="flex items-center justify-between mb-8 relative z-10">
-                      <h2 className="text-xl font-black text-slate-800 uppercase tracking-tighter">RECORD PAYMENT</h2>
-                      <button onClick={() => setShowPayBillModal(false)} className="w-8 h-8 flex items-center justify-center bg-slate-100 hover:bg-slate-200 text-slate-500 rounded-full transition-colors">
+                      <h2 className="text-xl font-black text-white uppercase tracking-tighter">RECORD PAYMENT</h2>
+                      <button onClick={() => setShowPayBillModal(false)} className="w-8 h-8 flex items-center justify-center bg-slate-800 hover:bg-slate-200 text-slate-400 rounded-full transition-colors">
                           <X className="w-4 h-4" />
                       </button>
                   </div>
                   
-                  <div className="bg-slate-50 border border-slate-100 rounded-2xl p-6 text-center mb-6 relative z-10">
+                  <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 text-center mb-6 relative z-10">
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">OUTSTANDING BALANCE</p>
                       <p className="text-4xl font-black text-rose-500 tracking-tighter">৳{statementMember.baki || 0}</p>
                   </div>
@@ -700,22 +700,22 @@ export const MemberDB: React.FC = () => {
                               type="number" 
                               value={payAmount}
                               onChange={(e) => setPayAmount(e.target.value)}
-                              className="w-full bg-[#111827] text-white text-3xl font-black tracking-tighter py-5 pl-14 pr-6 rounded-3xl outline-none placeholder:text-slate-700 shadow-inner"
+                              className="w-full bg-[#111827] text-white text-3xl font-black tracking-tighter py-5 pl-14 pr-6 rounded-3xl outline-none placeholder:text-slate-200 shadow-inner"
                               placeholder="0.00"
                           />
                       </div>
                   </div>
                   
-                  <div className="flex space-x-2 p-1 bg-slate-50 rounded-2xl mb-8 border border-slate-100 relative z-10">
+                  <div className="flex space-x-2 p-1 bg-slate-950 rounded-2xl mb-8 border border-slate-800 relative z-10">
                       <button 
                           onClick={() => setPayMethod('CASH')}
-                          className={`flex-1 py-3 text-xs font-black tracking-widest rounded-xl transition-all ${payMethod === 'CASH' ? 'bg-[#5b51ef] text-white shadow-md shadow-indigo-500/30' : 'text-slate-400 hover:text-slate-600'}`}
+                          className={`flex-1 py-3 text-xs font-black tracking-widest rounded-xl transition-all ${payMethod === 'CASH' ? 'bg-[#5b51ef] text-white shadow-md shadow-indigo-500/30' : 'text-slate-400 hover:text-slate-400'}`}
                       >
                           CASH
                       </button>
                       <button 
                           onClick={() => setPayMethod('UCB')}
-                          className={`flex-1 py-3 text-xs font-black tracking-widest rounded-xl transition-all ${payMethod === 'UCB' ? 'bg-[#5b51ef] text-white shadow-md shadow-indigo-500/30' : 'text-slate-400 hover:text-slate-600'}`}
+                          className={`flex-1 py-3 text-xs font-black tracking-widest rounded-xl transition-all ${payMethod === 'UCB' ? 'bg-[#5b51ef] text-white shadow-md shadow-indigo-500/30' : 'text-slate-400 hover:text-slate-400'}`}
                       >
                           UCB
                       </button>
@@ -737,7 +737,7 @@ export const MemberDB: React.FC = () => {
                           <Trash2 className="w-8 h-8" />
                       </div>
                       <h3 className="text-lg font-black text-white uppercase tracking-tighter mb-2">Remove Record?</h3>
-                      <p className="text-sm font-bold text-slate-400 mb-6">Are you sure you want to remove this history record? Member Due will be reversed.</p>
+                      <p className="text-sm font-bold text-slate-400 mb-6">Are you sure you want to remove this history record? Member Due will be reversed and stock will be restored.</p>
                       
                       <div className="flex space-x-3">
                           <button onClick={() => setTxDeleteConfirmId(null)} className="flex-1 py-3 bg-slate-800 text-slate-200 rounded-xl text-xs font-black tracking-widest hover:bg-slate-200 transition-colors">
