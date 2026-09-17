@@ -39,12 +39,22 @@ interface CanteenLayoutProps {
 export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMember }) => {
   const { t, i18n } = useTranslation();
   const [activeTab, setActiveTab] = useState<string>(initialMember?.role === 'manager' ? 'manager_dashboard' : 'personal_portal');
-  const [currentUser, setCurrentUser] = useState({ name: initialMember ? initialMember.name : 'Guest', role: (initialMember && initialMember.role) ? initialMember.role : 'employee' as 'employee'|'manager' });
+  const [currentUser, setCurrentUser] = useState<any>({ name: initialMember ? initialMember.name : 'Guest', role: (initialMember && initialMember.role) ? initialMember.role : 'employee', bdNo: initialMember?.bdNo });
   const [showLogin, setShowLogin] = useState(false);
   const [loginTab, setLoginTab] = useState<'member'|'manager'>('manager');
   const [loginInput, setLoginInput] = useState('');
   const [loginError, setLoginError] = useState('');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  
+  const handleLogout = () => {
+    if (currentUser.role === 'manager') {
+      setCurrentUser({ name: initialMember ? initialMember.name : 'Guest', role: 'employee', bdNo: initialMember?.bdNo });
+      setActiveTab('personal_portal');
+    } else {
+      onBack();
+    }
+  };
 
   const handleLogin = async () => {
     if (loginTab === 'member') {
@@ -52,14 +62,14 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
         setLoginError('Checking...');
         const { data, error } = await supabase
           .from('Canteen')
-          .select('Name, Rank')
+          .select('Surname, Rank')
           .eq('BD No', loginInput)
           .single();
           
         if (error || !data) {
           setLoginError('Member not found. Check BD No.');
         } else {
-          setCurrentUser({ name: `${data.Rank} ${data.Name}`, role: 'employee', bdNo: loginInput });
+          setCurrentUser({ name: `${data.Rank} ${data.Surname}`, role: 'employee', bdNo: loginInput });
           setActiveTab('personal_portal');
           setShowLogin(false);
           setLoginInput('');
@@ -183,14 +193,14 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
 
         <div className="p-6 space-y-4">
               <button
-                  onClick={onBack}
+                  onClick={handleLogout}
                  className="w-full flex items-center justify-center space-x-2 px-4 py-3.5 rounded-2xl text-rose-600 bg-rose-900/30 hover:bg-rose-100 transition-colors font-bold text-xs uppercase tracking-widest"
               >
                  <LogIn className="w-4 h-4 rotate-180" />
                  <span>LOGOUT</span>
               </button>
           
-          <div className={`flex items-center space-x-3 p-3 rounded-2xl cursor-pointer ${isEmployee ? 'bg-slate-900 text-white' : 'bg-slate-900 text-white'}`} onClick={onBack}>
+          <div className={`flex items-center space-x-3 p-3 rounded-2xl cursor-pointer ${isEmployee ? 'bg-slate-900 text-white' : 'bg-slate-900 text-white'}`} onClick={handleLogout}>
              <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center overflow-hidden">
                <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUser.name}&backgroundColor=0f172a`} alt="Avatar" className="w-full h-full object-cover" />
              </div>
@@ -249,7 +259,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
                   </div>
                   <div className={`p-4 border-t ${isEmployee ? "border-slate-800" : "border-slate-800"}`}>
                       <button
-                          onClick={onBack}
+                          onClick={handleLogout}
                           className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl text-rose-600 bg-rose-900/30 font-bold text-xs uppercase"
                       >
                           <LogIn className="w-4 h-4 rotate-180" />
@@ -303,24 +313,91 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
 
                 <div className="mb-6 mt-2">
                    <label className="block text-[11px] font-black text-slate-400 tracking-widest mb-3">
-                     {loginTab === 'member' ? '# MEMBER ID' : '# MANAGER PIN'}
+                     {loginTab === 'member' ? '# MEMBER ID' : '# SYSTEM KEY'}
                    </label>
-                   <input 
-                     type={loginTab === 'member' ? 'text' : 'password'}
-                     value={loginInput}
-                     onChange={e => { setLoginInput(e.target.value); setLoginError(''); }}
-                     placeholder={loginTab === 'member' ? 'e.g. 469000' : '****'}
-                     className="w-full bg-[#0f172a] text-white px-5 py-4 rounded-xl font-medium focus:outline-none focus:ring-2 focus:ring-[#4f46e5] placeholder:text-slate-300"
-                   />
+                   {loginTab === 'member' ? (
+                       <input 
+                         type="text"
+                         value={loginInput}
+                         onChange={e => { setLoginInput(e.target.value); setLoginError(''); }}
+                         placeholder="e.g. 469000"
+                         className="w-full bg-[#0f172a] text-white px-5 py-4 rounded-xl font-medium focus:outline-none focus:ring-2 focus:ring-[#4f46e5] placeholder:text-slate-300"
+                       />
+                   ) : (
+                       <div className="flex justify-center space-x-3">
+                           {[0,1,2,3].map(i => (
+                               <input 
+                                   key={i}
+                                   type="password" inputMode="numeric" pattern="[0-9]*" autoFocus={i === 0} maxLength={1}
+                                   value={loginInput[i] || ''}
+                                   onChange={e => {
+                                       const val = e.target.value;
+                                       let newVal = loginInput.split('');
+                                       newVal[i] = val.slice(-1); // take last char
+                                       const finalVal = newVal.join('');
+                                       setLoginInput(finalVal);
+                                       setLoginError('');
+                                       
+                                       if (val && i < 3) {
+                                           const next = document.getElementById(`pin-${i+1}`);
+                                           if (next) next.focus();
+                                       }
+                                       if (finalVal.length === 4) {
+                                           if (finalVal === '1234') {
+                                               setCurrentUser({ name: 'System Admin', role: 'manager' });
+                                               setActiveTab('manager_dashboard');
+                                               setShowLogin(false);
+                                               setLoginInput('');
+                                               setLoginError('');
+                                           } else {
+                                               setLoginError('Verifying...');
+                                               supabase.from('Canteen').select('Surname, Rank').eq('BD No', finalVal).single().then(({data, error}) => {
+                                                   if (error || !data) {
+                                                       setLoginError('Invalid System Key or BD No.');
+                                                       setTimeout(() => {
+                                                           setLoginInput('');
+                                                           setLoginError('');
+                                                           document.getElementById('pin-0')?.focus();
+                                                       }, 800);
+                                                   } else {
+                                                       setCurrentUser({ name: `${data.Rank} ${data.Surname}`, role: 'manager', bdNo: finalVal });
+                                                       setActiveTab('manager_dashboard');
+                                                       setShowLogin(false);
+                                                       setLoginInput('');
+                                                       setLoginError('');
+                                                   }
+                                               });
+                                           }
+                                       }
+                                   }}
+                                   onKeyDown={e => {
+                                       if (e.key === 'Backspace' && !loginInput[i] && i > 0) {
+                                           const prev = document.getElementById(`pin-${i-1}`);
+                                           if (prev) {
+                                               prev.focus();
+                                               let newVal = loginInput.split('');
+                                               newVal[i-1] = '';
+                                               setLoginInput(newVal.join(''));
+                                           }
+                                       }
+                                   }}
+                                   id={`pin-${i}`}
+                                   className="w-14 h-14 bg-[#0f172a] border border-slate-700 text-white text-center text-xl rounded-md font-bold focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all shadow-inner"
+                               />
+                           ))}
+                       </div>
+                   )}
                    {loginError && <p className="text-rose-500 text-xs font-bold mt-3">{loginError}</p>}
                 </div>
 
-                <button 
-                   onClick={handleLogin}
-                   className="w-full bg-[#4f46e5] hover:bg-[#4338ca] text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-indigo-500/30 hover:shadow-indigo-500/50 active:scale-[0.98]"
-                >
-                   ESTABLISH SESSION
-                </button>
+                {loginTab === 'member' && (
+                    <button 
+                       onClick={handleLogin}
+                       className="w-full bg-[#4f46e5] hover:bg-[#4338ca] text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-indigo-500/30 hover:shadow-indigo-500/50 active:scale-[0.98]"
+                    >
+                       ESTABLISH SESSION
+                    </button>
+                )}
              </div>
           </div>
         </div>

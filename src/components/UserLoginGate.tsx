@@ -34,6 +34,8 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
   const [isConfirmFocused, setIsConfirmFocused] = useState<boolean>(false);
 
   const [activeTab, setActiveTab] = useState<'Office' | 'Nt Count' | 'Canteen'>('Office');
+  
+
   const [isCanteenAuth, setIsCanteenAuth] = useState<boolean>(false);
   const [isCanteenManagerMode, setIsCanteenManagerMode] = useState<boolean>(false);
 
@@ -50,6 +52,12 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
       return saved ? JSON.parse(saved) : [];
     } catch { return []; }
   });
+  useEffect(() => {
+      if (activeTab === 'Canteen' && canteenRecentLogins.length > 0 && !bdInput) {
+          setBdInput(canteenRecentLogins[0]);
+      }
+  }, [activeTab, canteenRecentLogins, bdInput]);
+
 
   const recentLogins = activeTab === 'Canteen' ? canteenRecentLogins : officeRecentLogins;
 
@@ -558,7 +566,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
 
         {activeTab === 'Canteen' && isCanteenAuth && (
           <CanteenLayout 
-             initialMember={successAirman ? { name: successAirman.rank + ' ' + successAirman.name, bdNo: successAirman.bdNo, role: 'employee' } : undefined}
+             initialMember={successAirman ? { name: (successAirman.rank && successAirman.name) ? (successAirman.rank + ' ' + successAirman.name) : (successAirman.name || successAirman.fullName || 'Guest'), bdNo: successAirman.bdNo, role: 'employee' } : undefined}
              onBack={() => { setIsCanteenAuth(false); setBdInput(''); setPasswordInput(''); setSuccessAirman(null); setTargetAirman(null); }} 
           />
         )}

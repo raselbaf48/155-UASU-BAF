@@ -4,8 +4,241 @@ import { supabase } from '../../../supabase';
 
 export const CanteenInventory: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [items, setItems] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState<any[]>([
+  {
+    "id": "28d0782c-1bdf-42f6-a616-683a9d5038f1",
+    "name": "EGG MUMLET",
+    "category": "SNACKS",
+    "price": 15,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "bcb8b137-36b8-4fd0-9e11-0e9502859618",
+    "name": "EGG NOODLES",
+    "category": "SNACKS",
+    "price": 50,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "da73d5ab-f0e9-4df1-b3bd-89ed86a1da4f",
+    "name": "GREEN TEA",
+    "category": "SNACKS",
+    "price": 8,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "c6ca22ca-0a4a-4a2b-8b48-0d839d240e7b",
+    "name": "HALIM",
+    "category": "SNACKS",
+    "price": 50,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "3d86a07a-2c53-416a-abb6-52b0b448ca63",
+    "name": "LEMON JUICE",
+    "category": "DRINK",
+    "price": 10,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "0e5511c2-9014-4aeb-8e57-624d6994986a",
+    "name": "LIQUOR TEA",
+    "category": "DRINK",
+    "price": 5,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "02d2b676-3b4b-4e7d-9b58-477c53ede8ae",
+    "name": "MILK COFFEE",
+    "category": "DRINK",
+    "price": 25,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "136e714f-1272-4723-a0a5-2048cb81e94f",
+    "name": "MILK TEA",
+    "category": "DRINK",
+    "price": 12,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "5db26171-f6dc-4268-8d64-a5b53140e368",
+    "name": "NOODLES",
+    "category": "SNACKS",
+    "price": 30,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "0a1f36fc-aad0-4d45-a0d8-9222ca1ca07e",
+    "name": "NORMAL BISCUIT",
+    "category": "SNACKS",
+    "price": 5,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "38bc5293-57ed-4e5a-b817-cbdcb37bfebd",
+    "name": "ONE TIME BOX",
+    "category": "SNACKS",
+    "price": 5,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "3dde1a4e-9b62-49a9-8b24-d758c2afc24a",
+    "name": "PASTA",
+    "category": "SNACKS",
+    "price": 35,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "98b60d30-301c-49ea-9e99-7661e30fca39",
+    "name": "PORATA",
+    "category": "SNACKS",
+    "price": 15,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "cebd3bcc-1802-4f63-90f3-0bb2fa27e121",
+    "name": "PORATA (HOTEL)",
+    "category": "SNACKS",
+    "price": 10,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "b83a0120-d891-481a-a27f-9c7834bc48ee",
+    "name": "PORATA (UNIT)",
+    "category": "SNACKS",
+    "price": 15,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "eb34adaf-7ae0-4a52-8a90-291cc88b1a1f",
+    "name": "SOSA",
+    "category": "SNACKS",
+    "price": 10,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "dc82a6b4-6cea-4188-b6f1-7e176ec26cff",
+    "name": "SWARMA",
+    "category": "SNACKS",
+    "price": 50,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "4b63bf8e-cedb-4d4b-b25c-fd9451df7a49",
+    "name": "BOILED EGG",
+    "category": "SNACKS",
+    "price": 15,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "089a215f-20f3-47b2-983b-5a0a94cba18e",
+    "name": "CHICKEN BIRIYANI",
+    "category": "SNACKS",
+    "price": 65,
+    "stock": 10,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "5cc854fa-cdf0-43e9-a4cf-339f8a1dcbd3",
+    "name": "CHICKEN CURRY",
+    "category": "SNACKS",
+    "price": 50,
+    "stock": 99998,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "c149451c-7fe4-4531-9984-0addc2742fdb",
+    "name": "CHICKEN KHICHURI",
+    "category": "SNACKS",
+    "price": 65,
+    "stock": 99998,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "c5d4c577-81ab-43cf-88ca-d0e431661a2f",
+    "name": "CHICKEN ONION",
+    "category": "SNACKS",
+    "price": 45,
+    "stock": 99998,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "2a22e09c-cc55-4528-8a73-225de8456c1c",
+    "name": "CHICKEN PASTA",
+    "category": "SNACKS",
+    "price": 55,
+    "stock": 99998,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "b3785b27-f250-4000-85bf-3fbaf804cc63",
+    "name": "CHICKEN PULAW",
+    "category": "SNACKS",
+    "price": 65,
+    "stock": 99997,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "e37bb8e1-db3f-464a-8968-74bec924ac87",
+    "name": "CHOTPOTI",
+    "category": "SNACKS",
+    "price": 30,
+    "stock": 99998,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "c06d9508-2367-404d-b7ca-b5c9670a4b6c",
+    "name": "COLD COFFEE",
+    "category": "DRINK",
+    "price": 40,
+    "stock": 99997,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "7bb1b308-130a-4ee5-b2c4-bff0a5e25c49",
+    "name": "DRY CAKE",
+    "category": "SNACKS",
+    "price": 12,
+    "stock": 99998,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "2cb63ae0-6f65-48c7-92f5-77add415f5ea",
+    "name": "EGG FRY",
+    "category": "SNACKS",
+    "price": 18,
+    "stock": 0,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "51d5db48-1160-468c-a55a-ef21b7e4b81d",
+    "name": "EGG KHICURI",
+    "category": "SNACKS",
+    "price": 45,
+    "stock": 99997,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  }
+]);
+  const [loading, setLoading] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   
   const [newItem, setNewItem] = useState({
@@ -20,21 +253,254 @@ export const CanteenInventory: React.FC = () => {
   }, []);
 
   const fetchItems = async () => {
-    setLoading(true);
-    // Fetch from a Canteen_Inventory table or mock it if not exists yet
-    const { data, error } = await supabase.from('Canteen_Inventory').select('*');
-    if (!error && data) {
-      setItems(data);
-    } else {
-      // If table doesn't exist, we will use mock data for now and user can create table
-      setItems([
-          { id: '1', name: 'BLACK COFFEE', category: 'DRINK', price: 20, stock: 929994, isFixed: false },
-          { id: '2', name: 'BOILED EGG', category: 'SNACKS', price: 15, stock: 81986, isFixed: false, active: true },
-          { id: '3', name: 'CHICKEN BIRIYANI', category: 'SNACKS', price: 65, stock: 97994, isFixed: false },
-          { id: '4', name: 'CHICKEN CURRY', category: 'SNACKS', price: 50, stock: 9981, isFixed: false },
-      ]);
+    setLoading(false); // Instant load
+    try {
+        const { data, error } = await supabase.from('Canteen_Inventory').select('*');
+        console.log('CanteenInventory fetchItems:', { data, error });
+        if (!error && data && data.length > 0) {
+            setItems(data);
+        } else {
+            console.error('Failed or empty fetch:', error);
+            // Fallback
+            setItems([
+  {
+    "id": "28d0782c-1bdf-42f6-a616-683a9d5038f1",
+    "name": "EGG MUMLET",
+    "category": "SNACKS",
+    "price": 15,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "bcb8b137-36b8-4fd0-9e11-0e9502859618",
+    "name": "EGG NOODLES",
+    "category": "SNACKS",
+    "price": 50,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "da73d5ab-f0e9-4df1-b3bd-89ed86a1da4f",
+    "name": "GREEN TEA",
+    "category": "SNACKS",
+    "price": 8,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "c6ca22ca-0a4a-4a2b-8b48-0d839d240e7b",
+    "name": "HALIM",
+    "category": "SNACKS",
+    "price": 50,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "3d86a07a-2c53-416a-abb6-52b0b448ca63",
+    "name": "LEMON JUICE",
+    "category": "DRINK",
+    "price": 10,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "0e5511c2-9014-4aeb-8e57-624d6994986a",
+    "name": "LIQUOR TEA",
+    "category": "DRINK",
+    "price": 5,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "02d2b676-3b4b-4e7d-9b58-477c53ede8ae",
+    "name": "MILK COFFEE",
+    "category": "DRINK",
+    "price": 25,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "136e714f-1272-4723-a0a5-2048cb81e94f",
+    "name": "MILK TEA",
+    "category": "DRINK",
+    "price": 12,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "5db26171-f6dc-4268-8d64-a5b53140e368",
+    "name": "NOODLES",
+    "category": "SNACKS",
+    "price": 30,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "0a1f36fc-aad0-4d45-a0d8-9222ca1ca07e",
+    "name": "NORMAL BISCUIT",
+    "category": "SNACKS",
+    "price": 5,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "38bc5293-57ed-4e5a-b817-cbdcb37bfebd",
+    "name": "ONE TIME BOX",
+    "category": "SNACKS",
+    "price": 5,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "3dde1a4e-9b62-49a9-8b24-d758c2afc24a",
+    "name": "PASTA",
+    "category": "SNACKS",
+    "price": 35,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "98b60d30-301c-49ea-9e99-7661e30fca39",
+    "name": "PORATA",
+    "category": "SNACKS",
+    "price": 15,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "cebd3bcc-1802-4f63-90f3-0bb2fa27e121",
+    "name": "PORATA (HOTEL)",
+    "category": "SNACKS",
+    "price": 10,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "b83a0120-d891-481a-a27f-9c7834bc48ee",
+    "name": "PORATA (UNIT)",
+    "category": "SNACKS",
+    "price": 15,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "eb34adaf-7ae0-4a52-8a90-291cc88b1a1f",
+    "name": "SOSA",
+    "category": "SNACKS",
+    "price": 10,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "dc82a6b4-6cea-4188-b6f1-7e176ec26cff",
+    "name": "SWARMA",
+    "category": "SNACKS",
+    "price": 50,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "4b63bf8e-cedb-4d4b-b25c-fd9451df7a49",
+    "name": "BOILED EGG",
+    "category": "SNACKS",
+    "price": 15,
+    "stock": 99999,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "089a215f-20f3-47b2-983b-5a0a94cba18e",
+    "name": "CHICKEN BIRIYANI",
+    "category": "SNACKS",
+    "price": 65,
+    "stock": 10,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "5cc854fa-cdf0-43e9-a4cf-339f8a1dcbd3",
+    "name": "CHICKEN CURRY",
+    "category": "SNACKS",
+    "price": 50,
+    "stock": 99998,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "c149451c-7fe4-4531-9984-0addc2742fdb",
+    "name": "CHICKEN KHICHURI",
+    "category": "SNACKS",
+    "price": 65,
+    "stock": 99998,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "c5d4c577-81ab-43cf-88ca-d0e431661a2f",
+    "name": "CHICKEN ONION",
+    "category": "SNACKS",
+    "price": 45,
+    "stock": 99998,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "2a22e09c-cc55-4528-8a73-225de8456c1c",
+    "name": "CHICKEN PASTA",
+    "category": "SNACKS",
+    "price": 55,
+    "stock": 99998,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "b3785b27-f250-4000-85bf-3fbaf804cc63",
+    "name": "CHICKEN PULAW",
+    "category": "SNACKS",
+    "price": 65,
+    "stock": 99997,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "e37bb8e1-db3f-464a-8968-74bec924ac87",
+    "name": "CHOTPOTI",
+    "category": "SNACKS",
+    "price": 30,
+    "stock": 99998,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "c06d9508-2367-404d-b7ca-b5c9670a4b6c",
+    "name": "COLD COFFEE",
+    "category": "DRINK",
+    "price": 40,
+    "stock": 99997,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "7bb1b308-130a-4ee5-b2c4-bff0a5e25c49",
+    "name": "DRY CAKE",
+    "category": "SNACKS",
+    "price": 12,
+    "stock": 99998,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "2cb63ae0-6f65-48c7-92f5-77add415f5ea",
+    "name": "EGG FRY",
+    "category": "SNACKS",
+    "price": 18,
+    "stock": 0,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  },
+  {
+    "id": "51d5db48-1160-468c-a55a-ef21b7e4b81d",
+    "name": "EGG KHICURI",
+    "category": "SNACKS",
+    "price": 45,
+    "stock": 99997,
+    "created_at": "2026-09-16T11:21:03.555622+00:00"
+  }
+]);
+        }
+    } catch (e) {
+        console.error('Exception fetching items:', e);
     }
-    setLoading(false);
+    setLoading(false); console.log('Finished fetchItems, items array length:', items.length);
   };
 
   const [isEditMode, setIsEditMode] = useState(false);
@@ -98,8 +564,8 @@ export const CanteenInventory: React.FC = () => {
   };
 
   const filteredItems = items.filter(item => 
-      item.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-      item.category.toLowerCase().includes(searchTerm.toLowerCase())
+      (item.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+      (item.category || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
@@ -127,7 +593,7 @@ export const CanteenInventory: React.FC = () => {
          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
          <input 
             type="text" 
-            placeholder="Filter menu selection..."
+            placeholder={`Filter ${items.length} items...`}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full bg-slate-900 border border-slate-700 rounded-2xl pl-12 pr-4 py-4 text-sm font-bold text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#4f46e5]/20 focus:border-[#4f46e5] transition-all shadow-sm"

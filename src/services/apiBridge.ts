@@ -139,7 +139,7 @@ async function handleLocalApiRequest(urlStr: string, init?: RequestInit): Promis
                  }
               }
            } catch(e) {
-              console.error("Supabase delete failed", e);
+              console.warn('Supabase delete failed', e.message);
            }
         }
         return ok ? jsonResponse({ success: true }) : jsonResponse({ error: 'Airman not found' }, 404);
@@ -349,7 +349,7 @@ async function handleLocalApiRequest(urlStr: string, init?: RequestInit): Promis
     // Default fallback: return empty object or success
     return jsonResponse({ success: true, message: 'Handled by Local Bridge' });
   } catch (err: any) {
-    console.error('Local Bridge API Error:', err.stack);
+    console.warn('Local Bridge API Error:', err.message);
     return jsonResponse({ error: err.message || 'Internal local bridge error' }, 500);
   }
 }

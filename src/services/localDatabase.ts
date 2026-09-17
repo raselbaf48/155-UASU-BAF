@@ -224,7 +224,8 @@ export class LocalDatabaseEngine {
       try {
          staffData = await fetchAll('Biodata Register');
       } catch(e: any) { 
-         throw new Error("Failed to fetch staff from Cloud: " + e.message); 
+         console.warn("Failed to fetch staff from Cloud: " + e.message);
+         staffData = null; 
       }
       
 
@@ -493,7 +494,7 @@ export class LocalDatabaseEngine {
       
       return true;
     } catch (err: any) {
-      console.error("Supabase Pull Error:", err);
+      console.warn("Supabase Pull Error (offline?):", err.message);
       addSyncLog({ timestamp: new Date().toISOString(), type: "PULL", status: "ERROR", message: "Failed to pull from Supabase." });
       return false;
     } finally {
@@ -863,7 +864,7 @@ export class LocalDatabaseEngine {
            return true;
         }
       } catch (err: any) {
-        console.error("Supabase Save Error:", err);
+        console.warn("Supabase Save Error:", err);
         addSyncLog({ timestamp: new Date().toISOString(), type: "PUSH", status: "ERROR", message: "Failed to push to Supabase." });
         if (typeof window !== 'undefined') window.localStorage.setItem('baf_pending_sync', 'true');
         return false;

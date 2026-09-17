@@ -361,7 +361,7 @@ return () => mediaQuery.removeEventListener('change', listener);
           setConflictCount((data.conflictAlerts || []).length);
         }
       } catch (err) {
-        console.error('Failed to fetch conflict count:', err);
+        console.warn('Failed to fetch conflict count:', err);
       }
     };
     fetchConflicts();
@@ -407,7 +407,7 @@ return () => mediaQuery.removeEventListener('change', listener);
         }
       }
     } catch (err) {
-      console.error('Error saving airman:', err);
+      console.warn('Error saving airman:', err);
     } finally {
       setAirmanToEdit(null);
     }
@@ -435,7 +435,7 @@ return () => mediaQuery.removeEventListener('change', listener);
         window.dispatchEvent(new CustomEvent('baf_state_updated'));
       }
     } catch (err) {
-      console.error('Error deleting airman:', err);
+      console.warn('Error deleting airman:', err);
     }
   };
 
