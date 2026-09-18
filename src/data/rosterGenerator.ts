@@ -142,6 +142,7 @@ export function calculateDutyStats(
     
     // First, process all explicit assignments for the given month
     assignments.forEach((ass) => {
+      if ((ass.disposalScope || 'ALL') !== 'ALL') return;
       const d = new Date(ass.date);
       if (d.getFullYear() === year && (d.getMonth() + 1) === month) {
         const stat = map.get(ass.airmanId);
@@ -170,6 +171,10 @@ export function calculateDutyStats(
             break;
           case 'IDAC':
           case 'IDA':
+          case 'IDA C':
+          case 'IDA_C':
+          case 'IDAC CENTER':
+          case 'IDA CENTER':
             stat.totalIDAC++;
             if (ass.idaShift === 'Morning') {
               stat.totalIDACMorning++;
@@ -201,6 +206,7 @@ export function calculateDutyStats(
   } else {
     // Fallback if no specific year/month provided
     assignments.forEach((ass) => {
+      if ((ass.disposalScope || 'ALL') !== 'ALL') return;
       const stat = map.get(ass.airmanId);
       if (!stat) return;
 
@@ -226,7 +232,11 @@ export function calculateDutyStats(
           stat.totalDutyCount++;
           break;
         case 'IDAC':
-        case 'IDA':
+          case 'IDA':
+          case 'IDA C':
+          case 'IDA_C':
+          case 'IDAC CENTER':
+          case 'IDA CENTER':
           stat.totalIDAC++;
           if (ass.idaShift === 'Morning') {
             stat.totalIDACMorning++;

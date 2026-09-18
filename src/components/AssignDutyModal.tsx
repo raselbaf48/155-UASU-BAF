@@ -240,7 +240,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
       let targetFlight: FlightName | "All" = "All";
       
       // Do not auto-select flight for IDAC until a shift is explicitly chosen
-      if ((activeDutyCode === 'IDAC' || activeDutyCode === 'IDA') && !activeIdaShift) {
+      if ((['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(activeDutyCode as string)) && !activeIdaShift) {
          setActiveFlight("All");
          return;
       }
@@ -281,7 +281,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
     const flights: FlightName[] = ['Mechanics', 'Avionics', 'GCS', 'Admin'];
     const targetFlight = specificFlight !== undefined ? specificFlight : activeFlight;
     if (targetFlight === 'All') {
-      if (dutyCode === 'IDAC' || dutyCode === 'IDA') {
+      if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(dutyCode)) {
         if (shift) {
           return flights.reduce((sum, f) => sum + getFlightDutyQuotaForDate(fromDate, f, 'IDAC', shift), 0);
         }
@@ -294,7 +294,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
       return flights.reduce((sum, f) => sum + getFlightDutyQuotaForDate(fromDate, f, dutyCode), 0);
     }
 
-    if (dutyCode === 'IDAC' || dutyCode === 'IDA') {
+    if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(dutyCode)) {
       if (shift) {
         return getFlightDutyQuotaForDate(fromDate, targetFlight as FlightName, 'IDAC', shift);
       }
@@ -311,7 +311,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
       if (activeDutyCode === 'ATT' || activeDutyCode === 'AIRPORT') {
         return a.dutyCode === 'ATT' || a.dutyCode === 'AIRPORT';
       }
-      if (activeDutyCode === 'IDAC' || activeDutyCode === 'IDA') {
+      if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(activeDutyCode as string)) {
         return (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === activeIdaShift;
       }
       return a.dutyCode === activeDutyCode;
@@ -329,7 +329,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
       const isMatch =
         (dutyCode === 'ATT' || dutyCode === 'AIRPORT')
           ? assignment.dutyCode === 'ATT' || assignment.dutyCode === 'AIRPORT'
-          : (dutyCode === 'IDAC' || dutyCode === 'IDA')
+          : (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(dutyCode))
           ? (assignment.dutyCode === 'IDAC' || assignment.dutyCode === 'IDA') && (!shift || assignment.idaShift === shift)
           : assignment.dutyCode === dutyCode;
 
@@ -346,13 +346,13 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
   const currentlyAssignedCount = useMemo(() => {
     return getAssignedAirmenForDuty(
       activeDutyCode,
-      (activeDutyCode === 'IDAC' || activeDutyCode === 'IDA') ? activeIdaShift : undefined
+      (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(activeDutyCode as string)) ? activeIdaShift : undefined
     ).length;
   }, [assignmentsList, activeDutyCode, activeIdaShift, activeFlight, airmanMap]);
 
   // Required quota for currently selected duty & shift
   const currentRequiredQuota = useMemo(() => {
-    if (activeDutyCode === 'IDAC' || activeDutyCode === 'IDA') {
+    if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(activeDutyCode as string)) {
       return getRequiredCountForDuty('IDAC', activeIdaShift);
     }
     return getRequiredCountForDuty(activeDutyCode);
@@ -421,7 +421,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
       alert("Please select a duty first.");
       return;
     }
-    if ((activeDutyCode === 'IDAC' || activeDutyCode === 'IDA') && !activeIdaShift) {
+    if ((['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(activeDutyCode as string)) && !activeIdaShift) {
       alert("Please select a shift first.");
       return;
     }
@@ -440,7 +440,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
             fromDate,
             toDate,
             dutyCode: activeDutyCode,
-            idaShift: (activeDutyCode === 'IDAC' || activeDutyCode === 'IDA') ? activeIdaShift : undefined,
+            idaShift: (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(activeDutyCode as string)) ? activeIdaShift : undefined,
           }),
         });
 
@@ -451,7 +451,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
               if (activeDutyCode === 'ATT' || activeDutyCode === 'AIRPORT') {
                 return a.dutyCode !== 'ATT' && a.dutyCode !== 'AIRPORT';
               }
-              if (activeDutyCode === 'IDAC' || activeDutyCode === 'IDA') {
+              if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(activeDutyCode as string)) {
                 return !((a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === activeIdaShift);
               }
               return a.dutyCode !== activeDutyCode;
@@ -476,7 +476,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
           if (a.airmanId === airman.id) return false;
           const assignedAirman = airmen.find((m) => m.id === a.airmanId);
           if (!assignedAirman || assignedAirman.flightName !== targetFlight) return false;
-          if (activeDutyCode === 'IDAC' || activeDutyCode === 'IDA') {
+          if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(activeDutyCode as string)) {
             return (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === activeIdaShift;
           }
           if (activeDutyCode === 'ATT' || activeDutyCode === 'AIRPORT') {
@@ -510,7 +510,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
           body: JSON.stringify({
             airmanId: airman.id,
             dutyCode: activeDutyCode,
-            idaShift: activeDutyCode === 'IDAC' || activeDutyCode === 'IDA' ? activeIdaShift : undefined,
+            idaShift: ['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(activeDutyCode as string) ? activeIdaShift : undefined,
             fromDate,
             toDate,
             notes,
@@ -523,7 +523,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
             airmanId: airman.id,
             date: fromDate,
             dutyCode: activeDutyCode,
-            idaShift: activeDutyCode === 'IDAC' || activeDutyCode === 'IDA' ? activeIdaShift : undefined,
+            idaShift: ['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(activeDutyCode as string) ? activeIdaShift : undefined,
             notes,
             proxyForFlight: isProxyEnabled && proxyForFlight ? proxyForFlight : undefined,
           };
@@ -532,7 +532,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
             if (previousFlightAssignee) {
               updated = updated.filter((a) => !(a.airmanId === previousFlightAssignee.airmanId && a.dutyCode === previousFlightAssignee.dutyCode && a.idaShift === previousFlightAssignee.idaShift));
             }
-            if (activeDutyCode === 'IDAC' || activeDutyCode === 'IDA') {
+            if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(activeDutyCode as string)) {
               if (activeIdaShift === 'Night') {
                 const filtered = updated.filter((a) => !(a.airmanId === airman.id && (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night'));
                 return [...filtered, newAssignment];
@@ -546,7 +546,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
             }
           });
           const dtName = DUTY_TYPE_MAP.get(activeDutyCode as any)?.name || activeDutyCode;
-          const shiftSuffix = (activeDutyCode === 'IDAC' || activeDutyCode === 'IDA') ? ` (${activeIdaShift})` : '';
+          const shiftSuffix = (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(activeDutyCode as string)) ? ` (${activeIdaShift})` : '';
           setToastMessage(`✅ ${formatAirmanName(airman.rank)} ${airman.name} assigned to ${dtName}${shiftSuffix}`);
           setTimeout(() => setToastMessage(''), 2500);
           window.dispatchEvent(new CustomEvent('baf_state_updated'));
@@ -708,7 +708,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
         if (targetFlight !== 'All' && airman.flightName !== targetFlight) return false;
 
         // If IDAC duty is selected but no shift is selected, show empty list
-        if ((activeDutyCode === 'IDAC' || activeDutyCode === 'IDA') && !activeIdaShift) {
+        if ((['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(activeDutyCode as string)) && !activeIdaShift) {
            return false;
         }
 
@@ -716,7 +716,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
         if (isAssigned) return true;
 
         // Ensure airman's flight actually has a quota for this IDAC shift (if filterByRatio is ON)
-        if (filterByRatio && (activeDutyCode === 'IDAC' || activeDutyCode === 'IDA') && activeIdaShift) {
+        if (filterByRatio && (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(activeDutyCode as string)) && activeIdaShift) {
           const quota = getFlightDutyQuotaForDate(fromDate, airman.flightName, 'IDAC', activeIdaShift);
           if (quota <= 0) return false;
         }
@@ -744,7 +744,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
         const isWO = ['wo', 'swo', 'mwo', 'w/o'].some((r) => rankLower.includes(r));
 
         // IDAC Duty: All ranks eligible (MWO, SWO, WO, Sgt, Cpl, LAC, AC) - no exclusions
-        if (activeDutyCode === 'IDAC' || activeDutyCode === 'IDA') {
+        if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(activeDutyCode as string)) {
           return true;
         }
 
@@ -1117,7 +1117,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
           )}
 
           {/* IDAC Dynamic Shift Picker (Shows detailed airmen for each shift) */}
-          {(onlyIdac || activeDutyCode === 'IDAC' || activeDutyCode === 'IDA') && (
+          {(onlyIdac || ['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(activeDutyCode as string)) && (
             <div className="p-3 bg-teal-50/80 dark:bg-teal-950/40 rounded-xl border border-teal-200 dark:border-teal-800 space-y-2 animate-fadeIn">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-black text-teal-950 dark:text-teal-100 flex items-center space-x-1.5">
@@ -1246,7 +1246,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
                     fromDate, 
                     flt, 
                     activeDutyCode, 
-                    activeDutyCode === 'IDAC' || activeDutyCode === 'IDA' ? activeIdaShift : undefined
+                    ['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(activeDutyCode as string) ? activeIdaShift : undefined
                   );
                   if (quota === 0) return false;
                 } else {
@@ -1373,7 +1373,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
                   if (isCurrentDutyAssigned) {
                     // Always allow clicking to unassign
                     isEligible = true;
-                  } else if (activeDutyCode === 'IDAC' || activeDutyCode === 'IDA') {
+                  } else if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(activeDutyCode as string)) {
                     // User requirement: For IDAC Duty, all personnel in the flight are visible and eligible, even if on other disposal
                     isEligible = true;
                   } else if (statusInfo.type === 'ON_PARADE' || statusInfo.type === 'NIGHT_OFF' || statusInfo.type === 'DUTY_OFF' || statusInfo.type === 'GD Off' || statusInfo.type === 'CANTEEN' || (statusInfo.label || '').toLowerCase().includes('canteen') || (statusInfo.type === 'DEPLOYMENT' && (statusInfo.label || '').toLowerCase().includes('canteen'))) {

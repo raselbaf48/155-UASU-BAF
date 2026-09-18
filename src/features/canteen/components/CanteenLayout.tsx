@@ -45,6 +45,19 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
   const [loginInput, setLoginInput] = useState('');
   const [loginError, setLoginError] = useState('');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showCustomerProfile, setShowCustomerProfile] = useState(false);
+  const [currentCustomerAirman, setCurrentCustomerAirman] = useState<any>(null);
+
+  const handleCustomerProfileClick = async () => {
+    if (currentUser.role === 'manager' || currentUser.name === 'Guest') return;
+    const airmen = await localDb.getAirmen();
+    const cleanBd = currentUser.bdNo ? currentUser.bdNo.replace(/^BD\/?/i, '').trim() : '';
+    const found = airmen.find(a => a.bdNo === cleanBd);
+    if (found) {
+        setCurrentCustomerAirman(found);
+        setShowCustomerProfile(true);
+    }
+  };
 
   
   const handleLogout = () => {
@@ -118,8 +131,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
     { id: 'dashboard', name: 'Home', icon: Grid },
     { id: 'personal_portal', name: 'Personal Portal', icon: UserCircle },
     { id: 'inventory', name: 'Inventory', icon: Pkg },
-    { id: 'help', name: 'Help', icon: HelpCircle },
-    { id: 'manager_login', name: 'Manager Portal', icon: LogIn }
+        { id: 'manager_login', name: 'Manager Portal', icon: LogIn }
   ];
 
   const renderContent = () => {
@@ -130,7 +142,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
       case 'manager_dashboard': return <ManagerDashboard />;
       case 'pos_sales': return <PosSales />;
       case 'member_db': return <MemberDB />;
-      case 'inventory': return <CanteenInventory />;
+      case 'inventory': return <CanteenInventory readOnly={currentUser.role !== 'manager'} />;
       case 'expenditures': return <Expenditures />;
       case 'reports': return <CanteenReports />;
       case 'fund': return <CanteenFund />;
@@ -200,10 +212,10 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
                  <span>LOGOUT</span>
               </button>
           
-          <div className={`flex items-center space-x-3 p-3 rounded-2xl cursor-pointer ${isEmployee ? 'bg-slate-900 text-white' : 'bg-slate-900 text-white'}`} onClick={handleLogout}>
-             <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center overflow-hidden">
+          <div className={`flex items-center space-x-3 p-3 rounded-2xl cursor-pointer ${isEmployee ? 'bg-slate-900 text-white' : 'bg-slate-900 text-white'}`} onClick={handleCustomerProfileClick}>
+             {currentUser.role === 'manager' && (<div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center overflow-hidden">
                <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUser.name}&backgroundColor=0f172a`} alt="Avatar" className="w-full h-full object-cover" />
-             </div>
+             </div>)}
              <div className="text-left flex-1">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">
                   {currentUser.role === 'manager' ? 'MANAGER' : (currentUser.name === 'Guest' ? 'GUEST MODE' : 'CUSTOMER MODE')}

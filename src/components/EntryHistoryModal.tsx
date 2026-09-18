@@ -55,7 +55,6 @@ export const EntryHistoryModal: React.FC<EntryHistoryModalProps> = ({
   const [editToDate, setEditToDate] = useState<string>('');
   const [editNotes, setEditNotes] = useState<string>('');
   const [savingEdit, setSavingEdit] = useState<boolean>(false);
-  const [visibleCount, setVisibleCount] = useState<number>(10);
 
   const session = getCurrentUserSession();
   const isAdmin = session?.assignedRole === 'ADMIN';
@@ -141,7 +140,7 @@ export const EntryHistoryModal: React.FC<EntryHistoryModalProps> = ({
     setEditingItem(item);
     setEditAirmanId(item.airmanId);
     setEditDutyCode(item.dutyCode || 'GD');
-    setEditIdaShift(item.idaShift || 'Morning');
+    setEditIdaShift((item.idaShift && item.idaShift !== 'undefined' ? item.idaShift : 'Morning'));
     setEditFromDate(item.fromDate);
     setEditToDate(item.toDate || item.fromDate);
     setEditNotes(item.notes || '');
@@ -198,28 +197,41 @@ export const EntryHistoryModal: React.FC<EntryHistoryModalProps> = ({
     }
   };
 
-  // Limit strictly to the Last 10 entries as requested
-  const last10Entries = historyList.slice(0, visibleCount);
-
-  const filteredHistory = last10Entries.filter((item) => {
-    // Hide corrupted logs that have neither actionType nor type
+    const filteredHistory = historyList.filter((item) => {
+    // Hide corrupted logs immediately
     if (!item.actionType && !item.type) return false;
+    if (item.actionType === 'undefined' || item.type === 'undefined') return false;
+
+    const isSystem = item.actionType === 'SYSTEM_ACTION' || item.type === 'SYSTEM_ACTION';
+    
+    // Check missing airman
+    const air = airmen.find((a) => a.id === item.airmanId);
+    const resolvedName = air ? air.name : item.airmanName;
+    if (!isSystem && (!resolvedName || resolvedName === 'undefined')) return false;
+
+    // Check missing duty for non-system logs
+    if (!isSystem && (!item.dutyCode || item.dutyCode === 'undefined')) return false;
+
+    // Check missing date
+    if (!item.fromDate || item.fromDate === 'undefined') return false;
+
+    // Type filters
     if (filterType === 'LEAVE' && item.dutyCode !== 'LEAVE') return false;
     if (filterType === 'TDY' && item.dutyCode !== 'TDY') return false;
     if (filterType === 'DEPLOYMENT' && item.dutyCode !== 'DEPLOYMENT') return false;
-    if (filterType === 'DUTY' && (item.dutyCode === 'LEAVE' || item.dutyCode === 'TDY' || item.dutyCode === 'DEPLOYMENT' || !item.dutyCode)) return false;
-    if (filterType === 'SYSTEM' && item.actionType !== 'SYSTEM_ACTION') return false;
+    if (filterType === 'DUTY' && (item.dutyCode === 'LEAVE' || item.dutyCode === 'TDY' || item.dutyCode === 'DEPLOYMENT')) return false;
+    if (filterType === 'SYSTEM' && !isSystem) return false;
 
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
     return (
-      (item.airmanName || '').toLowerCase().includes(q) ||
+      (resolvedName || '').toLowerCase().includes(q) ||
       (item.dutyCode || '').toLowerCase().includes(q) ||
       (item.notes && item.notes.toLowerCase().includes(q)) ||
-      item.fromDate.includes(q) ||
-      item.toDate.includes(q)
+      (item.fromDate && item.fromDate.includes(q)) ||
+      (item.toDate && item.toDate.includes(q))
     );
-  });
+    });
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 bg-slate-950/75 backdrop-blur-xs animate-fadeIn">
@@ -233,9 +245,9 @@ export const EntryHistoryModal: React.FC<EntryHistoryModalProps> = ({
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center space-x-2">
-                <span>Last Entries (Last {visibleCount} Records)</span>
+                <span>Entry History</span>
                 <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-bold border border-emerald-300 dark:border-emerald-800">
-                  {last10Entries.length} of {historyList.length}
+                  {filteredHistory.length} Total
                 </span>
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
@@ -292,7 +304,7 @@ export const EntryHistoryModal: React.FC<EntryHistoryModalProps> = ({
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Search among last 10 entries (Airman name, BD, Duty, Date)..."
+            placeholder="Search all entries (Airman name, BD, Duty, Date)..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-9 pr-4 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 outline-none focus:border-emerald-500"
@@ -446,6 +458,7 @@ export const EntryHistoryModal: React.FC<EntryHistoryModalProps> = ({
               const fD = new Date(item.fromDate);
               const tD = new Date(item.toDate || item.fromDate);
               let diffDays = Math.max(1, Math.round((tD.getTime() - fD.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+              if (isNaN(diffDays)) diffDays = 1;
               
               if (item.notes && (item.dutyCode === 'LEAVE' || item.actionType === 'GRANT_LEAVE')) {
                   const match = item.notes.match(/\(F-295: (\d+) Free Days\)/);
@@ -478,7 +491,7 @@ export const EntryHistoryModal: React.FC<EntryHistoryModalProps> = ({
                             </span>
                           </div>
                           <div className="text-sm font-semibold text-slate-800 dark:text-slate-200 mt-1">
-                            {item.description || item.notes}
+                            {[item.description, item.notes].find(v => v && v !== 'undefined') || ''}
                           </div>
                         </div>
                       ) : (
@@ -491,11 +504,11 @@ export const EntryHistoryModal: React.FC<EntryHistoryModalProps> = ({
                             ? 'bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300'
                             : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
                         }`}>
-                          {(item.actionType || item.type || 'UNKNOWN ACTION').replace('_', ' ')}
+                          {(item.actionType || item.type || '').replace(/_/g, ' ')}
                         </span>
 
                         <span className="font-extrabold text-slate-900 dark:text-slate-100 text-sm">
-                          {air ? `${air.rank} ${air.name}` : item.airmanName}
+                          {air ? `${air.rank} ${air.name}` : (item.airmanName === 'undefined' ? '' : item.airmanName)}
                         </span>
 
                         {air && (
@@ -505,7 +518,7 @@ export const EntryHistoryModal: React.FC<EntryHistoryModalProps> = ({
                         )}
 
                         <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200">
-                          Duty: {item.dutyCode} {item.idaShift ? `(${item.idaShift})` : ''}
+                          Duty: {item.dutyCode === 'undefined' ? '' : item.dutyCode} {item.dutyCode && item.dutyCode.includes('IDA') ? ` ${(item.idaShift && item.idaShift !== 'undefined' ? item.idaShift : 'Morning')}` : ''}
                         </span>
                       </div>
 
@@ -514,13 +527,13 @@ export const EntryHistoryModal: React.FC<EntryHistoryModalProps> = ({
                         <span className="flex items-center space-x-1 font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800/60">
                           <Calendar className="w-3.5 h-3.5" />
                           <span>
-                            {item.fromDate === item.toDate
+                            {(!item.fromDate || item.fromDate === 'undefined') ? '' : (item.fromDate === item.toDate
                               ? `${item.fromDate} (1 Day)`
-                              : `${item.fromDate} to ${item.toDate} (${diffDays} Days)`}
+                              : `${item.fromDate} to ${item.toDate} (${diffDays} Days)`)}
                           </span>
                         </span>
 
-                        {item.notes && (
+                        {(item.notes && item.notes !== 'undefined') && (
                           <span className="text-slate-600 dark:text-slate-400">
                             • Note: <em className="text-slate-800 dark:text-slate-200 font-medium">{item.notes}</em>
                           </span>
@@ -569,22 +582,11 @@ export const EntryHistoryModal: React.FC<EntryHistoryModalProps> = ({
             })
           )}
           
-          {visibleCount < historyList.length && (
-            <div className="flex justify-center mt-4 pb-2">
-              <button 
-                onClick={() => setVisibleCount(prev => prev + 10)}
-                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-sm font-bold rounded-lg transition-colors border border-slate-200 dark:border-slate-700 shadow-sm cursor-pointer"
-              >
-                Load earlier history
-              </button>
-            </div>
-          )}
-
         </div>
 
         {/* Footer */}
         <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-500 shrink-0">
-          <span>Showing {Math.min(visibleCount, historyList.length)} of {historyList.length} log entries</span>
+          <span>Showing {filteredHistory.length} Total log entries</span>
           <button
             type="button"
             onClick={onClose}

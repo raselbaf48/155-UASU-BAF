@@ -53,10 +53,12 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
     } catch { return []; }
   });
   useEffect(() => {
-      if (activeTab === 'Canteen' && canteenRecentLogins.length > 0 && !bdInput) {
+      // Auto-fill only when switching tabs, not when the user manually clears the input
+      if (activeTab === 'Canteen' && canteenRecentLogins.length > 0 && bdInput === '') {
           setBdInput(canteenRecentLogins[0]);
       }
-  }, [activeTab, canteenRecentLogins, bdInput]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
 
   const recentLogins = activeTab === 'Canteen' ? canteenRecentLogins : officeRecentLogins;
@@ -359,7 +361,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                         }
                       }}
                       className="w-full bg-slate-800/90 border border-slate-700 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-2xl px-4 py-3.5 text-sm font-mono font-bold text-white outline-none transition-all"
-                      placeholder="e.g. 474455"
+                      placeholder=""
                       autoComplete="username"
                     />
                     
@@ -453,7 +455,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                         inputMode="numeric" pattern="[0-9]*" value={resetBd}
                         onChange={(e) => setResetBd(e.target.value)}
                         className="w-full pl-4 pr-4 py-3.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition-all"
-                        placeholder="474455"
+                        placeholder=""
                         required
                         autoFocus
                       />
@@ -545,7 +547,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
           <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto animate-fadeIn flex flex-col print:static print:bg-white print:text-black print:overflow-visible">
             <div className="sticky top-0 z-50 bg-slate-950/80 backdrop-blur-md border-b border-slate-800 p-4 flex items-center print:hidden">
               <button 
-                onClick={() => { setActiveTab('Office'); setTargetAirman(null); setBdInput(''); setPasswordInput(''); }}
+                onClick={() => { setActiveTab('Office'); setTargetAirman(null); setBdInput(officeRecentLogins[0] || ''); setPasswordInput(''); }}
                 className="flex items-center space-x-2 text-slate-400 hover:text-white transition-colors bg-slate-900/80 px-4 py-2 rounded-xl border border-slate-700 shadow-lg cursor-pointer"
               >
                 <ArrowLeft className="w-5 h-5" />
@@ -567,7 +569,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
         {activeTab === 'Canteen' && isCanteenAuth && (
           <CanteenLayout 
              initialMember={successAirman ? { name: (successAirman.rank && successAirman.name) ? (successAirman.rank + ' ' + successAirman.name) : (successAirman.name || successAirman.fullName || 'Guest'), bdNo: successAirman.bdNo, role: 'employee' } : undefined}
-             onBack={() => { setIsCanteenAuth(false); setBdInput(''); setPasswordInput(''); setSuccessAirman(null); setTargetAirman(null); }} 
+             onBack={() => { setIsCanteenAuth(false); setBdInput(canteenRecentLogins[0] || ''); setPasswordInput(''); setSuccessAirman(null); setTargetAirman(null); }} 
           />
         )}
       </div>
@@ -584,7 +586,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
           
           <div className={`bg-slate-800/80 backdrop-blur-md border border-slate-700 p-1.5 rounded-2xl flex items-center space-x-1 shadow-2xl transition-all duration-300 origin-bottom ${isMenuOpen ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'}`}>
             <button
-              onClick={() => { setActiveTab('Office'); setTargetAirman(null); setBdInput(''); setPasswordInput(''); setIsMenuOpen(false); }}
+              onClick={() => { setActiveTab('Office'); setTargetAirman(null); setBdInput(officeRecentLogins[0] || ''); setPasswordInput(''); setIsMenuOpen(false); }}
               className={`flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all cursor-pointer ${
                 activeTab === 'Office' 
                   ? 'bg-emerald-600 text-white shadow-md' 
@@ -606,7 +608,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
               <span>Nt Count</span>
             </button>
             <button
-              onClick={() => { setActiveTab('Canteen'); setTargetAirman(null); setBdInput(''); setPasswordInput(''); setIsMenuOpen(false); }}
+              onClick={() => { setActiveTab('Canteen'); setTargetAirman(null); setBdInput(canteenRecentLogins[0] || ''); setPasswordInput(''); setIsMenuOpen(false); }}
               className={`flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all cursor-pointer ${
                 activeTab === 'Canteen' 
                   ? 'bg-emerald-600 text-white shadow-md' 

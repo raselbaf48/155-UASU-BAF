@@ -158,7 +158,7 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
 
   // Keep bulkIdaShift synchronized with available shifts for selected date and flight
   useEffect(() => {
-    if (bulkDutyCode === 'IDAC' || bulkDutyCode === 'IDA') {
+    if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(bulkDutyCode as string)) {
       const available = getIdacShiftsForDateAndFlight(
         bulkFromDate,
         bulkFlight !== 'All' ? bulkFlight : undefined
@@ -432,7 +432,7 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
         body: JSON.stringify({
           airmanId: bulkAirmanId,
           dutyCode: bulkDutyCode,
-          idaShift: bulkDutyCode === 'IDAC' || bulkDutyCode === 'IDA' ? bulkIdaShift : undefined,
+          idaShift: ['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(bulkDutyCode as string) ? bulkIdaShift : undefined,
           fromDate: bulkFromDate,
           toDate: bulkToDate,
           notes: bulkNotes,
@@ -1675,7 +1675,7 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
               </div>
 
               {/* IDAC Shift Picker (if IDAC / IDA selected) */}
-              {(bulkDutyCode === 'IDAC' || bulkDutyCode === 'IDA') && (() => {
+              {(['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(bulkDutyCode as string)) && (() => {
                 const availableShifts = getIdacShiftsForDateAndFlight(
                   bulkFromDate,
                   bulkFlight !== 'All' ? bulkFlight : undefined
@@ -1936,7 +1936,7 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                       title="Undo/Revert last duty assignment"
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
-                      <span>Undo Last Entry</span>
+                      <span>Undo History</span>
                     </button>
                   )}
                 </div>

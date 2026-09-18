@@ -211,7 +211,7 @@ export const DashboardParadeState: React.FC<DashboardParadeStateProps> = ({
               title="View Last 10 Entries, undo wrong entries, or edit assignments"
             >
               <History className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-              <span>Last Entry</span>
+              <span>History</span>
             </button>
           )}
 

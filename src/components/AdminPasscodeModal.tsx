@@ -360,7 +360,7 @@ export const AdminPasscodeModal: React.FC<AdminPasscodeModalProps> = ({
                         inputMode="numeric" pattern="[0-9]*" value={confirmPass}
                         onChange={(e) => { setConfirmPass(e.target.value); setErrorMsg(''); }}
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleResetSubmit();
+                          if (e.key === 'Enter') handleNextStep(e);
                         }}
                         className="w-full px-4 py-3.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-amber-500 transition-all"
                         placeholder="Confirm 4 Digit PIN"

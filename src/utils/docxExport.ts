@@ -1231,188 +1231,117 @@ export async function exportParadeStateMultiDocx(
     }),
   ];
 
-  const headerRow1 = new TableRow({ cantSplit: true,
-    tableHeader: true,
-    children: [
-      createArialHeaderCell('Date', 900),
-      createArialHeaderCell('Day', 900),
-      createArialHeaderCell('Base Security\nDuty', 1100),
-      createArialHeaderCell('Base Taskforce\nDuty', 1100),
-      createArialHeaderCell('Najirpara\nTF Duty', 1100),
-      createArialHeaderCell('Airfield\nDuty', 1000),
-      createArialHeaderCell('Halishahar\nDuty', 1000),
-      createArialHeaderCell('Bake N\nBite', 900),
-      createArialHeaderCell('Tdy', 900),
-      createArialHeaderCell('Leave', 900),
-      createArialHeaderCell('IDA CENTER Duty', 3300),
-      createArialHeaderCell('Duty\nOff', 1100),
-      createArialHeaderCell('On\nParade', 1800),
-    ],
-  });
+  // Determine which columns to show
+  const hasBaseSec = rows.some((r) => r.baseSec && r.baseSec !== '-');
+  const hasBtf = rows.some((r) => r.btf && r.btf !== '-');
+  const hasNtf = rows.some((r) => r.ntf && r.ntf !== '-');
+  const hasAirfield = rows.some((r) => r.airfield && r.airfield !== '-');
+  const hasHalishahar = rows.some((r) => r.halishahar && r.halishahar !== '-');
+  const hasBakeBite = rows.some((r) => r.bakeBite && r.bakeBite !== '-');
+  const hasTdy = rows.some((r) => r.tdy && r.tdy !== '-');
+  const hasLeave = rows.some((r) => r.leave && r.leave !== '-');
+  const hasIdaMorn = rows.some((r) => r.idaMorning && r.idaMorning !== '-');
+  const hasIdaAft = rows.some((r) => r.idaAfternoon && r.idaAfternoon !== '-');
+  const hasIdaNight = rows.some((r) => r.idaNight && r.idaNight !== '-');
+  const hasAnyIda = hasIdaMorn || hasIdaAft || hasIdaNight;
+
+  const createCell = (text: string, width: number, vMerge?: 'restart' | 'continue', colSpan: number = 1) => {
+    return new TableCell({
+      width: { size: width, type: WidthType.DXA },
+      columnSpan: colSpan > 1 ? colSpan : undefined,
+      verticalMerge: vMerge,
+      shading: { fill: 'E2E8F0' },
+      verticalAlign: VerticalAlign.CENTER,
+      margins: { top: 80, bottom: 80, left: 50, right: 50 },
+      children: text ? text.split('\n').map((l) => new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: l, font: 'Arial', bold: true, size: 24 })] })) : [],
+    });
+  };
+
+  // Build Header Row 1
+  const h1Cells = [
+    createCell('Date', 900, 'restart'),
+    createCell('Day', 900, 'restart'),
+  ];
+  if (hasBaseSec) h1Cells.push(createCell('Base Security\nDuty', 1100, 'restart'));
+  if (hasBtf) h1Cells.push(createCell('Base Taskforce\nDuty', 1100, 'restart'));
+  if (hasNtf) h1Cells.push(createCell('Najirpara\nTF Duty', 1100, 'restart'));
+  if (hasAirfield) h1Cells.push(createCell('Airfield\nDuty', 1000, 'restart'));
+  if (hasHalishahar) h1Cells.push(createCell('Halishahar\nDuty', 1000, 'restart'));
+  if (hasBakeBite) h1Cells.push(createCell('Bake N\nBite', 900, 'restart'));
+  if (hasTdy) h1Cells.push(createCell('Tdy', 900, 'restart'));
+  if (hasLeave) h1Cells.push(createCell('Leave', 900, 'restart'));
+  
+  if (hasAnyIda) {
+    let span = 0;
+    if (hasIdaMorn) span++;
+    if (hasIdaAft) span++;
+    if (hasIdaNight) span++;
+    h1Cells.push(createCell('IDA CENTER Duty', 1100 * span, undefined, span));
+  }
+  
+  h1Cells.push(createCell('Duty\nOff', 1100, 'restart'));
+  h1Cells.push(createCell('On\nParade', 1800, 'restart'));
+
+  const headerRow1 = new TableRow({ cantSplit: true, tableHeader: true, children: h1Cells });
+
+  // Build Header Row 2
+  const h2Cells = [
+    createCell('', 900, 'continue'),
+    createCell('', 900, 'continue'),
+  ];
+  if (hasBaseSec) h2Cells.push(createCell('', 1100, 'continue'));
+  if (hasBtf) h2Cells.push(createCell('', 1100, 'continue'));
+  if (hasNtf) h2Cells.push(createCell('', 1100, 'continue'));
+  if (hasAirfield) h2Cells.push(createCell('', 1000, 'continue'));
+  if (hasHalishahar) h2Cells.push(createCell('', 1000, 'continue'));
+  if (hasBakeBite) h2Cells.push(createCell('', 900, 'continue'));
+  if (hasTdy) h2Cells.push(createCell('', 900, 'continue'));
+  if (hasLeave) h2Cells.push(createCell('', 900, 'continue'));
+  
+  if (hasAnyIda) {
+    if (hasIdaMorn) h2Cells.push(createCell('Morning', 1100));
+    if (hasIdaAft) h2Cells.push(createCell('Afternoon', 1100));
+    if (hasIdaNight) h2Cells.push(createCell('Night', 1100));
+  }
+  
+  h2Cells.push(createCell('', 1100, 'continue'));
+  h2Cells.push(createCell('', 1800, 'continue'));
+
+  const headerRow2 = new TableRow({ cantSplit: true, tableHeader: true, children: h2Cells });
 
   const dataRows = rows.map((r) => {
-    return new TableRow({ cantSplit: true,
-      children: [
-        createArialDataCell(r.dateDisplay, 900, AlignmentType.CENTER),
-        createArialDataCell(r.dayDisplay, 900, AlignmentType.CENTER),
-        createArialDataCell(r.baseSec || '-', 1100, AlignmentType.LEFT),
-        createArialDataCell(r.btf || '-', 1100, AlignmentType.LEFT),
-        createArialDataCell(r.ntf || '-', 1100, AlignmentType.LEFT),
-        createArialDataCell(r.airfield || '-', 1000, AlignmentType.LEFT),
-        createArialDataCell(r.halishahar || '-', 1000, AlignmentType.LEFT),
-        createArialDataCell(r.bakeBite || '-', 900, AlignmentType.LEFT),
-        createArialDataCell(r.tdy || '-', 900, AlignmentType.LEFT),
-        createArialDataCell(r.leave || '-', 900, AlignmentType.LEFT),
-        createArialDataCell(
-          `Morning:\n${r.idaMorning || '-'}\n\nAfternoon:\n${r.idaAfternoon || '-'}\n\nNight:\n${r.idaNight || '-'}`,
-          3300,
-          AlignmentType.LEFT
-        ),
-        createArialDataCell(r.dutyOff || '-', 1100, AlignmentType.LEFT),
-        createArialDataCell(r.onParade || '-', 1800, AlignmentType.LEFT),
-      ],
-    });
+    const cells = [
+      createArialDataCell(r.dateDisplay, 900, AlignmentType.CENTER),
+      createArialDataCell(r.dayDisplay, 900, AlignmentType.CENTER),
+    ];
+    if (hasBaseSec) cells.push(createArialDataCell(r.baseSec || '-', 1100, AlignmentType.LEFT));
+    if (hasBtf) cells.push(createArialDataCell(r.btf || '-', 1100, AlignmentType.LEFT));
+    if (hasNtf) cells.push(createArialDataCell(r.ntf || '-', 1100, AlignmentType.LEFT));
+    if (hasAirfield) cells.push(createArialDataCell(r.airfield || '-', 1000, AlignmentType.LEFT));
+    if (hasHalishahar) cells.push(createArialDataCell(r.halishahar || '-', 1000, AlignmentType.LEFT));
+    if (hasBakeBite) cells.push(createArialDataCell(r.bakeBite || '-', 900, AlignmentType.LEFT));
+    if (hasTdy) cells.push(createArialDataCell(r.tdy || '-', 900, AlignmentType.LEFT));
+    if (hasLeave) cells.push(createArialDataCell(r.leave || '-', 900, AlignmentType.LEFT));
+    
+    if (hasAnyIda) {
+      if (hasIdaMorn) cells.push(createArialDataCell(r.idaMorning || '-', 1100, AlignmentType.LEFT));
+      if (hasIdaAft) cells.push(createArialDataCell(r.idaAfternoon || '-', 1100, AlignmentType.LEFT));
+      if (hasIdaNight) cells.push(createArialDataCell(r.idaNight || '-', 1100, AlignmentType.LEFT));
+    }
+    
+    cells.push(createArialDataCell(r.dutyOff || '-', 1100, AlignmentType.LEFT));
+    cells.push(createArialDataCell(r.onParade || '-', 1800, AlignmentType.LEFT));
+
+    return new TableRow({ cantSplit: true, children: cells });
   });
 
   const table = new Table({
     layout: TableLayoutType.AUTOFIT,
     width: { size: 100, type: WidthType.PERCENTAGE },
-    rows: [headerRow1, ...dataRows],
+    rows: [headerRow1, headerRow2, ...dataRows],
   });
 
   docChildren.push(table);
-
-  // Spacer between table & signature row
-  docChildren.push(
-    new Paragraph({
-      spacing: { before: 240, after: 120 },
-      children: [],
-    })
-  );
-
-  const lSigName = leftSig?.name || 'MD NAHID HASAN KHAN';
-  const lSigRank = leftSig?.rank || 'Sgt';
-  const lSigDesig = leftSig?.desig || 'UWO';
-
-  const rSigName = rightSig?.name || 'MAHIM RAAD SADAT';
-  const rSigRank = rightSig?.rank || 'FLT LT';
-  const rSigDesig = rightSig?.desig || 'Adjutant';
-
-  const sigTable = new Table({
-    layout: TableLayoutType.AUTOFIT,
-    width: { size: 100, type: WidthType.PERCENTAGE },
-    borders: invisibleBorders,
-    rows: [
-      new TableRow({ cantSplit: true,
-        children: [
-          new TableCell({
-            width: { size: 50, type: WidthType.PERCENTAGE },
-            borders: invisibleBorders,
-            children: [
-              new Paragraph({
-                alignment: AlignmentType.LEFT,
-                spacing: { after: 15, line: 240 },
-                children: [
-                  new TextRun({
-                    text: lSigName.toUpperCase(),
-                    font: 'Arial',
-                    bold: true,
-                    size: 24,
-                  }),
-                ],
-              }),
-              new Paragraph({
-                alignment: AlignmentType.LEFT,
-                spacing: { after: 15, line: 240 },
-                children: [
-                  new TextRun({
-                    text: lSigRank,
-                    font: 'Arial',
-                    bold: true,
-                    size: 24,
-                  }),
-                ],
-              }),
-              new Paragraph({
-                alignment: AlignmentType.LEFT,
-                spacing: { after: 15, line: 240 },
-                children: [
-                  new TextRun({
-                    text: lSigDesig,
-                    font: 'Arial',
-                    size: 24,
-                  }),
-                ],
-              }),
-              new Paragraph({
-                alignment: AlignmentType.LEFT,
-                children: [
-                  new TextRun({
-                    text: '155 UASU BAF',
-                    font: 'Arial',
-                    size: 24,
-                  }),
-                ],
-              }),
-            ],
-          }),
-          new TableCell({
-            width: { size: 50, type: WidthType.PERCENTAGE },
-            borders: invisibleBorders,
-            children: [
-              new Paragraph({
-                alignment: AlignmentType.RIGHT,
-                spacing: { after: 15, line: 240 },
-                children: [
-                  new TextRun({
-                    text: rSigName.toUpperCase(),
-                    font: 'Arial',
-                    bold: true,
-                    size: 24,
-                  }),
-                ],
-              }),
-              new Paragraph({
-                alignment: AlignmentType.RIGHT,
-                spacing: { after: 15, line: 240 },
-                children: [
-                  new TextRun({
-                    text: rSigRank,
-                    font: 'Arial',
-                    bold: true,
-                    size: 24,
-                  }),
-                ],
-              }),
-              new Paragraph({
-                alignment: AlignmentType.RIGHT,
-                spacing: { after: 15, line: 240 },
-                children: [
-                  new TextRun({
-                    text: rSigDesig,
-                    font: 'Arial',
-                    size: 24,
-                  }),
-                ],
-              }),
-              new Paragraph({
-                alignment: AlignmentType.RIGHT,
-                children: [
-                  new TextRun({
-                    text: '155 UASU BAF',
-                    font: 'Arial',
-                    size: 24,
-                  }),
-                ],
-              }),
-            ],
-          }),
-        ],
-      }),
-    ],
-  });
-
-  docChildren.push(sigTable);
 
   const doc = new Document({
     styles: {

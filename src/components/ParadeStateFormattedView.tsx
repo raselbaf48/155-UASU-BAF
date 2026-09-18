@@ -136,7 +136,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  const [isEditingDisposals, setIsEditingDisposals] = useState(false);
  const [historicalCustomCats, setHistoricalCustomCats] = useState<{code: string, label: string, customTitle: string}[]>(() => { try { const saved = localStorage.getItem('parade_historical_custom'); return saved ? JSON.parse(saved) : []; } catch { return []; } });
 
- const ALL_DISPOSAL_OPTIONS = [{"code":"TDY","label":"TDY"},{"code":"LEAVE","label":"Leave"},{"code":"ESSN","label":"Essn"},{"code":"CMH","label":"CMH"},{"code":"SICK_REPORT","label":"Sick Report"},{"code":"CANTEEN","label":"Canteen"},{"code":"DUTY_OFF","label":"Duty Off"},{"code":"BAKE_N_BITE","label":"Bake & Bite"},{"code":"RECEPTION","label":"K/O & Reception"},{"code":"ADMIN_ORDER","label":"Admin Order"},{"code":"CLASS_TRG","label":"Class / Trg"},{"code":"AIRPORT","label":"Airfield"},{"code":"GAMES","label":"G/H & Games"},{"code":"ABSENT","label":"Absent"},{"code":"OTHERS","label":"✨ Custom..."}];
+ const ALL_DISPOSAL_OPTIONS = [{"code":"TDY","label":"TDY"},{"code":"DETT","label":"Detachment"},{"code":"LEAVE","label":"Leave"},{"code":"ESSN","label":"Essn"},{"code":"CMH","label":"CMH"},{"code":"BNS","label":"BNS"},{"code":"BSH","label":"BSH"},{"code":"OTHERS","customTitle":"Quarantine","label":"Quarantine"},{"code":"SICK_REPORT","label":"Sick Report"},{"code":"ED","label":"ED"},{"code":"EX_PPGF","label":"Ex PPGF"},{"code":"CANTEEN","label":"Canteen"},{"code":"DUTY_OFF","label":"Guard Duty Off"},{"code":"BAKE_N_BITE","label":"Bake & Bite"},{"code":"RECEPTION","label":"K/O & Reception"},{"code":"ADMIN_ORDER","label":"Admin Order"},{"code":"CLASS_TRG","label":"Class"},{"code":"OTHERS","customTitle":"Exam","label":"Exam"},{"code":"AIRPORT","label":"Airfield Duty"},{"code":"GAMES","label":"Games"},{"code":"GH","label":"Guard of Honor"},{"code":"AWL","label":"AWOL"},{"code":"ABSENT","label":"Detention"},{"code":"OTHERS","label":"✨ Custom..."}];
 
  const handleAddDisposalOption = (opt: any) => {
  if (opt.code === 'OTHERS' && !opt.customTitle) {
@@ -622,8 +622,9 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  headers: { 'Content-Type': 'application/json' },
  body: JSON.stringify({
  airmanId: editDisposalModal.airman.id,
- fromDate: editDisposalFromDate,
- toDate: editDisposalToDate,
+          fromDate: editDisposalFromDate,
+          toDate: editDisposalToDate,
+          disposalScope: isPtDocument ? "PT" : "PARADE",
  }),
  });
 
@@ -694,13 +695,13 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  const tdy = pList.filter((s) => ['TDY', 'ATT', 'DETT'].includes(s.dutyCode));
  const leave = pList.filter((s) => s.dutyCode === 'LEAVE');
  const idaMorn = pList.filter(
- (s) => ['IDAC', 'IDA'].includes(s.dutyCode) && s.idaShift === 'Morning'
+ (s) => ['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(s.dutyCode?.trim()?.toUpperCase()) && (!s.idaShift || s.idaShift.trim() === 'Morning')
  );
  const idaAft = pList.filter(
- (s) => ['IDAC', 'IDA'].includes(s.dutyCode) && s.idaShift === 'Afternoon'
+ (s) => ['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(s.dutyCode?.trim()?.toUpperCase()) && s.idaShift?.trim() === 'Afternoon'
  );
  const idaNight = pList.filter(
- (s) => ['IDAC', 'IDA'].includes(s.dutyCode) && s.idaShift === 'Night'
+ (s) => ['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(s.dutyCode?.trim()?.toUpperCase()) && s.idaShift?.trim() === 'Night'
  );
  const dutyOff = pList.filter(
  (s) => s.dutyCode === 'DUTY_OFF' || s.statusCategory === 'OFF'
@@ -709,12 +710,18 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  (s) => s.dutyCode === 'ON_PARADE' || s.statusCategory === 'PARADE'
  );
 
- const formatListStr = (items: typeof pList) =>
- items.length > 0
- ? items
- .map((it, idx) => `${idx + 1}. ${formatAirmanName(it.airman.rank)} ${formatAirmanName(it.airman.name)}`)
- .join('\n')
- : '-';
+ const formatListStr = (items: typeof pList, isDutyOff: boolean = false) =>
+      items.length > 0
+        ? items
+            .map((it, idx) => {
+               let noteStr = '';
+               if (isDutyOff) {
+                 noteStr = ' - ' + formatDutyOffShortName(it.previousDutyCode, it.previousDutyName, it.dutyName || it.notes);
+               }
+               return `${idx + 1}. ${formatAirmanName(it.airman.rank)} ${formatAirmanName(it.airman.name)}${noteStr}`;
+            })
+            .join('\n')
+        : '-';
 
  return {
  dateDisplay: formatDateSuperShort(dStr),
@@ -746,7 +753,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  unitHeader,
  dateRangeHeader,
  rows,
- `${isPtDocument ? 'PT' : 'Parade'} State - Airmen (${formatDateShort(fromDate)}).docx`,
+ `${isPtDocument ? 'PT' : 'Parade'} State - ${selectedFlight === 'Overall' ? 'Overall' : selectedFlight + ' Flt'} (${fromDate === toDate ? formatDateShort(fromDate).replace(/ \d{2}$/, '') : formatDateShort(fromDate).replace(/ \d{2}$/, '') + '-' + formatDateShort(toDate).replace(/ \d{2}$/, '')}).docx`,
  { name: p.name, rank: p.rank, desig: p.designation },
  { name: a.name, rank: a.rank, desig: a.designation }
  );
@@ -778,7 +785,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  otherDisposals,
  leftSig: { name: p.name, rank: p.rank, desig: p.designation },
  rightSig: { name: a.name, rank: a.rank, desig: a.designation },
-    }, `${isPtDocument ? 'PT' : 'Parade'} State - Airmen (${formatDateShort(fromDate)}).docx`);
+    }, `${isPtDocument ? 'PT' : 'Parade'} State - ${selectedFlight === 'Overall' ? 'Overall' : selectedFlight + ' Flt'} (${fromDate === toDate ? formatDateShort(fromDate).replace(/ \d{2}$/, '') : formatDateShort(fromDate).replace(/ \d{2}$/, '') + '-' + formatDateShort(toDate).replace(/ \d{2}$/, '')}).docx`);
  }
  };
 
@@ -818,7 +825,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  const codeUpper = (dutyCode || '').toUpperCase();
  const notesLower = (notes || '').toLowerCase();
 
- const isPtIdacA = isPtDocument && codeUpper === 'IDAC' && idaShift === 'Morning';
+ const isPtIdacA = isPtDocument && codeUpper === 'IDAC' && (!idaShift || idaShift.trim() === 'Morning');
 
  if (codeUpper === 'ON_PARADE' || statusCategory === 'PARADE' || isPtIdacA) {
  // Available on Parade / PT
@@ -945,7 +952,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  const codeUpper = (dutyCode || '').toUpperCase();
  const notesLower = (notes || '').toLowerCase();
 
- const isPtIdacA = isPtDocument && codeUpper === 'IDAC' && idaShift === 'Morning';
+ const isPtIdacA = isPtDocument && codeUpper === 'IDAC' && (!idaShift || idaShift.trim() === 'Morning');
 
  
         
@@ -1234,8 +1241,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  <option value="Admin">Admin</option>
  </select>
  </div>
- </>
- )}
+ 
 
  
  
@@ -1251,7 +1257,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  </button>
  )}
  {/* Signature Settings Button */}
- {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') && (
+        {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') && !isMultiDay && (
  <button
  onClick={() => setShowSignatureModal(true)}
  className="flex items-center space-x-1.5 px-6 py-2 bg-slate-100 dark:bg-slate-800 print:bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl font-black text-sm shadow-lg transition-all cursor-pointer ml-4"
@@ -1275,6 +1281,8 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
             </button>
           )}
 
+          </>
+            )}
           {/* Official Export / Print Button */}
           <button
             onClick={handleExportOrPrint}
@@ -1340,7 +1348,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  const isBakeBite = codeUpper === 'BAKE_BITE' || codeUpper === 'BAKE_N_BITE' || statusCategory === 'BAKE_N_BITE';
  const isTdy = ['TDY', 'ATT', 'DETT'].includes(codeUpper);
  const isLeave = codeUpper === 'LEAVE';
- const isIda = ['IDAC', 'IDA'].includes(codeUpper);
+ const isIda = ['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(codeUpper);
  const isDutyOff = codeUpper === 'DUTY_OFF' || statusCategory === 'OFF';
  const isOnParadeFlag = codeUpper === 'ON_PARADE' || statusCategory === 'PARADE';
 
@@ -1428,9 +1436,9 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  const bakeBite = pList.filter((s) => s.dutyCode === 'BAKE_BITE' || s.dutyCode === 'BAKE_N_BITE' || s.statusCategory === 'BAKE_N_BITE');
  const tdy = pList.filter((s) => ['TDY', 'ATT', 'DETT'].includes(s.dutyCode));
  const leave = pList.filter((s) => s.dutyCode === 'LEAVE');
- const idaMorn = pList.filter((s) => ['IDAC', 'IDA'].includes(s.dutyCode) && s.idaShift === 'Morning');
- const idaAft = pList.filter((s) => ['IDAC', 'IDA'].includes(s.dutyCode) && s.idaShift === 'Afternoon');
- const idaNight = pList.filter((s) => ['IDAC', 'IDA'].includes(s.dutyCode) && s.idaShift === 'Night');
+ const idaMorn = pList.filter((s) => ['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(s.dutyCode?.trim()?.toUpperCase()) && (!s.idaShift || s.idaShift.trim() === 'Morning'));
+ const idaAft = pList.filter((s) => ['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(s.dutyCode?.trim()?.toUpperCase()) && s.idaShift?.trim() === 'Afternoon');
+ const idaNight = pList.filter((s) => ['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(s.dutyCode?.trim()?.toUpperCase()) && s.idaShift?.trim() === 'Night');
  const dutyOff = pList.filter((s) => s.dutyCode === 'DUTY_OFF');
  
  const onParade = pList.filter((s) => s.dutyCode === 'ON_PARADE' || s.statusCategory === 'PARADE');
@@ -1451,7 +1459,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  const isBakeBite = codeUpper === 'BAKE_BITE' || codeUpper === 'BAKE_N_BITE' || statusCategory === 'BAKE_N_BITE';
  const isTdy = ['TDY', 'ATT', 'DETT'].includes(codeUpper);
  const isLeave = codeUpper === 'LEAVE';
- const isIda = ['IDAC', 'IDA'].includes(codeUpper);
+ const isIda = ['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(codeUpper);
  const isDutyOff = codeUpper === 'DUTY_OFF' || statusCategory === 'OFF';
  const isOnParadeFlag = codeUpper === 'ON_PARADE' || statusCategory === 'PARADE';
 
@@ -1833,12 +1841,13 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  </div>
  </div>
  </div>
- {/* SPACER ROW: 0.9 INCH HEIGHT TO PROVIDE AMPLE SIGNATURE HEADROOM */}
+ 
+              {/* SPACER ROW: 0.9 INCH HEIGHT TO PROVIDE AMPLE SIGNATURE HEADROOM */}
  <div className="w-full" style={{ height: '0.9in' }} />
 
  {/* OFFICIAL SIGNATURE FOOTER */}
  <div
- className="flex justify-between items-end pt-1 text-slate-900 dark:text-white print:text-black text-xs"
+ className={`flex justify-between items-end pt-1 ${fromDate !== toDate ? 'hidden print:hidden' : ''} text-slate-900 dark:text-white print:text-black text-xs`}
  style={{ fontFamily: 'Arial, sans-serif' }}
  >
  {/* LEFT SIGNATURE BLOCK (Prepared By) */}
@@ -1878,9 +1887,10 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  <div className="text-[11px] font-normal">{authorizedBy.rank}</div>
  <div className="text-[11px] font-normal">{authorizedBy.designation}</div>
  <div className="text-[10px] uppercase font-bold">{authorizedBy.unit || '155 UASU BAF'}</div>
- </div>
- </div>
- </div>
+                  </div>
+                </div>
+              </div>
+              
  </div>
  )}
  </div>

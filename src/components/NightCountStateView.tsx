@@ -124,8 +124,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
   const [disposalFlight, setDisposalFlight] = useState<FlightName>(role === 'ADMIN' && userFlight ? userFlight as FlightName : 'Avionics');
   const [disposalCategory, setDisposalCategory] = useState<string>('');
   const [disposalCustomTitle, setDisposalCustomTitle] = useState<string>('');
-  const [disposalSubCategory, setDisposalSubCategory] = useState<string>('');
-  const [selectedDisposalAirmenIds, setSelectedDisposalAirmenIds] = useState<string[]>([]);
+    const [selectedDisposalAirmenIds, setSelectedDisposalAirmenIds] = useState<string[]>([]);
   const [disposalPersonnelStatusMap, setDisposalPersonnelStatusMap] = useState<Record<string, { statusCategory: string; dutyCode: string; notes?: string; dutyName?: string }>>({});
   const [disposalFromDate, setDisposalFromDate] = useState<string>(selectedDate);
   const [disposalToDate, setDisposalToDate] = useState<string>(selectedDate);
@@ -137,14 +136,25 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
   const [savedDisposals, setSavedDisposals] = useState<Array<{code: string, label: string, customTitle?: string}>>(() => {
     try {
       const saved = localStorage.getItem('savedDisposalKeys_NC');
-      return saved ? JSON.parse(saved) : [];
+      if (saved) {
+        let parsed = JSON.parse(saved);
+        // Auto-migrate old "GD/TF/Airfield Duty" category out of saved disposals
+        if (parsed.some((d: any) => d.label === 'GD/TF/Airfield Duty' || d.code === 'DUTY_OFF' || d.code === 'CANTEEN' || d.code === 'RECEPTION' || d.label === 'ED/ EX PPGF' || d.label === 'CMH/ BNS/ BSH/Qnt' || d.label === 'U/C, U/Board' || d.label === 'Aft/ Ni flg/ Ni Duty' || d.label === 'AWOL/Detention' || d.label === 'Class/Exam')) {
+          parsed = parsed.filter((d: any) => !['GD/TF/Airfield Duty', 'DUTY_OFF', 'CANTEEN', 'RECEPTION', 'ED/ EX PPGF', 'CMH/ BNS/ BSH/Qnt', 'U/C, U/Board', 'Aft/ Ni flg/ Ni Duty', 'AWOL/Detention', 'Class/Exam', 'Games / Guard of Honor'].includes(d.label) && !['DUTY_OFF', 'CANTEEN', 'RECEPTION'].includes(d.code));
+          if (!parsed.some((d: any) => d.code === 'GD')) parsed.push({code: 'GD', label: 'Base Security (GD)'});
+          if (!parsed.some((d: any) => d.code === 'AIRPORT')) parsed.push({code: 'AIRPORT', label: 'Airfield Duty'});
+          localStorage.setItem('savedDisposalKeys_NC', JSON.stringify(parsed));
+        }
+        return parsed;
+      }
+      return [];
     } catch { return []; }
   });
   const [showDisposalDropdown, setShowDisposalDropdown] = useState(false);
   const [isEditingDisposals, setIsEditingDisposals] = useState(false);
   const [historicalCustomCats, setHistoricalCustomCats] = useState<{code: string, label: string, customTitle: string}[]>(() => { try { const saved = localStorage.getItem('parade_historical_custom'); return saved ? JSON.parse(saved) : []; } catch { return []; } });
 
-  const ALL_DISPOSAL_OPTIONS = [{"code":"TDY","label":"Det/Tdy"},{"code":"LEAVE","label":"Leave"},{"code":"OTHERS","customTitle":"Course","label":"Course"},{"code":"CLASS_TRG","label":"Class/Exam"},{"code":"ABSENT","label":"AWOL/Detention"},{"code":"SICK_REPORT","label":"Sick report"},{"code":"ED","label":"ED/ EX PPGF"},{"code":"CMH","label":"CMH/ BNS/ BSH/Qnt"},{"code":"OTHERS","customTitle":"U/C, U/Board","label":"U/C, U/ Board"},{"code":"OTHERS","customTitle":"Office Duty","label":"Office Duty"},{"code":"OTHERS","customTitle":"Aft/ Ni flg/ Ni Duty","label":"Aft/ Ni flg/ Ni Duty"},{"code":"AIRPORT","label":"GD/TF/Airfield Duty"},{"code":"DUTY_OFF","label":"Off Duty"},{"code":"RECEPTION","label":"K/O"},{"code":"CANTEEN","label":"Mess/ Canteen / Bakery"},{"code":"OTHERS","customTitle":"Driving","label":"Driving"},{"code":"GAMES","label":"Games / Guard of Honor"},{"code":"OTHERS","label":"✨ Custom..."}];
+  const ALL_DISPOSAL_OPTIONS = [{"code":"TDY","label":"TDY"},{"code":"DETT","label":"Detachment"},{"code":"LEAVE","label":"Leave"},{"code":"OTHERS","customTitle":"Course","label":"Course"},{"code":"CLASS_TRG","label":"Class"},{"code":"OTHERS","customTitle":"Exam","label":"Exam"},{"code":"AWL","label":"AWOL"},{"code":"ABSENT","label":"Detention"},{"code":"SICK_REPORT","label":"Sick report"},{"code":"ED","label":"ED"},{"code":"EX_PPGF","label":"Ex PPGF"},{"code":"CMH","label":"CMH"},{"code":"BNS","label":"BNS"},{"code":"BSH","label":"BSH"},{"code":"OTHERS","customTitle":"Quarantine","label":"Quarantine"},{"code":"OTHERS","customTitle":"U/C","label":"U/C"},{"code":"OTHERS","customTitle":"U/Board","label":"U/Board"},{"code":"OFFICE","label":"Office Duty"},{"code":"OTHERS","customTitle":"Aft Flg","label":"Aft Flg"},{"code":"OTHERS","customTitle":"Ni Flg","label":"Ni Flg"},{"code":"OTHERS","customTitle":"Ni Duty","label":"Ni Duty"},{"code":"GD","label":"Base Security (GD)"},{"code":"BTF","label":"Base Taskforce (BTF)"},{"code":"AIRPORT","label":"Airfield Duty"},{"code":"OTHERS","customTitle":"Driving","label":"Driving"},{"code":"GAMES","label":"Games"},{"code":"GH","label":"Guard of Honor"},{"code":"OTHERS","label":"✨ Custom..."}];
 
   const handleAddDisposalOption = (opt: any) => {
     if (opt.code === 'OTHERS' && !opt.customTitle) {
@@ -490,15 +500,6 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
   };
 
   
-  const SUB_CATEGORIES_MAP: Record<string, string[]> = {
-    'GD/TF/Airfield Duty': ['GD', 'TF', 'Airfield Duty'],
-    'ED/ EX PPGF': ['ED', 'EX PPGF'],
-    'CMH/ BNS/ BSH/Qnt': ['CMH', 'BNS', 'BSH', 'Qnt'],
-    'U/C, U/ Board': ['U/C', 'U/ Board'],
-    'Aft/ Ni flg/ Ni Duty': ['Aft', 'Ni flg', 'Ni Duty'],
-    'Mess/ Canteen / Bakery': ['Mess', 'Canteen', 'Bakery'],
-    'Games / Guard of Honor': ['Games', 'Guard of Honor']
-  };
 
   const getSelectedDisposalLabel = () => {
     if (!disposalCategory) return '';
@@ -511,7 +512,6 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
     return found ? found.label : '';
   };
   
-  const currentSubCategories = SUB_CATEGORIES_MAP[getSelectedDisposalLabel()] || [];
 
   // Handle Add Disposal submit (multi-person support)
 
@@ -526,9 +526,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
       const effectiveDutyCode = isCustom ? 'OTHERS' : disposalCategory;
       let effectiveNotes = undefined;
       
-      if (currentSubCategories.length > 0 && disposalSubCategory) {
-        effectiveNotes = disposalSubCategory;
-      } else if (isCustom) {
+      if (isCustom) {
         if (disposalCategory.startsWith('OTHERS_') && disposalCategory !== 'OTHERS_Custom') {
            effectiveNotes = disposalCategory.replace('OTHERS_', '');
         } else {
@@ -548,7 +546,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
         });
       }
 
-      const effectiveScope = isPtDocument ? 'PT' : (disposalScope === 'PT' ? 'PT' : 'PARADE');
+      const effectiveScope = 'NIGHT_COUNT';
 
       const promises = selectedDisposalAirmenIds.map((airmanId) =>
         fetch('/api/roster/assign-range', {
@@ -682,6 +680,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
           airmanId: editDisposalModal.airman.id,
           fromDate: editDisposalFromDate,
           toDate: editDisposalToDate,
+          disposalScope: "NIGHT_COUNT",
         }),
       });
 
@@ -791,6 +790,9 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
           othersCount++;
         } else if (['GD', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA', 'AIRPORT', 'AIRFIELD', 'ATT', 'AIR_FD'].includes(codeUpper) || statusCategory === 'DUTY') {
           // dutyOn handled directly by calculation
+          if (codeUpper === 'GD') {
+             guardDutyCount++;
+          }
         } else {
           othersCount++;
         }
@@ -828,8 +830,10 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
           const isIdacC = codeUpper === 'IDAC' && idaShift === 'Night';
           const isBake = ['BAKE_BITE', 'BAKE_N_BITE'].includes(codeUpper) || statusCategory === 'BAKE_N_BITE';
           
-          if (codeUpper === 'ON_PARADE' || codeUpper === 'PT' || codeUpper === 'PT_PARADE' || statusCategory === 'PARADE' || codeUpper === 'CANTEEN' || notesLower.includes('canteen') || codeUpper === 'RECEPTION' || notesLower.includes('reception') || notesLower.includes('k/o') || codeUpper === 'DUTY_OFF' || codeUpper === 'OFF_DUTY' || statusCategory === 'OFF' || notesLower.includes('off duty') || notesLower.includes('nt off') || notesLower.includes('night off')) {
-            onPtList.push({ airman, note: (notes && !notes.toLowerCase().includes('imported')) ? notes : '' });
+          const isDutyOff = codeUpper === 'DUTY_OFF' || codeUpper === 'OFF_DUTY' || statusCategory === 'OFF' || notesLower.includes('off duty') || notesLower.includes('nt off') || notesLower.includes('night off');
+          const isCanteenReception = codeUpper === 'CANTEEN' || notesLower.includes('canteen') || codeUpper === 'RECEPTION' || notesLower.includes('reception') || notesLower.includes('k/o');
+          if (codeUpper === 'ON_PARADE' || codeUpper === 'PT' || codeUpper === 'PT_PARADE' || statusCategory === 'PARADE' || isDutyOff || isCanteenReception) {
+            onPtList.push({ airman, note: '' });
           } else if (codeUpper === 'LEAVE' || statusCategory === 'LEAVE') {
             leaveList.push({ airman, note: '' });
           } else if (codeUpper === 'ESSN' || notesLower.includes('essn')) {
@@ -1296,7 +1300,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
             {/* OFFICIAL SIGNATURE FOOTER FOR MULTI-DAY */}
             {activeTab !== '155 UASU BAF' && (
             <div
-              className="flex justify-between items-end pt-1 text-black dark:text-white print:text-black text-xs min-w-[700px] print:min-w-0"
+              className={`flex justify-between items-end pt-1 ${fromDate !== toDate ? 'hidden print:hidden' : ''} text-black dark:text-white print:text-black text-xs min-w-[700px] print:min-w-0`}
               style={{ fontFamily: 'Arial, sans-serif' }}
             >
               {/* LEFT SIGNATURE BLOCK (Prepared By) */}
@@ -1475,6 +1479,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                         {onPtList.slice(0, 15).map((item, idx) => (
                           <li key={item.airman.id} className="whitespace-nowrap cursor-pointer hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40 px-1 rounded transition-colors" onClick={() => openEditDisposal(item.airman, 'ON_PARADE', 'On Parade')} title="Click to edit, change or remove disposal">
                             {idx + 1}. {formatAirmanName(item.airman.rank)} {formatAirmanName(item.airman.name)}
+                            {item.note && <span className="text-slate-800 dark:text-slate-200 font-medium ml-1">- {item.note}</span>}
                           </li>
                         ))}
                       </ol>
@@ -1485,6 +1490,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                           {onPtList.slice(15, 30).map((item, idx) => (
                             <li key={item.airman.id} className="whitespace-nowrap cursor-pointer hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40 px-1 rounded transition-colors" onClick={() => openEditDisposal(item.airman, 'ON_PARADE', 'On Parade')} title="Click to edit, change or remove disposal">
                               {16 + idx}. {formatAirmanName(item.airman.rank)} {formatAirmanName(item.airman.name)}
+                              {item.note && <span className="text-slate-800 dark:text-slate-200 font-medium ml-1">- {item.note}</span>}
                             </li>
                           ))}
                         </ol>
@@ -1496,6 +1502,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                           {onPtList.slice(30).map((item, idx) => (
                             <li key={item.airman.id} className="whitespace-nowrap cursor-pointer hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40 px-1 rounded transition-colors" onClick={() => openEditDisposal(item.airman, 'ON_PARADE', 'On Parade')} title="Click to edit, change or remove disposal">
                               {31 + idx}. {formatAirmanName(item.airman.rank)} {formatAirmanName(item.airman.name)}
+                              {item.note && <span className="text-slate-800 dark:text-slate-200 font-medium ml-1">- {item.note}</span>}
                             </li>
                           ))}
                         </ol>
@@ -1640,13 +1647,13 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
             </div>
             )}
 
-            {/* SPACER ROW: 0.9 INCH HEIGHT TO PROVIDE AMPLE SIGNATURE HEADROOM */}
+                          {/* SPACER ROW: 0.9 INCH HEIGHT TO PROVIDE AMPLE SIGNATURE HEADROOM */}
             <div className="w-full" style={{ height: '0.9in' }} />
 
             {/* OFFICIAL SIGNATURE FOOTER */}
             {activeTab !== '155 UASU BAF' && (
             <div
-              className="flex justify-between items-end pt-1 text-black dark:text-white print:text-black text-xs min-w-[700px] print:min-w-0"
+              className={`flex justify-between items-end pt-1 ${fromDate !== toDate ? 'hidden print:hidden' : ''} text-black dark:text-white print:text-black text-xs min-w-[700px] print:min-w-0`}
               style={{ fontFamily: 'Arial, sans-serif' }}
             >
               {/* LEFT SIGNATURE BLOCK (Prepared By) */}
@@ -1787,10 +1794,10 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                   
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {savedDisposals.map((cat) => {
+                  {savedDisposals.map((cat, idx) => {
                     const isSelected = !isEditingDisposals && disposalCategory === cat.code && (cat.code !== 'OTHERS' || disposalCustomTitle === cat.customTitle);
                     return (
-                      <div key={cat.label} className="relative group">
+                      <div key={`${cat.code}-${cat.label}-${cat.customTitle || ''}`} className="relative group">
                         <button
                           type="button"
                           onClick={() => {
@@ -1830,9 +1837,9 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                       </button>
                       {showDisposalDropdown && (
                         <div className="absolute top-full left-0 mt-1 w-56 max-h-64 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 py-1">
-                          {[...ALL_DISPOSAL_OPTIONS, ...historicalCustomCats].filter(opt => opt.code === 'OTHERS' || (!savedDisposals.some(d => d.code === opt.code && (d.code !== 'OTHERS' || d.customTitle === opt.customTitle)))).filter((opt, index, self) => index === self.findIndex((t) => t.code === opt.code && t.customTitle === opt.customTitle)).map((opt) => (
+                          {[...ALL_DISPOSAL_OPTIONS, ...historicalCustomCats].filter(opt => opt.code === 'OTHERS' || (!savedDisposals.some(d => d.code === opt.code && (d.code !== 'OTHERS' || d.customTitle === opt.customTitle)))).filter((opt, index, self) => index === self.findIndex((t) => t.code === opt.code && t.customTitle === opt.customTitle)).map((opt, idx) => (
                             <button
-                              key={opt.label}
+                              key={`${opt.code}-${opt.label}-${opt.customTitle || ''}`}
                               type="button"
                               onClick={() => handleAddDisposalOption(opt)}
                               className="w-full text-left px-4 py-2 text-[11px] font-bold text-slate-700 dark:text-slate-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 hover:text-emerald-900 dark:hover:text-emerald-100 transition-colors"
@@ -1848,72 +1855,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
 
                 
                 {/* Sub Category Dropdown */}
-                {currentSubCategories.length > 0 && (
-                  <div className="col-span-2 mt-2">
-                    <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1.5 uppercase">
-                      Sub Category <span className="text-rose-500">*</span>
-                    </label>
-                    <select
-                      value={disposalSubCategory}
-                      onChange={(e) => setDisposalSubCategory(e.target.value)}
-                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm font-semibold text-slate-900 dark:text-white outline-none focus:border-emerald-500"
-                      required
-                    >
-                      <option value="" disabled>Select Sub Category...</option>
-                      {currentSubCategories.map(sub => (
-                         <option key={sub} value={sub}>{sub}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                {/* Custom Title Input if OTHERS selected */}
-                {disposalCategory === 'OTHERS' && (!ALL_DISPOSAL_OPTIONS.find(o => o.label === disposalCustomTitle) || disposalCustomTitle === '') && !isEditingDisposals && (
-                  <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl space-y-1 animate-fadeIn">
-                    <label className="text-xs font-bold text-amber-900 dark:text-amber-200">
-                      Specify Custom Disposal Name
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Special Escort, VVIP Detail..."
-                      value={disposalCustomTitle}
-                      onChange={(e) => setDisposalCustomTitle(e.target.value)}
-                      className="w-full px-3 py-1.5 text-xs rounded-lg border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white print:text-black outline-none focus:border-amber-500 shadow-xs"
-                      required
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* 3. Flight Filter & Airman Selection */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                    3. Select Flight & Personnel
-                  </label>
-                </div>
-                <div className="grid grid-cols-4 gap-1.5">
-                  {(['Avionics', 'Mechanics', 'GCS', 'Admin'] as FlightName[]).map((fl) => {
-                    const isSuperAdmin = (role === 'SUPER_ADMIN' || role === 'OWNER');
-                    const isPastDate = disposalFromDate < todayStr;
-                    const isDisabledFlt = (role === 'ADMIN' && userFlight && fl !== userFlight) || (isPastDate && !isSuperAdmin);
-                    return (
-                    <button
-                      key={fl}
-                      type="button"
-                      onClick={() => !isDisabledFlt && setDisposalFlight(fl)}
-                      disabled={isDisabledFlt}
-                      className={`py-1 px-2 text-xs font-bold rounded-lg border text-center transition-all ${
-                        isDisabledFlt ? 'opacity-50 cursor-not-allowed bg-slate-100 text-slate-400 border-slate-200 dark:bg-slate-800 dark:text-slate-600 dark:border-slate-700' :
-                        disposalFlight === fl
-                          ? 'bg-purple-600 text-white border-purple-600 shadow-xs cursor-pointer'
-                          : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:border-slate-400 cursor-pointer'
-                      }`}
-                    >
-                      {fl}
-                    </button>
-                    );
-                  })}
+                
                 </div>
 
                 {/* Multi-Select Airmen List */}
@@ -1946,6 +1888,12 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
 
                     if (codeUpper === 'ON_PARADE' || statusCategory === 'PARADE') {
                       return { isOnParade: true, label: 'On Parade', dutyCode: 'ON_PARADE', notes, dutyName: 'On Parade' };
+                    }
+                    if (statusCategory === 'OFF' || codeUpper === 'DUTY_OFF' || codeUpper === 'OFF_DUTY' || notesLower.includes('off duty') || notesLower.includes('nt off') || notesLower.includes('night off')) {
+                      return { isOnParade: true, label: 'On Parade', dutyCode: 'ON_PARADE', notes: '', dutyName: 'On Parade' };
+                    }
+                    if (codeUpper === 'CANTEEN' || notesLower.includes('canteen') || codeUpper === 'RECEPTION' || notesLower.includes('reception') || notesLower.includes('k/o')) {
+                      return { isOnParade: true, label: 'On Parade', dutyCode: 'ON_PARADE', notes: '', dutyName: 'On Parade' };
                     }
                     if (codeUpper === 'LEAVE' || statusCategory === 'LEAVE') {
                       return { isOnParade: false, label: 'Leave', dutyCode: 'LEAVE', notes, dutyName: 'Leave' };
@@ -1986,11 +1934,9 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                     if (['ABSENT', 'AWL'].includes(codeUpper)) {
                       return { isOnParade: false, label: 'Absent', dutyCode: 'ABSENT', notes, dutyName: 'Absent' };
                     }
-                    if (statusCategory === 'OFF' || codeUpper === 'DUTY_OFF') {
-                      return { isOnParade: false, label: dutyName || notes || 'GD Off', dutyCode: 'DUTY_OFF', notes, dutyName: dutyName || 'GD Off' };
-                    }
                     if (statusCategory === 'DUTY' || ['GD', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA'].includes(codeUpper)) {
-                      return { isOnParade: false, label: notes || dutyCode || 'On Duty', dutyCode: dutyCode || 'DUTY_ON', notes, dutyName: dutyName || 'On Duty' };
+                      const displayDuty = formatDutyOnShortName(codeUpper, st.idaShift, notes, dutyName);
+                      return { isOnParade: false, label: displayDuty || 'On Duty', dutyCode: dutyCode || 'DUTY_ON', notes, dutyName: dutyName || 'On Duty' };
                     }
 
                     return { isOnParade: false, label: notes || dutyCode || 'Disposal', dutyCode: dutyCode || 'OTHERS', notes, dutyName: dutyName || 'Disposal' };
@@ -2116,8 +2062,6 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                     </div>
                   );
                 })()}
-              </div>
-
               {/* Submit Buttons */}
               <div className="flex items-center justify-between pt-3 border-t border-slate-200 dark:border-slate-800">
                 <span className="text-xs font-bold text-slate-600 ">
@@ -2237,10 +2181,10 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                   </button>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {savedDisposals.map((cat) => {
+                  {savedDisposals.map((cat, idx) => {
                     const isSelected = !isEditingDisposals && editDisposalCategory === cat.code && (cat.code !== 'OTHERS' || editDisposalCustomTitle === cat.customTitle);
                     return (
-                      <div key={cat.label} className="relative group">
+                      <div key={`${cat.code}-${cat.label}-${cat.customTitle || ''}`} className="relative group">
                         <button
                           type="button"
                           onClick={() => {
@@ -2281,9 +2225,9 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                       </button>
                       {showDisposalDropdown && (
                         <div className="absolute bottom-full mb-1 left-0 w-56 max-h-64 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 py-1">
-                          {[...ALL_DISPOSAL_OPTIONS, ...historicalCustomCats].filter(opt => opt.code === 'OTHERS' || (!savedDisposals.some(d => d.code === opt.code && (d.code !== 'OTHERS' || d.customTitle === opt.customTitle)))).filter((opt, index, self) => index === self.findIndex((t) => t.code === opt.code && t.customTitle === opt.customTitle)).map((opt) => (
+                          {[...ALL_DISPOSAL_OPTIONS, ...historicalCustomCats].filter(opt => opt.code === 'OTHERS' || (!savedDisposals.some(d => d.code === opt.code && (d.code !== 'OTHERS' || d.customTitle === opt.customTitle)))).filter((opt, index, self) => index === self.findIndex((t) => t.code === opt.code && t.customTitle === opt.customTitle)).map((opt, idx) => (
                             <button
-                              key={opt.label}
+                              key={`${opt.code}-${opt.label}-${opt.customTitle || ''}`}
                               type="button"
                               onClick={() => {
                                 handleAddDisposalOption(opt);

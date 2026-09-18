@@ -136,7 +136,7 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  const [showDisposalDropdown, setShowDisposalDropdown] = useState(false);
  const [isEditingDisposals, setIsEditingDisposals] = useState(false);
 
- const ALL_DISPOSAL_OPTIONS = [{"code":"TDY","label":"Det/Tdy"},{"code":"LEAVE","label":"Leave"},{"code":"OTHERS","customTitle":"Course","label":"Course"},{"code":"CLASS_TRG","label":"Class/Exam"},{"code":"ABSENT","label":"AWOL/Detention"},{"code":"SICK_REPORT","label":"Sick report"},{"code":"ED","label":"ED/ EX PPGF"},{"code":"CMH","label":"CMH/ BNS/ BSH/Qnt"},{"code":"OTHERS","customTitle":"U/C, U/Board","label":"U/C, U/ Board"},{"code":"OTHERS","customTitle":"Office Duty","label":"Office Duty"},{"code":"OTHERS","customTitle":"Aft/ Ni flg/ Ni Duty","label":"Aft/ Ni flg/ Ni Duty"},{"code":"AIRPORT","label":"GD/TF/Airfield Duty"},{"code":"DUTY_OFF","label":"Off Duty"},{"code":"RECEPTION","label":"K/O"},{"code":"CANTEEN","label":"Mess/ Canteen / Bakery"},{"code":"OTHERS","customTitle":"Driving","label":"Driving"},{"code":"GAMES","label":"Games / Guard of Honor"},{"code":"OTHERS","label":"✨ Custom..."}];
+ const ALL_DISPOSAL_OPTIONS = [{"code":"TDY","label":"TDY"},{"code":"DETT","label":"Detachment"},{"code":"LEAVE","label":"Leave"},{"code":"OTHERS","customTitle":"Course","label":"Course"},{"code":"CLASS_TRG","label":"Class"},{"code":"OTHERS","customTitle":"Exam","label":"Exam"},{"code":"AWL","label":"AWOL"},{"code":"ABSENT","label":"Detention"},{"code":"SICK_REPORT","label":"Sick report"},{"code":"ED","label":"ED"},{"code":"EX_PPGF","label":"Ex PPGF"},{"code":"CMH","label":"CMH"},{"code":"BNS","label":"BNS"},{"code":"BSH","label":"BSH"},{"code":"OTHERS","customTitle":"Quarantine","label":"Quarantine"},{"code":"OTHERS","customTitle":"U/C","label":"U/C"},{"code":"OTHERS","customTitle":"U/Board","label":"U/Board"},{"code":"OFFICE","label":"Office Duty"},{"code":"OTHERS","customTitle":"Aft Flg","label":"Aft Flg"},{"code":"OTHERS","customTitle":"Ni Flg","label":"Ni Flg"},{"code":"OTHERS","customTitle":"Ni Duty","label":"Ni Duty"},{"code":"GD","label":"Base Security (GD)"},{"code":"BTF","label":"Base Taskforce (BTF)"},{"code":"AIRPORT","label":"Airfield Duty"},{"code":"OTHERS","customTitle":"Driving","label":"Driving"},{"code":"GAMES","label":"Games"},{"code":"GH","label":"Guard of Honor"},{"code":"OTHERS","label":"✨ Custom..."}];
 
  const handleAddDisposalOption = (opt: any) => {
  if (opt.code === 'OTHERS' && !opt.customTitle) {
@@ -620,8 +620,9 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  headers: { 'Content-Type': 'application/json' },
  body: JSON.stringify({
  airmanId: editDisposalModal.airman.id,
- fromDate: editDisposalFromDate,
- toDate: editDisposalToDate,
+          fromDate: editDisposalFromDate,
+          toDate: editDisposalToDate,
+          disposalScope: "NIGHT_COUNT",
  }),
  });
 
@@ -1162,12 +1163,10 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  <div className="text-[11px] font-normal">{authorizedBy.rank}</div>
  <div className="text-[11px] font-normal">{authorizedBy.designation}</div>
  <div className="text-[10px] uppercase font-bold">{authorizedBy.unit || '155 UASU BAF'}</div>
- </div>
- </div>
-
- 
- </div>
- </div>
+                  </div>
+                </div>
+              </div>
+            </div>
  ) : (
  /* ========================================================================= */
  /* 2. SINGLE-DAY OFFICIAL BAF NIGHT COUNT STATE SHEET */

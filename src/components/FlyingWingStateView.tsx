@@ -31,21 +31,34 @@ interface SignatureDetails {
 const DISPOSAL_COLUMNS = [
   'Leave',
   'Course',
-  'Class/Exam',
-  'AWOL/Detention',
+  'Class',
+  'Exam',
+  'AWOL',
+  'Detention',
   'Sick report',
-  'ED/ EX PPGF',
-  'CMH/ BNS/ BSH/Qrnt',
-  'U/C, U/Board',
+  'ED',
+  'Ex PPGF',
+  'CMH',
+  'BNS',
+  'BSH',
+  'Quarantine',
+  'U/C',
+  'U/Board',
   'Office Duty',
-  'Aft/Ni flg/Ni Duty/Flg',
-  'TF/Base/Airfield Duty',
+  'Aft Flg',
+  'Ni Flg',
+  'Ni Duty',
+  'Base Security (GD)',
+  'Base Taskforce (BTF)',
+  'Airfield Duty',
   'Off Duty',
   'K/O',
-  'Mess/ Canteen /Bakery',
+  'Canteen',
+  'Bakery',
   'Driving',
   'PT/Parade on Unit',
-  'Games /Guard of Honor'
+  'Games',
+  'Guard of Honor'
 ];
 
 // The default list for the dropdown
@@ -464,7 +477,6 @@ export function FlyingWingStateView({
                     <label className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
                       2. Disposals & Counts
                     </label>
-                    {sessionStorage.getItem('baf_user_role') === 'SUPER_ADMIN' && (
                     <button
                       type="button"
                       onClick={() => setIsEditingDisposals(!isEditingDisposals)}
@@ -473,7 +485,6 @@ export function FlyingWingStateView({
                     >
                       <Settings className="w-4 h-4" />
                     </button>
-                    )}
                   </div>
                   <div className="space-y-3">
                     {formSavedDisposals.map((cat) => (

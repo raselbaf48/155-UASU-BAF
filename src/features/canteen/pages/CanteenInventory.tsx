@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Search, Plus, Edit2, Trash2, ImageIcon, Save, X } from 'lucide-react';
 import { supabase } from '../../../supabase';
 
-export const CanteenInventory: React.FC = () => {
+export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = false}) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [items, setItems] = useState<any[]>([
   {

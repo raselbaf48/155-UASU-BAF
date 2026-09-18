@@ -1259,7 +1259,7 @@ export class LocalDatabaseEngine {
     notes?: string;
     proxyForFlight?: FlightName;
     replaceAirmanId?: string;
-    disposalScope?: 'ALL' | 'PARADE' | 'PT';
+    disposalScope?: 'ALL' | 'PARADE' | 'PT' | 'NIGHT_COUNT';
   }): { count: number; assignedDates: string[] } {
     const { airmanId, dutyCode, idaShift, fromDate, toDate, notes, proxyForFlight, replaceAirmanId, disposalScope } = params;
     const assignedDates = getDatesInRange(fromDate, toDate);
@@ -1289,14 +1289,15 @@ export class LocalDatabaseEngine {
       const list = this.db.assignments[monthKey];
       let index = -1;
       const isDep = (code) => code && ['ATT', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(code);
-      if (dutyCode === 'IDAC' || dutyCode === 'IDA') {
+      const scope = disposalScope || 'ALL';
+      if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(dutyCode)) {
         if (idaShift === 'Night') {
-          index = list.findIndex((a) => a.airmanId === airmanId && a.date === dateStr && (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night');
+          index = list.findIndex((a) => a.airmanId === airmanId && a.date === dateStr && (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night' && (a.disposalScope || 'ALL') === scope);
         } else {
-          index = list.findIndex((a) => a.airmanId === airmanId && a.date === dateStr && !((a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night') && isDep(a.dutyCode) === isDep(dutyCode));
+          index = list.findIndex((a) => a.airmanId === airmanId && a.date === dateStr && !((a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night') && isDep(a.dutyCode) === isDep(dutyCode) && (a.disposalScope || 'ALL') === scope);
         }
       } else {
-        index = list.findIndex((a) => a.airmanId === airmanId && a.date === dateStr && !((a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night') && isDep(a.dutyCode) === isDep(dutyCode));
+        index = list.findIndex((a) => a.airmanId === airmanId && a.date === dateStr && !((a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night') && isDep(a.dutyCode) === isDep(dutyCode) && (a.disposalScope || 'ALL') === scope);
       }
 
 
@@ -1351,7 +1352,7 @@ export class LocalDatabaseEngine {
       idaShift?: IDAShift;
       proxyForFlight?: FlightName;
       notes?: string;
-      disposalScope?: 'ALL' | 'PARADE' | 'PT';
+      disposalScope?: 'ALL' | 'PARADE' | 'PT' | 'NIGHT_COUNT';
     }>;
     removedAirmanIds?: string[];
   }): { count: number; assignedDates: string[] } {
@@ -1391,7 +1392,7 @@ export class LocalDatabaseEngine {
         const list = this.db.assignments[monthKey];
         let index = -1;
         const isDep = (code) => code && ['ATT', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(code);
-        if (dutyCode === 'IDAC' || dutyCode === 'IDA') {
+        if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(dutyCode)) {
           if (idaShift === 'Night') {
             index = list.findIndex((a) => a.airmanId === airmanId && a.date === dateStr && (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night');
           } else {
@@ -1425,7 +1426,7 @@ export class LocalDatabaseEngine {
     return { count: assignments.length * assignedDates.length, assignedDates };
   }
 
-  public deleteAssignment(airmanId: string, date: string, dutyCode?: DutyCategoryCode, idaShift?: any): boolean {
+  public deleteAssignment(airmanId: string, date: string, dutyCode?: DutyCategoryCode, idaShift?: any, disposalScope?: 'ALL' | 'PARADE' | 'PT' | 'NIGHT_COUNT'): boolean {
     const monthKey = date.slice(0, 7);
     if (!this.db.assignments[monthKey]) return false;
 
@@ -1436,11 +1437,12 @@ export class LocalDatabaseEngine {
       const initialLen = list.length;
       this.db.assignments[monthKey] = list.filter((a) => {
         if (a.airmanId !== airmanId || a.date !== date) return true; // keep others
+        if (disposalScope && (a.disposalScope || 'ALL') !== disposalScope) return true; // keep if scope doesn't match
         const isDep = (code) => code && ['ATT', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(code);
         if (isDep(dutyCode)) {
           return !isDep(a.dutyCode); // remove if matches
         }
-        if (dutyCode === 'IDAC' || dutyCode === 'IDA') {
+        if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(dutyCode)) {
           if (idaShift) {
             return !((a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === idaShift);
           }
@@ -1451,7 +1453,11 @@ export class LocalDatabaseEngine {
       removed = this.db.assignments[monthKey].length < initialLen;
     } else {
       const initialLen = list.length;
-      this.db.assignments[monthKey] = list.filter((a) => !(a.airmanId === airmanId && a.date === date));
+      this.db.assignments[monthKey] = list.filter((a) => {
+        if (a.airmanId !== airmanId || a.date !== date) return true;
+        if (disposalScope && (a.disposalScope || 'ALL') !== disposalScope) return true; // keep if scope doesn't match
+        return false;
+      });
       removed = this.db.assignments[monthKey].length < initialLen;
     }
 
@@ -1468,13 +1474,14 @@ export class LocalDatabaseEngine {
     toDate: string;
     dutyCode?: DutyCategoryCode;
     idaShift?: any;
+    disposalScope?: 'ALL' | 'PARADE' | 'PT' | 'NIGHT_COUNT';
   }): number {
-    const { airmanId, fromDate, toDate, dutyCode, idaShift } = params;
+    const { airmanId, fromDate, toDate, dutyCode, idaShift, disposalScope } = params;
     const dates = getDatesInRange(fromDate, toDate);
     let count = 0;
 
     for (const d of dates) {
-      if (this.deleteAssignment(airmanId, d, dutyCode, idaShift)) {
+      if (this.deleteAssignment(airmanId, d, dutyCode, idaShift, disposalScope)) {
         count++;
       }
     }
@@ -1545,6 +1552,38 @@ export class LocalDatabaseEngine {
         }
       }
     });
+
+
+    // If PT or Night Count, check if Leave starts tomorrow
+    if (isPT || isNightCount) {
+      const getTomorrowDateStr = (dateStr: string): string => {
+        const [year, month, day] = dateStr.split('-').map(Number);
+        if (!year || !month || !day) return dateStr;
+        const d = new Date(Date.UTC(year, month - 1, day));
+        d.setUTCDate(d.getUTCDate() + 1);
+        const y = d.getUTCFullYear();
+        const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+        const da = String(d.getUTCDate()).padStart(2, '0');
+        return `${y}-${m}-${da}`;
+      };
+      const tmrwStr = getTomorrowDateStr(date);
+      const tmrwMonthKey = tmrwStr.slice(0, 7);
+      const tmrwAssignments = (this.db.assignments[tmrwMonthKey] || []).filter((a) => a.date === tmrwStr);
+      
+      tmrwAssignments.forEach((a) => {
+        if (a.dutyCode === 'LEAVE') {
+           const scope = a.disposalScope || 'ALL';
+           const isApplicable = scope === 'ALL' || (isPT && scope === 'PT') || (isNightCount && scope === 'NIGHT_COUNT');
+           if (isApplicable) {
+              assignmentMap.set(a.airmanId, {
+                 ...a,
+                 date: date,
+                 notes: a.notes ? `${a.notes} (Starts tomorrow)` : 'Starts tomorrow'
+              });
+           }
+        }
+      });
+    }
 
     // Calculate yesterday's assignments for auto duty off calculation safely via UTC
     const getYesterdayDateStr = (dateStr: string): string => {
@@ -1659,7 +1698,7 @@ export class LocalDatabaseEngine {
         else if (codeStr === 'NTF') dutyName = 'Najirpara Taskforce Duty';
         else if (codeStr === 'HALISHAHAR') dutyName = 'Halishahar Duty';
         else if (codeStr === 'AIRPORT' || codeStr === 'AIRFIELD' || codeStr === 'ATT' || codeStr === 'DETT') dutyName = 'Airfield';
-        else if (codeStr === 'IDAC' || codeStr === 'IDA') {
+        else if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(codeStr)) {
           const s = ass.idaShift || 'Morning';
           dutyName = `IDAC Duty (${s})`;
           
@@ -1790,7 +1829,7 @@ export class LocalDatabaseEngine {
           if (isPT) {
              return {
                 dutyCode: 'RECEPTION',
-                idaShift: ass.idaShift,
+                idaShift: (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(ass.dutyCode)) ? (ass.idaShift || 'Morning') : ass.idaShift,
                 proxyForFlight: ass.proxyForFlight,
                 disposalScope: scope,
                 notes: ass.notes || '',
@@ -1813,7 +1852,7 @@ export class LocalDatabaseEngine {
           
           return {
             dutyCode: dest,
-            idaShift: ass.idaShift,
+            idaShift: (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(ass.dutyCode)) ? (ass.idaShift || 'Morning') : ass.idaShift,
             proxyForFlight: ass.proxyForFlight,
             disposalScope: scope,
             notes: (ass.notes || '').toLowerCase().includes('imported') ? '' : (ass.notes || ''),
@@ -1835,7 +1874,7 @@ export class LocalDatabaseEngine {
 
         return { 
           dutyCode: ass.dutyCode, 
-          idaShift: ass.idaShift, 
+          idaShift: (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(ass.dutyCode)) ? (ass.idaShift || 'Morning') : ass.idaShift, 
           proxyForFlight: ass.proxyForFlight,
           disposalScope: scope,
           notes: safeNotes, 
@@ -1857,6 +1896,9 @@ export class LocalDatabaseEngine {
 
     const personnelStatusList = filteredAirmen.map((airman) => {
       const eff = resolveEffectiveAssignment(airman.id);
+      if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(eff.dutyCode) || (eff.dutyName && eff.dutyName.includes('IDAC'))) {
+         console.log("DEBUG IDAC for", airman.name, "id:", airman.id, "eff:", JSON.stringify(eff));
+      }
       const dutyCode = eff.dutyCode;
       const idaShift = eff.idaShift;
       const proxyForFlight = eff.proxyForFlight;
@@ -1881,7 +1923,7 @@ export class LocalDatabaseEngine {
         otherOff++;
       }
 
-      if ((dutyCode === 'IDAC' || dutyCode === 'IDA') && idaShift === 'Night') {
+      if ((['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(dutyCode)) && idaShift === 'Night') {
         const shiftNote = 'IDAC Night';
         if (!notes) notes = shiftNote;
         else if (!notes.includes('IDAC')) notes = `${shiftNote} - ${notes}`;
