@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Utensils, Search, X, Check, ChefHat, Clock, Plus, XCircle, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { supabase } from '../../../supabase';
-import { useEffect } from 'react';
+import { getCanteenConfig, resolveImageUrl, CanteenConfig } from '../utils/canteenSettings';
 import {
   BarChart,
   Bar,
@@ -31,6 +31,28 @@ export const ManagerDashboard: React.FC = () => {
   const [memberSearchTerm, setMemberSearchTerm] = useState('');
   const [showMemberDropdown, setShowMemberDropdown] = useState(false);
   const [preOrderTab, setPreOrderTab] = useState<'pending'|'completed'>('pending');
+  const [canteenConfig, setCanteenConfig] = useState<CanteenConfig>(() => getCanteenConfig());
+
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'canteen_settings') {
+        setCanteenConfig(getCanteenConfig());
+      }
+    };
+    const handleSettingsUpdated = (e: any) => {
+      if (e.detail) {
+        setCanteenConfig(e.detail);
+      } else {
+        setCanteenConfig(getCanteenConfig());
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('canteen_settings_updated', handleSettingsUpdated);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('canteen_settings_updated', handleSettingsUpdated);
+    };
+  }, []);
   const [catalog, setCatalog] = useState<any[]>([
   {
     "id": "28d0782c-1bdf-42f6-a616-683a9d5038f1",
@@ -283,7 +305,11 @@ export const ManagerDashboard: React.FC = () => {
   const fetchMembers = async () => {
     const { data, error } = await supabase.from('Canteen').select('*');
     if (!error && data) {
-        setMembers(data);
+        setMembers(data.map((m: any) => ({
+          ...m,
+          Due: Number(m.Due ?? m.due ?? m.baki ?? 0),
+          baki: Number(m.Due ?? m.due ?? m.baki ?? 0)
+        })));
     }
   };
 
@@ -614,8 +640,9 @@ export const ManagerDashboard: React.FC = () => {
   const handleRevertPreOrder = async (order: any) => {
       const member = members.find(m => String(m['BD No']) === String(order.memberId));
       if (member) {
-          const newBaki = (member.baki || 0) - order.total;
-          await supabase.from('Canteen').update({ baki: newBaki }).eq('airman_id', member.airman_id);
+          const currentDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
+          const newDue = Math.max(0, currentDue - order.total);
+          await supabase.from('Canteen').update({ Due: newDue }).eq('airman_id', member.airman_id);
       }
       
       for (const item of order.items) {
@@ -649,9 +676,10 @@ export const ManagerDashboard: React.FC = () => {
           return;
       }
       
-      // Update baki
-      const newBaki = (member.baki || 0) + order.total;
-      await supabase.from('Canteen').update({ baki: newBaki }).eq('airman_id', member.airman_id);
+      // Update Due
+      const currentDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
+      const newDue = currentDue + order.total;
+      await supabase.from('Canteen').update({ Due: newDue }).eq('airman_id', member.airman_id);
       
       // Update stock
       for (const item of order.items) {
@@ -788,14 +816,22 @@ export const ManagerDashboard: React.FC = () => {
          </div>
 
          <div className="z-10 flex flex-col items-center space-y-4">
-            <div className="w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center p-2 border border-slate-700 shadow-inner">
-               <img src="https://i.postimg.cc/gcqqCXCL/Logo-(1).png" alt="Logo" className="w-full h-full object-contain opacity-80" onError={(e) => e.currentTarget.style.display = 'none'} />
+            <div className="w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center p-2 border border-slate-700 shadow-inner overflow-hidden">
+               {canteenConfig.logoUrl ? (
+                  <img 
+                    src={resolveImageUrl(canteenConfig.logoUrl)} 
+                    alt="Logo" 
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-contain opacity-90" 
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }} 
+                  />
+               ) : (
+                  <Utensils className="w-8 h-8 text-[#4f46e5]" />
+               )}
             </div>
             
             <h2 className="text-4xl font-black text-white tracking-widest flex items-center space-x-3">
-               <span className="text-slate-400">🍽️</span> 
-               <span>CAFEUAV</span> 
-               <span className="text-slate-400">🍽️</span>
+               <span>{canteenConfig.name || '🍽️ CAFEUAV 🍽️'}</span>
             </h2>
             <p className="text-[10px] tracking-widest text-slate-400 font-bold uppercase pb-2">Eat Good Food, Serve Good!</p>
             

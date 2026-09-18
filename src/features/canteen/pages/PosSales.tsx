@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Plus, ShoppingCart, Minus, Trash2, CheckCircle2, X, History, Calendar } from 'lucide-react';
+import { Search, Plus, ShoppingCart, Minus, Trash2, CheckCircle2, X, History, Calendar, Package as PackageIcon } from 'lucide-react';
 import { supabase } from '../../../supabase';
+import { resolveImageUrl } from '../utils/canteenSettings';
 
 export const PosSales: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -267,6 +268,14 @@ export const PosSales: React.FC = () => {
     if (stored) {
         try { setRecentMembers(JSON.parse(stored)); } catch(e){}
     }
+
+    const handleInventoryUpdated = () => {
+      fetchCatalog();
+    };
+    window.addEventListener('canteen_inventory_updated', handleInventoryUpdated);
+    return () => {
+      window.removeEventListener('canteen_inventory_updated', handleInventoryUpdated);
+    };
   }, []);
 
   const loadHistory = () => {
@@ -282,9 +291,10 @@ export const PosSales: React.FC = () => {
       // Reverse Due
       const m = members.find(m => m.airman_id === txToRemove.airman_id);
       if (m) {
-          const newBaki = Math.max(0, (m.baki || 0) - txToRemove.amount);
-          await supabase.from('Canteen').update({ baki: newBaki }).eq('airman_id', txToRemove.airman_id);
-          setMembers(members.map(member => member.airman_id === txToRemove.airman_id ? {...member, baki: newBaki} : member));
+          const currentDue = Number(m.Due ?? m.due ?? m.baki ?? 0);
+          const newDue = Math.max(0, currentDue - txToRemove.amount);
+          await supabase.from('Canteen').update({ Due: newDue }).eq('airman_id', txToRemove.airman_id);
+          setMembers(members.map(member => member.airman_id === txToRemove.airman_id ? {...member, Due: newDue, baki: newDue} : member));
       }
 
       // Restore Stock
@@ -314,7 +324,11 @@ export const PosSales: React.FC = () => {
   const fetchMembers = async () => {
     const { data, error } = await supabase.from('Canteen').select('*');
     if (!error && data) {
-        setMembers(data);
+        setMembers(data.map((m: any) => ({
+          ...m,
+          Due: Number(m.Due ?? m.due ?? m.baki ?? 0),
+          baki: Number(m.Due ?? m.due ?? m.baki ?? 0)
+        })));
     }
   };
 
@@ -595,8 +609,9 @@ export const PosSales: React.FC = () => {
 
       if (selectedMembers.length > 0) {
           for (const m of selectedMembers) {
-              const newBaki = (m.baki || 0) + memberChargeAmount;
-              await supabase.from('Canteen').update({ baki: newBaki }).eq('airman_id', m.airman_id);
+              const currentDue = Number(m.Due ?? m.due ?? m.baki ?? 0);
+              const newDue = currentDue + memberChargeAmount;
+              await supabase.from('Canteen').update({ Due: newDue }).eq('airman_id', m.airman_id);
               
               // save tx to localstorage for statement
               const txDateStr = new Date(saleDate).toLocaleDateString('bn-BD');
@@ -681,8 +696,18 @@ export const PosSales: React.FC = () => {
                return (
                <div key={i} onClick={() => addToBasket(item)} className={`bg-slate-900 rounded-2xl p-4 flex items-center justify-between border transition-all duration-300 cursor-pointer hover:-translate-y-1 hover:shadow-[0_15px_30px_-10px_rgba(79,70,229,0.3)] group ${inBasket ? 'border-[#4f46e5] shadow-[0_10px_20px_-10px_rgba(79,70,229,0.2)]' : 'border-slate-800 hover:border-indigo-500/50'}`}>
                   <div className="flex items-center space-x-4">
-                     <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-inner transition-colors duration-300 ${inBasket ? 'bg-indigo-900/300/20 text-indigo-400' : 'bg-[#0f172a] text-slate-400 group-hover:bg-slate-800 group-hover:text-indigo-300'}`}>
-                        <PackageIcon className="w-6 h-6 group-hover:scale-110 transition-transform duration-300" />
+                     <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-inner transition-colors duration-300 overflow-hidden shrink-0 border border-slate-800/80 ${inBasket ? 'bg-indigo-900/30 text-indigo-400' : 'bg-[#0f172a] text-slate-400 group-hover:bg-slate-800 group-hover:text-indigo-300'}`}>
+                        {item.DP ? (
+                          <img 
+                            src={resolveImageUrl(item.DP)} 
+                            alt={item.name} 
+                            referrerPolicy="no-referrer"
+                            className="w-full h-full object-cover"
+                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                          />
+                        ) : (
+                          <PackageIcon className="w-6 h-6 group-hover:scale-110 transition-transform duration-300" />
+                        )}
                      </div>
                      <div>
                         <p className="text-[10px] font-black text-[#4f46e5] uppercase tracking-widest mb-0.5">{item.category}</p>
@@ -809,10 +834,23 @@ export const PosSales: React.FC = () => {
                ) : (
                    basket.map((item) => (
                        <div key={item.id} className="flex items-center justify-between bg-slate-800 p-4 rounded-xl border border-slate-800">
-                           <div className="flex-1 pr-4">
-                               <p className="text-xs font-black text-white leading-tight">{item.name}</p>
-                               <p className="text-[10px] font-bold text-slate-400 mt-1">৳{item.price} x {item.qty}</p>
-                           </div>
+                           <div className="flex-1 pr-4 flex items-center space-x-3 min-w-0">
+                               {item.DP && (
+                                 <div className="w-10 h-10 rounded-lg bg-slate-900 border border-slate-700 overflow-hidden shrink-0 shadow-sm">
+                                   <img 
+                                     src={resolveImageUrl(item.DP)} 
+                                     alt={item.name} 
+                                     referrerPolicy="no-referrer"
+                                     className="w-full h-full object-cover"
+                                     onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                   />
+                                 </div>
+                               )}
+                               <div className="min-w-0 flex-1">
+                                  <p className="text-xs font-black text-white leading-tight truncate">{item.name}</p>
+                                  <p className="text-[10px] font-bold text-slate-400 mt-1">৳{item.price} x {item.qty}</p>
+                               </div>
+                            </div>
                            <div className="flex items-center space-x-3">
                                <div className="flex items-center space-x-2 bg-slate-900 rounded-lg border border-slate-700 p-1">
                                    <button onClick={() => updateQty(item.id, -1)} className="p-1 hover:bg-slate-800 rounded text-slate-400"><Minus className="w-3 h-3" /></button>

@@ -568,7 +568,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
 
         {activeTab === 'Canteen' && isCanteenAuth && (
           <CanteenLayout 
-             initialMember={successAirman ? { name: (successAirman.rank && successAirman.name) ? (successAirman.rank + ' ' + successAirman.name) : (successAirman.name || successAirman.fullName || 'Guest'), bdNo: successAirman.bdNo, role: 'employee' } : undefined}
+             initialMember={successAirman ? { name: (successAirman.rank && successAirman.name) ? (successAirman.rank + ' ' + successAirman.name) : (successAirman.name || successAirman.fullName || 'Guest'), bdNo: successAirman.bdNo, role: 'employee', photoUrl: successAirman.photoUrl } : undefined}
              onBack={() => { setIsCanteenAuth(false); setBdInput(canteenRecentLogins[0] || ''); setPasswordInput(''); setSuccessAirman(null); setTargetAirman(null); }} 
           />
         )}

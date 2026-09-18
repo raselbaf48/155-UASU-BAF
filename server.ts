@@ -217,6 +217,55 @@ async function startServer() {
     res.json({ status: 'ok', unit: '155 UASU BAF', personnelCount: db.airmen.length });
   });
 
+  // Resolve external image URLs (Google Photos share links, Google Drive, etc.)
+  app.get('/api/resolve-image-url', async (req, res) => {
+    const rawUrl = (req.query.url as string || '').trim();
+    if (!rawUrl) {
+      return res.status(400).json({ error: 'Missing url parameter' });
+    }
+
+    try {
+      // 1. Google Drive direct link conversion
+      const driveMatch = rawUrl.match(/drive\.google\.com\/(?:file\/d\/([a-zA-Z0-9_-]+)|.*[?&]id=([a-zA-Z0-9_-]+))/);
+      if (driveMatch) {
+        const fileId = driveMatch[1] || driveMatch[2];
+        return res.json({ resolvedUrl: `https://lh3.googleusercontent.com/d/${fileId}` });
+      }
+
+      // 2. Fetch the target URL (handles photos.app.goo.gl and web pages with og:image)
+      const fetchRes = await fetch(rawUrl, {
+        redirect: 'follow',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+        }
+      });
+
+      const contentType = fetchRes.headers.get('content-type') || '';
+      if (contentType.startsWith('image/')) {
+        return res.json({ resolvedUrl: fetchRes.url || rawUrl });
+      }
+
+      const html = await fetchRes.text();
+      const ogMatch = html.match(/<meta property=["']og:image["'] content=["']([^"']+)["']/i)
+        || html.match(/<meta content=["']([^"']+)["'] property=["']og:image["']/i)
+        || html.match(/<meta name=["']twitter:image["'] content=["']([^"']+)["']/i);
+
+      if (ogMatch && ogMatch[1]) {
+        let directUrl = ogMatch[1].replace(/&amp;/g, '&');
+        // If it's a googleusercontent photo, optimize size parameter
+        if (directUrl.includes('googleusercontent.com')) {
+          directUrl = directUrl.replace(/=w\d+-h\d+.*$/, '=s800');
+        }
+        return res.json({ resolvedUrl: directUrl, originalUrl: rawUrl });
+      }
+
+      return res.json({ resolvedUrl: rawUrl, note: 'No og:image found' });
+    } catch (err: any) {
+      console.error('Error resolving image URL:', err);
+      res.status(500).json({ error: err.message, resolvedUrl: rawUrl });
+    }
+  });
+
   // Real-time Event Stream (SSE) for instant synchronization across all clients
   app.get('/api/realtime/events', (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');

@@ -382,9 +382,9 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({ onManagerPort
       
       {/* Profile Section */}
       <div className="flex flex-col items-center justify-center space-y-4">
-          <div className="w-16 h-16 bg-[#0f172a] rounded-2xl flex items-center justify-center relative shadow-lg">
-              <User className="w-8 h-8 text-white" />
-              <div className="absolute -bottom-1 -right-1 bg-[#4f46e5] rounded-full p-1 border-2 border-white">
+          <div className="w-16 h-16 bg-[#0f172a] rounded-2xl flex items-center justify-center relative shadow-lg border border-slate-700 text-indigo-400">
+              <User className="w-8 h-8" />
+              <div className="absolute -bottom-1 -right-1 bg-[#4f46e5] rounded-full p-1 border-2 border-slate-900">
                   <CreditCard className="w-3 h-3 text-white" />
               </div>
           </div>

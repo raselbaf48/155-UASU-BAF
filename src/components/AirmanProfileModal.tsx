@@ -24,11 +24,12 @@ interface AirmanProfileModalProps {
   initialCategory?: string;
   historyOnly?: boolean;
   allowEditDelete?: boolean;
+  canteenOnly?: boolean;
 }
 
 const presetLocations = ['AIR HQ', 'BAF AKR', 'BAF BSR', 'BAF MTR', 'BAF CXB', 'BAF SMD'];
 
-export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, onClose, onEditAirman, onRemoveAirman, role, initialTab = 'profile', initialCategory = 'ALL', historyOnly = false, allowEditDelete = false, variant = "nominal" }) => {
+export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, onClose, onEditAirman, onRemoveAirman, role, initialTab = 'profile', initialCategory = 'ALL', historyOnly = false, allowEditDelete = false, variant = "nominal", canteenOnly = false }) => {
   const [activeTab, setActiveTab] = useState<'history' | 'profile'>(historyOnly ? 'history' : initialTab);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [fromDate, setFromDate] = useState<string>(() => {
@@ -45,9 +46,10 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
     return `${y}-${m}-${lastDay}`;
   });
   const [assignments, setAssignments] = useState<DutyAssignment[]>([]);
+  const [canteenTransactions, setCanteenTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   
-  const [categoryFilter, setCategoryFilter] = useState<string>(initialCategory);
+  const [categoryFilter, setCategoryFilter] = useState<string>(canteenOnly ? 'ALL_CANTEEN' : initialCategory);
   
   const [editingGroup, setEditingGroup] = useState<DutyAssignment[] | null>(null);
   const [showDeleteGroupConfirm, setShowDeleteGroupConfirm] = useState<boolean>(false);
@@ -187,6 +189,7 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
   }, []);
 
   const handleGroupClick = (group: DutyAssignment[]) => {
+    if (!allowEditDelete) return;
     setEditingGroup(group);
     setEditFromDate(group[0].date);
     setEditToDate(group[group.length - 1].date);
@@ -410,11 +413,70 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
 
         const results = await Promise.all(promises);
         const all: DutyAssignment[] = results.flat();
-        const airmanAss = all.filter(
+        let airmanAss = all.filter(
           (a) => a && a.airmanId === airman.id && a.date >= fromDate && a.date <= toDate
         );
         airmanAss.sort((a, b) => a.date.localeCompare(b.date));
-        setAssignments(airmanAss);
+
+        if (canteenOnly) {
+          // Strictly keep ONLY CANTEEN assignments - no other duty/leave/deployment
+          const onlyCanteenDuty = airmanAss.filter(a => a.dutyCode === 'CANTEEN');
+          setAssignments(onlyCanteenDuty);
+
+          // Load Canteen transactions and pre-orders
+          try {
+            const cleanBd = (airman.bdNo || '').replace(/^BD\/?/i, '').trim();
+            const matchKeys = [
+              String(airman.id || ''),
+              String(airman.bdNo || ''),
+              cleanBd,
+              `airman-${cleanBd}`,
+              `airman-${airman.bdNo}`,
+              `cust-${cleanBd}`
+            ].filter(Boolean);
+
+            const txs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+            const myTxs = txs.filter((tx: any) => {
+              const txAid = String(tx.airman_id || '');
+              const txBd = String(tx.bdNo || '');
+              return matchKeys.includes(txAid) || 
+                     matchKeys.includes(txBd) || 
+                     (cleanBd && (txAid.includes(cleanBd) || txBd.includes(cleanBd)));
+            }).map((tx: any) => ({
+              id: tx.id || `tx-${Math.random()}`,
+              date: tx.date || '',
+              description: tx.items || (tx.type === 'BILL PAYMENT' ? `Payment Received (${tx.gateway || 'CASH'})` : 'Canteen Purchase'),
+              type: tx.type || 'PURCHASE',
+              amount: tx.amount,
+              gateway: tx.gateway,
+              isTransaction: true
+            }));
+
+            const preOrders = JSON.parse(localStorage.getItem('canteen_pre_orders') || '[]');
+            const myPreOrders = preOrders.filter((po: any) => {
+              const poAid = String(po.airman_id || '');
+              const poBd = String(po.bdNo || '');
+              return matchKeys.includes(poAid) || 
+                     matchKeys.includes(poBd) || 
+                     (cleanBd && (poAid.includes(cleanBd) || poBd.includes(cleanBd)));
+            }).map((po: any) => ({
+              id: po.id || `po-${Math.random()}`,
+              date: po.date || '',
+              description: po.items || 'Pre-Ordered Items',
+              type: 'PRE-ORDER',
+              amount: po.amount || 0,
+              status: po.status || 'PENDING',
+              isTransaction: true
+            }));
+
+            setCanteenTransactions([...myTxs, ...myPreOrders]);
+          } catch (e) {
+            console.error('Failed to load canteen transactions', e);
+            setCanteenTransactions([]);
+          }
+        } else {
+          setAssignments(airmanAss);
+        }
       } catch (err) {
         console.error('Failed to load airman history:', err);
       } finally {
@@ -511,6 +573,9 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
   };
 
   const filteredList = assignments.filter((a) => {
+    if (canteenOnly) {
+      return a.dutyCode === 'CANTEEN';
+    }
     if (categoryFilter === 'DUTY') return !['LEAVE', 'TDY', 'ATT', 'DUTY_OFF', 'ON_PARADE', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(a.dutyCode);
     if (categoryFilter === 'DEPL') return ['ATT', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(a.dutyCode);
     if (categoryFilter === 'LEAVE') return a.dutyCode === 'LEAVE';
@@ -523,8 +588,64 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
     return true;
   });
 
-  const isGroupedView = categoryFilter === 'ALL' || categoryFilter === 'LEAVE' || categoryFilter === 'TDY' || categoryFilter === 'DEPL' || categoryFilter === 'DUTY';
+  const isGroupedView = categoryFilter === 'ALL' || categoryFilter === 'LEAVE' || categoryFilter === 'TDY' || categoryFilter === 'DEPL' || categoryFilter === 'DUTY' || categoryFilter === 'CANTEEN';
   const groupedList = isGroupedView ? getGroupedList(filteredList) : [];
+
+  const canteenHistoryItems = useMemo(() => {
+    if (!canteenOnly) return [];
+    const items: Array<{
+      id: string;
+      date: string;
+      title: string;
+      type: string;
+      detail: string;
+      amountOrDays: string;
+      badgeBg: string;
+    }> = [];
+
+    // Transactions and orders
+    if (categoryFilter === 'ALL_CANTEEN' || categoryFilter === 'PURCHASES') {
+      canteenTransactions.forEach((tx, idx) => {
+        let bBg = 'bg-indigo-100 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800';
+        let typeLabel = tx.type || 'PURCHASE';
+        if (tx.type === 'BILL PAYMENT') {
+          bBg = 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800';
+          typeLabel = 'BILL PAYMENT';
+        } else if (tx.type === 'PRE-ORDER') {
+          bBg = 'bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800';
+          typeLabel = `PRE-ORDER (${tx.status || 'PENDING'})`;
+        }
+
+        items.push({
+          id: `tx-${tx.id || idx}`,
+          date: tx.date || '-',
+          title: tx.description || 'Canteen Item',
+          type: tx.type,
+          detail: typeLabel,
+          amountOrDays: tx.amount ? `৳${tx.amount}` : (tx.type === 'PRE-ORDER' ? 'Pending' : '৳0'),
+          badgeBg: bBg
+        });
+      });
+    }
+
+    // Canteen duty assignments
+    if (categoryFilter === 'ALL_CANTEEN' || categoryFilter === 'DUTY') {
+      filteredList.forEach((duty, idx) => {
+        items.push({
+          id: `duty-${duty.id || idx}`,
+          date: duty.date,
+          title: 'Canteen Duty Assignment',
+          type: 'DUTY',
+          detail: duty.notes || 'Canteen Deployment',
+          amountOrDays: '1 Day',
+          badgeBg: 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+        });
+      });
+    }
+
+    // Sort descending by date
+    return items.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  }, [canteenOnly, categoryFilter, canteenTransactions, filteredList]);
 
   const _todayD = new Date();
   const _currY = _todayD.getFullYear();
@@ -540,8 +661,11 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
         {/* Header */}
         <div className="bg-slate-900 text-white p-5 flex items-start justify-between border-b border-slate-800 shrink-0">
           <div className="flex items-center space-x-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-emerald-600 border border-emerald-400/50 flex items-center justify-center text-white text-lg font-black shadow-md">
-              {formatAirmanName(airman.rank)}
+            <div className="w-12 h-12 rounded-2xl bg-slate-800 border-2 border-emerald-500/50 flex flex-col items-center justify-center shadow-lg shrink-0 text-emerald-400">
+              <Shield className="w-5 h-5 mb-0.5" />
+              <span className="text-[8px] font-black text-white text-center leading-none">
+                {formatAirmanName(airman.rank)}
+              </span>
             </div>
             <div>
               <div className="flex items-center space-x-2">
@@ -662,32 +786,73 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                 </div>
 
                 {/* Category toggle */}
-                {isDutyMatrixMode ? (
+                {canteenOnly ? (
+                  <div className="flex items-center space-x-1 bg-white dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-700 text-[11px] font-bold">
+                    <button
+                      onClick={() => setCategoryFilter('ALL_CANTEEN')}
+                      className={`px-2.5 py-1 rounded-lg transition-all ${
+                        categoryFilter === 'ALL_CANTEEN'
+                          ? 'bg-emerald-600 text-white'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      All Canteen
+                    </button>
+                    <button
+                      onClick={() => setCategoryFilter('PURCHASES')}
+                      className={`px-2.5 py-1 rounded-lg transition-all ${
+                        categoryFilter === 'PURCHASES'
+                          ? 'bg-emerald-600 text-white'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      Purchases & Orders
+                    </button>
+                    <button
+                      onClick={() => setCategoryFilter('DUTY')}
+                      className={`px-2.5 py-1 rounded-lg transition-all ${
+                        categoryFilter === 'DUTY'
+                          ? 'bg-emerald-600 text-white'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      Canteen Duty
+                    </button>
+                  </div>
+                ) : isDutyMatrixMode ? (
                   <div className="text-[12px] font-black text-slate-800 dark:text-white px-3 py-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg">
                     {DUTY_TYPE_MAP.get(initialCategory as any)?.name || initialCategory}
                   </div>
                 ) : !historyOnly && (
                   <div className="flex items-center space-x-1 bg-white dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-700 text-[11px] font-bold">
-                    {(['ALL', 'DUTY', 'LEAVE', 'TDY', 'DEPL'].includes(categoryFilter) ? ['ALL', 'DUTY', 'LEAVE', 'TDY', 'DEPL'] : ['ALL', 'DUTY', 'LEAVE', 'TDY', 'DEPL', categoryFilter]).map((cat) => (
-                      <button
-                        key={cat}
-                        onClick={() => setCategoryFilter(cat)}
-                        className={`px-2.5 py-1 rounded-lg transition-all ${
-                          categoryFilter === cat
-                            ? 'bg-emerald-600 text-white'
-                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                        }`}
-                      >
-                        {cat}
-                      </button>
-                    ))}
+                    {(() => {
+                      const baseCats = ['ALL', 'DUTY', 'LEAVE', 'TDY', 'DEPL'];
+                      const hasCanteen = assignments.some(a => a.dutyCode === 'CANTEEN');
+                      if (hasCanteen && !baseCats.includes('CANTEEN')) {
+                        baseCats.push('CANTEEN');
+                      }
+                      const cats = baseCats.includes(categoryFilter) ? baseCats : [...baseCats, categoryFilter];
+                      return cats.map((cat) => (
+                        <button
+                          key={cat}
+                          onClick={() => setCategoryFilter(cat)}
+                          className={`px-2.5 py-1 rounded-lg transition-all ${
+                            categoryFilter === cat
+                              ? 'bg-emerald-600 text-white'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                          }`}
+                        >
+                          {cat}
+                        </button>
+                      ));
+                    })()}
                   </div>
                 )}
               </div>
             {/* Assignments Table */}
               <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
                 <div className="flex-1 overflow-y-auto relative">
-                {editingGroup ? (
+                {allowEditDelete && editingGroup ? (
                   <div className="p-4 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm animate-fadeIn">
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="font-bold text-slate-900 dark:text-white">Edit / Remove Entry</h3>
@@ -1329,6 +1494,55 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                       </div>
                     )}
                   </div>
+                ) : canteenOnly ? (
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-extrabold uppercase text-[10px] tracking-wider">
+                        <th className="py-2.5 px-3.5">Ser</th>
+                        <th className="py-2.5 px-3.5">Date</th>
+                        <th className="py-2.5 px-3.5">Description / Activity</th>
+                        <th className="py-2.5 px-3.5">Category</th>
+                        <th className="py-2.5 px-3.5 text-right">Amount / Days</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {loading ? (
+                        <tr>
+                          <td colSpan={5} className="py-8 text-center text-slate-400 font-bold">
+                            Loading Canteen history...
+                          </td>
+                        </tr>
+                      ) : canteenHistoryItems.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="py-8 text-center text-slate-400 font-bold">
+                            No Canteen history records found for this period.
+                          </td>
+                        </tr>
+                      ) : (
+                        canteenHistoryItems.map((item, idx) => (
+                          <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                            <td className="py-2.5 px-3.5 font-mono font-bold text-slate-500">
+                              {String(idx + 1).padStart(2, '0')}
+                            </td>
+                            <td className="py-2.5 px-3.5 font-mono font-bold text-slate-800 dark:text-slate-200 whitespace-nowrap">
+                              {item.date}
+                            </td>
+                            <td className="py-2.5 px-3.5 font-bold text-slate-800 dark:text-slate-200">
+                              {item.title}
+                            </td>
+                            <td className="py-2.5 px-3.5">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${item.badgeBg}`}>
+                                {item.detail}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3.5 text-right font-black text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
+                              {item.amountOrDays}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
                 ) : isGroupedView ? (
                   <table className="w-full text-center border-collapse text-xs">
                     <thead>
@@ -1355,7 +1569,12 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                             return DUTY_TYPE_MAP.get(first.dutyCode)?.name || first.dutyCode;
                           })();
                           return (
-                            <tr key={idx} onClick={() => handleGroupClick(group)} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 cursor-pointer" title="Click to edit or remove">
+                            <tr
+                              key={idx}
+                              onClick={allowEditDelete ? () => handleGroupClick(group) : undefined}
+                              className={`transition-colors ${allowEditDelete ? 'hover:bg-slate-50 dark:hover:bg-slate-800/40 cursor-pointer' : ''}`}
+                              title={allowEditDelete ? 'Click to edit or remove' : undefined}
+                            >
                               <td className="py-2.5 px-3.5 font-mono font-bold text-slate-800 dark:text-slate-200">
                                 {String(idx + 1).padStart(2, '0')}
                               </td>
@@ -1416,7 +1635,12 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                         filteredList.map((item, idx) => {
                           const typeInfo = DUTY_TYPE_MAP.get(item.dutyCode);
                           return (
-                            <tr key={idx} onClick={() => handleGroupClick([item])} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 cursor-pointer" title="Click to edit or remove">
+                            <tr
+                              key={idx}
+                              onClick={allowEditDelete ? () => handleGroupClick([item]) : undefined}
+                              className={`transition-colors ${allowEditDelete ? 'hover:bg-slate-50 dark:hover:bg-slate-800/40 cursor-pointer' : ''}`}
+                              title={allowEditDelete ? 'Click to edit or remove' : undefined}
+                            >
                               <td className="py-2.5 px-3.5 font-mono font-bold text-slate-800 dark:text-slate-200">
                                 {item.date}
                               </td>

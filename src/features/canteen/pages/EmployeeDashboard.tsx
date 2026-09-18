@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Utensils, Search, Clock, Plus, Check } from 'lucide-react';
+import { Utensils, Search, Clock, Plus, Check, User, Phone, MessageSquare, X, Copy, CheckCheck } from 'lucide-react';
 import { supabase } from '../../../supabase';
+import { getCanteenConfig, resolveImageUrl, CanteenConfig } from '../utils/canteenSettings';
 import {
   BarChart,
   Bar,
@@ -27,6 +28,26 @@ interface EmployeeDashboardProps { onManagerPortalClick?: () => void; currentUse
 export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ onManagerPortalClick, currentUser }) => {
   const [dailyMenu, setDailyMenu] = useState<any[]>([]);
   const [isOrdering, setIsOrdering] = useState(false);
+  const [canteenConfig, setCanteenConfig] = useState<CanteenConfig>(() => getCanteenConfig());
+  const [showContactModal, setShowContactModal] = useState(false);
+  const [copiedPhone, setCopiedPhone] = useState(false);
+
+  const rawPhone = canteenConfig.phone || '+880 1601-676760';
+  const cleanPhone = rawPhone.replace(/\s+/g, '');
+  let waDigits = rawPhone.replace(/[^0-9]/g, '');
+  if (waDigits.startsWith('0')) {
+    waDigits = '88' + waDigits;
+  } else if (!waDigits.startsWith('880') && waDigits.length === 10) {
+    waDigits = '880' + waDigits;
+  }
+  const waUrl = `https://wa.me/${waDigits}`;
+  const telUrl = `tel:${cleanPhone}`;
+
+  const copyNumber = () => {
+    navigator.clipboard.writeText(rawPhone);
+    setCopiedPhone(true);
+    setTimeout(() => setCopiedPhone(false), 2000);
+  };
   
   useEffect(() => {
       fetchMenu();
@@ -35,18 +56,31 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ onManagerP
           if (e.key === 'canteen_daily_menu') {
               fetchMenu();
           }
+          if (e.key === 'canteen_settings') {
+              setCanteenConfig(getCanteenConfig());
+          }
       };
       
       const handleCustomEvent = () => {
           fetchMenu();
       };
 
+      const handleSettingsUpdated = (e: any) => {
+          if (e.detail) {
+              setCanteenConfig(e.detail);
+          } else {
+              setCanteenConfig(getCanteenConfig());
+          }
+      };
+
       window.addEventListener('storage', handleStorageChange);
       window.addEventListener('canteen_menu_updated', handleCustomEvent);
+      window.addEventListener('canteen_settings_updated', handleSettingsUpdated);
       
       return () => {
           window.removeEventListener('storage', handleStorageChange);
           window.removeEventListener('canteen_menu_updated', handleCustomEvent);
+          window.removeEventListener('canteen_settings_updated', handleSettingsUpdated);
       };
   }, []);
 
@@ -343,33 +377,90 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ onManagerP
     <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300 pb-10">
       
       {/* Top Banner */}
-      <div className="flex flex-col md:flex-row bg-slate-900 rounded-[2rem] shadow-sm border border-slate-800 overflow-hidden h-auto md:h-40">
-         {/* Left Side */}
-         <div className="md:w-1/2 bg-[#0f172a] text-white p-8 flex flex-col justify-center items-center relative overflow-hidden">
-            <Utensils className="absolute w-64 h-64 text-white opacity-20 -right-10 -bottom-10" />
+      <div className="flex flex-col md:flex-row bg-slate-900 rounded-[2rem] shadow-sm border border-slate-800 overflow-hidden min-h-[160px]">
+         {/* Left Side - Active Canteen Identity */}
+         <div className="md:w-1/2 bg-[#0f172a] text-white p-6 md:p-8 flex flex-col justify-center items-center relative overflow-hidden">
+            <Utensils className="absolute w-64 h-64 text-white opacity-10 -right-10 -bottom-10" />
             
-            <div className="flex flex-col items-center space-y-2 z-10">
-               <div className="bg-[#4f46e5]/20 p-2 rounded-2xl mb-1">
-                 <div className="w-12 h-12 bg-slate-900 rounded-xl flex items-center justify-center">
-                    <span className="text-[8px] text-[#4f46e5] text-center leading-tight font-bold">postimg<br/>free hosting</span>
-                 </div>
+            <div className="flex flex-col items-center space-y-2 z-10 text-center">
+               <div className="w-14 h-14 bg-slate-800/90 rounded-2xl flex items-center justify-center p-1.5 border border-slate-700 shadow-inner overflow-hidden mb-1">
+                 {canteenConfig.logoUrl ? (
+                   <img 
+                     src={resolveImageUrl(canteenConfig.logoUrl)} 
+                     alt="Canteen Logo" 
+                     referrerPolicy="no-referrer"
+                     className="w-full h-full object-contain"
+                     onError={(e) => {
+                       e.currentTarget.style.display = 'none';
+                     }}
+                   />
+                 ) : (
+                   <Utensils className="w-6 h-6 text-[#4f46e5]" />
+                 )}
                </div>
-               <h2 className="text-4xl font-black tracking-widest flex items-center space-x-2">
-                 <span>🍽️</span> <span>CAFEUAV</span> <span>🍽️</span>
+               <h2 className="text-3xl md:text-4xl font-black tracking-widest flex items-center justify-center space-x-2">
+                 <span>{canteenConfig.name || '🍽️ CAFE UAV 🍽️'}</span>
                </h2>
                <p className="text-[10px] tracking-widest text-slate-400 font-bold uppercase">Eat Good Food, Serve Good!</p>
             </div>
          </div>
-         {/* Right Side */}
-         <div className="md:w-1/2 p-8 flex items-center justify-between">
+
+         {/* Right Side - Manager Info & Picture */}
+         <div className="md:w-1/2 p-6 md:p-8 flex items-center justify-between bg-slate-900 border-t md:border-t-0 md:border-l border-slate-800">
             <div className="flex items-center space-x-4">
-               <div className="w-14 h-14 rounded-full bg-slate-800 border-2 border-white shadow-md overflow-hidden">
-                  <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUser?.name || 'Guest'}&backgroundColor=f1f5f9`} alt="User" className="w-full h-full object-cover" />
+               <div className="w-16 h-16 rounded-2xl bg-slate-800 border-2 border-indigo-500/50 shadow-md flex items-center justify-center overflow-hidden shrink-0">
+                  {canteenConfig.adminImage ? (
+                     <img 
+                       src={resolveImageUrl(canteenConfig.adminImage)} 
+                       alt={canteenConfig.managerName || 'Manager'} 
+                       referrerPolicy="no-referrer"
+                       className="w-full h-full object-cover"
+                       onError={(e) => {
+                         e.currentTarget.style.display = 'none';
+                       }}
+                     />
+                  ) : (
+                     <User className="w-8 h-8 text-indigo-400" />
+                  )}
                </div>
                <div>
-                  <p className="text-[10px] font-black text-[#4f46e5] uppercase tracking-widest">{currentUser?.role === 'manager' ? 'MANAGER' : 'MEMBER'}</p>
-                  <p className="text-xl font-bold text-white dark:text-white leading-tight">{currentUser?.name || 'Guest'}</p>
-                  <p className="text-xs font-bold text-slate-400">+880 1601-676760</p>
+                  <div className="flex items-center space-x-2">
+                     <span className="text-[9px] font-black text-indigo-300 uppercase tracking-widest px-2 py-0.5 rounded bg-indigo-950/80 border border-indigo-800/60">
+                        CANTEEN MANAGER
+                     </span>
+                  </div>
+                  <p className="text-xl md:text-2xl font-black text-white leading-tight mt-1">
+                     {canteenConfig.managerName || 'LAC Nishad'}
+                  </p>
+                  <div className="flex items-center space-x-2 mt-1.5 flex-wrap gap-y-1.5">
+                     <button 
+                       onClick={() => setShowContactModal(true)}
+                       className="group flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-indigo-500/50 transition-all text-xs font-bold text-slate-300 hover:text-white cursor-pointer"
+                       title="Click for Call or WhatsApp options"
+                     >
+                        <Phone className="w-3.5 h-3.5 text-emerald-400 group-hover:scale-110 transition-transform" />
+                        <span className="underline decoration-slate-600 group-hover:decoration-emerald-400 underline-offset-2">{rawPhone}</span>
+                     </button>
+
+                     <div className="flex items-center space-x-1">
+                        <a 
+                          href={telUrl}
+                          className="p-1.5 rounded-lg bg-emerald-950/60 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-800/60 transition-all shadow-sm"
+                          title="Direct Phone Call"
+                        >
+                           <Phone className="w-3.5 h-3.5" />
+                        </a>
+                        <a 
+                          href={waUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-1.5 rounded-lg bg-emerald-950/60 hover:bg-[#25D366] text-[#25D366] hover:text-white border border-emerald-800/60 transition-all shadow-sm"
+                          title="Chat on WhatsApp"
+                        >
+                           <MessageSquare className="w-3.5 h-3.5" />
+                        </a>
+                     </div>
+                  </div>
                </div>
             </div>
          </div>
@@ -434,6 +525,82 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ onManagerP
             </div>
          </div>
       </div>
+
+      {/* Manager Contact Modal */}
+      {showContactModal && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setShowContactModal(false)}>
+           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-sm w-full shadow-2xl relative animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+              <button 
+                onClick={() => setShowContactModal(false)}
+                className="absolute top-4 right-4 text-slate-400 hover:text-white p-1.5 rounded-xl hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="text-center mb-6 pt-2">
+                 <div className="w-16 h-16 rounded-2xl bg-slate-800 border-2 border-indigo-500/50 shadow-lg flex items-center justify-center overflow-hidden mx-auto mb-3">
+                   {canteenConfig.adminImage ? (
+                      <img 
+                        src={resolveImageUrl(canteenConfig.adminImage)} 
+                        alt={canteenConfig.managerName || 'Manager'} 
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover"
+                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                      />
+                   ) : (
+                      <User className="w-8 h-8 text-indigo-400" />
+                   )}
+                 </div>
+                 <h4 className="text-lg font-black text-white">{canteenConfig.managerName || 'Canteen Manager'}</h4>
+                 <span className="inline-block text-[10px] font-black text-indigo-300 uppercase tracking-widest px-2.5 py-0.5 rounded-full bg-indigo-950 border border-indigo-800/60 mt-1">
+                    Canteen Manager
+                 </span>
+                 <div className="mt-3">
+                    <p className="text-sm font-mono text-slate-200 font-bold bg-slate-950 py-1.5 px-3 rounded-xl border border-slate-800 inline-block">
+                       {rawPhone}
+                    </p>
+                 </div>
+              </div>
+
+              <div className="space-y-3">
+                 <a 
+                   href={telUrl}
+                   className="w-full flex items-center justify-center space-x-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3.5 px-4 rounded-xl transition-all shadow-lg shadow-emerald-900/30 active:scale-[0.98]"
+                 >
+                   <Phone className="w-4 h-4" />
+                   <span>Direct Phone Call</span>
+                 </a>
+
+                 <a 
+                   href={waUrl}
+                   target="_blank"
+                   rel="noopener noreferrer"
+                   className="w-full flex items-center justify-center space-x-2.5 bg-[#25D366] hover:bg-[#20bd5a] text-white font-bold py-3.5 px-4 rounded-xl transition-all shadow-lg shadow-emerald-900/30 active:scale-[0.98]"
+                 >
+                   <MessageSquare className="w-4 h-4" />
+                   <span>WhatsApp Message</span>
+                 </a>
+
+                 <button 
+                   onClick={copyNumber}
+                   className="w-full flex items-center justify-center space-x-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-2.5 px-4 rounded-xl border border-slate-700 transition-all text-xs cursor-pointer"
+                 >
+                   {copiedPhone ? (
+                     <>
+                       <CheckCheck className="w-4 h-4 text-emerald-400" />
+                       <span className="text-emerald-400">Number Copied!</span>
+                     </>
+                   ) : (
+                     <>
+                       <Copy className="w-4 h-4" />
+                       <span>Copy Phone Number</span>
+                     </>
+                   )}
+                 </button>
+              </div>
+           </div>
+        </div>
+      )}
     </div>
   );
 };

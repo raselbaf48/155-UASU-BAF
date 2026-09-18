@@ -140,7 +140,7 @@ export const EntryHistoryModal: React.FC<EntryHistoryModalProps> = ({
     setEditingItem(item);
     setEditAirmanId(item.airmanId);
     setEditDutyCode(item.dutyCode || 'GD');
-    setEditIdaShift((item.idaShift && item.idaShift !== 'undefined' ? item.idaShift : 'Morning'));
+    setEditIdaShift((item.idaShift && (item.idaShift as any) !== 'undefined' ? item.idaShift : 'Morning'));
     setEditFromDate(item.fromDate);
     setEditToDate(item.toDate || item.fromDate);
     setEditNotes(item.notes || '');

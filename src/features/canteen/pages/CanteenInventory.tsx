@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Plus, Edit2, Trash2, ImageIcon, Save, X } from 'lucide-react';
+import { Search, Plus, Edit2, Trash2, ImageIcon, Save, X, Loader2 } from 'lucide-react';
 import { supabase } from '../../../supabase';
+import { resolveImageUrl, fetchDirectImageUrl } from '../utils/canteenSettings';
 
 export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = false}) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -245,8 +246,28 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     name: '',
     category: 'SNACKS',
     price: 0,
-    stock: 0
+    stock: 0,
+    DP: ''
   });
+  const [resolvingItemDp, setResolvingItemDp] = useState(false);
+
+  const handleAutoResolveItemDp = async (url: string) => {
+    const trimmed = url.trim();
+    if (!trimmed) return;
+    if (trimmed.includes('photos.app.goo.gl') || trimmed.includes('photos.google.com/share') || trimmed.includes('drive.google.com')) {
+      setResolvingItemDp(true);
+      try {
+        const direct = await fetchDirectImageUrl(trimmed);
+        if (direct && direct !== trimmed) {
+          setNewItem(prev => ({ ...prev, DP: direct }));
+        }
+      } catch (e) {
+        console.warn('Item DP resolution failed:', e);
+      } finally {
+        setResolvingItemDp(false);
+      }
+    }
+  };
 
   useEffect(() => {
     fetchItems();
@@ -514,7 +535,8 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       name: item.name,
       category: item.category,
       price: item.price,
-      stock: item.stock
+      stock: item.stock,
+      DP: item.DP || ''
     });
     setShowAddModal(true);
   };
@@ -522,33 +544,46 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
   const handleAddItem = async () => {
       if (!newItem.name || newItem.price <= 0) return;
       
+      let finalDp = (newItem.DP || '').trim();
+      if (finalDp.includes('photos.app.goo.gl') || finalDp.includes('photos.google.com/share')) {
+        setResolvingItemDp(true);
+        finalDp = await fetchDirectImageUrl(finalDp);
+        setResolvingItemDp(false);
+      }
+
       const payload = {
-          name: newItem.name,
+          name: newItem.name.trim(),
           category: newItem.category,
           price: newItem.price,
-          stock: newItem.stock
+          stock: newItem.stock,
+          DP: finalDp || null
       };
 
       if (isEditMode && editingId) {
           const { error } = await supabase.from('Canteen_Inventory').update(payload).eq('id', editingId);
           if (!error) {
               setShowAddModal(false);
-              fetchItems();
+              // Realtime update local state
+              setItems(prev => prev.map(i => i.id === editingId ? { ...i, ...payload } : i));
           } else {
               alert("Error updating item: " + error.message);
           }
       } else {
-          const { error } = await supabase.from('Canteen_Inventory').insert([payload]);
+          const { data, error } = await supabase.from('Canteen_Inventory').insert([payload]).select();
           
           if (!error) {
               setShowAddModal(false);
-              fetchItems();
+              if (data && data[0]) {
+                setItems(prev => [data[0], ...prev]);
+              } else {
+                fetchItems();
+              }
           } else {
-              setItems([...items, { ...payload, id: Math.random().toString() }]);
+              setItems([{ ...payload, id: Math.random().toString() }, ...items]);
               setShowAddModal(false);
           }
       }
-      setNewItem({ name: '', category: 'SNACKS', price: 0, stock: 0 });
+      setNewItem({ name: '', category: 'SNACKS', price: 0, stock: 0, DP: '' });
       setIsEditMode(false);
       setEditingId(null);
   };
@@ -577,15 +612,21 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
             <h2 className="text-2xl font-black text-white uppercase tracking-tighter">CANTEEN MENU</h2>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">CLOUD INTEGRATED INVENTORY</p>
          </div>
-         <button onClick={() => {
-            setIsEditMode(false);
-            setEditingId(null);
-            setNewItem({ name: '', category: 'SNACKS', price: 0, stock: 0 });
-            setShowAddModal(true);
-         }} className="flex items-center space-x-2 px-5 py-3 bg-[#4f46e5] text-white rounded-xl text-[10px] font-black tracking-widest hover:bg-[#4338ca] transition-colors shadow-md shadow-indigo-500/20">
-            <Plus className="w-4 h-4" />
-            <span>ADD NEW ENTRY</span>
-         </button>
+         {!readOnly ? (
+           <button onClick={() => {
+              setIsEditMode(false);
+              setEditingId(null);
+              setNewItem({ name: '', category: 'SNACKS', price: 0, stock: 0, DP: '' });
+              setShowAddModal(true);
+           }} className="flex items-center space-x-2 px-5 py-3 bg-[#4f46e5] text-white rounded-xl text-[10px] font-black tracking-widest hover:bg-[#4338ca] transition-colors shadow-md shadow-indigo-500/20">
+              <Plus className="w-4 h-4" />
+              <span>ADD NEW ENTRY</span>
+           </button>
+         ) : (
+           <div className="flex items-center space-x-2 px-4 py-2 bg-slate-800/80 border border-slate-700/80 rounded-xl text-slate-400 text-xs font-bold uppercase tracking-wider">
+              <span>VIEW ONLY MODE</span>
+           </div>
+         )}
       </div>
 
       {/* Search Bar */}
@@ -608,17 +649,29 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
              {filteredItems.map((item, i) => (
                 <div key={i} className={`bg-slate-900 rounded-[2rem] p-6 border-2 shadow-sm transition-all hover:shadow-md ${item.active ? 'border-[#4f46e5] shadow-indigo-500/10' : 'border-slate-800'}`}>
                    <div className="flex items-start justify-between mb-4">
-                      <div className="w-12 h-12 rounded-2xl bg-indigo-900/30 text-indigo-400 flex items-center justify-center shadow-sm">
-                         <ImageIcon className="w-5 h-5" />
+                      <div className="w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700/60 overflow-hidden flex items-center justify-center shrink-0 shadow-sm">
+                         {item.DP ? (
+                            <img 
+                               src={resolveImageUrl(item.DP)} 
+                               alt={item.name} 
+                               referrerPolicy="no-referrer"
+                               className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+                               onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                            />
+                         ) : (
+                            <ImageIcon className="w-6 h-6 text-indigo-400" />
+                         )}
                       </div>
-                      <div className="flex items-center space-x-2">
-                         <button onClick={() => handleEdit(item)} className="p-1.5 text-indigo-400 hover:text-indigo-600 transition-colors">
-                            <Edit2 className="w-4 h-4" />
-                         </button>
-                         <button onClick={() => setDeleteConfirmId(item.id)} className="p-1.5 text-rose-400 hover:text-rose-600 transition-colors">
-                            <Trash2 className="w-4 h-4" />
-                         </button>
-                      </div>
+                      {!readOnly && (
+                        <div className="flex items-center space-x-2">
+                           <button onClick={() => handleEdit(item)} className="p-1.5 text-indigo-400 hover:text-indigo-600 transition-colors">
+                              <Edit2 className="w-4 h-4" />
+                           </button>
+                           <button onClick={() => setDeleteConfirmId(item.id)} className="p-1.5 text-rose-400 hover:text-rose-600 transition-colors">
+                              <Trash2 className="w-4 h-4" />
+                           </button>
+                        </div>
+                      )}
                    </div>
 
                    <div className="mb-4">
@@ -699,6 +752,52 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                         className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                         placeholder="0"
                      />
+                  </div>
+
+                  {/* DP URL input with preview and auto-resolution */}
+                  <div>
+                     <div className="flex items-center justify-between mb-1">
+                        <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase block">
+                           ITEM PHOTO URL (DP)
+                        </label>
+                        <span className="text-[9px] font-bold text-indigo-400">
+                           {resolvingItemDp ? 'Resolving...' : 'Google Photos / Web'}
+                        </span>
+                     </div>
+                     <div className="relative">
+                        <input 
+                           type="text" 
+                           value={newItem.DP}
+                           onChange={(e) => {
+                              const val = e.target.value;
+                              setNewItem({ ...newItem, DP: val });
+                              if (val.includes('photos.app.goo.gl') || val.includes('photos.google.com/share')) {
+                                 handleAutoResolveItemDp(val);
+                              }
+                           }}
+                           onBlur={() => handleAutoResolveItemDp(newItem.DP)}
+                           className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl pl-4 pr-12 py-3 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 truncate"
+                           placeholder="https://... (Google Photos or Web link)"
+                        />
+                        <div className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-lg bg-slate-900 border border-slate-700 overflow-hidden flex items-center justify-center shrink-0">
+                           {resolvingItemDp ? (
+                              <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+                           ) : newItem.DP ? (
+                              <img 
+                                 src={resolveImageUrl(newItem.DP)} 
+                                 alt="Preview" 
+                                 referrerPolicy="no-referrer"
+                                 className="w-full h-full object-cover"
+                                 onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                              />
+                           ) : (
+                              <ImageIcon className="w-4 h-4 text-slate-500" />
+                           )}
+                        </div>
+                     </div>
+                     <p className="text-[9px] text-slate-400 mt-1">
+                        💡 Google Photos লিঙ্ক দিলে স্বয়ংক্রিয়ভাবে ছবিতে পরিণত হবে।
+                     </p>
                   </div>
                </div>
 
