@@ -55,6 +55,8 @@ import {
  exportParadeStateMultiDocx,
  MultiParadeDayItem,
 } from '../utils/docxExport';
+import { DisposalCategoryDropdown } from './DisposalCategoryDropdown';
+import { saveCustomDisposal, getSavedCustomDisposals } from '../utils/customDisposalStore';
 
 interface PrintableParadeStateModalProps {
  isOpen?: boolean;
@@ -221,7 +223,7 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
   const getPdfTitle = () => {
     const formattedDate = formatDateShort(fromDate).replace(/ \d{2}$/, '');
     const toFormattedDate = formatDateShort(toDate).replace(/ \d{2}$/, '');
-    const flightText = selectedFlight === 'Overall' ? 'Overall' : `${selectedFlight} Flt`;
+    const flightText = selectedFlight === 'Overall' ? '155 UASU' : `${selectedFlight} Flt`;
     if (fromDate === toDate) {
        return `${isPtDocument ? 'PT' : 'Parade'} State - ${flightText} (${formattedDate})`;
     } else {
@@ -727,9 +729,20 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  const codeUpper = (dutyCode || '').toUpperCase();
  const notesLower = (notes || '').toLowerCase();
 
- const isPtIdacA = isPtDocument && codeUpper === 'IDAC' && ((!idaShift || idaShift.trim() === 'Morning') || !idaShift);
+ const isIdac = codeUpper === 'IDAC' || codeUpper === 'IDA' || notesLower.includes('idac') || notesLower.includes('ida center');
+ const shiftLower = (idaShift || '').toLowerCase();
+ const isIdacNt = isIdac && (
+ shiftLower === 'night' || shiftLower === 'c' || shiftLower === 'nt' ||
+ notesLower.includes('night') || notesLower.includes('nt') || notesLower.includes('shift c') || notesLower.includes('"c"')
+ );
+ const isPtIdacA = isPtDocument && isIdac && !isIdacNt && (
+ shiftLower === 'morning' || shiftLower === 'a' || !idaShift ||
+ notesLower.includes('morning') || notesLower.includes('idac a')
+ );
 
- if (codeUpper === 'ON_PARADE' || statusCategory === 'PARADE' || isPtIdacA) {
+ if (isPtDocument && isIdacNt) {
+ guardDutyCount++;
+ } else if (codeUpper === 'ON_PARADE' || statusCategory === 'PARADE' || isPtIdacA || (!isPtDocument && isIdacNt && statusCategory !== 'OFF')) {
  // Available on Parade / PT
  } else if (codeUpper === 'LEAVE' || statusCategory === 'LEAVE') {
  leaveCount++;
@@ -854,11 +867,21 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  const codeUpper = (dutyCode || '').toUpperCase();
  const notesLower = (notes || '').toLowerCase();
 
- const isPtIdacA = isPtDocument && codeUpper === 'IDAC' && ((!idaShift || idaShift.trim() === 'Morning') || !idaShift);
+ const isIdac = codeUpper === 'IDAC' || codeUpper === 'IDA' || notesLower.includes('idac') || notesLower.includes('ida center');
+ const shiftLower = (idaShift || '').toLowerCase();
+ const isIdacNt = isIdac && (
+ shiftLower === 'night' || shiftLower === 'c' || shiftLower === 'nt' ||
+ notesLower.includes('night') || notesLower.includes('nt') || notesLower.includes('shift c') || notesLower.includes('"c"')
+ );
+ const isPtIdacA = isPtDocument && isIdac && !isIdacNt && (
+ shiftLower === 'morning' || shiftLower === 'a' || !idaShift ||
+ notesLower.includes('morning') || notesLower.includes('idac a')
+ );
 
- 
-        
-        if (statusCategory === 'PARADE' || codeUpper === 'ON_PARADE' || isPtIdacA) {
+ if (isPtDocument && isIdacNt) {
+ const dutyDisplay = formatDutyOnShortName(codeUpper, idaShift, notes, item.dutyName);
+ dutyOnList.push({ airman, note: dutyDisplay });
+ } else if (statusCategory === 'PARADE' || codeUpper === 'ON_PARADE' || isPtIdacA || (!isPtDocument && isIdacNt && statusCategory !== 'OFF')) {
  onPtList.push({ airman, note: '' });
  } else if (codeUpper === 'LEAVE' || statusCategory === 'LEAVE') {
  leaveList.push({ airman, note: '' });
@@ -1001,42 +1024,44 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  };
 
  if (isOpen === false) return null;
- return createPortal(
+  return createPortal(
     <div className="fixed inset-0 z-[100] flex flex-col bg-slate-900/90 backdrop-blur-sm overflow-hidden print:bg-white print:static print:w-full print:h-auto print:z-[9999] print:overflow-visible print:block">
- {/* MODAL HEADER - HIDDEN ON PRINT */}
-        <div className="flex-none bg-slate-900 border-b border-slate-700 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-2xl print:hidden z-10 sticky top-0">
-          <div className="flex items-center space-x-3 text-white">
-            
-            
-            {onDownloadDocx && (
-              <button
-                onClick={onDownloadDocx}
-                className="flex items-center space-x-2 px-6 py-2.5 bg-blue-700 hover:bg-blue-600 text-white rounded-xl font-black text-sm shadow-lg shadow-blue-900/20 transition-all cursor-pointer"
-                title="Download Document"
-              >
-                <Download className="w-5 h-5" />
-                <span>Download Document</span>
-              </button>
-            )}
-<button
-              onClick={() => {
-                document.title = getPdfTitle();
-                window.print();
-              }}
-              className="flex items-center space-x-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black text-sm shadow-lg shadow-emerald-900/20 transition-all cursor-pointer"
-            >
-              <Printer className="w-5 h-5" />
-              <span>Official Export / Print</span>
-            </button>
-            <button
-              onClick={onClose}
-              className="flex items-center space-x-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold text-sm transition-colors cursor-pointer ml-3"
-            >
-              <X className="w-5 h-5" />
-              <span>Close</span>
-            </button>
+      {/* MODAL HEADER - HIDDEN ON PRINT */}
+      <div className="flex-none bg-slate-900 border-b border-slate-700 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between shadow-2xl print:hidden z-10 gap-4 sticky top-0">
+        <div className="flex items-center space-x-4">
+          <button
+            onClick={onClose}
+            className="p-2 bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white rounded-xl transition-all cursor-pointer"
+            title="Close Preview"
+          >
+            <X className="w-5 h-5" />
+          </button>
+          <div>
+            <h2 className="text-base sm:text-lg font-black text-white">Print Preview: 155 UASU BAF</h2>
+            <p className="text-xs font-medium text-slate-400">Review document before printing</p>
           </div>
         </div>
+        <div className="flex flex-wrap sm:flex-nowrap items-center gap-3">
+          <button
+            onClick={onDownloadDocx || (() => exportHtmlToWord('print-parade-state-content', `${getPdfTitle()}.doc`, 'landscape'))}
+            className="flex items-center space-x-2 px-3 sm:px-6 py-2 sm:py-2.5 bg-blue-700 hover:bg-blue-600 text-white rounded-xl font-black text-sm shadow-lg shadow-blue-900/20 transition-all cursor-pointer"
+            title="Export Document"
+          >
+            <FileDown className="w-5 h-5" />
+            <span>Export Doc</span>
+          </button>
+          <button
+            onClick={() => {
+              document.title = getPdfTitle();
+              window.print();
+            }}
+            className="flex items-center space-x-2 px-3 sm:px-6 py-2 sm:py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black text-sm shadow-lg shadow-emerald-900/20 transition-all cursor-pointer"
+          >
+            <Printer className="w-5 h-5" />
+            <span>Official Export / Print</span>
+          </button>
+        </div>
+      </div>
 
  {/* SCROLLABLE DOCUMENT CONTAINER */}
  <div id="print-parade-state-content" className="flex-1 overflow-y-auto p-4 sm:p-8 flex justify-center print:p-0 print:overflow-visible print:block">
@@ -1787,30 +1812,12 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  );
  })}
  {!isEditingDisposals && (
- <div className="relative">
- <button
- type="button"
- onClick={() => setShowDisposalDropdown(!showDisposalDropdown)}
- className="px-2.5 py-1.5 rounded-xl text-xs font-bold border border-dashed border-slate-300 dark:border-slate-600 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:border-slate-400 bg-slate-50 transition-all cursor-pointer flex items-center space-x-1"
- >
- <Plus className="w-3.5 h-3.5" />
- {savedDisposals.length === 0 && <span>Add Category</span>}
- </button>
- {showDisposalDropdown && (
- <div className="absolute top-full left-0 mt-1 w-56 max-h-64 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 py-1">
- {[...ALL_DISPOSAL_OPTIONS, ...historicalCustomCats].filter(opt => opt.code === 'OTHERS' || (!savedDisposals.some(d => d.code === opt.code && (d.code !== 'OTHERS' || d.customTitle === opt.customTitle)))).filter((opt, index, self) => index === self.findIndex((t) => t.code === opt.code && t.customTitle === opt.customTitle)).map((opt) => (
- <button
- key={opt.label}
- type="button"
- onClick={() => handleAddDisposalOption(opt)}
- className="w-full text-left px-4 py-2 text-[11px] font-bold text-slate-700 dark:text-slate-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 hover:text-emerald-900 dark:hover:text-emerald-100 transition-colors"
- >
- {opt.code === 'OTHERS' && opt.customTitle ? opt.customTitle : opt.label}
- </button>
- ))}
- </div>
- )}
- </div>
+ <DisposalCategoryDropdown
+ options={[...ALL_DISPOSAL_OPTIONS, ...historicalCustomCats]}
+ savedDisposals={savedDisposals}
+ onSelectOption={handleAddDisposalOption}
+ buttonLabel="Add Category"
+ />
  )}
  </div>
 
@@ -2224,36 +2231,22 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
                     );
                   })}
                   {!isEditingDisposals && (
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={() => setShowDisposalDropdown(!showDisposalDropdown)}
-                        className="px-2.5 py-1.5 rounded-xl text-xs font-bold border border-dashed border-slate-300 dark:border-slate-600 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:border-slate-400 bg-slate-50 dark:bg-slate-900 transition-all cursor-pointer flex items-center space-x-1"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        {savedDisposals.length === 0 && <span>Add Category</span>}
-                      </button>
-                      {showDisposalDropdown && (
-                        <div className="absolute bottom-full mb-1 left-0 w-56 max-h-64 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 py-1">
-                          {[...ALL_DISPOSAL_OPTIONS, ...historicalCustomCats].filter(opt => opt.code === 'OTHERS' || (!savedDisposals.some(d => d.code === opt.code && (d.code !== 'OTHERS' || d.customTitle === opt.customTitle)))).filter((opt, index, self) => index === self.findIndex((t) => t.code === opt.code && t.customTitle === opt.customTitle)).map((opt) => (
-                            <button
-                              key={opt.label}
-                              type="button"
-                              onClick={() => {
-                                handleAddDisposalOption(opt);
-                                setEditDisposalCategory(opt.code);
-                                if (opt.customTitle) setEditDisposalCustomTitle(opt.customTitle);
-                                else if (opt.code === 'OTHERS') setEditDisposalCustomTitle('');
-                                setShowDisposalDropdown(false);
-                              }}
-                              className="w-full text-left px-4 py-2 text-[11px] font-bold text-slate-700 dark:text-slate-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 hover:text-emerald-900 dark:hover:text-emerald-100 transition-colors"
-                            >
-                              {opt.code === 'OTHERS' && opt.customTitle ? opt.customTitle : opt.label}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                    <DisposalCategoryDropdown
+                      options={[...ALL_DISPOSAL_OPTIONS, ...historicalCustomCats]}
+                      savedDisposals={savedDisposals}
+                      dropUp={true}
+                      onSelectOption={(opt) => {
+                        handleAddDisposalOption(opt);
+                        setEditDisposalCategory(opt.code);
+                        if (opt.customTitle) {
+                          setEditDisposalCustomTitle(opt.customTitle);
+                          saveCustomDisposal(opt.customTitle);
+                        } else if (opt.code === 'OTHERS') {
+                          setEditDisposalCustomTitle('');
+                        }
+                      }}
+                      buttonLabel="Add Category"
+                    />
                   )}
                 </div>
 

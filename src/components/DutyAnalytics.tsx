@@ -28,6 +28,14 @@ export const DutyAnalytics: React.FC<DutyAnalyticsProps> = ({ airmen, onViewProf
     }
   });
 
+  const [removedHolidays, setRemovedHolidays] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('baf_removed_holidays') || '[]');
+    } catch {
+      return [];
+    }
+  });
+
   const [filterMode, setFilterMode] = useState<'ALL' | 'HOLIDAY'>('ALL');
   const [selectedFlight, setSelectedFlight] = useState<FlightName | null>(null);
   
@@ -51,27 +59,75 @@ export const DutyAnalytics: React.FC<DutyAnalyticsProps> = ({ airmen, onViewProf
 
   useEffect(() => {
     fetchAnalytics();
-    const handleGlobalUpdate = () => fetchAnalytics();
+    const handleGlobalUpdate = () => {
+      fetchAnalytics();
+      try {
+        setCustomHolidays(JSON.parse(localStorage.getItem('baf_custom_holidays') || '[]'));
+      } catch {}
+      try {
+        setRemovedHolidays(JSON.parse(localStorage.getItem('baf_removed_holidays') || '[]'));
+      } catch {}
+    };
     window.addEventListener('baf_state_updated', handleGlobalUpdate);
     return () => window.removeEventListener('baf_state_updated', handleGlobalUpdate);
   }, [monthKey]);
 
-  // Holiday Logic
-  const handleToggleHoliday = (dateStr: string) => {
-    setCustomHolidays((prev) => {
-      const updated = prev.includes(dateStr)
-        ? prev.filter((d) => d !== dateStr)
-        : [...prev, dateStr];
-      try {
-        localStorage.setItem('baf_custom_holidays', JSON.stringify(updated));
-      } catch (err) {}
-      return updated;
-    });
-  };
-
+  // Holiday Logic - Supports both Adding holidays (any weekday) & Removing holidays (e.g. Friday working day)
   const isHolidayDate = (dateStr: string, dObj: Date) => {
+    if (removedHolidays.includes(dateStr)) return false;
     const isWeekend = dObj.getDay() === 5 || dObj.getDay() === 6; // Friday / Saturday
     return isWeekend || customHolidays.includes(dateStr);
+  };
+
+  const handleToggleHoliday = (dateStr: string) => {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dObj = new Date(y, m - 1, d);
+    const currentlyHoliday = isHolidayDate(dateStr, dObj);
+    const isWeekend = dObj.getDay() === 5 || dObj.getDay() === 6;
+
+    if (currentlyHoliday) {
+      // Was a holiday -> Make it a WORKING DAY
+      if (isWeekend) {
+        setRemovedHolidays((prev) => {
+          const updated = prev.includes(dateStr) ? prev : [...prev, dateStr];
+          try {
+            localStorage.setItem('baf_removed_holidays', JSON.stringify(updated));
+          } catch {}
+          return updated;
+        });
+      }
+      if (customHolidays.includes(dateStr)) {
+        setCustomHolidays((prev) => {
+          const updated = prev.filter((item) => item !== dateStr);
+          try {
+            localStorage.setItem('baf_custom_holidays', JSON.stringify(updated));
+          } catch {}
+          return updated;
+        });
+      }
+    } else {
+      // Was a working day -> Make it a HOLIDAY
+      if (isWeekend) {
+        // Restore Friday/Saturday default holiday
+        setRemovedHolidays((prev) => {
+          const updated = prev.filter((item) => item !== dateStr);
+          try {
+            localStorage.setItem('baf_removed_holidays', JSON.stringify(updated));
+          } catch {}
+          return updated;
+        });
+      } else {
+        // Normal weekday, add to custom holidays
+        setCustomHolidays((prev) => {
+          const updated = prev.includes(dateStr) ? prev : [...prev, dateStr];
+          try {
+            localStorage.setItem('baf_custom_holidays', JSON.stringify(updated));
+          } catch {}
+          return updated;
+        });
+      }
+    }
+    window.dispatchEvent(new Event('baf_state_updated'));
   };
 
   // Recalculate stats based on filters
@@ -81,14 +137,16 @@ export const DutyAnalytics: React.FC<DutyAnalyticsProps> = ({ airmen, onViewProf
       const dateObj = new Date(a.date);
       return isHolidayDate(a.date, dateObj);
     });
-  }, [assignments, filterMode, customHolidays]);
+  }, [assignments, filterMode, customHolidays, removedHolidays]);
 
   const stats = useMemo(() => {
     return calculateDutyStats(airmen, filteredAssignments, currentYear, currentMonth);
   }, [airmen, filteredAssignments, currentYear, currentMonth]);
 
+  // Totals dynamically computed for the active flight (or overall if none selected)
   const totals = useMemo(() => {
-    return stats.reduce((acc, s) => {
+    const targetStats = selectedFlight ? stats.filter(s => s.flightName === selectedFlight) : stats;
+    return targetStats.reduce((acc, s) => {
       acc.totalGD = (acc.totalGD || 0) + (s.totalGD || 0);
       acc.totalBTF = (acc.totalBTF || 0) + (s.totalBTF || 0);
       acc.totalNTF = (acc.totalNTF || 0) + (s.totalNTF || 0);
@@ -97,7 +155,7 @@ export const DutyAnalytics: React.FC<DutyAnalyticsProps> = ({ airmen, onViewProf
       acc.totalIDAC = (acc.totalIDAC || 0) + (s.totalIDAC || 0);
       return acc;
     }, {} as any);
-  }, [stats]);
+  }, [stats, selectedFlight]);
 
   const airmanMap = new Map(airmen.map((a) => [a.id, a]));
 
@@ -184,10 +242,100 @@ export const DutyAnalytics: React.FC<DutyAnalyticsProps> = ({ airmen, onViewProf
                 <ChevronLeft className="w-5 h-5 text-slate-600 dark:text-slate-400" />
               </button>
 
-              <button onClick={() => setIsCalendarOpen(!isCalendarOpen)} className="flex items-center justify-center space-x-2 text-sm font-bold text-slate-700 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors bg-slate-100 dark:bg-slate-800 px-5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm w-auto">
-                <Calendar className="w-4 h-4" />
-                <span>{monthNames[currentMonth - 1]} {currentYear}</span>
-              </button>
+              <div className="relative">
+                <button
+                  onClick={() => setIsCalendarOpen(!isCalendarOpen)}
+                  className="flex items-center justify-center space-x-2 text-sm font-bold text-slate-700 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors bg-slate-100 dark:bg-slate-800 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 shadow-xs w-auto"
+                >
+                  <Calendar className="w-4 h-4 text-emerald-500" />
+                  <span>{monthNames[currentMonth - 1]} {currentYear}</span>
+                </button>
+
+                {isCalendarOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40 bg-black/10 backdrop-blur-xs" onClick={() => setIsCalendarOpen(false)}></div>
+                    <div className="w-[280px] sm:w-[290px] border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden bg-white dark:bg-slate-900 shadow-2xl absolute top-full mt-2 left-1/2 -translate-x-1/2 z-50 p-2.5 select-none">
+                      <div className="flex items-center justify-between px-1.5 py-1 mb-1 border-b border-slate-100 dark:border-slate-800">
+                        <div>
+                          <h2 className="text-xs font-black text-slate-800 dark:text-slate-100">
+                            {monthNames[currentMonth - 1]} {currentYear}
+                          </h2>
+                          <p className="text-[9px] text-slate-400 font-medium">Click date to toggle Holiday / Workday</p>
+                        </div>
+                        <button
+                          onClick={() => setIsCalendarOpen(false)}
+                          className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg transition-colors"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-7 text-center mb-1">
+                        {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, idx) => (
+                          <div
+                            key={idx}
+                            className={`py-1 text-[9px] font-black uppercase ${
+                              idx === 5 || idx === 6 ? 'text-red-500 dark:text-red-400' : 'text-slate-400 dark:text-slate-500'
+                            }`}
+                          >
+                            {day}
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="grid grid-cols-7 gap-1">
+                        {emptyCells.map((i) => (
+                          <div key={`empty-${i}`} className="h-7 w-full" />
+                        ))}
+                        {daysArray.map((day) => {
+                          const dateStr = `${currentYear}-${currentMonth.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+                          const dObj = new Date(currentYear, currentMonth - 1, day);
+                          const isHoliday = isHolidayDate(dateStr, dObj);
+                          const isWeekend = dObj.getDay() === 5 || dObj.getDay() === 6;
+                          const isWorkingWeekend = isWeekend && !isHoliday;
+
+                          return (
+                            <button
+                              key={day}
+                              onClick={() => handleToggleHoliday(dateStr)}
+                              title={
+                                isHoliday
+                                  ? `${day} ${monthNames[currentMonth - 1]}: Holiday (Click to make Working Day)`
+                                  : `${day} ${monthNames[currentMonth - 1]}: Working Day (Click to make Holiday)`
+                              }
+                              className={`h-7 w-full rounded-md flex flex-col items-center justify-center transition-all ${
+                                isHoliday
+                                  ? 'bg-rose-500/15 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 font-black border border-rose-500/30 hover:bg-rose-500/25'
+                                  : isWorkingWeekend
+                                  ? 'bg-emerald-500/15 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 font-black border border-emerald-500/40 hover:bg-emerald-500/25'
+                                  : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 font-bold'
+                              }`}
+                            >
+                              <span className="text-[11px] leading-none">{day}</span>
+                              {isHoliday ? (
+                                <span className="text-[6.5px] leading-none font-black text-rose-500 mt-0.5">H</span>
+                              ) : isWorkingWeekend ? (
+                                <span className="text-[6.5px] leading-none font-black text-emerald-600 dark:text-emerald-400 mt-0.5">W</span>
+                              ) : null}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div className="mt-2 pt-1.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[8px] font-bold text-slate-500 dark:text-slate-400 px-1">
+                        <div className="flex items-center space-x-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-rose-500 inline-block" />
+                          <span>Holiday (H)</span>
+                        </div>
+                        <div className="flex items-center space-x-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+                          <span>Work Fri/Sat (W)</span>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
               
               <button
                 onClick={() => {
@@ -200,50 +348,8 @@ export const DutyAnalytics: React.FC<DutyAnalyticsProps> = ({ airmen, onViewProf
                 <ChevronRight className="w-5 h-5 text-slate-600 dark:text-slate-400" />
               </button>
             </div>
-{isCalendarOpen && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setIsCalendarOpen(false)}></div>
-                <div className="max-w-sm border border-slate-200 dark:border-slate-700/50 rounded-xl overflow-hidden bg-slate-50 dark:bg-slate-900/50 shadow-lg absolute top-[110px] z-20">
-                <div className="flex items-center justify-center px-4 py-3 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700/50">
-                  <h2 className="text-sm font-black text-slate-800 dark:text-slate-200">
-                    {monthNames[currentMonth - 1]} {currentYear}
-                  </h2>
-                </div>
-                <div className="grid grid-cols-7 text-center border-b border-slate-200 dark:border-slate-700/50 bg-slate-100 dark:bg-slate-800/80">
-                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-                    <div key={day} className="py-1.5 text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                      {day}
-                    </div>
-                  ))}
-                </div>
-                <div className="grid grid-cols-7 bg-white dark:bg-slate-900">
-                  {emptyCells.map(i => (
-                    <div key={`empty-${i}`} className="p-1.5 border-b border-r border-slate-100 dark:border-slate-800/50 bg-slate-50 dark:bg-slate-900/20" />
-                  ))}
-                  {daysArray.map(day => {
-                    const dateStr = `${currentYear}-${currentMonth.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
-                    const dObj = new Date(currentYear, currentMonth - 1, day);
-                    const isHoliday = isHolidayDate(dateStr, dObj);
-                    return (
-                      <button
-                        key={day}
-                        onClick={() => handleToggleHoliday(dateStr)}
-                        title="Click to toggle custom holiday"
-                        className={`p-1.5 h-12 border-b border-r border-slate-100 dark:border-slate-800/50 flex flex-col items-center justify-center transition-colors ${isHoliday ? 'bg-red-50/50 dark:bg-red-950/20 hover:bg-red-100 dark:hover:bg-red-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-                      >
-                        <span className={`text-xs font-bold ${isHoliday ? 'text-red-600 dark:text-red-400' : 'text-slate-700 dark:text-slate-300'}`}>
-                          {day}
-                        </span>
-                        {isHoliday && <span className="text-[8px] leading-tight font-bold text-red-500 dark:text-red-400 uppercase mt-0.5">Holiday</span>}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-              </>
-            )}
             
-            <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-xl p-1 shadow-inner relative z-20">
+            <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-xl p-1 shadow-inner relative z-0">
               <button
                 onClick={() => setFilterMode('ALL')}
                 className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${filterMode === 'ALL' ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
@@ -268,15 +374,97 @@ export const DutyAnalytics: React.FC<DutyAnalyticsProps> = ({ airmen, onViewProf
         </div>
       ) : (
         <>
-          {/* Overview Cards (Full names for all duties) */}
+          {/* Flight Filter Selector Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-slate-900 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-black text-slate-600 dark:text-slate-300">
+                Flight View:
+              </span>
+              <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-xl p-1 shadow-inner">
+                <button
+                  onClick={() => setSelectedFlight(null)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    selectedFlight === null
+                      ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs'
+                      : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                  }`}
+                >
+                  All Flights (Overall)
+                </button>
+                {flights.map((fl) => (
+                  <button
+                    key={fl}
+                    onClick={() => setSelectedFlight(fl)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      selectedFlight === fl
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                    }`}
+                  >
+                    {fl} Flight
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {selectedFlight ? (
+              <div className="flex items-center space-x-2">
+                <span className="text-xs font-black text-emerald-700 dark:text-emerald-300 bg-emerald-100/80 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 px-3 py-1 rounded-xl">
+                  Showing: {selectedFlight} Flight
+                </span>
+                <button
+                  onClick={() => setSelectedFlight(null)}
+                  className="text-xs font-bold text-slate-500 hover:text-red-500 underline transition-colors"
+                >
+                  Reset to All
+                </button>
+              </div>
+            ) : (
+              <span className="text-xs text-slate-400 font-medium">
+                Showing overall unit duty metrics (155 UASU)
+              </span>
+            )}
+          </div>
+
+          {/* Overview Cards (Full names for all duties - dynamic for flight) */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             {[
-              { id: 'ALL', label: 'All Duties', count: (totals.totalGD || 0) + (totals.totalBTF || 0) + (totals.totalNTF || 0) + (totals.totalHalishahar || 0) + (totals.totalIDAC || 0), color: 'emerald' },
-              { id: 'GD', label: 'Base Security Duty', count: totals.totalGD || 0, color: 'red' },
-              { id: 'BTF', label: 'Base Taskforce Duty', count: totals.totalBTF || 0, color: 'amber' },
-              { id: 'NTF', label: 'Najirpara Taskforce', count: totals.totalNTF || 0, color: 'orange' },
-              { id: 'HTF', label: 'Halishahar Taskforce', count: totals.totalHalishahar || 0, color: 'blue' },
-              { id: 'IDAC', label: 'IDAC Duty', count: totals.totalIDAC || 0, color: 'teal' },
+              { 
+                id: 'ALL', 
+                label: selectedFlight ? `All Duties (${selectedFlight.substring(0, 3)} Flt)` : 'All Duties', 
+                count: (totals.totalGD || 0) + (totals.totalBTF || 0) + (totals.totalNTF || 0) + (totals.totalHalishahar || 0) + (totals.totalIDAC || 0), 
+                color: 'emerald' 
+              },
+              { 
+                id: 'GD', 
+                label: selectedFlight ? `Base Security (${selectedFlight.substring(0, 3)} Flt)` : 'Base Security Duty', 
+                count: totals.totalGD || 0, 
+                color: 'red' 
+              },
+              { 
+                id: 'BTF', 
+                label: selectedFlight ? `Taskforce (${selectedFlight.substring(0, 3)} Flt)` : 'Base Taskforce Duty', 
+                count: totals.totalBTF || 0, 
+                color: 'amber' 
+              },
+              { 
+                id: 'NTF', 
+                label: selectedFlight ? `Najirpara (${selectedFlight.substring(0, 3)} Flt)` : 'Najirpara Taskforce', 
+                count: totals.totalNTF || 0, 
+                color: 'orange' 
+              },
+              { 
+                id: 'HTF', 
+                label: selectedFlight ? `Halishahar (${selectedFlight.substring(0, 3)} Flt)` : 'Halishahar Taskforce', 
+                count: totals.totalHalishahar || 0, 
+                color: 'blue' 
+              },
+              { 
+                id: 'IDAC', 
+                label: selectedFlight ? `IDAC Duty (${selectedFlight.substring(0, 3)} Flt)` : 'IDAC Duty', 
+                count: totals.totalIDAC || 0, 
+                color: 'teal' 
+              },
             ].map(duty => (
               <button
                 key={duty.id}
@@ -455,6 +643,7 @@ export const DutyAnalytics: React.FC<DutyAnalyticsProps> = ({ airmen, onViewProf
           onViewProfile={onViewProfile}
           currentYear={currentYear}
           currentMonth={currentMonth}
+          selectedFlight={selectedFlight}
         />
       )}
     </div>
@@ -468,10 +657,12 @@ const DutyDetailsModal: React.FC<{
   airmen: Airman[];
   currentYear: number;
   currentMonth: number;
+  selectedFlight?: FlightName | null;
   onClose: () => void;
   onViewProfile: (airman: Airman, config?: any) => void;
-}> = ({ dutyId, assignments, airmen, currentYear, currentMonth, onClose, onViewProfile }) => {
+}> = ({ dutyId, assignments, airmen, currentYear, currentMonth, selectedFlight, onClose, onViewProfile }) => {
   const [showPrintPreview, setShowPrintPreview] = useState(false);
+  const [modalFlight, setModalFlight] = useState<FlightName | null>(selectedFlight || null);
 
   const mapDutyIdToType = (id: string) => {
     if (id === 'GD') return 'GD';
@@ -510,6 +701,7 @@ const DutyDetailsModal: React.FC<{
   const dutyAirmen = airmen
     .filter(a => {
       if (!a.active) return false;
+      if (modalFlight && a.flightName !== modalFlight) return false;
       return uniqueAirmanIds.includes(a.id);
     })
     .sort((a, b) => {
@@ -622,21 +814,53 @@ const DutyDetailsModal: React.FC<{
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs print:static print:inset-auto print:p-0 print:bg-transparent print:backdrop-blur-none print:z-auto print:block print:w-full">
       <div className="bg-white dark:bg-slate-900 rounded-3xl w-full max-w-6xl max-h-[85vh] overflow-hidden shadow-2xl flex flex-col border border-slate-200 dark:border-slate-800 print:shadow-none print:border-none print:rounded-none print:max-w-full print:max-h-none print:h-auto print:bg-white print:text-black print:overflow-visible print:block">
-        <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50 print:bg-white print:border-none print:px-0 print:py-2 print:text-black">
+        <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex flex-wrap gap-3 justify-between items-center bg-slate-50 dark:bg-slate-800/50 print:bg-white print:border-none print:px-0 print:py-2 print:text-black">
           <div>
             <h2 className="text-lg font-black text-slate-900 dark:text-slate-100 flex items-center space-x-2">
               <Layers className="w-5 h-5 text-emerald-600" />
               <span>{dutyId} Duty Matrix - {currentMonth}/{currentYear}</span>
             </h2>
-            <p className="text-xs text-slate-500 font-semibold mt-1">Showing capable personnel and duty dates</p>
+            <p className="text-xs text-slate-500 font-semibold mt-1">
+              Showing {dutyAirmen.length} airmen {modalFlight ? `(${modalFlight} Flight)` : '(All Flights)'}
+            </p>
           </div>
-          <div className="flex items-center space-x-2">
-            <button onClick={() => setShowPrintPreview(true)} className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-colors print:hidden" title="Print Matrix">
-              <Printer className="w-5 h-5 text-slate-500 dark:text-slate-400" />
-            </button>
-            <button onClick={onClose} className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-colors print:hidden" title="Close">
-              <X className="w-5 h-5 text-slate-500 dark:text-slate-400" />
-            </button>
+          
+          <div className="flex items-center space-x-3 print:hidden">
+            {/* Flight Tabs */}
+            <div className="flex items-center bg-slate-200/80 dark:bg-slate-700/80 p-1 rounded-xl">
+              <button
+                onClick={() => setModalFlight(null)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                  modalFlight === null
+                    ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                All
+              </button>
+              {(['Avionics', 'Mechanics', 'GCS', 'Admin'] as FlightName[]).map(fl => (
+                <button
+                  key={fl}
+                  onClick={() => setModalFlight(fl)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                    modalFlight === fl
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  {fl.substring(0, 3)}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center space-x-1 border-l border-slate-200 dark:border-slate-700 pl-2">
+              <button onClick={() => setShowPrintPreview(true)} className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-colors" title="Print Matrix">
+                <Printer className="w-5 h-5 text-slate-500 dark:text-slate-400" />
+              </button>
+              <button onClick={onClose} className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-colors" title="Close">
+                <X className="w-5 h-5 text-slate-500 dark:text-slate-400" />
+              </button>
+            </div>
           </div>
         </div>
         

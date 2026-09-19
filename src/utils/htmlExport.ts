@@ -125,11 +125,42 @@ export function exportHtmlToWord(elementId: string, filename: string, orientatio
     <head>
       <meta charset='utf-8'>
       <title>Export Document</title>
+      <!--[if gte mso 9]>
+      <xml>
+        <w:WordDocument>
+          <w:View>Print</w:View>
+          <w:Zoom>100</w:Zoom>
+          <w:DoNotOptimizeForBrowser/>
+        </w:WordDocument>
+      </xml>
+      <![endif]-->
       <style>
+        @page {
+          size: ${orientation === 'landscape' ? '841.9pt 595.3pt' : '595.3pt 841.9pt'}; /* A4 dimensions */
+          ${orientation === 'landscape' ? 'mso-page-orientation: landscape;' : ''}
+          margin: 36.0pt 36.0pt 36.0pt 36.0pt;
+          mso-header-margin: 36.0pt;
+          mso-footer-margin: 36.0pt;
+          mso-paper-source: 0;
+        }
+        @page Section1 {
+          size: ${orientation === 'landscape' ? '841.9pt 595.3pt' : '595.3pt 841.9pt'};
+          ${orientation === 'landscape' ? 'mso-page-orientation: landscape;' : ''}
+          margin: 36.0pt 36.0pt 36.0pt 36.0pt;
+          mso-header-margin: 36.0pt;
+          mso-footer-margin: 36.0pt;
+          mso-paper-source: 0;
+        }
+        div.Section1 {
+          page: Section1;
+        }
         @page WordSection1 {
           size: ${orientation === 'landscape' ? '841.9pt 595.3pt' : '595.3pt 841.9pt'}; /* A4 dimensions */
           ${orientation === 'landscape' ? 'mso-page-orientation: landscape;' : ''}
           margin: 36.0pt 36.0pt 36.0pt 36.0pt;
+          mso-header-margin: 36.0pt;
+          mso-footer-margin: 36.0pt;
+          mso-paper-source: 0;
         }
         div.WordSection1 {
           page: WordSection1;
@@ -175,7 +206,7 @@ export function exportHtmlToWord(elementId: string, filename: string, orientatio
       </style>
     </head>
     <body>
-      <div class="WordSection1">
+      <div class="Section1 WordSection1">
         ${clone.innerHTML}
       </div>
     </body>

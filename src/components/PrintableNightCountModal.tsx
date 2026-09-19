@@ -54,6 +54,8 @@ import {
  exportParadeStateMultiDocx,
  MultiParadeDayItem,
 } from '../utils/docxExport';
+import { DisposalCategoryDropdown } from './DisposalCategoryDropdown';
+import { saveCustomDisposal, getSavedCustomDisposals } from '../utils/customDisposalStore';
 
 interface NightCountStateViewProps {
  role?: UserRole;
@@ -697,11 +699,20 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
         const { dutyCode, statusCategory, notes, idaShift } = item;
         const codeUpper = (dutyCode || '').toUpperCase();
         const notesLower = (notes || '').toLowerCase();
+        const shiftLower = (idaShift || '').toLowerCase();
 
-        const isNightCountIdacA = codeUpper === 'IDAC' && idaShift === 'Morning';
+        const isIdac = codeUpper === 'IDAC' || codeUpper === 'IDA' || notesLower.includes('idac') || notesLower.includes('ida center');
+        const isNightCountIdacNt = isIdac && (
+          shiftLower === 'night' || shiftLower === 'c' || shiftLower === 'nt' ||
+          notesLower.includes('night') || notesLower.includes('nt') || notesLower.includes('shift c') || notesLower.includes('"c"')
+        );
+        const isNightCountIdacA = isIdac && !isNightCountIdacNt && (
+          shiftLower === 'morning' || shiftLower === 'a' ||
+          notesLower.includes('morning') || notesLower.includes('idac a') || notesLower.includes('shift a') || notesLower.includes('"a"') ||
+          (!notesLower.includes('afternoon') && !notesLower.includes('aft') && shiftLower !== 'afternoon' && shiftLower !== 'b')
+        );
+        const isIdacB = isIdac && !isNightCountIdacNt && !isNightCountIdacA;
         const isDutyOff = codeUpper === 'DUTY_OFF' || codeUpper === 'OFF_DUTY' || statusCategory === 'OFF' || notesLower.includes('off duty') || notesLower.includes('nt off') || notesLower.includes('night off');
-        const isIdacB = codeUpper === 'IDAC' && idaShift === 'Afternoon';
-        const isIdacC = codeUpper === 'IDAC' && idaShift === 'Night';
         const isBake = ['BAKE_BITE', 'BAKE_N_BITE'].includes(codeUpper) || statusCategory === 'BAKE_N_BITE';
 
         if (codeUpper === 'ON_PARADE' || statusCategory === 'PARADE' || isNightCountIdacA || isDutyOff || codeUpper === 'CANTEEN' || notesLower.includes('canteen') || codeUpper === 'RECEPTION' || notesLower.includes('reception') || notesLower.includes('k/o')) {
@@ -729,9 +740,9 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
           absentCount++;
         } else if (isBake) {
           bakeBiteCount++;
-        } else if (isIdacB || isIdacC || codeUpper === 'OFFICE' || notesLower.includes('office')) {
+        } else if (isIdacB || codeUpper === 'OFFICE' || notesLower.includes('office')) {
           othersCount++;
-        } else if (['GD', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA', 'AIRPORT', 'AIRFIELD', 'ATT', 'AIR_FD'].includes(codeUpper) || statusCategory === 'DUTY') {
+        } else if (isNightCountIdacNt || ['GD', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA', 'AIRPORT', 'AIRFIELD', 'ATT', 'AIR_FD'].includes(codeUpper) || statusCategory === 'DUTY') {
           // dutyOn handled directly by calculation
         } else {
           othersCount++;
@@ -766,11 +777,24 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
           const { statusCategory, dutyCode, notes, idaShift } = st;
           const codeUpper = (dutyCode || '').toUpperCase();
           const notesLower = (notes || '').toLowerCase();
-          const isIdacB = codeUpper === 'IDAC' && idaShift === 'Afternoon';
-          const isIdacC = codeUpper === 'IDAC' && idaShift === 'Night';
+          const shiftLower = (idaShift || '').toLowerCase();
+
+          const isIdac = codeUpper === 'IDAC' || codeUpper === 'IDA' || notesLower.includes('idac') || notesLower.includes('ida center');
+          const isIdacNt = isIdac && (
+            shiftLower === 'night' || shiftLower === 'c' || shiftLower === 'nt' ||
+            notesLower.includes('night') || notesLower.includes('nt') || notesLower.includes('shift c') || notesLower.includes('"c"')
+          );
+          const isIdacA = isIdac && !isIdacNt && (
+            shiftLower === 'morning' || shiftLower === 'a' ||
+            notesLower.includes('morning') || notesLower.includes('idac a') || notesLower.includes('shift a') || notesLower.includes('"a"') ||
+            (!notesLower.includes('afternoon') && !notesLower.includes('aft') && shiftLower !== 'afternoon' && shiftLower !== 'b')
+          );
+          const isIdacB = isIdac && !isIdacNt && !isIdacA;
           const isBake = ['BAKE_BITE', 'BAKE_N_BITE'].includes(codeUpper) || statusCategory === 'BAKE_N_BITE';
           
-          if (codeUpper === 'ON_PARADE' || codeUpper === 'PT' || codeUpper === 'PT_PARADE' || statusCategory === 'PARADE' || codeUpper === 'CANTEEN' || notesLower.includes('canteen') || codeUpper === 'RECEPTION' || notesLower.includes('reception') || notesLower.includes('k/o') || codeUpper === 'DUTY_OFF' || codeUpper === 'OFF_DUTY' || statusCategory === 'OFF' || notesLower.includes('off duty') || notesLower.includes('nt off') || notesLower.includes('night off')) {
+          if (isIdacNt) {
+            dutyOnList.push({ airman, note: 'IDAC Nt' });
+          } else if (codeUpper === 'ON_PARADE' || codeUpper === 'PT' || codeUpper === 'PT_PARADE' || statusCategory === 'PARADE' || isIdacA || codeUpper === 'CANTEEN' || notesLower.includes('canteen') || codeUpper === 'RECEPTION' || notesLower.includes('reception') || notesLower.includes('k/o') || codeUpper === 'DUTY_OFF' || codeUpper === 'OFF_DUTY' || statusCategory === 'OFF' || notesLower.includes('off duty') || notesLower.includes('nt off') || notesLower.includes('night off')) {
             onPtList.push({ airman, note: (notes && !notes.toLowerCase().includes('imported')) ? notes : '' });
           } else if (codeUpper === 'LEAVE' || statusCategory === 'LEAVE') {
             leaveList.push({ airman, note: '' });
@@ -797,7 +821,7 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
           
           } else if (isBake) {
             bakeBiteList.push({ airman, note: (notes && !notes.toLowerCase().includes('imported')) ? notes : '' });
-          } else if (isIdacB || isIdacC || codeUpper === 'OFFICE' || notesLower.includes('office')) {
+          } else if (isIdacB || codeUpper === 'OFFICE' || notesLower.includes('office')) {
             dutyOnList.push({ airman, note: 'Office Duty' });
           } else if (['GD', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA', 'AIRPORT', 'AIRFIELD', 'ATT', 'AIR_FD'].includes(codeUpper) || statusCategory === 'DUTY') {
             const dutyDisplay = formatDutyOnShortName(codeUpper, idaShift, notes, st.dutyName);
@@ -1094,10 +1118,9 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  const c = (s.dutyCode || '').toUpperCase();
  const n = (s.notes || '').toLowerCase();
  const isOffice = c === 'OFFICE' || n.includes('office');
- const isIdacB = c === 'IDAC' && s.idaShift === 'Afternoon';
- const isIdacC = c === 'IDAC' && s.idaShift === 'Night';
+ const isIdacB = c === 'IDAC' && (s.idaShift === 'Afternoon' || (s.idaShift as any) === 'B');
  const isBake = ['BAKE_BITE', 'BAKE_N_BITE'].includes(c) || s.statusCategory === 'BAKE_N_BITE';
- return isOffice || isIdacB || isIdacC || isBake;
+ return isOffice || isIdacB || isBake;
  }).length;
  const aftNiFlgCount = tempPList.filter(s => s.dutyCode === 'NIGHT_FLYING' || s.notes?.toLowerCase().includes('night')).length;
  const offDutyCount = tempPList.filter(s => s.dutyCode === 'OFF_DUTY' || s.notes?.toLowerCase().includes('off duty')).length;
@@ -1251,10 +1274,9 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  const c = (s.dutyCode || '').toUpperCase();
  const n = (s.notes || '').toLowerCase();
  const isOffice = c === 'OFFICE' || n.includes('office');
- const isIdacB = c === 'IDAC' && s.idaShift === 'Afternoon';
- const isIdacC = c === 'IDAC' && s.idaShift === 'Night';
+ const isIdacB = c === 'IDAC' && (s.idaShift === 'Afternoon' || (s.idaShift as any) === 'B');
  const isBake = ['BAKE_BITE', 'BAKE_N_BITE'].includes(c) || s.statusCategory === 'BAKE_N_BITE';
- return isOffice || isIdacB || isIdacC || isBake;
+ return isOffice || isIdacB || isBake;
  }).length;
  const aftNiFlgCount = tempPList.filter(s => s.dutyCode === 'NIGHT_FLYING' || s.notes?.toLowerCase().includes('night')).length;
  const offDutyCount = tempPList.filter(s => s.dutyCode === 'OFF_DUTY' || s.notes?.toLowerCase().includes('off duty')).length;
@@ -1655,30 +1677,12 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  );
  })}
  {!isEditingDisposals && (
- <div className="relative">
- <button
- type="button"
- onClick={() => setShowDisposalDropdown(!showDisposalDropdown)}
- className="px-2.5 py-1.5 rounded-xl text-xs font-bold border border-dashed border-slate-300 dark:border-slate-600 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:border-slate-400 bg-slate-50 transition-all cursor-pointer flex items-center space-x-1"
- >
- <Plus className="w-3.5 h-3.5" />
- {savedDisposals.length === 0 && <span>Add Category</span>}
- </button>
- {showDisposalDropdown && (
- <div className="absolute top-full left-0 mt-1 w-56 max-h-64 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 py-1">
- {ALL_DISPOSAL_OPTIONS.filter(opt => opt.code === 'OTHERS' || !savedDisposals.some(d => d.code === opt.code)).map((opt) => (
- <button
- key={opt.label}
- type="button"
- onClick={() => handleAddDisposalOption(opt)}
- className="w-full text-left px-4 py-2 text-[11px] font-bold text-slate-700 dark:text-slate-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 hover:text-emerald-900 dark:hover:text-emerald-100 transition-colors"
- >
- {opt.label}
- </button>
- ))}
- </div>
- )}
- </div>
+ <DisposalCategoryDropdown
+ options={ALL_DISPOSAL_OPTIONS}
+ savedDisposals={savedDisposals}
+ onSelectOption={handleAddDisposalOption}
+ buttonLabel="Add Category"
+ />
  )}
  </div>
 
@@ -1709,7 +1713,7 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  </div>
  <div className="grid grid-cols-4 gap-1.5">
  {(['Avionics', 'Mechanics', 'GCS', 'Admin'] as FlightName[]).map((fl) => {
- const isDisabledFlt = (role === 'ADMIN' && userFlight && fl !== userFlight) || (role === 'ADMIN' && selectedDate < todayStr);
+ const isDisabledFlt = false;
  return (
  <button
  key={fl}
@@ -1756,9 +1760,28 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  const { statusCategory, dutyCode, notes, dutyName } = st;
  const codeUpper = (dutyCode || '').toUpperCase();
  const notesLower = (notes || '').toLowerCase();
+ const shiftLower = (st.idaShift || '').toLowerCase();
 
  if (codeUpper === 'ON_PARADE' || statusCategory === 'PARADE') {
  return { isOnParade: true, label: 'On Parade', dutyCode: 'ON_PARADE', notes, dutyName: 'On Parade' };
+ }
+
+ const isIdac = codeUpper === 'IDAC' || codeUpper === 'IDA' || notesLower.includes('idac') || notesLower.includes('ida center');
+ const isIdacNt = isIdac && (
+   shiftLower === 'night' || shiftLower === 'c' || shiftLower === 'nt' ||
+   notesLower.includes('night') || notesLower.includes('nt') || notesLower.includes('shift c') || notesLower.includes('"c"')
+ );
+ const isIdacA = isIdac && !isIdacNt && (
+   shiftLower === 'morning' || shiftLower === 'a' ||
+   notesLower.includes('morning') || notesLower.includes('idac a') || notesLower.includes('shift a') || notesLower.includes('"a"') ||
+   (!notesLower.includes('afternoon') && !notesLower.includes('aft') && shiftLower !== 'afternoon' && shiftLower !== 'b')
+ );
+
+ if (isIdacA) {
+   return { isOnParade: true, label: 'On Parade', dutyCode: 'ON_PARADE', notes: '', dutyName: 'On Parade' };
+ }
+ if (isIdacNt) {
+   return { isOnParade: false, label: 'IDAC Nt', dutyCode: 'IDAC', notes: 'IDAC Nt', dutyName: 'IDAC Nt' };
  }
  if (codeUpper === 'LEAVE' || statusCategory === 'LEAVE') {
  return { isOnParade: false, label: 'Leave', dutyCode: 'LEAVE', notes, dutyName: 'Leave' };
@@ -2103,36 +2126,22 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
                     );
                   })}
                   {!isEditingDisposals && (
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={() => setShowDisposalDropdown(!showDisposalDropdown)}
-                        className="px-2.5 py-1.5 rounded-xl text-xs font-bold border border-dashed border-slate-300 dark:border-slate-600 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:border-slate-400 bg-slate-50 dark:bg-slate-900 transition-all cursor-pointer flex items-center space-x-1"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        {savedDisposals.length === 0 && <span>Add Category</span>}
-                      </button>
-                      {showDisposalDropdown && (
-                        <div className="absolute bottom-full mb-1 left-0 w-56 max-h-64 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 py-1">
-                          {ALL_DISPOSAL_OPTIONS.filter(opt => opt.code === 'OTHERS' || (!savedDisposals.some(d => d.code === opt.code && (d.code !== 'OTHERS' || d.customTitle === opt.customTitle)))).filter((opt, index, self) => index === self.findIndex((t) => t.code === opt.code && t.customTitle === opt.customTitle)).map((opt) => (
-                            <button
-                              key={opt.label}
-                              type="button"
-                              onClick={() => {
-                                handleAddDisposalOption(opt);
-                                setEditDisposalCategory(opt.code);
-                                if (opt.customTitle) setEditDisposalCustomTitle(opt.customTitle);
-                                else if (opt.code === 'OTHERS') setEditDisposalCustomTitle('');
-                                setShowDisposalDropdown(false);
-                              }}
-                              className="w-full text-left px-4 py-2 text-[11px] font-bold text-slate-700 dark:text-slate-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 hover:text-emerald-900 dark:hover:text-emerald-100 transition-colors"
-                            >
-                              {opt.code === 'OTHERS' && opt.customTitle ? opt.customTitle : opt.label}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                    <DisposalCategoryDropdown
+                      options={ALL_DISPOSAL_OPTIONS}
+                      savedDisposals={savedDisposals}
+                      dropUp={true}
+                      onSelectOption={(opt) => {
+                        handleAddDisposalOption(opt);
+                        setEditDisposalCategory(opt.code);
+                        if (opt.customTitle) {
+                          setEditDisposalCustomTitle(opt.customTitle);
+                          saveCustomDisposal(opt.customTitle);
+                        } else if (opt.code === 'OTHERS') {
+                          setEditDisposalCustomTitle('');
+                        }
+                      }}
+                      buttonLabel="Add Category"
+                    />
                   )}
                 </div>
 

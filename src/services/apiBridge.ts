@@ -1,5 +1,7 @@
 import { supabase } from '../supabase';
 import { localDb } from './localDatabase';
+import { getCurrentUserSession } from '../utils/authSession';
+import { checkDutyPermission } from '../utils/dutyPermissions';
 
 /**
  * Universal API Bridge & Fallback Interceptor
@@ -178,25 +180,56 @@ async function handleLocalApiRequest(urlStr: string, init?: RequestInit): Promis
       return jsonResponse(data);
     }
 
+    // Helper to verify duty write permissions
+    const verifyDutyWritePermission = (targetAirmanId?: string, targetDate?: string, targetFlight?: string) => {
+      const session = getCurrentUserSession();
+      const role = session?.assignedRole || 'USER';
+      let flight = targetFlight;
+      if (!flight && targetAirmanId) {
+        const air = localDb.getAirmen().find(a => a.id === targetAirmanId);
+        flight = air?.flightName;
+      }
+      return checkDutyPermission(role, flight, targetDate, session?.flightName);
+    };
+
     // 5. Duty Assignment Actions
     if (pathname === '/api/roster/assign') {
       const { monthKey, assignment } = body || {};
       const targetMonth = monthKey || assignment?.date?.slice(0, 7);
+      const perm = verifyDutyWritePermission(assignment?.airmanId, assignment?.date);
+      if (!perm.canAssign) {
+        return jsonResponse({ error: perm.reason || 'Permission denied' }, 403);
+      }
       const res = localDb.assignDuty(targetMonth, assignment);
       return jsonResponse({ success: true, assignment: res });
     }
 
     if (pathname === '/api/roster/assign-range') {
+      const { airmanId, fromDate } = body || {};
+      const perm = verifyDutyWritePermission(airmanId, fromDate);
+      if (!perm.canAssign) {
+        return jsonResponse({ error: perm.reason || 'Permission denied' }, 403);
+      }
       const res = localDb.assignRange(body);
       return jsonResponse({ success: true, ...res });
     }
 
     if (pathname === '/api/roster/batch-assign' || pathname === '/api/roster/bulk-assign') {
+      const session = getCurrentUserSession();
+      const role = session?.assignedRole || 'USER';
+      if (role === 'USER') {
+        return jsonResponse({ error: 'Permission denied: Regular users have read-only access' }, 403);
+      }
       const res = localDb.batchAssign(body);
       return jsonResponse({ success: true, message: `Assigned ${res.count} duties successfully!`, ...res });
     }
 
     if (pathname === '/api/roster/restore-assignments') {
+      const session = getCurrentUserSession();
+      const role = session?.assignedRole || 'USER';
+      if (role === 'USER') {
+        return jsonResponse({ error: 'Permission denied: Regular users have read-only access' }, 403);
+      }
       const { restoreItems } = body || {};
       if (Array.isArray(restoreItems)) {
         restoreItems.forEach((item: any) => {
@@ -213,11 +246,19 @@ async function handleLocalApiRequest(urlStr: string, init?: RequestInit): Promis
     }
 
     if (pathname === '/api/roster/clear-all') {
+      const session = getCurrentUserSession();
+      if (session?.assignedRole !== 'OWNER' && session?.assignedRole !== 'SUPER_ADMIN') {
+        return jsonResponse({ error: 'Permission denied: Only Super Admin and Owner can clear all duties' }, 403);
+      }
       localDb.resetToEmptyRoster();
       return jsonResponse({ success: true, message: 'All duties cleared' });
     }
 
     if (pathname === '/api/roster/clear-month') {
+      const session = getCurrentUserSession();
+      if (session?.assignedRole !== 'OWNER' && session?.assignedRole !== 'SUPER_ADMIN') {
+        return jsonResponse({ error: 'Permission denied: Only Super Admin and Owner can clear monthly duties' }, 403);
+      }
       const { monthKey } = body || {};
       if (monthKey) {
         localDb.clearMonth(monthKey);
@@ -226,17 +267,30 @@ async function handleLocalApiRequest(urlStr: string, init?: RequestInit): Promis
     }
 
     if (pathname === '/api/roster/reset-official') {
+      const session = getCurrentUserSession();
+      if (session?.assignedRole !== 'OWNER' && session?.assignedRole !== 'SUPER_ADMIN') {
+        return jsonResponse({ error: 'Permission denied: Only Super Admin and Owner can reset official data' }, 403);
+      }
       localDb.resetToOfficialData();
       return jsonResponse({ success: true, message: 'Reset to official parade state data' });
     }
 
     if (pathname === '/api/roster/delete-assignment') {
       const { airmanId, date, dutyCode, idaShift } = body || {};
+      const perm = verifyDutyWritePermission(airmanId, date);
+      if (!perm.canDelete) {
+        return jsonResponse({ error: perm.reason || 'Permission denied' }, 403);
+      }
       localDb.deleteAssignment(airmanId, date, dutyCode, idaShift);
       return jsonResponse({ success: true });
     }
 
     if (pathname === '/api/roster/delete-range') {
+      const { airmanId, fromDate } = body || {};
+      const perm = verifyDutyWritePermission(airmanId, fromDate);
+      if (!perm.canDelete) {
+        return jsonResponse({ error: perm.reason || 'Permission denied' }, 403);
+      }
       const count = localDb.deleteRange(body);
       return jsonResponse({ success: true, count });
     }

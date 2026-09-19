@@ -503,7 +503,29 @@ export class LocalDatabaseEngine {
   }
 
   /**
-   * Push changes to Firebase Firestore
+   * Directly sync an app setting key-value pair to Supabase app_settings table
+   */
+  public async syncSettingToCloud(key: string, value: string): Promise<boolean> {
+    if (typeof window === 'undefined' || !isSupabaseConfigured) return false;
+    try {
+      const { error } = await supabase.from('app_settings').upsert([{
+        setting_key: key,
+        setting_value: value,
+        updated_at: new Date().toISOString()
+      }], { onConflict: 'setting_key' });
+      if (error) {
+        console.warn(`Failed to sync setting "${key}" to Supabase:`, error);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      console.warn(`Error syncing setting "${key}" to Supabase:`, e);
+      return false;
+    }
+  }
+
+  /**
+   * Push changes to Firebase Firestore / Supabase
    */
   public async saveToFirebase(dbToSave: LocalStorageDB, immediate = false): Promise<boolean> {
     if (typeof window === 'undefined') return false;
@@ -579,8 +601,30 @@ export class LocalDatabaseEngine {
            return !prev || JSON.stringify(prev) !== JSON.stringify(u);
         });
         
-        if (changedAirmen.length === 0 && changedAssignments.length === 0 && deletedAssignments.length === 0 && changedHistory.length === 0 && changedUsers.length === 0) {
-           console.log("No data changes detected. Skipping Supabase upload.");
+        const hasCoreChanges = changedAirmen.length > 0 || changedAssignments.length > 0 || deletedAssignments.length > 0 || changedHistory.length > 0 || changedUsers.length > 0;
+
+        if (!hasCoreChanges && !immediate) {
+           // Quickly ensure settings & matrix are up to date in cloud
+           try {
+             const settingsPayload: any[] = [];
+             const SETTING_PREFIXES = ['baf_', 'savedDisposalKeys', 'parade_historical', 'flg_wg_'];
+             const IGNORED_KEYS = ['baf_official_duty_matrix_v4', 'baf_database_v2', 'baf_sync_logs', 'baf_pending_sync', 'baf_presence', 'baf_user_login_history', 'baf_recent_logins', 'baf_theme_pref', 'baf_last_used_id', 'baf_dismissed_notice_sig', 'baf_cleared_notices_v4'];
+             if (typeof window !== 'undefined') {
+               for (let i = 0; i < window.localStorage.length; i++) {
+                 const key = window.localStorage.key(i);
+                 if (!key || IGNORED_KEYS.includes(key)) continue;
+                 if (SETTING_PREFIXES.some(prefix => key.startsWith(prefix))) {
+                   const val = window.localStorage.getItem(key);
+                   if (val) settingsPayload.push({ setting_key: key, setting_value: val, updated_at: new Date().toISOString() });
+                 }
+               }
+               if (settingsPayload.length > 0) {
+                 await supabase.from('app_settings').upsert(settingsPayload, { onConflict: 'setting_key' });
+               }
+             }
+           } catch(err) {
+             console.warn("Background settings sync failed:", err);
+           }
            if (typeof window !== 'undefined') window.localStorage.removeItem('baf_pending_sync');
            this.isPushing = false;
            return true; // Already in sync
@@ -1292,7 +1336,10 @@ export class LocalDatabaseEngine {
       const scope = disposalScope || 'ALL';
       if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(dutyCode)) {
         if (idaShift === 'Night') {
-          index = list.findIndex((a) => a.airmanId === airmanId && a.date === dateStr && (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night' && (a.disposalScope || 'ALL') === scope);
+          index = list.findIndex((a) => a.airmanId === airmanId && a.date === dateStr && (
+            ((a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night') ||
+            a.dutyCode === 'ON_PARADE'
+          ) && (a.disposalScope || 'ALL') === scope);
         } else {
           index = list.findIndex((a) => a.airmanId === airmanId && a.date === dateStr && !((a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night') && isDep(a.dutyCode) === isDep(dutyCode) && (a.disposalScope || 'ALL') === scope);
         }
@@ -1394,7 +1441,10 @@ export class LocalDatabaseEngine {
         const isDep = (code) => code && ['ATT', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(code);
         if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(dutyCode)) {
           if (idaShift === 'Night') {
-            index = list.findIndex((a) => a.airmanId === airmanId && a.date === dateStr && (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night');
+            index = list.findIndex((a) => a.airmanId === airmanId && a.date === dateStr && (
+              ((a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night') ||
+              a.dutyCode === 'ON_PARADE'
+            ));
           } else {
             index = list.findIndex((a) => a.airmanId === airmanId && a.date === dateStr && !((a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night') && isDep(a.dutyCode) === isDep(dutyCode));
           }
@@ -1537,12 +1587,37 @@ export class LocalDatabaseEngine {
         if (!existing) {
           assignmentMap.set(a.airmanId, a);
         } else {
-          // If we have both, determine priority
-          const isDeployment = (code) => ['ATT', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(code);
+          // Priority logic:
+          // 1. Specific duty (like IDAC, GD, LEAVE, etc.) always beats baseline ON_PARADE
+          const isBase = (code: string) => !code || code === 'ON_PARADE' || code === 'PT' || code === 'PT_PARADE';
+          const existingIsBase = isBase(existing.dutyCode);
+          const newIsBase = isBase(a.dutyCode);
+          if (existingIsBase && !newIsBase) {
+            assignmentMap.set(a.airmanId, a);
+            return;
+          }
+          if (!existingIsBase && newIsBase) {
+            return; // Keep the specific duty
+          }
+
+          // 2. For PT or Night Count, IDAC Night is top priority duty
+          const isIdacNt = (asn: DutyAssignment) =>
+            (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(asn.dutyCode)) &&
+            (asn.idaShift === 'Night' || (asn.notes || '').toLowerCase().includes('night') || (asn.notes || '').toLowerCase().includes('nt'));
+          if ((isPT || isNightCount) && isIdacNt(a) && !isIdacNt(existing)) {
+            assignmentMap.set(a.airmanId, a);
+            return;
+          }
+          if ((isPT || isNightCount) && !isIdacNt(a) && isIdacNt(existing)) {
+            return;
+          }
+
+          // 3. Regular duty overwrites deployment
+          const isDeployment = (code: string) => ['ATT', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(code);
           const existingIsDep = isDeployment(existing.dutyCode);
           const newIsDep = isDeployment(a.dutyCode);
           if (existingIsDep && !newIsDep) {
-            assignmentMap.set(a.airmanId, a); // New regular duty overwrites deployment
+            assignmentMap.set(a.airmanId, a);
           } else if (!existingIsDep && !newIsDep) {
             // Overwrite with higher specificity scope if applicable, else overwrite
             if ((existing.disposalScope || 'ALL') === 'ALL') {
@@ -1702,7 +1777,7 @@ export class LocalDatabaseEngine {
           const s = ass.idaShift || 'Morning';
           dutyName = `IDAC Duty (${s})`;
           
-          if (isPT) {
+          if (isPT || isNightCount) {
             statusCategory = 'DUTY';
           } else {
             if (s === 'Night' && shift === 'Morning') {

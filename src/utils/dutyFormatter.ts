@@ -38,9 +38,9 @@ export function formatDutyOnShortName(
     const shift = (idaShift || '').toLowerCase();
     
     // Explicit exact shift match first
-    if (shift === 'night') return 'IDAC "Nt"';
-    if (shift === 'afternoon') return 'IDAC "B"';
-    if (shift === 'morning') return 'IDAC "A"';
+    if (shift === 'night' || shift === 'nt' || shift === 'c') return 'IDAC Nt';
+    if (shift === 'afternoon' || shift === 'aft' || shift === 'b') return 'IDAC "B"';
+    if (shift === 'morning' || shift === 'morn' || shift === 'a') return 'IDAC "A"';
     
     // Check for Night shift ("Nt")
     if (
@@ -51,7 +51,7 @@ export function formatDutyOnShortName(
       notesLower.includes('"c"') ||
       nameLower.includes('night')
     ) {
-      return 'IDAC "Nt"';
+      return 'IDAC Nt';
     }
 
     // Check for Afternoon ("B")

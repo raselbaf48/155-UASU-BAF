@@ -518,7 +518,9 @@ export async function exportDutyRatioDocx(
         properties: {
           page: {
             size: {
-              orientation: PageOrientation.PORTRAIT,
+              width: 11906,
+              height: 16838,
+              orientation: PageOrientation.LANDSCAPE,
             },
             margin: { top: 500, right: 500, bottom: 500, left: 500 },
           },
@@ -1144,7 +1146,7 @@ export async function exportParadeStateSingleDocx(
             size: {
               width: 11906,
               height: 16838,
-              orientation: PageOrientation.PORTRAIT,
+              orientation: PageOrientation.LANDSCAPE,
             },
             margin: { top: 400, right: 400, bottom: 400, left: 400 },
           },
@@ -1155,7 +1157,7 @@ export async function exportParadeStateSingleDocx(
   });
 
   const targetFileName =
-    fileName || `${isPt ? 'PT State' : 'Parade State'} - Airmen (${dateStr}).docx`;
+    fileName || `${isPt ? 'PT State' : 'Parade State'} - ${flight === 'Overall' ? '155 UASU' : flight + ' Flt'} (${dateStr}).docx`;
   const blob = await Packer.toBlob(doc);
   saveAs(blob, targetFileName);
 }
@@ -1361,7 +1363,7 @@ export async function exportParadeStateMultiDocx(
             size: {
               width: 11906,
               height: 16838,
-              orientation: PageOrientation.PORTRAIT,
+              orientation: PageOrientation.LANDSCAPE,
             },
             margin: { top: 400, right: 400, bottom: 400, left: 400 },
           },
@@ -1497,7 +1499,7 @@ export async function exportMonthlyDutyRegisterDocx(
             size: {
               width: 11906,
               height: 16838,
-              orientation: PageOrientation.PORTRAIT,
+              orientation: PageOrientation.LANDSCAPE,
             },
             margin: { top: 400, right: 400, bottom: 400, left: 400 },
           },

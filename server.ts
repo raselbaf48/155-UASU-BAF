@@ -1178,9 +1178,9 @@ ${combinedText.substring(0, 30000)}
   // Vite middleware in dev or static serving in production
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { 
+      server: {
         middlewareMode: true,
-        hmr: { port: 24678 }
+        hmr: false,
       },
       appType: 'spa',
     });

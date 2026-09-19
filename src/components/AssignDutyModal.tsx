@@ -39,6 +39,7 @@ import {
 } from '../types';
 import { DUTY_TYPES, DUTY_TYPE_MAP } from '../data/dutyTypes';
 import { getCurrentUserSession } from '../utils/authSession';
+import { checkDutyPermission } from '../utils/dutyPermissions';
 import { getStoredDutyRatiosForDate } from '../data/dutyRatios';
 import { getIdacShiftsForDateAndFlight, getFlightDutyQuotaForDate, getStoredDutyMatrix } from '../data/officialDutyRatioMatrix';
 import { FlightDutyRatioModal } from './FlightDutyRatioModal';
@@ -74,15 +75,26 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
 }) => {
   // Date Mode: Single Date vs Multi-Date Range
   const session = getCurrentUserSession();
-  const isSuperAdmin = ((session?.assignedRole === 'SUPER_ADMIN' || session?.assignedRole === 'OWNER') || session?.assignedRole === 'OWNER');
+  const isSuperAdmin = session?.assignedRole === 'SUPER_ADMIN' || session?.assignedRole === 'OWNER';
   const isAdmin = session?.assignedRole === 'ADMIN';
+  const isUser = !isAdmin && !isSuperAdmin;
   const adminFlight = session?.flightName;
-  const [selectedPresetDays, setSelectedPresetDays] = useState<number | null>(1);
-  const [fromDate, setFromDate] = useState<string>(selectedDate || new Date().toISOString().split('T')[0]);
+  const todayStr = new Date().toISOString().split('T')[0];
 
-  const isPastDate = fromDate < new Date().toISOString().split('T')[0];
-  const isReadOnly = isPastDate && !isSuperAdmin;
-  const [toDate, setToDate] = useState<string>(selectedDate || new Date().toISOString().split('T')[0]);
+  const [selectedPresetDays, setSelectedPresetDays] = useState<number | null>(1);
+  const [fromDate, setFromDate] = useState<string>(() => {
+    const init = selectedDate || todayStr;
+    if (isAdmin && init < todayStr) return todayStr;
+    return init;
+  });
+
+  const isPastDate = fromDate < todayStr;
+  const isReadOnly = isUser || (isPastDate && !isSuperAdmin);
+  const [toDate, setToDate] = useState<string>(() => {
+    const init = selectedDate || todayStr;
+    if (isAdmin && init < todayStr) return todayStr;
+    return init;
+  });
 
   // Active duty & flight filters
   const [activeDutyCode, setActiveDutyCode] = useState<DutyCategoryCode | ''>(
@@ -91,7 +103,10 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
   const [selectionMode, setSelectionMode] = useState<'DutyFirst' | 'FlightFirst' | 'None'>(
     initialDutyCode ? 'DutyFirst' : (initialFlight !== 'All' ? 'FlightFirst' : 'None')
   );
-  const [activeFlight, setActiveFlight] = useState<FlightName | 'All'>(initialFlight);
+  const [activeFlight, setActiveFlight] = useState<FlightName | 'All'>(() => {
+    if (isAdmin && adminFlight) return adminFlight as FlightName;
+    return initialFlight;
+  });
   const [activeIdaShift, setActiveIdaShift] = useState<IDAShift | undefined>(undefined);
   const [activeLeaveType, setActiveLeaveType] = useState<'Casual' | 'Annual' | 'Recreation'>('Casual');
   const [isProxyEnabled, setIsProxyEnabled] = useState<boolean>(false);
@@ -115,8 +130,12 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       if (selectedDate) {
-        setFromDate(selectedDate);
-        setToDate(selectedDate);
+        const dateToSet = (isAdmin && selectedDate < todayStr) ? todayStr : selectedDate;
+        setFromDate(dateToSet);
+        setToDate(dateToSet);
+      }
+      if (isAdmin && adminFlight) {
+        setActiveFlight(adminFlight as FlightName);
       }
       if (onlyIdac) {
         setActiveDutyCode('IDAC');
@@ -124,7 +143,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
         setActiveDutyCode(initialDutyCode);
       }
     }
-  }, [isOpen, selectedDate, onlyIdac, initialDutyCode]);
+  }, [isOpen, selectedDate, onlyIdac, initialDutyCode, isAdmin, adminFlight, todayStr]);
 
   // Dynamically compute available IDAC shifts based on ratio matrix for fromDate
   // DO NOT filter by activeFlight, otherwise users can't switch to a shift assigned to a different flight!
@@ -382,6 +401,10 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
     const d = new Date(fromDate);
     d.setDate(d.getDate() + days);
     const newDate = d.toISOString().split('T')[0];
+    if (days < 0 && !isSuperAdmin && newDate < todayStr) {
+      alert("Admins cannot navigate to or modify duties for past dates.");
+      return;
+    }
     setFromDate(newDate);
     if (selectedPresetDays !== null) {
       const td = new Date(newDate);
@@ -426,6 +449,25 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
       return;
     }
     const isCurrentlyAssignedToThisDuty = isAirmanAssignedToActiveDuty(airman.id);
+
+    // Permission check
+    const perm = checkDutyPermission(
+      session?.assignedRole || 'USER',
+      airman.flightName,
+      fromDate,
+      session?.flightName
+    );
+    if (isCurrentlyAssignedToThisDuty) {
+      if (!perm.canDelete) {
+        alert(perm.reason || "You do not have permission to remove duties.");
+        return;
+      }
+    } else {
+      if (!perm.canAssign) {
+        alert(perm.reason || "You do not have permission to assign duties.");
+        return;
+      }
+    }
 
     setProcessingAirmanId(airman.id);
 
@@ -1237,6 +1279,9 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
                 2. Flight:
               </span>
               {(['All', 'Avionics', 'Mechanics', 'GCS', 'Admin'] as Array<FlightName | 'All'>).filter(flt => {
+                if (isAdmin && adminFlight) {
+                  return flt === adminFlight;
+                }
                 if (flt === 'All') return true;
                 const matrixConfig = getStoredDutyMatrix().find(t => t.dutyCode === activeDutyCode);
                 
@@ -1349,12 +1394,13 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
             {/* Candidate Grid: Clean display showing strictly Rank & Name + Duty Badge */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-72 overflow-y-auto p-1 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-900/50">
               
-              {isReadOnly ? (
-                <div className="col-span-full py-8 text-center text-sm font-bold text-slate-500 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-dashed border-slate-300 dark:border-slate-700">
-                  <div className="mb-2">🚫</div>
-                  Modifications are disabled for past dates.
+              {isReadOnly && (
+                <div className="col-span-full py-2 px-3 text-center text-xs font-bold text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/40 rounded-xl border border-amber-300 dark:border-amber-800 flex items-center justify-center space-x-2">
+                  <span>🔒</span>
+                  <span>{isUser ? 'Read-Only Mode: Regular users cannot assign or change duties.' : 'Past Date (Read-Only): Admins cannot assign or change duties for past dates.'}</span>
                 </div>
-              ) : candidatePersonnel.length === 0 ? (
+              )}
+              {candidatePersonnel.length === 0 ? (
                 <div className="col-span-full py-8 text-center text-xs text-slate-400">
                   No matching candidates found for this duty & flight.
                 </div>
@@ -1381,7 +1427,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
                     isEligible = true;
                   }
 
-                  const isDisabled = !isEligible;
+                  const isDisabled = isReadOnly || !isEligible;
                   const isProcessing = processingAirmanId === airman.id;
 
                   return (
@@ -1391,7 +1437,9 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
                       disabled={isDisabled || isProcessing}
                       onClick={() => handleToggleAssignAirman(airman)}
                       title={
-                        isDisabled
+                        isReadOnly
+                          ? (isUser ? 'Read-only: Regular users cannot modify duties.' : 'Past dates cannot be modified by Admins.')
+                          : isDisabled
                           ? `${formatAirmanName(airman.rank)} ${airman.name} is on ${statusInfo.label} and is not eligible for ${DUTY_TYPE_MAP.get(activeDutyCode as any)?.name || activeDutyCode}.`
                           : undefined
                       }

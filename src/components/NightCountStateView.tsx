@@ -57,6 +57,8 @@ import {
   exportParadeStateMultiDocx,
   MultiParadeDayItem,
 } from '../utils/docxExport';
+import { DisposalCategoryDropdown } from './DisposalCategoryDropdown';
+import { saveCustomDisposal, getSavedCustomDisposals } from '../utils/customDisposalStore';
 
 import { exportHtmlToWord } from '../utils/htmlExport';
 
@@ -121,7 +123,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
   // Add Disposal Modal State
   const [showAddDisposalModal, setShowAddDisposalModal] = useState<boolean>(false);
   const [disposalDateMode, setDisposalDateMode] = useState<'SINGLE' | 'MULTI'>('SINGLE');
-  const [disposalFlight, setDisposalFlight] = useState<FlightName>(role === 'ADMIN' && userFlight ? userFlight as FlightName : 'Avionics');
+  const [disposalFlight, setDisposalFlight] = useState<FlightName | 'All'>(userFlight ? (userFlight as FlightName) : 'All');
   const [disposalCategory, setDisposalCategory] = useState<string>('');
   const [disposalCustomTitle, setDisposalCustomTitle] = useState<string>('');
     const [selectedDisposalAirmenIds, setSelectedDisposalAirmenIds] = useState<string[]>([]);
@@ -241,6 +243,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
               dutyCode: item.dutyCode,
               notes: item.notes,
               dutyName: item.dutyName,
+              idaShift: item.idaShift,
             };
           });
           setDisposalPersonnelStatusMap(map);
@@ -589,10 +592,6 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
 
   // Open Edit / Change Disposal Modal for a specific airman
   const openEditDisposal = (airman: Airman, dutyCode: string, dutyName?: string, note?: string) => {
-    if (role === 'ADMIN' && userFlight && airman.flightName !== userFlight) {
-      alert("You are not authorized to edit disposals for personnel outside your flight.");
-      return;
-    }
     const todayStr = new Date().toISOString().split('T')[0];
     if (disposalFromDate < todayStr && !isSuperAdmin) {
       alert("You cannot edit disposals for past dates.");
@@ -754,11 +753,20 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
         const { dutyCode, statusCategory, notes, idaShift } = item;
         const codeUpper = (dutyCode || '').toUpperCase();
         const notesLower = (notes || '').toLowerCase();
+        const shiftLower = (idaShift || '').toLowerCase();
 
-        const isNightCountIdacA = codeUpper === 'IDAC' && idaShift === 'Morning';
+        const isIdac = codeUpper === 'IDAC' || codeUpper === 'IDA' || notesLower.includes('idac') || notesLower.includes('ida center');
+        const isNightCountIdacNt = isIdac && (
+          shiftLower === 'night' || shiftLower === 'c' || shiftLower === 'nt' ||
+          notesLower.includes('night') || notesLower.includes('nt') || notesLower.includes('shift c') || notesLower.includes('"c"')
+        );
+        const isNightCountIdacA = isIdac && !isNightCountIdacNt && (
+          shiftLower === 'morning' || shiftLower === 'a' ||
+          notesLower.includes('morning') || notesLower.includes('idac a') || notesLower.includes('shift a') || notesLower.includes('"a"') ||
+          (!notesLower.includes('afternoon') && !notesLower.includes('aft') && shiftLower !== 'afternoon' && shiftLower !== 'b')
+        );
+        const isIdacB = isIdac && !isNightCountIdacNt && !isNightCountIdacA;
         const isDutyOff = codeUpper === 'DUTY_OFF' || codeUpper === 'OFF_DUTY' || statusCategory === 'OFF' || notesLower.includes('off duty') || notesLower.includes('nt off') || notesLower.includes('night off');
-        const isIdacB = codeUpper === 'IDAC' && idaShift === 'Afternoon';
-        const isIdacC = codeUpper === 'IDAC' && idaShift === 'Night';
         const isBake = ['BAKE_BITE', 'BAKE_N_BITE'].includes(codeUpper) || statusCategory === 'BAKE_N_BITE';
 
         if (codeUpper === 'ON_PARADE' || statusCategory === 'PARADE' || isNightCountIdacA || isDutyOff || codeUpper === 'CANTEEN' || notesLower.includes('canteen') || codeUpper === 'RECEPTION' || notesLower.includes('reception') || notesLower.includes('k/o')) {
@@ -786,9 +794,9 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
           absentCount++;
         } else if (isBake) {
           bakeBiteCount++;
-        } else if (isIdacB || isIdacC || codeUpper === 'OFFICE' || notesLower.includes('office')) {
+        } else if (isIdacB || codeUpper === 'OFFICE' || notesLower.includes('office')) {
           othersCount++;
-        } else if (['GD', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA', 'AIRPORT', 'AIRFIELD', 'ATT', 'AIR_FD'].includes(codeUpper) || statusCategory === 'DUTY') {
+        } else if (isNightCountIdacNt || ['GD', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA', 'AIRPORT', 'AIRFIELD', 'ATT', 'AIR_FD'].includes(codeUpper) || statusCategory === 'DUTY') {
           // dutyOn handled directly by calculation
           if (codeUpper === 'GD') {
              guardDutyCount++;
@@ -826,13 +834,26 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
           const { statusCategory, dutyCode, notes, idaShift } = st;
           const codeUpper = (dutyCode || '').toUpperCase();
           const notesLower = (notes || '').toLowerCase();
-          const isIdacB = codeUpper === 'IDAC' && idaShift === 'Afternoon';
-          const isIdacC = codeUpper === 'IDAC' && idaShift === 'Night';
+          const shiftLower = (idaShift || '').toLowerCase();
+
+          const isIdac = codeUpper === 'IDAC' || codeUpper === 'IDA' || notesLower.includes('idac') || notesLower.includes('ida center');
+          const isIdacNt = isIdac && (
+            shiftLower === 'night' || shiftLower === 'c' || shiftLower === 'nt' ||
+            notesLower.includes('night') || notesLower.includes('nt') || notesLower.includes('shift c') || notesLower.includes('"c"')
+          );
+          const isIdacA = isIdac && !isIdacNt && (
+            shiftLower === 'morning' || shiftLower === 'a' ||
+            notesLower.includes('morning') || notesLower.includes('idac a') || notesLower.includes('shift a') || notesLower.includes('"a"') ||
+            (!notesLower.includes('afternoon') && !notesLower.includes('aft') && shiftLower !== 'afternoon' && shiftLower !== 'b')
+          );
+          const isIdacB = isIdac && !isIdacNt && !isIdacA;
           const isBake = ['BAKE_BITE', 'BAKE_N_BITE'].includes(codeUpper) || statusCategory === 'BAKE_N_BITE';
           
           const isDutyOff = codeUpper === 'DUTY_OFF' || codeUpper === 'OFF_DUTY' || statusCategory === 'OFF' || notesLower.includes('off duty') || notesLower.includes('nt off') || notesLower.includes('night off');
           const isCanteenReception = codeUpper === 'CANTEEN' || notesLower.includes('canteen') || codeUpper === 'RECEPTION' || notesLower.includes('reception') || notesLower.includes('k/o');
-          if (codeUpper === 'ON_PARADE' || codeUpper === 'PT' || codeUpper === 'PT_PARADE' || statusCategory === 'PARADE' || isDutyOff || isCanteenReception) {
+          if (isIdacNt) {
+            dutyOnList.push({ airman, note: 'IDAC Nt' });
+          } else if (codeUpper === 'ON_PARADE' || codeUpper === 'PT' || codeUpper === 'PT_PARADE' || statusCategory === 'PARADE' || isIdacA || isDutyOff || isCanteenReception) {
             onPtList.push({ airman, note: '' });
           } else if (codeUpper === 'LEAVE' || statusCategory === 'LEAVE') {
             leaveList.push({ airman, note: '' });
@@ -859,7 +880,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
           
           } else if (isBake) {
             bakeBiteList.push({ airman, note: (notes && !notes.toLowerCase().includes('imported')) ? notes : '' });
-          } else if (isIdacB || isIdacC || codeUpper === 'OFFICE' || notesLower.includes('office')) {
+          } else if (isIdacB || codeUpper === 'OFFICE' || notesLower.includes('office')) {
             dutyOnList.push({ airman, note: 'Office Duty' });
           } else if (['GD', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA', 'AIRPORT', 'AIRFIELD', 'ATT', 'AIR_FD'].includes(codeUpper) || statusCategory === 'DUTY') {
             const dutyDisplay = formatDutyOnShortName(codeUpper, idaShift, notes, st.dutyName);
@@ -1250,10 +1271,9 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                     const c = (s.dutyCode || '').toUpperCase();
                     const n = (s.notes || '').toLowerCase();
                     const isOffice = c === 'OFFICE' || n.includes('office');
-                    const isIdacB = c === 'IDAC' && s.idaShift === 'Afternoon';
-                    const isIdacC = c === 'IDAC' && s.idaShift === 'Night';
+                    const isIdacB = c === 'IDAC' && (s.idaShift === 'Afternoon' || (s.idaShift as any) === 'B');
                     const isBake = ['BAKE_BITE', 'BAKE_N_BITE'].includes(c) || s.statusCategory === 'BAKE_N_BITE';
-                    return isOffice || isIdacB || isIdacC || isBake;
+                    return isOffice || isIdacB || isBake;
                   }).length;
                   const aftNiFlgCount = tempPList.filter(s => s.dutyCode === 'NIGHT_FLYING' || s.notes?.toLowerCase().includes('night')).length;
                   const offDutyCount = tempPList.filter(s => s.dutyCode === 'OFF_DUTY' || s.notes?.toLowerCase().includes('off duty')).length;
@@ -1409,10 +1429,9 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                     const c = (s.dutyCode || '').toUpperCase();
                     const n = (s.notes || '').toLowerCase();
                     const isOffice = c === 'OFFICE' || n.includes('office');
-                    const isIdacB = c === 'IDAC' && s.idaShift === 'Afternoon';
-                    const isIdacC = c === 'IDAC' && s.idaShift === 'Night';
+                    const isIdacB = c === 'IDAC' && (s.idaShift === 'Afternoon' || (s.idaShift as any) === 'B');
                     const isBake = ['BAKE_BITE', 'BAKE_N_BITE'].includes(c) || s.statusCategory === 'BAKE_N_BITE';
-                    return isOffice || isIdacB || isIdacC || isBake;
+                    return isOffice || isIdacB || isBake;
                   }).length;
                   const aftNiFlgCount = tempPList.filter(s => s.dutyCode === 'NIGHT_FLYING' || s.notes?.toLowerCase().includes('night')).length;
                   const offDutyCount = tempPList.filter(s => s.dutyCode === 'OFF_DUTY' || s.notes?.toLowerCase().includes('off duty')).length;
@@ -1826,41 +1845,64 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                     );
                   })}
                   {!isEditingDisposals && (
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={() => setShowDisposalDropdown(!showDisposalDropdown)}
-                        className="px-2.5 py-1.5 rounded-xl text-xs font-bold border border-dashed border-slate-300 dark:border-slate-600 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:border-slate-400 bg-slate-50 dark:bg-slate-900 transition-all cursor-pointer flex items-center space-x-1"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        {savedDisposals.length === 0 && <span>Add Category</span>}
-                      </button>
-                      {showDisposalDropdown && (
-                        <div className="absolute top-full left-0 mt-1 w-56 max-h-64 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 py-1">
-                          {[...ALL_DISPOSAL_OPTIONS, ...historicalCustomCats].filter(opt => opt.code === 'OTHERS' || (!savedDisposals.some(d => d.code === opt.code && (d.code !== 'OTHERS' || d.customTitle === opt.customTitle)))).filter((opt, index, self) => index === self.findIndex((t) => t.code === opt.code && t.customTitle === opt.customTitle)).map((opt, idx) => (
-                            <button
-                              key={`${opt.code}-${opt.label}-${opt.customTitle || ''}`}
-                              type="button"
-                              onClick={() => handleAddDisposalOption(opt)}
-                              className="w-full text-left px-4 py-2 text-[11px] font-bold text-slate-700 dark:text-slate-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 hover:text-emerald-900 dark:hover:text-emerald-100 transition-colors"
-                            >
-                              {opt.code === 'OTHERS' && opt.customTitle ? opt.customTitle : opt.label}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                    <DisposalCategoryDropdown
+                      options={[...ALL_DISPOSAL_OPTIONS, ...historicalCustomCats]}
+                      savedDisposals={savedDisposals}
+                      onSelectOption={handleAddDisposalOption}
+                      buttonLabel="Add Category"
+                    />
                   )}
                 </div>
 
-                
-                {/* Sub Category Dropdown */}
-                
+                {/* Custom Title Input if OTHERS selected */}
+                {disposalCategory === 'OTHERS' && (!ALL_DISPOSAL_OPTIONS.find(o => o.label === disposalCustomTitle && o.customTitle === disposalCustomTitle) || disposalCustomTitle === '') && !isEditingDisposals && (
+                  <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl space-y-1 animate-fadeIn mt-2">
+                    <label className="text-xs font-bold text-amber-900 dark:text-amber-200">
+                      Specify Custom Disposal Name
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Special Escort, VVIP Detail..."
+                      value={disposalCustomTitle}
+                      onChange={(e) => setDisposalCustomTitle(e.target.value)}
+                      className="w-full px-3 py-1.5 text-xs rounded-lg border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white print:text-black outline-none focus:border-amber-500 shadow-xs"
+                      required
+                    />
+                  </div>
+                )}
+                </div>
+
+                {/* 3. Flight Filter & Airman Selection */}
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      3. Select Flight & Personnel
+                    </label>
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+                      Select flight to view personnel
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {(['All', 'Avionics', 'Mechanics', 'GCS', 'Admin'] as const).map((fl) => (
+                      <button
+                        key={fl}
+                        type="button"
+                        onClick={() => setDisposalFlight(fl)}
+                        className={`py-1.5 px-2 text-xs font-bold rounded-lg border text-center transition-all cursor-pointer ${
+                          disposalFlight === fl
+                            ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
+                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:border-slate-400'
+                        }`}
+                      >
+                        {fl}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 {/* Multi-Select Airmen List */}
                 {(() => {
-                  const flightAirmen = airmen.filter((a) => a.flightName === disposalFlight).filter(a => {
+                  const flightAirmen = airmen.filter((a) => (disposalFlight === 'All' ? true : a.flightName === disposalFlight)).filter(a => {
     if (!['CPL', 'Cpl', 'LAC', 'AC'].includes(a.rank)) return false;
     const block = (a.addressBlock || '').toLowerCase();
     const isLOut = block.includes('qtr') || 
@@ -1886,8 +1928,28 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                     const codeUpper = (dutyCode || '').toUpperCase();
                     const notesLower = (notes || '').toLowerCase();
 
+                    const shiftLower = (st.idaShift || '').toLowerCase();
+                    const isIdac = codeUpper === 'IDAC' || codeUpper === 'IDA' || notesLower.includes('idac') || notesLower.includes('ida center');
+                    const isIdacNt = isIdac && (
+                      shiftLower === 'night' || shiftLower === 'c' || shiftLower === 'nt' ||
+                      notesLower.includes('night') || notesLower.includes('nt') || notesLower.includes('shift c') || notesLower.includes('"c"')
+                    );
+
+                    if (isIdacNt) {
+                      return { isOnParade: false, label: 'IDAC Nt', dutyCode: 'IDAC', notes: 'IDAC Nt', dutyName: 'IDAC Nt' };
+                    }
+
                     if (codeUpper === 'ON_PARADE' || statusCategory === 'PARADE') {
                       return { isOnParade: true, label: 'On Parade', dutyCode: 'ON_PARADE', notes, dutyName: 'On Parade' };
+                    }
+                    const isIdacA = isIdac && !isIdacNt && (
+                      shiftLower === 'morning' || shiftLower === 'a' ||
+                      notesLower.includes('morning') || notesLower.includes('idac a') || notesLower.includes('shift a') || notesLower.includes('"a"') ||
+                      (!notesLower.includes('afternoon') && !notesLower.includes('aft') && shiftLower !== 'afternoon' && shiftLower !== 'b')
+                    );
+
+                    if (isIdacA) {
+                      return { isOnParade: true, label: 'On Parade', dutyCode: 'ON_PARADE', notes: '', dutyName: 'On Parade' };
                     }
                     if (statusCategory === 'OFF' || codeUpper === 'DUTY_OFF' || codeUpper === 'OFF_DUTY' || notesLower.includes('off duty') || notesLower.includes('nt off') || notesLower.includes('night off')) {
                       return { isOnParade: true, label: 'On Parade', dutyCode: 'ON_PARADE', notes: '', dutyName: 'On Parade' };
@@ -1968,7 +2030,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                       {/* Selection Toolbar */}
                       <div className="flex items-center justify-between px-1 text-xs">
                         <span className="text-slate-600 dark:text-slate-400 font-medium">
-                          Available: <strong className="text-emerald-700 dark:text-emerald-400 font-bold">{availableOnParade.length}</strong> / {flightAirmen.length} in {disposalFlight}
+                          Available: <strong className="text-emerald-700 dark:text-emerald-400 font-bold">{availableOnParade.length}</strong> / {flightAirmen.length} in {disposalFlight === 'All' ? 'All Flights' : `${disposalFlight} Flight`}
                           {selectedDisposalAirmenIds.length > 0 && (
                             <span className="ml-2 font-bold text-emerald-600 dark:text-emerald-400">
                               ({selectedDisposalAirmenIds.length} Selected)
@@ -1999,7 +2061,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                       <div className="max-h-56 overflow-y-auto space-y-1.5 p-2 rounded-xl bg-slate-50/50 dark:bg-slate-800/30 border border-slate-200 dark:border-slate-700/50">
                         {flightAirmen.length === 0 ? (
                           <div className="py-4 text-center text-xs text-slate-400">
-                            No airmen registered in {disposalFlight} Flight
+                            No airmen registered in {disposalFlight === 'All' ? 'any' : disposalFlight} Flight
                           </div>
                         ) : (
                           flightAirmen.map((a) => {
@@ -2214,36 +2276,22 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                     );
                   })}
                   {!isEditingDisposals && (
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={() => setShowDisposalDropdown(!showDisposalDropdown)}
-                        className="px-2.5 py-1.5 rounded-xl text-xs font-bold border border-dashed border-slate-300 dark:border-slate-600 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:border-slate-400 bg-slate-50 dark:bg-slate-900 transition-all cursor-pointer flex items-center space-x-1"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        {savedDisposals.length === 0 && <span>Add Category</span>}
-                      </button>
-                      {showDisposalDropdown && (
-                        <div className="absolute bottom-full mb-1 left-0 w-56 max-h-64 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 py-1">
-                          {[...ALL_DISPOSAL_OPTIONS, ...historicalCustomCats].filter(opt => opt.code === 'OTHERS' || (!savedDisposals.some(d => d.code === opt.code && (d.code !== 'OTHERS' || d.customTitle === opt.customTitle)))).filter((opt, index, self) => index === self.findIndex((t) => t.code === opt.code && t.customTitle === opt.customTitle)).map((opt, idx) => (
-                            <button
-                              key={`${opt.code}-${opt.label}-${opt.customTitle || ''}`}
-                              type="button"
-                              onClick={() => {
-                                handleAddDisposalOption(opt);
-                                setEditDisposalCategory(opt.code);
-                                if (opt.customTitle) setEditDisposalCustomTitle(opt.customTitle);
-                                else if (opt.code === 'OTHERS') setEditDisposalCustomTitle('');
-                                setShowDisposalDropdown(false);
-                              }}
-                              className="w-full text-left px-4 py-2 text-[11px] font-bold text-slate-700 dark:text-slate-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 hover:text-emerald-900 dark:hover:text-emerald-100 transition-colors"
-                            >
-                              {opt.code === 'OTHERS' && opt.customTitle ? opt.customTitle : opt.label}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                    <DisposalCategoryDropdown
+                      options={[...ALL_DISPOSAL_OPTIONS, ...historicalCustomCats]}
+                      savedDisposals={savedDisposals}
+                      dropUp={true}
+                      onSelectOption={(opt) => {
+                        handleAddDisposalOption(opt);
+                        setEditDisposalCategory(opt.code);
+                        if (opt.customTitle) {
+                          setEditDisposalCustomTitle(opt.customTitle);
+                          saveCustomDisposal(opt.customTitle);
+                        } else if (opt.code === 'OTHERS') {
+                          setEditDisposalCustomTitle('');
+                        }
+                      }}
+                      buttonLabel="Add Category"
+                    />
                   )}
                 </div>
 

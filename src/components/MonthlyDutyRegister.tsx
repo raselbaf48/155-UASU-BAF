@@ -60,26 +60,63 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
     }
   });
 
+  const [removedHolidays, setRemovedHolidays] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('baf_removed_holidays') || '[]');
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    const syncHolidays = () => {
+      try {
+        setCustomHolidays(JSON.parse(localStorage.getItem('baf_custom_holidays') || '[]'));
+        setRemovedHolidays(JSON.parse(localStorage.getItem('baf_removed_holidays') || '[]'));
+      } catch (e) {
+        console.error('Failed to sync holidays in MonthlyDutyRegister:', e);
+      }
+    };
+    window.addEventListener('baf_state_updated', syncHolidays);
+    return () => window.removeEventListener('baf_state_updated', syncHolidays);
+  }, []);
+
   const [assignments, setAssignments] = useState<DutyAssignment[]>([]);
   const [allYearAssignments, setAllYearAssignments] = useState<DutyAssignment[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
   // Toggle Custom Holiday
   const handleToggleHoliday = (dateStr: string) => {
-    setCustomHolidays((prev) => {
-      const updated = prev.includes(dateStr)
-        ? prev.filter((d) => d !== dateStr)
-        : [...prev, dateStr];
-      try {
-        localStorage.setItem('baf_custom_holidays', JSON.stringify(updated));
-      } catch (err) {
-        console.error('Failed to save custom holidays to localStorage:', err);
+    const parts = dateStr.split('-');
+    const dObj = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    const isWeekend = dObj.getDay() === 5 || dObj.getDay() === 6;
+
+    if (isWeekend) {
+      if (removedHolidays.includes(dateStr)) {
+        const next = removedHolidays.filter(d => d !== dateStr);
+        setRemovedHolidays(next);
+        localStorage.setItem('baf_removed_holidays', JSON.stringify(next));
+      } else {
+        const next = [...removedHolidays, dateStr];
+        setRemovedHolidays(next);
+        localStorage.setItem('baf_removed_holidays', JSON.stringify(next));
       }
-      return updated;
-    });
+    } else {
+      if (customHolidays.includes(dateStr)) {
+        const next = customHolidays.filter(d => d !== dateStr);
+        setCustomHolidays(next);
+        localStorage.setItem('baf_custom_holidays', JSON.stringify(next));
+      } else {
+        const next = [...customHolidays, dateStr];
+        setCustomHolidays(next);
+        localStorage.setItem('baf_custom_holidays', JSON.stringify(next));
+      }
+    }
+    window.dispatchEvent(new CustomEvent('baf_state_updated'));
   };
 
   const isHolidayDate = (dateStr: string, dObj: Date) => {
+    if (removedHolidays.includes(dateStr)) return false;
     const isWeekend = dObj.getDay() === 5 || dObj.getDay() === 6; // Friday / Saturday in BD
     return isWeekend || customHolidays.includes(dateStr);
   };

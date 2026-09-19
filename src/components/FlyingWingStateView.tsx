@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FlightName } from '../types';
+import { saveCustomDisposal, getSavedCustomDisposals } from '../utils/customDisposalStore';
 
 const FLYING_WING_UNITS = ['Flg WG HQ', '1 SQN BAF', '3 SQN BAF', '5 SQN BAF', '21 SQN BAF', '105 AJTU BAF', '155 UASU BAF', '301 SAM UNIT'];
 import { Printer, Settings, X, Plus } from 'lucide-react';
@@ -225,10 +226,13 @@ export function FlyingWingStateView({
   }, [selectedUnit, isAddModalOpen]);
 
   const handleAddDisposalToForm = (name: string) => {
-    if (!ALL_DISPOSAL_OPTIONS.includes(name) && !historicalCustomCats.includes(name)) {
-      const newHistory = [...historicalCustomCats, name];
-      setHistoricalCustomCats(newHistory);
-      localStorage.setItem('flg_wg_historical_custom', JSON.stringify(newHistory));
+    if (!ALL_DISPOSAL_OPTIONS.includes(name)) {
+      saveCustomDisposal(name);
+      if (!historicalCustomCats.includes(name)) {
+        const newHistory = [...historicalCustomCats, name];
+        setHistoricalCustomCats(newHistory);
+        localStorage.setItem('flg_wg_historical_custom', JSON.stringify(newHistory));
+      }
     }
     if (!formSavedDisposals.includes(name)) {
       const updated = [...formSavedDisposals, name];
@@ -526,62 +530,99 @@ export function FlyingWingStateView({
                         {formSavedDisposals.length === 0 && <span>Add Category</span>}
                       </button>
                       {showDisposalDropdown && (
-                        <div className="absolute top-full mt-1 left-0 w-56 max-h-64 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 py-1">
-                          {Array.from(new Set([...ALL_DISPOSAL_OPTIONS, ...historicalCustomCats, ...customColumns])).filter(opt => !formSavedDisposals.includes(opt)).map((opt) => (
-                            <button
-                              key={opt}
-                              type="button"
-                              onClick={() => handleAddDisposalToForm(opt)}
-                              className="w-full text-left px-4 py-2 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 hover:text-emerald-900 dark:hover:text-emerald-100 transition-colors"
-                            >
-                              {opt}
-                            </button>
-                          ))}
-                          
-                          <div className="border-t border-slate-100 dark:border-slate-700 mt-1 pt-1 px-2">
-                            {!showCustomInput ? (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setShowCustomInput(true);
-                                }}
-                                className="w-full text-left px-2 py-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded transition-colors"
-                              >
-                                ✨ Custom...
-                              </button>
-                            ) : (
-                              <div className="flex items-center space-x-1 p-1">
-                                <input
-                                  autoFocus
-                                  type="text"
-                                  value={customDisposalText}
-                                  onChange={(e) => setCustomDisposalText(e.target.value)}
-                                  placeholder="Custom name"
-                                  className="flex-1 px-2 py-1 text-xs border rounded bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-none"
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter' && customDisposalText.trim()) {
-                                      e.preventDefault();
-                                      handleAddDisposalToForm(customDisposalText.trim());
-                                    }
-                                  }}
-                                />
+                        <>
+                          <div
+                            className="fixed inset-0 z-40 bg-transparent"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShowDisposalDropdown(false);
+                              setShowCustomInput(false);
+                            }}
+                          />
+                          <div className="absolute top-full mt-1 left-0 w-56 max-h-64 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 py-1 flex flex-col">
+                            <div className="flex-1 overflow-y-auto">
+                              {/* Standard & Existing options */}
+                              {Array.from(new Set([...ALL_DISPOSAL_OPTIONS, ...customColumns])).filter(opt => !formSavedDisposals.includes(opt)).map((opt) => (
+                                <button
+                                  key={opt}
+                                  type="button"
+                                  onClick={() => handleAddDisposalToForm(opt)}
+                                  className="w-full text-left px-4 py-2 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 hover:text-emerald-900 dark:hover:text-emerald-100 transition-colors"
+                                >
+                                  {opt}
+                                </button>
+                              ))}
+
+                              {/* Saved Custom Categories (added once, now appears here above Custom) */}
+                              {Array.from(new Set([...getSavedCustomDisposals(), ...historicalCustomCats]))
+                                .filter(c => !ALL_DISPOSAL_OPTIONS.includes(c) && !formSavedDisposals.includes(c))
+                                .length > 0 && (
+                                <div className="border-t border-slate-100 dark:border-slate-700 my-1 pt-1">
+                                  <div className="px-3 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                    Custom Categories
+                                  </div>
+                                  {Array.from(new Set([...getSavedCustomDisposals(), ...historicalCustomCats]))
+                                    .filter(c => !ALL_DISPOSAL_OPTIONS.includes(c) && !formSavedDisposals.includes(c))
+                                    .map((opt) => (
+                                      <button
+                                        key={opt}
+                                        type="button"
+                                        onClick={() => handleAddDisposalToForm(opt)}
+                                        className="w-full text-left px-4 py-2 text-xs font-bold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors flex items-center justify-between"
+                                      >
+                                        <span>{opt}</span>
+                                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/50 font-medium">Custom</span>
+                                      </button>
+                                    ))}
+                                </div>
+                              )}
+                            </div>
+                            
+                            <div className="border-t border-slate-100 dark:border-slate-700 mt-1 pt-1 px-2">
+                              {!showCustomInput ? (
                                 <button
                                   type="button"
                                   onClick={(e) => {
-                                    e.preventDefault();
-                                    if (customDisposalText.trim()) {
-                                      handleAddDisposalToForm(customDisposalText.trim());
-                                    }
+                                    e.stopPropagation();
+                                    setShowCustomInput(true);
                                   }}
-                                  className="px-2 py-1 bg-emerald-600 text-white rounded text-xs font-bold cursor-pointer"
+                                  className="w-full text-left px-2 py-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded transition-colors"
                                 >
-                                  Add
+                                  ✨ Custom...
                                 </button>
-                              </div>
-                            )}
+                              ) : (
+                                <div className="flex items-center space-x-1 p-1">
+                                  <input
+                                    autoFocus
+                                    type="text"
+                                    value={customDisposalText}
+                                    onChange={(e) => setCustomDisposalText(e.target.value)}
+                                    placeholder="Custom name"
+                                    className="flex-1 px-2 py-1 text-xs border rounded bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-none"
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter' && customDisposalText.trim()) {
+                                        e.preventDefault();
+                                        handleAddDisposalToForm(customDisposalText.trim());
+                                      }
+                                    }}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      if (customDisposalText.trim()) {
+                                        handleAddDisposalToForm(customDisposalText.trim());
+                                      }
+                                    }}
+                                    className="px-2 py-1 bg-emerald-600 text-white rounded text-xs font-bold cursor-pointer"
+                                  >
+                                    Add
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           </div>
-                        </div>
+                        </>
                       )}
                     </div>
                   </div>
