@@ -25,9 +25,10 @@ import { Expenditures } from '../pages/Expenditures';
 import { CanteenReports } from '../pages/CanteenReports';
 import { CanteenSettings } from '../pages/CanteenSettings';
 import { CanteenFund } from '../pages/CanteenFund';
+import { DueRegister } from '../pages/DueRegister';
 import { AirmanProfileModal } from '../../../components/AirmanProfileModal';
 
-import { Wallet, LayoutDashboard, Coffee, Search, List, CreditCard, ArrowLeft, Utensils, Wifi, HelpCircle, LogIn, Grid, Package as Pkg, ShoppingCart, Users, Banknote, BarChart2, Settings as SettingsIcon, PieChart, Package, UserCircle, X, Menu, User, Eye, EyeOff, Lock, Phone, UtensilsCrossed, Boxes } from 'lucide-react';
+import { Wallet, LayoutDashboard, Coffee, Search, List, CreditCard, ArrowLeft, Utensils, Wifi, HelpCircle, LogIn, Grid, Package as Pkg, ShoppingCart, Users, Banknote, BarChart2, Settings as SettingsIcon, PieChart, Package, UserCircle, X, Menu, User, Eye, EyeOff, Lock, Phone, UtensilsCrossed, Boxes, ClipboardList } from 'lucide-react';
 
 interface CanteenLayoutProps {
   initialMember?: { name: string, bdNo: string, role?: 'employee'|'manager', photoUrl?: string, due?: number };
@@ -463,6 +464,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
     { id: 'manager_dashboard', name: 'Manager Home', icon: Grid },
     { id: 'pos_sales', name: 'POS Sales', icon: ShoppingCart },
     { id: 'member_db', name: 'Member DB', icon: Users },
+    { id: 'due_register', name: 'Due Register', icon: ClipboardList },
     { id: 'menu', name: 'Menu', icon: UtensilsCrossed },
     { id: 'inventory', name: 'Inventory', icon: Boxes },
     { id: 'expenditures', name: 'Expenditures', icon: Banknote },
@@ -491,6 +493,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
       case 'manager_dashboard': return <ManagerDashboard />;
       case 'pos_sales': return <PosSales />;
       case 'member_db': return <MemberDB />;
+      case 'due_register': return <DueRegister />;
       case 'menu': return <CanteenInventory readOnly={currentUser.role !== 'manager'} />;
       case 'inventory': return <RawInventoryManagement readOnly={currentUser.role !== 'manager'} />;
       case 'expenditures': return <Expenditures />;

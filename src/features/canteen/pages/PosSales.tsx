@@ -3,7 +3,7 @@ import { Search, Plus, ShoppingCart, Minus, Trash2, CheckCircle2, X, History, Ca
 import { supabase } from '../../../supabase';
 import { resolveImageUrl } from '../utils/canteenSettings';
 import { formatCanteenDate } from '../utils/dateUtils';
-import { deductRawStockForSales, getRecipeForMenuItem, getRawInventoryItems } from '../utils/recipeManager';
+import { deductRawStockForSales, restoreRawStockForSaleCancellation, getRecipeForMenuItem, getRawInventoryItems } from '../utils/recipeManager';
 
 export const PosSales: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -299,28 +299,69 @@ export const PosSales: React.FC = () => {
           setMembers(members.map(member => member.airman_id === txToRemove.airman_id ? {...member, Due: newDue, baki: newDue} : member));
       }
 
-      // Restore Stock
-      if (txToRemove.items) {
-          const itemsArray = txToRemove.items.split(',').map((s: string) => s.trim());
-          for (const itemStr of itemsArray) {
-              const match = itemStr.match(/(.+?)\s+\((\d+)\)/);
-              if (match) {
-                  const itemName = match[1];
-                  const qty = parseInt(match[2]);
-                  const itemObj = catalog.find((c: any) => c.name === itemName);
+      // Prepare items for restoration
+      const itemsToRestore: Array<{ menuItemId?: string; menuItemName: string; qty: number }> = [];
+
+      // Restore Catalog (Menu item) Stock
+      if (txToRemove.soldItems && Array.isArray(txToRemove.soldItems) && txToRemove.soldItems.length > 0) {
+          for (const item of txToRemove.soldItems) {
+              const qty = Number(item.qty) || 0;
+              if (qty > 0) {
+                  itemsToRestore.push({
+                      menuItemId: item.menuItemId,
+                      menuItemName: item.menuItemName,
+                      qty
+                  });
+                  const itemObj = catalog.find((c: any) => c.id === item.menuItemId || c.name.toLowerCase() === item.menuItemName?.toLowerCase());
                   if (itemObj) {
                       const newStock = (itemObj.stock || 0) + qty;
                       await supabase.from('Canteen_Inventory').update({ stock: newStock }).eq('id', itemObj.id);
                   }
               }
           }
-          fetchCatalog(); // Refresh catalog after stock restoration
+      } else if (txToRemove.items) {
+          const itemsArray = txToRemove.items.split(',').map((s: string) => s.trim());
+          for (const itemStr of itemsArray) {
+              const match = itemStr.match(/(.+?)\s+\((\d+)\)/);
+              if (match) {
+                  const itemName = match[1];
+                  const qty = parseInt(match[2]);
+                  itemsToRestore.push({
+                      menuItemName: itemName,
+                      qty
+                  });
+                  const itemObj = catalog.find((c: any) => c.name.toLowerCase() === itemName.toLowerCase());
+                  if (itemObj) {
+                      const newStock = (itemObj.stock || 0) + qty;
+                      await supabase.from('Canteen_Inventory').update({ stock: newStock }).eq('id', itemObj.id);
+                  }
+              }
+          }
       }
+
+      // Restore Raw Materials Stock (কাঁচামালের স্টক ফেরত আনা)
+      let restoredCount = 0;
+      if (itemsToRestore.length > 0) {
+          const rawRestoreResult = restoreRawStockForSaleCancellation(itemsToRestore, {
+              id: txToRemove.id,
+              memberName: txToRemove.memberName,
+              date: txToRemove.date
+          });
+          restoredCount = rawRestoreResult.restored.length;
+      }
+
+      fetchCatalog(); // Refresh catalog after stock restoration
 
       const updatedHistory = salesHistory.filter(tx => tx.id !== txId);
       setSalesHistory(updatedHistory);
       localStorage.setItem('canteen_txs', JSON.stringify(updatedHistory));
       setTxDeleteConfirmId(null);
+
+      const rawMsg = restoredCount > 0 
+          ? ` এবং ${restoredCount}টি কাঁচামালের স্টক স্টোরে ফেরত এসেছে!` 
+          : '!';
+      setToastMessage(`✅ সেল রেকর্ড ডিলিট করা হয়েছে, বকেয়া সমন্বয় করা হয়েছে${rawMsg}`);
+      setTimeout(() => setToastMessage(''), 4000);
   };
 
   const fetchMembers = async () => {
@@ -629,6 +670,11 @@ export const PosSales: React.FC = () => {
                   memberName: txMemberName,
                   rank: m.Rank || m.rank || '',
                   items: basket.map(b => `${b.name} (${b.qty})`).join(', '),
+                  soldItems: basket.map(b => ({
+                      menuItemId: b.id,
+                      menuItemName: b.name,
+                      qty: b.qty
+                  })),
                   amount: memberChargeAmount,
                   type: 'SALE',
                   gateway: 'DUE'
@@ -1006,7 +1052,7 @@ export const PosSales: React.FC = () => {
                           <Trash2 className="w-8 h-8" />
                       </div>
                       <h3 className="text-lg font-black text-white uppercase tracking-tighter mb-2">Remove Record?</h3>
-                      <p className="text-sm font-bold text-slate-400 mb-6">Are you sure you want to remove this history record? Member Due will be reversed and stock will be restored.</p>
+                      <p className="text-sm font-bold text-slate-400 mb-6">Are you sure you want to remove this history record? Member Due will be reversed, and both Catalog and RAW Material stocks (issue back) will be restored to store.</p>
                       
                       <div className="flex space-x-3">
                           <button onClick={() => setTxDeleteConfirmId(null)} className="flex-1 py-3 bg-slate-800 text-slate-200 rounded-xl text-xs font-black tracking-widest hover:bg-slate-200 transition-colors">

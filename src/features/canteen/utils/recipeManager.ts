@@ -7,6 +7,7 @@ export interface RawInventoryItem {
   currentStock: number;
   minStockAlert: number;
   unitCost: number;
+  wastagePercentage?: number; // e.g. 30 means 30% wastage, 70% enters stock
   lastRestockedDate: string;
   supplier?: string;
   notes?: string;
@@ -50,6 +51,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
     currentStock: 35,
     minStockAlert: 12,
     unitCost: 230,
+    wastagePercentage: 30,
     lastRestockedDate: '2026-09-18',
     supplier: 'Local Poultry Market',
     notes: 'Fresh broiler chicken for daily dishes'
@@ -232,6 +234,14 @@ const DEFAULT_MENU_RECIPES: Record<string, RecipeIngredient[]> = {
     { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.02, unit: 'kg' },
     { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.01, unit: 'liter' }
   ],
+  'EGG FRY': [
+    { rawItemId: 'raw-7', rawItemName: 'Egg', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.02, unit: 'kg' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.01, unit: 'liter' }
+  ],
+  'BOILED EGG': [
+    { rawItemId: 'raw-7', rawItemName: 'Egg', quantity: 1, unit: 'pcs' }
+  ],
   'EGG NOODLES': [
     { rawItemId: 'raw-6', rawItemName: 'Noodles', quantity: 1, unit: 'packet' },
     { rawItemId: 'raw-7', rawItemName: 'Egg', quantity: 1, unit: 'pcs' },
@@ -260,6 +270,10 @@ const DEFAULT_MENU_RECIPES: Record<string, RecipeIngredient[]> = {
     { rawItemId: 'raw-4', rawItemName: 'Milk Powder', quantity: 0.025, unit: 'kg' },
     { rawItemId: 'raw-13', rawItemName: 'Sugar', quantity: 0.015, unit: 'kg' }
   ],
+  'COLD COFFEE': [
+    { rawItemId: 'raw-4', rawItemName: 'Milk Powder', quantity: 0.025, unit: 'kg' },
+    { rawItemId: 'raw-13', rawItemName: 'Sugar', quantity: 0.02, unit: 'kg' }
+  ],
   'MILK TEA': [
     { rawItemId: 'raw-4', rawItemName: 'Milk Powder', quantity: 0.02, unit: 'kg' },
     { rawItemId: 'raw-5', rawItemName: 'Tea Bag', quantity: 1, unit: 'packet' },
@@ -272,6 +286,9 @@ const DEFAULT_MENU_RECIPES: Record<string, RecipeIngredient[]> = {
   'NORMAL BISCUIT': [
     { rawItemId: 'raw-8', rawItemName: 'Biscuit', quantity: 1, unit: 'packet' }
   ],
+  'DRY CAKE': [
+    { rawItemId: 'raw-8', rawItemName: 'Biscuit', quantity: 1, unit: 'packet' }
+  ],
   'ONE TIME BOX': [
     { rawItemId: 'raw-9', rawItemName: 'One Time Box', quantity: 1, unit: 'pcs' }
   ],
@@ -279,6 +296,74 @@ const DEFAULT_MENU_RECIPES: Record<string, RecipeIngredient[]> = {
     { rawItemId: 'raw-10', rawItemName: 'Pasta', quantity: 0.1, unit: 'kg' },
     { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.02, unit: 'kg' },
     { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.015, unit: 'liter' }
+  ],
+  'CHICKEN PASTA': [
+    { rawItemId: 'raw-1', rawItemName: 'Chicken', quantity: 0.08, unit: 'kg' },
+    { rawItemId: 'raw-10', rawItemName: 'Pasta', quantity: 0.08, unit: 'kg' },
+    { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.03, unit: 'kg' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.015, unit: 'liter' }
+  ],
+  'PORATA': [
+    { rawItemId: 'raw-11', rawItemName: 'Frozen Porota', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.01, unit: 'liter' }
+  ],
+  'PORATA (HOTEL)': [
+    { rawItemId: 'raw-11', rawItemName: 'Frozen Porota', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.01, unit: 'liter' }
+  ],
+  'PORATA (UNIT)': [
+    { rawItemId: 'raw-11', rawItemName: 'Frozen Porota', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.01, unit: 'liter' }
+  ],
+  'CHICKEN BIRIYANI': [
+    { rawItemId: 'raw-1', rawItemName: 'Chicken', quantity: 0.15, unit: 'kg' },
+    { rawItemId: 'raw-2', rawItemName: 'Rice', quantity: 0.15, unit: 'kg' },
+    { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.04, unit: 'kg' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.025, unit: 'liter' }
+  ],
+  'CHICKEN CURRY': [
+    { rawItemId: 'raw-1', rawItemName: 'Chicken', quantity: 0.15, unit: 'kg' },
+    { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.04, unit: 'kg' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.02, unit: 'liter' }
+  ],
+  'CHICKEN KHICHURI': [
+    { rawItemId: 'raw-1', rawItemName: 'Chicken', quantity: 0.12, unit: 'kg' },
+    { rawItemId: 'raw-2', rawItemName: 'Rice', quantity: 0.12, unit: 'kg' },
+    { rawItemId: 'raw-3', rawItemName: 'Dal', quantity: 0.03, unit: 'kg' },
+    { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.03, unit: 'kg' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.02, unit: 'liter' }
+  ],
+  'CHICKEN ONION': [
+    { rawItemId: 'raw-1', rawItemName: 'Chicken', quantity: 0.12, unit: 'kg' },
+    { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.05, unit: 'kg' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.02, unit: 'liter' }
+  ],
+  'CHICKEN PULAW': [
+    { rawItemId: 'raw-1', rawItemName: 'Chicken', quantity: 0.15, unit: 'kg' },
+    { rawItemId: 'raw-2', rawItemName: 'Rice', quantity: 0.15, unit: 'kg' },
+    { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.03, unit: 'kg' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.025, unit: 'liter' }
+  ],
+  'EGG KHICURI': [
+    { rawItemId: 'raw-7', rawItemName: 'Egg', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-2', rawItemName: 'Rice', quantity: 0.12, unit: 'kg' },
+    { rawItemId: 'raw-3', rawItemName: 'Dal', quantity: 0.03, unit: 'kg' },
+    { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.03, unit: 'kg' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.02, unit: 'liter' }
+  ],
+  'CHOTPOTI': [
+    { rawItemId: 'raw-3', rawItemName: 'Dal', quantity: 0.06, unit: 'kg' },
+    { rawItemId: 'raw-7', rawItemName: 'Egg', quantity: 0.5, unit: 'pcs' },
+    { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.02, unit: 'kg' }
+  ],
+  'SWARMA': [
+    { rawItemId: 'raw-1', rawItemName: 'Chicken', quantity: 0.08, unit: 'kg' },
+    { rawItemId: 'raw-11', rawItemName: 'Frozen Porota', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.02, unit: 'kg' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.01, unit: 'liter' }
+  ],
+  'SOSA': [
+    { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.02, unit: 'kg' }
   ]
 };
 
@@ -463,8 +548,8 @@ export const deductRawStockForSales = (
       newStock: newStock,
       cost: Math.round(used * item.unitCost),
       date: today,
-      notes: `POS Sale auto deduction (${soldItems.map(s => `${s.menuItemName} x${s.qty}`).join(', ')})`,
-      recordedBy: 'POS System'
+      notes: `[AUTO ISSUE - MENU SALE] ${soldItems.map(s => `${s.menuItemName} x${s.qty}`).join(', ')}`,
+      recordedBy: 'POS Sale (Auto)'
     });
 
     return {
@@ -501,7 +586,7 @@ export const deductRawStockForSales = (
 export interface AutoRestockExpenseInput {
   desc: string;
   subdesc?: string;
-  category: string;
+  category?: string;
   amount: number;
   date?: string;
   rawItemId?: string;
@@ -595,15 +680,25 @@ export const autoRestockFromExpense = (input: AutoRestockExpenseInput): {
   qtyToAdd = Math.round(qtyToAdd * 100) / 100;
   if (qtyToAdd <= 0) qtyToAdd = 1;
 
+  // Check wastage percentage (e.g. Chicken 30% wastage -> net 70% in inventory, 30% in wastage log)
+  const wastagePct = Number(matchedItem.wastagePercentage) || 0;
+  let netQtyToAdd = qtyToAdd;
+  let wastageQty = 0;
+
+  if (wastagePct > 0 && wastagePct < 100) {
+    wastageQty = Math.round((qtyToAdd * (wastagePct / 100)) * 1000) / 1000;
+    netQtyToAdd = Math.round((qtyToAdd - wastageQty) * 1000) / 1000;
+  }
+
   const prevStock = matchedItem.currentStock;
-  const newStock = Math.round((prevStock + qtyToAdd) * 100) / 100;
+  const newStock = Math.round((prevStock + netQtyToAdd) * 100) / 100;
   const today = input.date || new Date().toISOString().split('T')[0];
 
   // Update item
   const updatedItems = rawItems.map(item => {
     if (item.id === matchedItem!.id) {
-      const calculatedUnitCost = input.amount > 0 && qtyToAdd > 0
-        ? Math.round(input.amount / qtyToAdd)
+      const calculatedUnitCost = input.amount > 0 && netQtyToAdd > 0
+        ? Math.round(input.amount / netQtyToAdd)
         : item.unitCost;
 
       return {
@@ -618,21 +713,44 @@ export const autoRestockFromExpense = (input: AutoRestockExpenseInput): {
 
   saveRawInventoryItems(updatedItems);
 
-  // Add RESTOCK Log
-  const newLog: RawStockLog = {
+  // Prepare logs
+  const newLogs: RawStockLog[] = [];
+
+  // 1. RESTOCK Log for Net Stock added
+  newLogs.push({
     id: `log-exp-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
     itemId: matchedItem.id,
     itemName: `${matchedItem.name} (${matchedItem.nameBn})`,
     type: 'RESTOCK',
-    quantity: qtyToAdd,
+    quantity: netQtyToAdd,
     unit: matchedItem.unit,
     previousStock: prevStock,
     newStock: newStock,
     cost: input.amount,
     date: today,
-    notes: `Expenditure Purchase: ${input.desc} (৳${input.amount})`,
-    recordedBy: 'Expenditures Auto-Restock'
-  };
+    notes: wastagePct > 0 
+      ? `[AUTO RESTOCK] Purchased: ${qtyToAdd} ${matchedItem.unit} (Wastage ${wastagePct}% deducted: -${wastageQty} ${matchedItem.unit}, Net: +${netQtyToAdd} ${matchedItem.unit})`
+      : `[AUTO RESTOCK - EXPENDITURE] ${input.desc} (৳${input.amount})`,
+    recordedBy: 'Expenditure (Auto)'
+  });
+
+  // 2. WASTAGE Log if item has wastage percentage
+  if (wastageQty > 0) {
+    newLogs.push({
+      id: `log-waste-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      itemId: matchedItem.id,
+      itemName: `${matchedItem.name} (${matchedItem.nameBn})`,
+      type: 'WASTAGE',
+      quantity: wastageQty,
+      unit: matchedItem.unit,
+      previousStock: Math.round((prevStock + qtyToAdd) * 100) / 100,
+      newStock: newStock,
+      cost: input.amount > 0 ? Math.round((input.amount * (wastagePct / 100)) * 10) / 10 : 0,
+      date: today,
+      notes: `[AUTO WASTAGE] ${wastagePct}% processing loss from ${qtyToAdd} ${matchedItem.unit} purchased (${input.desc})`,
+      recordedBy: 'Auto Wastage Calculation'
+    });
+  }
 
   try {
     let existingLogs: RawStockLog[] = [];
@@ -640,7 +758,7 @@ export const autoRestockFromExpense = (input: AutoRestockExpenseInput): {
     if (storedLogs) {
       existingLogs = JSON.parse(storedLogs);
     }
-    const mergedLogs = [newLog, ...existingLogs].slice(0, 500);
+    const mergedLogs = [...newLogs, ...existingLogs].slice(0, 500);
     localStorage.setItem(RAW_LOGS_STORAGE_KEY, JSON.stringify(mergedLogs));
     window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
     window.dispatchEvent(new Event('storage'));
@@ -651,8 +769,143 @@ export const autoRestockFromExpense = (input: AutoRestockExpenseInput): {
   return {
     success: true,
     restockedItem: matchedItem,
-    quantity: qtyToAdd,
-    message: `${matchedItem.name} (+${qtyToAdd} ${matchedItem.unit}) auto restocked from expenditure!`
+    quantity: netQtyToAdd,
+    message: wastagePct > 0
+      ? `${matchedItem.name}: ${qtyToAdd} ${matchedItem.unit} purchased (${wastagePct}% wastage: -${wastageQty} ${matchedItem.unit}, net +${netQtyToAdd} ${matchedItem.unit} added to stock)`
+      : `${matchedItem.name} (+${netQtyToAdd} ${matchedItem.unit}) auto restocked from expenditure!`
+  };
+};
+
+export interface RawStockRestorationResult {
+  success: boolean;
+  restored: Array<{
+    rawItemId: string;
+    rawItemName: string;
+    qtyRestored: number;
+    unit: string;
+    previousStock: number;
+    newStock: number;
+  }>;
+}
+
+/**
+ * Restores raw material stock when a POS Sale transaction is removed/cancelled from Sales History
+ */
+export const restoreRawStockForSaleCancellation = (
+  soldItems: Array<{ menuItemId?: string; menuItemName: string; qty: number }>,
+  txInfo?: { id?: string | number; memberName?: string; date?: string }
+): RawStockRestorationResult => {
+  const rawItems = getRawInventoryItems();
+  const rawItemsMap = new Map<string, RawInventoryItem>();
+  rawItems.forEach(item => {
+    rawItemsMap.set(item.id, { ...item });
+    rawItemsMap.set(item.name.toLowerCase().trim(), item);
+  });
+
+  const recipes = getMenuRecipes();
+  const restorationsMap = new Map<string, { item: RawInventoryItem; totalToRestore: number }>();
+
+  for (const sold of soldItems) {
+    if (sold.qty <= 0) continue;
+
+    // Find recipe
+    let recipe: RecipeIngredient[] = [];
+    if (sold.menuItemId && recipes[sold.menuItemId]) {
+      recipe = recipes[sold.menuItemId];
+    } else if (sold.menuItemName) {
+      recipe = recipes[sold.menuItemName.trim().toUpperCase()] || [];
+    }
+
+    if (!recipe || recipe.length === 0) {
+      continue;
+    }
+
+    for (const ing of recipe) {
+      let rawItem = rawItemsMap.get(ing.rawItemId);
+      if (!rawItem && ing.rawItemName) {
+        rawItem = rawItems.find(r => r.name.toLowerCase() === ing.rawItemName.toLowerCase());
+      }
+
+      if (rawItem) {
+        const amount = ing.quantity * sold.qty;
+        const current = restorationsMap.get(rawItem.id);
+        if (current) {
+          current.totalToRestore += amount;
+        } else {
+          restorationsMap.set(rawItem.id, { item: rawItem, totalToRestore: amount });
+        }
+      }
+    }
+  }
+
+  if (restorationsMap.size === 0) {
+    return { success: true, restored: [] };
+  }
+
+  const today = new Date().toISOString().split('T')[0];
+  const newLogs: RawStockLog[] = [];
+  const restoredSummary: RawStockRestorationResult['restored'] = [];
+
+  const updatedItems = rawItems.map(item => {
+    const entry = restorationsMap.get(item.id);
+    if (!entry) return item;
+
+    const restoreQty = Math.round(entry.totalToRestore * 1000) / 1000;
+    const prevStock = item.currentStock;
+    const newStock = Math.round((prevStock + restoreQty) * 1000) / 1000;
+
+    restoredSummary.push({
+      rawItemId: item.id,
+      rawItemName: item.name,
+      qtyRestored: restoreQty,
+      unit: item.unit,
+      previousStock: prevStock,
+      newStock
+    });
+
+    const memberDesc = txInfo?.memberName ? ` [${txInfo.memberName}]` : '';
+    newLogs.push({
+      id: `log-restore-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+      itemId: item.id,
+      itemName: item.name,
+      type: 'RESTOCK',
+      quantity: restoreQty,
+      unit: item.unit,
+      previousStock: prevStock,
+      newStock,
+      cost: Math.round(restoreQty * item.unitCost),
+      date: today,
+      notes: `[RESTOCK - SALE CANCELLED] POS Sale cancelled${memberDesc}. Returned: ${soldItems.map(s => `${s.menuItemName} x${s.qty}`).join(', ')}`,
+      recordedBy: 'POS Sale Cancellation'
+    });
+
+    return {
+      ...item,
+      currentStock: newStock
+    };
+  });
+
+  // Save updated items
+  saveRawInventoryItems(updatedItems);
+
+  // Save logs
+  try {
+    let existingLogs: RawStockLog[] = [];
+    const storedLogs = localStorage.getItem(RAW_LOGS_STORAGE_KEY);
+    if (storedLogs) {
+      existingLogs = JSON.parse(storedLogs);
+    }
+    const mergedLogs = [...newLogs, ...existingLogs].slice(0, 500);
+    localStorage.setItem(RAW_LOGS_STORAGE_KEY, JSON.stringify(mergedLogs));
+    window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+    window.dispatchEvent(new Event('storage'));
+  } catch (e) {
+    console.warn('Failed to append raw stock restoration logs:', e);
+  }
+
+  return {
+    success: true,
+    restored: restoredSummary
   };
 };
 
