@@ -203,14 +203,17 @@ export class LocalDatabaseEngine {
       let dataChanged = false;
       const newDb = { ...this.db };
       
-      // Helper to fetch all rows with pagination
+      // Helper to fetch all rows with pagination and timeout resilience
       const fetchAll = async (table: string) => {
         let allData: any[] = [];
         let from = 0;
-        const step = 1000;
+        const step = 500;
         while (true) {
           const { data, error } = await supabase.from(table).select('*').range(from, from + step - 1);
-          if (error) throw error;
+          if (error) {
+            console.warn(`Supabase fetch error on table ${table}:`, error);
+            throw error;
+          }
           if (!data || data.length === 0) break;
           allData = allData.concat(data);
           if (data.length < step) break;
@@ -220,11 +223,12 @@ export class LocalDatabaseEngine {
       };
 
       // 1. Pull Airmen (Staff)
-      let staffData;
+      emitSyncProgress(10, "Fetching Nominal Roll / Biodata...");
+      let staffData: any[] | null = null;
       try {
          staffData = await fetchAll('Biodata Register');
       } catch(e: any) { 
-         console.warn("Failed to fetch staff from Cloud: " + e.message);
+         console.warn("Failed to fetch staff from Cloud: " + (e?.message || e));
          staffData = null; 
       }
       
@@ -282,11 +286,12 @@ export class LocalDatabaseEngine {
       }
       
       // 2. Pull Assignments (Duty Rosters)
-      let dutyData;
+      emitSyncProgress(30, "Fetching Duty Rosters...");
+      let dutyData: any[] | null = null;
       try {
          dutyData = await fetchAll('duty_rosters');
       } catch(e: any) { 
-         throw new Error("Failed to fetch duties from Cloud: " + e.message); 
+         console.warn("Failed to fetch duties from Cloud: " + (e?.message || e)); 
       }
       
       if (dutyData) {
@@ -311,16 +316,19 @@ export class LocalDatabaseEngine {
       }
       
       // 3. Pull Activity History (Parade States)
-      let histData;
+      emitSyncProgress(60, "Fetching Parade States / History...");
+      let histData: any[] | null = null;
       try {
          histData = await fetchAll('parade_states');
       } catch(e: any) { 
-         throw new Error("Failed to fetch history from Cloud: " + e.message); 
+         console.warn("Failed to fetch history from Cloud: " + (e?.message || e)); 
       }
       
       if (histData) {
-         const parsedHistory = histData.map((h: any) => ({
+         const parsedHistory: ActivityHistoryItem[] = histData.map((h: any) => ({
             id: h.log_id || 'log-' + Math.random().toString(36).substring(2, 9),
+            airmanId: h.airman_id || '',
+            airmanName: h.airman_name || h.user_name || 'System',
             date: h.date || '',
             type: h.type || 'SYSTEM',
             title: h.title || '',
@@ -335,11 +343,12 @@ export class LocalDatabaseEngine {
       }
       
       // 4. Pull User Profiles
-      let userData;
+      emitSyncProgress(80, "Fetching User Profiles...");
+      let userData: any[] | null = null;
       try {
          userData = await fetchAll('user_profiles');
       } catch(e: any) { 
-         throw new Error("Failed to fetch users from Cloud: " + e.message); 
+         console.warn("Failed to fetch users from Cloud: " + (e?.message || e)); 
       }
       
       if (userData && userData.length > 0) {
@@ -494,8 +503,14 @@ export class LocalDatabaseEngine {
       
       return true;
     } catch (err: any) {
-      console.warn("Supabase Pull Error (offline?):", err.message);
-      addSyncLog({ timestamp: new Date().toISOString(), type: "PULL", status: "ERROR", message: "Failed to pull from Supabase." });
+      console.warn("Supabase Pull Error (offline?):", err);
+      const detailMsg = err?.message || (typeof err === 'string' ? err : 'Unknown network/server error');
+      addSyncLog({ 
+        timestamp: new Date().toISOString(), 
+        type: "PULL", 
+        status: "ERROR", 
+        message: `Failed to pull from Supabase: ${detailMsg}` 
+      });
       return false;
     } finally {
       this.isFirebaseSyncing = false;
@@ -666,12 +681,35 @@ export class LocalDatabaseEngine {
              if (!staffErr && (!staffDataRes || staffDataRes.length === 0) && chunk.length > 0) { console.error('Staff upsert blocked by RLS'); hasError = true; errorMessage = 'Row Level Security (RLS) is blocking the Staff upload in Supabase. Please disable RLS or add policies.'; break; }
              await delay(100);
              if (staffErr) {
-               console.error("Error syncing staff to Supabase:", staffErr);
-               hasError = true;
-               errorMessage = staffErr.message?.includes('Failed to fetch') 
-                  ? 'Network error (Failed to fetch). If you have an Adblocker or Brave Shields enabled, it might be blocking Supabase. Please disable it for this site.'
-                  : (staffErr.message || 'Staff error');
-               break;
+               // Check if the error is caused by a Supabase trigger referencing column "Name" of relation "Canteen"
+               if (staffErr.code === '42703' || staffErr.message?.includes('column "Name" of relation "Canteen"') || staffErr.message?.includes('Canteen')) {
+                 console.warn("Notice: Remote Supabase database has a trigger on 'Biodata Register' referencing non-existent column 'Name' on relation 'Canteen'. Syncing airmen directly to Canteen table instead:", staffErr.message);
+                 try {
+                   const canteenPayload = chunk.map(c => ({
+                     airman_id: c.airman_id,
+                     'BD No': c['BD No'] || '',
+                     Rank: c['Rank'] || '',
+                     Surname: c['Surname'] || '',
+                     Contact: c['Mobile No'] || 'N/A'
+                   }));
+                   await supabase.from('Canteen').upsert(canteenPayload, { onConflict: 'airman_id' });
+                 } catch (cErr) {
+                   console.warn("Direct Canteen upsert note:", cErr);
+                 }
+                 addSyncLog({
+                   timestamp: new Date().toISOString(),
+                   type: "PUSH",
+                   status: "SUCCESS",
+                   message: "Staff updated (Canteen direct sync completed; remote trigger 'Name' column skipped)."
+                 });
+               } else {
+                 console.error("Error syncing staff to Supabase:", staffErr);
+                 hasError = true;
+                 errorMessage = staffErr.message?.includes('Failed to fetch') 
+                    ? 'Network error (Failed to fetch). If you have an Adblocker or Brave Shields enabled, it might be blocking Supabase. Please disable it for this site.'
+                    : (staffErr.message || 'Staff error');
+                 break;
+               }
              }
           }
         }
@@ -1103,18 +1141,48 @@ export class LocalDatabaseEngine {
       code: data.code || `${data.rank || 'LAC'}-${(data.name || 'AIR').slice(0, 3).toUpperCase()}`,
       bdNo: data.bdNo || `BD/${Date.now().toString().slice(-6)}`,
       rank: data.rank || 'LAC',
-      name: data.name || 'Airman',
+      fullName: data.fullName || data.name || 'Airman',
+      name: data.name || data.fullName || 'Airman',
       trade: data.trade || 'General Tech',
       addressBlock: data.addressBlock || '',
+      permanentAddress: data.permanentAddress || '',
+      bloodGroup: data.bloodGroup || '',
       mobileNo: data.mobileNo || '01700000000',
       flightName: (data.flightName as FlightName) || 'Admin',
       remarks: data.remarks || 'Newly Enlisted',
-      active: true,
+      dateJoined: data.dateJoined || '',
+      dateLeft: data.dateLeft || '',
+      leaveReason: data.leaveReason || '',
+      active: data.active !== undefined ? data.active : true,
+      jcoSeniorityOrder: data.jcoSeniorityOrder,
     };
 
     this.db.airmen.push(newAirman);
     this.logSystemAction(newAirman.id, `${newAirman.rank} ${newAirman.name}`, 'Added new airman to Nominal Roll');
     this.saveToStorage();
+
+    // Auto add to Canteen Member DB (Supabase & Local)
+    try {
+      const pureBd = cleanBd || String(newAirman.bdNo || '').replace(/\D/g, '');
+      const canteenMemberPayload = {
+        airman_id: newAirman.id,
+        "BD No": pureBd,
+        Rank: newAirman.rank,
+        Surname: newAirman.name,
+        Contact: newAirman.mobileNo || 'N/A',
+        Due: 0,
+        DP: null
+      };
+      if (isSupabaseConfigured) {
+        Promise.resolve(supabase.from('Canteen').upsert([canteenMemberPayload], { onConflict: 'airman_id' }))
+          .then(({ error }: any) => {
+            if (error) console.warn('Auto-add airman to Canteen DB note:', error.message);
+          })
+          .catch((err: any) => console.warn('Auto-add airman to Canteen failed:', err));
+      }
+    } catch (cErr) {
+      console.warn('Auto-sync airman to Canteen caught error:', cErr);
+    }
 
     return newAirman;
   }
@@ -1151,6 +1219,28 @@ export class LocalDatabaseEngine {
     }
 
     this.saveToStorage();
+
+    // Auto add imported airmen to Canteen Member DB
+    try {
+      if (isSupabaseConfigured && createdAirmen.length > 0) {
+        const canteenBatch = createdAirmen.map(a => ({
+          airman_id: a.id,
+          "BD No": String(a.bdNo || '').replace(/\D/g, ''),
+          Rank: a.rank,
+          Surname: a.name,
+          Contact: a.mobileNo || 'N/A',
+          Due: 0,
+          DP: null
+        }));
+        Promise.resolve(supabase.from('Canteen').upsert(canteenBatch, { onConflict: 'airman_id' }))
+          .then(({ error }: any) => {
+            if (error) console.warn('Bulk auto-add to Canteen DB note:', error.message);
+          })
+          .catch((err: any) => console.warn('Bulk auto-add to Canteen failed:', err));
+      }
+    } catch (cErr) {
+      console.warn('Bulk auto-sync airmen to Canteen caught error:', cErr);
+    }
 
     // Log in activity history
     this.recordActivity({

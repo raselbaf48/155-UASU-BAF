@@ -566,61 +566,9 @@ export const validateUserLogin = async (
     console.error("Supabase login check failed, falling back to local DB", e);
   }
 
-  // 1. Check detailed users register first
-  const detailedList = getDetailedUsers(nominalAirmen);
-  const matchedDetail = detailedList.find((u) => u.bdNo.toLowerCase() === cleanInput);
-
+  // If user was registered in detailed users but credentials failed local and cloud checks
   if (matchedDetail) {
-    // PIN Verification
-    const expectedPassword = matchedDetail.password || matchedDetail.bdNo;
-    if (passwordInput.trim() !== expectedPassword?.toString().trim()) {
-      return { success: false, message: `Invalid User ID or PIN.` };
-    }
-    if (matchedDetail.status === 'DISABLED') {
-      return {
-        success: false,
-        message: 'You are not authorized to access the portal. User ID is disabled. Please contact administrator.',
-      };
-    }
-    if (matchedDetail.status === 'SUSPENDED') {
-      return {
-        success: false,
-        message: 'You are not authorized to access the portal. User ID is temporarily suspended.',
-      };
-    }
-
-    // Find corresponding airman or construct one
-    let airman = nominalAirmen.find(
-      (a) => (a.bdNo || "").trim().replace(/^BD\/?/i, '').toLowerCase() === cleanInput || a.id === matchedDetail.airmanId
-    );
-
-    if (!airman) {
-      airman = {
-        id: (matchedDetail.airmanId && matchedDetail.airmanId !== "airman-undefined") ? matchedDetail.airmanId : `airman-${matchedDetail.bdNo && matchedDetail.bdNo !== "undefined" ? matchedDetail.bdNo : Math.random().toString(36).slice(2, 10)}`,
-        serNo: 99,
-        code: `${matchedDetail.rank}-${matchedDetail.name.slice(0, 3).toUpperCase()}`,
-        bdNo: `BD/${matchedDetail.bdNo}`,
-        rank: matchedDetail.rank as any,
-        name: matchedDetail.name,
-        trade: matchedDetail.trade || 'General',
-        addressBlock: '155 UASU',
-        mobileNo: '',
-        flightName: (matchedDetail.flightName as any) || 'Admin',
-        remarks: matchedDetail.remarks || '',
-        active: true,
-      };
-    }
-
-    // Update lastLoginAt
-    matchedDetail.lastLoginAt = new Date().toISOString();
-    saveDetailedUsers(detailedList);
-
-    return {
-      success: true,
-      airman,
-      detailedUser: matchedDetail,
-      message: `Access granted for ${matchedDetail.rank} ${matchedDetail.name}`,
-    };
+    return { success: false, message: 'Invalid User ID or PIN.' };
   }
 
   // 2. If not explicitly in detailed list, check nominal roll

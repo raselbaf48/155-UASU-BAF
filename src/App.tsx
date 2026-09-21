@@ -35,6 +35,7 @@ import { Logo155UASU } from './components/Logo155UASU';
 import { Shield, AlertCircle, X } from 'lucide-react';
 import { getCurrentUserSession, clearUserSession, UserSession } from './utils/authSession';
 import { localDb } from './services/localDatabase';
+import { supabase, isSupabaseConfigured } from './supabase';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<SidebarTab>('overview');
@@ -403,7 +404,27 @@ return () => mediaQuery.removeEventListener('change', listener);
           body: JSON.stringify(airmanData),
         });
         if (res.ok) {
+          const created = await res.json();
           fetchAirmen();
+
+          // Auto add to Canteen Member DB
+          if (isSupabaseConfigured && created) {
+            try {
+              const cleanBd = String(created.bdNo || airmanData.bdNo || '').replace(/\D/g, '');
+              const canteenPayload = {
+                airman_id: created.id || (cleanBd ? `BD/${cleanBd}` : `airman-${cleanBd}`),
+                "BD No": cleanBd,
+                Rank: created.rank || airmanData.rank || 'LAC',
+                Surname: created.name || airmanData.name || 'Airman',
+                Contact: created.mobileNo || airmanData.mobileNo || 'N/A',
+                Due: 0,
+                DP: null
+              };
+              await supabase.from('Canteen').upsert([canteenPayload], { onConflict: 'airman_id' });
+            } catch (cErr) {
+              console.warn('Auto add to Canteen table in App handleSave error:', cErr);
+            }
+          }
         }
       }
     } catch (err) {
@@ -518,6 +539,7 @@ return () => mediaQuery.removeEventListener('change', listener);
           {activeTab === 'biodata-register' && (
             <NominalRoll
               variant="biodata"
+              role={role}
               initialFlightFilter={selectedFlight === "Overall" || selectedFlight === "All" ? "All" : selectedFlight}
               airmen={airmen}
               userFlight={userSession?.flightName}

@@ -35,7 +35,7 @@ export const PrintableNominalRollModal: React.FC<PrintableNominalRollModalProps>
 
 
   const handleExportCSV = () => {
-    let csvContent = "data:text/csv;charset=utf-8,";
+    let csvContent = "";
     
     // Headers (Surname column added next to Full Name for CSV export only)
     const headers = ["Ser", "BD No", "Rank", "Full Name", "Surname", "Trade", "Flight"];
@@ -60,6 +60,11 @@ export const PrintableNominalRollModal: React.FC<PrintableNominalRollModalProps>
         const cleaned = str.replace(/"/g, '""').replace(/\n/g, ' ');
         return `"${cleaned}"`;
       };
+
+      const formatMobileForCsv = (mobile: string | undefined | null) => {
+        if (!mobile || !mobile.trim() || mobile.trim() === '-') return '""';
+        return `"${mobile.trim().replace(/"/g, '""')}"`;
+      };
       
       const row = [
         index + 1,
@@ -79,7 +84,7 @@ export const PrintableNominalRollModal: React.FC<PrintableNominalRollModalProps>
         row.push(escapeCsv(a.addressBlock || '-'));
       }
       
-      row.push(a.mobileNo || '-');
+      row.push(formatMobileForCsv(a.mobileNo));
       
       if (variant === 'biodata') {
         row.push(a.dateJoined ? new Date(a.dateJoined).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '-');
@@ -88,9 +93,10 @@ export const PrintableNominalRollModal: React.FC<PrintableNominalRollModalProps>
       csvContent += row.join(",") + "\n";
     });
     
-    const encodedUri = encodeURI(csvContent);
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
+    link.setAttribute("href", url);
     const filename = variant === 'biodata' 
       ? `Biodata_Register_${new Date().toISOString().split('T')[0]}.csv`
       : `Nominal_Roll_${new Date().toISOString().split('T')[0]}.csv`;
@@ -98,6 +104,7 @@ export const PrintableNominalRollModal: React.FC<PrintableNominalRollModalProps>
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const handlePrint = () => {

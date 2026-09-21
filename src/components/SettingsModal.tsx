@@ -858,12 +858,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                    window.location.reload();
                                 }, 1500);
                               } else {
-                                setSyncMessage('Download Failed!');
-                                setSyncLogsState(getSyncLogs());
+                                const logs = getSyncLogs();
+                                const lastLog = logs.find(l => l.type === 'PULL' && l.status === 'ERROR');
+                                setSyncMessage(lastLog?.message ? `Failed: ${lastLog.message}` : 'Download Failed!');
+                                setSyncLogsState(logs);
                                 setTimeout(() => {
                                    setRestoreStatus('');
                                    setSyncProgress(0);
-                                }, 2000);
+                                }, 3000);
                               }
                             }} 
                             disabled={restoreStatus === 'Uploading...' || restoreStatus === 'Downloading...'}

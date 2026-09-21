@@ -29,12 +29,16 @@ interface BulkImportAirmenModalProps {
 export interface ParsedAirmanRow {
   id: string;
   rank: string;
+  fullName?: string;
   name: string;
   bdNo: string;
   trade: string;
-  addressBlock: string;
-  mobileNo: string;
   flightName: string;
+  bloodGroup?: string;
+  addressBlock: string;
+  permanentAddress?: string;
+  mobileNo: string;
+  dateJoined?: string;
   remarks: string;
   errors: string[];
   warnings: string[];
@@ -107,12 +111,13 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
       if (!row.bdNo.trim() || !normBd) {
         errors.push('BD Number is required');
       } else {
+        const displayBd = row.bdNo.replace(/^BD\/?/i, '').trim();
         if (existingBdSet.has(normBd)) {
           const match = existing.find((a) => normalizeBd(a.bdNo) === normBd);
-          errors.push(`BD/${row.bdNo} already exists in Nominal Roll (${match?.rank} ${match?.name})`);
+          errors.push(`BD No ${displayBd} already exists in Nominal Roll (${match?.rank} ${match?.name})`);
         }
         if (fileBdCount[normBd] > 1) {
-          errors.push(`Duplicate BD/${row.bdNo} appears multiple times in this file`);
+          errors.push(`Duplicate BD No ${displayBd} appears multiple times in this file`);
         }
       }
 
@@ -145,17 +150,28 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
     const headers = data[0].map((h: any) => String(h || '').trim().toLowerCase());
 
     const findCol = (keywords: string[]) => {
+      // First exact match check
+      const exact = headers.findIndex((h) => keywords.includes(h));
+      if (exact >= 0) return exact;
+      // Then substring match check
       return headers.findIndex((h) => keywords.some((k) => h.includes(k)));
     };
 
+    // Columns matching exact Export CSV sequence:
+    // Ser, BD No, Rank, Full Name, Surname, Trade, Flight, Blood Group, Present Address, Permanent Address, Mobile No, Dt of Posting
+    const bdIdx = findCol(['bd no', 'bdno', 'service no', 'svc no', 'bd']);
     const rankIdx = findCol(['rank', 'পদবি']);
-    const nameIdx = findCol(['name', 'নাম', 'airman']);
-    const bdIdx = findCol(['bd', 'bd no', 'bdno', 'service no', 'svc no', 'number']);
+    const fullNameIdx = findCol(['full name', 'fullname', 'পুরো নাম', 'সম্পূর্ণ নাম']);
+    const surnameIdx = findCol(['surname', 'short name', 'ডাক নাম']);
+    const genericNameIdx = findCol(['name', 'নাম', 'airman']);
     const tradeIdx = findCol(['trade', 'ট্রেড']);
-    const addressIdx = findCol(['address', 'living', 'block', 'quarter', 'qtr', 'mess']);
-    const mobileIdx = findCol(['mobile', 'phone', 'cell', 'contact']);
     const flightIdx = findCol(['flight', 'flt', 'section']);
-    const remarksIdx = findCol(['remarks', 'remark', 'note']);
+    const bloodGroupIdx = findCol(['blood group', 'blood', 'bg', 'রক্তের গ্রুপ', 'রক্ত']);
+    const presentAddressIdx = findCol(['present address', 'address block', 'address', 'living', 'block', 'quarter', 'qtr', 'mess', 'বর্তমান ঠিকানা']);
+    const permanentAddressIdx = findCol(['permanent address', 'permanent', 'স্থায়ী ঠিকানা', 'home address']);
+    const mobileIdx = findCol(['mobile no', 'mobile', 'phone', 'cell', 'contact', 'মোবাইল']);
+    const postingDateIdx = findCol(['dt of posting', 'date of posting', 'posting date', 'joining date', 'date joined', 'যোগদানের তারিখ']);
+    const remarksIdx = findCol(['remarks', 'remark', 'note', 'মন্তব্য']);
 
     const parsed: ParsedAirmanRow[] = [];
 
@@ -168,26 +184,53 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
       const getVal = (idx: number, fallback = '') => (idx >= 0 && row[idx] !== undefined && row[idx] !== null ? String(row[idx]).trim() : fallback);
 
       const rawRank = getVal(rankIdx, 'LAC');
-      const rawName = getVal(nameIdx, '');
-      let rawBd = getVal(bdIdx, '');
-      if (rawBd && !rawBd.toUpperCase().startsWith('BD')) {
-        rawBd = `BD/${rawBd}`;
-      }
-      const rawTrade = getVal(tradeIdx, 'General Tech');
-      const rawAddress = getVal(addressIdx, "");
-      const rawMobile = getVal(mobileIdx, '01');
+      const rawFullName = getVal(fullNameIdx, '');
+      const rawSurname = getVal(surnameIdx, '');
+      const rawGenericName = getVal(genericNameIdx, '');
+      
+      // Effective surname (name) and full name
+      const effectiveSurname = rawSurname || rawGenericName || rawFullName;
+      const effectiveFullName = rawFullName || rawGenericName || rawSurname;
+
+      let rawBd = getVal(bdIdx, '').replace(/^BD\/?/i, '').trim();
+      const rawTrade = getVal(tradeIdx, 'Afr Fitt');
       const rawFlight = getVal(flightIdx, 'Admin');
+      const rawBloodGroup = getVal(bloodGroupIdx, '');
+      const rawPresentAddress = getVal(presentAddressIdx, '');
+      const rawPermanentAddress = getVal(permanentAddressIdx, '');
+      
+      let rawMobile = getVal(mobileIdx, '');
+      if (rawMobile.startsWith('="') && rawMobile.endsWith('"')) {
+        rawMobile = rawMobile.slice(2, -1);
+      } else if (rawMobile.startsWith('=')) {
+        rawMobile = rawMobile.replace(/^=['"]?|['"]?$/g, '');
+      } else if (rawMobile.startsWith("'")) {
+        rawMobile = rawMobile.slice(1);
+      }
+      // If Excel or user stripped leading 0 from 11-digit BD mobile (e.g. 1712345678 -> 01712345678)
+      const digitsOnly = rawMobile.replace(/\D/g, '');
+      if (digitsOnly.length === 10 && digitsOnly.startsWith('1')) {
+        rawMobile = `0${digitsOnly}`;
+      } else if (!rawMobile) {
+        rawMobile = 'N/A';
+      }
+
+      const rawPostingDate = getVal(postingDateIdx, '');
       const rawRemarks = getVal(remarksIdx, '');
 
       parsed.push({
         id: `row-${i}-${Date.now()}`,
         rank: rawRank,
-        name: rawName,
+        fullName: effectiveFullName,
+        name: effectiveSurname,
         bdNo: rawBd,
         trade: rawTrade,
-        addressBlock: rawAddress,
-        mobileNo: rawMobile,
         flightName: rawFlight,
+        bloodGroup: rawBloodGroup,
+        addressBlock: rawPresentAddress,
+        permanentAddress: rawPermanentAddress,
+        mobileNo: rawMobile,
+        dateJoined: rawPostingDate,
         remarks: rawRemarks,
         errors: [],
         warnings: [],
@@ -273,22 +316,40 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
   };
 
   const handleDownloadSample = () => {
-    const headers = ['Rank', 'Name', 'BD No', 'Trade', 'Address Block', 'Mobile No', 'Flight Name', 'Remarks'];
-    const sampleRows = [
-      ['Sgt', 'Sazzad Hossain', 'BD/478546', 'Avionic Tech', "Sgt's Mess Block 05", '01712345678', 'Avionics', 'UAV Operator'],
-      ['CPL', 'Russel Ahmed', 'BD/489123', 'Mech Tech', "Airmen's Mess Block 08", '01812345678', 'Mechanics', 'Engine Tech'],
-      ['LAC', 'Anowar Hossain', 'BD/495678', 'GCST', 'Svc Qtr D-14', '01912345678', 'GCS', 'Shift IC'],
-      ['AC', 'Rakib Hasan', 'BD/498901', 'Admin Tech', 'Outside Base: Agrabad', '01612345678', 'Admin', 'Admin Clerk'],
+    // Exact same heading row sequence as the Export CSV file:
+    const headers = [
+      'Ser',
+      'BD No',
+      'Rank',
+      'Full Name',
+      'Surname',
+      'Trade',
+      'Flight',
+      'Blood Group',
+      'Present Address',
+      'Permanent Address',
+      'Mobile No',
+      'Dt of Posting',
     ];
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...sampleRows.map((r) => r.map((c) => `"${c}"`).join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
+    const sampleRows = [
+      ['1', '478546', 'Sgt', 'Md Sazzad Hossain', 'Sazzad', 'Afr Fitt', 'Mechanics', 'B+', "Sgt's Mess Block 05", 'Mirpur-10, Dhaka', '01712345678', '12-Jan-22'],
+      ['2', '489123', 'Cpl', 'Russel Ahmed', 'Russel', 'Eng Fitt', 'Mechanics', 'O+', "Airmen's Mess Block 08", 'Sadar, Bogura', '01812345678', '15-Jun-23'],
+      ['3', '495678', 'LAC', 'Md Anowar Hossain', 'Anowar', 'E&I Fitt', 'Avionics', 'A+', 'Svc Qtr D-14', 'Kotwali, Chattogram', '01912345678', '01-Nov-23'],
+      ['4', '498901', 'AC', 'Rakib Hasan', 'Rakib', 'Radio Fitt', 'Avionics', 'AB+', 'Outside Base: Agrabad', 'Gouripur, Mymensingh', '01612345678', '10-Feb-24'],
+      ['5', '499120', 'AC', 'Tanvir Ahmed', 'Tanvir', 'Armt Fitt', 'Mechanics', 'O+', "Airmen's Mess Block 02", 'Sadar, Jashore', '01798765432', '18-Mar-24'],
+    ];
+
+    const csvContent = [headers.join(','), ...sampleRows.map((r) => r.map((c) => `"${c.replace(/"/g, '""')}"`).join(','))].join('\n');
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', 'BAF_155_UASU_Airmen_Nominal_Template.csv');
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'BAF_155_UASU_Airmen_Biodata_Template.csv');
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const totalErrors = rows.reduce((sum, r) => sum + r.errors.length, 0);
@@ -302,16 +363,17 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
       const airmenToImport = rows.map((r) => {
         const rankObj = normalizeRank(r.rank);
         const flightObj = normalizeFlight(r.flightName);
-        let cleanBd = r.bdNo.trim();
-        if (!cleanBd.toUpperCase().startsWith('BD')) {
-          cleanBd = `BD/${cleanBd}`;
-        }
+        const cleanBd = r.bdNo.trim().replace(/^BD\/?/i, '').trim();
         return {
           rank: rankObj.rank,
+          fullName: (r.fullName || r.name).trim(),
           name: r.name.trim(),
           bdNo: cleanBd,
-          trade: r.trade.trim() || 'General Tech',
+          trade: r.trade.trim() || 'Afr Fitt',
           addressBlock: r.addressBlock.trim(),
+          permanentAddress: r.permanentAddress?.trim() || '',
+          bloodGroup: r.bloodGroup?.trim() || '',
+          dateJoined: r.dateJoined?.trim() || '',
           mobileNo: r.mobileNo.trim() || '01700000000',
           flightName: flightObj.flight,
           remarks: r.remarks.trim() || 'Bulk Imported',
@@ -343,14 +405,14 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
             <div>
               <div className="flex items-center space-x-2">
                 <h2 className="text-lg font-black tracking-tight text-white">
-                  Bulk Import Airmen to Nominal Roll
+                  Bulk Import Airmen to Biodata Register
                 </h2>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-950 border border-emerald-500/40 text-emerald-400 uppercase">
                   CSV / Excel (.xlsx)
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Upload nominal roster sheet to batch-create airmen records with instant validation.
+                Upload airmen roster sheet to batch-create airmen records with instant validation.
               </p>
             </div>
           </div>
@@ -405,7 +467,7 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
                   <span>Standard Template</span>
                 </div>
                 <p className="text-xs text-emerald-800 dark:text-emerald-200/80 mt-1 leading-relaxed">
-                  Download our pre-formatted spreadsheet template with the correct column headers and sample data.
+                  Download our pre-formatted spreadsheet template with the correct column headers (BD No without 'BD/', related trades like Afr Fitt, Eng Fitt, E&I Fitt, Radio Fitt, Armt Fitt).
                 </p>
               </div>
               <button
@@ -453,12 +515,13 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
                       <tr>
                         <th className="p-2.5 border-b border-slate-200 dark:border-slate-700">#</th>
                         <th className="p-2.5 border-b border-slate-200 dark:border-slate-700">Status</th>
-                        <th className="p-2.5 border-b border-slate-200 dark:border-slate-700">Rank</th>
-                        <th className="p-2.5 border-b border-slate-200 dark:border-slate-700">Name</th>
                         <th className="p-2.5 border-b border-slate-200 dark:border-slate-700">BD Number</th>
-                        <th className="p-2.5 border-b border-slate-200 dark:border-slate-700">Flight</th>
+                        <th className="p-2.5 border-b border-slate-200 dark:border-slate-700">Rank</th>
+                        <th className="p-2.5 border-b border-slate-200 dark:border-slate-700">Full Name</th>
+                        <th className="p-2.5 border-b border-slate-200 dark:border-slate-700">Surname</th>
                         <th className="p-2.5 border-b border-slate-200 dark:border-slate-700">Trade</th>
-                        <th className="p-2.5 border-b border-slate-200 dark:border-slate-700">Address / Mess</th>
+                        <th className="p-2.5 border-b border-slate-200 dark:border-slate-700">Flight</th>
+                        <th className="p-2.5 border-b border-slate-200 dark:border-slate-700">Address</th>
                         <th className="p-2.5 border-b border-slate-200 dark:border-slate-700">Mobile</th>
                         <th className="p-2.5 border-b border-slate-200 dark:border-slate-700 text-center">Action</th>
                       </tr>
@@ -493,6 +556,14 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
                               )}
                             </td>
                             <td className="p-2">
+                              <input
+                                type="text"
+                                value={row.bdNo}
+                                onChange={(e) => handleRowChange(row.id, 'bdNo', e.target.value)}
+                                className="w-28 px-2 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-900 dark:text-white font-bold"
+                              />
+                            </td>
+                            <td className="p-2">
                               <select
                                 value={row.rank}
                                 onChange={(e) => handleRowChange(row.id, 'rank', e.target.value)}
@@ -508,17 +579,26 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
                             <td className="p-2">
                               <input
                                 type="text"
-                                value={row.name}
-                                onChange={(e) => handleRowChange(row.id, 'name', e.target.value)}
-                                className="w-32 px-2 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs text-slate-900 dark:text-white font-semibold"
+                                value={row.fullName || row.name}
+                                onChange={(e) => handleRowChange(row.id, 'fullName', e.target.value)}
+                                className="w-36 px-2 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs text-slate-900 dark:text-white font-medium"
                               />
                             </td>
                             <td className="p-2">
                               <input
                                 type="text"
-                                value={row.bdNo}
-                                onChange={(e) => handleRowChange(row.id, 'bdNo', e.target.value)}
-                                className="w-28 px-2 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-900 dark:text-white font-bold"
+                                value={row.name}
+                                onChange={(e) => handleRowChange(row.id, 'name', e.target.value)}
+                                className="w-28 px-2 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs text-slate-900 dark:text-white font-semibold"
+                              />
+                            </td>
+                            <td className="p-2">
+                              <input
+                                type="text"
+                                list="baf-trade-options"
+                                value={row.trade}
+                                onChange={(e) => handleRowChange(row.id, 'trade', e.target.value)}
+                                className="w-28 px-2 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs text-slate-900 dark:text-white"
                               />
                             </td>
                             <td className="p-2">
@@ -533,14 +613,6 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
                                   </option>
                                 ))}
                               </select>
-                            </td>
-                            <td className="p-2">
-                              <input
-                                type="text"
-                                value={row.trade}
-                                onChange={(e) => handleRowChange(row.id, 'trade', e.target.value)}
-                                className="w-28 px-2 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs text-slate-900 dark:text-white"
-                              />
                             </td>
                             <td className="p-2">
                               <input
@@ -580,6 +652,11 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
         </div>
 
         {/* Modal Footer */}
+        <datalist id="baf-trade-options">
+          {['Afr Fitt', 'Eng Fitt', 'E&I Fitt', 'Radio Fitt', 'Armt Fitt', 'GS', 'Log Asst', 'Sec Asst (GD)', 'Sec Asst (Accts)', 'Admin Asst', 'ATCA', 'Cy Asst', 'IT Asst'].map((t) => (
+            <option key={t} value={t} />
+          ))}
+        </datalist>
         <div className="p-5 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
           <div className="text-xs text-slate-500 dark:text-slate-400">
             {rows.length > 0 ? (

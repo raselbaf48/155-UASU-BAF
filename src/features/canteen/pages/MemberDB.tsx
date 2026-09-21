@@ -432,6 +432,18 @@ ${rowsList}
       await fetchMembers();
     };
     init();
+
+    // Subscribe to realtime updates on Canteen table
+    const channel = supabase
+      .channel('canteen_members_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'Canteen' }, () => {
+        fetchMembers();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const handleAutoResolveMemberDp = async (url: string, isForEdit = false) => {

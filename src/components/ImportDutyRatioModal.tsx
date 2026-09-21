@@ -16,6 +16,7 @@ import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import { DutyRatioTable } from '../data/officialDutyRatioMatrix';
 import { FlightName } from '../types';
+import { exportDutyRatioMatrixCSV } from '../utils/csvExport';
 
 interface ImportDutyRatioModalProps {
   isOpen: boolean;
@@ -54,17 +55,28 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
     const clean = rawDuty.toLowerCase().replace(/[^a-z0-9]/g, '');
     return currentMatrix.find((t) => {
       const tClean = t.title.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const tCleanNoParen = t.title.split('(')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
       const idClean = t.id.toLowerCase().replace(/[^a-z0-9]/g, '');
-      return tClean.includes(clean) || clean.includes(tClean) || idClean.includes(clean) || clean.includes(idClean);
+      return (
+        tClean === clean ||
+        tCleanNoParen === clean ||
+        idClean === clean ||
+        tClean.includes(clean) ||
+        clean.includes(tClean) ||
+        tCleanNoParen.includes(clean) ||
+        clean.includes(tCleanNoParen) ||
+        idClean.includes(clean) ||
+        clean.includes(idClean)
+      );
     });
   };
 
   const matchFlight = (rawFlight: string): FlightName | null => {
     const clean = rawFlight.trim().toLowerCase();
-    if (clean.includes('mech')) return 'Mechanics';
-    if (clean.includes('avionic') || clean === 'avi') return 'Avionics';
+    if (clean === 'mech' || clean.includes('mechanic')) return 'Mechanics';
+    if (clean === 'avi' || clean.includes('avionic')) return 'Avionics';
     if (clean.includes('gcs')) return 'GCS';
-    if (clean.includes('admin') || clean === 'adm') return 'Admin';
+    if (clean === 'adm' || clean === 'admin' || clean.includes('admin')) return 'Admin';
     return null;
   };
 
@@ -76,7 +88,7 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
 
     const headers = data[0].map((h: any) => String(h || '').trim().toLowerCase());
 
-    const dutyColIdx = headers.findIndex((h) => h.includes('duty') || h.includes('type') || h.includes('table'));
+    const dutyColIdx = headers.findIndex((h) => h.includes('duty') || h.includes('type') || h.includes('table') || h.includes('name'));
     const flightColIdx = headers.findIndex((h) => h.includes('flight') || h.includes('flt') || h.includes('section'));
 
     // Find day columns (e.g. Day 1..31 or 1..31)
@@ -101,6 +113,17 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
       const rawDuty = dutyColIdx >= 0 && row[dutyColIdx] ? String(row[dutyColIdx]).trim() : `Table ${i}`;
       const rawFlight = flightColIdx >= 0 && row[flightColIdx] ? String(row[flightColIdx]).trim() : '';
 
+      // Skip summary / footer rows (e.g. Daily Total, Total, Req.)
+      const lowerFlight = rawFlight.toLowerCase();
+      if (['total', 'daily total', 'req', 'req.', 'daily req', 'grand total'].includes(lowerFlight)) {
+        continue;
+      }
+
+      // If duty header is also repeated as data row
+      if (rawDuty.toLowerCase().includes('duty type') || rawDuty.toLowerCase().includes('duty name')) {
+        continue;
+      }
+
       const matchedT = matchTable(rawDuty);
       const matchedF = matchFlight(rawFlight);
 
@@ -110,7 +133,7 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
       for (let d = 0; d < 31; d++) {
         const col = dayIndices[d];
         let val = 0;
-        if (col >= 0 && row[col] !== undefined && row[col] !== null) {
+        if (col >= 0 && row[col] !== undefined && row[col] !== null && String(row[col]).trim() !== '') {
           const num = parseInt(String(row[col]), 10);
           if (isNaN(num)) {
             errors.push(`Day ${d + 1} has non-numeric value: ${row[col]}`);
@@ -184,26 +207,7 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
   };
 
   const handleDownloadSample = () => {
-    const headers = ['Duty Type', 'Flight', ...Array.from({ length: 31 }, (_, i) => `Day ${i + 1}`)];
-    const sampleRows: any[][] = [];
-
-    currentMatrix.forEach((table) => {
-      VALID_FLIGHTS.forEach((fl) => {
-        const days = table.data[fl] || Array(31).fill(0);
-        sampleRows.push([table.title, fl, ...days]);
-      });
-    });
-
-    const csvContent =
-      'data:text/csv;charset=utf-8,' +
-      [headers.join(','), ...sampleRows.map((r) => r.map((c) => `"${c}"`).join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', 'BAF_155_UASU_Duty_Ratio_Template.csv');
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    exportDutyRatioMatrixCSV(currentMatrix, 'BAF_155_UASU_Duty_Ratio_Template.csv');
   };
 
   const totalErrors = rows.reduce((sum, r) => sum + r.errors.length, 0);
@@ -222,6 +226,16 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
         const targetTable = newMatrix.find((t) => t.id === row.matchedTableId);
         if (targetTable) {
           targetTable.data[row.matchedFlight] = [...row.days];
+        }
+      });
+
+      // Recalculate totalRequiredMonth for updated tables
+      newMatrix.forEach((table) => {
+        const total = VALID_FLIGHTS.reduce((sum, fl) => {
+          return sum + (table.data[fl] || []).reduce((a, b) => a + b, 0);
+        }, 0);
+        if (total > 0) {
+          table.totalRequiredMonth = total;
         }
       });
 
@@ -306,7 +320,7 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
                 {fileName ? `Selected: ${fileName}` : 'Click to select or drag & drop CSV/Excel matrix file'}
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Format: Duty Type, Flight, Day 1 through Day 31
+                Format: Duty Type, Flight, Day 1 through Day 31, Total Month (Exact same format as Export CSV)
               </p>
             </div>
 
@@ -314,10 +328,10 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
               <div>
                 <div className="flex items-center space-x-1.5 text-xs font-black text-indigo-900 dark:text-indigo-300 uppercase tracking-wide">
                   <FileSpreadsheet className="w-3.5 h-3.5" />
-                  <span>Official Ratio Scale</span>
+                  <span>Standard Matrix Template</span>
                 </div>
                 <p className="text-xs text-indigo-800 dark:text-indigo-200/80 mt-1 leading-relaxed">
-                  Download our current duty quota scale as a pre-filled template with all 8 duty tables and 4 flights.
+                  Download the official duty ratio spreadsheet template in the exact same format as Export CSV (Day 1..Day 31 for all flights).
                 </p>
               </div>
               <button
@@ -326,7 +340,7 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
                 className="mt-4 w-full py-2.5 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs flex items-center justify-center space-x-2 shadow-xs transition-colors cursor-pointer"
               >
                 <Download className="w-4 h-4" />
-                <span>Download Current Matrix (.csv)</span>
+                <span>Download Template (.csv)</span>
               </button>
             </div>
           </div>

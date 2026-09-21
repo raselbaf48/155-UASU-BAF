@@ -331,16 +331,35 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
 
         {/* Actions */}
         <div className="flex flex-wrap items-center gap-2 self-end md:self-auto">
+          {isSaved && (
+            <div className="px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-xs font-bold flex items-center space-x-1.5 animate-fadeIn">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <span>Saved</span>
+            </div>
+          )}
+
           {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') ? (
-            <button
-              type="button"
-              onClick={() => setIsPrintModalOpen(true)}
-              className="px-3.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-xl transition-colors flex items-center space-x-1.5 shadow-xs cursor-pointer"
-              title="Print Preview / Export"
-            >
-              <Printer className="w-4 h-4" />
-              <span className="hidden sm:inline">Official Export/Print</span>
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => setIsImportModalOpen(true)}
+                className="px-3.5 py-2 text-xs font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-xl transition-colors flex items-center space-x-1.5 shadow-xs cursor-pointer"
+                title="Import Duty Ratio Matrix from CSV / Excel"
+              >
+                <Upload className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                <span>Import Matrix</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsPrintModalOpen(true)}
+                className="px-3.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-xl transition-colors flex items-center space-x-1.5 shadow-xs cursor-pointer"
+                title="Print Preview / Export"
+              >
+                <Printer className="w-4 h-4" />
+                <span className="hidden sm:inline">Official Export/Print</span>
+              </button>
+            </>
           ) : (
           <button
             onClick={onRequestAdminAccess}
@@ -868,6 +887,20 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
           matrix={matrix}
           selectedFlightFilter={selectedFlightFilter}
           onClose={() => setIsPrintModalOpen(false)}
+        />
+      )}
+
+      {isImportModalOpen && (
+        <ImportDutyRatioModal
+          isOpen={isImportModalOpen}
+          onClose={() => setIsImportModalOpen(false)}
+          currentMatrix={matrix}
+          onImport={(newMatrix) => {
+            setMatrix(newMatrix);
+            saveDutyMatrix(newMatrix);
+            setIsSaved(true);
+            setTimeout(() => setIsSaved(false), 2500);
+          }}
         />
       )}
       </div>

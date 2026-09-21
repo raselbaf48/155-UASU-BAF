@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Airman, FlightName, Rank, UserRole } from '../types';
-import { Search, UserPlus, Edit3, Trash2, Eye, Filter, Phone, MapPin, Shield, CheckCircle, RefreshCw, Printer, FileDown, FileSpreadsheet, Upload, KeyRound, UserCheck, AlertTriangle } from 'lucide-react';
+import { Search, UserPlus, Edit3, Trash2, Filter, Phone, MapPin, Shield, CheckCircle, RefreshCw, Printer, FileDown, FileSpreadsheet, Upload, KeyRound, UserCheck, AlertTriangle } from 'lucide-react';
 import { handleSafePrint } from "../utils/printUtils";
 import { sortAirmenBySeniority } from '../utils/seniority';
 import { PrintableNominalRollModal } from './PrintableNominalRollModal';
@@ -20,13 +20,15 @@ const formatAirmanName = (name: string) => {
   return name.toLowerCase().split(' ').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 };
 interface NominalRollProps {
+  variant?: 'nominal' | 'biodata';
   airmen: Airman[];
-  role: UserRole;
+  role?: UserRole;
+  userFlight?: string;
   onRefresh: () => void;
   onAddAirman: () => void;
   onEditAirman: (airman: Airman) => void;
   onDeleteAirman: (airmanId: string) => void;
-  onViewProfile: (airman: Airman) => void;
+  onViewProfile: (airman: Airman, config?: any) => void;
   onSyncGoogleSheet?: () => Promise<void>;
   initialFlightFilter?: FlightName | 'All' | '';
 }
@@ -133,7 +135,7 @@ export const NominalRoll: React.FC<NominalRollProps> = ({
       <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-black text-slate-900 dark:text-slate-100 flex items-center space-x-2">
-            <span>{variant === 'biodata' ? 'Biodata Register Directory' : 'Nominal Roll Directory'}</span>
+            <span>{variant === 'biodata' ? 'Biodata Register' : 'Nominal Roll'}</span>
             <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-emerald-100 text-emerald-900 dark:bg-emerald-950/80 dark:text-emerald-300">
               {filteredAirmen.length} Airmen (Seniority Order)
             </span>
@@ -144,8 +146,6 @@ export const NominalRoll: React.FC<NominalRollProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
-          
-
           <button
             type="button"
             onClick={() => setIsPrintModalOpen(true)}
@@ -156,6 +156,18 @@ export const NominalRoll: React.FC<NominalRollProps> = ({
             <span>Official Export/Print</span>
           </button>
 
+          {variant === 'biodata' && (
+            <button
+              type="button"
+              onClick={() => setIsBulkImportOpen(true)}
+              className="flex items-center space-x-1.5 px-3.5 py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl font-bold text-xs shadow-xs transition-colors cursor-pointer"
+              title="Import Airmen via CSV or Excel"
+            >
+              <Upload className="w-4 h-4" />
+              <span>Import</span>
+            </button>
+          )}
+
           <button
             onClick={() => setIsHistoryModalOpen(true)}
             className="flex items-center space-x-1.5 px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-xl font-bold text-xs shadow-xs transition-colors"
@@ -165,7 +177,7 @@ export const NominalRoll: React.FC<NominalRollProps> = ({
             <span>History</span>
           </button>
 
-          {variant === 'biodata' && (role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') ? (
+          {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') && (
             <button
               onClick={onAddAirman}
               className="flex items-center space-x-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs px-4 py-2.5 rounded-xl shadow-xs transition-all cursor-pointer"
@@ -173,12 +185,7 @@ export const NominalRoll: React.FC<NominalRollProps> = ({
               <UserPlus className="w-4 h-4" />
               <span>Add Airman</span>
             </button>
-          ) : variant === 'biodata' ? (
-            <div className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-300 text-xs font-bold">
-              <Eye className="w-3.5 h-3.5" />
-              <span>Read-Only Directory</span>
-            </div>
-          ) : null}
+          )}
         </div>
       </div>
 

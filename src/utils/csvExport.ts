@@ -95,3 +95,4 @@ export function exportTableToCSV(elementId: string, filename: string) {
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
+
