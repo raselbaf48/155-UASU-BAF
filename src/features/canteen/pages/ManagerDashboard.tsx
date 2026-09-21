@@ -4,6 +4,7 @@ import { Utensils, Search, X, Check, ChefHat, Clock, Plus, XCircle, AlertTriangl
 import { supabase } from '../../../supabase';
 import { getCanteenConfig, resolveImageUrl, CanteenConfig } from '../utils/canteenSettings';
 import { formatCanteenDate } from '../utils/dateUtils';
+import { deductRawStockForSales, restoreRawStockForSaleCancellation } from '../utils/recipeManager';
 import {
   BarChart,
   Bar,
@@ -304,7 +305,7 @@ export const ManagerDashboard: React.FC = () => {
   }, []);
 
   const fetchMembers = async () => {
-    const { data, error } = await supabase.from('Canteen').select('*');
+    const { data, error } = await supabase.from('Canteen_Member').select('*');
     if (!error && data) {
         setMembers(data.map((m: any) => ({
           ...m,
@@ -316,7 +317,7 @@ export const ManagerDashboard: React.FC = () => {
 
   const fetchCatalog = async () => {
     try {
-        const { data, error } = await supabase.from('Canteen_Inventory').select('*');
+        const { data, error } = await supabase.from('Canteen_Menu').select('*');
         if (!error && data && data.length > 0) {
             setCatalog(data);
         } else {
@@ -590,6 +591,9 @@ export const ManagerDashboard: React.FC = () => {
           const next = prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id];
           localStorage.setItem('canteen_daily_menu', JSON.stringify(next));
           window.dispatchEvent(new Event('canteen_menu_updated'));
+          window.dispatchEvent(new Event('canteen_daily_menu_updated'));
+          window.dispatchEvent(new Event('canteen_state_updated'));
+          window.dispatchEvent(new Event('storage'));
           return next;
       });
   };
@@ -627,6 +631,9 @@ export const ManagerDashboard: React.FC = () => {
       });
 
       localStorage.setItem('canteen_pre_orders', JSON.stringify(existing));
+      window.dispatchEvent(new Event('canteen_pre_orders_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
       
       const parsed = existing.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       setPreOrders(parsed);
@@ -647,15 +654,15 @@ export const ManagerDashboard: React.FC = () => {
       if (member) {
           const currentDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
           const newDue = Math.max(0, currentDue - order.total);
-          await supabase.from('Canteen').update({ Due: newDue }).eq('airman_id', member.airman_id);
+          await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', member.airman_id);
       }
       
-      for (const item of order.items) {
-          const dbItem = catalog.find(c => c.id === item.id);
-          if (dbItem) {
-              const newStock = (dbItem.stock || 0) + item.qty;
-              await supabase.from('Canteen_Inventory').update({ stock: newStock }).eq('id', dbItem.id);
-          }
+      // Restore raw stock for sales cancellation
+      if (order.items && order.items.length > 0) {
+        restoreRawStockForSaleCancellation(order.items.map((i: any) => ({
+          name: i.name,
+          quantity: i.qty || 1
+        })));
       }
       
       const txs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
@@ -690,7 +697,7 @@ export const ManagerDashboard: React.FC = () => {
       });
       if (!member) {
           try {
-              const { data } = await supabase.from('Canteen').select('*').or(`"BD No".eq.${cleanOrderBd},airman_id.eq.${cleanOrderBd},airman_id.eq.airman-${cleanOrderBd}`).limit(1);
+              const { data } = await supabase.from('Canteen_Member').select('*').or(`"BD No".eq.${cleanOrderBd},airman_id.eq.${cleanOrderBd},airman_id.eq.airman-${cleanOrderBd}`).limit(1);
               if (data && data.length > 0) {
                   member = data[0];
               }
@@ -704,15 +711,14 @@ export const ManagerDashboard: React.FC = () => {
       // Update Due
       const currentDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
       const newDue = currentDue + order.total;
-      await supabase.from('Canteen').update({ Due: newDue }).eq('airman_id', member.airman_id);
+      await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', member.airman_id);
       
-      // Update stock
-      for (const item of order.items) {
-          const dbItem = catalog.find(c => c.id === item.id);
-          if (dbItem) {
-              const newStock = Math.max(0, (dbItem.stock || 0) - item.qty);
-              await supabase.from('Canteen_Inventory').update({ stock: newStock }).eq('id', dbItem.id);
-          }
+      // Deduct raw material stock for sale
+      if (order.items && order.items.length > 0) {
+        deductRawStockForSales(order.items.map((i: any) => ({
+          name: i.name,
+          quantity: i.qty || 1
+        })));
       }
       
       // Record transaction
@@ -765,6 +771,9 @@ export const ManagerDashboard: React.FC = () => {
       
       const updated = existing.filter((o: any) => o.orderId !== cancelConfirmId);
       localStorage.setItem('canteen_pre_orders', JSON.stringify(updated));
+      window.dispatchEvent(new Event('canteen_pre_orders_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
       
       const parsed = updated.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       setPreOrders(parsed);

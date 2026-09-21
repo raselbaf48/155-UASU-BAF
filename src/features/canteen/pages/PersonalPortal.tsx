@@ -65,7 +65,7 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
       try {
         if (cleanBd) {
           const { data, error } = await supabase
-            .from('Canteen')
+            .from('Canteen_Member')
             .select('DP, Due, Rank, Surname, Contact, "BD No", airman_id')
             .or(`"BD No".eq.${cleanBd},airman_id.eq.${cleanBd},airman_id.eq.airman-${cleanBd}`)
             .limit(1);
@@ -92,7 +92,7 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
           const surname = parts[parts.length - 1];
           if (surname) {
             const { data } = await supabase
-              .from('Canteen')
+              .from('Canteen_Member')
               .select('DP, Due, Rank, Surname, Contact')
               .ilike('Surname', `%${surname}%`)
               .limit(1);
@@ -602,7 +602,7 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
                   const filtered = allItems.filter(item => ids.includes(item.id));
                   
                   try {
-                      const { data, error } = await supabase.from('Canteen_Inventory').select('*').in('id', ids);
+                      const { data, error } = await supabase.from('Canteen_Menu').select('*').in('id', ids);
                       if (!error && data && data.length > 0) {
                           setDailyMenu(data);
                           return;

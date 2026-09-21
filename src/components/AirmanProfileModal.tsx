@@ -455,7 +455,7 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
             if (!cMember) {
               if (cleanBd) {
                 const { data } = await supabase
-                  .from('Canteen')
+                  .from('Canteen_Member')
                   .select('*')
                   .or(`"BD No".eq.${cleanBd},airman_id.eq.${cleanBd},airman_id.eq.airman-${cleanBd}`)
                   .limit(1);
@@ -468,7 +468,7 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                 const surname = parts[parts.length - 1];
                 if (surname) {
                   const { data } = await supabase
-                    .from('Canteen')
+                    .from('Canteen_Member')
                     .select('*')
                     .ilike('Surname', `%${surname}%`)
                     .limit(1);

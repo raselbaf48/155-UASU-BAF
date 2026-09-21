@@ -295,7 +295,7 @@ export const PosSales: React.FC = () => {
       if (m) {
           const currentDue = Number(m.Due ?? m.due ?? m.baki ?? 0);
           const newDue = Math.max(0, currentDue - txToRemove.amount);
-          await supabase.from('Canteen').update({ Due: newDue }).eq('airman_id', txToRemove.airman_id);
+          await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', txToRemove.airman_id);
           setMembers(members.map(member => member.airman_id === txToRemove.airman_id ? {...member, Due: newDue, baki: newDue} : member));
       }
 
@@ -312,11 +312,6 @@ export const PosSales: React.FC = () => {
                       menuItemName: item.menuItemName,
                       qty
                   });
-                  const itemObj = catalog.find((c: any) => c.id === item.menuItemId || c.name.toLowerCase() === item.menuItemName?.toLowerCase());
-                  if (itemObj) {
-                      const newStock = (itemObj.stock || 0) + qty;
-                      await supabase.from('Canteen_Inventory').update({ stock: newStock }).eq('id', itemObj.id);
-                  }
               }
           }
       } else if (txToRemove.items) {
@@ -330,11 +325,6 @@ export const PosSales: React.FC = () => {
                       menuItemName: itemName,
                       qty
                   });
-                  const itemObj = catalog.find((c: any) => c.name.toLowerCase() === itemName.toLowerCase());
-                  if (itemObj) {
-                      const newStock = (itemObj.stock || 0) + qty;
-                      await supabase.from('Canteen_Inventory').update({ stock: newStock }).eq('id', itemObj.id);
-                  }
               }
           }
       }
@@ -365,7 +355,7 @@ export const PosSales: React.FC = () => {
   };
 
   const fetchMembers = async () => {
-    const { data, error } = await supabase.from('Canteen').select('*');
+    const { data, error } = await supabase.from('Canteen_Member').select('*');
     if (!error && data) {
         setMembers(data.map((m: any) => ({
           ...m,
@@ -377,7 +367,7 @@ export const PosSales: React.FC = () => {
 
   const fetchCatalog = async () => {
     try {
-        const { data, error } = await supabase.from('Canteen_Inventory').select('*');
+        const { data, error } = await supabase.from('Canteen_Menu').select('*');
         if (!error && data && data.length > 0) {
             setCatalog(data);
         } else {
@@ -657,7 +647,7 @@ export const PosSales: React.FC = () => {
           for (const m of selectedMembers) {
               const currentDue = Number(m.Due ?? m.due ?? m.baki ?? 0);
               const newDue = currentDue + memberChargeAmount;
-              await supabase.from('Canteen').update({ Due: newDue }).eq('airman_id', m.airman_id);
+              await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', m.airman_id);
               
               // save tx to localstorage for statement
               const txDateStr = formatCanteenDate(saleDate);
@@ -701,12 +691,6 @@ export const PosSales: React.FC = () => {
           qty: b.qty * multiplier
       }));
       const deductionResult = deductRawStockForSales(itemsForDeduction);
-
-      for (const b of basket) {
-          const totalQtySold = b.qty * multiplier;
-          const newStock = Math.max(0, (b.stock || 0) - totalQtySold);
-          await supabase.from('Canteen_Inventory').update({ stock: newStock }).eq('id', b.id);
-      }
 
       const deductionSummary = deductionResult.deducted.length > 0 
           ? ` (${deductionResult.deducted.length}টি কাঁচামালের স্টক বিয়োগ হয়েছে)`

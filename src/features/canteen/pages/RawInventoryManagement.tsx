@@ -6,47 +6,20 @@ import {
   Boxes, ChefHat, Sparkles, Percent, LayoutGrid, List
 } from 'lucide-react';
 import { formatMoney, formatNumber } from '../i18n';
+import { supabase } from '../../../supabase';
+import { 
+  RawInventoryItem, 
+  RawStockLog, 
+  RAW_ITEMS_STORAGE_KEY, 
+  RAW_LOGS_STORAGE_KEY,
+  getRawInventoryItems,
+  saveRawInventoryItems,
+  deduplicateRawItems,
+  getEffectiveRawUnitCost
+} from '../utils/recipeManager';
+import { queuePushKeyToCloud } from '../utils/canteenCloudSync';
 
-export interface RawInventoryItem {
-  id: string;
-  name: string;
-  nameBn: string;
-  category: string;
-  unit: string;
-  currentStock: number;
-  minStockAlert: number;
-  unitCost: number;
-  lastRestockedDate: string;
-  supplier?: string;
-  notes?: string;
-  wastagePercentage?: number;
-}
-
-export interface RawStockLog {
-  id: string;
-  itemId: string;
-  itemName: string;
-  type: 'RESTOCK' | 'ISSUE' | 'WASTAGE';
-  quantity: number;
-  unit: string;
-  previousStock: number;
-  newStock: number;
-  cost?: number;
-  date: string;
-  notes?: string;
-  recordedBy?: string;
-}
-
-const DEFAULT_CATEGORIES = [
-  'All',
-  'Grains & Pulses',
-  'Dairy & Beverages',
-  'Dry Food & Snacks',
-  'Packaging & Disposables',
-  'Oil & Spices',
-  'Frozen Foods',
-  'Vegetables'
-];
+export type { RawInventoryItem, RawStockLog };
 
 const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
@@ -113,7 +86,10 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
     unitCost: 165,
     lastRestockedDate: '2026-09-19',
     supplier: 'Ispahani / Taaza Distributor',
-    notes: '100 pcs per box'
+    notes: '১ প্যাকেটে ১০০ টি টি-ব্যাগ থাকে (1 packet = 100 pcs)',
+    packSize: 100,
+    subUnit: 'pcs',
+    hasSubUnits: true
   },
   {
     id: 'raw-6',
@@ -181,19 +157,6 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
     notes: 'Evening snacks pasta preparation'
   },
   {
-    id: 'raw-11',
-    name: 'Frozen Porota',
-    nameBn: 'ফ্রোজেন পরোটা (Kazi/CP)',
-    category: 'Frozen Foods',
-    unit: 'pcs',
-    currentStock: 160,
-    minStockAlert: 45,
-    unitCost: 16,
-    lastRestockedDate: '2026-09-19',
-    supplier: 'Deep Freezer Store',
-    notes: 'Quick breakfast & night snack'
-  },
-  {
     id: 'raw-12',
     name: 'Soyabin Oil',
     nameBn: 'সয়াবিন তেল (রূপচাঁদা/তীর)',
@@ -231,6 +194,194 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
     lastRestockedDate: '2026-09-20',
     supplier: 'Local Bazar',
     notes: 'Daily kitchen staple'
+  },
+  {
+    id: 'raw-15',
+    name: 'Halim Mix',
+    nameBn: 'হালিম মিক্স মসলা ও ডাল',
+    category: 'Oil & Spices',
+    unit: 'packet',
+    currentStock: 30,
+    minStockAlert: 10,
+    unitCost: 65,
+    lastRestockedDate: '2026-09-21',
+    supplier: 'Radhuni / Pran',
+    notes: 'Halim mix pulses & spices packet for special halim'
+  },
+  {
+    id: 'raw-16',
+    name: 'LPG',
+    nameBn: 'এলপিজি গ্যাস (LPG)',
+    category: 'Fuel & Utilities',
+    subCategory: 'Gas Cylinder',
+    unit: 'cylinder',
+    currentStock: 4,
+    minStockAlert: 1,
+    unitCost: 1450,
+    lastRestockedDate: '2026-09-21',
+    supplier: 'Beximco / Omera Gas',
+    notes: 'Commercial 12kg LPG gas cylinder for cooking stove'
+  },
+  {
+    id: 'raw-17',
+    name: 'Tomato Sauce',
+    nameBn: 'টমেটো সস (Tometo Sos)',
+    category: 'Oil & Spices',
+    unit: 'bottle',
+    currentStock: 25,
+    minStockAlert: 8,
+    unitCost: 110,
+    lastRestockedDate: '2026-09-21',
+    supplier: 'Pran / Ahmed',
+    notes: 'Tomato sauce / ketchup for shawarma, snacks & fast food'
+  },
+  {
+    id: 'raw-18',
+    name: 'Maggi Masala',
+    nameBn: 'ম্যাগি মসলা (Maggi Mosla)',
+    category: 'Oil & Spices',
+    unit: 'packet',
+    currentStock: 120,
+    minStockAlert: 30,
+    unitCost: 8,
+    lastRestockedDate: '2026-09-21',
+    supplier: 'Nestle Wholesale',
+    notes: 'Maggi taste-maker seasoning sachets'
+  },
+  {
+    id: 'raw-19',
+    name: 'Green Chili',
+    nameBn: 'কাঁচা মরিচ (Green Chili)',
+    category: 'Vegetables',
+    unit: 'kg',
+    currentStock: 15,
+    minStockAlert: 5,
+    unitCost: 180,
+    wastagePercentage: 10,
+    lastRestockedDate: '2026-09-22',
+    supplier: 'Local Bazar',
+    notes: 'Fresh green chili for omelet, noodles & snacks'
+  },
+  {
+    id: 'raw-20',
+    name: 'Coffee',
+    nameBn: 'কফি পাউডার (Coffee)',
+    category: 'Dairy & Beverages',
+    unit: 'packet',
+    currentStock: 40,
+    minStockAlert: 12,
+    unitCost: 320,
+    lastRestockedDate: '2026-09-20',
+    supplier: 'City Super Store',
+    notes: 'Nescafe instant coffee powder for milk & cold coffee'
+  },
+  {
+    id: 'raw-21',
+    name: 'Dry Cake',
+    nameBn: 'ড্রাই কেক (Dry Cake)',
+    category: 'Dry Food & Snacks',
+    unit: 'packet',
+    currentStock: 60,
+    minStockAlert: 20,
+    unitCost: 12,
+    lastRestockedDate: '2026-09-21',
+    supplier: 'Olympic / Dan Cake',
+    notes: 'Crispy dry cake for counter sales'
+  },
+  {
+    id: 'raw-22',
+    name: 'Swarma Bread',
+    nameBn: 'শার্মা ব্রেড / রুটি (Swarma)',
+    category: 'Frozen Foods',
+    unit: 'pcs',
+    currentStock: 80,
+    minStockAlert: 25,
+    unitCost: 18,
+    lastRestockedDate: '2026-09-21',
+    supplier: 'Bakery Supply',
+    notes: 'Shawarma pita bread wraps'
+  },
+  {
+    id: 'raw-23',
+    name: 'Butter Ban',
+    nameBn: 'বাটার বন (Butter Ban)',
+    category: 'Dry Food & Snacks',
+    unit: 'pcs',
+    currentStock: 70,
+    minStockAlert: 20,
+    unitCost: 15,
+    lastRestockedDate: '2026-09-22',
+    supplier: 'Local Bakery',
+    notes: 'Sweet cream butter bun'
+  },
+  {
+    id: 'raw-24',
+    name: 'Sandwich Bread',
+    nameBn: 'স্যান্ডউইচ ব্রেড (Sandwitch)',
+    category: 'Dry Food & Snacks',
+    unit: 'packet',
+    currentStock: 45,
+    minStockAlert: 15,
+    unitCost: 45,
+    lastRestockedDate: '2026-09-21',
+    supplier: 'City Bakery',
+    notes: '১ প্যাকেটে ১২ স্লাইস থাকে (1 loaf = 12 slices)',
+    packSize: 12,
+    subUnit: 'slice',
+    hasSubUnits: true
+  },
+  {
+    id: 'raw-25',
+    name: 'Burger Bun',
+    nameBn: 'বার্গার বান (Burger)',
+    category: 'Dry Food & Snacks',
+    unit: 'pcs',
+    currentStock: 60,
+    minStockAlert: 20,
+    unitCost: 16,
+    lastRestockedDate: '2026-09-22',
+    supplier: 'City Bakery',
+    notes: 'Soft sesame burger bun'
+  },
+  {
+    id: 'raw-26',
+    name: 'Hotel Porota',
+    nameBn: 'হোটেল পরোটা (Hotel Porota)',
+    category: 'Frozen Foods',
+    unit: 'pcs',
+    currentStock: 120,
+    minStockAlert: 40,
+    unitCost: 8,
+    lastRestockedDate: '2026-09-22',
+    supplier: 'Hotel Paratha Supply',
+    notes: 'Handmade flaky paratha for breakfast & snacks'
+  },
+  {
+    id: 'raw-27',
+    name: 'Salt',
+    nameBn: 'খাবার লবণ (Salt)',
+    category: 'Oil & Spices',
+    unit: 'kg',
+    currentStock: 50,
+    minStockAlert: 15,
+    unitCost: 40,
+    lastRestockedDate: '2026-09-18',
+    supplier: 'Molla / ACI Salt',
+    notes: 'Iodized cooking salt for all kitchen dishes'
+  },
+  {
+    id: 'raw-28',
+    name: 'Lemon',
+    nameBn: 'কাঁচা লেবু (Lemon)',
+    category: 'Vegetables',
+    unit: 'pcs',
+    currentStock: 100,
+    minStockAlert: 30,
+    unitCost: 6,
+    wastagePercentage: 15,
+    lastRestockedDate: '2026-09-22',
+    supplier: 'Local Green Grocer',
+    notes: 'Fresh juicy lemons for lemon juice, tea & meals'
   }
 ];
 
@@ -268,18 +419,45 @@ const INITIAL_RAW_STOCK_LOGS: RawStockLog[] = [
 const STORAGE_KEY = 'canteen_raw_inventory_items_v2';
 const LOGS_STORAGE_KEY = 'canteen_raw_stock_logs_v2';
 
+// Helper to encode metadata safely into notes so Supabase schema cache doesn't reject with 'column not found'
+const encodeNotesWithMeta = (notes?: string, meta?: any) => {
+  let base = (notes || '').replace(/<!--META:[\s\S]*?-->/g, '').trim();
+  if (meta && Object.keys(meta).length > 0) {
+    base = base ? `${base} <!--META:${JSON.stringify(meta)}-->` : `<!--META:${JSON.stringify(meta)}-->`;
+  }
+  return base;
+};
+
+const decodeNotesMeta = (notes?: string) => {
+  if (!notes) return {};
+  const match = notes.match(/<!--META:([\s\S]*?)-->/);
+  if (match && match[1]) {
+    try {
+      return JSON.parse(match[1]);
+    } catch {}
+  }
+  return {};
+};
+
 export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readOnly = false }) => {
   const [items, setItems] = useState<RawInventoryItem[]>(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        let parsed = JSON.parse(stored);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray(parsed.deduplicated)) {
+          parsed = parsed.deduplicated;
+        }
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const { deduplicated } = deduplicateRawItems(parsed);
+          return deduplicated;
+        }
       }
     } catch (e) {
       console.warn('Failed to load raw items from localStorage:', e);
     }
-    return INITIAL_RAW_ITEMS;
+    const { deduplicated } = deduplicateRawItems(INITIAL_RAW_ITEMS);
+    return deduplicated;
   });
 
   const [logs, setLogs] = useState<RawStockLog[]>(() => {
@@ -329,28 +507,108 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
   const [newItemData, setNewItemData] = useState<Partial<RawInventoryItem>>({
     name: '',
     nameBn: '',
-    category: 'Grains & Pulses',
+    category: 'Fuel & Utilities',
+    subCategory: '',
     unit: 'kg',
     currentStock: 10,
     minStockAlert: 5,
     unitCost: 100,
     supplier: '',
     notes: '',
-    wastagePercentage: 0
+    wastagePercentage: 0,
+    hasSubUnits: false,
+    packSize: 1,
+    subUnit: 'pcs'
   });
 
-  // Save changes to localStorage
+  // Fetch raw inventory from Supabase Canteen_Inventory table
   useEffect(() => {
+    const fetchFromDb = async () => {
+      try {
+        const { data, error } = await supabase.from('Canteen_Inventory').select('*');
+        if (!error && data && data.length > 0) {
+          const mapped: RawInventoryItem[] = data.map((r: any) => {
+            const meta = decodeNotesMeta(r.notes);
+            const cleanNotes = (r.notes || '').replace(/<!--META:[\s\S]*?-->/g, '').trim();
+            return {
+              id: String(r.id),
+              name: r.name || '',
+              nameBn: r.nameBn || r.name_bn || r.name || '',
+              category: meta.category || r.category || 'Packaging & Disposables',
+              subCategory: meta.subCategory || r.subCategory || r.sub_category || '',
+              unit: r.unit || 'kg',
+              currentStock: Number(r.currentStock ?? r.current_stock ?? 0),
+              minStockAlert: Number(r.minStockAlert ?? r.min_stock_alert ?? 5),
+              unitCost: Number(r.unitCost ?? r.unit_cost ?? 0),
+              wastagePercentage: Number(r.wastagePercentage ?? r.wastage_percentage ?? 0),
+              lastRestockedDate: r.lastRestockedDate || r.last_restocked_date || '',
+              supplier: r.supplier || '',
+              notes: cleanNotes,
+              hasSubUnits: Boolean(meta.hasSubUnits ?? r.hasSubUnits ?? r.has_sub_units ?? (Number(r.packSize ?? r.pack_size) > 1)),
+              packSize: Number(meta.packSize ?? r.packSize ?? r.pack_size ?? 1),
+              subUnit: meta.subUnit || r.subUnit || r.sub_unit || 'pcs'
+            };
+          });
+          setItems(prev => {
+            const combined = [...(Array.isArray(prev) ? prev : []), ...mapped];
+            const { deduplicated } = deduplicateRawItems(combined);
+            try {
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(deduplicated));
+            } catch {}
+            return deduplicated;
+          });
+        }
+      } catch (err) {
+        console.warn('Canteen_Inventory DB fetch note:', err);
+      }
+    };
+    fetchFromDb();
+  }, []);
+
+  // Save changes to localStorage, app_settings Cloud, and Supabase Canteen_Inventory table
+  useEffect(() => {
+    if (!Array.isArray(items)) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+      window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
     } catch (e) {
       console.warn('Failed to save raw items:', e);
+    }
+
+    // Push full rich object to app_settings cloud key for complete persistence
+    queuePushKeyToCloud('canteen_raw_inventory_items_v2', items);
+
+    if (items.length > 0) {
+      const payload = items.map(it => ({
+        id: it.id,
+        name: it.name,
+        nameBn: it.nameBn || '',
+        unit: it.unit || 'kg',
+        currentStock: it.currentStock ?? 0,
+        minStockAlert: it.minStockAlert ?? 5,
+        unitCost: it.unitCost ?? 0,
+        wastagePercentage: it.wastagePercentage ?? 0,
+        lastRestockedDate: it.lastRestockedDate || '',
+        supplier: it.supplier || '',
+        notes: encodeNotesWithMeta(it.notes, {
+          category: it.category,
+          subCategory: it.subCategory,
+          hasSubUnits: it.hasSubUnits,
+          packSize: it.packSize,
+          subUnit: it.subUnit
+        })
+      }));
+      Promise.resolve(supabase.from('Canteen_Inventory').upsert(payload, { onConflict: 'id' }))
+        .catch(err => console.warn('Supabase Canteen_Inventory upsert note:', err));
     }
   }, [items]);
 
   useEffect(() => {
     try {
       localStorage.setItem(LOGS_STORAGE_KEY, JSON.stringify(logs));
+      window.dispatchEvent(new Event('canteen_raw_stock_logs_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
     } catch (e) {
       console.warn('Failed to save raw stock logs:', e);
     }
@@ -362,7 +620,10 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
       try {
         const stored = localStorage.getItem(STORAGE_KEY);
         if (stored) {
-          const parsed = JSON.parse(stored);
+          let parsed = JSON.parse(stored);
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray(parsed.deduplicated)) {
+            parsed = parsed.deduplicated;
+          }
           if (Array.isArray(parsed) && parsed.length > 0) {
             setItems(parsed);
           }
@@ -381,20 +642,25 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
     };
 
     window.addEventListener('canteen_raw_inventory_updated', handleSync);
+    window.addEventListener('canteen_raw_stock_logs_updated', handleSync);
+    window.addEventListener('canteen_state_updated', handleSync);
     window.addEventListener('storage', handleSync);
     return () => {
       window.removeEventListener('canteen_raw_inventory_updated', handleSync);
+      window.removeEventListener('canteen_raw_stock_logs_updated', handleSync);
+      window.removeEventListener('canteen_state_updated', handleSync);
       window.removeEventListener('storage', handleSync);
     };
   }, []);
 
   // Statistics calculation
   const stats = useMemo(() => {
-    const totalItems = items.length;
-    const totalValue = items.reduce((sum, item) => sum + (item.currentStock * item.unitCost), 0);
-    const lowStockItems = items.filter(item => item.currentStock <= item.minStockAlert);
-    const outOfStockItems = items.filter(item => item.currentStock <= 0);
-    const healthyCount = items.filter(item => item.currentStock > item.minStockAlert).length;
+    const list = Array.isArray(items) ? items : [];
+    const totalItems = list.length;
+    const totalValue = list.reduce((sum, item) => sum + (item.currentStock * item.unitCost), 0);
+    const lowStockItems = list.filter(item => item.currentStock <= item.minStockAlert);
+    const outOfStockItems = list.filter(item => item.currentStock <= 0);
+    const healthyCount = list.filter(item => item.currentStock > item.minStockAlert).length;
     const healthPercent = totalItems > 0 ? Math.round((healthyCount / totalItems) * 100) : 100;
 
     return {
@@ -408,12 +674,8 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
 
   // Filtered items
   const filteredItems = useMemo(() => {
-    return items.filter(item => {
-      // Exclude 'Meat & Poultry' category
-      if (item.category === 'Meat & Poultry') {
-        return false;
-      }
-
+    const list = Array.isArray(items) ? items : [];
+    return list.filter(item => {
       // Search
       const q = searchTerm.trim().toLowerCase();
       if (q) {
@@ -615,14 +877,18 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
             ...i,
             name: newItemData.name!.trim(),
             nameBn: newItemData.nameBn?.trim() || newItemData.name!.trim(),
-            category: newItemData.category || 'Grains & Pulses',
+            category: newItemData.category?.trim() || i.category || 'Fuel & Utilities',
+            subCategory: newItemData.subCategory !== undefined ? newItemData.subCategory.trim() : (i.subCategory || ''),
             unit: newItemData.unit || 'kg',
             currentStock: Number(newItemData.currentStock) || 0,
             minStockAlert: Number(newItemData.minStockAlert) || 5,
             unitCost: Number(newItemData.unitCost) || 0,
             supplier: newItemData.supplier?.trim(),
             notes: newItemData.notes?.trim(),
-            wastagePercentage: newItemData.wastagePercentage !== undefined ? Number(newItemData.wastagePercentage) : 0
+            wastagePercentage: newItemData.wastagePercentage !== undefined ? Number(newItemData.wastagePercentage) : 0,
+            hasSubUnits: Boolean(newItemData.hasSubUnits),
+            packSize: newItemData.hasSubUnits ? Math.max(1, Number(newItemData.packSize) || 1) : 1,
+            subUnit: newItemData.hasSubUnits ? (newItemData.subUnit || 'pcs').trim() : undefined
           };
         }
         return i;
@@ -644,7 +910,8 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
         id: `raw-${Date.now()}`,
         name: newItemData.name.trim(),
         nameBn: newItemData.nameBn?.trim() || newItemData.name.trim(),
-        category: newItemData.category || 'Grains & Pulses',
+        category: newItemData.category?.trim() || 'Fuel & Utilities',
+        subCategory: newItemData.subCategory?.trim() || '',
         unit: newItemData.unit || 'kg',
         currentStock: effectiveStock,
         minStockAlert: Number(newItemData.minStockAlert) || 5,
@@ -652,7 +919,10 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
         lastRestockedDate: today,
         supplier: newItemData.supplier?.trim(),
         notes: newItemData.notes?.trim(),
-        wastagePercentage: wastagePct
+        wastagePercentage: wastagePct,
+        hasSubUnits: Boolean(newItemData.hasSubUnits),
+        packSize: newItemData.hasSubUnits ? Math.max(1, Number(newItemData.packSize) || 1) : 1,
+        subUnit: newItemData.hasSubUnits ? (newItemData.subUnit || 'pcs').trim() : undefined
       };
       setItems(prev => [newItem, ...prev]);
 
@@ -704,22 +974,31 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
     setNewItemData({
       name: item.name,
       nameBn: item.nameBn,
-      category: item.category,
+      category: item.category || 'Fuel & Utilities',
+      subCategory: item.subCategory || '',
       unit: item.unit,
       currentStock: item.currentStock,
       minStockAlert: item.minStockAlert,
       unitCost: item.unitCost,
       supplier: item.supplier || '',
       notes: item.notes || '',
-      wastagePercentage: item.wastagePercentage || 0
+      wastagePercentage: item.wastagePercentage || 0,
+      hasSubUnits: Boolean(item.hasSubUnits || (item.packSize && item.packSize > 1)),
+      packSize: item.packSize || 1,
+      subUnit: item.subUnit || 'pcs'
     });
     setShowAddModal(true);
   };
 
-  const handleDeleteItem = (item: RawInventoryItem) => {
+  const handleDeleteItem = async (item: RawInventoryItem) => {
     const confirmDelete = window.confirm(`Are you sure you want to delete ${item.name} (${item.nameBn})?`);
     if (confirmDelete) {
       setItems(prev => prev.filter(i => i.id !== item.id));
+      try {
+        await supabase.from('Canteen_Inventory').delete().eq('id', item.id);
+      } catch (err) {
+        console.warn('Delete from Canteen_Inventory table note:', err);
+      }
     }
   };
 
@@ -727,7 +1006,8 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
   const handleResetToDefault = () => {
     const confirmReset = window.confirm('Reset raw inventory items to original list? This will restore standard items (Chicken, Rice, Dal, Milk Powder, etc.).');
     if (confirmReset) {
-      setItems(INITIAL_RAW_ITEMS);
+      const { deduplicated } = deduplicateRawItems(INITIAL_RAW_ITEMS);
+      setItems(deduplicated);
     }
   };
 
@@ -1058,9 +1338,16 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                             <h4 className="font-extrabold text-white text-base truncate flex items-center gap-1.5" title={item.name}>
                               <span>{item.name}</span>
                             </h4>
-                            <p className="text-xs text-slate-400 font-medium truncate" title={item.nameBn}>
-                              {item.nameBn}
-                            </p>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <p className="text-xs text-slate-400 font-medium truncate" title={item.nameBn}>
+                                {item.nameBn}
+                              </p>
+                              {(item.subCategory || item.category) && (
+                                <span className="text-[10px] px-1.5 py-0.5 bg-slate-800 text-indigo-300 rounded-md border border-slate-700/60 font-semibold truncate max-w-[120px]">
+                                  {item.subCategory || item.category}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
 
@@ -1082,11 +1369,18 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                         </div>
                       </div>
 
-                      {/* Category & Wastage Tag Pills */}
+                      {/* Unit & Wastage Tag Pills */}
                       <div className="flex flex-wrap items-center gap-1.5 mt-3">
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-800 text-slate-400 border border-slate-700/60">
-                          {item.category}
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-800 text-indigo-300 border border-slate-700/60 uppercase">
+                          {item.unit}
                         </span>
+
+                        {Boolean(item.hasSubUnits || (item.packSize && item.packSize > 1)) && (
+                          <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 flex items-center gap-1" title={`প্রতি ${item.unit}-এ ${item.packSize} ${item.subUnit || 'pcs'} থাকে`}>
+                            <Boxes className="w-2.5 h-2.5 text-indigo-400" />
+                            <span>১ {item.unit} = {item.packSize} {item.subUnit || 'pcs'}</span>
+                          </span>
+                        )}
 
                         {wastagePct > 0 && (
                           <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
@@ -1131,11 +1425,27 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                       </div>
 
                       {/* Details: Unit Cost & Supplier */}
-                      <div className="mt-3 space-y-1 text-xs">
+                      <div className="mt-3 space-y-1.5 text-xs">
                         <div className="flex items-center justify-between text-slate-400">
-                          <span>Unit Price:</span>
+                          <span>কেনা দর:</span>
                           <span className="font-bold text-slate-200">৳{item.unitCost} / {item.unit}</span>
                         </div>
+                        {Boolean(item.hasSubUnits || (item.packSize && item.packSize > 1)) && (
+                          <div className="flex items-center justify-between text-indigo-300 text-[11px] bg-indigo-950/30 px-2 py-1 rounded-lg border border-indigo-500/25">
+                            <span className="font-medium">প্রতি {item.subUnit || 'pcs'} দর:</span>
+                            <span className="font-black text-indigo-200">
+                              ৳{((item.unitCost) / (item.packSize || 1)).toFixed(2)}
+                            </span>
+                          </div>
+                        )}
+                        {wastagePct > 0 && (
+                          <div className="flex items-center justify-between text-amber-400 text-[11px] bg-amber-950/30 px-2 py-1 rounded-lg border border-amber-500/25">
+                            <span className="font-medium">কার্যকর দর ({100 - wastagePct}% টিকে):</span>
+                            <span className="font-black text-amber-300">
+                              ৳{(Math.round((item.unitCost / (1 - wastagePct / 100)) * 10) / 10).toLocaleString()} / {item.unit}
+                            </span>
+                          </div>
+                        )}
                         {item.supplier && (
                           <div className="flex items-center justify-between text-slate-400 text-[11px]">
                             <span className="text-slate-500">Supplier:</span>
@@ -1234,8 +1544,14 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                                   </span>
                                 )}
                               </div>
-                              <div className="text-xs text-slate-400 font-medium">
-                                {item.nameBn}
+                              <div className="text-xs text-slate-400 font-medium flex items-center gap-1.5 flex-wrap">
+                                <span>{item.nameBn}</span>
+                                {Boolean(item.hasSubUnits || (item.packSize && item.packSize > 1)) && (
+                                  <span className="text-[10px] font-black px-1.5 py-0.2 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded inline-flex items-center gap-1">
+                                    <Boxes className="w-2.5 h-2.5" />
+                                    <span>{item.packSize} {item.subUnit || 'pcs'} / {item.unit}</span>
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -1252,6 +1568,11 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                             <span className="text-xs font-bold text-slate-400 ml-1 uppercase">
                               {item.unit}
                             </span>
+                            {Boolean(item.hasSubUnits || (item.packSize && item.packSize > 1)) && (
+                              <div className="text-[10px] text-indigo-300/90 font-bold">
+                                ≈ {Math.round(item.currentStock * (item.packSize || 1))} {item.subUnit || 'pcs'}
+                              </div>
+                            )}
                             <div className="w-20 bg-slate-800 h-1.5 rounded-full mt-1 mx-auto overflow-hidden">
                               <div 
                                 className={`h-full rounded-full ${
@@ -1281,7 +1602,17 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
 
                         {/* Unit Cost */}
                         <td className="px-4 py-3.5 text-right font-semibold text-slate-300 text-xs">
-                          ৳ {item.unitCost} / {item.unit}
+                          <div>৳ {item.unitCost} / {item.unit}</div>
+                          {Boolean(item.hasSubUnits || (item.packSize && item.packSize > 1)) && (
+                            <div className="text-[10px] text-indigo-300 font-bold">
+                              ৳{((item.unitCost) / (item.packSize || 1)).toFixed(2)} / {item.subUnit || 'pcs'}
+                            </div>
+                          )}
+                          {wastagePct > 0 && (
+                            <div className="text-[10px] text-amber-300 font-bold" title="অপচয় বাদ দিয়ে নিট কার্যকর দর">
+                              নিট: ৳{Math.round((item.unitCost / (1 - wastagePct / 100)) * 10) / 10}
+                            </div>
+                          )}
                         </td>
 
                         {/* Total Value */}
@@ -1410,36 +1741,55 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-bold text-slate-400 mb-1">Category</label>
+                    <label className="block text-xs font-bold text-slate-400 mb-1">ক্যাটাগরি (Category)</label>
                     <select
-                      value={newItemData.category || 'Grains & Pulses'}
+                      value={newItemData.category || 'Fuel & Utilities'}
                       onChange={(e) => setNewItemData({ ...newItemData, category: e.target.value })}
                       className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500"
                     >
-                      {DEFAULT_CATEGORIES.filter(c => c !== 'All').map(c => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
+                      <option value="Fuel & Utilities">Fuel & Utilities (জ্বালানি ও গ্যাস)</option>
+                      <option value="Meat & Poultry">Meat & Poultry (মাংস ও পোল্ট্রি)</option>
+                      <option value="Grains & Pulses">Grains & Pulses (চাল ও ডাল)</option>
+                      <option value="Oil & Spices">Oil & Spices (তেল ও মসলা)</option>
+                      <option value="Dairy & Beverages">Dairy & Beverages (দুধ, চা ও কফি)</option>
+                      <option value="Vegetables">Vegetables (শাকসবজি ও কাঁচাবাজার)</option>
+                      <option value="Dry Food & Snacks">Dry Food & Snacks (শুকনো খাবার ও স্ন্যাকস)</option>
+                      <option value="Frozen Foods">Frozen Foods (ফ্রোজেন আইটেম)</option>
+                      <option value="Packaging & Disposables">Packaging & Disposables (বক্স ও ওয়ান টাইম)</option>
+                      <option value="Other">Other (অন্যান্য)</option>
                     </select>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-400 mb-1">Unit of Measure</label>
-                    <select
-                      value={newItemData.unit || 'kg'}
-                      onChange={(e) => setNewItemData({ ...newItemData, unit: e.target.value })}
+                    <label className="block text-xs font-bold text-slate-400 mb-1">সাব-ক্যাটাগরি (SubCat / Sub-Category)</label>
+                    <input
+                      type="text"
+                      value={newItemData.subCategory || ''}
+                      onChange={(e) => setNewItemData({ ...newItemData, subCategory: e.target.value })}
+                      placeholder="e.g. Gas Cylinder, 12kg LPG, Spices"
                       className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500"
-                    >
-                      <option value="kg">kg (Kilogram)</option>
-                      <option value="gm">gm (Gram)</option>
-                      <option value="liter">liter (Liter)</option>
-                      <option value="pcs">pcs (Pieces)</option>
-                      <option value="packet">packet (Packet)</option>
-                      <option value="box">box (Box)</option>
-                      <option value="bag">bag (Sack/Bag)</option>
-                    </select>
+                    />
                   </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">Unit of Measure (পরিমাপের একক)</label>
+                  <select
+                    value={newItemData.unit || 'kg'}
+                    onChange={(e) => setNewItemData({ ...newItemData, unit: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="kg">kg (Kilogram / কেজি)</option>
+                    <option value="gm">gm (Gram / গ্রাম)</option>
+                    <option value="liter">liter (Liter / লিটার)</option>
+                    <option value="pcs">pcs (Pieces / পিস)</option>
+                    <option value="cylinder">cylinder (Cylinder / সিলিন্ডার)</option>
+                    <option value="packet">packet (Packet / প্যাকেট)</option>
+                    <option value="box">box (Box / বক্স)</option>
+                    <option value="bag">bag (Sack/Bag / বস্তা)</option>
+                  </select>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
@@ -1506,6 +1856,98 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                       কেনার সময় এই % বাদ দিয়ে নিট স্টক ইনভেন্টরিতে ঢুকবে এবং অপচয় লগে যাবে
                     </p>
                   </div>
+                </div>
+
+                {/* Packaging & Sub-Units Configuration (e.g. 1 Packet Tea Bag = 100 pcs) */}
+                <div className="bg-slate-950/70 border border-slate-800 p-3.5 rounded-2xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-xs font-black text-white flex items-center gap-1.5">
+                        <Boxes className="w-3.5 h-3.5 text-indigo-400" />
+                        <span>প্যাকেজিং ও সাব-ইউনিট কনফিগারেশন (Sub-Units / Pieces)</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        প্যাকেটের ভেতরে নির্দিষ্ট পিস/স্লাইস থাকলে (যেমন: ১ প্যাকেট Tea Bag = ১০০ PCS)
+                      </p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(newItemData.hasSubUnits)}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setNewItemData({
+                            ...newItemData,
+                            hasSubUnits: checked,
+                            packSize: checked ? (newItemData.packSize && newItemData.packSize > 1 ? newItemData.packSize : 100) : 1,
+                            subUnit: checked ? (newItemData.subUnit || 'pcs') : undefined
+                          });
+                        }}
+                        className="sr-only peer"
+                      />
+                      <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                    </label>
+                  </div>
+
+                  {newItemData.hasSubUnits && (
+                    <div className="pt-2 border-t border-slate-800/80 space-y-3 animate-in fade-in duration-200">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                            প্রতি প্যাকেটে মোট সংখ্যা (Pack Size) *
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            step="1"
+                            value={newItemData.packSize || 100}
+                            onChange={(e) => setNewItemData({ ...newItemData, packSize: Math.max(1, parseInt(e.target.value) || 1) })}
+                            placeholder="e.g. 100"
+                            className="w-full px-3 py-2 bg-slate-900 border border-indigo-500/40 rounded-xl text-white font-black text-sm focus:outline-none focus:border-indigo-400"
+                          />
+                          <p className="text-[10px] text-slate-500 mt-1">যেমন: ১ বক্সে ১০০ টি টি-ব্যাগ</p>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                            সাব-ইউনিটের নাম (Sub-unit)
+                          </label>
+                          <select
+                            value={newItemData.subUnit || 'pcs'}
+                            onChange={(e) => setNewItemData({ ...newItemData, subUnit: e.target.value })}
+                            className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-sm font-bold focus:outline-none focus:border-indigo-500"
+                          >
+                            <option value="pcs">pcs (পিস / ব্যাগ)</option>
+                            <option value="slice">slice (স্লাইস)</option>
+                            <option value="cup">cup (কাপ)</option>
+                            <option value="sheet">sheet (শিট)</option>
+                            <option value="gm">gm (গ্রাম)</option>
+                            <option value="ml">ml (মিলি)</option>
+                          </select>
+                          <p className="text-[10px] text-slate-500 mt-1">রেসিপিতে এই এককে ব্যবহার হবে</p>
+                        </div>
+                      </div>
+
+                      {/* Live Calculation Preview */}
+                      <div className="bg-indigo-950/40 border border-indigo-500/30 rounded-xl p-3 text-xs space-y-1">
+                        <div className="flex items-center justify-between text-indigo-300 font-bold">
+                          <span>প্যাকেজিং অনুপাত:</span>
+                          <span className="font-mono text-white">
+                            ১ {newItemData.unit || 'packet'} = {newItemData.packSize || 100} {newItemData.subUnit || 'pcs'}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-indigo-200">
+                          <span>প্রতি {newItemData.subUnit || 'pcs'} খরচ (Unit Cost):</span>
+                          <span className="font-black text-amber-300 text-sm">
+                            ৳{((Number(newItemData.unitCost) || 0) / Math.max(1, (Number(newItemData.packSize) || 1))).toFixed(2)}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 pt-1">
+                          চা, কফি বা স্যান্ডউইচ বিক্রির সময় প্রতি কাপে ১ {newItemData.subUnit || 'pcs'} খরচ ধরবে এবং ইনভেন্টরি থেকে {(1 / Math.max(1, (Number(newItemData.packSize) || 1))).toFixed(4)} {newItemData.unit || 'packet'} কমে যাবে।
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div>

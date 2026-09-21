@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { formatMoney } from '../i18n';
 import { getCanteenConfig, resolveImageUrl, fetchCanteenConfigFromCloud, CanteenConfig } from '../utils/canteenSettings';
 import { autoCheckInitialCleanSlate } from '../utils/resetCanteenData';
+import { initCanteenCloudSync, pullAllCanteenDataFromCloud, getCanteenCloudSyncStatus, CloudSyncStatus } from '../utils/canteenCloudSync';
 import { EmployeeDashboard } from '../pages/EmployeeDashboard';
 import { PersonalPortal } from '../pages/PersonalPortal';
 import { PlaceDemand } from '../pages/PlaceDemand';
@@ -28,7 +29,7 @@ import { CanteenFund } from '../pages/CanteenFund';
 import { DueRegister } from '../pages/DueRegister';
 import { AirmanProfileModal } from '../../../components/AirmanProfileModal';
 
-import { Wallet, LayoutDashboard, Coffee, Search, List, CreditCard, ArrowLeft, Utensils, Wifi, HelpCircle, LogIn, Grid, Package as Pkg, ShoppingCart, Users, Banknote, BarChart2, Settings as SettingsIcon, PieChart, Package, UserCircle, X, Menu, User, Eye, EyeOff, Lock, Phone, UtensilsCrossed, Boxes, ClipboardList } from 'lucide-react';
+import { Wallet, LayoutDashboard, Coffee, Search, List, CreditCard, ArrowLeft, Utensils, Wifi, HelpCircle, LogIn, Grid, Package as Pkg, ShoppingCart, Users, Banknote, BarChart2, Settings as SettingsIcon, PieChart, Package, UserCircle, X, Menu, User, Eye, EyeOff, Lock, Phone, UtensilsCrossed, Boxes, ClipboardList, Cloud, RefreshCw } from 'lucide-react';
 
 interface CanteenLayoutProps {
   initialMember?: { name: string, bdNo: string, role?: 'employee'|'manager', photoUrl?: string, due?: number };
@@ -70,10 +71,13 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
   const [showCustomerProfile, setShowCustomerProfile] = useState(false);
   const [currentCustomerAirman, setCurrentCustomerAirman] = useState<any>(null);
   const [canteenConfig, setCanteenConfig] = useState<CanteenConfig>(() => getCanteenConfig());
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<CloudSyncStatus>(() => getCanteenCloudSyncStatus());
 
   // Cloud config synchronization on mount & event listeners
   useEffect(() => {
     autoCheckInitialCleanSlate();
+    const cleanupCloudSync = initCanteenCloudSync();
+
     fetchCanteenConfigFromCloud().then(cfg => {
       if (cfg) setCanteenConfig(cfg);
     });
@@ -90,11 +94,21 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
         setCanteenConfig(getCanteenConfig());
       }
     };
+    const handleCloudSyncStatus = (e: any) => {
+      if (e.detail) {
+        setCloudSyncStatus(e.detail);
+      }
+    };
+
     window.addEventListener('storage', handleStorage);
     window.addEventListener('canteen_settings_updated', handleSettingsUpdated);
+    window.addEventListener('canteen_cloud_sync_status', handleCloudSyncStatus);
+
     return () => {
+      cleanupCloudSync();
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener('canteen_settings_updated', handleSettingsUpdated);
+      window.removeEventListener('canteen_cloud_sync_status', handleCloudSyncStatus);
     };
   }, []);
 
@@ -109,7 +123,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
           // 1. Check Supabase Canteen table first (where DP update happens in MemberDB)
           if (cleanBd) {
             const { data, error } = await supabase
-              .from('Canteen')
+              .from('Canteen_Member')
               .select('DP, Due, Surname, Rank, Contact, "BD No", airman_id')
               .or(`"BD No".eq.${cleanBd},airman_id.eq.${cleanBd},airman_id.eq.airman-${cleanBd}`)
               .limit(1);
@@ -139,7 +153,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
             const surname = parts[parts.length - 1];
             if (surname) {
               const { data } = await supabase
-                .from('Canteen')
+                .from('Canteen_Member')
                 .select('DP, Surname, Rank')
                 .ilike('Surname', `%${surname}%`)
                 .limit(1);
@@ -176,7 +190,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
       let canteenMember: any = null;
       if (cleanBd) {
         const { data, error } = await supabase
-          .from('Canteen')
+          .from('Canteen_Member')
           .select('*')
           .or(`"BD No".eq.${cleanBd},airman_id.eq.${cleanBd},airman_id.eq.airman-${cleanBd}`)
           .limit(1);
@@ -190,7 +204,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
         const surname = parts[parts.length - 1];
         if (surname) {
           const { data } = await supabase
-            .from('Canteen')
+            .from('Canteen_Member')
             .select('*')
             .ilike('Surname', `%${surname}%`)
             .limit(1);
@@ -418,7 +432,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
       try {
         setLoginError('Checking...');
         const { data, error } = await supabase
-          .from('Canteen')
+          .from('Canteen_Member')
           .select('Surname, Rank, DP, Due')
           .eq('BD No', loginInput)
           .single();
@@ -535,9 +549,38 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
               {canteenConfig.name.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'CAFEUAV'}
             </h1>
           </div>
-          <div className="mt-3 inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-emerald-900/30 border border-emerald-800/50">
-            <Wifi className="w-3 h-3 text-emerald-500" />
-            <span className="text-[10px] font-black text-emerald-400 tracking-wider">CONNECTED</span>
+
+          <div className="mt-3 flex items-center justify-between gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800">
+            <div className="flex items-center space-x-2 min-w-0">
+              <Cloud className={`w-3.5 h-3.5 shrink-0 ${
+                cloudSyncStatus.status === 'syncing' 
+                  ? 'text-amber-400 animate-pulse' 
+                  : cloudSyncStatus.status === 'error' 
+                  ? 'text-rose-400' 
+                  : 'text-emerald-400'
+              }`} />
+              <div className="min-w-0">
+                <span className="text-[10px] font-black uppercase tracking-wider block text-slate-300 truncate">
+                  {cloudSyncStatus.status === 'syncing' 
+                    ? 'Cloud Syncing...' 
+                    : cloudSyncStatus.status === 'error' 
+                    ? 'Cloud Offline' 
+                    : 'Cloud Synced'}
+                </span>
+                {cloudSyncStatus.lastSyncTime && (
+                  <span className="text-[9px] text-slate-500 block leading-tight">
+                    {cloudSyncStatus.lastSyncTime}
+                  </span>
+                )}
+              </div>
+            </div>
+            <button
+              onClick={() => pullAllCanteenDataFromCloud()}
+              title="Sync now from Cloud"
+              className="text-slate-400 hover:text-white p-1 rounded-md hover:bg-slate-800 transition-colors shrink-0"
+            >
+              <RefreshCw className={`w-3 h-3 ${cloudSyncStatus.status === 'syncing' ? 'animate-spin text-amber-400' : ''}`} />
+            </button>
           </div>
         </div>
         
@@ -755,16 +798,24 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
                     onError={(e) => { e.currentTarget.style.display = 'none'; }}
                   />
                 )}
-                <span className="font-bold text-base text-white truncate max-w-[180px]">
+                <span className="font-bold text-base text-white truncate max-w-[150px]">
                   {canteenConfig.name.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'CAFEUAV'}
                 </span>
               </div>
             </div>
-            <div 
-              onClick={handleCustomerProfileClick}
-              className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center border-2 border-indigo-500 cursor-pointer text-indigo-400 overflow-hidden"
-              title="Profile"
-            >
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => pullAllCanteenDataFromCloud()}
+                title="Sync from cloud"
+                className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 active:scale-95 transition-transform"
+              >
+                <Cloud className={`w-4 h-4 ${cloudSyncStatus.status === 'syncing' ? 'text-amber-400 animate-pulse' : 'text-emerald-400'}`} />
+              </button>
+              <div 
+                onClick={handleCustomerProfileClick}
+                className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center border-2 border-indigo-500 cursor-pointer text-indigo-400 overflow-hidden"
+                title="Profile"
+              >
               {currentUser.role === 'manager' && canteenConfig.adminImage ? (
                 <img 
                   src={resolveImageUrl(canteenConfig.adminImage)} 
@@ -784,6 +835,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
               ) : (
                 <User className="w-4 h-4" />
               )}
+              </div>
             </div>
          </div>
 

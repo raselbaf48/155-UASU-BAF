@@ -1,8 +1,11 @@
+import { supabase } from '../../../supabase';
+
 export interface RawInventoryItem {
   id: string;
   name: string;
   nameBn: string;
-  category: string;
+  category?: string;
+  subCategory?: string;
   unit: string;
   currentStock: number;
   minStockAlert: number;
@@ -11,6 +14,9 @@ export interface RawInventoryItem {
   lastRestockedDate: string;
   supplier?: string;
   notes?: string;
+  packSize?: number; // e.g. 100 for Tea Bag (1 packet = 100 pcs)
+  subUnit?: string;  // e.g. 'pcs'
+  hasSubUnits?: boolean;
 }
 
 export interface RawStockLog {
@@ -98,7 +104,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-5',
     name: 'Tea Bag',
-    nameBn: 'টি ব্যাগ / চা পাতা',
+    nameBn: 'টি ব্যাগ (Tea Bag)',
     category: 'Dairy & Beverages',
     unit: 'packet',
     currentStock: 48,
@@ -106,7 +112,10 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
     unitCost: 165,
     lastRestockedDate: '2026-09-19',
     supplier: 'Ispahani / Taaza Distributor',
-    notes: '100 pcs per box'
+    notes: '১ প্যাকেটে ১০০ টি টি-ব্যাগ থাকে (1 packet = 100 pcs)',
+    packSize: 100,
+    subUnit: 'pcs',
+    hasSubUnits: true
   },
   {
     id: 'raw-6',
@@ -174,19 +183,6 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
     notes: 'Evening snacks pasta preparation'
   },
   {
-    id: 'raw-11',
-    name: 'Frozen Porota',
-    nameBn: 'ফ্রোজেন পরোটা (Kazi/CP)',
-    category: 'Frozen Foods',
-    unit: 'pcs',
-    currentStock: 160,
-    minStockAlert: 45,
-    unitCost: 16,
-    lastRestockedDate: '2026-09-19',
-    supplier: 'Deep Freezer Store',
-    notes: 'Quick breakfast & night snack'
-  },
-  {
     id: 'raw-12',
     name: 'Soyabin Oil',
     nameBn: 'সয়াবিন তেল (রূপচাঁদা/তীর)',
@@ -224,6 +220,194 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
     lastRestockedDate: '2026-09-20',
     supplier: 'Local Bazar',
     notes: 'Daily kitchen staple'
+  },
+  {
+    id: 'raw-15',
+    name: 'Halim Mix',
+    nameBn: 'হালিম মিক্স মসলা ও ডাল',
+    category: 'Oil & Spices',
+    unit: 'packet',
+    currentStock: 30,
+    minStockAlert: 10,
+    unitCost: 65,
+    lastRestockedDate: '2026-09-21',
+    supplier: 'Radhuni / Pran',
+    notes: 'Halim mix pulses & spices packet for special halim'
+  },
+  {
+    id: 'raw-16',
+    name: 'LPG',
+    nameBn: 'এলপিজি গ্যাস (LPG)',
+    category: 'Fuel & Utilities',
+    subCategory: 'Gas Cylinder',
+    unit: 'cylinder',
+    currentStock: 4,
+    minStockAlert: 1,
+    unitCost: 1450,
+    lastRestockedDate: '2026-09-21',
+    supplier: 'Beximco / Omera Gas',
+    notes: 'Commercial 12kg LPG gas cylinder for cooking stove'
+  },
+  {
+    id: 'raw-17',
+    name: 'Tomato Sauce',
+    nameBn: 'টমেটো সস (Tometo Sos)',
+    category: 'Oil & Spices',
+    unit: 'bottle',
+    currentStock: 25,
+    minStockAlert: 8,
+    unitCost: 110,
+    lastRestockedDate: '2026-09-21',
+    supplier: 'Pran / Ahmed',
+    notes: 'Tomato sauce / ketchup for shawarma, snacks & fast food'
+  },
+  {
+    id: 'raw-18',
+    name: 'Maggi Masala',
+    nameBn: 'ম্যাগি মসলা (Maggi Mosla)',
+    category: 'Oil & Spices',
+    unit: 'packet',
+    currentStock: 120,
+    minStockAlert: 30,
+    unitCost: 8,
+    lastRestockedDate: '2026-09-21',
+    supplier: 'Nestle Wholesale',
+    notes: 'Maggi taste-maker seasoning sachets'
+  },
+  {
+    id: 'raw-19',
+    name: 'Green Chili',
+    nameBn: 'কাঁচা মরিচ (Green Chili)',
+    category: 'Vegetables',
+    unit: 'kg',
+    currentStock: 15,
+    minStockAlert: 5,
+    unitCost: 180,
+    wastagePercentage: 10,
+    lastRestockedDate: '2026-09-22',
+    supplier: 'Local Bazar',
+    notes: 'Fresh green chili for omelet, noodles & snacks'
+  },
+  {
+    id: 'raw-20',
+    name: 'Coffee',
+    nameBn: 'কফি পাউডার (Coffee)',
+    category: 'Dairy & Beverages',
+    unit: 'packet',
+    currentStock: 40,
+    minStockAlert: 12,
+    unitCost: 320,
+    lastRestockedDate: '2026-09-20',
+    supplier: 'City Super Store',
+    notes: 'Nescafe instant coffee powder for milk & cold coffee'
+  },
+  {
+    id: 'raw-21',
+    name: 'Dry Cake',
+    nameBn: 'ড্রাই কেক (Dry Cake)',
+    category: 'Dry Food & Snacks',
+    unit: 'packet',
+    currentStock: 60,
+    minStockAlert: 20,
+    unitCost: 12,
+    lastRestockedDate: '2026-09-21',
+    supplier: 'Olympic / Dan Cake',
+    notes: 'Crispy dry cake for counter sales'
+  },
+  {
+    id: 'raw-22',
+    name: 'Swarma Bread',
+    nameBn: 'শার্মা ব্রেড / রুটি (Swarma)',
+    category: 'Frozen Foods',
+    unit: 'pcs',
+    currentStock: 80,
+    minStockAlert: 25,
+    unitCost: 18,
+    lastRestockedDate: '2026-09-21',
+    supplier: 'Bakery Supply',
+    notes: 'Shawarma pita bread wraps'
+  },
+  {
+    id: 'raw-23',
+    name: 'Butter Ban',
+    nameBn: 'বাটার বন (Butter Ban)',
+    category: 'Dry Food & Snacks',
+    unit: 'pcs',
+    currentStock: 70,
+    minStockAlert: 20,
+    unitCost: 15,
+    lastRestockedDate: '2026-09-22',
+    supplier: 'Local Bakery',
+    notes: 'Sweet cream butter bun'
+  },
+  {
+    id: 'raw-24',
+    name: 'Sandwich Bread',
+    nameBn: 'স্যান্ডউইচ ব্রেড (Sandwitch)',
+    category: 'Dry Food & Snacks',
+    unit: 'packet',
+    currentStock: 45,
+    minStockAlert: 15,
+    unitCost: 45,
+    lastRestockedDate: '2026-09-21',
+    supplier: 'City Bakery',
+    notes: '১ প্যাকেটে ১২ স্লাইস পাউরুটি থাকে (1 pack = 12 slices)',
+    packSize: 12,
+    subUnit: 'slice',
+    hasSubUnits: true
+  },
+  {
+    id: 'raw-25',
+    name: 'Burger Bun',
+    nameBn: 'বার্গার বান (Burger)',
+    category: 'Dry Food & Snacks',
+    unit: 'pcs',
+    currentStock: 60,
+    minStockAlert: 20,
+    unitCost: 16,
+    lastRestockedDate: '2026-09-22',
+    supplier: 'City Bakery',
+    notes: 'Soft sesame burger bun'
+  },
+  {
+    id: 'raw-26',
+    name: 'Hotel Porota',
+    nameBn: 'হোটেল পরোটা (Hotel Porota)',
+    category: 'Frozen Foods',
+    unit: 'pcs',
+    currentStock: 160,
+    minStockAlert: 40,
+    unitCost: 10,
+    lastRestockedDate: '2026-09-22',
+    supplier: 'Hotel Paratha Supply',
+    notes: 'হাতে তৈরি সুস্বাদু হোটেল পরোটা'
+  },
+  {
+    id: 'raw-27',
+    name: 'Salt',
+    nameBn: 'খাবার লবণ (Salt)',
+    category: 'Oil & Spices',
+    unit: 'kg',
+    currentStock: 50,
+    minStockAlert: 15,
+    unitCost: 40,
+    lastRestockedDate: '2026-09-18',
+    supplier: 'Molla / ACI Salt',
+    notes: 'রান্নায় ব্যবহৃত আয়োডিনযুক্ত খাবার লবণ'
+  },
+  {
+    id: 'raw-28',
+    name: 'Lemon',
+    nameBn: 'কাঁচা লেবু (Lemon)',
+    category: 'Vegetables',
+    unit: 'pcs',
+    currentStock: 100,
+    minStockAlert: 30,
+    unitCost: 6,
+    wastagePercentage: 15,
+    lastRestockedDate: '2026-09-22',
+    supplier: 'Local Green Grocer',
+    notes: 'Fresh juicy lemons for lemon juice, tea & meals'
   }
 ];
 
@@ -232,62 +416,111 @@ const DEFAULT_MENU_RECIPES: Record<string, RecipeIngredient[]> = {
   'EGG MUMLET': [
     { rawItemId: 'raw-7', rawItemName: 'Egg', quantity: 1, unit: 'pcs' },
     { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.02, unit: 'kg' },
-    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.01, unit: 'liter' }
+    { rawItemId: 'raw-19', rawItemName: 'Green Chili', quantity: 0.005, unit: 'kg' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.01, unit: 'liter' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.002, unit: 'cylinder' },
+    { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 0.002, unit: 'kg' }
   ],
   'EGG FRY': [
     { rawItemId: 'raw-7', rawItemName: 'Egg', quantity: 1, unit: 'pcs' },
-    { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.02, unit: 'kg' },
-    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.01, unit: 'liter' }
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.01, unit: 'liter' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.002, unit: 'cylinder' },
+    { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 0.002, unit: 'kg' }
   ],
   'BOILED EGG': [
-    { rawItemId: 'raw-7', rawItemName: 'Egg', quantity: 1, unit: 'pcs' }
+    { rawItemId: 'raw-7', rawItemName: 'Egg', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.002, unit: 'cylinder' },
+    { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 0.002, unit: 'kg' }
   ],
   'EGG NOODLES': [
     { rawItemId: 'raw-6', rawItemName: 'Noodles', quantity: 1, unit: 'packet' },
     { rawItemId: 'raw-7', rawItemName: 'Egg', quantity: 1, unit: 'pcs' },
     { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.02, unit: 'kg' },
-    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.01, unit: 'liter' }
+    { rawItemId: 'raw-19', rawItemName: 'Green Chili', quantity: 0.005, unit: 'kg' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.015, unit: 'liter' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.003, unit: 'cylinder' },
+    { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 0.003, unit: 'kg' }
   ],
   'GREEN TEA': [
-    { rawItemId: 'raw-5', rawItemName: 'Tea Bag', quantity: 1, unit: 'packet' },
-    { rawItemId: 'raw-13', rawItemName: 'Sugar', quantity: 0.01, unit: 'kg' }
+    { rawItemId: 'raw-5', rawItemName: 'Tea Bag', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-13', rawItemName: 'Sugar', quantity: 0.01, unit: 'kg' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.001, unit: 'cylinder' }
   ],
   'HALIM': [
-    { rawItemId: 'raw-3', rawItemName: 'Dal', quantity: 0.05, unit: 'kg' },
     { rawItemId: 'raw-1', rawItemName: 'Chicken', quantity: 0.05, unit: 'kg' },
-    { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.02, unit: 'kg' },
-    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.015, unit: 'liter' }
+    { rawItemId: 'raw-15', rawItemName: 'Halim Mix', quantity: 0.05, unit: 'packet' },
+    { rawItemId: 'raw-3', rawItemName: 'Dal', quantity: 0.03, unit: 'kg' },
+    { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.025, unit: 'kg' },
+    { rawItemId: 'raw-19', rawItemName: 'Green Chili', quantity: 0.005, unit: 'kg' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.015, unit: 'liter' },
+    { rawItemId: 'raw-28', rawItemName: 'Lemon', quantity: 0.25, unit: 'pcs' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.005, unit: 'cylinder' },
+    { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 0.004, unit: 'kg' }
   ],
   'LEMON JUICE': [
+    { rawItemId: 'raw-28', rawItemName: 'Lemon', quantity: 1, unit: 'pcs' },
     { rawItemId: 'raw-13', rawItemName: 'Sugar', quantity: 0.025, unit: 'kg' },
+    { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 0.002, unit: 'kg' },
     { rawItemId: 'raw-9', rawItemName: 'One Time Box', quantity: 1, unit: 'pcs' }
   ],
   'LIQUOR TEA': [
-    { rawItemId: 'raw-5', rawItemName: 'Tea Bag', quantity: 1, unit: 'packet' },
-    { rawItemId: 'raw-13', rawItemName: 'Sugar', quantity: 0.015, unit: 'kg' }
+    { rawItemId: 'raw-5', rawItemName: 'Tea Bag', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-13', rawItemName: 'Sugar', quantity: 0.015, unit: 'kg' },
+    { rawItemId: 'raw-28', rawItemName: 'Lemon', quantity: 0.25, unit: 'pcs' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.001, unit: 'cylinder' }
   ],
   'MILK COFFEE': [
-    { rawItemId: 'raw-4', rawItemName: 'Milk Powder', quantity: 0.025, unit: 'kg' },
-    { rawItemId: 'raw-13', rawItemName: 'Sugar', quantity: 0.015, unit: 'kg' }
+    { rawItemId: 'raw-20', rawItemName: 'Coffee', quantity: 0.01, unit: 'packet' },
+    { rawItemId: 'raw-4', rawItemName: 'Milk Powder', quantity: 0.02, unit: 'kg' },
+    { rawItemId: 'raw-13', rawItemName: 'Sugar', quantity: 0.015, unit: 'kg' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.0015, unit: 'cylinder' }
   ],
   'COLD COFFEE': [
+    { rawItemId: 'raw-20', rawItemName: 'Coffee', quantity: 0.01, unit: 'packet' },
     { rawItemId: 'raw-4', rawItemName: 'Milk Powder', quantity: 0.025, unit: 'kg' },
-    { rawItemId: 'raw-13', rawItemName: 'Sugar', quantity: 0.02, unit: 'kg' }
+    { rawItemId: 'raw-13', rawItemName: 'Sugar', quantity: 0.02, unit: 'kg' },
+    { rawItemId: 'raw-9', rawItemName: 'One Time Box', quantity: 1, unit: 'pcs' }
   ],
   'MILK TEA': [
     { rawItemId: 'raw-4', rawItemName: 'Milk Powder', quantity: 0.02, unit: 'kg' },
-    { rawItemId: 'raw-5', rawItemName: 'Tea Bag', quantity: 1, unit: 'packet' },
-    { rawItemId: 'raw-13', rawItemName: 'Sugar', quantity: 0.015, unit: 'kg' }
+    { rawItemId: 'raw-5', rawItemName: 'Tea Bag', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-13', rawItemName: 'Sugar', quantity: 0.015, unit: 'kg' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.0015, unit: 'cylinder' }
   ],
   'NOODLES': [
     { rawItemId: 'raw-6', rawItemName: 'Noodles', quantity: 1, unit: 'packet' },
-    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.01, unit: 'liter' }
+    { rawItemId: 'raw-18', rawItemName: 'Maggi Masala', quantity: 1, unit: 'packet' },
+    { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.015, unit: 'kg' },
+    { rawItemId: 'raw-19', rawItemName: 'Green Chili', quantity: 0.005, unit: 'kg' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.01, unit: 'liter' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.003, unit: 'cylinder' },
+    { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 0.002, unit: 'kg' }
   ],
   'NORMAL BISCUIT': [
     { rawItemId: 'raw-8', rawItemName: 'Biscuit', quantity: 1, unit: 'packet' }
   ],
   'DRY CAKE': [
-    { rawItemId: 'raw-8', rawItemName: 'Biscuit', quantity: 1, unit: 'packet' }
+    { rawItemId: 'raw-21', rawItemName: 'Dry Cake', quantity: 1, unit: 'packet' }
+  ],
+  'BUTTER BAN': [
+    { rawItemId: 'raw-23', rawItemName: 'Butter Ban', quantity: 1, unit: 'pcs' }
+  ],
+  'BURGER': [
+    { rawItemId: 'raw-25', rawItemName: 'Burger Bun', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-1', rawItemName: 'Chicken', quantity: 0.06, unit: 'kg' },
+    { rawItemId: 'raw-17', rawItemName: 'Tomato Sauce', quantity: 0.015, unit: 'bottle' },
+    { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.015, unit: 'kg' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.01, unit: 'liter' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.003, unit: 'cylinder' },
+    { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 0.002, unit: 'kg' }
+  ],
+  'SANDWITCH': [
+    { rawItemId: 'raw-24', rawItemName: 'Sandwich Bread', quantity: 0.167, unit: 'packet' },
+    { rawItemId: 'raw-7', rawItemName: 'Egg', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-17', rawItemName: 'Tomato Sauce', quantity: 0.01, unit: 'bottle' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.005, unit: 'liter' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.002, unit: 'cylinder' },
+    { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 0.002, unit: 'kg' }
   ],
   'ONE TIME BOX': [
     { rawItemId: 'raw-9', rawItemName: 'One Time Box', quantity: 1, unit: 'pcs' }
@@ -295,85 +528,269 @@ const DEFAULT_MENU_RECIPES: Record<string, RecipeIngredient[]> = {
   'PASTA': [
     { rawItemId: 'raw-10', rawItemName: 'Pasta', quantity: 0.1, unit: 'kg' },
     { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.02, unit: 'kg' },
-    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.015, unit: 'liter' }
+    { rawItemId: 'raw-17', rawItemName: 'Tomato Sauce', quantity: 0.01, unit: 'bottle' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.015, unit: 'liter' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.003, unit: 'cylinder' },
+    { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 0.003, unit: 'kg' }
   ],
   'CHICKEN PASTA': [
     { rawItemId: 'raw-1', rawItemName: 'Chicken', quantity: 0.08, unit: 'kg' },
     { rawItemId: 'raw-10', rawItemName: 'Pasta', quantity: 0.08, unit: 'kg' },
     { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.03, unit: 'kg' },
-    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.015, unit: 'liter' }
+    { rawItemId: 'raw-17', rawItemName: 'Tomato Sauce', quantity: 0.015, unit: 'bottle' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.015, unit: 'liter' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.004, unit: 'cylinder' },
+    { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 0.004, unit: 'kg' }
   ],
   'PORATA': [
-    { rawItemId: 'raw-11', rawItemName: 'Frozen Porota', quantity: 1, unit: 'pcs' },
-    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.01, unit: 'liter' }
+    { rawItemId: 'raw-26', rawItemName: 'Hotel Porota', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.01, unit: 'liter' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.002, unit: 'cylinder' },
+    { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 0.001, unit: 'kg' }
   ],
   'PORATA (HOTEL)': [
-    { rawItemId: 'raw-11', rawItemName: 'Frozen Porota', quantity: 1, unit: 'pcs' },
-    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.01, unit: 'liter' }
+    { rawItemId: 'raw-26', rawItemName: 'Hotel Porota', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.01, unit: 'liter' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.002, unit: 'cylinder' },
+    { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 0.001, unit: 'kg' }
   ],
   'PORATA (UNIT)': [
-    { rawItemId: 'raw-11', rawItemName: 'Frozen Porota', quantity: 1, unit: 'pcs' },
-    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.01, unit: 'liter' }
+    { rawItemId: 'raw-26', rawItemName: 'Hotel Porota', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.01, unit: 'liter' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.002, unit: 'cylinder' },
+    { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 0.001, unit: 'kg' }
   ],
   'CHICKEN BIRIYANI': [
     { rawItemId: 'raw-1', rawItemName: 'Chicken', quantity: 0.15, unit: 'kg' },
     { rawItemId: 'raw-2', rawItemName: 'Rice', quantity: 0.15, unit: 'kg' },
     { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.04, unit: 'kg' },
-    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.025, unit: 'liter' }
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.025, unit: 'liter' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.006, unit: 'cylinder' },
+    { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 0.006, unit: 'kg' }
   ],
   'CHICKEN CURRY': [
     { rawItemId: 'raw-1', rawItemName: 'Chicken', quantity: 0.15, unit: 'kg' },
     { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.04, unit: 'kg' },
-    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.02, unit: 'liter' }
+    { rawItemId: 'raw-19', rawItemName: 'Green Chili', quantity: 0.005, unit: 'kg' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.02, unit: 'liter' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.005, unit: 'cylinder' },
+    { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 0.005, unit: 'kg' }
   ],
   'CHICKEN KHICHURI': [
     { rawItemId: 'raw-1', rawItemName: 'Chicken', quantity: 0.12, unit: 'kg' },
     { rawItemId: 'raw-2', rawItemName: 'Rice', quantity: 0.12, unit: 'kg' },
     { rawItemId: 'raw-3', rawItemName: 'Dal', quantity: 0.03, unit: 'kg' },
     { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.03, unit: 'kg' },
-    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.02, unit: 'liter' }
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.02, unit: 'liter' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.005, unit: 'cylinder' },
+    { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 0.005, unit: 'kg' }
   ],
   'CHICKEN ONION': [
     { rawItemId: 'raw-1', rawItemName: 'Chicken', quantity: 0.12, unit: 'kg' },
     { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.05, unit: 'kg' },
-    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.02, unit: 'liter' }
+    { rawItemId: 'raw-19', rawItemName: 'Green Chili', quantity: 0.005, unit: 'kg' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.02, unit: 'liter' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.004, unit: 'cylinder' },
+    { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 0.004, unit: 'kg' }
   ],
   'CHICKEN PULAW': [
     { rawItemId: 'raw-1', rawItemName: 'Chicken', quantity: 0.15, unit: 'kg' },
     { rawItemId: 'raw-2', rawItemName: 'Rice', quantity: 0.15, unit: 'kg' },
     { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.03, unit: 'kg' },
-    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.025, unit: 'liter' }
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.025, unit: 'liter' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.005, unit: 'cylinder' },
+    { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 0.005, unit: 'kg' }
   ],
   'EGG KHICURI': [
     { rawItemId: 'raw-7', rawItemName: 'Egg', quantity: 1, unit: 'pcs' },
     { rawItemId: 'raw-2', rawItemName: 'Rice', quantity: 0.12, unit: 'kg' },
     { rawItemId: 'raw-3', rawItemName: 'Dal', quantity: 0.03, unit: 'kg' },
     { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.03, unit: 'kg' },
-    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.02, unit: 'liter' }
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.02, unit: 'liter' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.004, unit: 'cylinder' },
+    { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 0.004, unit: 'kg' }
   ],
   'CHOTPOTI': [
     { rawItemId: 'raw-3', rawItemName: 'Dal', quantity: 0.06, unit: 'kg' },
     { rawItemId: 'raw-7', rawItemName: 'Egg', quantity: 0.5, unit: 'pcs' },
-    { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.02, unit: 'kg' }
+    { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.02, unit: 'kg' },
+    { rawItemId: 'raw-19', rawItemName: 'Green Chili', quantity: 0.005, unit: 'kg' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.004, unit: 'cylinder' },
+    { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 0.003, unit: 'kg' }
   ],
   'SWARMA': [
-    { rawItemId: 'raw-1', rawItemName: 'Chicken', quantity: 0.08, unit: 'kg' },
-    { rawItemId: 'raw-11', rawItemName: 'Frozen Porota', quantity: 1, unit: 'pcs' },
-    { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.02, unit: 'kg' },
-    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.01, unit: 'liter' }
+    { rawItemId: 'raw-22', rawItemName: 'Swarma Bread', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-1', rawItemName: 'Chicken', quantity: 0.07, unit: 'kg' },
+    { rawItemId: 'raw-17', rawItemName: 'Tomato Sauce', quantity: 0.015, unit: 'bottle' },
+    { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.015, unit: 'kg' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 0.01, unit: 'liter' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.003, unit: 'cylinder' },
+    { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 0.002, unit: 'kg' }
   ],
   'SOSA': [
-    { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.02, unit: 'kg' }
+    { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 0.02, unit: 'kg' },
+    { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 0.001, unit: 'kg' }
   ]
+};
+
+export const normalizeRawItemName = (name: string): string => {
+  const s = (name || '').toLowerCase().trim();
+  if (s.includes('salt') || s.includes('লবণ')) return 'salt';
+  if (s.includes('gas') || s.includes('গ্যাস') || s.includes('cylinder') || s.includes('lpg')) return 'gas-cylinder';
+  if (s.includes('coffee') || s.includes('কফি')) return 'coffee';
+  if (s.includes('dry cake') || s.includes('ড্রাই কেক')) return 'dry-cake';
+  if (s.includes('halim') || s.includes('হালিম')) return 'halim-mix';
+  if (s.includes('tometo') || s.includes('tomato') || s.includes('টমেটো')) return 'tomato-sauce';
+  if (s.includes('maggi') || s.includes('ম্যাগি')) return 'maggi-masala';
+  if (s.includes('green chili') || s.includes('কাঁচা মরিচ')) return 'green-chili';
+  if (s.includes('swarma') || s.includes('শার্মা') || s.includes('shawarma')) return 'swarma-bread';
+  if (s.includes('butter ban') || s.includes('বাটার বন') || s.includes('butter bun')) return 'butter-ban';
+  if (s.includes('sandwitch') || s.includes('sandwich') || s.includes('স্যান্ডউইচ')) return 'sandwich-bread';
+  if (s.includes('burger') || s.includes('বার্গার')) return 'burger-bun';
+  if (s.includes('porota') || s.includes('পরোটা')) return 'porota';
+  if (s.includes('lemon') || s.includes('লেবু')) return 'lemon';
+  if (s.includes('tea bag') || s.includes('টি ব্যাগ')) return 'tea-bag';
+  if (s.includes('chicken') || s.includes('মুরগি')) return 'chicken';
+  if (s.includes('rice') || s.includes('চাল')) return 'rice';
+  if (s.includes('dal') || s.includes('ডাল')) return 'dal';
+  if (s.includes('milk') || s.includes('দুধ')) return 'milk-powder';
+  if (s.includes('noodle') || s.includes('নুডলস')) return 'noodles';
+  if (s.includes('egg') || s.includes('ডিম')) return 'egg';
+  if (s.includes('oil') || s.includes('তেল')) return 'oil';
+  if (s.includes('sugar') || s.includes('চিনি')) return 'sugar';
+  if (s.includes('onion') || s.includes('পেঁয়াজ') || s.includes('পেয়াজ')) return 'onion';
+  if (s.includes('pasta') || s.includes('পাস্তা')) return 'pasta';
+  if (s.includes('biscuit') || s.includes('বিস্কুট')) return 'biscuit';
+  if (s.includes('box') || s.includes('one time') || s.includes('ওয়ান টাইম')) return 'one-time-box';
+  return s.replace(/[^a-z0-9]/g, '');
+};
+
+export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplicated: RawInventoryItem[]; removedIds: string[] } => {
+  const actualItems: RawInventoryItem[] = Array.isArray(items)
+    ? items
+    : (items && Array.isArray(items.deduplicated) ? items.deduplicated : []);
+
+  const seenKeys = new Map<string, RawInventoryItem>();
+  const removedIds: string[] = [];
+
+  for (const item of actualItems) {
+    const key = normalizeRawItemName(item.name);
+    if (!seenKeys.has(key)) {
+      if (key === 'tea-bag') {
+        seenKeys.set(key, {
+          ...item,
+          packSize: item.packSize && item.packSize > 1 ? item.packSize : 100,
+          subUnit: item.subUnit || 'pcs',
+          hasSubUnits: true,
+          notes: item.notes || '১ প্যাকেটে ১০০ টি টি-ব্যাগ থাকে (1 packet = 100 pcs)'
+        });
+      } else if (key === 'sandwich-bread') {
+        seenKeys.set(key, {
+          ...item,
+          packSize: item.packSize && item.packSize > 1 ? item.packSize : 12,
+          subUnit: item.subUnit || 'slice',
+          hasSubUnits: true
+        });
+      } else {
+        seenKeys.set(key, item);
+      }
+    } else {
+      const existing = seenKeys.get(key)!;
+      // Prefer standard raw-1 to raw-28 id over auto-generated IDs
+      const currentIsStandard = item.id.startsWith('raw-') && !item.id.startsWith('raw-item-') && !item.id.includes(Date.now().toString().slice(0, 4));
+      const existingIsStandard = existing.id.startsWith('raw-') && !existing.id.startsWith('raw-item-') && !existing.id.includes(Date.now().toString().slice(0, 4));
+
+      // Intelligently select the best names and categories without letting default generic names overwrite custom names (e.g. LPG over Gas Cylinder)
+      const chooseName = (a: string, b: string) => {
+        if (!a) return b;
+        if (!b) return a;
+        if (b === 'Gas Cylinder' && a && a !== 'Gas Cylinder') return a;
+        if (a === 'Gas Cylinder' && b && b !== 'Gas Cylinder') return b;
+        return a;
+      };
+
+      const preferredName = chooseName(item.name, existing.name);
+      const preferredNameBn = chooseName(item.nameBn, existing.nameBn);
+      const chosenCategory = item.category || existing.category || 'Packaging & Disposables';
+      const chosenSubCategory = item.subCategory || existing.subCategory || (key === 'gas-cylinder' ? 'Gas Cylinder' : '');
+
+      if (currentIsStandard && !existingIsStandard) {
+        removedIds.push(existing.id);
+        seenKeys.set(key, {
+          ...existing,
+          ...item,
+          name: preferredName,
+          nameBn: preferredNameBn,
+          category: chosenCategory,
+          subCategory: chosenSubCategory,
+          currentStock: Math.max(existing.currentStock, item.currentStock),
+          packSize: item.packSize || existing.packSize,
+          subUnit: item.subUnit || existing.subUnit,
+          hasSubUnits: item.hasSubUnits ?? existing.hasSubUnits
+        });
+      } else {
+        removedIds.push(item.id);
+        seenKeys.set(key, {
+          ...item,
+          ...existing,
+          name: preferredName,
+          nameBn: preferredNameBn,
+          category: chosenCategory,
+          subCategory: chosenSubCategory,
+          currentStock: Math.max(existing.currentStock, item.currentStock),
+          packSize: existing.packSize || item.packSize,
+          subUnit: existing.subUnit || item.subUnit,
+          hasSubUnits: existing.hasSubUnits ?? item.hasSubUnits
+        });
+      }
+    }
+  }
+
+  const deduplicated = Array.from(seenKeys.values());
+  return { deduplicated, removedIds };
 };
 
 export const getRawInventoryItems = (): RawInventoryItem[] => {
   try {
     const stored = localStorage.getItem(RAW_ITEMS_STORAGE_KEY);
+    let itemsToProcess: RawInventoryItem[] = INITIAL_RAW_ITEMS;
+    let isInitialSeeding = true;
     if (stored) {
       const parsed = JSON.parse(stored);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        itemsToProcess = parsed;
+        isInitialSeeding = false;
+      }
     }
+
+    const { deduplicated, removedIds } = deduplicateRawItems(itemsToProcess);
+
+    // Only merge initial items if storage was completely empty (initial seeding)!
+    // NEVER re-inject missing initial items if user already has items in inventory!
+    let hasAdded = false;
+    if (isInitialSeeding) {
+      const currentKeys = new Set(deduplicated.map(it => normalizeRawItemName(it.name)));
+      for (const init of INITIAL_RAW_ITEMS) {
+        const k = normalizeRawItemName(init.name);
+        if (!currentKeys.has(k)) {
+          deduplicated.push(init);
+          currentKeys.add(k);
+          hasAdded = true;
+        }
+      }
+    }
+
+    if (removedIds.length > 0 || hasAdded) {
+      try {
+        localStorage.setItem(RAW_ITEMS_STORAGE_KEY, JSON.stringify(deduplicated));
+        if (removedIds.length > 0) {
+          Promise.resolve(supabase.from('Canteen_Inventory').delete().in('id', removedIds))
+            .catch(err => console.warn('Cleaned duplicate raw items from DB:', err));
+        }
+      } catch {}
+    }
+
+    return deduplicated;
   } catch (e) {
     console.warn('Failed to load raw items from localStorage:', e);
   }
@@ -382,9 +799,31 @@ export const getRawInventoryItems = (): RawInventoryItem[] => {
 
 export const saveRawInventoryItems = (items: RawInventoryItem[]): void => {
   try {
-    localStorage.setItem(RAW_ITEMS_STORAGE_KEY, JSON.stringify(items));
+    const { deduplicated } = deduplicateRawItems(items);
+    localStorage.setItem(RAW_ITEMS_STORAGE_KEY, JSON.stringify(deduplicated));
     window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
     window.dispatchEvent(new Event('storage'));
+
+    if (deduplicated && deduplicated.length > 0) {
+      const payload = deduplicated.map(it => ({
+        id: it.id,
+        name: it.name,
+        nameBn: it.nameBn || '',
+        unit: it.unit || 'kg',
+        currentStock: it.currentStock ?? 0,
+        minStockAlert: it.minStockAlert ?? 5,
+        unitCost: it.unitCost ?? 0,
+        wastagePercentage: it.wastagePercentage ?? 0,
+        lastRestockedDate: it.lastRestockedDate || '',
+        supplier: it.supplier || '',
+        notes: it.notes || '',
+        packSize: it.packSize ?? null,
+        subUnit: it.subUnit ?? null,
+        hasSubUnits: it.hasSubUnits ?? false
+      }));
+      Promise.resolve(supabase.from('Canteen_Inventory').upsert(payload, { onConflict: 'id' }))
+        .catch(err => console.warn('Supabase Canteen_Inventory upsert note from recipeManager:', err));
+    }
   } catch (e) {
     console.warn('Failed to save raw items:', e);
   }
@@ -396,7 +835,33 @@ export const getMenuRecipes = (): MenuRecipeMap => {
     if (stored) {
       const parsed = JSON.parse(stored);
       if (parsed && typeof parsed === 'object') {
-        return parsed;
+        let hasChanges = false;
+        const merged: MenuRecipeMap = { ...parsed };
+
+        for (const [key, defaultIngredients] of Object.entries(DEFAULT_MENU_RECIPES)) {
+          if (!merged[key] || merged[key].length === 0) {
+            merged[key] = defaultIngredients;
+            hasChanges = true;
+          } else {
+            // Check if Gas Cylinder or Salt is missing from cooked recipes and inject them!
+            const existingIngNames = new Set(merged[key].map((ing: any) => (ing.rawItemName || '').toLowerCase().trim()));
+            const missingCookingEssentials = defaultIngredients.filter(ing => {
+              const nameLower = (ing.rawItemName || '').toLowerCase();
+              return (nameLower.includes('gas') || nameLower.includes('salt')) && !existingIngNames.has(nameLower);
+            });
+            if (missingCookingEssentials.length > 0) {
+              merged[key] = [...merged[key], ...missingCookingEssentials];
+              hasChanges = true;
+            }
+          }
+        }
+
+        if (hasChanges) {
+          try {
+            localStorage.setItem(RECIPES_STORAGE_KEY, JSON.stringify(merged));
+          } catch {}
+        }
+        return merged;
       }
     }
   } catch (e) {
@@ -426,6 +891,82 @@ export const getRecipeForMenuItem = (menuItemId: string, menuItemName?: string):
   return [];
 };
 
+/**
+ * Automatically ensures cooking ingredients (Gas Cylinder and Salt) are included
+ * for recipes that involve cooking raw items (chicken, meat, egg, rice, dal, pasta, oil, vegetables, etc.)
+ */
+export const ensureCookingIngredients = (
+  ingredients: RecipeIngredient[],
+  rawItems?: RawInventoryItem[]
+): RecipeIngredient[] => {
+  if (!ingredients || ingredients.length === 0) return ingredients;
+
+  const allRaw = rawItems && rawItems.length > 0 ? rawItems : getRawInventoryItems();
+  
+  // Find raw items that indicate cooking
+  const cookingIndicatorKeywords = [
+    'chicken', 'meat', 'beef', 'egg', 'dim', 'rice', 'dal', 'pasta', 
+    'khichuri', 'biriyani', 'curry', 'porota', 'oil', 'onion', 'chili', 'vegetable', 'alu', 'potato'
+  ];
+
+  const hasCookedRaw = ingredients.some(ing => {
+    const rawName = (ing.rawItemName || '').toLowerCase();
+    return cookingIndicatorKeywords.some(kw => rawName.includes(kw));
+  });
+
+  if (!hasCookedRaw) {
+    return ingredients;
+  }
+
+  // Check if gas or salt already present
+  const hasGas = ingredients.some(ing => {
+    const name = (ing.rawItemName || '').toLowerCase();
+    return name.includes('gas') || name.includes('lpg') || name.includes('cylinder') || name.includes('গ্যাস');
+  });
+
+  const hasSalt = ingredients.some(ing => {
+    const name = (ing.rawItemName || '').toLowerCase();
+    return name.includes('salt') || name.includes('লবণ');
+  });
+
+  let updated = [...ingredients];
+
+  if (!hasGas) {
+    const gasRaw = allRaw.find(r => {
+      const lower = r.name.toLowerCase();
+      return lower.includes('lpg') || lower.includes('gas') || lower.includes('cylinder') || (r.nameBn && r.nameBn.includes('গ্যাস'));
+    }) || {
+      id: 'raw-16',
+      name: 'LPG',
+      unit: 'cylinder',
+      unitCost: 1450
+    };
+    updated.push({
+      rawItemId: gasRaw.id,
+      rawItemName: gasRaw.name,
+      quantity: 0.003,
+      unit: gasRaw.unit
+    });
+  }
+
+  if (!hasSalt) {
+    const saltRaw = allRaw.find(r => r.name.toLowerCase().includes('salt') || r.nameBn?.includes('লবণ')) || {
+      id: 'raw-27',
+      name: 'Salt',
+      unit: 'kg',
+      unitCost: 42
+    };
+    updated.push({
+      rawItemId: saltRaw.id,
+      rawItemName: saltRaw.name,
+      quantity: 0.002,
+      unit: saltRaw.unit
+    });
+  }
+
+  return updated;
+};
+
 export const saveRecipeForMenuItem = (
   menuItemId: string,
   ingredients: RecipeIngredient[],
@@ -433,11 +974,12 @@ export const saveRecipeForMenuItem = (
 ): void => {
   try {
     const recipes = { ...getMenuRecipes() };
+    const validatedIngredients = ensureCookingIngredients(ingredients);
     if (menuItemId) {
-      recipes[menuItemId] = ingredients;
+      recipes[menuItemId] = validatedIngredients;
     }
     if (menuItemName) {
-      recipes[menuItemName.trim().toUpperCase()] = ingredients;
+      recipes[menuItemName.trim().toUpperCase()] = validatedIngredients;
     }
     localStorage.setItem(RECIPES_STORAGE_KEY, JSON.stringify(recipes));
     window.dispatchEvent(new Event('canteen_menu_recipes_updated'));
@@ -496,7 +1038,19 @@ export const deductRawStockForSales = (
       }
 
       if (rawItem) {
-        const amount = ing.quantity * sold.qty;
+        let amount = ing.quantity * sold.qty;
+        
+        // If raw item has packSize and ingredient is specified in subUnit or pieces:
+        if (rawItem.packSize && rawItem.packSize > 1) {
+          const ingUnit = (ing.unit || '').toLowerCase().trim();
+          const rawUnit = (rawItem.unit || '').toLowerCase().trim();
+          const subUnit = (rawItem.subUnit || 'pcs').toLowerCase().trim();
+          if (ingUnit === subUnit || (rawUnit === 'packet' && (ingUnit === 'pcs' || ingUnit === 'piece' || ingUnit === 'pc'))) {
+            // Convert sub-unit count (e.g. 1 tea bag) to inventory unit (e.g. 1/100 packet)
+            amount = (ing.quantity / rawItem.packSize) * sold.qty;
+          }
+        }
+
         const current = deductionsMap.get(rawItem.id);
         if (current) {
           current.totalUsed += amount;
@@ -571,6 +1125,8 @@ export const deductRawStockForSales = (
     const mergedLogs = [...newLogs, ...existingLogs].slice(0, 500);
     localStorage.setItem(RAW_LOGS_STORAGE_KEY, JSON.stringify(mergedLogs));
     window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+    window.dispatchEvent(new Event('canteen_raw_stock_logs_updated'));
+    window.dispatchEvent(new Event('canteen_state_updated'));
     window.dispatchEvent(new Event('storage'));
   } catch (e) {
     console.warn('Failed to append raw stock logs:', e);
@@ -629,7 +1185,21 @@ export const autoRestockFromExpense = (input: AutoRestockExpenseInput): {
       'raw-11': ['porota', 'paratha', 'parota', 'পরোটা', 'ফ্রোজেন পরোটা'],
       'raw-12': ['oil', 'soyabean', 'soyabin', 'tel', 'তেল', 'রূপচাঁদা', 'সয়াবিন'],
       'raw-13': ['sugar', 'chini', 'cheeni', 'চিনি'],
-      'raw-14': ['onion', 'peyaj', 'peaj', 'পেঁয়াজ', 'পেয়াজ']
+      'raw-14': ['onion', 'peyaj', 'peaj', 'পেঁয়াজ', 'পেয়াজ'],
+      'raw-15': ['halim', 'halim mix', 'haleem', 'হালিম মিক্স', 'হালিম'],
+      'raw-16': ['gas', 'cylinder', 'lpg', 'গ্যাস', 'সিলিন্ডার'],
+      'raw-17': ['sos', 'sauce', 'tomato', 'tometo', 'সস', 'টমেটো সস'],
+      'raw-18': ['maggi mosla', 'masala', 'mosla', 'ম্যাগি মসলা', 'টেস্টমেকার'],
+      'raw-19': ['green chili', 'chili', 'morich', 'কাঁচা মরিচ', 'মরিচ'],
+      'raw-20': ['coffee', 'nescafe', 'কফি', 'কফি পাউডার'],
+      'raw-21': ['dry cake', 'cake', 'ড্রাই কেক'],
+      'raw-22': ['swarma', 'shawarma', 'pita', 'শার্মা', 'শাওয়ার্মা', 'শার্মা ব্রেড'],
+      'raw-23': ['butter ban', 'ban', 'bun', 'বাটার বন', 'বনরুটি'],
+      'raw-24': ['sandwitch', 'sandwich', 'bread', 'স্যান্ডউইচ', 'স্যান্ডউইচ ব্রেড'],
+      'raw-25': ['burger', 'burger bun', 'বার্গার', 'বার্গার বান'],
+      'raw-26': ['hotel porota', 'porota', 'paratha', 'হোটেল পরোটা'],
+      'raw-27': ['salt', 'lobon', 'লবণ', 'নুন'],
+      'raw-28': ['lemon', 'lebu', 'লেবু', 'কাগজি লেবু']
     };
 
     // Check direct names first
@@ -761,6 +1331,8 @@ export const autoRestockFromExpense = (input: AutoRestockExpenseInput): {
     const mergedLogs = [...newLogs, ...existingLogs].slice(0, 500);
     localStorage.setItem(RAW_LOGS_STORAGE_KEY, JSON.stringify(mergedLogs));
     window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+    window.dispatchEvent(new Event('canteen_raw_stock_logs_updated'));
+    window.dispatchEvent(new Event('canteen_state_updated'));
     window.dispatchEvent(new Event('storage'));
   } catch (e) {
     console.warn('Failed to append raw restock log:', e);
@@ -827,7 +1399,17 @@ export const restoreRawStockForSaleCancellation = (
       }
 
       if (rawItem) {
-        const amount = ing.quantity * sold.qty;
+        let amount = ing.quantity * sold.qty;
+
+        if (rawItem.packSize && rawItem.packSize > 1) {
+          const ingUnit = (ing.unit || '').toLowerCase().trim();
+          const rawUnit = (rawItem.unit || '').toLowerCase().trim();
+          const subUnit = (rawItem.subUnit || 'pcs').toLowerCase().trim();
+          if (ingUnit === subUnit || (rawUnit === 'packet' && (ingUnit === 'pcs' || ingUnit === 'piece' || ingUnit === 'pc'))) {
+            amount = (ing.quantity / rawItem.packSize) * sold.qty;
+          }
+        }
+
         const current = restorationsMap.get(rawItem.id);
         if (current) {
           current.totalToRestore += amount;
@@ -898,6 +1480,8 @@ export const restoreRawStockForSaleCancellation = (
     const mergedLogs = [...newLogs, ...existingLogs].slice(0, 500);
     localStorage.setItem(RAW_LOGS_STORAGE_KEY, JSON.stringify(mergedLogs));
     window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+    window.dispatchEvent(new Event('canteen_raw_stock_logs_updated'));
+    window.dispatchEvent(new Event('canteen_state_updated'));
     window.dispatchEvent(new Event('storage'));
   } catch (e) {
     console.warn('Failed to append raw stock restoration logs:', e);
@@ -909,3 +1493,89 @@ export const restoreRawStockForSaleCancellation = (
   };
 };
 
+/**
+ * Calculates the effective unit cost of a raw inventory item accounting for wastage percentage.
+ * Example: Purchased 1 kg at 230 tk with 30% wastage -> 700 gm usable for 230 tk -> Effective rate = 230 / (1 - 0.3) = 328.57 tk/kg.
+ */
+export const getEffectiveRawUnitCost = (item: RawInventoryItem): number => {
+  const baseCost = Number(item.unitCost) || 0;
+  const wastage = Number(item.wastagePercentage) || 0;
+  if (wastage > 0 && wastage < 100) {
+    return Math.round((baseCost / (1 - wastage / 100)) * 100) / 100;
+  }
+  return baseCost;
+};
+
+export interface MenuItemCostBreakdown {
+  rawItemId: string;
+  rawItemName: string;
+  quantity: number;
+  unit: string;
+  unitCost: number;
+  effectiveUnitCost: number;
+  wastagePercentage: number;
+  lineCost: number;
+}
+
+export interface MenuItemCostResult {
+  totalCost: number;
+  breakdown: MenuItemCostBreakdown[];
+}
+
+/**
+ * Computes total production cost of a menu item recipe with wastage adjustments.
+ */
+export const calculateMenuItemCost = (
+  ingredients: RecipeIngredient[],
+  customRawItems?: RawInventoryItem[]
+): MenuItemCostResult => {
+  const rawItems = customRawItems && customRawItems.length > 0 ? customRawItems : getRawInventoryItems();
+  const rawMap = new Map<string, RawInventoryItem>();
+  rawItems.forEach(r => {
+    rawMap.set(r.id, r);
+    rawMap.set(r.name.toLowerCase().trim(), r);
+  });
+
+  const breakdown: MenuItemCostBreakdown[] = [];
+  let totalCost = 0;
+
+  for (const ing of ingredients) {
+    const raw = rawMap.get(ing.rawItemId) || rawMap.get(ing.rawItemName.toLowerCase().trim());
+    const baseCost = raw ? (Number(raw.unitCost) || 0) : 0;
+    const wastage = raw ? (Number(raw.wastagePercentage) || 0) : 0;
+    const effectiveCost = raw ? getEffectiveRawUnitCost(raw) : baseCost;
+    const qty = Number(ing.quantity) || 0;
+
+    let effectiveUnitPrice = effectiveCost;
+    let lineCost = 0;
+
+    // Check if ingredient is specified in sub-unit (e.g. 1 pcs tea bag when pack is 100 pcs @ 165 tk)
+    if (raw && raw.packSize && raw.packSize > 1) {
+      const ingUnit = (ing.unit || '').toLowerCase().trim();
+      const rawUnit = (raw.unit || '').toLowerCase().trim();
+      const subUnit = (raw.subUnit || 'pcs').toLowerCase().trim();
+      if (ingUnit === subUnit || (rawUnit === 'packet' && (ingUnit === 'pcs' || ingUnit === 'piece' || ingUnit === 'pc'))) {
+        effectiveUnitPrice = effectiveCost / raw.packSize;
+      }
+    }
+
+    lineCost = Math.round(qty * effectiveUnitPrice * 100) / 100;
+
+    totalCost += lineCost;
+    breakdown.push({
+      rawItemId: ing.rawItemId,
+      rawItemName: ing.rawItemName || (raw ? raw.name : 'Unknown Raw Item'),
+      quantity: qty,
+      unit: ing.unit || (raw ? raw.unit : 'pcs'),
+      unitCost: baseCost,
+      effectiveUnitCost: Math.round(effectiveUnitPrice * 100) / 100,
+      wastagePercentage: wastage,
+      lineCost
+    });
+  }
+
+  return {
+    totalCost: Math.round(totalCost * 10) / 10,
+    breakdown
+  };
+};

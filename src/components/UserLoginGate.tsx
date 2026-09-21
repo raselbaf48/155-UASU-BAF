@@ -168,7 +168,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
       (async () => {
         try {
           const { data } = await supabase
-            .from('Canteen')
+            .from('Canteen_Member')
             .select('DP, Due, Rank, Surname, Contact, "BD No", airman_id')
             .or(`"BD No".eq.${cleanInput},airman_id.eq.${cleanInput},airman_id.eq.airman-${cleanInput}`)
             .limit(1);

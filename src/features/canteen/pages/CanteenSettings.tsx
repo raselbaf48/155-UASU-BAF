@@ -45,7 +45,7 @@ export const CanteenSettings: React.FC = () => {
   const fetchMembers = async () => {
     setLoadingMembers(true);
     try {
-      const { data, error } = await supabase.from('Canteen').select('*');
+      const { data, error } = await supabase.from('Canteen_Member').select('*');
       if (!error && data) {
         setMembers(data);
       }

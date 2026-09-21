@@ -719,7 +719,7 @@ export class LocalDatabaseEngine {
                      Surname: c['Surname'] || '',
                      Contact: c['Mobile No'] || 'N/A'
                    }));
-                   await supabase.from('Canteen').upsert(canteenPayload, { onConflict: 'airman_id' });
+                   await supabase.from('Canteen_Member').upsert(canteenPayload, { onConflict: 'airman_id' });
                  } catch (cErr) {
                    console.warn("Direct Canteen upsert note:", cErr);
                  }
@@ -1288,7 +1288,7 @@ export class LocalDatabaseEngine {
         DP: null
       };
       if (isSupabaseConfigured) {
-        Promise.resolve(supabase.from('Canteen').upsert([canteenMemberPayload], { onConflict: 'airman_id' }))
+        Promise.resolve(supabase.from('Canteen_Member').upsert([canteenMemberPayload], { onConflict: 'airman_id' }))
           .then(({ error }: any) => {
             if (error) console.warn('Auto-add airman to Canteen DB note:', error.message);
           })
@@ -1346,7 +1346,7 @@ export class LocalDatabaseEngine {
           Due: 0,
           DP: null
         }));
-        Promise.resolve(supabase.from('Canteen').upsert(canteenBatch, { onConflict: 'airman_id' }))
+        Promise.resolve(supabase.from('Canteen_Member').upsert(canteenBatch, { onConflict: 'airman_id' }))
           .then(({ error }: any) => {
             if (error) console.warn('Bulk auto-add to Canteen DB note:', error.message);
           })

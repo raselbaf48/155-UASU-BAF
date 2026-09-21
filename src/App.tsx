@@ -420,7 +420,7 @@ return () => mediaQuery.removeEventListener('change', listener);
                 Due: 0,
                 DP: null
               };
-              await supabase.from('Canteen').upsert([canteenPayload], { onConflict: 'airman_id' });
+              await supabase.from('Canteen_Member').upsert([canteenPayload], { onConflict: 'airman_id' });
             } catch (cErr) {
               console.warn('Auto add to Canteen table in App handleSave error:', cErr);
             }

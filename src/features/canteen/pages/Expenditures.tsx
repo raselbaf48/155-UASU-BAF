@@ -126,7 +126,7 @@ export const Expenditures: React.FC = () => {
   useEffect(() => {
     const fetchCivilians = async () => {
       try {
-        const { data, error } = await supabase.from('Canteen').select('*');
+        const { data, error } = await supabase.from('Canteen_Member').select('*');
         if (!error && data) {
           const civList = data
             .filter((m: any) => {

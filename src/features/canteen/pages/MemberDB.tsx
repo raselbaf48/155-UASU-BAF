@@ -276,7 +276,7 @@ ${rowsList}
     const newDue = Math.max(0, currentDue - amount);
     
     // Update Supabase Canteen table 'Due' column
-    await supabase.from('Canteen').update({ Due: newDue }).eq('airman_id', payBillMember.airman_id);
+    await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', payBillMember.airman_id);
     
     const payeeName = [payBillMember.Rank || payBillMember.rank, payBillMember.Surname || payBillMember.surname || payBillMember.Name || payBillMember.name].filter(Boolean).join(' ') || payBillMember['BD No'] || payBillMember.airman_id;
     const tx = {
@@ -329,7 +329,7 @@ ${rowsList}
       newDue = Math.max(0, currentDue - amountToReverse);
     }
     
-    await supabase.from('Canteen').update({ Due: newDue }).eq('airman_id', targetMember.airman_id);
+    await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', targetMember.airman_id);
     
     if (txToRemove.type !== 'BILL PAYMENT' && txToRemove.items) {
       const parts = txToRemove.items.split(',');
@@ -338,10 +338,9 @@ ${rowsList}
         if (match) {
           const itemName = match[1].trim();
           const qty = parseInt(match[2], 10);
-          const { data: invData } = await supabase.from('Canteen_Inventory').select('*').eq('name', itemName).single();
-          if (invData) {
-            await supabase.from('Canteen_Inventory').update({ stock: (invData.stock || 0) + qty }).eq('id', invData.id);
-          }
+          try {
+            await supabase.from('Canteen_Menu').select('*').eq('name', itemName).single();
+          } catch {}
         }
       }
     }
@@ -370,7 +369,7 @@ ${rowsList}
     try {
       const { data: biodata } = await supabase.from('Biodata Register').select('*');
       if (biodata && biodata.length > 0) {
-        const { data: existingCanteen } = await supabase.from('Canteen').select('airman_id, Due, DP');
+        const { data: existingCanteen } = await supabase.from('Canteen_Member').select('airman_id, Due, DP');
         const existingDueMap = new Map();
         const existingDpMap = new Map();
         if (existingCanteen) {
@@ -390,7 +389,7 @@ ${rowsList}
           DP: existingDpMap.has(b.airman_id) ? existingDpMap.get(b.airman_id) : null
         }));
 
-        await supabase.from('Canteen').upsert(payload, { onConflict: 'airman_id' });
+        await supabase.from('Canteen_Member').upsert(payload, { onConflict: 'airman_id' });
       }
     } catch (err) {
       console.warn('Auto-sync biodata silent note:', err);
@@ -399,7 +398,7 @@ ${rowsList}
 
   const fetchMembers = async () => {
     setLoading(true);
-    const { data, error } = await supabase.from('Canteen').select('*');
+    const { data, error } = await supabase.from('Canteen_Member').select('*');
     if (!error && data) {
       const formatted = data.map((m: any) => ({
         ...m,
@@ -489,7 +488,7 @@ ${rowsList}
       Due: 0
     };
 
-    const { error } = await supabase.from('Canteen').insert([payload]);
+    const { error } = await supabase.from('Canteen_Member').insert([payload]);
     if (!error) {
       setShowAddModal(false);
       fetchMembers();
@@ -522,7 +521,7 @@ ${rowsList}
       DP: finalDp || null
     };
 
-    const { error } = await supabase.from('Canteen').update(updatePayload).eq('airman_id', profileMember.airman_id);
+    const { error } = await supabase.from('Canteen_Member').update(updatePayload).eq('airman_id', profileMember.airman_id);
     if (!error) {
       const updated = { ...profileMember, ...updatePayload, DP: finalDp };
       setProfileMember(updated);
@@ -534,7 +533,7 @@ ${rowsList}
   };
 
   const confirmDeleteMember = async (airman_id: string) => {
-    const { error } = await supabase.from('Canteen').delete().eq('airman_id', airman_id);
+    const { error } = await supabase.from('Canteen_Member').delete().eq('airman_id', airman_id);
     if (!error) {
       setMembers(prev => prev.filter(m => m.airman_id !== airman_id));
       if (profileMember && profileMember.airman_id === airman_id) {

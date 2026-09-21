@@ -327,7 +327,7 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ onManagerP
                   const filtered = allItems.filter(item => ids.includes(item.id));
                   
                   try {
-                      const { data, error } = await supabase.from('Canteen_Inventory').select('*').in('id', ids);
+                      const { data, error } = await supabase.from('Canteen_Menu').select('*').in('id', ids);
                       if (!error && data && data.length > 0) {
                           setDailyMenu(data);
                           return;

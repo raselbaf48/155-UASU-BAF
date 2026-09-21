@@ -20,7 +20,7 @@ export const CanteenReports: React.FC = () => {
     }
 
     try {
-      const { data } = await supabase.from('Canteen').select('airman_id, "BD No", Rank, Surname');
+      const { data } = await supabase.from('Canteen_Member').select('airman_id, "BD No", Rank, Surname');
       if (data && data.length > 0) {
         const map: Record<string, any> = {};
         data.forEach(m => {
