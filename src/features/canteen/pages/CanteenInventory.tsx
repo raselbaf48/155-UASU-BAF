@@ -710,7 +710,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
          <div>
             <h2 className="text-2xl font-black text-white uppercase tracking-tighter">CANTEEN MENU</h2>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">CLOUD INTEGRATED INVENTORY</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">CLOUD INTEGRATED MENU & ITEMS</p>
          </div>
          {!readOnly ? (
            <div className="flex items-center space-x-3">

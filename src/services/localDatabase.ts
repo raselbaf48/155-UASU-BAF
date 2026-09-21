@@ -146,6 +146,9 @@ export class LocalDatabaseEngine {
       }
       window.addEventListener("baf_idac_settings_updated", (e: any) => { if (e.detail?.source !== 'firebase') this.saveToFirebase(this.db); });
       window.addEventListener("baf_duty_ratio_updated", (e: any) => { if (e.detail?.source !== 'firebase') this.saveToFirebase(this.db); });
+      window.addEventListener("baf_sync_duty_matrix_cloud", (e: any) => {
+        this.syncDutyMatrixToCloud(e.detail?.matrix);
+      });
       window.addEventListener("baf_signatures_updated", (e: any) => { if (e.detail?.source !== 'firebase') this.saveToFirebase(this.db); });
       window.addEventListener("baf_logo_updated", (e: any) => { if (e.detail?.source !== 'firebase') this.saveToFirebase(this.db); });
       window.addEventListener("baf_theme_updated", (e: any) => { if (e.detail?.source !== 'firebase') this.saveToFirebase(this.db); });
@@ -439,12 +442,19 @@ export class LocalDatabaseEngine {
                  try { metadataMatrix = JSON.parse(metadataRaw); } catch(e) {}
              }
 
+             // Check if local has pending unsynced changes - if so, immediately push local latest matrix to Cloud
+             const isPendingSync = typeof window !== 'undefined' && window.localStorage.getItem('baf_pending_sync') === 'true';
+             if (isPendingSync && currentMatrix.length > 0) {
+                 setTimeout(() => {
+                     this.syncDutyMatrixToCloud(currentMatrix);
+                 }, 100);
+             }
+
              const formattedMatrix = Array.from(dutyMap.values()).map(duty => {
-                 let total = 0;
+                 let flightTotal = 0;
                  ['Mechanics', 'Avionics', 'GCS', 'Admin'].forEach(f => {
-                     total += duty.data[f].reduce((sum: number, val: number) => sum + val, 0);
+                     flightTotal += duty.data[f].reduce((sum: number, val: number) => sum + val, 0);
                  });
-                 duty.totalRequiredMonth = total;
 
                  const existingDuty = currentMatrix.find((d: any) => d.id === duty.id);
                  const metaDuty = metadataMatrix.find((d: any) => d.id === duty.id);
@@ -466,6 +476,23 @@ export class LocalDatabaseEngine {
                      if (sourceForPreserve.dailyRequirements !== undefined) duty.dailyRequirements = sourceForPreserve.dailyRequirements;
                      if (sourceForPreserve.isDisabled !== undefined) duty.isDisabled = sourceForPreserve.isDisabled;
                  }
+
+                 // Robust monthly requirement calculation - NEVER reset to 0 if dailyRequirements or quota exists!
+                 let trueMonthly = 0;
+                 if (duty.dailyRequirements && Array.isArray(duty.dailyRequirements) && duty.dailyRequirements.length > 0) {
+                     trueMonthly = duty.dailyRequirements.reduce((s: number, v: number) => s + (Number(v) || 0), 0);
+                 }
+                 if (trueMonthly === 0 && sourceForPreserve?.totalRequiredMonth && sourceForPreserve.totalRequiredMonth > 0) {
+                     trueMonthly = sourceForPreserve.totalRequiredMonth;
+                 }
+                 if (trueMonthly === 0 && duty.totalRequiredDaily && duty.totalRequiredDaily > 0) {
+                     trueMonthly = duty.totalRequiredDaily * 31;
+                 }
+                 if (trueMonthly === 0) {
+                     trueMonthly = flightTotal;
+                 }
+                 duty.totalRequiredMonth = trueMonthly;
+
                  return duty;
              });
 
@@ -967,6 +994,93 @@ export class LocalDatabaseEngine {
     }
   }
 
+
+  public async syncDutyMatrixToCloud(providedMatrix?: any[]): Promise<boolean> {
+    if (typeof window === 'undefined') return false;
+    try {
+      const raw = providedMatrix ? JSON.stringify(providedMatrix) : window.localStorage.getItem('baf_official_duty_matrix_v4');
+      if (!raw) return false;
+      const matrix = JSON.parse(raw);
+      if (!Array.isArray(matrix)) return false;
+
+      const matrixPayload: any[] = [];
+      matrix.forEach((m: any) => {
+        const flights = ['Mechanics', 'Avionics', 'GCS', 'Admin'];
+        flights.forEach(f => {
+          const days = m.data?.[f] || Array(31).fill(0);
+          const flightTotal = days.reduce((sum: number, val: number) => sum + val, 0);
+          const row: any = {
+            id: `${m.id || m.dutyCode}_${f}`,
+            duty_id: m.id || m.dutyCode || 'unknown',
+            duty_title: m.title || m.dutyCode || 'Unknown Duty',
+            duty_code: m.dutyCode || 'UNKNOWN',
+            shift_label: m.shiftLabel || null,
+            flight: f,
+            flight_total: flightTotal,
+            duty_total_daily: m.totalRequiredDaily || 0,
+            is_disabled: m.isDisabled || false
+          };
+          for (let i = 0; i < 31; i++) {
+            row[`day_${i + 1}`] = days[i] || 0;
+          }
+          matrixPayload.push(row);
+        });
+      });
+
+      if (matrixPayload.length > 0) {
+        const { error: matrixErr } = await supabase.from('duty_ratio_matrix').upsert(matrixPayload, { onConflict: 'id' });
+        if (matrixErr) {
+          console.warn("Error upserting duty_ratio_matrix to Supabase:", matrixErr);
+        }
+      }
+
+      // Prepare metadata & full settings for app_settings
+      const metadata = matrix.map((m: any) => {
+        let totalReqMonth = m.totalRequiredMonth;
+        if (m.dailyRequirements && Array.isArray(m.dailyRequirements) && m.dailyRequirements.length > 0) {
+          totalReqMonth = m.dailyRequirements.reduce((s: number, v: number) => s + (Number(v) || 0), 0);
+        } else if (!totalReqMonth && m.totalRequiredDaily) {
+          totalReqMonth = m.totalRequiredDaily * 31;
+        }
+        return {
+          id: m.id,
+          serNo: m.serNo,
+          title: m.title,
+          dutyCode: m.dutyCode,
+          shiftLabel: m.shiftLabel,
+          eligibleFlights: m.eligibleFlights,
+          eligibleRanks: m.eligibleRanks,
+          flightTargets: m.flightTargets,
+          isDisabled: m.isDisabled,
+          totalRequiredDaily: m.totalRequiredDaily,
+          totalRequiredMonth: totalReqMonth,
+          dailyRequirements: m.dailyRequirements
+        };
+      });
+
+      const settingsPayload = [
+        {
+          setting_key: 'baf_duty_matrix_metadata',
+          setting_value: JSON.stringify(metadata),
+          updated_at: new Date().toISOString()
+        },
+        {
+          setting_key: 'baf_duty_matrix_full',
+          setting_value: JSON.stringify(matrix),
+          updated_at: new Date().toISOString()
+        }
+      ];
+
+      await supabase.from('app_settings').upsert(settingsPayload, { onConflict: 'setting_key' });
+      window.localStorage.removeItem('baf_pending_sync');
+      emitSyncProgress(100, "Duty Matrix synced to Cloud");
+      addSyncLog({ timestamp: new Date().toISOString(), type: "PUSH", status: "SUCCESS", message: "Realtime Duty Matrix synced to Cloud!" });
+      return true;
+    } catch (err: any) {
+      console.warn("Failed to sync duty matrix to Cloud:", err);
+      return false;
+    }
+  }
 
   private loadInitialLocalState(): LocalStorageDB {
     try {

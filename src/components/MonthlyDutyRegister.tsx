@@ -4,9 +4,8 @@ import { Airman, DutyAssignment, DutyCategoryCode, FlightName, UserRole, Conflic
 import { DUTY_TYPES, DUTY_TYPE_MAP } from '../data/dutyTypes';
 import { getDaysInMonth, calculateDutyStats, detectConflicts, resolveAirmanDutyForDate, addAssignmentToMap, getAirmanShortCode } from '../data/rosterGenerator';
 import { DutyCellPopover } from './DutyCellPopover';
-import { exportTableToCSV } from '../utils/csvExport';
 import { getOptimalMinColumnWidth } from '../utils/tableUtils';
-import { Download, Calendar, CalendarRange, AlertTriangle, ShieldAlert, ChevronLeft, ChevronRight, Search, Filter, RefreshCw, CheckCircle, X, Plus, Clock, Trash2, FileText, RotateCcw, Sliders, Eye, EyeOff, History } from 'lucide-react';
+import { Calendar, CalendarRange, AlertTriangle, ShieldAlert, ChevronLeft, ChevronRight, Search, Filter, RefreshCw, CheckCircle, X, Plus, Clock, Trash2, FileText, RotateCcw, Sliders, Eye, EyeOff, History } from 'lucide-react';
 import { getStoredDutyRatiosForDate } from '../data/dutyRatios';
 import { getIdacShiftsForDateAndFlight, getFlightDutyQuotaForDate } from '../data/officialDutyRatioMatrix';
 import { FlightDutyRatioModal } from './FlightDutyRatioModal';
@@ -980,15 +979,6 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
         <div className="flex-1 flex flex-wrap justify-center lg:justify-end gap-2 mt-4 lg:mt-0">
           {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') && (
             <div className="flex flex-wrap justify-center lg:justify-end gap-2">
-              <button
-                onClick={() => exportTableToCSV('duty-register-container', `Duty_Register_${currentYear}_${currentMonth}.csv`)}
-                className="flex items-center space-x-1.5 px-3 py-2 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-all active:scale-95"
-                title="Export current view to CSV"
-              >
-                <Download className="w-4 h-4" />
-                <span className="hidden xl:inline">Export</span>
-              </button>
-
               <button
                 onClick={() => setShowHistoryModal(true)}
                 className="flex items-center space-x-1.5 px-3 py-2 text-xs font-bold rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 shadow-xs transition-all active:scale-95"

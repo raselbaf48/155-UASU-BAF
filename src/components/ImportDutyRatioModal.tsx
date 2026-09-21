@@ -16,7 +16,7 @@ import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import { DutyRatioTable } from '../data/officialDutyRatioMatrix';
 import { FlightName } from '../types';
-import { exportDutyRatioMatrixCSV } from '../utils/csvExport';
+import { exportDutyRatioMatrixCSV, exportDutyRatioMatrixExcel } from '../utils/csvExport';
 
 interface ImportDutyRatioModalProps {
   isOpen: boolean;
@@ -52,17 +52,22 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
   if (!isOpen) return null;
 
   const matchTable = (rawDuty: string): DutyRatioTable | undefined => {
+    if (!rawDuty) return undefined;
     const stripped = rawDuty.replace(/^(duty\s*:?|table\s*\d*:?|\d+[\.\-\)]\s*)/i, '').trim();
     const clean = stripped.toLowerCase().replace(/[^a-z0-9]/g, '');
     if (!clean) return undefined;
-    return currentMatrix.find((t) => {
+
+    // 1. Direct code / id / title match
+    const directMatch = currentMatrix.find((t) => {
       const tClean = t.title.toLowerCase().replace(/[^a-z0-9]/g, '');
       const tCleanNoParen = t.title.split('(')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
       const idClean = t.id.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const codeClean = (t.dutyCode || '').toLowerCase().replace(/[^a-z0-9]/g, '');
       return (
         tClean === clean ||
         tCleanNoParen === clean ||
         idClean === clean ||
+        codeClean === clean ||
         tClean.includes(clean) ||
         clean.includes(tClean) ||
         tCleanNoParen.includes(clean) ||
@@ -71,14 +76,220 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
         clean.includes(idClean)
       );
     });
+    if (directMatch) return directMatch;
+
+    // 2. Military and duty aliases
+    const lower = stripped.toLowerCase();
+
+    // Base Security Duty / GD / Guard Duty
+    if (
+      lower.includes('base sec') ||
+      lower.includes('basesec') ||
+      lower.includes('security') ||
+      lower.includes('guard duty') ||
+      lower.includes('general duty') ||
+      clean === 'gd' ||
+      clean === 'gdduty'
+    ) {
+      const found = currentMatrix.find((t) => t.id === 'security_duty' || t.dutyCode === 'GD');
+      if (found) return found;
+    }
+
+    // Base Taskforce / BTF
+    if (
+      (lower.includes('base') && (lower.includes('tf') || lower.includes('taskforce') || lower.includes('task force'))) ||
+      clean === 'btf' ||
+      clean === 'basetf'
+    ) {
+      const found = currentMatrix.find((t) => t.id === 'base_tf' || t.dutyCode === 'BTF');
+      if (found) return found;
+    }
+
+    // Nazirpara Taskforce / NTF
+    if (
+      lower.includes('nazirpara') ||
+      lower.includes('najirpara') ||
+      clean === 'ntf' ||
+      clean === 'nazirparatf' ||
+      clean === 'najirparatf'
+    ) {
+      const found = currentMatrix.find((t) => t.id === 'nazirpara_tf' || t.dutyCode === 'NTF');
+      if (found) return found;
+    }
+
+    // IDAC Shifts (Morning, Afternoon, Night)
+    if (lower.includes('idac') || lower.includes('ida')) {
+      if (lower.includes('mor') || lower.includes('morning')) {
+        const found = currentMatrix.find((t) => t.id === 'idac_mor' || (t.dutyCode === 'IDAC' && t.shiftLabel === 'Morning'));
+        if (found) return found;
+      }
+      if (lower.includes('aft') || lower.includes('afternoon') || lower.includes('a/n') || clean.includes('an')) {
+        const found = currentMatrix.find((t) => t.id === 'idac_an' || (t.dutyCode === 'IDAC' && t.shiftLabel === 'Afternoon'));
+        if (found) return found;
+      }
+      if (lower.includes('night') || lower.includes('nit') || clean.includes('nt') || lower.includes('ngt')) {
+        const found = currentMatrix.find((t) => t.id === 'idac_nt' || (t.dutyCode === 'IDAC' && t.shiftLabel === 'Night'));
+        if (found) return found;
+      }
+    }
+
+    // Airport / Airfield
+    if (lower.includes('airport') || lower.includes('airfield') || clean === 'apt') {
+      const found = currentMatrix.find((t) => t.id === 'airport_duty' || t.dutyCode === 'AIRPORT');
+      if (found) return found;
+    }
+
+    // Halishahar / Reception / Receiption Duty
+    if (
+      lower.includes('reception') ||
+      lower.includes('receiption') ||
+      clean === 'rec' ||
+      clean === 'reception' ||
+      clean === 'receiption' ||
+      lower.includes('k/o') ||
+      lower.includes('key orderly') ||
+      lower.includes('halishahar') ||
+      clean === 'hal'
+    ) {
+      const found = currentMatrix.find(
+        (t) =>
+          t.id === 'reception_duty' ||
+          t.dutyCode === 'RECEPTION' ||
+          t.title.toLowerCase().includes('reception') ||
+          t.title.toLowerCase().includes('receiption') ||
+          t.id === 'halishahar_duty' ||
+          t.dutyCode === 'HALISHAHAR'
+      );
+      if (found) return found;
+    }
+
+    return currentMatrix.find((t) => {
+      const titleLower = t.title.toLowerCase();
+      return titleLower.includes(lower) || lower.includes(titleLower);
+    });
   };
 
   const matchFlight = (rawFlight: string): FlightName | null => {
-    const clean = rawFlight.trim().toLowerCase();
-    if (clean === 'mech' || clean.includes('mechanic')) return 'Mechanics';
-    if (clean === 'avi' || clean.includes('avionic')) return 'Avionics';
-    if (clean.includes('gcs')) return 'GCS';
-    if (clean === 'adm' || clean === 'admin' || clean.includes('admin')) return 'Admin';
+    if (!rawFlight) return null;
+    const str = String(rawFlight).trim();
+    if (!str) return null;
+
+    const lower = str.toLowerCase();
+    // Strip leading serial numbers, bullets, brackets: e.g. "1. Mech Flt" -> "mech flt"
+    const stripped = lower.replace(/^[\d\s\.\-\)\(\[\]\:\*]+/, '').trim();
+    const clean = stripped.replace(/[^a-z0-9]/g, '');
+
+    // Skip summary / header / table titles
+    if (
+      lower.startsWith('daily') ||
+      lower === 'total' ||
+      lower.startsWith('total') ||
+      lower.startsWith('req') ||
+      lower === 'date' ||
+      lower === 'flight' ||
+      lower === 'flt' ||
+      lower === 'duty' ||
+      lower === 'table' ||
+      lower === 'sl' ||
+      lower === 'ser' ||
+      lower === 'no'
+    ) {
+      return null;
+    }
+
+    // 1. GCS (Ground Control Station)
+    // Matches: "GCS", "G.C.S", "G.C.S.", "GCS Flt", "GCS Flight", "Ground Control", "Ground Control Station", "FLT GCS", "FLT-GCS", "G Flt", "G-Flt", "G/Flt", "GF", "জিসিএস"
+    if (
+      clean.includes('gcs') ||
+      clean === 'g' ||
+      clean === 'gf' ||
+      clean === 'gflt' ||
+      clean.startsWith('gflt') ||
+      clean === 'gc' ||
+      lower.includes('ground control') ||
+      lower.includes('ground station') ||
+      lower.includes('g.c.s') ||
+      lower.startsWith('g ') ||
+      lower.startsWith('g-') ||
+      lower.startsWith('g/') ||
+      lower.startsWith('g_') ||
+      lower.includes('g flight') ||
+      lower.includes('g/flt') ||
+      lower.includes('g-flt') ||
+      lower.includes('জিসিএস')
+    ) {
+      return 'GCS';
+    }
+
+    // 2. Avionics
+    // Matches: "Avi", "AVI", "Avi Flt", "Avi Flight", "Avionics", "Avionic", "Avionics Flt", "Avionics Flight", "Avn", "AVN", "Avn Flt", "Radar", "Armament", "Radio", "Instrument", "FLT AVI", "FLT-AVI", "A Flt", "A-Flt", "A/Flt", "AF", "এভিওনিক্স", "এভি"
+    if (
+      lower.includes('avionic') ||
+      lower.includes('avi') ||
+      lower.includes('avn') ||
+      lower.includes('radar') ||
+      lower.includes('armament') ||
+      lower.includes('radio') ||
+      lower.includes('instrument') ||
+      clean === 'a' ||
+      clean === 'af' ||
+      clean === 'aflt' ||
+      clean.startsWith('aflt') ||
+      lower.startsWith('a ') ||
+      lower.startsWith('a-') ||
+      lower.startsWith('a/') ||
+      lower.startsWith('a_') ||
+      lower.includes('a flight') ||
+      lower.includes('a/flt') ||
+      lower.includes('a-flt') ||
+      lower.includes('এভি')
+    ) {
+      return 'Avionics';
+    }
+
+    // 3. Mechanics
+    // Matches: "Mech", "MECH", "Mech Flt", "Mech Flight", "Mechanic", "Mechanics", "Mechanics Flt", "Mechanics Flight", "Maint", "Maintenance", "Maint Flt", "Maintenance Flt", "FLT MECH", "FLT-MECH", "Airframe", "Engine", "A&E", "M Flt", "M-Flt", "M/Flt", "MF", "মেকানিক্স", "মেক"
+    if (
+      lower.includes('mechanic') ||
+      lower.includes('mech') ||
+      lower.includes('maint') ||
+      lower.includes('airframe') ||
+      lower.includes('engine') ||
+      clean === 'm' ||
+      clean === 'mf' ||
+      clean === 'mflt' ||
+      clean.startsWith('mflt') ||
+      lower.startsWith('m ') ||
+      lower.startsWith('m-') ||
+      lower.startsWith('m/') ||
+      lower.startsWith('m_') ||
+      lower.includes('m flight') ||
+      lower.includes('m/flt') ||
+      lower.includes('m-flt') ||
+      lower.includes('মেক')
+    ) {
+      return 'Mechanics';
+    }
+
+    // 4. Admin
+    // Matches: "Admin", "Adm", "Admin Flt", "Admin Flight", "Adm Flt", "Administration", "Administrative", "FLT ADM", "FLT-ADM", "Support", "AD", "AD Flt", "এডমিন", "অ্যাডমিন"
+    if (
+      lower.includes('admin') ||
+      lower.includes('adm') ||
+      lower.includes('administrative') ||
+      lower.includes('administration') ||
+      lower.includes('support') ||
+      clean === 'ad' ||
+      clean === 'adflt' ||
+      lower.startsWith('ad ') ||
+      lower.startsWith('ad-') ||
+      lower.startsWith('ad/') ||
+      lower.includes('এডমিন') ||
+      lower.includes('অ্যাডমিন')
+    ) {
+      return 'Admin';
+    }
+
     return null;
   };
 
@@ -88,45 +299,83 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
       return;
     }
 
-    // Determine if file is in FLAT format: has both a Duty Type and Flight column in header
-    const firstRowLower = data[0] ? data[0].map((c) => String(c || '').trim().toLowerCase()) : [];
-    const hasDutyCol = firstRowLower.some((c) => c.includes('duty') || c.includes('table'));
-    const hasFlightCol = firstRowLower.some((c) => c.includes('flight') || c.includes('flt') || c.includes('section'));
+    // Search first 5 rows to see if there is a flat header row with both Duty & Flight
+    let headerRowIdx = -1;
+    let dutyColIdx = -1;
+    let flightColIdx = -1;
+
+    for (let r = 0; r < Math.min(data.length, 5); r++) {
+      const rowLower = (data[r] || []).map((c) => String(c || '').trim().toLowerCase());
+      const dIdx = rowLower.findIndex((c) => c.includes('duty') || c.includes('table'));
+      const fIdx = rowLower.findIndex((c) => c.includes('flight') || c.includes('flt') || c.includes('section'));
+      if (dIdx !== -1 && fIdx !== -1) {
+        headerRowIdx = r;
+        dutyColIdx = dIdx;
+        flightColIdx = fIdx;
+        break;
+      }
+    }
 
     const parsed: ParsedMatrixRow[] = [];
 
-    if (hasDutyCol && hasFlightCol) {
+    if (headerRowIdx !== -1) {
       // ----------------------------------------------------
       // MODE 1: Flat Column Format
       // ----------------------------------------------------
-      const dutyColIdx = firstRowLower.findIndex((h) => h.includes('duty') || h.includes('type') || h.includes('table') || h.includes('name'));
-      const flightColIdx = firstRowLower.findIndex((h) => h.includes('flight') || h.includes('flt') || h.includes('section'));
+      const headerRowLower = (data[headerRowIdx] || []).map((c) => String(c || '').trim().toLowerCase());
 
       const dayIndices: number[] = [];
       for (let day = 1; day <= 31; day++) {
-        let idx = firstRowLower.findIndex((h) => h === `day ${day}` || h === `day_${day}` || h === `d${day}` || h === String(day) || h === `day${day}`);
-        if (idx === -1 && data[0].length >= day + 1) {
+        let idx = headerRowLower.findIndex((h) => h === `day ${day}` || h === `day_${day}` || h === `d${day}` || h === String(day) || h === `day${day}`);
+        if (idx === -1 && data[headerRowIdx].length >= day + 1) {
           idx = (flightColIdx >= 0 ? flightColIdx : 1) + day;
         }
         dayIndices.push(idx);
       }
 
-      for (let i = 1; i < data.length; i++) {
+      let lastSeenDuty = '';
+
+      for (let i = headerRowIdx + 1; i < data.length; i++) {
         const row = data[i];
         if (!row || row.every((c) => c === null || c === undefined || String(c).trim() === '')) {
           continue;
         }
 
-        const rawDuty = dutyColIdx >= 0 && row[dutyColIdx] ? String(row[dutyColIdx]).trim() : `Table ${i}`;
-        const rawFlight = flightColIdx >= 0 && row[flightColIdx] ? String(row[flightColIdx]).trim() : '';
+        let rawDuty = dutyColIdx >= 0 && row[dutyColIdx] ? String(row[dutyColIdx]).trim() : '';
+
+        // Check if this row is comment, repeated header, or daily summary BEFORE updating lastSeenDuty
+        const lowerDuty = rawDuty.toLowerCase();
+        if (
+          lowerDuty.startsWith('#') ||
+          lowerDuty.includes('duty type') ||
+          lowerDuty.includes('duty name') ||
+          lowerDuty.startsWith('daily')
+        ) {
+          continue;
+        }
+
+        let rawFlight = flightColIdx >= 0 && row[flightColIdx] ? String(row[flightColIdx]).trim() : '';
+        if (!rawFlight) {
+          for (let c = 0; c < Math.min(row.length, 4); c++) {
+            if (c !== dutyColIdx) {
+              const mf = matchFlight(String(row[c] || ''));
+              if (mf) {
+                rawFlight = String(row[c] || '').trim();
+                break;
+              }
+            }
+          }
+        }
 
         const lowerFlight = rawFlight.toLowerCase();
         if (['total', 'daily total', 'req', 'req.', 'daily req', 'grand total'].includes(lowerFlight)) {
           continue;
         }
 
-        if (rawDuty.toLowerCase().includes('duty type') || rawDuty.toLowerCase().includes('duty name')) {
-          continue;
+        if (!rawDuty && lastSeenDuty) {
+          rawDuty = lastSeenDuty;
+        } else if (rawDuty) {
+          lastSeenDuty = rawDuty;
         }
 
         const matchedT = matchTable(rawDuty);
@@ -160,7 +409,7 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
 
         parsed.push({
           id: `row-${i}-${Date.now()}`,
-          dutyType: rawDuty,
+          dutyType: rawDuty || (matchedT ? matchedT.title : 'Unknown Duty'),
           matchedTableId: matchedT ? matchedT.id : null,
           flight: rawFlight,
           matchedFlight: matchedF,
@@ -181,48 +430,97 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
           continue;
         }
 
-        const firstCell = String(row[0] || '').trim();
-        if (firstCell.startsWith('#')) {
-          continue; // Comment line
-        }
-
-        // Check if this row is a Duty Header: e.g. "Duty: SECURITY DUTY..." or matches table title
-        const matchedT = matchTable(firstCell);
-        const isFlightCell = matchFlight(firstCell) !== null;
-        const lowerFirst = firstCell.toLowerCase();
-
-        if (matchedT && !isFlightCell && !lowerFirst.includes('daily') && !lowerFirst.includes('total') && !lowerFirst.includes('req')) {
-          currentDutyObj = matchedT;
+        // 1. Skip comment lines
+        const firstNonEmpty = row.find((c) => c !== null && c !== undefined && String(c).trim() !== '');
+        if (firstNonEmpty && String(firstNonEmpty).trim().startsWith('#')) {
           continue;
         }
 
-        // Check if this row is a column header row: "Date", "1", "2", ... "31"
+        // 2. Check if this row is a column header row (e.g. "Date, 1, 2, ... 31" or "Flight, 1, 2, ... 31")
         const rowLower = row.map((c) => String(c || '').trim().toLowerCase());
-        if (rowLower[0] === 'date' || rowLower[1] === '1' || rowLower[0] === 'flight') {
+        const hasNumbers = rowLower.some((h) => h === '1' || h === 'day 1' || h === 'd1' || h === 'day_1' || h === '1.0');
+        const hasDateOrFlt = rowLower.some((h) => h === 'date' || h === 'flight' || h === 'flt' || h === 'section');
+
+        if (hasNumbers && (hasDateOrFlt || rowLower[0] === 'date' || rowLower[0] === 'flight' || rowLower[1] === '1')) {
           dayIndices = [];
           for (let day = 1; day <= 31; day++) {
-            let idx = rowLower.findIndex((h) => h === String(day) || h === `day ${day}` || h === `d${day}`);
+            let idx = rowLower.findIndex((h) => h === String(day) || h === `day ${day}` || h === `d${day}` || h === `day_${day}` || h === `${day}.0`);
             if (idx === -1) {
-              // Fallback: if first column is 'date', days 1..31 begin at index 1
-              idx = (rowLower[0] === 'date' || rowLower[0] === 'flight') ? day : day - 1;
+              const baseIdx = (rowLower[0] === 'date' || rowLower[0] === 'flight' || rowLower[0] === 'flt') ? 1 : 0;
+              idx = baseIdx + (day - 1);
             }
             dayIndices.push(idx);
           }
           continue;
         }
 
-        // Check if this is a Flight row (Mechanics, Avionics, GCS, Admin or Mech, AVI, Adm)
-        const matchedF = matchFlight(firstCell);
+        // 3. Skip summary / footer rows like Daily Total, Daily Req, Total
+        const firstTwoCells = `${String(row[0] || '')} ${String(row[1] || '')}`.toLowerCase();
+        if (
+          firstTwoCells.includes('daily total') ||
+          firstTwoCells.includes('daily req') ||
+          firstTwoCells.trim() === 'total' ||
+          firstTwoCells.startsWith('total ') ||
+          firstTwoCells.includes('grand total')
+        ) {
+          continue;
+        }
+
+        // 4. Look for a Flight Name in the first 4 columns
+        let fltCol = -1;
+        let matchedF: FlightName | null = null;
+        let rawFlight = '';
+
+        for (let c = 0; c < Math.min(row.length, 4); c++) {
+          const cellVal = String(row[c] || '').trim();
+          if (!cellVal) continue;
+          const mf = matchFlight(cellVal);
+          if (mf) {
+            fltCol = c;
+            matchedF = mf;
+            rawFlight = cellVal;
+            break;
+          }
+        }
+
+        // 5. Look for a Duty Header in this row
+        let rowMatchedT: DutyRatioTable | undefined;
+        for (let c = 0; c < (fltCol !== -1 ? fltCol : Math.min(row.length, 3)); c++) {
+          const cellVal = String(row[c] || '').trim();
+          if (!cellVal) continue;
+          const mt = matchTable(cellVal);
+          if (mt) {
+            rowMatchedT = mt;
+            break;
+          }
+        }
+
+        if (rowMatchedT) {
+          currentDutyObj = rowMatchedT;
+        }
+
+        // If this row is a duty header with NO flight, advance to next row
+        if (!matchedF) {
+          if (!rowMatchedT) {
+            const mt = matchTable(String(row[0] || ''));
+            if (mt) {
+              currentDutyObj = mt;
+            }
+          }
+          continue;
+        }
+
+        // 6. Process flight row
         if (matchedF) {
           const days: number[] = [];
           const errors: string[] = [];
 
           if (!currentDutyObj) {
-            errors.push(`Flight "${firstCell}" found before any Duty heading`);
+            errors.push(`Flight "${rawFlight}" found before any Duty heading`);
           }
 
           for (let d = 0; d < 31; d++) {
-            const col = dayIndices[d] !== undefined && dayIndices[d] >= 0 ? dayIndices[d] : d + 1;
+            const col = (dayIndices[d] !== undefined && dayIndices[d] >= 0) ? dayIndices[d] : (fltCol + 1 + d);
             let val = 0;
             if (row[col] !== undefined && row[col] !== null && String(row[col]).trim() !== '') {
               const num = parseInt(String(row[col]), 10);
@@ -238,19 +536,14 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
           }
 
           parsed.push({
-            id: `row-${i}-${Date.now()}`,
+            id: `row-${i}-${Date.now()}-${matchedF}`,
             dutyType: currentDutyObj ? currentDutyObj.title : 'Unknown Duty',
             matchedTableId: currentDutyObj ? currentDutyObj.id : null,
-            flight: firstCell,
+            flight: rawFlight,
             matchedFlight: matchedF,
             days,
             errors,
           });
-          continue;
-        }
-
-        // Skip summary or footer rows like Daily Total, Daily Req, Total
-        if (lowerFirst.includes('daily') || lowerFirst === 'total' || lowerFirst.includes('req')) {
           continue;
         }
       }
@@ -300,6 +593,10 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
 
   const handleDownloadSample = () => {
     exportDutyRatioMatrixCSV(currentMatrix, 'BAF_155_UASU_Duty_Ratio_Template.csv');
+  };
+
+  const handleDownloadExcelSample = () => {
+    exportDutyRatioMatrixExcel(currentMatrix, 'BAF_155_UASU_Duty_Ratio_Template.xlsx');
   };
 
   const totalErrors = rows.reduce((sum, r) => sum + r.errors.length, 0);
@@ -426,14 +723,26 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
                   Download the official duty ratio spreadsheet template in the exact same format as Export CSV (Date, 1..31 for all duties).
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={handleDownloadSample}
-                className="mt-4 w-full py-2.5 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs flex items-center justify-center space-x-2 shadow-xs transition-colors cursor-pointer"
-              >
-                <Download className="w-4 h-4" />
-                <span>Download Template (.csv)</span>
-              </button>
+              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={handleDownloadExcelSample}
+                  className="w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs flex items-center justify-center space-x-1.5 shadow-xs transition-colors cursor-pointer"
+                  title="Download Excel Workbook with Live Formulas"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  <span>Download Template (.xlsx)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadSample}
+                  className="w-full py-2.5 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs flex items-center justify-center space-x-1.5 shadow-xs transition-colors cursor-pointer"
+                  title="Download CSV file with Calculated Totals"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Download Template (.csv)</span>
+                </button>
+              </div>
             </div>
           </div>
 

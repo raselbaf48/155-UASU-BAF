@@ -2,9 +2,8 @@ import { DateNavigator } from './DateNavigator';
 import React, { useState, useEffect, useMemo } from 'react';
 import { Airman, FlightName, UserRole } from '../types';
 import { getCurrentUserSession } from '../utils/authSession';
-import { Calendar, Search, Filter, Printer, Download, FileSpreadsheet, Eye, ShieldCheck, Sun, Moon, Plus, RefreshCw, X, Check, FileText, History } from 'lucide-react';
+import { Calendar, Search, Filter, Printer, Download, Eye, ShieldCheck, Sun, Moon, Plus, RefreshCw, X, Check, FileText, History } from 'lucide-react';
 import { sortAirmenBySeniority } from '../utils/seniority';
-import { exportTableToCSV } from '../utils/csvExport';
 import { getOptimalMinColumnWidth } from '../utils/tableUtils';
 import { EntryHistoryModal } from './EntryHistoryModal';
 
@@ -557,7 +556,7 @@ export const LeaveRegisterView: React.FC<LeaveRegisterViewProps> = ({
   };
 
   return (
-    <div className="duty-register-print space-y-6">
+    <div id="leave-register-container" className="duty-register-print space-y-6">
       {/* Header & Controls */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -605,15 +604,6 @@ export const LeaveRegisterView: React.FC<LeaveRegisterViewProps> = ({
           )}
 
           {/* Record / Grant Leave Button */}
-          
-          <button
-            onClick={() => exportTableToCSV('leave-register-container', `Leave_Register_${selectedFlight}_${selectedYear}.csv`)}
-            className="flex items-center space-x-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs shadow-xs transition-colors cursor-pointer"
-          >
-            <FileSpreadsheet className="w-4 h-4" />
-            <span className="hidden sm:inline">Export CSV</span>
-          </button>
-
           <button
             onClick={() => {
               setLeaveAirmanId('');
@@ -641,6 +631,18 @@ export const LeaveRegisterView: React.FC<LeaveRegisterViewProps> = ({
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <div 
+          onClick={() => setSummaryFilter(summaryFilter === 'OnLeave' ? null : 'OnLeave')}
+          className={`bg-white dark:bg-slate-900 border rounded-xl p-4 shadow-xs cursor-pointer transition-all ${summaryFilter === 'OnLeave' ? 'ring-2 ring-emerald-500 border-emerald-500' : 'border-slate-200 dark:border-slate-800 hover:border-emerald-300'}`}>
+          <div className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-wider">
+            Currently On Leave
+          </div>
+          <div className="text-2xl font-black text-slate-900 dark:text-white mt-1">
+            {totalOnLeaveToday} <span className="text-xs font-semibold text-slate-400">Men</span>
+          </div>
+          <div className="text-[11px] text-slate-500 mt-0.5">Active personnel on leave</div>
+        </div>
+
         <div 
           onClick={() => setSummaryFilter(summaryFilter === 'Casual' ? null : 'Casual')}
           className={`bg-white dark:bg-slate-900 border rounded-xl p-4 shadow-xs cursor-pointer transition-all ${summaryFilter === 'Casual' ? 'ring-2 ring-emerald-500 border-emerald-500' : 'border-slate-200 dark:border-slate-800 hover:border-emerald-300'}`}>
@@ -690,31 +692,6 @@ export const LeaveRegisterView: React.FC<LeaveRegisterViewProps> = ({
             {totalF295 > 0 ? `(${totalF295} days F-295 pass)` : 'Prefix/Suffix F-295 rule applied'}
           </div>
         </div>
-
-        
-        {(() => {
-          const currentList = leaveRecords.filter((r: any) => r.currentlyOnLeave);
-          return (
-            
-  <div 
-          onClick={() => setSummaryFilter(summaryFilter === 'OnLeave' ? null : 'OnLeave')}
-          className={`bg-white dark:bg-slate-900 border rounded-xl p-4 shadow-xs flex flex-col h-full max-h-[140px] cursor-pointer transition-all ${summaryFilter === 'OnLeave' ? 'ring-2 ring-emerald-500 border-emerald-500' : 'border-slate-200 dark:border-slate-800 hover:border-emerald-300'}`}>
-    <div className="text-slate-500 dark:text-slate-400 text-xs font-bold uppercase tracking-wider mb-2 shrink-0 flex justify-between">
-      <span>Currently On Leave</span>
-      
-    </div>
-    <div className="flex-1 flex flex-col justify-end">
-      <div className="flex items-baseline space-x-2">
-        <span className="text-3xl md:text-4xl font-black text-slate-900 dark:text-white tabular-nums tracking-tighter">
-          {currentList.length}
-        </span>
-        <span className="text-xs font-bold text-slate-500 uppercase">Men</span>
-      </div>
-    </div>
-  </div>
-          );
-        })()}
-  
       </div>
 
       {/* Filters Bar */}

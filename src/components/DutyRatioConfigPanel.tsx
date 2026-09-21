@@ -478,7 +478,16 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
 
                     <div className="mt-3 flex items-center justify-between px-1">
                       <span className="text-xs font-bold text-slate-500 dark:text-slate-400">Monthly Total:</span>
-                      <span className={`text-sm font-bold font-mono ${table.isDisabled ? 'text-slate-400' : 'text-slate-700 dark:text-slate-300'}`}>{table.totalRequiredMonth || 0}</span>
+                      {(() => {
+                        const calculatedTotal = (table.dailyRequirements && Array.isArray(table.dailyRequirements) && table.dailyRequirements.length > 0)
+                          ? table.dailyRequirements.reduce((sum, v) => sum + (Number(v) || 0), 0)
+                          : (table.totalRequiredMonth || (table.totalRequiredDaily ? table.totalRequiredDaily * 31 : 0) || ['Mechanics', 'Avionics', 'GCS', 'Admin'].reduce((sum, fl) => sum + (table.data?.[fl as FlightName]?.reduce((s, c) => s + c, 0) || 0), 0));
+                        return (
+                          <span className={`text-sm font-bold font-mono ${table.isDisabled ? 'text-slate-400' : 'text-slate-700 dark:text-slate-300'}`}>
+                            {calculatedTotal}
+                          </span>
+                        );
+                      })()}
                     </div>
 
                   </div>
@@ -495,7 +504,14 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                   <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
                     <div>
                       <h3 className="font-bold text-lg text-slate-900 dark:text-white">Configure Daily Requirements</h3>
-                      <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mt-0.5">{matrix[settingsTableIdx].title}</p>
+                      <div className="flex items-center space-x-2 mt-0.5">
+                        <span className="text-sm font-semibold text-indigo-600 dark:text-indigo-400">{matrix[settingsTableIdx].title}</span>
+                        <span className="text-xs px-2 py-0.5 rounded-md font-bold font-mono bg-indigo-100 dark:bg-indigo-900/50 text-indigo-800 dark:text-indigo-200">
+                          Total: {((matrix[settingsTableIdx].dailyRequirements && matrix[settingsTableIdx].dailyRequirements!.length > 0)
+                            ? matrix[settingsTableIdx].dailyRequirements!.reduce((a, b) => a + (Number(b) || 0), 0)
+                            : (matrix[settingsTableIdx].totalRequiredMonth || (matrix[settingsTableIdx].totalRequiredDaily ? matrix[settingsTableIdx].totalRequiredDaily * 31 : 0)))} days
+                        </span>
+                      </div>
                     </div>
                     <button 
                       onClick={() => setSettingsTableIdx(null)}
@@ -586,11 +602,12 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                                     if (onMatrixChange) {
                                       const updated = [...matrix];
                                       updated[settingsTableIdx] = { ...updated[settingsTableIdx] };
-                                      const currentReqs = updated[settingsTableIdx].dailyRequirements || new Array(31).fill(updated[settingsTableIdx].totalRequiredDaily || 0);
+                                      const currentReqs = updated[settingsTableIdx].dailyRequirements ? [...updated[settingsTableIdx].dailyRequirements!] : new Array(31).fill(updated[settingsTableIdx].totalRequiredDaily || 0);
                                       if (currentReqs[idx] > 0) {
                                         currentReqs[idx] -= 1;
                                         updated[settingsTableIdx].dailyRequirements = currentReqs;
                                         updated[settingsTableIdx].totalRequiredMonth = currentReqs.reduce((a, b) => a + b, 0);
+                                        updated[settingsTableIdx].totalRequiredDaily = Math.max(...currentReqs);
                                         onMatrixChange(updated);
                                       }
                                     }
@@ -607,10 +624,11 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                                     if (onMatrixChange) {
                                       const updated = [...matrix];
                                       updated[settingsTableIdx] = { ...updated[settingsTableIdx] };
-                                      const currentReqs = updated[settingsTableIdx].dailyRequirements || new Array(31).fill(updated[settingsTableIdx].totalRequiredDaily || 0);
+                                      const currentReqs = updated[settingsTableIdx].dailyRequirements ? [...updated[settingsTableIdx].dailyRequirements!] : new Array(31).fill(updated[settingsTableIdx].totalRequiredDaily || 0);
                                       currentReqs[idx] += 1;
                                       updated[settingsTableIdx].dailyRequirements = currentReqs;
                                       updated[settingsTableIdx].totalRequiredMonth = currentReqs.reduce((a, b) => a + b, 0);
+                                      updated[settingsTableIdx].totalRequiredDaily = Math.max(...currentReqs);
                                       onMatrixChange(updated);
                                     }
                                   }}
@@ -628,9 +646,30 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                   </div>
 
                   {/* Modal Footer */}
-                  <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-800 flex justify-end bg-slate-50 dark:bg-slate-800/50">
+                  <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs font-bold text-slate-500 dark:text-slate-400">Total Monthly Requirement:</span>
+                      <span className="px-2.5 py-1 rounded-lg bg-indigo-600 text-white font-mono font-black text-sm">
+                        {((matrix[settingsTableIdx]?.dailyRequirements && matrix[settingsTableIdx]?.dailyRequirements!.length > 0)
+                          ? matrix[settingsTableIdx]?.dailyRequirements!.reduce((a, b) => a + (Number(b) || 0), 0)
+                          : (matrix[settingsTableIdx]?.totalRequiredMonth || (matrix[settingsTableIdx]?.totalRequiredDaily ? matrix[settingsTableIdx]?.totalRequiredDaily * 31 : 0)))}
+                      </span>
+                      <span className="text-xs text-slate-500 font-medium">days</span>
+                    </div>
                     <button 
-                      onClick={() => setSettingsTableIdx(null)}
+                      onClick={() => {
+                        if (onMatrixChange && matrix[settingsTableIdx]) {
+                          const updated = [...matrix];
+                          const cur = { ...updated[settingsTableIdx] };
+                          if (cur.dailyRequirements && cur.dailyRequirements.length > 0) {
+                            cur.totalRequiredMonth = cur.dailyRequirements.reduce((a, b) => a + (Number(b) || 0), 0);
+                            cur.totalRequiredDaily = Math.max(...cur.dailyRequirements);
+                            updated[settingsTableIdx] = cur;
+                            onMatrixChange(updated);
+                          }
+                        }
+                        setSettingsTableIdx(null);
+                      }}
                       className="px-6 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 shadow-md rounded-xl transition-colors flex items-center space-x-2"
                     >
                       <Save className="w-4 h-4" />

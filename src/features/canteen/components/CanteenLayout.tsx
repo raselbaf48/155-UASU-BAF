@@ -20,13 +20,14 @@ import { Settings } from '../pages/Settings';
 import { PosSales } from '../pages/PosSales';
 import { MemberDB } from '../pages/MemberDB';
 import { CanteenInventory } from '../pages/CanteenInventory';
+import { RawInventoryManagement } from '../pages/RawInventoryManagement';
 import { Expenditures } from '../pages/Expenditures';
 import { CanteenReports } from '../pages/CanteenReports';
 import { CanteenSettings } from '../pages/CanteenSettings';
 import { CanteenFund } from '../pages/CanteenFund';
 import { AirmanProfileModal } from '../../../components/AirmanProfileModal';
 
-import { Wallet, LayoutDashboard, Coffee, Search, List, CreditCard, ArrowLeft, Utensils, Wifi, HelpCircle, LogIn, Grid, Package as Pkg, ShoppingCart, Users, Banknote, BarChart2, Settings as SettingsIcon, PieChart, Package, UserCircle, X, Menu, User, Eye, EyeOff, Lock, Phone } from 'lucide-react';
+import { Wallet, LayoutDashboard, Coffee, Search, List, CreditCard, ArrowLeft, Utensils, Wifi, HelpCircle, LogIn, Grid, Package as Pkg, ShoppingCart, Users, Banknote, BarChart2, Settings as SettingsIcon, PieChart, Package, UserCircle, X, Menu, User, Eye, EyeOff, Lock, Phone, UtensilsCrossed, Boxes } from 'lucide-react';
 
 interface CanteenLayoutProps {
   initialMember?: { name: string, bdNo: string, role?: 'employee'|'manager', photoUrl?: string, due?: number };
@@ -462,7 +463,8 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
     { id: 'manager_dashboard', name: 'Manager Home', icon: Grid },
     { id: 'pos_sales', name: 'POS Sales', icon: ShoppingCart },
     { id: 'member_db', name: 'Member DB', icon: Users },
-    { id: 'inventory', name: 'Inventory', icon: Pkg },
+    { id: 'menu', name: 'Menu', icon: UtensilsCrossed },
+    { id: 'inventory', name: 'Inventory', icon: Boxes },
     { id: 'expenditures', name: 'Expenditures', icon: Banknote },
     { id: 'reports', name: 'Reports', icon: PieChart },
     { id: 'fund', name: 'Fund', icon: Wallet },
@@ -470,8 +472,9 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
   ] : [
     { id: 'dashboard', name: 'Home', icon: Grid },
     { id: 'personal_portal', name: 'Personal Portal', icon: UserCircle },
-    { id: 'inventory', name: 'Inventory', icon: Pkg },
-        { id: 'manager_login', name: 'Manager Portal', icon: LogIn }
+    { id: 'menu', name: 'Menu', icon: UtensilsCrossed },
+    { id: 'inventory', name: 'Inventory', icon: Boxes },
+    { id: 'manager_login', name: 'Manager Portal', icon: LogIn }
   ];
 
   const renderContent = () => {
@@ -488,7 +491,8 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
       case 'manager_dashboard': return <ManagerDashboard />;
       case 'pos_sales': return <PosSales />;
       case 'member_db': return <MemberDB />;
-      case 'inventory': return <CanteenInventory readOnly={currentUser.role !== 'manager'} />;
+      case 'menu': return <CanteenInventory readOnly={currentUser.role !== 'manager'} />;
+      case 'inventory': return <RawInventoryManagement readOnly={currentUser.role !== 'manager'} />;
       case 'expenditures': return <Expenditures />;
       case 'reports': return <CanteenReports />;
       case 'fund': return <CanteenFund />;

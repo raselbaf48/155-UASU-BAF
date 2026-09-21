@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { DutyRatioTable } from '../data/officialDutyRatioMatrix';
 import { FlightName } from '../types';
 import { Printer, X, Download, FileSpreadsheet } from 'lucide-react';
-import { exportTableToCSV, exportDutyRatioMatrixCSV } from '../utils/csvExport';
+import { exportTableToCSV, exportDutyRatioMatrixCSV, exportDutyRatioMatrixExcel } from '../utils/csvExport';
 import { exportHtmlToWord } from '../utils/htmlExport';
 import { DUTY_TYPE_MAP } from '../data/dutyTypes';
 
@@ -146,28 +146,37 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
           </div>
         </div>
 
-        <div className="flex items-center space-x-3">
-          
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <button
-            onClick={() => exportDutyRatioMatrixCSV(matrix, 'Duty_Ratio_Matrix_Complete.csv')}
-            className="flex items-center space-x-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold text-xs transition-colors cursor-pointer"
+            onClick={() => exportDutyRatioMatrixExcel(matrix, 'Duty_Ratio_Matrix_Complete.xlsx')}
+            className="flex items-center space-x-2 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs transition-colors cursor-pointer shadow-xs"
+            title="Export to Microsoft Excel (.xlsx) with dynamic sum formulas"
           >
             <FileSpreadsheet className="w-4 h-4" />
+            <span>Export Excel</span>
+          </button>
+
+          <button
+            onClick={() => exportDutyRatioMatrixCSV(matrix, 'Duty_Ratio_Matrix_Complete.csv')}
+            className="flex items-center space-x-2 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold text-xs transition-colors cursor-pointer shadow-xs"
+            title="Export to CSV (.csv) with calculated sums"
+          >
+            <Download className="w-4 h-4" />
             <span>Export CSV</span>
           </button>
 
           <button
             onClick={() => exportHtmlToWord('print-duty-ratio-content', 'Duty_Ratio_Matrix_Complete.doc')}
-            className="flex items-center space-x-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold text-xs transition-colors cursor-pointer"
+            className="flex items-center space-x-2 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold text-xs transition-colors cursor-pointer shadow-xs"
           >
             <Download className="w-4 h-4" />
             <span>Export Document</span>
           </button>
           <button
             onClick={handlePrint}
-            className="flex items-center space-x-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black text-sm shadow-lg shadow-emerald-900/20 transition-all cursor-pointer"
+            className="flex items-center space-x-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black text-xs sm:text-sm shadow-lg shadow-emerald-900/20 transition-all cursor-pointer"
           >
-            <Printer className="w-5 h-5" />
+            <Printer className="w-4 h-4" />
             <span>Official Export / Print</span>
           </button>
         </div>

@@ -32,94 +32,94 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
   // 1. BASE SECURITY DUTY
   {
     id: 'security_duty',
-    title: 'SECURITY DUTY (88)',
+    title: 'BASE SECURITY DUTY',
     dutyCode: 'GD',
     totalRequiredMonth: 88,
     totalRequiredDaily: 3,
     data: {
-      Mechanics: [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1],
-      Avionics:  [1,1,1,0,1,1,1,0,0,0,1,1,1,1,1,0,0,0,1,1,0,1,0,0,1,1,1,0,1,1,1],
-      GCS:       [1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,0,1,1,1,1,0,1,1,1,1,1,1,1],
-      Admin:     [0,0,0,1,1,0,0,0,1,1,0,0,0,0,0,1,0,1,0,0,1,0,0,1,0,0,0,1,0,0,1],
+      Mechanics: [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1],
+      Avionics:  [1,1,0,1,1,0,0,1,1,0,0,1,1,0,1,1,0,1,0,1,1,0,0,0,1,1,0,1,1,0,0],
+      GCS:       [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1,1,1,1,1,1,1,2],
+      Admin:     [0,0,1,0,0,1,1,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,1,0,0,0,0],
     },
   },
   // 2. BASE TASKFORCE DUTY
   {
     id: 'base_tf',
-    title: 'BASE T/F (22)',
+    title: 'BASE TASKFORCE DUTY',
     dutyCode: 'BTF',
     totalRequiredMonth: 22,
     totalRequiredDaily: 1,
     data: {
-      Mechanics: [0,0,1,1,0,0,1,1,0,0,0,0,1,0,0,0,1,1,0,0,0,0,0,1,0,0,0,0,0,0,0],
-      Avionics:  [1,1,0,0,1,0,0,0,1,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-      GCS:       [0,0,0,0,0,1,0,0,0,0,1,1,0,0,0,1,0,0,0,0,0,1,0,0,1,0,0,0,0,0,0],
-      Admin:     [0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0],
+      Mechanics: [0,1,1,1,1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
+      Avionics:  [0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0],
+      GCS:       [0,0,0,0,0,0,0,1,0,0,0,1,0,1,1,1,0,0,0,0,0,1,1,0,1,0,0,0,0,0,0],
+      Admin:     [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
     },
   },
-  // 3. NAZIRPARA TARKFORCE DUTY
+  // 3. NAJIRPARA TASKFORCE DUTY
   {
     id: 'nazirpara_tf',
-    title: 'NAZIRPARA T/F (40)',
+    title: 'NAJIRPARA TASKFORCE DUTY',
     dutyCode: 'NTF',
     totalRequiredMonth: 40,
     totalRequiredDaily: 1,
     data: {
-      Mechanics: [1,1,0,0,0,0,1,1,0,1,1,0,0,0,1,0,0,0,1,1,0,0,1,0,1,0,1,1,0,0,1],
-      Avionics:  [0,0,0,0,1,1,0,0,0,0,0,1,1,0,0,1,0,0,0,0,1,1,0,1,0,0,0,0,0,1,1],
-      GCS:       [1,0,1,1,0,0,0,0,1,0,0,0,0,1,1,0,0,1,1,0,0,0,0,1,0,1,1,0,1,1,0],
-      Admin:     [0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+      Mechanics: [1,0,0,0,1,0,1,1,0,1,1,0,0,0,1,1,0,0,1,1,0,0,0,1,1,0,1,1,0,0,1],
+      Avionics:  [0,0,1,0,0,0,0,0,0,0,0,0,0,1,0,0,1,0,1,0,0,1,1,1,0,0,1,0,0,1,0],
+      GCS:       [1,1,0,1,0,1,0,0,1,1,0,1,1,0,1,0,0,1,0,0,1,0,0,0,0,1,0,0,1,1,1],
+      Admin:     [0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
     },
   },
   // 4. IDAC MORNING
   {
     id: 'idac_mor',
-    title: 'IDAC MOR (31)',
+    title: 'IDAC  MORNING',
     dutyCode: 'IDAC',
     shiftLabel: 'Morning',
     totalRequiredMonth: 31,
     totalRequiredDaily: 1,
     data: {
-      Mechanics: [1,0,1,0,1,0,0,0,0,0,0,0,1,0,1,0,0,1,1,0,0,0,0,0,0,0,0,0,1,0,0],
-      Avionics:  [0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,1,0,1,0,1,0,0,0,1,0],
-      GCS:       [0,1,0,1,0,0,1,1,1,1,0,0,0,1,0,0,0,0,0,1,1,0,1,0,0,0,1,0,0,0,1],
-      Admin:     [0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0],
+      Mechanics: [0,0,0,0,1,1,0,0,0,1,1,0,1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,0,1,1,0],
+      Avionics:  [0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,0,0,0],
+      GCS:       [1,1,1,0,0,0,1,1,1,0,0,0,0,1,1,1,1,0,0,1,1,1,0,0,0,1,1,1,0,0,1],
+      Admin:     [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0],
     },
   },
   // 5. IDAC AFTERNOON
   {
     id: 'idac_an',
-    title: 'IDAC A/N (31)',
+    title: 'IDAC AFTERNOON ',
     dutyCode: 'IDAC',
     shiftLabel: 'Afternoon',
     totalRequiredMonth: 31,
     totalRequiredDaily: 1,
     data: {
-      Mechanics: [0,1,0,1,0,1,1,1,1,0,0,0,0,0,1,1,1,0,0,0,1,0,0,0,1,1,0,0,1,0,0],
-      Avionics:  [1,0,0,0,1,0,0,0,0,0,1,0,0,1,0,0,0,1,0,1,0,0,1,0,0,0,1,0,0,1,1],
-      GCS:       [0,0,0,0,0,0,0,0,0,1,0,1,1,0,0,0,0,0,0,0,0,1,0,1,0,0,0,1,0,0,0],
-      Admin:     [0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0],
+      Mechanics: [0,1,1,1,0,0,1,1,1,0,0,0,0,1,1,1,1,0,0,1,0,1,0,0,1,1,1,0,0,0,0],
+      Avionics:  [1,0,0,0,0,1,0,0,0,1,1,0,1,0,0,0,0,1,0,0,1,0,0,0,0,0,0,1,0,1,1],
+      GCS:       [0,0,0,0,1,0,0,0,0,0,0,1,0,0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1,0,0],
+      Admin:     [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0],
     },
   },
   // 6. IDAC NIGHT
   {
     id: 'idac_nt',
-    title: 'IDAC N/T (62)',
+    title: 'IDAC NIGHT',
     dutyCode: 'IDAC',
     shiftLabel: 'Night',
     totalRequiredMonth: 62,
     totalRequiredDaily: 2,
     data: {
-      Mechanics: [0,1,1,1,1,0,1,1,1,1,1,1,1,0,0,0,0,1,1,1,1,1,1,0,0,1,1,1,1,1,1],
-      Avionics:  [0,0,1,0,0,1,1,1,0,0,0,0,0,1,1,1,1,0,0,0,1,1,0,1,1,1,1,0,0,1,1],
-      GCS:       [1,1,0,1,1,0,0,0,0,1,1,1,1,0,1,1,0,1,1,1,0,0,1,1,0,0,1,1,1,0,0],
-      Admin:     [1,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+      Mechanics: [1,1,1,1,0,1,0,1,0,1,1,1,1,0,1,0,1,1,1,0,1,1,1,1,0,0,1,1,1,1,1],
+      Avionics:  [1,0,0,0,1,0,1,1,1,0,0,1,0,1,1,1,0,0,1,1,0,0,0,1,1,1,0,0,0,0,0],
+      GCS:       [0,1,1,1,1,1,0,0,1,1,1,0,1,1,0,1,1,0,0,1,1,1,1,0,1,1,1,1,1,1,1],
+      Admin:     [0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0],
     },
   },
   // 7. AIRFIELD DUTY
   {
     id: 'airport_duty',
-    title: 'AIRPORT DUTY',
+    title: 'AIRFIELD DUTY',
     dutyCode: 'AIRPORT',
     totalRequiredMonth: 93,
     totalRequiredDaily: 3,
@@ -131,19 +131,19 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
       Admin:     [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
     },
   },
-  // 8. HALISHAHAR TASKFIRCE DUTY
+  // 8. RECEIPTION DUTY
   {
     id: 'halishahar_duty',
-    title: 'HALISHAHAR T/F',
-    dutyCode: 'HALISHAHAR',
-    totalRequiredMonth: 7,
+    title: 'Receiption Duty',
+    dutyCode: 'RECEPTION',
+    totalRequiredMonth: 31,
     totalRequiredDaily: 1,
-    eligibleFlights: ['Avionics'],
+    eligibleFlights: ['Mechanics', 'Avionics', 'GCS', 'Admin'],
     data: {
-      Mechanics: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-      Avionics:  [0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0],
-      GCS:       [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-      Admin:     [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+      Mechanics: [1,0,1,1,0,0,1,0,1,0,0,0,0,1,0,0,1,0,0,0,1,1,0,0,1,1,0,0,0,0,0],
+      Avionics:  [0,1,0,0,0,0,0,0,0,0,1,0,1,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,1,1],
+      GCS:       [0,0,0,0,1,1,0,1,0,0,0,1,0,0,1,0,0,1,1,0,0,0,1,1,0,0,1,0,1,0,0],
+      Admin:     [0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0],
     },
   },
 ];
@@ -192,9 +192,29 @@ export function getStoredDutyMatrix(): DutyRatioTable[] {
         const defaultsMap = new Map(INITIAL_OFFICIAL_DUTY_MATRIX.map((t) => [t.id, t]));
         const updatedParsed = parsed.map((t: DutyRatioTable) => {
           const defT = defaultsMap.get(t.id);
+          let title = t.title || defT?.title || '';
+          if (defT) {
+            const cleanT = title.toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (
+              cleanT === 'securityduty88' ||
+              cleanT === 'basetf22' ||
+              cleanT === 'nazirparatarforce40' ||
+              cleanT === 'nazirparataforce40' ||
+              cleanT === 'nazirparaf40' ||
+              cleanT === 'nazirparattf40' ||
+              cleanT === 'nazirparaf' ||
+              cleanT === 'idacmor31' ||
+              cleanT === 'idacan31' ||
+              cleanT === 'idacnt62' ||
+              cleanT === 'halishahartf'
+            ) {
+              title = defT.title;
+            }
+          }
           return {
             ...t,
-            title: t.title || defT?.title,
+            title,
+            dutyCode: defT?.dutyCode || t.dutyCode,
             eligibleFlights: t.eligibleFlights || defT?.eligibleFlights,
             eligibleRanks: t.eligibleRanks || defT?.eligibleRanks,
           };
@@ -287,26 +307,41 @@ export function getStoredDutyMatrix(): DutyRatioTable[] {
 
 export function saveDutyMatrix(matrix: DutyRatioTable[]) {
   try {
-    localStorage.setItem(MATRIX_STORAGE_KEY, JSON.stringify(matrix));
+    // 1. Sanitize matrix ensuring totalRequiredMonth always matches daily requirements sum
+    const sanitizedMatrix = matrix.map(m => {
+      const copy = { ...m };
+      if (copy.dailyRequirements && Array.isArray(copy.dailyRequirements) && copy.dailyRequirements.length > 0) {
+        copy.totalRequiredMonth = copy.dailyRequirements.reduce((a, b) => a + (Number(b) || 0), 0);
+      } else if (!copy.totalRequiredMonth && copy.totalRequiredDaily) {
+        copy.totalRequiredMonth = copy.totalRequiredDaily * 31;
+      }
+      return copy;
+    });
+
+    localStorage.setItem(MATRIX_STORAGE_KEY, JSON.stringify(sanitizedMatrix));
     
     // Save metadata separately so it gets synced via app_settings
-    const metadata = matrix.map(m => ({
+    const metadata = sanitizedMatrix.map(m => ({
         id: m.id,
         serNo: m.serNo,
         title: m.title,
         dutyCode: m.dutyCode,
+        shiftLabel: m.shiftLabel,
         eligibleFlights: m.eligibleFlights,
         eligibleRanks: m.eligibleRanks,
         flightTargets: m.flightTargets,
         isDisabled: m.isDisabled,
         totalRequiredDaily: m.totalRequiredDaily,
+        totalRequiredMonth: m.totalRequiredMonth,
         dailyRequirements: m.dailyRequirements
     }));
     localStorage.setItem('baf_duty_matrix_metadata', JSON.stringify(metadata));
+    localStorage.setItem('baf_duty_matrix_full', JSON.stringify(sanitizedMatrix));
     localStorage.setItem('baf_pending_sync', 'true');
 
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('baf_duty_ratio_updated', { detail: { matrix } }));
+      window.dispatchEvent(new CustomEvent('baf_duty_ratio_updated', { detail: { matrix: sanitizedMatrix } }));
+      window.dispatchEvent(new CustomEvent('baf_sync_duty_matrix_cloud', { detail: { matrix: sanitizedMatrix } }));
     }
   } catch (e) {
     console.error('Failed to save duty matrix:', e);

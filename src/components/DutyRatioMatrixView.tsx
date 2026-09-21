@@ -30,6 +30,7 @@ import {
   FileSpreadsheet,
   CheckCircle2, Clock } from 'lucide-react';
 import { exportDutyRatioDocx } from '../utils/docxExport';
+import { exportDutyRatioMatrixCSV, exportDutyRatioMatrixExcel } from '../utils/csvExport';
 import { ImportDutyRatioModal } from './ImportDutyRatioModal';
 import { FlightDutyCalendarModal } from './FlightDutyCalendarModal';
 import { PrintableDutyRatioModal } from "./PrintableDutyRatioModal";
@@ -342,18 +343,38 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
             <>
               <button
                 type="button"
+                onClick={() => exportDutyRatioMatrixExcel(matrix, 'Duty_Ratio_Matrix_Complete.xlsx')}
+                className="px-3 py-2 text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 rounded-xl transition-colors flex items-center space-x-1.5 shadow-xs cursor-pointer"
+                title="Export Duty Ratio Matrix to Microsoft Excel (.xlsx) with Live Formulas"
+              >
+                <FileSpreadsheet className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                <span>Export Excel</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => exportDutyRatioMatrixCSV(matrix, 'Duty_Ratio_Matrix_Complete.csv')}
+                className="px-3 py-2 text-xs font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-xl transition-colors flex items-center space-x-1.5 shadow-xs cursor-pointer"
+                title="Export Duty Ratio Matrix to CSV (.csv) with Calculated Totals"
+              >
+                <FileDown className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                <span>Export CSV</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setIsImportModalOpen(true)}
-                className="px-3.5 py-2 text-xs font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-xl transition-colors flex items-center space-x-1.5 shadow-xs cursor-pointer"
+                className="px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-xl transition-colors flex items-center space-x-1.5 shadow-xs cursor-pointer"
                 title="Import Duty Ratio Matrix from CSV / Excel"
               >
-                <Upload className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                <Upload className="w-4 h-4 text-slate-600 dark:text-slate-400" />
                 <span>Import Matrix</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setIsPrintModalOpen(true)}
-                className="px-3.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-xl transition-colors flex items-center space-x-1.5 shadow-xs cursor-pointer"
+                className="px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-xl transition-colors flex items-center space-x-1.5 shadow-xs cursor-pointer"
                 title="Print Preview / Export"
               >
                 <Printer className="w-4 h-4" />
