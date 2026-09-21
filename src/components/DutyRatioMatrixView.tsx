@@ -54,6 +54,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
   const [settingsTableIdx, setSettingsTableIdx] = useState<number | null>(null);
   const [resetConfirmTableIdx, setResetConfirmTableIdx] = useState<number | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [flightViewMode, setFlightViewMode] = useState<'SCHEDULE' | 'DUTY_CARDS'>('SCHEDULE');
   const [viewMode, setViewMode] = useState<'DUTY_DISTRIBUTION' | 'DUTY_RATIO' | 'MANPOWER' | 'DUTY_LIST'>('DUTY_RATIO');
   const [targetDate, setTargetDate] = useState(() => {
     const saved = localStorage.getItem('baf_duty_distribution_target_date');
@@ -298,6 +299,13 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
     });
   });
 
+  const targetFlightTotal = selectedFlightFilter !== 'Overall'
+    ? matrix.filter(t => !t.isDisabled).reduce((sum, t) => {
+        const tgt = autoTargets?.[selectedFlightFilter]?.[t.id] ?? t.flightTargets?.[selectedFlightFilter as FlightName] ?? 0;
+        return sum + tgt;
+      }, 0)
+    : 0;
+
   const handleRatioCalculated = (newMatrix: DutyRatioTable[]) => {
     setMatrix(newMatrix);
     saveDutyMatrix(newMatrix);
@@ -459,23 +467,38 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
               </div>
             </div>
             
-            {selectedFlightFilter === 'Overall' && (
-              <div className="flex justify-center mb-6">
-                <button
-                  onClick={() => setShowAllTableInfo(!showAllTableInfo)}
-                  className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-sm font-bold transition-all shadow-sm border ${showAllTableInfo ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-                >
-                  <Info className="w-4 h-4" />
-                  <span>{showAllTableInfo ? 'Hide Info' : 'Show Info'}</span>
-                </button>
-              </div>
-            )}
+            <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
+              <button
+                onClick={() => setShowAllTableInfo(!showAllTableInfo)}
+                className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-sm font-bold transition-all shadow-sm border ${showAllTableInfo ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+              >
+                <Info className="w-4 h-4" />
+                <span>{showAllTableInfo ? 'Hide Info' : 'Show Info'}</span>
+              </button>
+
+              {selectedFlightFilter !== 'Overall' && (
+                <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold">
+                  <button
+                    onClick={() => setFlightViewMode('SCHEDULE')}
+                    className={`px-3 py-1.5 rounded-lg transition-all ${flightViewMode === 'SCHEDULE' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
+                  >
+                    Consolidated Schedule
+                  </button>
+                  <button
+                    onClick={() => setFlightViewMode('DUTY_CARDS')}
+                    className={`px-3 py-1.5 rounded-lg transition-all ${flightViewMode === 'DUTY_CARDS' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
+                  >
+                    Per-Duty Cards
+                  </button>
+                </div>
+              )}
+            </div>
           </>
         )}
 
         {/* Existing Mapping for Overall or Specific Single Flight Rendering */}
 
-        {viewMode === 'DUTY_RATIO' && selectedFlightFilter === 'Overall' && matrix.filter(t => !t.isDisabled).map((table, tableIdx) => {
+        {viewMode === 'DUTY_RATIO' && (selectedFlightFilter === 'Overall' || flightViewMode === 'DUTY_CARDS') && matrix.filter(t => !t.isDisabled).map((table, tableIdx) => {
           const tableTotal = flights.reduce((sum, fl) => sum + table.data[fl].reduce((a,b) => a+b, 0), 0);
           // Keep specific styling for first tables
           let colors = {
@@ -673,113 +696,177 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
           })}
           
 
-        {viewMode === 'DUTY_RATIO' && selectedFlightFilter !== 'Overall' && (
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-md overflow-hidden">
-            <div className="px-4 py-3 flex items-center justify-between bg-slate-800 text-white">
-              <div className="flex items-center space-x-3">
-                <span className="font-mono font-black text-sm tracking-wider">
-                  {selectedFlightFilter} Duty Schedule
-                </span>
+        {viewMode === 'DUTY_RATIO' && selectedFlightFilter !== 'Overall' && flightViewMode === 'SCHEDULE' && (
+          <div className="space-y-4">
+            {showAllTableInfo && (
+              <div className="bg-indigo-50/90 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 rounded-2xl p-4 shadow-xs">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center space-x-2.5">
+                    <Info className="w-5 h-5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                    <div>
+                      <h4 className="font-black text-sm text-indigo-950 dark:text-indigo-200">
+                        {selectedFlightFilter} Flight Quota & Target Info
+                      </h4>
+                      <p className="text-xs text-indigo-700 dark:text-indigo-300">
+                        Allocated Total: <strong className="font-mono">{flightTotalsOverall[selectedFlightFilter as FlightName]}</strong> / Target Total: <strong className="font-mono">{targetFlightTotal}</strong>
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-3 text-xs font-semibold">
+                    <span className="inline-flex items-center space-x-1.5 bg-emerald-100/70 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 px-2.5 py-1 rounded-lg">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+                      <span>Target Matched</span>
+                    </span>
+                    <span className="inline-flex items-center space-x-1.5 bg-red-100/70 dark:bg-red-950/50 text-red-800 dark:text-red-300 px-2.5 py-1 rounded-lg">
+                      <span className="w-2 h-2 rounded-full bg-red-500 inline-block"></span>
+                      <span>Quota Mismatch</span>
+                    </span>
+                  </div>
+                </div>
               </div>
-              <div className="text-xs font-bold bg-white/20 px-2.5 py-1 rounded-lg">
-                Month Total: <strong className="font-mono">{flightTotalsOverall[selectedFlightFilter as FlightName]}</strong>
-            </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs text-center border-collapse">
-                <thead>
-                  <tr className="bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
-                    <th className="p-2 text-center sticky left-0 bg-slate-100 dark:bg-slate-800 z-10 w-32 min-w-32 border-r border-slate-200 dark:border-slate-700 align-middle">
-                      Duty Name / Date
-                    </th>
-                    {daysArray.map((d) => (
-                      <th key={d} className="p-1 min-w-[28px] max-w-[32px] font-mono text-[11px] align-middle">
-                        {d}
+            )}
+
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-md overflow-hidden">
+              <div className="px-4 py-3 flex items-center justify-between bg-slate-800 text-white">
+                <div className="flex items-center space-x-3">
+                  <span className="font-mono font-black text-sm tracking-wider">
+                    {selectedFlightFilter} Duty Schedule
+                  </span>
+                </div>
+                <div className="text-xs font-bold bg-white/20 px-2.5 py-1 rounded-lg">
+                  Month Total: <strong className="font-mono">{flightTotalsOverall[selectedFlightFilter as FlightName]}</strong>
+                  {showAllTableInfo && (
+                    <span className="ml-1 text-white/80">
+                      / {targetFlightTotal}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-center border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
+                      <th className="p-2 text-center sticky left-0 bg-slate-100 dark:bg-slate-800 z-10 w-32 min-w-32 border-r border-slate-200 dark:border-slate-700 align-middle">
+                        Duty Name / Date
                       </th>
-                    ))}
-                    <th className="p-2 w-16 min-w-16 font-bold bg-slate-200/60 dark:bg-slate-700/60 border-l border-slate-200 dark:border-slate-700 align-middle">
-                      Total
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {matrix.filter(t => !t.isDisabled).map((table, tableIdx) => {
-                    const rowData = table.data[selectedFlightFilter as FlightName];
-                    const rowSum = rowData.reduce((a, b) => a + b, 0);
-                    return (
-                      <tr key={table.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
-                        <td className="p-2 text-center font-bold text-slate-900 dark:text-white sticky left-0 bg-white dark:bg-slate-900 z-10 border-r border-slate-200 dark:border-slate-800 align-middle text-[11px] leading-tight">
-                          <div className="flex items-center justify-between">
-                            <span>{table.serNo !== undefined ? `${table.serNo}. ` : ''}{table.title}</span>
-                            {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') ? (
-                              <button
-                                onClick={() => setEditingCalendar({ tableIdx: matrix.findIndex(x => x.id === table.id), flight: selectedFlightFilter as FlightName })}
-                                className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-indigo-500 transition-colors cursor-pointer ml-2"
-                                title="Edit in Calendar"
-                              >
-                                <Calendar className="w-3.5 h-3.5" />
-                              </button>
-                            ) : (
-                              <Calendar className="w-3.5 h-3.5 text-slate-400 ml-2" />
-                            )}
-                          </div>
-                        </td>
-                        {daysArray.map((dayNum, dayIdx) => {
-                          const val = rowData[dayIdx] || 0;
-                          const isPositive = val > 0;
-                          return (
-                            <td
-                              key={dayNum}
-                              className={`p-0.5 border border-slate-100 dark:border-slate-800/50 ${
-                                isPositive
-                                  ? 'bg-emerald-50/80 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-200 font-black'
-                                  : 'text-slate-400 dark:text-slate-600 font-normal'
-                              }`}
-                            >
-                              <span className="inline-block py-1 font-mono text-xs">{val || ''}</span>
-                            </td>
-                          );
-                        })}
-                        <td className="p-2 font-mono font-black text-slate-900 dark:text-white bg-slate-50 dark:bg-slate-800/50 border-l border-slate-200 dark:border-slate-700 align-middle">
-                          {rowSum}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {/* Daily Total Row */}
-                  <tr className="bg-slate-100/90 dark:bg-slate-800/90 font-bold border-t-2 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100">
-                    <td className="p-2 text-center font-black sticky left-0 bg-slate-100 dark:bg-slate-800 z-10 border-r border-slate-300 dark:border-slate-700 align-middle">
-                      <div className="flex items-center justify-between">
-                        <span className="uppercase text-[11px] font-black tracking-wider text-slate-800 dark:text-slate-200">
-                          Daily Total
-                        </span>
-                        <span className="text-[9px] px-1 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-mono font-bold">
-                          TOTAL
-                        </span>
-                      </div>
-                    </td>
-                    {daysArray.map((dayNum, dayIdx) => {
-                      const dailySum = matrix.filter(t => !t.isDisabled).reduce((sum, table) => sum + (table.data[selectedFlightFilter as FlightName]?.[dayIdx] || 0), 0);
-                      const isPositive = dailySum > 0;
+                      {daysArray.map((d) => (
+                        <th key={d} className="p-1 min-w-[28px] max-w-[32px] font-mono text-[11px] align-middle">
+                          {d}
+                        </th>
+                      ))}
+                      {showAllTableInfo ? (
+                        <th className="p-2 w-28 min-w-28 font-bold bg-slate-200/60 dark:bg-slate-700/60 border-l border-slate-200 dark:border-slate-700 align-middle leading-tight">
+                          Total / Target
+                        </th>
+                      ) : (
+                        <th className="p-2 w-16 min-w-16 font-bold bg-slate-200/60 dark:bg-slate-700/60 border-l border-slate-200 dark:border-slate-700 align-middle">
+                          Total
+                        </th>
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {matrix.filter(t => !t.isDisabled).map((table, tableIdx) => {
+                      const rowData = table.data[selectedFlightFilter as FlightName];
+                      const rowSum = rowData.reduce((a, b) => a + b, 0);
+                      const target = autoTargets?.[selectedFlightFilter as FlightName]?.[table.id] ?? table.flightTargets?.[selectedFlightFilter as FlightName] ?? 0;
                       return (
-                        <td
-                          key={dayNum}
-                          className={`p-0.5 border border-slate-200 dark:border-slate-700/70 font-mono font-black ${
-                            isPositive
-                              ? 'bg-emerald-100/70 dark:bg-emerald-950/60 text-emerald-950 dark:text-emerald-200'
-                              : 'text-slate-400 dark:text-slate-600 font-normal'
-                          }`}
-                        >
-                          <span className="inline-block py-1 text-xs">{dailySum}</span>
-                        </td>
+                        <tr key={table.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                          <td className="p-2 text-center font-bold text-slate-900 dark:text-white sticky left-0 bg-white dark:bg-slate-900 z-10 border-r border-slate-200 dark:border-slate-800 align-middle text-[11px] leading-tight">
+                            <div className="flex items-center justify-between">
+                              <span>{table.serNo !== undefined ? `${table.serNo}. ` : ''}{table.title}</span>
+                              {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') ? (
+                                <button
+                                  onClick={() => setEditingCalendar({ tableIdx: matrix.findIndex(x => x.id === table.id), flight: selectedFlightFilter as FlightName })}
+                                  className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-indigo-500 transition-colors cursor-pointer ml-2"
+                                  title="Edit in Calendar"
+                                >
+                                  <Calendar className="w-3.5 h-3.5" />
+                                </button>
+                              ) : (
+                                <Calendar className="w-3.5 h-3.5 text-slate-400 ml-2" />
+                              )}
+                            </div>
+                          </td>
+                          {daysArray.map((dayNum, dayIdx) => {
+                            const val = rowData[dayIdx] || 0;
+                            const isPositive = val > 0;
+                            return (
+                              <td
+                                key={dayNum}
+                                className={`p-0.5 border border-slate-100 dark:border-slate-800/50 ${
+                                  isPositive
+                                    ? 'bg-emerald-50/80 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-200 font-black'
+                                    : 'text-slate-400 dark:text-slate-600 font-normal'
+                                }`}
+                              >
+                                <span className="inline-block py-1 font-mono text-xs">{val || ''}</span>
+                              </td>
+                            );
+                          })}
+                          {showAllTableInfo ? (
+                            <td className="p-2 font-mono font-bold bg-slate-50 dark:bg-slate-800/50 border-l border-slate-200 dark:border-slate-700 align-middle">
+                              <div className="flex items-center justify-center space-x-1 text-[11px]">
+                                <span className={rowSum !== target ? 'text-red-600 dark:text-red-400 font-black' : 'text-emerald-700 dark:text-emerald-400 font-bold'}>
+                                  {rowSum}
+                                </span>
+                                <span className="text-slate-400">/</span>
+                                <span className="text-slate-600 dark:text-slate-400 font-bold">{target}</span>
+                              </div>
+                            </td>
+                          ) : (
+                            <td className="p-2 font-mono font-black text-slate-900 dark:text-white bg-slate-50 dark:bg-slate-800/50 border-l border-slate-200 dark:border-slate-700 align-middle">
+                              {rowSum}
+                            </td>
+                          )}
+                        </tr>
                       );
                     })}
-                    <td className="p-2 font-mono font-black text-emerald-800 dark:text-emerald-300 bg-slate-200/90 dark:bg-slate-700/90 border-l border-slate-300 dark:border-slate-700 text-xs align-middle">
-                      {flightTotalsOverall[selectedFlightFilter as FlightName]}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+                    {/* Daily Total Row */}
+                    <tr className="bg-slate-100/90 dark:bg-slate-800/90 font-bold border-t-2 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100">
+                      <td className="p-2 text-center font-black sticky left-0 bg-slate-100 dark:bg-slate-800 z-10 border-r border-slate-300 dark:border-slate-700 align-middle">
+                        <div className="flex items-center justify-between">
+                          <span className="uppercase text-[11px] font-black tracking-wider text-slate-800 dark:text-slate-200">
+                            {showAllTableInfo ? 'Total / Target' : 'Daily Total'}
+                          </span>
+                          <span className="text-[9px] px-1 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-mono font-bold">
+                            TOTAL
+                          </span>
+                        </div>
+                      </td>
+                      {daysArray.map((dayNum, dayIdx) => {
+                        const dailySum = matrix.filter(t => !t.isDisabled).reduce((sum, table) => sum + (table.data[selectedFlightFilter as FlightName]?.[dayIdx] || 0), 0);
+                        const isPositive = dailySum > 0;
+                        return (
+                          <td
+                            key={dayNum}
+                            className={`p-0.5 border border-slate-200 dark:border-slate-700/70 font-mono font-black ${
+                              isPositive
+                                ? 'bg-emerald-100/70 dark:bg-emerald-950/60 text-emerald-950 dark:text-emerald-200'
+                                : 'text-slate-400 dark:text-slate-600 font-normal'
+                            }`}
+                          >
+                            <span className="inline-block py-1 text-xs">{dailySum}</span>
+                          </td>
+                        );
+                      })}
+                      <td className="p-2 font-mono font-black text-emerald-800 dark:text-emerald-300 bg-slate-200/90 dark:bg-slate-700/90 border-l border-slate-300 dark:border-slate-700 text-xs align-middle">
+                        {showAllTableInfo ? (
+                          <div className="flex items-center justify-center space-x-1">
+                            <span className={flightTotalsOverall[selectedFlightFilter as FlightName] !== targetFlightTotal ? 'text-red-600 dark:text-red-400 font-black' : ''}>
+                              {flightTotalsOverall[selectedFlightFilter as FlightName]}
+                            </span>
+                            <span className="text-slate-400 font-normal">/</span>
+                            <span className="text-slate-600 dark:text-slate-400">{targetFlightTotal}</span>
+                          </div>
+                        ) : (
+                          flightTotalsOverall[selectedFlightFilter as FlightName]
+                        )}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
@@ -889,6 +976,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
       {editingCalendar && (role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') && (
         <FlightDutyCalendarModal
           table={matrix[editingCalendar.tableIdx]}
+          matrix={matrix}
           flight={editingCalendar.flight}
           onClose={() => setEditingCalendar(null)}
           onSave={(newData) => {

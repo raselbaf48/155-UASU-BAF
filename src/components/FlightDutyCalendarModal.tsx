@@ -6,6 +6,7 @@ import { Calendar, RotateCcw, X, Save, CheckCircle2 } from 'lucide-react';
 interface FlightDutyCalendarModalProps {
   table: DutyRatioTable;
   flight: FlightName;
+  matrix?: DutyRatioTable[];
   onClose: () => void;
   onSave: (newData: number[]) => void;
 }
@@ -13,10 +14,12 @@ interface FlightDutyCalendarModalProps {
 export const FlightDutyCalendarModal: React.FC<FlightDutyCalendarModalProps> = ({
   table,
   flight,
+  matrix,
   onClose,
   onSave,
 }) => {
   const [data, setData] = useState<number[]>(table.data[flight] || new Array(31).fill(0));
+  const [flightViewMetric, setFlightViewMetric] = useState<'THIS_DUTY' | 'ALL_DUTIES'>('THIS_DUTY');
 
   const handleCellClick = (dayIdx: number) => {
     const val = data[dayIdx] || 0;
@@ -89,11 +92,56 @@ export const FlightDutyCalendarModal: React.FC<FlightDutyCalendarModalProps> = (
           </div>
         </div>
 
+        {/* Legend & View Metric Switcher */}
+        <div className="px-4 sm:px-6 py-2.5 bg-slate-100/80 dark:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+          <div className="flex items-center space-x-3">
+            <div className="flex items-center space-x-1.5" title={`Duties assigned to ${flight} on that date`}>
+              <span className="w-2.5 h-2.5 rounded-full bg-indigo-600 inline-block"></span>
+              <span className="font-bold text-slate-700 dark:text-slate-300">Left:</span>
+              <span className="text-slate-600 dark:text-slate-400 font-semibold">{flight} Duty</span>
+            </div>
+            <div className="flex items-center space-x-1.5" title="Total duties of all flights / Daily requirement">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span>
+              <span className="font-bold text-slate-700 dark:text-slate-300">Right:</span>
+              <span className="text-slate-600 dark:text-slate-400 font-semibold">Total / Req</span>
+            </div>
+          </div>
+
+          {matrix && (
+            <div className="flex items-center bg-white dark:bg-slate-900 rounded-lg p-0.5 border border-slate-200 dark:border-slate-700 font-bold text-[10px]">
+              <button
+                type="button"
+                onClick={() => setFlightViewMetric('THIS_DUTY')}
+                className={`px-2 py-0.5 rounded transition-all cursor-pointer ${
+                  flightViewMetric === 'THIS_DUTY'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+                title={`Show ${flight} duty count in this duty table`}
+              >
+                This Duty
+              </button>
+              <button
+                type="button"
+                onClick={() => setFlightViewMetric('ALL_DUTIES')}
+                className={`px-2 py-0.5 rounded transition-all cursor-pointer ${
+                  flightViewMetric === 'ALL_DUTIES'
+                    ? 'bg-purple-600 text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+                title={`Show ${flight} total duties across all 8 tables on that date`}
+              >
+                All Duties Day Total
+              </button>
+            </div>
+          )}
+        </div>
+
         {/* Calendar Grid */}
         <div className="p-4 sm:p-6">
           <div className="grid grid-cols-7 gap-3 sm:gap-4">
             {Array.from({ length: 31 }).map((_, i) => {
-              const val = data[i];
+              const val = data[i] || 0;
               const isPositive = val > 0;
               
               const requirement = table.dailyRequirements ? (table.dailyRequirements[i] || 0) : (table.totalRequiredDaily || 0);
@@ -103,16 +151,43 @@ export const FlightDutyCalendarModal: React.FC<FlightDutyCalendarModalProps> = (
               const isFulfilled = requirement > 0 && totalAssigned >= requirement;
               const isOverFulfilled = requirement > 0 && totalAssigned > requirement;
 
+              const otherTablesCount = matrix
+                ? matrix
+                    .filter(t => t.id !== table.id && !t.isDisabled)
+                    .reduce((sum, t) => sum + (t.data[flight]?.[i] || 0), 0)
+                : 0;
+              const totalFlightDayCount = val + otherTablesCount;
+
+              const displayFlightCount = flightViewMetric === 'ALL_DUTIES' ? totalFlightDayCount : val;
+
               return (
                 <button
                   key={i}
+                  type="button"
                   onClick={() => handleCellClick(i)}
+                  title={`${flight} on Day ${i + 1}: ${val} in ${table.title}${otherTablesCount > 0 ? ` (${totalFlightDayCount} total across all duties on this day)` : ''}`}
                   className={`relative aspect-square rounded-full border-2 flex flex-col items-center justify-center transition-all ${
                     isPositive
                       ? 'bg-indigo-50 border-indigo-200 dark:bg-indigo-900/20 dark:border-indigo-800/50 cursor-pointer'
                       : 'bg-slate-50 border-slate-200 hover:border-indigo-300 dark:bg-slate-800/50 dark:border-slate-700 dark:hover:border-indigo-500 cursor-pointer'
                   }`}
                 >
+                  {/* Left Badge: Flight Duty Count on this Date */}
+                  <div
+                    className={`absolute -top-2 -left-2 text-[9px] font-black px-1.5 py-0.5 rounded-full shadow-sm border transition-colors ${
+                      flightViewMetric === 'ALL_DUTIES'
+                        ? totalFlightDayCount > 0
+                          ? 'bg-purple-600 border-purple-700 text-white dark:bg-purple-500'
+                          : 'bg-slate-200 border-slate-300 text-slate-500 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-400'
+                        : val > 0
+                          ? 'bg-indigo-600 border-indigo-700 text-white dark:bg-indigo-500'
+                          : 'bg-slate-200 border-slate-300 text-slate-500 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    {displayFlightCount}
+                  </div>
+
+                  {/* Right Badge: Duty Table Daily Total vs Requirement */}
                   {requirement > 0 && (
                     <div className={`absolute -top-2 -right-2 text-[9px] font-black px-1.5 py-0.5 rounded-full shadow-sm border ${
                       isOverFulfilled ? 'bg-rose-500 border-rose-600 text-white dark:bg-rose-600' :
