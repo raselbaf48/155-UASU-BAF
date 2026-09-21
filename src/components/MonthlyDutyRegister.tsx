@@ -1,5 +1,5 @@
 import { DateNavigator } from './DateNavigator';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Airman, DutyAssignment, DutyCategoryCode, FlightName, UserRole, ConflictAlert, IDAShift } from '../types';
 import { DUTY_TYPES, DUTY_TYPE_MAP } from '../data/dutyTypes';
 import { getDaysInMonth, calculateDutyStats, detectConflicts, resolveAirmanDutyForDate, addAssignmentToMap, getAirmanShortCode } from '../data/rosterGenerator';
@@ -93,6 +93,13 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
   const [assignments, setAssignments] = useState<DutyAssignment[]>([]);
   const [allYearAssignments, setAllYearAssignments] = useState<DutyAssignment[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+
+  // Map assignments by key "airmanId_YYYY-MM-DD"
+  const assignmentMap = useMemo(() => {
+    const map = new Map<string, DutyAssignment>();
+    assignments.forEach((ass) => addAssignmentToMap(map, ass));
+    return map;
+  }, [assignments]);
 
   // Toggle Custom Holiday
   const handleToggleHoliday = (dateStr: string) => {
@@ -331,6 +338,10 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
     if (foundTdy) return { status: 'TDY', dutyName: 'On TDY' };
     if (foundDutyCode) {
       const dt = DUTY_TYPE_MAP.get(foundDutyCode as any);
+      const isOther = foundDutyCode === 'OTHERS' || foundDutyCode === 'OTHER' || (foundDutyCode as string)?.toUpperCase() === 'OTHER' || (foundDutyCode as string)?.toUpperCase() === 'OTHERS';
+      if (isOther) {
+        return { status: 'DUTY', dutyName: 'Disposal' };
+      }
       return { status: 'DUTY', dutyName: dt ? dt.name : foundDutyCode };
     }
     return { status: 'ON_PARADE', dutyName: 'On Parade' };
@@ -665,10 +676,6 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
       window.removeEventListener('baf_state_updated', handleGlobalUpdate);
     };
   }, [monthKey, currentYear, isFullYearView]);
-
-  // Map assignments by key "airmanId_YYYY-MM-DD"
-  const assignmentMap = new Map<string, DutyAssignment>();
-  assignments.forEach((ass) => addAssignmentToMap(assignmentMap, ass));
 
   // Calculate duty stats & conflicts
   const statsList = calculateDutyStats(
@@ -1495,30 +1502,16 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                       </td>
 
                       <td className="py-2.5 px-3 sticky left-10 z-10 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 group-hover:bg-slate-50 dark:group-hover:bg-slate-800 text-center" style={{ minWidth: getOptimalMinColumnWidth(`${formatAirmanName(airman.rank)} ${airman.name}`, 140, 7.5, 24) }}>
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-1.5 truncate">
-                            <span className="font-bold text-[10px] text-slate-600 dark:text-slate-300 shrink-0">
-                              {formatAirmanName(airman.rank)}
-                            </span>
-                            <span
-                              onClick={() => onViewProfile(airman)}
-                              className="font-bold text-slate-900 dark:text-slate-100 hover:text-emerald-600 dark:hover:text-emerald-400 cursor-pointer truncate max-w-36"
-                            >
-                              {airman.name}
-                            </span>
-                          </div>
-                          {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleOpenBulkModal(airman.id);
-                              }}
-                              title={`Assign Duty Date Range for ${formatAirmanName(airman.rank)} ${airman.name}`}
-                              className="ml-1 p-1 rounded text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 transition-colors"
-                            >
-                              <CalendarRange className="w-3.5 h-3.5" />
-                            </button>
-                          )}
+                        <div className="flex items-center space-x-1.5 truncate">
+                          <span className="font-bold text-[10px] text-slate-600 dark:text-slate-300 shrink-0">
+                            {formatAirmanName(airman.rank)}
+                          </span>
+                          <span
+                            onClick={() => onViewProfile(airman)}
+                            className="font-bold text-slate-900 dark:text-slate-100 hover:text-emerald-600 dark:hover:text-emerald-400 cursor-pointer truncate"
+                          >
+                            {airman.name}
+                          </span>
                         </div>
                       </td>
 
@@ -1530,22 +1523,58 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                         const dutyCode = ass.dutyCode;
                         const dutyType = DUTY_TYPE_MAP.get(dutyCode as any);
 
+                        const dutyCodeStr = String(dutyCode || '');
+                        const isOtherDisposal =
+                          dutyCodeStr.toUpperCase() === 'OTHERS' ||
+                          dutyCodeStr.toUpperCase() === 'OTHER' ||
+                          dutyCodeStr.startsWith('OTHERS_');
+
+                        let displayLabel = '';
+                        const displayBadgeBg = dutyType
+                          ? `${dutyType.badgeBg} ${dutyType.badgeText}`
+                          : 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700';
+
+                        if ((dutyCode === 'IDAC' || dutyCode === 'IDA') && ass?.idaShift && ass.idaShift !== 'None') {
+                          displayLabel = `I-${ass.idaShift.charAt(0)}`;
+                        } else if (isOtherDisposal) {
+                          // Resolve specific disposal name (e.g., Course, Exam, Driving, etc.)
+                          const cleanNote = ass?.notes?.trim();
+                          const fallbackName = (ass as any)?.dutyName || (ass as any)?.customTitle;
+                          let name = '';
+                          if (cleanNote && !['OTHER', 'OTHERS', 'OTHER DISPOSAL', 'CUSTOM DISPOSAL', 'CUSTOM'].includes(cleanNote.toUpperCase())) {
+                            name = cleanNote;
+                          } else if (fallbackName && !['OTHER', 'OTHERS', 'OTHER DISPOSAL', 'CUSTOM DISPOSAL', 'CUSTOM'].includes(String(fallbackName).toUpperCase())) {
+                            name = String(fallbackName);
+                          } else if (typeof dutyCode === 'string' && dutyCode.startsWith('OTHERS_')) {
+                            name = dutyCode.replace('OTHERS_', '');
+                          } else {
+                            name = 'Disposal';
+                          }
+
+                          if (name.includes(' - ')) {
+                            name = name.split(' - ')[0].trim();
+                          }
+                          displayLabel = name.toUpperCase();
+                        } else if (dutyType) {
+                          displayLabel = dutyType.shortName;
+                        } else {
+                          displayLabel = dutyCode;
+                        }
+
+                        const tooltipText = isOtherDisposal
+                          ? `${displayLabel}${ass?.notes && ass.notes !== displayLabel ? ` ("${ass.notes}")` : ''}`
+                          : `${dutyType?.name || dutyCode}${ass?.idaShift && ass.idaShift !== 'None' ? ` (${ass.idaShift})` : ''} ${ass?.notes ? `("${ass.notes}")` : ''}`;
+
                         return (
                           <td
                             key={day}
                             className="p-1 text-center border-r border-slate-200 dark:border-slate-800 transition-colors"
                           >
                             <span
-                              className={`inline-block w-7 py-1 rounded text-[10px] font-extrabold font-mono text-center shadow-2xs ${
-                                dutyType ? dutyType.badgeBg + ' ' + dutyType.badgeText : 'bg-slate-100 text-slate-800'
-                              }`}
-                              title={`${dutyType?.name || dutyCode}${ass?.idaShift && ass.idaShift !== 'None' ? ` (${ass.idaShift})` : ''} ${ass?.notes ? `("${ass.notes}")` : ''}`}
+                              className={`inline-block min-w-7 px-1 py-1 rounded text-[10px] font-extrabold font-mono text-center shadow-2xs whitespace-nowrap overflow-hidden text-ellipsis ${displayBadgeBg}`}
+                              title={tooltipText}
                             >
-                              {(dutyCode === 'IDAC' || dutyCode === 'IDA') && ass?.idaShift && ass.idaShift !== 'None'
-                                ? `I-${ass.idaShift.charAt(0)}`
-                                : dutyType
-                                ? dutyType.shortName
-                                : dutyCode}
+                              {displayLabel}
                             </span>
                           </td>
                         );
@@ -2257,7 +2286,16 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                         else if (res.dutyCode === 'IDAC' || res.dutyCode === 'IDA') dutySuffix = `IDAC Duty (${res.idaShift || 'Morning'})`;
                         else if (res.dutyCode === 'BAKE_N_BITE') dutySuffix = 'Bake & Bite';
                         else if (res.dutyCode === 'DUTY_OFF') dutySuffix = 'Duty Off';
-                        else if (hasOtherDuty) dutySuffix = res.dutyCode;
+                        else if (hasOtherDuty) {
+                          const resCodeStr = String(res.dutyCode || '');
+                          const isOther = resCodeStr.toUpperCase() === 'OTHERS' || resCodeStr.toUpperCase() === 'OTHER' || resCodeStr.startsWith('OTHERS_');
+                          if (isOther) {
+                            const noteName = res.notes?.trim();
+                            dutySuffix = (noteName && !['OTHER', 'OTHERS', 'OTHER DISPOSAL', 'CUSTOM DISPOSAL', 'CUSTOM'].includes(noteName.toUpperCase())) ? noteName : 'Disposal';
+                          } else {
+                            dutySuffix = DUTY_TYPE_MAP.get(res.dutyCode)?.name || res.notes || res.dutyCode;
+                          }
+                        }
 
                         const label = dutySuffix
                           ? `${formatAirmanName(a.rank)} ${a.name} - ${dutySuffix}`

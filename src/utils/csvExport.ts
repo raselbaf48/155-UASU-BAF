@@ -96,3 +96,107 @@ export function exportTableToCSV(elementId: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+function getExcelColName(colNumber: number): string {
+  let colName = '';
+  let dividend = colNumber;
+  let modulo;
+  while (dividend > 0) {
+    modulo = (dividend - 1) % 26;
+    colName = String.fromCharCode(65 + modulo) + colName;
+    dividend = Math.floor((dividend - modulo) / 26);
+  }
+  return colName;
+}
+
+export function exportDutyRatioMatrixCSV(
+  matrix: Array<{
+    id?: string;
+    title: string;
+    data: Record<string, number[]>;
+    dailyRequirement?: number;
+    totalRequiredMonth?: number;
+    isDisabled?: boolean;
+  }>,
+  filename = 'BAF_155_UASU_Duty_Ratio_Template.csv'
+) {
+  const activeTables = matrix.filter((t) => !t.isDisabled);
+  const rows: string[][] = [];
+
+  // Title comment
+  rows.push(['# BAF 155 UASU - OFFICIAL DUTY RATIO MATRIX']);
+  rows.push(['# NOTE: "Total" column and "Daily Total" / "Daily Req" rows are auto-calculated. Only edit flight quotas for Day 1-31.']);
+  rows.push([]);
+
+  activeTables.forEach((table) => {
+    const cleanTitle = (table.title || '').replace(/"/g, '""');
+    rows.push([`"Duty: ${cleanTitle}"`]);
+
+    const headers = ['Date', ...Array.from({ length: 31 }, (_, i) => String(i + 1)), 'Total'];
+    rows.push(headers);
+
+    const flights: Array<{ key: string; label: string }> = [
+      { key: 'Mechanics', label: 'Mechanics' },
+      { key: 'Avionics', label: 'Avionics' },
+      { key: 'GCS', label: 'GCS' },
+      { key: 'Admin', label: 'Admin' },
+    ];
+
+    const flightStartRow = rows.length + 1; // 1-based row index in Excel
+    const flightEndRow = flightStartRow + flights.length - 1;
+
+    flights.forEach(({ key, label }) => {
+      const currentRow = rows.length + 1;
+      const days = table.data?.[key] || Array(31).fill(0);
+      const totalFormula = `=SUM(B${currentRow}:AF${currentRow})`;
+
+      rows.push([
+        `"${label}"`,
+        ...days.map((d) => String(d ?? 0)),
+        totalFormula,
+      ]);
+    });
+
+    // Daily Total row
+    const dailyTotalRow = rows.length + 1;
+    const dailyTotalFormulas: string[] = [];
+    for (let day = 1; day <= 31; day++) {
+      const colLetter = getExcelColName(day + 1);
+      dailyTotalFormulas.push(`=SUM(${colLetter}${flightStartRow}:${colLetter}${flightEndRow})`);
+    }
+    const monthTotalFormula = `=SUM(B${dailyTotalRow}:AF${dailyTotalRow})`;
+
+    rows.push([
+      '"Daily Total"',
+      ...dailyTotalFormulas,
+      monthTotalFormula,
+    ]);
+
+    // Daily Req row
+    const dailyReq =
+      table.dailyRequirement ??
+      (table.totalRequiredMonth ? Math.round(table.totalRequiredMonth / 31) : 0);
+    if (dailyReq > 0) {
+      const reqRow = rows.length + 1;
+      rows.push([
+        '"Daily Req"',
+        ...Array(31).fill(String(dailyReq)),
+        `=SUM(B${reqRow}:AF${reqRow})`,
+      ]);
+    }
+
+    // Blank line between duties
+    rows.push([]);
+  });
+
+  const csvContent = rows.map((r) => r.join(',')).join('\n');
+  const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename.replace(/\.csv?$/, '') + '.csv';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+

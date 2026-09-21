@@ -52,7 +52,9 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
   if (!isOpen) return null;
 
   const matchTable = (rawDuty: string): DutyRatioTable | undefined => {
-    const clean = rawDuty.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const stripped = rawDuty.replace(/^(duty\s*:?|table\s*\d*:?|\d+[\.\-\)]\s*)/i, '').trim();
+    const clean = stripped.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!clean) return undefined;
     return currentMatrix.find((t) => {
       const tClean = t.title.toLowerCase().replace(/[^a-z0-9]/g, '');
       const tCleanNoParen = t.title.split('(')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -86,82 +88,172 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
       return;
     }
 
-    const headers = data[0].map((h: any) => String(h || '').trim().toLowerCase());
-
-    const dutyColIdx = headers.findIndex((h) => h.includes('duty') || h.includes('type') || h.includes('table') || h.includes('name'));
-    const flightColIdx = headers.findIndex((h) => h.includes('flight') || h.includes('flt') || h.includes('section'));
-
-    // Find day columns (e.g. Day 1..31 or 1..31)
-    const dayIndices: number[] = [];
-    for (let day = 1; day <= 31; day++) {
-      let idx = headers.findIndex((h) => h === `day ${day}` || h === `day_${day}` || h === `d${day}` || h === String(day) || h === `day${day}`);
-      if (idx === -1 && data[0].length >= day + 1) {
-        // Fallback positional indexing if columns start after Duty Type & Flight
-        idx = (flightColIdx >= 0 ? flightColIdx : 1) + day;
-      }
-      dayIndices.push(idx);
-    }
+    // Determine if file is in FLAT format: has both a Duty Type and Flight column in header
+    const firstRowLower = data[0] ? data[0].map((c) => String(c || '').trim().toLowerCase()) : [];
+    const hasDutyCol = firstRowLower.some((c) => c.includes('duty') || c.includes('table'));
+    const hasFlightCol = firstRowLower.some((c) => c.includes('flight') || c.includes('flt') || c.includes('section'));
 
     const parsed: ParsedMatrixRow[] = [];
 
-    for (let i = 1; i < data.length; i++) {
-      const row = data[i];
-      if (!row || row.every((c) => c === null || c === undefined || String(c).trim() === '')) {
-        continue;
-      }
+    if (hasDutyCol && hasFlightCol) {
+      // ----------------------------------------------------
+      // MODE 1: Flat Column Format
+      // ----------------------------------------------------
+      const dutyColIdx = firstRowLower.findIndex((h) => h.includes('duty') || h.includes('type') || h.includes('table') || h.includes('name'));
+      const flightColIdx = firstRowLower.findIndex((h) => h.includes('flight') || h.includes('flt') || h.includes('section'));
 
-      const rawDuty = dutyColIdx >= 0 && row[dutyColIdx] ? String(row[dutyColIdx]).trim() : `Table ${i}`;
-      const rawFlight = flightColIdx >= 0 && row[flightColIdx] ? String(row[flightColIdx]).trim() : '';
-
-      // Skip summary / footer rows (e.g. Daily Total, Total, Req.)
-      const lowerFlight = rawFlight.toLowerCase();
-      if (['total', 'daily total', 'req', 'req.', 'daily req', 'grand total'].includes(lowerFlight)) {
-        continue;
-      }
-
-      // If duty header is also repeated as data row
-      if (rawDuty.toLowerCase().includes('duty type') || rawDuty.toLowerCase().includes('duty name')) {
-        continue;
-      }
-
-      const matchedT = matchTable(rawDuty);
-      const matchedF = matchFlight(rawFlight);
-
-      const days: number[] = [];
-      const errors: string[] = [];
-
-      for (let d = 0; d < 31; d++) {
-        const col = dayIndices[d];
-        let val = 0;
-        if (col >= 0 && row[col] !== undefined && row[col] !== null && String(row[col]).trim() !== '') {
-          const num = parseInt(String(row[col]), 10);
-          if (isNaN(num)) {
-            errors.push(`Day ${d + 1} has non-numeric value: ${row[col]}`);
-          } else if (num < 0 || num > 99) {
-            errors.push(`Day ${d + 1} quota out of range (0–99): ${num}`);
-          } else {
-            val = num;
-          }
+      const dayIndices: number[] = [];
+      for (let day = 1; day <= 31; day++) {
+        let idx = firstRowLower.findIndex((h) => h === `day ${day}` || h === `day_${day}` || h === `d${day}` || h === String(day) || h === `day${day}`);
+        if (idx === -1 && data[0].length >= day + 1) {
+          idx = (flightColIdx >= 0 ? flightColIdx : 1) + day;
         }
-        days.push(val);
+        dayIndices.push(idx);
       }
 
-      if (!matchedT) {
-        errors.push(`Unrecognized Duty Type "${rawDuty}". Expected one of: ${currentMatrix.map((m) => m.title).join(', ')}`);
-      }
-      if (!matchedF) {
-        errors.push(`Unrecognized Flight "${rawFlight}". Expected: Mechanics, Avionics, GCS, Admin`);
-      }
+      for (let i = 1; i < data.length; i++) {
+        const row = data[i];
+        if (!row || row.every((c) => c === null || c === undefined || String(c).trim() === '')) {
+          continue;
+        }
 
-      parsed.push({
-        id: `row-${i}-${Date.now()}`,
-        dutyType: rawDuty,
-        matchedTableId: matchedT ? matchedT.id : null,
-        flight: rawFlight,
-        matchedFlight: matchedF,
-        days,
-        errors,
-      });
+        const rawDuty = dutyColIdx >= 0 && row[dutyColIdx] ? String(row[dutyColIdx]).trim() : `Table ${i}`;
+        const rawFlight = flightColIdx >= 0 && row[flightColIdx] ? String(row[flightColIdx]).trim() : '';
+
+        const lowerFlight = rawFlight.toLowerCase();
+        if (['total', 'daily total', 'req', 'req.', 'daily req', 'grand total'].includes(lowerFlight)) {
+          continue;
+        }
+
+        if (rawDuty.toLowerCase().includes('duty type') || rawDuty.toLowerCase().includes('duty name')) {
+          continue;
+        }
+
+        const matchedT = matchTable(rawDuty);
+        const matchedF = matchFlight(rawFlight);
+
+        const days: number[] = [];
+        const errors: string[] = [];
+
+        for (let d = 0; d < 31; d++) {
+          const col = dayIndices[d];
+          let val = 0;
+          if (col >= 0 && row[col] !== undefined && row[col] !== null && String(row[col]).trim() !== '') {
+            const num = parseInt(String(row[col]), 10);
+            if (isNaN(num)) {
+              errors.push(`Day ${d + 1} has non-numeric value: ${row[col]}`);
+            } else if (num < 0 || num > 99) {
+              errors.push(`Day ${d + 1} quota out of range (0–99): ${num}`);
+            } else {
+              val = num;
+            }
+          }
+          days.push(val);
+        }
+
+        if (!matchedT) {
+          errors.push(`Unrecognized Duty Type "${rawDuty}". Expected one of: ${currentMatrix.map((m) => m.title).join(', ')}`);
+        }
+        if (!matchedF) {
+          errors.push(`Unrecognized Flight "${rawFlight}". Expected: Mechanics, Avionics, GCS, Admin`);
+        }
+
+        parsed.push({
+          id: `row-${i}-${Date.now()}`,
+          dutyType: rawDuty,
+          matchedTableId: matchedT ? matchedT.id : null,
+          flight: rawFlight,
+          matchedFlight: matchedF,
+          days,
+          errors,
+        });
+      }
+    } else {
+      // ----------------------------------------------------
+      // MODE 2: Export CSV Block Matrix Format (Date, 1..31, Total)
+      // ----------------------------------------------------
+      let currentDutyObj: DutyRatioTable | null = null;
+      let dayIndices: number[] = [];
+
+      for (let i = 0; i < data.length; i++) {
+        const row = data[i];
+        if (!row || row.every((c) => c === null || c === undefined || String(c).trim() === '')) {
+          continue;
+        }
+
+        const firstCell = String(row[0] || '').trim();
+        if (firstCell.startsWith('#')) {
+          continue; // Comment line
+        }
+
+        // Check if this row is a Duty Header: e.g. "Duty: SECURITY DUTY..." or matches table title
+        const matchedT = matchTable(firstCell);
+        const isFlightCell = matchFlight(firstCell) !== null;
+        const lowerFirst = firstCell.toLowerCase();
+
+        if (matchedT && !isFlightCell && !lowerFirst.includes('daily') && !lowerFirst.includes('total') && !lowerFirst.includes('req')) {
+          currentDutyObj = matchedT;
+          continue;
+        }
+
+        // Check if this row is a column header row: "Date", "1", "2", ... "31"
+        const rowLower = row.map((c) => String(c || '').trim().toLowerCase());
+        if (rowLower[0] === 'date' || rowLower[1] === '1' || rowLower[0] === 'flight') {
+          dayIndices = [];
+          for (let day = 1; day <= 31; day++) {
+            let idx = rowLower.findIndex((h) => h === String(day) || h === `day ${day}` || h === `d${day}`);
+            if (idx === -1) {
+              // Fallback: if first column is 'date', days 1..31 begin at index 1
+              idx = (rowLower[0] === 'date' || rowLower[0] === 'flight') ? day : day - 1;
+            }
+            dayIndices.push(idx);
+          }
+          continue;
+        }
+
+        // Check if this is a Flight row (Mechanics, Avionics, GCS, Admin or Mech, AVI, Adm)
+        const matchedF = matchFlight(firstCell);
+        if (matchedF) {
+          const days: number[] = [];
+          const errors: string[] = [];
+
+          if (!currentDutyObj) {
+            errors.push(`Flight "${firstCell}" found before any Duty heading`);
+          }
+
+          for (let d = 0; d < 31; d++) {
+            const col = dayIndices[d] !== undefined && dayIndices[d] >= 0 ? dayIndices[d] : d + 1;
+            let val = 0;
+            if (row[col] !== undefined && row[col] !== null && String(row[col]).trim() !== '') {
+              const num = parseInt(String(row[col]), 10);
+              if (isNaN(num)) {
+                errors.push(`Day ${d + 1} has non-numeric value: ${row[col]}`);
+              } else if (num < 0 || num > 99) {
+                errors.push(`Day ${d + 1} quota out of range (0–99): ${num}`);
+              } else {
+                val = num;
+              }
+            }
+            days.push(val);
+          }
+
+          parsed.push({
+            id: `row-${i}-${Date.now()}`,
+            dutyType: currentDutyObj ? currentDutyObj.title : 'Unknown Duty',
+            matchedTableId: currentDutyObj ? currentDutyObj.id : null,
+            flight: firstCell,
+            matchedFlight: matchedF,
+            days,
+            errors,
+          });
+          continue;
+        }
+
+        // Skip summary or footer rows like Daily Total, Daily Req, Total
+        if (lowerFirst.includes('daily') || lowerFirst === 'total' || lowerFirst.includes('req')) {
+          continue;
+        }
+      }
     }
 
     setRows(parsed);
@@ -320,7 +412,7 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
                 {fileName ? `Selected: ${fileName}` : 'Click to select or drag & drop CSV/Excel matrix file'}
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Format: Duty Type, Flight, Day 1 through Day 31, Total Month (Exact same format as Export CSV)
+                Format: Duty Matrix with Date, 1 through 31, Total (100% Identical to Export CSV format)
               </p>
             </div>
 
@@ -331,7 +423,7 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
                   <span>Standard Matrix Template</span>
                 </div>
                 <p className="text-xs text-indigo-800 dark:text-indigo-200/80 mt-1 leading-relaxed">
-                  Download the official duty ratio spreadsheet template in the exact same format as Export CSV (Day 1..Day 31 for all flights).
+                  Download the official duty ratio spreadsheet template in the exact same format as Export CSV (Date, 1..31 for all duties).
                 </p>
               </div>
               <button

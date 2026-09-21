@@ -1662,6 +1662,10 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                             if (first.dutyCode === 'LEAVE') return first.notes || 'Leave';
                             if (first.dutyCode === 'TDY') return first.notes || 'TDY';
                             if (['ATT', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(first.dutyCode)) return first.notes || DUTY_TYPE_MAP.get(first.dutyCode)?.name || 'Deployment';
+                            if (first.dutyCode === 'OTHERS' || first.dutyCode === 'OTHER' || (typeof first.dutyCode === 'string' && first.dutyCode.startsWith('OTHERS_'))) {
+                              const noteName = first.notes?.trim();
+                              return (noteName && !['OTHER', 'OTHERS', 'OTHER DISPOSAL', 'CUSTOM DISPOSAL', 'CUSTOM'].includes(noteName.toUpperCase())) ? noteName : 'Disposal';
+                            }
                             return DUTY_TYPE_MAP.get(first.dutyCode)?.name || first.dutyCode;
                           })();
                           return (
@@ -1752,7 +1756,13 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                                         typeInfo?.badgeBg || 'bg-slate-100'
                                       } ${typeInfo?.badgeText || 'text-slate-800'}`}
                                     >
-                                      {typeInfo?.name || item.dutyCode}
+                                      {(() => {
+                                        if (item.dutyCode === 'OTHERS' || item.dutyCode === 'OTHER' || (typeof item.dutyCode === 'string' && item.dutyCode.startsWith('OTHERS_'))) {
+                                          const noteName = item.notes?.trim();
+                                          return (noteName && !['OTHER', 'OTHERS', 'OTHER DISPOSAL', 'CUSTOM DISPOSAL', 'CUSTOM'].includes(noteName.toUpperCase())) ? noteName : 'Disposal';
+                                        }
+                                        return typeInfo?.name || item.dutyCode;
+                                      })()}
                                     </span>
                                   </td>
                                   <td className="py-2.5 px-3.5 font-semibold text-slate-600 dark:text-slate-400">

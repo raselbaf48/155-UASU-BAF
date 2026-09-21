@@ -281,14 +281,15 @@ export const saveDetailedUsers = (users: DetailedUserLogin[]): void => {
         if (isSupabaseConfigured) {
           const { error } = await supabase.from('user_profiles').upsert(supaPayload, { onConflict: '"User ID"' });
           if (error) {
-            console.error("Error syncing to Supabase:", error);
-            if (error.message?.includes('Failed to fetch')) {
-              console.warn("Supabase sync blocked by Adblocker or Network error.");
+            if (error.message?.includes('Failed to fetch') || (error as any)?.details?.includes('Failed to fetch')) {
+              console.warn("Supabase sync currently offline or blocked; local changes preserved.");
+            } else {
+              console.warn("Supabase user sync notice:", error.message || error);
             }
           }
         }
-      } catch (err) {
-        console.error("Supabase async sync failed:", err);
+      } catch (err: any) {
+        console.warn("Supabase async sync notice:", err?.message || err);
       }
     })();
 
@@ -633,7 +634,7 @@ export const setUserSession = (airman: Airman, assignedRole: UserLoginRole = 'US
   }
 
   // Record into history log in local storage & D1
-  recordLoginLog(airman);
+  recordLoginLog(airman, assignedRole);
   // Realtime Presence Sync
   logUserLogin({
     bdNo: (airman.bdNo || "").replace(/^BD\/?/i, '').trim(),
@@ -689,7 +690,7 @@ export const getLoginHistory = (): UserLoginLog[] => {
 /**
  * Add a record to login history
  */
-export const recordLoginLog = async (airman: Airman): Promise<void> => {
+export const recordLoginLog = async (airman: Airman, role: string = 'USER'): Promise<void> => {
   try {
     const nowIso = new Date().toISOString();
     const cleanBd = (airman.bdNo || "").replace(/^BD\/?/i, '').trim();
@@ -699,6 +700,7 @@ export const recordLoginLog = async (airman: Airman): Promise<void> => {
       rank: airman.rank,
       name: airman.name,
       flightName: airman.flightName,
+      role: role || 'USER',
       timestamp: nowIso,
       timeFormatted: formatLogTime(nowIso),
       deviceInfo: typeof navigator !== 'undefined' && navigator.userAgent.includes('Mobile') ? 'Mobile Device' : 'Desktop / Web Workstation',
@@ -710,6 +712,16 @@ export const recordLoginLog = async (airman: Airman): Promise<void> => {
     try {
       localStorage.setItem(HISTORY_KEY, JSON.stringify(cachedLoginHistory));
     } catch {}
+
+    // Dispatch event so active listeners update immediately
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('baf_login_history_updated', { detail: cachedLoginHistory }));
+    }
+
+    // Sync to Supabase app_settings if configured
+    if (isSupabaseConfigured) {
+      localDb.syncSettingToCloud('baf_user_login_history', JSON.stringify(cachedLoginHistory.slice(0, 100))).catch(() => {});
+    }
   } catch (e) {
     console.error('Failed to record login log:', e);
   }
@@ -722,6 +734,12 @@ export const clearLoginHistory = async (): Promise<void> => {
   cachedLoginHistory = [];
   try {
     localStorage.removeItem(HISTORY_KEY);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('baf_login_history_updated', { detail: [] }));
+    }
+    if (isSupabaseConfigured) {
+      localDb.syncSettingToCloud('baf_user_login_history', JSON.stringify([])).catch(() => {});
+    }
   } catch (e) {
     console.error('Failed to clear login history locally:', e);
   }

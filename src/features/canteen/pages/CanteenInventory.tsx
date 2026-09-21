@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Search, Plus, Edit2, Trash2, ImageIcon, Save, X, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Search, Plus, Edit2, Trash2, ImageIcon, Save, X, Loader2, PackagePlus, AlertTriangle, CheckCircle2, RotateCcw, Layers } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, fetchDirectImageUrl } from '../utils/canteenSettings';
 
@@ -598,10 +598,110 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       setDeleteConfirmId(null);
   };
 
-  const filteredItems = items.filter(item => 
-      (item.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
-      (item.category || '').toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
+
+  // Restock Modal States
+  const [showRestockModal, setShowRestockModal] = useState<boolean>(false);
+  const [restockEntries, setRestockEntries] = useState<Record<string, number | ''>>({});
+  const [restockSearch, setRestockSearch] = useState<string>('');
+  const [restockCategory, setRestockCategory] = useState<string>('ALL');
+  const [isSavingRestock, setIsSavingRestock] = useState<boolean>(false);
+  const [restockNotice, setRestockNotice] = useState<string>('');
+
+  // Extract all categories dynamically
+  const availableCategories = useMemo(() => {
+    const cats = new Set<string>();
+    cats.add('ALL');
+    ['SNACKS', 'DRINK', 'LUNCH', 'BREAKFAST', 'DINNER'].forEach(c => {
+      if (items.some(i => (i.category || '').toUpperCase() === c)) {
+        cats.add(c);
+      }
+    });
+    items.forEach(i => {
+      if (i.category) {
+        cats.add(i.category.trim().toUpperCase());
+      }
+    });
+    return Array.from(cats);
+  }, [items]);
+
+  const filteredItems = items.filter(item => {
+      const matchesSearch = (item.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+                            (item.category || '').toLowerCase().includes(searchTerm.toLowerCase());
+      const itemCategory = (item.category || 'SNACKS').toUpperCase();
+      const matchesCategory = selectedCategory === 'ALL' || itemCategory === selectedCategory;
+      return matchesSearch && matchesCategory;
+  });
+
+  const handleAddQuickStock = (itemId: string, amount: number) => {
+    setRestockEntries(prev => {
+      const currentVal = typeof prev[itemId] === 'number' ? Number(prev[itemId]) : 0;
+      return {
+        ...prev,
+        [itemId]: currentVal + amount
+      };
+    });
+  };
+
+  const handleRestockQtyChange = (itemId: string, valStr: string) => {
+    if (valStr === '') {
+      setRestockEntries(prev => {
+        const next = { ...prev };
+        delete next[itemId];
+        return next;
+      });
+      return;
+    }
+    const val = parseInt(valStr, 10);
+    if (!isNaN(val) && val >= 0) {
+      setRestockEntries(prev => ({
+        ...prev,
+        [itemId]: val
+      }));
+    }
+  };
+
+  const handleSaveRestock = async () => {
+    const itemsToUpdate = Object.entries(restockEntries).filter(([_, qty]) => typeof qty === 'number' && qty > 0);
+    if (itemsToUpdate.length === 0) return;
+
+    setIsSavingRestock(true);
+    try {
+      const updatedList = [...items];
+      for (const [id, addQty] of itemsToUpdate) {
+        const currentItem = updatedList.find(i => i.id === id);
+        const prevStock = Number(currentItem?.stock ?? 0);
+        const newStock = prevStock + Number(addQty);
+
+        // Update in Supabase
+        await supabase.from('Canteen_Inventory').update({ stock: newStock }).eq('id', id);
+
+        // Update local item
+        const idx = updatedList.findIndex(i => i.id === id);
+        if (idx !== -1) {
+          updatedList[idx] = { ...updatedList[idx], stock: newStock };
+        }
+      }
+
+      setItems(updatedList);
+      window.dispatchEvent(new Event('canteen_inventory_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+
+      setRestockNotice(`Successfully updated stock for ${itemsToUpdate.length} item(s)!`);
+      setTimeout(() => {
+        setShowRestockModal(false);
+        setRestockEntries({});
+        setRestockNotice('');
+      }, 1000);
+    } catch (err) {
+      console.error('Failed to restock items:', err);
+    } finally {
+      setIsSavingRestock(false);
+    }
+  };
+
+  const totalRestockCount = Object.values(restockEntries).filter((v): v is number => typeof v === 'number' && v > 0).length;
+  const totalRestockUnits = Object.values(restockEntries).reduce<number>((sum, v) => sum + (typeof v === 'number' ? v : 0), 0);
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300 pb-10">
@@ -613,15 +713,30 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">CLOUD INTEGRATED INVENTORY</p>
          </div>
          {!readOnly ? (
-           <button onClick={() => {
-              setIsEditMode(false);
-              setEditingId(null);
-              setNewItem({ name: '', category: 'SNACKS', price: 0, stock: 0, DP: '' });
-              setShowAddModal(true);
-           }} className="flex items-center space-x-2 px-5 py-3 bg-[#4f46e5] text-white rounded-xl text-[10px] font-black tracking-widest hover:bg-[#4338ca] transition-colors shadow-md shadow-indigo-500/20">
-              <Plus className="w-4 h-4" />
-              <span>ADD NEW ENTRY</span>
-           </button>
+           <div className="flex items-center space-x-3">
+              <button 
+                onClick={() => {
+                   setRestockEntries({});
+                   setRestockSearch('');
+                   setRestockCategory('ALL');
+                   setRestockNotice('');
+                   setShowRestockModal(true);
+                }} 
+                className="flex items-center space-x-2 px-5 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[10px] font-black tracking-widest transition-colors shadow-md shadow-emerald-600/20 cursor-pointer"
+              >
+                 <PackagePlus className="w-4 h-4" />
+                 <span>RESTOCK</span>
+              </button>
+              <button onClick={() => {
+                 setIsEditMode(false);
+                 setEditingId(null);
+                 setNewItem({ name: '', category: 'SNACKS', price: 0, stock: 0, DP: '' });
+                 setShowAddModal(true);
+              }} className="flex items-center space-x-2 px-5 py-3 bg-[#4f46e5] text-white rounded-xl text-[10px] font-black tracking-widest hover:bg-[#4338ca] transition-colors shadow-md shadow-indigo-500/20 cursor-pointer">
+                 <Plus className="w-4 h-4" />
+                 <span>ADD NEW ENTRY</span>
+              </button>
+           </div>
          ) : (
            <div className="flex items-center space-x-2 px-4 py-2 bg-slate-800/80 border border-slate-700/80 rounded-xl text-slate-400 text-xs font-bold uppercase tracking-wider">
               <span>VIEW ONLY MODE</span>
@@ -641,60 +756,348 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
          />
       </div>
 
+      {/* Category / Meal Filter Pills */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+         {availableCategories.map((cat) => {
+            const count = cat === 'ALL'
+               ? items.length
+               : items.filter(i => (i.category || 'SNACKS').toUpperCase() === cat).length;
+            const isSelected = selectedCategory === cat;
+            return (
+               <button
+                  key={cat}
+                  onClick={() => setSelectedCategory(cat)}
+                  className={`px-4 py-2 rounded-xl text-xs font-black tracking-wider uppercase transition-all shrink-0 cursor-pointer flex items-center space-x-2 border ${
+                     isSelected
+                        ? 'bg-[#4f46e5] text-white border-[#4f46e5] shadow-md shadow-indigo-500/25'
+                        : 'bg-slate-900/90 text-slate-400 hover:text-slate-200 hover:bg-slate-800 border-slate-800'
+                  }`}
+               >
+                  <span>{cat}</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                     isSelected ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-500'
+                  }`}>
+                     {count}
+                  </span>
+               </button>
+            );
+         })}
+      </div>
+
       {/* Grid */}
       {loading ? (
           <div className="text-center py-10 text-slate-400 font-bold animate-pulse">Loading inventory...</div>
       ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-             {filteredItems.map((item, i) => (
-                <div key={i} className={`bg-slate-900 rounded-[2rem] p-6 border-2 shadow-sm transition-all hover:shadow-md ${item.active ? 'border-[#4f46e5] shadow-indigo-500/10' : 'border-slate-800'}`}>
-                   <div className="flex items-start justify-between mb-4">
-                      <div className="w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700/60 overflow-hidden flex items-center justify-center shrink-0 shadow-sm">
-                         {item.DP ? (
-                            <img 
-                               src={resolveImageUrl(item.DP)} 
-                               alt={item.name} 
-                               referrerPolicy="no-referrer"
-                               className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
-                               onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                            />
-                         ) : (
-                            <ImageIcon className="w-6 h-6 text-indigo-400" />
+             {filteredItems.map((item, i) => {
+                const stockVal = Number(item.stock ?? 0);
+                const isOutOfStock = stockVal <= 0;
+                const isLowStock = stockVal > 0 && stockVal < 10;
+
+                return (
+                <div 
+                   key={i} 
+                   className={`bg-slate-900 rounded-[2rem] p-6 border-2 shadow-sm transition-all hover:shadow-md flex flex-col justify-between ${
+                      isOutOfStock
+                         ? 'border-rose-900/60 bg-slate-900/95 shadow-rose-950/20'
+                         : isLowStock
+                         ? 'border-amber-500/40 bg-slate-900/95 shadow-amber-950/20'
+                         : item.active 
+                         ? 'border-[#4f46e5] shadow-indigo-500/10' 
+                         : 'border-slate-800'
+                   }`}
+                >
+                   <div>
+                      <div className="flex items-start justify-between mb-4">
+                         <div className={`w-14 h-14 rounded-2xl bg-slate-800 border overflow-hidden flex items-center justify-center shrink-0 shadow-sm ${
+                            isOutOfStock ? 'border-rose-900/40' : 'border-slate-700/60'
+                         }`}>
+                            {item.DP ? (
+                               <img 
+                                  src={resolveImageUrl(item.DP)} 
+                                  alt={item.name} 
+                                  referrerPolicy="no-referrer"
+                                  className={`w-full h-full object-cover group-hover:scale-110 transition-transform duration-300 ${isOutOfStock ? 'grayscale opacity-60' : ''}`}
+                                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                               />
+                            ) : (
+                               <ImageIcon className={`w-6 h-6 ${isOutOfStock ? 'text-rose-500/50' : 'text-indigo-400'}`} />
+                            )}
+                         </div>
+                         {!readOnly && (
+                           <div className="flex items-center space-x-2">
+                              <button onClick={() => handleEdit(item)} className="p-1.5 text-indigo-400 hover:text-indigo-300 transition-colors cursor-pointer">
+                                 <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button onClick={() => setDeleteConfirmId(item.id)} className="p-1.5 text-rose-400 hover:text-rose-300 transition-colors cursor-pointer">
+                                 <Trash2 className="w-4 h-4" />
+                              </button>
+                           </div>
                          )}
                       </div>
-                      {!readOnly && (
-                        <div className="flex items-center space-x-2">
-                           <button onClick={() => handleEdit(item)} className="p-1.5 text-indigo-400 hover:text-indigo-600 transition-colors">
-                              <Edit2 className="w-4 h-4" />
-                           </button>
-                           <button onClick={() => setDeleteConfirmId(item.id)} className="p-1.5 text-rose-400 hover:text-rose-600 transition-colors">
-                              <Trash2 className="w-4 h-4" />
-                           </button>
-                        </div>
-                      )}
+
+                      <div className="mb-4">
+                         <p className="text-[8px] font-black text-[#4f46e5] tracking-widest uppercase mb-1">{item.category}</p>
+                         <h3 className={`font-black text-sm leading-tight uppercase ${isOutOfStock ? 'text-slate-400' : 'text-white'}`}>
+                            {item.name}
+                         </h3>
+                         <p className="text-[8px] font-bold text-slate-400 uppercase mt-1">PRICES ARE NOT FIXED</p>
+                      </div>
                    </div>
 
-                   <div className="mb-4">
-                      <p className="text-[8px] font-black text-[#4f46e5] tracking-widest uppercase mb-1">{item.category}</p>
-                      <h3 className="font-black text-white text-sm leading-tight uppercase">{item.name}</h3>
-                      <p className="text-[8px] font-bold text-slate-400 uppercase mt-1">PRICES ARE NOT FIXED</p>
-                   </div>
-
-                   <div className="flex items-end justify-between mt-auto">
+                   {/* Price and Stock Box - SYNC REMOVED, WARNING HIGHLIGHTED */}
+                   <div className="flex items-center justify-between mt-auto pt-3 border-t border-slate-800/80">
                       <div className="flex items-center space-x-2">
                          <span className="text-2xl font-black tracking-tighter text-white">৳{item.price}</span>
-                         <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded text-[8px] font-black text-indigo-500 uppercase">
-                            <BoltIcon className="w-3 h-3" />
-                            <span>SYNC</span>
-                         </span>
                       </div>
-                      <div className="px-2 py-1 rounded bg-emerald-900/30 border border-emerald-900/50">
-                         <span className="text-[8px] font-black text-emerald-500 tracking-widest">{item.stock} IN UNIT</span>
-                      </div>
+                      
+                      {isOutOfStock ? (
+                         <div className="px-2.5 py-1 rounded-xl bg-rose-950/70 border border-rose-500/60 flex items-center space-x-1.5 shadow-sm shadow-rose-950/50">
+                            <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                            <span className="text-[9px] font-black text-rose-400 tracking-wider uppercase">STOCK: 0 (OUT)</span>
+                         </div>
+                      ) : isLowStock ? (
+                         <div className="px-2.5 py-1 rounded-xl bg-amber-950/70 border border-amber-500/60 flex items-center space-x-1.5 shadow-sm shadow-amber-950/50 animate-pulse">
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            <span className="text-[9px] font-black text-amber-400 tracking-wider uppercase">STOCK: {stockVal} (LOW)</span>
+                         </div>
+                      ) : (
+                         <div className="px-2.5 py-1 rounded-xl bg-slate-800/90 border border-slate-700/80">
+                            <span className="text-[9px] font-black text-emerald-400 tracking-wider uppercase">STOCK: {stockVal}</span>
+                         </div>
+                      )}
                    </div>
                 </div>
-             ))}
+             )})}
           </div>
+      )}
+
+      {/* Bulk Restock Modal */}
+      {showRestockModal && (
+         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fadeIn">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-3xl shadow-2xl flex flex-col max-h-[90vh]">
+               {/* Modal Header */}
+               <div className="flex items-center justify-between pb-4 border-b border-slate-800 shrink-0">
+                  <div className="flex items-center space-x-3">
+                     <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                        <PackagePlus className="w-5 h-5" />
+                     </div>
+                     <div>
+                        <h3 className="text-lg font-black text-white uppercase tracking-tight">RESTOCK MENU ITEMS</h3>
+                        <p className="text-[11px] font-bold text-slate-400">
+                           নতুন এন্ট্রি করা সংখ্যা পূর্বের স্টকের সাথে যোগ (Add) হয়ে যাবে
+                        </p>
+                     </div>
+                  </div>
+                  <button 
+                     onClick={() => setShowRestockModal(false)} 
+                     className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                  >
+                     <X className="w-5 h-5" />
+                  </button>
+               </div>
+
+               {/* Modal Filter and Search */}
+               <div className="py-4 space-y-3 shrink-0 border-b border-slate-800/80">
+                  <div className="flex flex-col sm:flex-row gap-3">
+                     <div className="relative flex-1">
+                        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                        <input 
+                           type="text" 
+                           placeholder="Search items to restock..."
+                           value={restockSearch}
+                           onChange={(e) => setRestockSearch(e.target.value)}
+                           className="w-full bg-slate-800/80 border border-slate-700/80 rounded-xl pl-10 pr-4 py-2.5 text-xs font-bold text-slate-200 focus:outline-none focus:border-emerald-500"
+                        />
+                     </div>
+                     {/* Category pills in Restock Modal */}
+                     <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                        {availableCategories.map(cat => (
+                           <button
+                              key={cat}
+                              onClick={() => setRestockCategory(cat)}
+                              className={`px-3 py-1.5 rounded-lg text-[10px] font-black tracking-wider uppercase transition-all shrink-0 cursor-pointer ${
+                                 restockCategory === cat
+                                    ? 'bg-emerald-600 text-white'
+                                    : 'bg-slate-800 text-slate-400 hover:text-white'
+                              }`}
+                           >
+                              {cat}
+                           </button>
+                        ))}
+                     </div>
+                  </div>
+               </div>
+
+               {/* Items List */}
+               <div className="overflow-y-auto py-3 space-y-2.5 flex-1 pr-1">
+                  {items
+                     .filter(item => {
+                        const matchesSearch = (item.name || '').toLowerCase().includes(restockSearch.toLowerCase()) || 
+                                              (item.category || '').toLowerCase().includes(restockSearch.toLowerCase());
+                        const itemCategory = (item.category || 'SNACKS').toUpperCase();
+                        const matchesCat = restockCategory === 'ALL' || itemCategory === restockCategory;
+                        return matchesSearch && matchesCat;
+                     })
+                     .map((item) => {
+                        const currentStock = Number(item.stock ?? 0);
+                        const addedQty = typeof restockEntries[item.id] === 'number' ? Number(restockEntries[item.id]) : 0;
+                        const newTotal = currentStock + addedQty;
+                        const isEntered = addedQty > 0;
+
+                        return (
+                           <div 
+                              key={item.id}
+                              className={`p-3.5 rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                                 isEntered
+                                    ? 'bg-emerald-950/20 border-emerald-500/50 shadow-sm'
+                                    : currentStock <= 0
+                                    ? 'bg-slate-900/90 border-rose-900/40'
+                                    : currentStock < 10
+                                    ? 'bg-slate-900/90 border-amber-500/30'
+                                    : 'bg-slate-800/40 border-slate-800'
+                              }`}
+                           >
+                              {/* Left Info */}
+                              <div className="flex items-center space-x-3 min-w-0 flex-1">
+                                 <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700/60 overflow-hidden shrink-0 flex items-center justify-center">
+                                    {item.DP ? (
+                                       <img 
+                                          src={resolveImageUrl(item.DP)} 
+                                          alt={item.name} 
+                                          referrerPolicy="no-referrer"
+                                          className="w-full h-full object-cover"
+                                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                       />
+                                    ) : (
+                                       <ImageIcon className="w-4 h-4 text-slate-500" />
+                                    )}
+                                 </div>
+                                 <div className="truncate">
+                                    <div className="flex items-center space-x-2">
+                                       <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">{item.category}</span>
+                                       <span className="text-[10px] font-bold text-slate-400 font-mono">৳{item.price}</span>
+                                    </div>
+                                    <h4 className="text-xs font-black text-white uppercase truncate">{item.name}</h4>
+                                 </div>
+                              </div>
+
+                              {/* Current Stock */}
+                              <div className="flex items-center space-x-2 shrink-0">
+                                 <div className="text-right">
+                                    <span className="text-[9px] font-bold text-slate-400 block uppercase">Previous Stock</span>
+                                    <span className={`text-xs font-black font-mono ${
+                                       currentStock <= 0 ? 'text-rose-400' : currentStock < 10 ? 'text-amber-400' : 'text-slate-200'
+                                    }`}>
+                                       {currentStock} {currentStock <= 0 ? '(OUT)' : currentStock < 10 ? '(LOW)' : ''}
+                                    </span>
+                                 </div>
+                              </div>
+
+                              {/* Restock Input & Quick Add Chips */}
+                              <div className="flex items-center space-x-2 shrink-0">
+                                 <div className="flex items-center space-x-1">
+                                    {[10, 25, 50].map((step) => (
+                                       <button
+                                          key={step}
+                                          type="button"
+                                          onClick={() => handleAddQuickStock(item.id, step)}
+                                          className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-emerald-400 hover:text-white rounded-lg text-[10px] font-bold transition-colors cursor-pointer"
+                                       >
+                                          +{step}
+                                       </button>
+                                    ))}
+                                 </div>
+
+                                 <div className="w-24">
+                                    <input 
+                                       type="number"
+                                       min={0}
+                                       placeholder="+ Add"
+                                       value={restockEntries[item.id] ?? ''}
+                                       onChange={(e) => handleRestockQtyChange(item.id, e.target.value)}
+                                       className={`w-full text-center py-1.5 px-2 rounded-xl text-xs font-black font-mono bg-slate-950 border focus:outline-none transition-all ${
+                                          isEntered
+                                             ? 'border-emerald-500 text-emerald-300 ring-2 ring-emerald-500/20'
+                                             : 'border-slate-700 text-white focus:border-indigo-500'
+                                       }`}
+                                    />
+                                 </div>
+
+                                 {/* Result Preview */}
+                                 <div className="w-24 text-right">
+                                    <span className="text-[9px] font-bold text-slate-500 block uppercase">New Stock</span>
+                                    <span className={`text-xs font-black font-mono ${
+                                       isEntered ? 'text-emerald-400 font-bold' : 'text-slate-500'
+                                    }`}>
+                                       {newTotal}
+                                    </span>
+                                 </div>
+                              </div>
+                           </div>
+                        );
+                     })}
+               </div>
+
+               {/* Notice if any */}
+               {restockNotice && (
+                  <div className="py-2 px-3 bg-emerald-950/60 border border-emerald-500/50 rounded-xl text-emerald-400 text-xs font-bold flex items-center space-x-2 my-2 animate-fadeIn shrink-0">
+                     <CheckCircle2 className="w-4 h-4 shrink-0" />
+                     <span>{restockNotice}</span>
+                  </div>
+               )}
+
+               {/* Modal Footer */}
+               <div className="pt-4 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
+                  <div className="text-xs text-slate-400">
+                     {totalRestockCount > 0 ? (
+                        <span>
+                           Selected: <strong className="text-emerald-400">{totalRestockCount} items</strong> (+{totalRestockUnits} units to add)
+                        </span>
+                     ) : (
+                        <span>আইটেমে যোগ করার সংখ্যা লিখুন বা +10, +25 বাটনে চাপ দিন</span>
+                     )}
+                  </div>
+
+                  <div className="flex items-center space-x-3 w-full sm:w-auto">
+                     {totalRestockCount > 0 && (
+                        <button
+                           type="button"
+                           onClick={() => setRestockEntries({})}
+                           className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl transition-colors cursor-pointer"
+                        >
+                           Clear All
+                        </button>
+                     )}
+                     <button
+                        type="button"
+                        onClick={() => setShowRestockModal(false)}
+                        className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl transition-colors cursor-pointer"
+                     >
+                        Cancel
+                     </button>
+                     <button
+                        type="button"
+                        onClick={handleSaveRestock}
+                        disabled={totalRestockCount === 0 || isSavingRestock}
+                        className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 text-white rounded-xl text-xs font-black tracking-wider transition-all shadow-md shadow-emerald-600/30 cursor-pointer disabled:cursor-not-allowed"
+                     >
+                        {isSavingRestock ? (
+                           <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <span>Saving Stock...</span>
+                           </>
+                        ) : (
+                           <>
+                              <PackagePlus className="w-4 h-4" />
+                              <span>Save & Restock ({totalRestockCount})</span>
+                           </>
+                        )}
+                     </button>
+                  </div>
+               </div>
+            </div>
+         </div>
       )}
 
       {/* Add Item Modal */}

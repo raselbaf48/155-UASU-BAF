@@ -142,9 +142,33 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  // Supabase Proxy to bypass Adblockers
-  const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://asevtncnoytawykhcleg.supabase.co';
-  const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFzZXZ0bmNub3l0YXd5a2hjbGVnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkyNjEzMjksImV4cCI6MjEwNDgzNzMyOX0.YpeamrrHPpZdxGcj03PGIm4Z8OC9ShbLpJ16x9cl6RE';
+  // Helper to sanitize duplicated/malformed Supabase environment values
+  function cleanSupabaseUrl(url: string | undefined): string {
+    if (!url) return 'https://asevtncnoytawykhcleg.supabase.co';
+    let cleaned = url.trim();
+    if (cleaned.length % 2 === 0 && cleaned.slice(0, cleaned.length / 2) === cleaned.slice(cleaned.length / 2)) {
+      cleaned = cleaned.slice(0, cleaned.length / 2);
+    }
+    const httpsMatch = cleaned.match(/https?:\/\/[^\/]+/g);
+    if (httpsMatch && httpsMatch.length > 1) {
+      cleaned = httpsMatch[0];
+    }
+    return cleaned.replace(/\/+$/, '');
+  }
+
+  function cleanSupabaseAnonKey(key: string | undefined): string {
+    const fallbackKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFzZXZ0bmNub3l0YXd5a2hjbGVnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkyNjEzMjksImV4cCI6MjEwNDgzNzMyOX0.YpeamrrHPpZdxGcj03PGIm4Z8OC9ShbLpJ16x9cl6RE';
+    if (!key) return fallbackKey;
+    let cleaned = key.trim();
+    if (cleaned.length % 2 === 0 && cleaned.slice(0, cleaned.length / 2) === cleaned.slice(cleaned.length / 2)) {
+      cleaned = cleaned.slice(0, cleaned.length / 2);
+    }
+    return cleaned;
+  }
+
+  // Supabase Proxy to bypass Adblockers and CORS restrictions
+  const supabaseUrl = cleanSupabaseUrl(process.env.VITE_SUPABASE_URL);
+  const supabaseAnonKey = cleanSupabaseAnonKey(process.env.VITE_SUPABASE_ANON_KEY);
   
   app.all('/api/supabase/*', async (req, res) => {
     let targetUrl = '';
@@ -159,8 +183,14 @@ async function startServer() {
       delete headers['accept-encoding']; // Let fetch handle this
       
       headers['apikey'] = supabaseAnonKey;
-      if (!headers['authorization']) {
+      if (!headers['authorization'] || String(headers['authorization']).includes(supabaseAnonKey)) {
         headers['authorization'] = `Bearer ${supabaseAnonKey}`;
+      } else {
+        const authVal = String(headers['authorization']);
+        if (authVal.startsWith('Bearer ')) {
+          const token = authVal.slice(7);
+          headers['authorization'] = `Bearer ${cleanSupabaseAnonKey(token)}`;
+        }
       }
       
       const reqOptions: RequestInit = {
@@ -169,36 +199,39 @@ async function startServer() {
       };
       
       if (req.method !== 'GET' && req.method !== 'HEAD') {
-        // Stream the request body
         const chunks = [];
         for await (const chunk of req) {
           chunks.push(chunk);
         }
-        reqOptions.body = Buffer.concat(chunks);
+        if (chunks.length > 0) {
+          reqOptions.body = Buffer.concat(chunks);
+        }
       }
       
       const supabaseRes = await fetch(targetUrl, reqOptions);
       
+      const hopByHopHeaders = new Set([
+        'connection',
+        'keep-alive',
+        'proxy-authenticate',
+        'proxy-authorization',
+        'te',
+        'trailers',
+        'transfer-encoding',
+        'upgrade',
+        'content-encoding',
+        'content-length',
+      ]);
+
       supabaseRes.headers.forEach((val, key) => {
-        // Node fetch auto-decompresses the response, so we must strip these headers
-        // otherwise the browser will fail to parse the decompressed stream
-        if (key.toLowerCase() !== 'content-encoding' && key.toLowerCase() !== 'content-length') {
+        if (!hopByHopHeaders.has(key.toLowerCase())) {
           res.setHeader(key, val);
         }
       });
       res.status(supabaseRes.status);
       
-      if (supabaseRes.body) {
-        const reader = supabaseRes.body.getReader();
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          res.write(value);
-        }
-        res.end();
-      } else {
-        res.end();
-      }
+      const arrayBuffer = await supabaseRes.arrayBuffer();
+      res.send(Buffer.from(arrayBuffer));
     } catch (e: any) {
       console.error('Supabase proxy error:', e, 'Target:', targetUrl);
       res.status(502).json({ error: 'Proxy error', details: e.message, cause: e.cause ? String(e.cause) : null, targetUrl });

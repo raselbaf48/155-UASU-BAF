@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { DutyRatioTable } from '../data/officialDutyRatioMatrix';
 import { FlightName } from '../types';
 import { Printer, X, Download, FileSpreadsheet } from 'lucide-react';
-import { exportTableToCSV } from '../utils/csvExport';
+import { exportTableToCSV, exportDutyRatioMatrixCSV } from '../utils/csvExport';
 import { exportHtmlToWord } from '../utils/htmlExport';
 import { DUTY_TYPE_MAP } from '../data/dutyTypes';
 
@@ -149,7 +149,7 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
         <div className="flex items-center space-x-3">
           
           <button
-            onClick={() => exportTableToCSV('print-duty-ratio-content', 'Duty_Ratio_Matrix_Complete.csv')}
+            onClick={() => exportDutyRatioMatrixCSV(matrix, 'Duty_Ratio_Matrix_Complete.csv')}
             className="flex items-center space-x-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold text-xs transition-colors cursor-pointer"
           >
             <FileSpreadsheet className="w-4 h-4" />
@@ -435,7 +435,15 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
                           }, 0);
                           return <td key={i} className="border border-black p-1 font-bold">{sum > 0 ? sum : ''}</td>;
                         })}
-                        <td className="border border-black p-1 font-bold">{table.totalRequiredMonth}</td>
+                        <td className="border border-black p-1 font-bold">
+                          {chunk.reduce((monthAcc, d) => {
+                            const i = d - 1;
+                            const dailySum = ['Mechanics', 'Avionics', 'GCS', 'Admin'].reduce((acc, fl) => {
+                              return acc + (table.data[fl as FlightName]?.[i] || 0);
+                            }, 0);
+                            return monthAcc + dailySum;
+                          }, 0)}
+                        </td>
                       </tr>
                       <tr style={{ backgroundColor: '#f1f5f9' }}>
                         <td className="border border-black font-bold p-1">Req.</td>

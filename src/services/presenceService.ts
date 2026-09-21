@@ -79,15 +79,51 @@ export const subscribeToActiveUsers = (callback: (users: any[]) => void) => {
 };
 
 export const subscribeToLoginHistory = (callback: (logs: any[]) => void) => {
-  const handleLocal = (e: any) => callback(e.detail || []);
+  const getLocalLogs = () => {
+    try {
+      const raw = localStorage.getItem('baf_user_login_history');
+      if (raw) return JSON.parse(raw);
+    } catch {}
+    return [];
+  };
+
+  const handleLocal = (e: any) => {
+    if (e.detail && Array.isArray(e.detail)) {
+      callback(e.detail);
+    } else {
+      callback(getLocalLogs());
+    }
+  };
+
   window.addEventListener('baf_login_history_updated', handleLocal);
   
-  callback(JSON.parse(localStorage.getItem('baf_user_login_history') || '[]'));
+  // Immediately provide local login history
+  const initialLogs = getLocalLogs();
+  callback(initialLogs);
   
+  // Safely check cloud sync from app_settings if Supabase is configured
   if (isSupabaseConfigured) {
-    supabase.from('parade_states').select('*').eq('type', 'SYSTEM').order('created_at', { ascending: false }).limit(100).then(({ data, error }) => {
-      if (!error && data) {
-         callback(data);
+    supabase.from('app_settings').select('setting_value').eq('setting_key', 'baf_user_login_history').single().then(({ data, error }) => {
+      if (!error && data && data.setting_value) {
+        try {
+          const cloudLogs = JSON.parse(data.setting_value);
+          if (Array.isArray(cloudLogs) && cloudLogs.length > 0) {
+            const local = getLocalLogs();
+            const map = new Map();
+            [...local, ...cloudLogs].forEach((item: any) => {
+              if (item && item.id && !map.has(item.id)) {
+                map.set(item.id, item);
+              }
+            });
+            const merged = Array.from(map.values()).sort((a: any, b: any) => {
+              const timeA = new Date(a.timestamp || 0).getTime();
+              const timeB = new Date(b.timestamp || 0).getTime();
+              return timeB - timeA;
+            });
+            localStorage.setItem('baf_user_login_history', JSON.stringify(merged));
+            callback(merged);
+          }
+        } catch {}
       }
     });
   }

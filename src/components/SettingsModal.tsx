@@ -42,7 +42,7 @@ import {   UserManagementTab } from './UserManagementTab';
 import {   UserRole, ThemePreference, DetailedUserLogin, UserLoginStatus, UserLoginRole, Rank, FlightName } from '../types';
 import { getCustomDuties, saveCustomDuties, addCustomDuty, removeCustomDuty, CustomDutyConfig } from '../utils/customDuties';
 import {   subscribeToActiveUsers, subscribeToLoginHistory } from '../services/presenceService';
-import {   getLoginHistory, clearLoginHistory, UserLoginLog, getDetailedUsers, toggleUserLoginStatus, saveDetailedUsers, changeUserPassword, changeAdminPassword, changeUserRole, getCurrentUserSession } from '../utils/authSession';
+import {   getLoginHistory, clearLoginHistory, recordLoginLog, UserLoginLog, getDetailedUsers, toggleUserLoginStatus, saveDetailedUsers, changeUserPassword, changeAdminPassword, changeUserRole, getCurrentUserSession } from '../utils/authSession';
 import {   localDb, getSyncLogs, SyncLog } from '../services/localDatabase';
 
 import { CustomDutiesTab } from './CustomDutiesTab';
@@ -343,11 +343,50 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setNewPasscode('');
       setConfirmPasscode('');
       setRestoreStatus('');
-      setLoginHistory(getLoginHistory());
+      
+      let logs = getLoginHistory();
+      if (logs.length === 0) {
+        const session = getCurrentUserSession();
+        if (session) {
+          recordLoginLog({
+            id: session.airmanId,
+            bdNo: session.bdNo,
+            rank: session.rank,
+            name: session.name,
+            flightName: session.flightName,
+            trade: session.trade
+          } as any, session.assignedRole || session.systemRole || 'USER');
+          logs = getLoginHistory();
+        }
+      }
+      setLoginHistory(logs);
+      setRealtimeHistory(logs);
       setDetailedUsersList(getDetailedUsers());
       setActiveSection(null);
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (activeSection === 'history') {
+      let logs = getLoginHistory();
+      if (logs.length === 0) {
+        const session = getCurrentUserSession();
+        if (session) {
+          recordLoginLog({
+            id: session.airmanId,
+            bdNo: session.bdNo,
+            rank: session.rank,
+            name: session.name,
+            flightName: session.flightName,
+            trade: session.trade
+          } as any, session.assignedRole || session.systemRole || 'USER');
+          logs = getLoginHistory();
+        }
+      }
+      setLoginHistory(logs);
+      setRealtimeHistory(logs);
+    }
+  }, [activeSection]);
 
   const handleUpdateAdminPasscode = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1291,34 +1330,42 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <ShieldCheck className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
                     </div>
                     <div>
-                      <div className="text-sm font-black text-slate-900 dark:text-white">
-                        {selectedHistoryUser.rank} {selectedHistoryUser.name}
+                      <div className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                        {formatAirmanName(selectedHistoryUser.rank || '')} {selectedHistoryUser.name}
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-600 font-bold uppercase tracking-wider">
+                          {selectedHistoryUser.role === 'OWNER' ? 'Owner' : selectedHistoryUser.role === 'SUPER_ADMIN' ? 'Super Admin' : selectedHistoryUser.role === 'ADMIN' ? 'Admin' : 'User'}
+                        </span>
                       </div>
                       <div className="text-xs font-mono text-emerald-600 dark:text-emerald-400 mt-0.5">
-                        {selectedHistoryUser.bdNo}
+                        {selectedHistoryUser.bdNo} • {selectedHistoryUser.flightName || 'Flight'}
                       </div>
+                      {selectedHistoryUser.deviceInfo && (
+                        <div className="text-[11px] text-slate-400 mt-1 font-medium">
+                          Device: {selectedHistoryUser.deviceInfo}
+                        </div>
+                      )}
                     </div>
                   </div>
 
                   <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
                     <Activity className="w-4 h-4" />
-                    Timeline
+                    Activity Timeline
                   </h4>
                   <div className="space-y-6">
                     <div className="relative pl-6 border-l-2 border-emerald-200 dark:border-emerald-900/50">
                       <div className="absolute w-3 h-3 bg-emerald-500 rounded-full -left-[7px] top-1 border-2 border-white dark:border-slate-800"></div>
                       <p className="text-sm font-black text-slate-900 dark:text-white">Logged In</p>
-                      <p className="text-xs font-bold text-slate-500 dark:text-slate-400 mt-1">System Login</p>
+                      <p className="text-xs font-bold text-slate-500 dark:text-slate-400 mt-1">Authenticated to UASU Portal</p>
                       <p className="text-xs font-medium text-slate-400 dark:text-slate-500 mt-0.5">
-                        {new Date(selectedHistoryUser.timestamp).toLocaleString()}
+                        {selectedHistoryUser.timeFormatted || (selectedHistoryUser.timestamp ? new Date(selectedHistoryUser.timestamp).toLocaleString() : 'Recent')}
                       </p>
                     </div>
                     <div className="relative pl-6 border-l-2 border-slate-200 dark:border-slate-700">
                       <div className="absolute w-3 h-3 bg-slate-400 rounded-full -left-[7px] top-1 border-2 border-white dark:border-slate-800"></div>
-                      <p className="text-sm font-black text-slate-900 dark:text-white">System Access</p>
-                      <p className="text-xs font-bold text-slate-500 dark:text-slate-400 mt-1">Only View Dashboard</p>
+                      <p className="text-sm font-black text-slate-900 dark:text-white">Active Session Access</p>
+                      <p className="text-xs font-bold text-slate-500 dark:text-slate-400 mt-1">View & Update Duty / Nominal Roll</p>
                       <p className="text-xs font-medium text-slate-400 dark:text-slate-500 mt-0.5">
-                        {new Date(new Date(selectedHistoryUser.timestamp).getTime() + 60000).toLocaleString()}
+                        {selectedHistoryUser.timestamp ? new Date(new Date(selectedHistoryUser.timestamp).getTime() + 60000).toLocaleString() : 'Recent'}
                       </p>
                     </div>
                   </div>
@@ -1346,62 +1393,103 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Realtime Login History Section */}
-                  <div className="flex items-center gap-2 mb-2">
+                  {/* Realtime Login History Toolbar */}
+                  <div className="flex items-center gap-2 mb-3">
                     <div className="flex-1 flex items-center bg-white dark:bg-slate-800 rounded-xl px-3 py-2 border border-slate-200 dark:border-slate-700 shadow-sm">
-                      <Search className="w-4 h-4 text-slate-400" />
+                      <Search className="w-4 h-4 text-slate-400 shrink-0" />
                       <input
                         type="text"
-                        placeholder="Search realtime logs..."
+                        placeholder="Search logs by ID, Name, Rank, Flight, Role..."
                         value={historySearch}
                         onChange={(e) => setHistorySearch(e.target.value)}
-                        className="w-full bg-transparent border-none text-xs font-bold text-slate-900 dark:text-white px-3 py-1 outline-none placeholder:text-slate-400"
+                        className="w-full bg-transparent border-none text-xs font-bold text-slate-900 dark:text-white px-2 py-1 outline-none placeholder:text-slate-400"
                       />
                     </div>
+                    <button
+                      onClick={() => {
+                        const logs = getLoginHistory();
+                        setLoginHistory(logs);
+                        setRealtimeHistory(logs);
+                      }}
+                      title="Refresh Login History"
+                      className="p-2.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-xl transition-all shadow-sm flex items-center gap-1 text-xs font-bold cursor-pointer"
+                    >
+                      <RefreshCw className="w-4 h-4 text-slate-500" />
+                    </button>
+                    {(role === 'SUPER_ADMIN' || role === 'OWNER' || role === 'ADMIN') && (
+                      <button
+                        onClick={async () => {
+                          if (window.confirm('Are you sure you want to clear all login history logs?')) {
+                            await clearLoginHistory();
+                            setLoginHistory([]);
+                            setRealtimeHistory([]);
+                          }
+                        }}
+                        title="Clear All Login History"
+                        className="p-2.5 bg-white dark:bg-slate-800 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-rose-500 border border-slate-200 dark:border-slate-700 rounded-xl transition-all shadow-sm flex items-center gap-1 text-xs font-bold cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                   <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden divide-y divide-slate-100 dark:divide-slate-700 max-h-[60vh] overflow-y-auto shadow-sm">
                     {(() => {
-                      const filtered = realtimeHistory.filter(log => {
+                      const sourceList = (realtimeHistory && realtimeHistory.length > 0)
+                        ? realtimeHistory
+                        : (loginHistory && loginHistory.length > 0 ? loginHistory : getLoginHistory());
+
+                      const filtered = sourceList.filter(log => {
                         if (!historySearch.trim()) return true;
                         const q = historySearch.toLowerCase();
                         return (
                           log.bdNo?.toLowerCase().includes(q) ||
                           log.name?.toLowerCase().includes(q) ||
                           log.rank?.toLowerCase().includes(q) ||
-                          log.flightName?.toLowerCase().includes(q)
+                          log.flightName?.toLowerCase().includes(q) ||
+                          log.role?.toLowerCase().includes(q) ||
+                          log.deviceInfo?.toLowerCase().includes(q)
                         );
                       });
                       if (filtered.length === 0) {
                         return (
                           <div className="p-8 text-center text-slate-500">
                             <History className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                            <p className="text-xs font-bold">No realtime login history found</p>
+                            <p className="text-xs font-bold">No login history found</p>
+                            <p className="text-[11px] text-slate-400 mt-1">Logs will appear automatically whenever users log in.</p>
                           </div>
                         );
                       }
-                      return filtered.map(log => (
-                        <div 
-                          key={log.id} 
-                          onClick={() => setSelectedHistoryUser(log)}
-                          className="p-4 hover:bg-slate-50 dark:hover:bg-slate-750 transition-colors flex justify-between items-center cursor-pointer"
-                        >
-                          <div>
-                            <div className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
-                              {log.rank} {log.name}
-                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-600 font-bold uppercase tracking-wider">
-                                {log.role === 'OWNER' ? 'Owner' : log.role === 'SUPER_ADMIN' ? 'Super Admin' : log.role === 'ADMIN' ? 'Admin' : 'User'}
-                              </span>
+                      return filtered.map(log => {
+                        const formattedTime = log.timeFormatted || (log.timestamp ? new Date(log.timestamp).toLocaleString() : 'Recent');
+                        return (
+                          <div 
+                            key={log.id || `${log.bdNo}-${log.timestamp}`} 
+                            onClick={() => setSelectedHistoryUser(log)}
+                            className="p-4 hover:bg-slate-50 dark:hover:bg-slate-750 transition-colors flex justify-between items-center cursor-pointer"
+                          >
+                            <div>
+                              <div className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                                {formatAirmanName(log.rank || '')} {log.name}
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-600 font-bold uppercase tracking-wider">
+                                  {log.role === 'OWNER' ? 'Owner' : log.role === 'SUPER_ADMIN' ? 'Super Admin' : log.role === 'ADMIN' ? 'Admin' : 'User'}
+                                </span>
+                                {log.deviceInfo && (
+                                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 font-medium">
+                                    {log.deviceInfo}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400 mt-1">
+                                {log.bdNo} • {log.flightName || 'Flight'}
+                              </div>
+                              <div className="text-[10px] text-slate-400 mt-1 font-medium">
+                                {formattedTime}
+                              </div>
                             </div>
-                            <div className="text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400 mt-1">
-                              {log.bdNo} • {log.flightName}
-                            </div>
-                            <div className="text-[10px] text-slate-400 mt-1 font-medium">
-                              {new Date(log.timestamp).toLocaleString()}
-                            </div>
+                            <ChevronRight className="w-5 h-5 text-slate-400 shrink-0" />
                           </div>
-                          <ChevronRight className="w-5 h-5 text-slate-400" />
-                        </div>
-                      ));
+                        );
+                      });
                     })()}
                   </div>
                 </>
