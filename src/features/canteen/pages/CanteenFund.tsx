@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Wallet, Landmark, CreditCard, Receipt } from 'lucide-react';
+import { formatCanteenDate } from '../utils/dateUtils';
 
 export const CanteenFund: React.FC = () => {
   const [reports, setReports] = useState<any[]>([]);
@@ -108,7 +109,7 @@ export const CanteenFund: React.FC = () => {
                   ) : (
                       activeList.map((tx, idx) => (
                          <tr key={tx.id || idx} className="border-b border-slate-800/50 hover:bg-slate-800/50 transition-colors">
-                            <td className="p-4">{tx.date}</td>
+                            <td className="p-4">{formatCanteenDate(tx.date)}</td>
                             <td className="p-4 text-indigo-400 font-bold">{tx.airman_id}</td>
                             <td className="p-4">
                                 <span className={`px-2 py-1 rounded text-[8px] font-black tracking-widest uppercase ${tx.gateway === 'CASH' ? 'bg-emerald-900/30 text-emerald-500' : 'bg-blue-900/30 text-blue-500'}`}>

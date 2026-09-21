@@ -183,7 +183,7 @@ async function handleLocalApiRequest(urlStr: string, init?: RequestInit): Promis
     // Helper to verify duty write permissions
     const verifyDutyWritePermission = (targetAirmanId?: string, targetDate?: string, targetFlight?: string) => {
       const session = getCurrentUserSession();
-      const role = session?.assignedRole || 'USER';
+      const role = (session?.assignedRole as any) || 'USER';
       let flight = targetFlight;
       if (!flight && targetAirmanId) {
         const air = localDb.getAirmen().find(a => a.id === targetAirmanId);

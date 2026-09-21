@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { formatMoney, formatNumber } from '../i18n';
 import { Search, Filter, Download } from 'lucide-react';
+import { formatCanteenDate } from '../utils/dateUtils';
 
 export const MyDemands: React.FC = () => {
   const { t, i18n } = useTranslation();
@@ -48,7 +49,7 @@ export const MyDemands: React.FC = () => {
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50 text-slate-200 dark:text-slate-300">
               {dummyHistory.map((row) => (
                 <tr key={row.id} className="hover:bg-slate-800 dark:hover:bg-slate-800/20 transition-colors">
-                  <td className="px-6 py-4 font-medium">{row.date}</td>
+                  <td className="px-6 py-4 font-medium">{formatCanteenDate(row.date)}</td>
                   <td className="px-6 py-4">
                     <div className="font-bold">{i18n.language === 'bn' ? row.item_bn : row.item_en}</div>
                     <div className="text-xs text-slate-400">{row.meal}</div>

@@ -37,8 +37,8 @@ export const PrintableNominalRollModal: React.FC<PrintableNominalRollModalProps>
   const handleExportCSV = () => {
     let csvContent = "data:text/csv;charset=utf-8,";
     
-    // Headers
-    const headers = ["Ser", "BD No", "Rank", "Full Name", "Trade", "Flight"];
+    // Headers (Surname column added next to Full Name for CSV export only)
+    const headers = ["Ser", "BD No", "Rank", "Full Name", "Surname", "Trade", "Flight"];
     if (variant === 'biodata') {
       headers.push("Blood Group");
       headers.push("Present Address");
@@ -55,7 +55,7 @@ export const PrintableNominalRollModal: React.FC<PrintableNominalRollModalProps>
     
     // Rows
     airmen.forEach((a, index) => {
-      const escapeCsv = (str) => {
+      const escapeCsv = (str: string | undefined | null) => {
         if (!str) return '""';
         const cleaned = str.replace(/"/g, '""').replace(/\n/g, ' ');
         return `"${cleaned}"`;
@@ -66,6 +66,7 @@ export const PrintableNominalRollModal: React.FC<PrintableNominalRollModalProps>
         a.bdNo,
         a.rank,
         escapeCsv(a.fullName || a.name),
+        escapeCsv(a.name || a.fullName),
         escapeCsv(a.trade),
         a.flightName
       ];
@@ -90,7 +91,10 @@ export const PrintableNominalRollModal: React.FC<PrintableNominalRollModalProps>
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `Nominal_Roll_${new Date().toISOString().split('T')[0]}.csv`);
+    const filename = variant === 'biodata' 
+      ? `Biodata_Register_${new Date().toISOString().split('T')[0]}.csv`
+      : `Nominal_Roll_${new Date().toISOString().split('T')[0]}.csv`;
+    link.setAttribute("download", filename);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

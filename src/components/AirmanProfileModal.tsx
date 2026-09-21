@@ -1,9 +1,34 @@
 import { DateNavigator } from './DateNavigator';
 import React, { useState, useEffect, useMemo } from 'react';
 import { Airman, DutyAssignment } from '../types';
-import { X, Shield, Phone, MapPin, Award, Calendar, FileText, User, Filter, Printer, Clock, Settings, Trash2, Check, RefreshCw, AlertCircle } from 'lucide-react';
+import { X, Shield, Phone, MapPin, Award, Calendar, FileText, User, Filter, Printer, Clock, Settings, Trash2, Check, RefreshCw, AlertCircle, ShoppingBag, CreditCard } from 'lucide-react';
 import { DUTY_TYPE_MAP } from '../data/dutyTypes';
+import { supabase } from '../supabase';
+import { resolveImageUrl } from '../features/canteen/utils/canteenSettings';
 
+const parseTxDateToIso = (dateStr: string): string => {
+  if (!dateStr) return '';
+  const bengaliDigits = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
+  let normalized = dateStr;
+  bengaliDigits.forEach((d, i) => {
+    normalized = normalized.split(d).join(String(i));
+  });
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    return normalized;
+  }
+  const parts = normalized.split(/[\/\-\.]/);
+  if (parts.length === 3) {
+    if (parts[0].length === 4) {
+      return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+    } else {
+      const day = parts[0].padStart(2, '0');
+      const month = parts[1].padStart(2, '0');
+      const year = parts[2].length === 2 ? `20${parts[2]}` : parts[2];
+      return `${year}-${month}-${day}`;
+    }
+  }
+  return dateStr;
+};
 
 const formatAirmanName = (name: string) => {
   if (!name) return '';
@@ -47,6 +72,7 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
   });
   const [assignments, setAssignments] = useState<DutyAssignment[]>([]);
   const [canteenTransactions, setCanteenTransactions] = useState<any[]>([]);
+  const [canteenMemberData, setCanteenMemberData] = useState<any>((airman as any)?.canteenMember || null);
   const [loading, setLoading] = useState<boolean>(true);
   
   const [categoryFilter, setCategoryFilter] = useState<string>(canteenOnly ? 'ALL_CANTEEN' : initialCategory);
@@ -419,20 +445,52 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
         airmanAss.sort((a, b) => a.date.localeCompare(b.date));
 
         if (canteenOnly) {
-          // Strictly keep ONLY CANTEEN assignments - no other duty/leave/deployment
-          const onlyCanteenDuty = airmanAss.filter(a => a.dutyCode === 'CANTEEN');
-          setAssignments(onlyCanteenDuty);
+          // Do NOT show Canteen duty assignments in customer profile history
+          setAssignments([]);
 
-          // Load Canteen transactions and pre-orders
+          // Fetch member directly from DB Canteen table to ensure latest info and DP
           try {
             const cleanBd = (airman.bdNo || '').replace(/^BD\/?/i, '').trim();
+            let cMember = (airman as any)?.canteenMember || null;
+            if (!cMember) {
+              if (cleanBd) {
+                const { data } = await supabase
+                  .from('Canteen')
+                  .select('*')
+                  .or(`"BD No".eq.${cleanBd},airman_id.eq.${cleanBd},airman_id.eq.airman-${cleanBd}`)
+                  .limit(1);
+                if (data && data.length > 0) {
+                  cMember = data[0];
+                }
+              }
+              if (!cMember && airman.name) {
+                const parts = airman.name.trim().split(/\s+/);
+                const surname = parts[parts.length - 1];
+                if (surname) {
+                  const { data } = await supabase
+                    .from('Canteen')
+                    .select('*')
+                    .ilike('Surname', `%${surname}%`)
+                    .limit(1);
+                  if (data && data.length > 0) {
+                    cMember = data[0];
+                  }
+                }
+              }
+            }
+            if (cMember) {
+              setCanteenMemberData(cMember);
+            }
+
             const matchKeys = [
               String(airman.id || ''),
               String(airman.bdNo || ''),
               cleanBd,
               `airman-${cleanBd}`,
               `airman-${airman.bdNo}`,
-              `cust-${cleanBd}`
+              `cust-${cleanBd}`,
+              ...(cMember?.airman_id ? [String(cMember.airman_id)] : []),
+              ...(cMember?.['BD No'] ? [String(cMember['BD No'])] : [])
             ].filter(Boolean);
 
             const txs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
@@ -442,36 +500,26 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
               return matchKeys.includes(txAid) || 
                      matchKeys.includes(txBd) || 
                      (cleanBd && (txAid.includes(cleanBd) || txBd.includes(cleanBd)));
-            }).map((tx: any) => ({
-              id: tx.id || `tx-${Math.random()}`,
-              date: tx.date || '',
-              description: tx.items || (tx.type === 'BILL PAYMENT' ? `Payment Received (${tx.gateway || 'CASH'})` : 'Canteen Purchase'),
-              type: tx.type || 'PURCHASE',
-              amount: tx.amount,
-              gateway: tx.gateway,
-              isTransaction: true
-            }));
+            }).map((tx: any) => {
+              const isPayment = tx.type === 'BILL PAYMENT' || tx.type === 'PAYMENT' || (typeof tx.items === 'string' && tx.items.toUpperCase().includes('BILL PAYMENT'));
+              return {
+                id: tx.id || `tx-${Math.random()}`,
+                date: tx.date || '',
+                rawDate: parseTxDateToIso(tx.date || ''),
+                description: isPayment 
+                  ? (tx.description || (tx.gateway ? `Bill Payment (${tx.gateway})` : 'Bill Payment'))
+                  : (tx.items || tx.description || 'Canteen Purchase'),
+                type: isPayment ? 'BILL PAYMENT' : 'PURCHASE',
+                amount: Number(tx.amount || 0),
+                gateway: tx.gateway || 'CASH',
+                isTransaction: true
+              };
+            });
 
-            const preOrders = JSON.parse(localStorage.getItem('canteen_pre_orders') || '[]');
-            const myPreOrders = preOrders.filter((po: any) => {
-              const poAid = String(po.airman_id || '');
-              const poBd = String(po.bdNo || '');
-              return matchKeys.includes(poAid) || 
-                     matchKeys.includes(poBd) || 
-                     (cleanBd && (poAid.includes(cleanBd) || poBd.includes(cleanBd)));
-            }).map((po: any) => ({
-              id: po.id || `po-${Math.random()}`,
-              date: po.date || '',
-              description: po.items || 'Pre-Ordered Items',
-              type: 'PRE-ORDER',
-              amount: po.amount || 0,
-              status: po.status || 'PENDING',
-              isTransaction: true
-            }));
-
-            setCanteenTransactions([...myTxs, ...myPreOrders]);
+            // Exclude pre-orders and duties; only show Purchase History & Payment History
+            setCanteenTransactions(myTxs);
           } catch (e) {
-            console.error('Failed to load canteen transactions', e);
+            console.error('Failed to load canteen data', e);
             setCanteenTransactions([]);
           }
         } else {
@@ -596,56 +644,44 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
     const items: Array<{
       id: string;
       date: string;
+      rawDate: string;
       title: string;
-      type: string;
+      type: 'PURCHASE' | 'BILL PAYMENT';
       detail: string;
       amountOrDays: string;
+      amountNum: number;
       badgeBg: string;
+      gateway?: string;
     }> = [];
 
-    // Transactions and orders
-    if (categoryFilter === 'ALL_CANTEEN' || categoryFilter === 'PURCHASES') {
-      canteenTransactions.forEach((tx, idx) => {
-        let bBg = 'bg-indigo-100 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800';
-        let typeLabel = tx.type || 'PURCHASE';
-        if (tx.type === 'BILL PAYMENT') {
-          bBg = 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800';
-          typeLabel = 'BILL PAYMENT';
-        } else if (tx.type === 'PRE-ORDER') {
-          bBg = 'bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800';
-          typeLabel = `PRE-ORDER (${tx.status || 'PENDING'})`;
-        }
+    canteenTransactions.forEach((tx, idx) => {
+      const isPayment = tx.type === 'BILL PAYMENT';
 
-        items.push({
-          id: `tx-${tx.id || idx}`,
-          date: tx.date || '-',
-          title: tx.description || 'Canteen Item',
-          type: tx.type,
-          detail: typeLabel,
-          amountOrDays: tx.amount ? `৳${tx.amount}` : (tx.type === 'PRE-ORDER' ? 'Pending' : '৳0'),
-          badgeBg: bBg
-        });
-      });
-    }
+      // Category filtering:
+      if (categoryFilter === 'PURCHASES' && isPayment) return;
+      if (categoryFilter === 'PAYMENTS' && !isPayment) return;
 
-    // Canteen duty assignments
-    if (categoryFilter === 'ALL_CANTEEN' || categoryFilter === 'DUTY') {
-      filteredList.forEach((duty, idx) => {
-        items.push({
-          id: `duty-${duty.id || idx}`,
-          date: duty.date,
-          title: 'Canteen Duty Assignment',
-          type: 'DUTY',
-          detail: duty.notes || 'Canteen Deployment',
-          amountOrDays: '1 Day',
-          badgeBg: 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
-        });
+      const badgeBg = isPayment
+        ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+        : 'bg-indigo-100 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800';
+
+      items.push({
+        id: `tx-${tx.id || idx}`,
+        date: tx.date || '-',
+        rawDate: tx.rawDate || '',
+        title: tx.description || (isPayment ? 'Bill Payment' : 'Canteen Purchase'),
+        type: isPayment ? 'BILL PAYMENT' : 'PURCHASE',
+        detail: isPayment ? 'Bill Payment' : 'Purchase',
+        amountOrDays: `৳${tx.amount}`,
+        amountNum: tx.amount,
+        badgeBg,
+        gateway: tx.gateway
       });
-    }
+    });
 
     // Sort descending by date
-    return items.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  }, [canteenOnly, categoryFilter, canteenTransactions, filteredList]);
+    return items.sort((a, b) => (b.rawDate || b.date || '').localeCompare(a.rawDate || a.date || ''));
+  }, [canteenOnly, categoryFilter, canteenTransactions]);
 
   const _todayD = new Date();
   const _currY = _todayD.getFullYear();
@@ -661,24 +697,50 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
         {/* Header */}
         <div className="bg-slate-900 text-white p-5 flex items-start justify-between border-b border-slate-800 shrink-0">
           <div className="flex items-center space-x-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-slate-800 border-2 border-emerald-500/50 flex flex-col items-center justify-center shadow-lg shrink-0 text-emerald-400">
-              <Shield className="w-5 h-5 mb-0.5" />
-              <span className="text-[8px] font-black text-white text-center leading-none">
-                {formatAirmanName(airman.rank)}
-              </span>
+            <div className="w-12 h-12 rounded-2xl bg-slate-800 border-2 border-indigo-500/50 flex flex-col items-center justify-center shadow-lg shrink-0 text-indigo-400 overflow-hidden">
+              {(canteenMemberData?.DP || airman.photoUrl) ? (
+                <img 
+                  src={resolveImageUrl(canteenMemberData?.DP || airman.photoUrl)} 
+                  alt={airman.name}
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover"
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                />
+              ) : (
+                <>
+                  <Shield className="w-5 h-5 mb-0.5 text-indigo-400" />
+                  <span className="text-[8px] font-black text-white text-center leading-none">
+                    {formatAirmanName(canteenMemberData?.Rank || airman.rank)}
+                  </span>
+                </>
+              )}
             </div>
             <div>
               <div className="flex items-center space-x-2">
-                <span className="text-xs font-mono font-black text-emerald-400 bg-emerald-950 px-2 py-0.5 rounded border border-emerald-800">
-                  {airman.bdNo}
+                <span className="text-xs font-mono font-black text-indigo-400 bg-indigo-950 px-2 py-0.5 rounded border border-indigo-800">
+                  {canteenMemberData?.['BD No'] || airman.bdNo}
                 </span>
-                <span className="text-xs font-bold text-slate-300">
-                  #{airman.serNo}
-                </span>
+                {canteenOnly ? (
+                  <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">
+                    Canteen Customer
+                  </span>
+                ) : (
+                  <span className="text-xs font-bold text-slate-300">
+                    #{airman.serNo}
+                  </span>
+                )}
               </div>
-              <h2 className="text-lg font-black mt-1 text-white">{airman.name}</h2>
+              <h2 className="text-lg font-black mt-1 text-white">
+                {canteenOnly ? `${canteenMemberData?.Rank || airman.rank} ${canteenMemberData?.Surname || airman.fullName || airman.name}` : airman.name}
+              </h2>
               <p className="text-xs text-slate-400 font-semibold">
-                {airman.flightName} Flight • {airman.trade}
+                {canteenOnly ? (
+                  <span className="text-slate-300">
+                    Canteen Member • {canteenMemberData?.Contact || canteenMemberData?.['Mobile No'] || airman.mobileNo || 'N/A'}
+                  </span>
+                ) : (
+                  `${airman.flightName} Flight • ${airman.trade}`
+                )}
               </p>
             </div>
           </div>
@@ -790,33 +852,33 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                   <div className="flex items-center space-x-1 bg-white dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-700 text-[11px] font-bold">
                     <button
                       onClick={() => setCategoryFilter('ALL_CANTEEN')}
-                      className={`px-2.5 py-1 rounded-lg transition-all ${
+                      className={`px-3 py-1.5 rounded-lg transition-all ${
                         categoryFilter === 'ALL_CANTEEN'
-                          ? 'bg-emerald-600 text-white'
+                          ? 'bg-indigo-600 text-white shadow-xs'
                           : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                       }`}
                     >
-                      All Canteen
+                      All History
                     </button>
                     <button
                       onClick={() => setCategoryFilter('PURCHASES')}
-                      className={`px-2.5 py-1 rounded-lg transition-all ${
+                      className={`px-3 py-1.5 rounded-lg transition-all ${
                         categoryFilter === 'PURCHASES'
-                          ? 'bg-emerald-600 text-white'
+                          ? 'bg-indigo-600 text-white shadow-xs'
                           : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                       }`}
                     >
-                      Purchases & Orders
+                      Purchase History
                     </button>
                     <button
-                      onClick={() => setCategoryFilter('DUTY')}
-                      className={`px-2.5 py-1 rounded-lg transition-all ${
-                        categoryFilter === 'DUTY'
-                          ? 'bg-emerald-600 text-white'
+                      onClick={() => setCategoryFilter('PAYMENTS')}
+                      className={`px-3 py-1.5 rounded-lg transition-all ${
+                        categoryFilter === 'PAYMENTS'
+                          ? 'bg-emerald-600 text-white shadow-xs'
                           : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                       }`}
                     >
-                      Canteen Duty
+                      Payment History
                     </button>
                   </div>
                 ) : isDutyMatrixMode ? (
@@ -1495,54 +1557,88 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                     )}
                   </div>
                 ) : canteenOnly ? (
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-extrabold uppercase text-[10px] tracking-wider">
-                        <th className="py-2.5 px-3.5">Ser</th>
-                        <th className="py-2.5 px-3.5">Date</th>
-                        <th className="py-2.5 px-3.5">Description / Activity</th>
-                        <th className="py-2.5 px-3.5">Category</th>
-                        <th className="py-2.5 px-3.5 text-right">Amount / Days</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                      {loading ? (
-                        <tr>
-                          <td colSpan={5} className="py-8 text-center text-slate-400 font-bold">
-                            Loading Canteen history...
-                          </td>
+                  <div>
+                    {/* Mini stats bar for quick overview */}
+                    <div className="grid grid-cols-3 gap-2.5 p-3 mb-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-800 text-center">
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-500 uppercase block">Total Purchases</span>
+                        <span className="text-sm font-black text-rose-500">
+                          ৳{canteenTransactions.filter(t => t.type === 'PURCHASE').reduce((s, c) => s + (Number(c.amount) || 0), 0)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-500 uppercase block">Total Payments</span>
+                        <span className="text-sm font-black text-emerald-500">
+                          ৳{canteenTransactions.filter(t => t.type === 'BILL PAYMENT').reduce((s, c) => s + (Number(c.amount) || 0), 0)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-500 uppercase block">Current Due</span>
+                        <span className="text-sm font-black text-amber-500">
+                          ৳{Number(canteenMemberData?.Due ?? canteenMemberData?.due ?? (airman as any)?.canteenDue ?? 0)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-extrabold uppercase text-[10px] tracking-wider">
+                          <th className="py-2.5 px-3.5">Ser</th>
+                          <th className="py-2.5 px-3.5">Date</th>
+                          <th className="py-2.5 px-3.5">Description / Items</th>
+                          <th className="py-2.5 px-3.5 text-center">Category</th>
+                          <th className="py-2.5 px-3.5 text-center">Method</th>
+                          <th className="py-2.5 px-3.5 text-right">Amount</th>
                         </tr>
-                      ) : canteenHistoryItems.length === 0 ? (
-                        <tr>
-                          <td colSpan={5} className="py-8 text-center text-slate-400 font-bold">
-                            No Canteen history records found for this period.
-                          </td>
-                        </tr>
-                      ) : (
-                        canteenHistoryItems.map((item, idx) => (
-                          <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
-                            <td className="py-2.5 px-3.5 font-mono font-bold text-slate-500">
-                              {String(idx + 1).padStart(2, '0')}
-                            </td>
-                            <td className="py-2.5 px-3.5 font-mono font-bold text-slate-800 dark:text-slate-200 whitespace-nowrap">
-                              {item.date}
-                            </td>
-                            <td className="py-2.5 px-3.5 font-bold text-slate-800 dark:text-slate-200">
-                              {item.title}
-                            </td>
-                            <td className="py-2.5 px-3.5">
-                              <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${item.badgeBg}`}>
-                                {item.detail}
-                              </span>
-                            </td>
-                            <td className="py-2.5 px-3.5 text-right font-black text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
-                              {item.amountOrDays}
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {loading ? (
+                          <tr>
+                            <td colSpan={6} className="py-8 text-center text-slate-400 font-bold">
+                              Loading Canteen history...
                             </td>
                           </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
+                        ) : canteenHistoryItems.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="py-8 text-center text-slate-400 font-bold">
+                              {categoryFilter === 'PURCHASES'
+                                ? 'No purchase history records found.'
+                                : categoryFilter === 'PAYMENTS'
+                                ? 'No payment history records found.'
+                                : 'No purchase or payment records found.'}
+                            </td>
+                          </tr>
+                        ) : (
+                          canteenHistoryItems.map((item, idx) => (
+                            <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                              <td className="py-2.5 px-3.5 font-mono font-bold text-slate-500">
+                                {String(idx + 1).padStart(2, '0')}
+                              </td>
+                              <td className="py-2.5 px-3.5 font-mono font-bold text-slate-800 dark:text-slate-200 whitespace-nowrap">
+                                {item.date}
+                              </td>
+                              <td className="py-2.5 px-3.5 font-bold text-slate-800 dark:text-slate-200">
+                                {item.title}
+                              </td>
+                              <td className="py-2.5 px-3.5 text-center">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${item.badgeBg}`}>
+                                  {item.type === 'BILL PAYMENT' ? 'Payment' : 'Purchase'}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3.5 text-center font-bold text-slate-600 dark:text-slate-400 text-[11px]">
+                                {item.type === 'BILL PAYMENT' ? (item.gateway || 'CASH') : 'POS Sale'}
+                              </td>
+                              <td className={`py-2.5 px-3.5 text-right font-black whitespace-nowrap text-sm ${
+                                item.type === 'BILL PAYMENT' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
+                              }`}>
+                                {item.type === 'BILL PAYMENT' ? `+৳${item.amountNum}` : `-৳${item.amountNum}`}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 ) : isGroupedView ? (
                   <table className="w-full text-center border-collapse text-xs">
                     <thead>
@@ -1679,84 +1775,177 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
             </div>
           ) : (
             /* Profile Details Tab */
-            <div className="space-y-4 text-xs text-slate-700 dark:text-slate-300">
-                            <div className="grid grid-cols-2 gap-3.5 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-200 dark:border-slate-800">
-                <div>
-                  <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-bold">
-                    BD No
-                  </span>
-                  <span className="font-mono font-black text-sm text-slate-900 dark:text-slate-100">
-                    {airman.bdNo}
-                  </span>
+            canteenOnly ? (
+              <div className="space-y-4 text-xs text-slate-700 dark:text-slate-300">
+                {/* DP & Customer Identity Card */}
+                <div className="bg-gradient-to-br from-indigo-950/40 via-slate-900/60 to-slate-950 p-5 rounded-2xl border border-indigo-500/20 flex flex-col sm:flex-row items-center space-y-4 sm:space-y-0 sm:space-x-5">
+                  <div className="w-24 h-24 rounded-2xl bg-slate-800 border-2 border-indigo-500/60 shadow-xl overflow-hidden flex items-center justify-center shrink-0">
+                    {(canteenMemberData?.DP || airman.photoUrl) ? (
+                      <img 
+                        src={resolveImageUrl(canteenMemberData?.DP || airman.photoUrl)} 
+                        alt="Customer DP" 
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover"
+                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                      />
+                    ) : (
+                      <User className="w-10 h-10 text-indigo-400" />
+                    )}
+                  </div>
+                  <div className="flex-1 text-center sm:text-left space-y-1">
+                    <div className="flex items-center justify-center sm:justify-start space-x-2">
+                      <span className="font-mono font-black text-sm text-indigo-400 bg-indigo-950 px-2.5 py-0.5 rounded border border-indigo-800">
+                        {canteenMemberData?.['BD No'] || airman.bdNo}
+                      </span>
+                      <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">
+                        Active Customer
+                      </span>
+                    </div>
+                    <h3 className="text-lg font-black text-white">
+                      {canteenMemberData?.Rank || airman.rank} {canteenMemberData?.Surname || airman.fullName || airman.name}
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Canteen Database Record #{canteenMemberData?.airman_id || airman.id}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-bold">
-                    Rank
-                  </span>
-                  <span className="font-black text-sm text-slate-900 dark:text-slate-100">
-                    {formatAirmanName(airman.rank)}
-                  </span>
+
+                {/* Financial Summary */}
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-rose-500/10 border border-rose-500/20 p-3.5 rounded-xl text-center">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-rose-400 block mb-1">
+                      Current Due
+                    </span>
+                    <span className="text-lg font-black text-rose-400">
+                      ৳{Number(canteenMemberData?.Due ?? canteenMemberData?.due ?? (airman as any)?.canteenDue ?? 0)}
+                    </span>
+                  </div>
+                  <div className="bg-indigo-500/10 border border-indigo-500/20 p-3.5 rounded-xl text-center">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 block mb-1">
+                      Total Purchases
+                    </span>
+                    <span className="text-lg font-black text-indigo-400">
+                      ৳{canteenTransactions.filter(t => t.type === 'PURCHASE').reduce((s, c) => s + (Number(c.amount) || 0), 0)}
+                    </span>
+                  </div>
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 p-3.5 rounded-xl text-center">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 block mb-1">
+                      Total Paid
+                    </span>
+                    <span className="text-lg font-black text-emerald-400">
+                      ৳{canteenTransactions.filter(t => t.type === 'BILL PAYMENT').reduce((s, c) => s + (Number(c.amount) || 0), 0)}
+                    </span>
+                  </div>
                 </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-bold">
-                    Full Name
-                  </span>
-                  <span className="font-bold text-slate-900 dark:text-slate-100">
-                    {airman.fullName || airman.name}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-bold">
-                    Trade
-                  </span>
-                  <span className="font-bold text-slate-900 dark:text-slate-100">
-                    {airman.trade}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-bold">
-                    Flight
-                  </span>
-                  <span className="font-black text-emerald-600 dark:text-emerald-400">
-                    {airman.flightName}
-                  </span>
+
+                {/* Customer Details from Canteen DB Table */}
+                <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2.5">
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-700">
+                    <span className="text-slate-500 font-semibold text-xs">Data Source</span>
+                    <span className="font-mono font-bold text-indigo-500 dark:text-indigo-400 text-xs">Canteen Table (Supabase DB)</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500 font-semibold text-xs">BD No</span>
+                    <span className="font-mono font-bold text-slate-900 dark:text-slate-100 text-sm">{canteenMemberData?.['BD No'] || airman.bdNo}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500 font-semibold text-xs">Rank</span>
+                    <span className="font-bold text-slate-900 dark:text-slate-100 text-sm">{canteenMemberData?.Rank || airman.rank}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500 font-semibold text-xs">Surname / Name</span>
+                    <span className="font-bold text-slate-900 dark:text-slate-100 text-sm">{canteenMemberData?.Surname || airman.fullName || airman.name}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500 font-semibold text-xs">Contact No</span>
+                    <span className="font-mono font-bold text-slate-900 dark:text-slate-100 text-sm">{canteenMemberData?.Contact || canteenMemberData?.['Mobile No'] || airman.mobileNo || 'N/A'}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500 font-semibold text-xs">Airman ID</span>
+                    <span className="font-mono text-slate-600 dark:text-slate-400 text-xs">{canteenMemberData?.airman_id || airman.id}</span>
+                  </div>
                 </div>
               </div>
-              
-              <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
-                {variant === 'biodata' && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500 font-semibold text-xs">Blood Group</span>
-                    <span className="font-bold text-slate-900 dark:text-slate-100 text-sm">{airman.bloodGroup || 'N/A'}</span>
+            ) : (
+              <div className="space-y-4 text-xs text-slate-700 dark:text-slate-300">
+                <div className="grid grid-cols-2 gap-3.5 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-200 dark:border-slate-800">
+                  <div>
+                    <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-bold">
+                      BD No
+                    </span>
+                    <span className="font-mono font-black text-sm text-slate-900 dark:text-slate-100">
+                      {airman.bdNo}
+                    </span>
                   </div>
-                )}
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500 font-semibold text-xs">{variant === 'biodata' ? 'Present Address' : 'Address'}</span>
-                  <span className="font-bold text-slate-900 dark:text-slate-100 text-sm">{airman.addressBlock || 'N/A'}</span>
+                  <div>
+                    <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-bold">
+                      Rank
+                    </span>
+                    <span className="font-black text-sm text-slate-900 dark:text-slate-100">
+                      {formatAirmanName(airman.rank)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-bold">
+                      Full Name
+                    </span>
+                    <span className="font-bold text-slate-900 dark:text-slate-100">
+                      {airman.fullName || airman.name}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-bold">
+                      Trade
+                    </span>
+                    <span className="font-bold text-slate-900 dark:text-slate-100">
+                      {airman.trade}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-bold">
+                      Flight
+                    </span>
+                    <span className="font-black text-emerald-600 dark:text-emerald-400">
+                      {airman.flightName}
+                    </span>
+                  </div>
                 </div>
-                {variant === 'biodata' && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500 font-semibold text-xs">Permanent Address</span>
-                    <span className="font-bold text-slate-900 dark:text-slate-100 text-sm">{airman.permanentAddress || 'N/A'}</span>
-                  </div>
-                )}
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500 font-semibold text-xs">Contact</span>
-                  <span className="font-mono font-bold text-slate-900 dark:text-slate-100 text-sm">{airman.mobileNo || 'N/A'}</span>
-                </div>
-                {variant === 'biodata' && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500 font-semibold text-xs">Dt of Posting</span>
-                    <span className="font-bold text-slate-900 dark:text-slate-100 text-sm">{airman.dateJoined || 'N/A'}</span>
-                  </div>
-                )}
                 
-                <div className="flex items-center justify-between pt-2 mt-2 border-t border-slate-200 dark:border-slate-700">
-                  <span className="text-slate-500 font-semibold text-xs">Remarks</span>
-                  <span className="italic text-slate-600 dark:text-slate-300 text-sm text-right">{airman.remarks || 'None'}</span>
+                <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                  {variant === 'biodata' && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500 font-semibold text-xs">Blood Group</span>
+                      <span className="font-bold text-slate-900 dark:text-slate-100 text-sm">{airman.bloodGroup || 'N/A'}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500 font-semibold text-xs">{variant === 'biodata' ? 'Present Address' : 'Address'}</span>
+                    <span className="font-bold text-slate-900 dark:text-slate-100 text-sm">{airman.addressBlock || 'N/A'}</span>
+                  </div>
+                  {variant === 'biodata' && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500 font-semibold text-xs">Permanent Address</span>
+                      <span className="font-bold text-slate-900 dark:text-slate-100 text-sm">{airman.permanentAddress || 'N/A'}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500 font-semibold text-xs">Contact</span>
+                    <span className="font-mono font-bold text-slate-900 dark:text-slate-100 text-sm">{airman.mobileNo || 'N/A'}</span>
+                  </div>
+                  {variant === 'biodata' && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500 font-semibold text-xs">Dt of Posting</span>
+                      <span className="font-bold text-slate-900 dark:text-slate-100 text-sm">{airman.dateJoined || 'N/A'}</span>
+                    </div>
+                  )}
+                  
+                  <div className="flex items-center justify-between pt-2 mt-2 border-t border-slate-200 dark:border-slate-700">
+                    <span className="text-slate-500 font-semibold text-xs">Remarks</span>
+                    <span className="italic text-slate-600 dark:text-slate-300 text-sm text-right">{airman.remarks || 'None'}</span>
+                  </div>
                 </div>
               </div>
-            </div>
+            )
           )}
         </div>
 

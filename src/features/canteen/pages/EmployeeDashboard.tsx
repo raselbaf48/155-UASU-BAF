@@ -347,30 +347,49 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ onManagerP
   };
 
   const handlePreOrder = (item: any) => {
-      setIsOrdering(true);
-      setTimeout(() => {
-          try {
-              const existingStr = localStorage.getItem('canteen_pre_orders') || '[]';
-              const existing = JSON.parse(existingStr);
-              
+      try {
+          const existingStr = localStorage.getItem('canteen_pre_orders') || '[]';
+          let existing = [];
+          try { existing = JSON.parse(existingStr); } catch(e) {}
+
+          const memberId = currentUser?.bdNo || 'Unknown ID';
+          const memberName = currentUser?.name || 'Guest';
+
+          const pendingOrderIndex = existing.findIndex((po: any) => 
+              po.status === 'pending' && 
+              String(po.memberId).toLowerCase() === String(memberId).toLowerCase() &&
+              Array.isArray(po.items) && po.items.some((i: any) => i.id === item.id || i.name?.toLowerCase() === item.name?.toLowerCase())
+          );
+
+          if (pendingOrderIndex !== -1) {
+              const targetOrder = existing[pendingOrderIndex];
+              const itmIdx = targetOrder.items.findIndex((i: any) => i.id === item.id || i.name?.toLowerCase() === item.name?.toLowerCase());
+              if (itmIdx !== -1) {
+                  targetOrder.items[itmIdx].qty = (Number(targetOrder.items[itmIdx].qty) || 1) + 1;
+              } else {
+                  targetOrder.items.push({ id: item.id, name: item.name, qty: 1, price: item.price });
+              }
+              targetOrder.total = targetOrder.items.reduce((sum: number, itm: any) => sum + ((Number(itm.qty) || 1) * (Number(itm.price) || 0)), 0);
+              targetOrder.timestamp = new Date().toISOString();
+          } else {
               const newOrder = {
                   orderId: 'PO-' + Date.now(),
                   timestamp: new Date().toISOString(),
-                  memberId: currentUser?.bdNo || 'Unknown ID',
-                  memberName: currentUser?.name || 'Guest',
+                  memberId: memberId,
+                  memberName: memberName,
                   items: [{ id: item.id, name: item.name, qty: 1, price: item.price }],
                   total: item.price,
                   status: 'pending'
               };
-              
               existing.push(newOrder);
-              localStorage.setItem('canteen_pre_orders', JSON.stringify(existing));
-              alert('Pre-order placed successfully!');
-          } catch(e) {
-              console.error(e);
           }
-          setIsOrdering(false);
-      }, 500);
+
+          localStorage.setItem('canteen_pre_orders', JSON.stringify(existing));
+          window.dispatchEvent(new Event('canteen_state_updated'));
+          window.dispatchEvent(new Event('storage'));
+      } catch(e) {
+          console.error(e);
+      }
   };
 
   return (

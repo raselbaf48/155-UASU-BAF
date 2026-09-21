@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Search, Plus, ShoppingCart, Minus, Trash2, CheckCircle2, X, History, Calendar, Package as PackageIcon } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl } from '../utils/canteenSettings';
+import { formatCanteenDate } from '../utils/dateUtils';
 
 export const PosSales: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -614,16 +615,25 @@ export const PosSales: React.FC = () => {
               await supabase.from('Canteen').update({ Due: newDue }).eq('airman_id', m.airman_id);
               
               // save tx to localstorage for statement
-              const txDateStr = new Date(saleDate).toLocaleDateString('bn-BD');
+              const txDateStr = formatCanteenDate(saleDate);
+              const txMemberName = [m.Rank || m.rank, m.Surname || m.surname || m.Name || m.name].filter(Boolean).join(' ') || m['BD No'] || m.airman_id;
               const tx = {
                   id: Date.now() + Math.random(),
                   date: txDateStr,
                   airman_id: m.airman_id,
+                  bdNo: m['BD No'] || m.bdNo || m.airman_id,
+                  memberName: txMemberName,
+                  rank: m.Rank || m.rank || '',
                   items: basket.map(b => `${b.name} (${b.qty})`).join(', '),
-                  amount: memberChargeAmount
+                  amount: memberChargeAmount,
+                  type: 'SALE',
+                  gateway: 'DUE'
               };
               const existingTx = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
               localStorage.setItem('canteen_txs', JSON.stringify([tx, ...existingTx]));
+              window.dispatchEvent(new Event('canteen_txs_updated'));
+              window.dispatchEvent(new Event('canteen_state_updated'));
+              window.dispatchEvent(new Event('storage'));
           }
           
           const newRecents = [...selectedMembers, ...recentMembers].reduce((acc, curr) => {
@@ -943,7 +953,7 @@ export const PosSales: React.FC = () => {
                                 <div key={tx.id} className="bg-slate-800 p-4 rounded-xl flex items-center justify-between border border-slate-700">
                                     <div>
                                         <p className="text-xs font-black text-white">{memberName}</p>
-                                        <p className="text-[10px] text-slate-400 mt-1">{tx.date} • {tx.items}</p>
+                                        <p className="text-[10px] text-slate-400 mt-1">{formatCanteenDate(tx.date)} • {tx.items}</p>
                                     </div>
                                     <div className="flex items-center space-x-4">
                                         <p className="text-sm font-black text-white">৳{tx.amount}</p>

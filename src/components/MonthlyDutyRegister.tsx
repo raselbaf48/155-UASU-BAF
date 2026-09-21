@@ -11,6 +11,8 @@ import { getStoredDutyRatiosForDate } from '../data/dutyRatios';
 import { getIdacShiftsForDateAndFlight, getFlightDutyQuotaForDate } from '../data/officialDutyRatioMatrix';
 import { FlightDutyRatioModal } from './FlightDutyRatioModal';
 import { EntryHistoryModal } from './EntryHistoryModal';
+import { getCurrentUserSession } from '../utils/authSession';
+import { checkDutyPermission, isDateInPast } from '../utils/dutyPermissions';
 
 
 const formatAirmanName = (name: string) => {
@@ -48,6 +50,13 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
   onViewProfile,
 }) => {
   const today = new Date();
+  const session = getCurrentUserSession();
+  const isSuperAdmin = role === 'SUPER_ADMIN' || role === 'OWNER';
+  const isAdmin = role === 'ADMIN';
+  const isUser = !isAdmin && !isSuperAdmin;
+  const adminFlight = session?.flightName;
+  const todayDateStr = new Date().toISOString().split('T')[0];
+
   const [currentYear, setCurrentYear] = useState<number>(today.getFullYear());
   const [currentMonth, setCurrentMonth] = useState<number>(today.getMonth() + 1); // 1-12
   const [isFullYearView, setIsFullYearView] = useState<boolean>(false);
@@ -87,6 +96,10 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
 
   // Toggle Custom Holiday
   const handleToggleHoliday = (dateStr: string) => {
+    if (isUser) {
+      alert('Regular users have read-only access and cannot modify holidays.');
+      return;
+    }
     const parts = dateStr.split('-');
     const dObj = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
     const isWeekend = dObj.getDay() === 5 || dObj.getDay() === 6;
@@ -374,6 +387,10 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
     if (airmanId) {
       const selected = airmen.find((a) => a.id === airmanId);
       if (selected) {
+        if (isAdmin && adminFlight && selected.flightName !== adminFlight) {
+          alert(`As an Admin, you can only assign duties to your own flight (${adminFlight}).`);
+          return;
+        }
         setBulkFlight(selected.flightName);
         setBulkAirmanId(selected.id);
         const rankLower = selected.rank.toLowerCase();
@@ -383,19 +400,37 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
         }
       }
     } else {
-      setBulkFlight('All');
-      const defaultEligible = airmen.filter((a) => {
-        const rankLower = a.rank.toLowerCase();
-        return ['cpl', 'lac', 'ac1', 'ac2', 'corporal'].some((r) => rankLower.includes(r));
-      });
-      if (defaultEligible.length > 0) {
-        setBulkAirmanId(defaultEligible[0].id);
-      } else if (airmen.length > 0) {
-        setBulkAirmanId(airmen[0].id);
+      if (isAdmin && adminFlight) {
+        setBulkFlight(adminFlight as FlightName);
+        const defaultEligible = airmen.filter((a) => {
+          if (a.flightName !== adminFlight) return false;
+          const rankLower = a.rank.toLowerCase();
+          return ['cpl', 'lac', 'ac1', 'ac2', 'corporal'].some((r) => rankLower.includes(r));
+        });
+        if (defaultEligible.length > 0) {
+          setBulkAirmanId(defaultEligible[0].id);
+        } else {
+          const fltAirmen = airmen.filter(a => a.flightName === adminFlight);
+          if (fltAirmen.length > 0) setBulkAirmanId(fltAirmen[0].id);
+        }
+      } else {
+        setBulkFlight('All');
+        const defaultEligible = airmen.filter((a) => {
+          const rankLower = a.rank.toLowerCase();
+          return ['cpl', 'lac', 'ac1', 'ac2', 'corporal'].some((r) => rankLower.includes(r));
+        });
+        if (defaultEligible.length > 0) {
+          setBulkAirmanId(defaultEligible[0].id);
+        } else if (airmen.length > 0) {
+          setBulkAirmanId(airmen[0].id);
+        }
       }
     }
     const todayStr = new Date().toISOString().split('T')[0];
-    const defaultFrom = todayStr.startsWith(monthKey) ? todayStr : `${monthKey}-01`;
+    let defaultFrom = todayStr.startsWith(monthKey) ? todayStr : `${monthKey}-01`;
+    if (isAdmin && defaultFrom < todayStr) {
+      defaultFrom = todayStr;
+    }
     const defaultTo = defaultFrom;
     setBulkFromDate(defaultFrom);
     setBulkToDate(defaultTo);
@@ -408,8 +443,9 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
     if (days === 0) {
       // Set to Today
       const startToday = todayStr.startsWith(monthKey) ? todayStr : `${monthKey}-01`;
-      setBulkFromDate(startToday);
-      setBulkToDate(startToday);
+      const finalStart = (isAdmin && startToday < todayStr) ? todayStr : startToday;
+      setBulkFromDate(finalStart);
+      setBulkToDate(finalStart);
       return;
     }
 
@@ -438,6 +474,13 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
   const handleBulkAssignRange = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!bulkAirmanId || !bulkDutyCode || !bulkFromDate || !bulkToDate) return;
+
+    const selectedAirman = airmen.find((a) => a.id === bulkAirmanId);
+    const perm = checkDutyPermission(role, selectedAirman?.flightName, bulkFromDate, adminFlight);
+    if (!perm.canAssign) {
+      alert(perm.reason || 'You do not have permission to assign duty for this flight or past dates.');
+      return;
+    }
 
     setBulkLoading(true);
     setBulkSuccessMsg('');
@@ -503,6 +546,12 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
     if (!bulkAirmanId || !bulkFromDate || !bulkToDate) return;
     const selectedAirman = airmen.find((a) => a.id === bulkAirmanId);
     const airmanLabel = selectedAirman ? `${formatAirmanName(selectedAirman.rank)} ${selectedAirman.name}` : 'Airman';
+
+    const perm = checkDutyPermission(role, selectedAirman?.flightName, bulkFromDate, adminFlight);
+    if (!perm.canDelete) {
+      alert(perm.reason || 'You do not have permission to delete duties for this flight or past dates.');
+      return;
+    }
 
     if (!window.confirm(`Are you sure you want to delete/clear all duty entries for ${airmanLabel} between ${bulkFromDate} and ${bulkToDate}?`)) {
       return;
@@ -719,6 +768,13 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
     e.preventDefault();
     if (!cellEditModal || !selectedReplacementAirmanId) return;
 
+    const targetAirman = airmen.find((a) => a.id === selectedReplacementAirmanId);
+    const perm = checkDutyPermission(role, targetAirman?.flightName || cellEditModal.flight, cellEditModal.date, adminFlight);
+    if (!perm.canAssign) {
+      alert(perm.reason || 'You do not have permission to assign duty for this flight or past dates.');
+      return;
+    }
+
     setCellEditLoading(true);
     try {
       // 1. If replacing an existing airman, remove his duty for that date first
@@ -763,6 +819,13 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
 
   const handleCellEditDelete = async () => {
     if (!cellEditModal || !cellEditModal.assignedAirman) return;
+
+    const perm = checkDutyPermission(role, cellEditModal.flight, cellEditModal.date, adminFlight);
+    if (!perm.canDelete) {
+      alert(perm.reason || 'You do not have permission to delete duties for this flight or past dates.');
+      return;
+    }
+
     if (!window.confirm(`Are you sure you want to delete duty for ${cellEditModal.assignedAirman.rank} ${cellEditModal.assignedAirman.name} on ${cellEditModal.date}?`)) {
       return;
     }
@@ -1584,35 +1647,46 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                 <div className="grid grid-cols-5 gap-1.5">
                   <button
                     type="button"
+                    disabled={isAdmin && !!adminFlight}
                     onClick={() => setBulkFlight('All')}
+                    title={isAdmin && adminFlight ? `Admins can only detail duties for ${adminFlight} flight` : undefined}
                     className={`py-1.5 px-2 text-xs font-bold rounded-xl border text-center transition-all ${
-                      bulkFlight === 'All'
-                        ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
-                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:border-slate-400'
+                      isAdmin && adminFlight
+                        ? 'opacity-40 cursor-not-allowed bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700'
+                        : bulkFlight === 'All'
+                        ? 'bg-slate-900 text-white border-slate-900 shadow-xs cursor-pointer'
+                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:border-slate-400 cursor-pointer'
                     }`}
                   >
                     All Flt
                   </button>
-                  {flightsList.map((fl) => (
-                    <button
-                      key={fl}
-                      type="button"
-                      onClick={() => setBulkFlight(fl)}
-                      className={`py-1.5 px-1.5 text-xs font-bold rounded-xl border text-center transition-all truncate ${
-                        bulkFlight === fl
-                          ? fl === 'Avionics'
-                            ? 'bg-cyan-600 text-white border-cyan-700'
-                            : fl === 'Mechanics'
-                            ? 'bg-amber-600 text-white border-amber-700'
-                            : fl === 'GCS'
-                            ? 'bg-purple-600 text-white border-purple-700'
-                            : 'bg-slate-700 text-white border-slate-800'
-                          : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:border-slate-400'
-                      }`}
-                    >
-                      {fl}
-                    </button>
-                  ))}
+                  {flightsList.map((fl) => {
+                    const isFltDisabled = isAdmin && !!adminFlight && fl !== adminFlight;
+                    return (
+                      <button
+                        key={fl}
+                        type="button"
+                        disabled={isFltDisabled}
+                        title={isFltDisabled ? `Admins can only detail duties for ${adminFlight} flight` : undefined}
+                        onClick={() => setBulkFlight(fl)}
+                        className={`py-1.5 px-1.5 text-xs font-bold rounded-xl border text-center transition-all truncate ${
+                          isFltDisabled
+                            ? 'opacity-40 cursor-not-allowed bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700'
+                            : bulkFlight === fl
+                            ? fl === 'Avionics'
+                              ? 'bg-cyan-600 text-white border-cyan-700 cursor-pointer'
+                              : fl === 'Mechanics'
+                              ? 'bg-amber-600 text-white border-amber-700 cursor-pointer'
+                              : fl === 'GCS'
+                              ? 'bg-purple-600 text-white border-purple-700 cursor-pointer'
+                              : 'bg-slate-700 text-white border-slate-800 cursor-pointer'
+                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:border-slate-400 cursor-pointer'
+                        }`}
+                      >
+                        {fl}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -1915,7 +1989,7 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                       From Date:
                     </span>
                     <DateNavigator
-                      
+                      min={isAdmin ? todayDateStr : undefined}
                       value={bulkFromDate}
                       onChange={(e) => {
                         setBulkFromDate(e.target.value);
@@ -1932,9 +2006,8 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                       To Date:
                     </span>
                     <DateNavigator
-                      
+                      min={bulkFromDate || (isAdmin ? todayDateStr : undefined)}
                       value={bulkToDate}
-                      min={bulkFromDate}
                       onChange={(e) => setBulkToDate(e.target.value)}
                       className="w-full px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 outline-none focus:border-emerald-500 shadow-2xs"
                       required
@@ -1957,9 +2030,13 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                   <button
                     type="button"
                     onClick={handleBulkDeleteRange}
-                    disabled={bulkLoading}
-                    className="px-3 py-1.5 text-xs font-bold text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 rounded-xl border border-rose-300 dark:border-rose-800 transition-all flex items-center space-x-1"
-                    title="Delete or clear duty entries for selected airman in this date range"
+                    disabled={bulkLoading || (isAdmin && bulkFromDate < todayDateStr)}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all flex items-center space-x-1 ${
+                      isAdmin && bulkFromDate < todayDateStr
+                        ? 'opacity-40 cursor-not-allowed bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700'
+                        : 'text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 border-rose-300 dark:border-rose-800'
+                    }`}
+                    title={isAdmin && bulkFromDate < todayDateStr ? 'Admins cannot delete duties for past dates' : 'Delete or clear duty entries for selected airman in this date range'}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                     <span>Delete Range Duty</span>
@@ -2034,206 +2111,232 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
       )}
 
       {/* Cell-Level Duty Assignment & Replacement Modal */}
-      {cellEditModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs animate-fadeIn">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-5">
-            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3.5">
-              <div>
-                <h3 className="text-sm font-black text-slate-900 dark:text-slate-100 flex items-center space-x-2">
-                  <span>Duty Assignment & Edit</span>
-                </h3>
-                <p className="text-[11px] text-slate-500 mt-0.5 font-medium">
-                  {cellEditModal.flight} Flight • {cellEditModal.date}
-                </p>
-              </div>
-              <button
-                onClick={() => setCellEditModal(null)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {cellEditModal && (() => {
+        const isCellPast = isDateInPast(cellEditModal.date);
+        const isCellWrongFlight = isAdmin && !!adminFlight && cellEditModal.flight !== adminFlight;
+        const isCellReadOnly = isUser || (isAdmin && (isCellPast || isCellWrongFlight));
 
-            <form onSubmit={handleCellEditSubmit} className="space-y-4">
-              {/* Duty & Flight Badge Info */}
-              <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/60 flex items-center justify-between text-xs">
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs animate-fadeIn">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-5">
+              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3.5">
                 <div>
-                  <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Duty & Shift</div>
-                  <div className="font-black text-slate-900 dark:text-slate-100 mt-0.5">
-                    {cellEditModal.dutyLabel}
-                  </div>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-slate-100 flex items-center space-x-2">
+                    <span>Duty Assignment & Edit</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5 font-medium">
+                    {cellEditModal.flight} Flight • {cellEditModal.date}
+                  </p>
                 </div>
-                <div className="text-right">
-                  <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Flight Quota</div>
-                  <div className="font-mono font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
-                    {getFlightDutyQuotaForDate(cellEditModal.date, cellEditModal.flight, cellEditModal.dutyCode, cellEditModal.idaShift)} Required
-                  </div>
-                </div>
+                <button
+                  onClick={() => setCellEditModal(null)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
 
-              {/* Currently Detailed Airman Banner (if any) */}
-              {cellEditModal.assignedAirman && (
-                <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800/80 rounded-xl text-xs">
-                  <div className="text-[10px] text-amber-800 dark:text-amber-400 font-bold uppercase tracking-wider">
-                    Currently Detailed Personnel
-                  </div>
-                  <div className="font-black text-slate-900 dark:text-slate-100 mt-1 flex items-center justify-between">
-                    <span>
-                      {cellEditModal.assignedAirman.rank} {cellEditModal.assignedAirman.name}
-                    </span>
-                    <span className="font-mono text-[11px] bg-amber-200/70 dark:bg-amber-900/60 px-1.5 py-0.5 rounded text-amber-900 dark:text-amber-200">
-                      BD: {cellEditModal.assignedAirman.bdNo}
-                    </span>
-                  </div>
+              {isCellReadOnly && (
+                <div className="p-3 bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-800 rounded-xl text-xs font-bold text-amber-900 dark:text-amber-200 flex items-center space-x-2">
+                  <span>🔒</span>
+                  <span>
+                    {isUser
+                      ? 'Read-Only Mode: Regular users cannot modify duties.'
+                      : isCellPast
+                      ? 'Past Date (Locked): Admins cannot assign or modify duties for past dates.'
+                      : `Locked: Admins can only manage duties for their own flight (${adminFlight}).`}
+                  </span>
                 </div>
               )}
 
-              {/* Proxy Flight Selection (Optional) */}
-              <div className="space-y-1 bg-amber-50/60 dark:bg-amber-950/30 p-2.5 rounded-xl border border-amber-200 dark:border-amber-800/80">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-amber-900 dark:text-amber-300">
-                    Proxy Personnel (Optional)
-                  </label>
-                  <span className="text-[10px] text-amber-700 dark:text-amber-400">
-                    {cellEditProxyFlight ? `Covering by ${cellEditProxyFlight} Flight` : 'Assigned from own flight'}
-                  </span>
+              <form onSubmit={handleCellEditSubmit} className="space-y-4">
+                {/* Duty & Flight Badge Info */}
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/60 flex items-center justify-between text-xs">
+                  <div>
+                    <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Duty & Shift</div>
+                    <div className="font-black text-slate-900 dark:text-slate-100 mt-0.5">
+                      {cellEditModal.dutyLabel}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Flight Quota</div>
+                    <div className="font-mono font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                      {getFlightDutyQuotaForDate(cellEditModal.date, cellEditModal.flight, cellEditModal.dutyCode, cellEditModal.idaShift)} Required
+                    </div>
+                  </div>
                 </div>
-                <select
-                  value={cellEditProxyFlight}
-                  onChange={(e) => setCellEditProxyFlight(e.target.value as FlightName | '')}
-                  className="w-full px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 outline-none focus:border-amber-500 cursor-pointer"
-                >
-                  <option value="">No Proxy (Assign from {cellEditModal.flight} Flight)</option>
-                  {(['Avionics', 'Mechanics', 'GCS', 'Admin'] as FlightName[])
-                    .filter((fl) => fl !== cellEditModal.flight)
-                    .map((fl) => (
-                      <option key={fl} value={fl}>
-                        Proxy from {fl} Flight
-                      </option>
-                    ))}
-                </select>
-              </div>
 
-              {/* Personnel Selection Dropdown */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                  {cellEditProxyFlight
-                    ? `Select Proxy Airman (from ${cellEditProxyFlight} Flight):`
-                    : cellEditModal.assignedAirman
-                    ? `Replace Airman (from ${cellEditModal.flight} Flight):`
-                    : `Select Airman (from ${cellEditModal.flight} Flight):`}
-                </label>
-                <select
-                  value={selectedReplacementAirmanId}
-                  onChange={(e) => setSelectedReplacementAirmanId(e.target.value)}
-                  className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 outline-none focus:border-emerald-500 shadow-2xs cursor-pointer"
-                  required
-                >
-                  <option value="">-- Choose Airman ({cellEditProxyFlight || cellEditModal.flight}) --</option>
-                  {airmen
-                    .filter((a) => {
-                      if (a.flightName !== (cellEditProxyFlight || cellEditModal.flight)) return false;
-                      // Base Security Duty (GD) is strictly for Cpl & Below (Cpl, LAC, AC1, AC2)
-                      if (cellEditModal.dutyCode === 'GD') {
-                        const rankLower = a.rank.toLowerCase();
-                        return ['cpl', 'lac', 'ac1', 'ac2', 'corporal'].some((r) => rankLower.includes(r));
-                      }
-                      return true;
-                    })
-                    .map((a) => {
-                      const res = resolveAirmanDutyForDate(a.id, cellEditModal.date, assignmentMap);
-                      const isSameDuty = (cellEditModal.dutyCode === 'IDAC' || cellEditModal.dutyCode === 'IDA')
-                        ? (res.dutyCode === 'IDAC' || res.dutyCode === 'IDA') && res.idaShift === cellEditModal.idaShift
-                        : res.dutyCode === cellEditModal.dutyCode;
-                      const hasOtherDuty = res.dutyCode && (res.dutyCode as string) !== 'OFF' && (res.dutyCode as string) !== 'ON_PARADE' && !isSameDuty;
-
-                      let dutySuffix = '';
-                      if (res.dutyCode === 'LEAVE') dutySuffix = 'Leave';
-                      else if (res.dutyCode === 'TDY') dutySuffix = 'TDY';
-                      else if (res.dutyCode === 'GD') dutySuffix = 'Guard Duty';
-                      else if (res.dutyCode === 'BTF') dutySuffix = 'Base Taskforce';
-                      else if (res.dutyCode === 'NTF') dutySuffix = 'Najirpara Taskforce';
-                      else if (res.dutyCode === 'HALISHAHAR') dutySuffix = 'Halishahar Taskforce';
-                      else if (res.dutyCode === 'AIRPORT') dutySuffix = 'Airfield Duty';
-                      else if (res.dutyCode === 'IDAC' || res.dutyCode === 'IDA') dutySuffix = `IDAC Duty (${res.idaShift || 'Morning'})`;
-                      else if (res.dutyCode === 'BAKE_N_BITE') dutySuffix = 'Bake & Bite';
-                      else if (res.dutyCode === 'DUTY_OFF') dutySuffix = 'Duty Off';
-                      else if (hasOtherDuty) dutySuffix = res.dutyCode;
-
-                      const label = dutySuffix
-                        ? `${formatAirmanName(a.rank)} ${a.name} - ${dutySuffix}`
-                        : `${formatAirmanName(a.rank)} ${a.name}`;
-
-                      return (
-                        <option key={a.id} value={a.id}>
-                          {label}
-                        </option>
-                      );
-                    })}
-                </select>
-              </div>
-
-              {/* Optional Notes */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                  Notes / Remarks (Optional):
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g., Detail replacement / swap"
-                  value={cellEditNotes}
-                  onChange={(e) => setCellEditNotes(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex items-center justify-between pt-3 border-t border-slate-200 dark:border-slate-800 gap-2">
-                {cellEditModal.assignedAirman ? (
-                  <button
-                    type="button"
-                    onClick={handleCellEditDelete}
-                    disabled={cellEditLoading}
-                    className="px-3 py-2 text-xs font-bold text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 rounded-xl border border-rose-300 dark:border-rose-800 transition-all flex items-center space-x-1 disabled:opacity-50"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Clear Duty</span>
-                  </button>
-                ) : (
-                  <div />
+                {/* Currently Detailed Airman Banner (if any) */}
+                {cellEditModal.assignedAirman && (
+                  <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800/80 rounded-xl text-xs">
+                    <div className="text-[10px] text-amber-800 dark:text-amber-400 font-bold uppercase tracking-wider">
+                      Currently Detailed Personnel
+                    </div>
+                    <div className="font-black text-slate-900 dark:text-slate-100 mt-1 flex items-center justify-between">
+                      <span>
+                        {cellEditModal.assignedAirman.rank} {cellEditModal.assignedAirman.name}
+                      </span>
+                      <span className="font-mono text-[11px] bg-amber-200/70 dark:bg-amber-900/60 px-1.5 py-0.5 rounded text-amber-900 dark:text-amber-200">
+                        BD: {cellEditModal.assignedAirman.bdNo}
+                      </span>
+                    </div>
+                  </div>
                 )}
 
-                <div className="flex items-center space-x-2">
-                  <button
-                    type="button"
-                    onClick={() => setCellEditModal(null)}
-                    className="px-3 py-2 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors"
+                {/* Proxy Flight Selection (Optional) */}
+                {!isAdmin && (
+                  <div className="space-y-1 bg-amber-50/60 dark:bg-amber-950/30 p-2.5 rounded-xl border border-amber-200 dark:border-amber-800/80">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-amber-900 dark:text-amber-300">
+                        Proxy Personnel (Optional)
+                      </label>
+                      <span className="text-[10px] text-amber-700 dark:text-amber-400">
+                        {cellEditProxyFlight ? `Covering by ${cellEditProxyFlight} Flight` : 'Assigned from own flight'}
+                      </span>
+                    </div>
+                    <select
+                      disabled={isCellReadOnly}
+                      value={cellEditProxyFlight}
+                      onChange={(e) => setCellEditProxyFlight(e.target.value as FlightName | '')}
+                      className="w-full px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 outline-none focus:border-amber-500 cursor-pointer disabled:opacity-50"
+                    >
+                      <option value="">No Proxy (Assign from {cellEditModal.flight} Flight)</option>
+                      {(['Avionics', 'Mechanics', 'GCS', 'Admin'] as FlightName[])
+                        .filter((fl) => fl !== cellEditModal.flight)
+                        .map((fl) => (
+                          <option key={fl} value={fl}>
+                            Proxy from {fl} Flight
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* Personnel Selection Dropdown */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    {cellEditProxyFlight
+                      ? `Select Proxy Airman (from ${cellEditProxyFlight} Flight):`
+                      : cellEditModal.assignedAirman
+                      ? `Replace Airman (from ${cellEditModal.flight} Flight):`
+                      : `Select Airman (from ${cellEditModal.flight} Flight):`}
+                  </label>
+                  <select
+                    disabled={isCellReadOnly}
+                    value={selectedReplacementAirmanId}
+                    onChange={(e) => setSelectedReplacementAirmanId(e.target.value)}
+                    className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 outline-none focus:border-emerald-500 shadow-2xs cursor-pointer disabled:opacity-50"
+                    required
                   >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={cellEditLoading || !selectedReplacementAirmanId}
-                    className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-md transition-all flex items-center space-x-1.5 disabled:opacity-50"
-                  >
-                    {cellEditLoading ? (
-                      <>
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        <span>Saving...</span>
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle className="w-3.5 h-3.5" />
-                        <span>{cellEditModal.assignedAirman ? 'Save / Replace' : 'Assign Airman'}</span>
-                      </>
-                    )}
-                  </button>
+                    <option value="">-- Choose Airman ({cellEditProxyFlight || cellEditModal.flight}) --</option>
+                    {airmen
+                      .filter((a) => {
+                        if (a.flightName !== (cellEditProxyFlight || cellEditModal.flight)) return false;
+                        // Base Security Duty (GD) is strictly for Cpl & Below (Cpl, LAC, AC1, AC2)
+                        if (cellEditModal.dutyCode === 'GD') {
+                          const rankLower = a.rank.toLowerCase();
+                          return ['cpl', 'lac', 'ac1', 'ac2', 'corporal'].some((r) => rankLower.includes(r));
+                        }
+                        return true;
+                      })
+                      .map((a) => {
+                        const res = resolveAirmanDutyForDate(a.id, cellEditModal.date, assignmentMap);
+                        const isSameDuty = (cellEditModal.dutyCode === 'IDAC' || cellEditModal.dutyCode === 'IDA')
+                          ? (res.dutyCode === 'IDAC' || res.dutyCode === 'IDA') && res.idaShift === cellEditModal.idaShift
+                          : res.dutyCode === cellEditModal.dutyCode;
+                        const hasOtherDuty = res.dutyCode && (res.dutyCode as string) !== 'OFF' && (res.dutyCode as string) !== 'ON_PARADE' && !isSameDuty;
+
+                        let dutySuffix = '';
+                        if (res.dutyCode === 'LEAVE') dutySuffix = 'Leave';
+                        else if (res.dutyCode === 'TDY') dutySuffix = 'TDY';
+                        else if (res.dutyCode === 'GD') dutySuffix = 'Guard Duty';
+                        else if (res.dutyCode === 'BTF') dutySuffix = 'Base Taskforce';
+                        else if (res.dutyCode === 'NTF') dutySuffix = 'Najirpara Taskforce';
+                        else if (res.dutyCode === 'HALISHAHAR') dutySuffix = 'Halishahar Taskforce';
+                        else if (res.dutyCode === 'AIRPORT') dutySuffix = 'Airfield Duty';
+                        else if (res.dutyCode === 'IDAC' || res.dutyCode === 'IDA') dutySuffix = `IDAC Duty (${res.idaShift || 'Morning'})`;
+                        else if (res.dutyCode === 'BAKE_N_BITE') dutySuffix = 'Bake & Bite';
+                        else if (res.dutyCode === 'DUTY_OFF') dutySuffix = 'Duty Off';
+                        else if (hasOtherDuty) dutySuffix = res.dutyCode;
+
+                        const label = dutySuffix
+                          ? `${formatAirmanName(a.rank)} ${a.name} - ${dutySuffix}`
+                          : `${formatAirmanName(a.rank)} ${a.name}`;
+
+                        return (
+                          <option key={a.id} value={a.id}>
+                            {label}
+                          </option>
+                        );
+                      })}
+                  </select>
                 </div>
-              </div>
-            </form>
+
+                {/* Optional Notes */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    Notes / Remarks (Optional):
+                  </label>
+                  <input
+                    disabled={isCellReadOnly}
+                    type="text"
+                    placeholder="e.g., Detail replacement / swap"
+                    value={cellEditNotes}
+                    onChange={(e) => setCellEditNotes(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 outline-none focus:border-emerald-500 disabled:opacity-50"
+                  />
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex items-center justify-between pt-3 border-t border-slate-200 dark:border-slate-800 gap-2">
+                  {cellEditModal.assignedAirman ? (
+                    <button
+                      type="button"
+                      onClick={handleCellEditDelete}
+                      disabled={cellEditLoading || isCellReadOnly}
+                      className="px-3 py-2 text-xs font-bold text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 rounded-xl border border-rose-300 dark:border-rose-800 transition-all flex items-center space-x-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Clear Duty</span>
+                    </button>
+                  ) : (
+                    <div />
+                  )}
+
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => setCellEditModal(null)}
+                      className="px-3 py-2 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors"
+                    >
+                      {isCellReadOnly ? 'Close' : 'Cancel'}
+                    </button>
+                    {!isCellReadOnly && (
+                      <button
+                        type="submit"
+                        disabled={cellEditLoading || !selectedReplacementAirmanId}
+                        className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-md transition-all flex items-center space-x-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {cellEditLoading ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Saving...</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle className="w-3.5 h-3.5" />
+                            <span>{cellEditModal.assignedAirman ? 'Save / Replace' : 'Assign Airman'}</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </form>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 };

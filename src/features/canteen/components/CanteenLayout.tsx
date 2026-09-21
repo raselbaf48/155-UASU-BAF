@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../../supabase';
 import { localDb } from '../../../services/localDatabase';
 import { useTranslation } from 'react-i18next';
 import { formatMoney } from '../i18n';
 import { getCanteenConfig, resolveImageUrl, fetchCanteenConfigFromCloud, CanteenConfig } from '../utils/canteenSettings';
+import { autoCheckInitialCleanSlate } from '../utils/resetCanteenData';
 import { EmployeeDashboard } from '../pages/EmployeeDashboard';
 import { PersonalPortal } from '../pages/PersonalPortal';
 import { PlaceDemand } from '../pages/PlaceDemand';
@@ -28,18 +29,39 @@ import { AirmanProfileModal } from '../../../components/AirmanProfileModal';
 import { Wallet, LayoutDashboard, Coffee, Search, List, CreditCard, ArrowLeft, Utensils, Wifi, HelpCircle, LogIn, Grid, Package as Pkg, ShoppingCart, Users, Banknote, BarChart2, Settings as SettingsIcon, PieChart, Package, UserCircle, X, Menu, User, Eye, EyeOff, Lock, Phone } from 'lucide-react';
 
 interface CanteenLayoutProps {
-  initialMember?: { name: string, bdNo: string, role?: 'employee'|'manager', photoUrl?: string };
+  initialMember?: { name: string, bdNo: string, role?: 'employee'|'manager', photoUrl?: string, due?: number };
   onBack: () => void;
 }
 
 export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMember }) => {
   const { t, i18n } = useTranslation();
   const [activeTab, setActiveTab] = useState<string>(initialMember?.role === 'manager' ? 'manager_dashboard' : 'personal_portal');
-  const [currentUser, setCurrentUser] = useState<any>({ name: initialMember ? initialMember.name : 'Guest', role: (initialMember && initialMember.role) ? initialMember.role : 'employee', bdNo: initialMember?.bdNo, DP: initialMember?.photoUrl });
-  const [customerDp, setCustomerDp] = useState<string>(initialMember?.photoUrl || '');
+
+  const cleanBdInitial = initialMember?.bdNo ? initialMember.bdNo.replace(/^BD\/?/i, '').trim() : '';
+  const cachedMember = (() => {
+    if (!cleanBdInitial) return null;
+    try {
+      const raw = localStorage.getItem(`canteen_member_${cleanBdInitial.toLowerCase()}`);
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  })();
+
+  const initialDp = initialMember?.photoUrl || cachedMember?.dp || '';
+  const [customerDp, setCustomerDp] = useState<string>(initialDp);
+  const [currentUser, setCurrentUser] = useState<any>({ 
+    name: initialMember ? initialMember.name : (cachedMember ? `${cachedMember.rank || ''} ${cachedMember.surname || ''}`.trim() : 'Guest'), 
+    role: (initialMember && initialMember.role) ? initialMember.role : 'employee', 
+    bdNo: initialMember?.bdNo || cleanBdInitial, 
+    DP: initialDp,
+    due: initialMember?.due !== undefined ? initialMember.due : (cachedMember?.due !== undefined ? cachedMember.due : 0)
+  });
   const [showLogin, setShowLogin] = useState(false);
   const [loginTab, setLoginTab] = useState<'member'|'manager'>('manager');
   const [loginInput, setLoginInput] = useState('');
+  const [managerOtp, setManagerOtp] = useState<string[]>(['', '', '', '']);
+  const [isOtpError, setIsOtpError] = useState(false);
+  const [isOtpSuccess, setIsOtpSuccess] = useState(false);
+  const otpInputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const [showManagerPassword, setShowManagerPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -49,6 +71,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
 
   // Cloud config synchronization on mount & event listeners
   useEffect(() => {
+    autoCheckInitialCleanSlate();
     fetchCanteenConfigFromCloud().then(cfg => {
       if (cfg) setCanteenConfig(cfg);
     });
@@ -85,12 +108,25 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
           if (cleanBd) {
             const { data, error } = await supabase
               .from('Canteen')
-              .select('DP, Surname, Rank, "BD No", airman_id')
-              .or(`"BD No".eq.${cleanBd},airman_id.eq.${cleanBd}`)
+              .select('DP, Due, Surname, Rank, Contact, "BD No", airman_id')
+              .or(`"BD No".eq.${cleanBd},airman_id.eq.${cleanBd},airman_id.eq.airman-${cleanBd}`)
               .limit(1);
 
             if (!error && data && data.length > 0 && data[0].DP) {
-              if (isMounted) setCustomerDp(data[0].DP);
+              if (isMounted) {
+                setCustomerDp(data[0].DP);
+                setCurrentUser((prev: any) => ({ ...prev, DP: data[0].DP }));
+              }
+              try {
+                localStorage.setItem(`canteen_member_${cleanBd.toLowerCase()}`, JSON.stringify({
+                  dp: data[0].DP,
+                  due: Number(data[0].Due) || 0,
+                  rank: data[0].Rank,
+                  surname: data[0].Surname,
+                  contact: data[0].Contact,
+                  bdNo: cleanBd
+                }));
+              } catch {}
               return;
             }
           }
@@ -132,9 +168,39 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
   const handleCustomerProfileClick = async () => {
     if (currentUser.role === 'manager') return;
     try {
-      const airmen = await localDb.getAirmen();
       const cleanBd = currentUser.bdNo ? currentUser.bdNo.replace(/^BD\/?/i, '').trim() : '';
-      let found = airmen.find(a => a.bdNo === cleanBd);
+      
+      // 1. Fetch info directly from DB Canteen table
+      let canteenMember: any = null;
+      if (cleanBd) {
+        const { data, error } = await supabase
+          .from('Canteen')
+          .select('*')
+          .or(`"BD No".eq.${cleanBd},airman_id.eq.${cleanBd},airman_id.eq.airman-${cleanBd}`)
+          .limit(1);
+        if (!error && data && data.length > 0) {
+          canteenMember = data[0];
+        }
+      }
+
+      if (!canteenMember && currentUser.name && currentUser.name !== 'Guest') {
+        const parts = currentUser.name.trim().split(/\s+/);
+        const surname = parts[parts.length - 1];
+        if (surname) {
+          const { data } = await supabase
+            .from('Canteen')
+            .select('*')
+            .ilike('Surname', `%${surname}%`)
+            .limit(1);
+          if (data && data.length > 0) {
+            canteenMember = data[0];
+          }
+        }
+      }
+
+      // Also get supplementary info from localDb airmen if available (e.g. trade, flight)
+      const airmen = await localDb.getAirmen();
+      let found = airmen.find(a => (cleanBd && a.bdNo?.toLowerCase() === cleanBd.toLowerCase()));
       if (!found && currentUser.bdNo) {
         found = airmen.find(a => a.bdNo?.toLowerCase() === cleanBd.toLowerCase() || a.bdNo?.toLowerCase() === currentUser.bdNo?.toLowerCase());
       }
@@ -145,8 +211,42 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
           return fullName.includes(matchName) || matchName.includes(a.name.toLowerCase());
         });
       }
-      if (!found) {
-        found = {
+
+      let finalCustomerAirman: any = null;
+      if (canteenMember) {
+        const bdNum = canteenMember['BD No'] || cleanBd || 'N/A';
+        const rank = canteenMember['Rank'] || found?.rank || 'LAC';
+        const surname = canteenMember['Surname'] || found?.name || currentUser.name || 'Customer';
+        const dp = canteenMember['DP'] || customerDp || found?.photoUrl || currentUser.DP || '';
+        const contact = canteenMember['Contact'] || canteenMember['Mobile No'] || found?.mobileNo || 'N/A';
+        const due = Number(canteenMember.Due ?? canteenMember.due ?? canteenMember.baki ?? 0);
+
+        finalCustomerAirman = {
+          id: canteenMember.airman_id || found?.id || `airman-${bdNum}`,
+          serNo: found?.serNo || 1,
+          code: bdNum,
+          bdNo: bdNum,
+          rank: rank,
+          name: surname,
+          fullName: `${rank} ${surname}`.trim(),
+          trade: found?.trade || 'Canteen Member',
+          addressBlock: found?.addressBlock || 'N/A',
+          mobileNo: contact,
+          flightName: found?.flightName || 'Admin',
+          remarks: found?.remarks || 'Canteen Customer',
+          active: true,
+          photoUrl: dp,
+          canteenDue: due,
+          canteenMember: canteenMember
+        };
+      } else if (found) {
+        finalCustomerAirman = {
+          ...found,
+          photoUrl: customerDp || currentUser.DP || found.photoUrl || '',
+          canteenDue: 0
+        };
+      } else {
+        finalCustomerAirman = {
           id: 'cust-' + (cleanBd || '1'),
           serNo: 1,
           code: cleanBd || 'CUST',
@@ -154,18 +254,18 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
           rank: (currentUser.name?.split(' ')[0] as any) || 'LAC',
           name: currentUser.name ? currentUser.name.replace(/^[A-Za-z\-]+\s+/, '') : 'Customer',
           fullName: currentUser.name || 'Customer',
-          trade: 'General',
-          addressBlock: 'Barrack-3',
+          trade: 'Canteen Member',
+          addressBlock: 'N/A',
           mobileNo: 'N/A',
           flightName: 'Admin',
           remarks: 'Canteen Customer',
           active: true,
-          photoUrl: customerDp || currentUser.DP || ''
+          photoUrl: customerDp || currentUser.DP || '',
+          canteenDue: 0
         };
-      } else if (customerDp) {
-        found.photoUrl = customerDp;
       }
-      setCurrentCustomerAirman(found);
+
+      setCurrentCustomerAirman(finalCustomerAirman);
       setShowCustomerProfile(true);
     } catch (e) {
       console.error('Error opening customer profile', e);
@@ -173,6 +273,135 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
   };
 
   
+  useEffect(() => {
+    if (showLogin && loginTab === 'manager') {
+      setManagerOtp(['', '', '', '']);
+      setIsOtpError(false);
+      setIsOtpSuccess(false);
+      setLoginError('');
+      setTimeout(() => {
+        otpInputRefs.current[0]?.focus();
+      }, 100);
+    }
+  }, [showLogin, loginTab]);
+
+  const verifyManagerOtp = (pin: string) => {
+    const validPin = (canteenConfig.password || (canteenConfig as any).adminPassword || '0000').trim();
+    const entered = pin.trim();
+    const isBdMatch = canteenConfig.managerBdNo && entered === canteenConfig.managerBdNo.trim();
+
+    if (entered === validPin || isBdMatch) {
+      setIsOtpSuccess(true);
+      setIsOtpError(false);
+      setLoginError('✓ PIN Matched! Logging in...');
+      setTimeout(() => {
+        setCurrentUser({ name: canteenConfig.managerName || 'Canteen Manager', role: 'manager' });
+        setActiveTab('manager_dashboard');
+        setShowLogin(false);
+        setManagerOtp(['', '', '', '']);
+        setIsOtpSuccess(false);
+        setLoginInput('');
+        setLoginError('');
+      }, 350);
+    } else {
+      setIsOtpError(true);
+      setLoginError('✗ Incorrect PIN. Auto resetting...');
+      setTimeout(() => {
+        setManagerOtp(['', '', '', '']);
+        setIsOtpError(false);
+        setLoginError('Incorrect 4-digit PIN. Try again.');
+        otpInputRefs.current[0]?.focus();
+      }, 650);
+    }
+  };
+
+  const handleOtpChange = (index: number, val: string) => {
+    const rawDigits = val.replace(/\D/g, '');
+    if (!rawDigits) {
+      const newOtp = [...managerOtp];
+      newOtp[index] = '';
+      setManagerOtp(newOtp);
+      return;
+    }
+
+    if (rawDigits.length > 1) {
+      const chars = rawDigits.slice(0, 4).split('');
+      const newOtp = [...managerOtp];
+      chars.forEach((c, i) => {
+        if (i < 4) newOtp[i] = c;
+      });
+      setManagerOtp(newOtp);
+      setIsOtpError(false);
+      setLoginError('');
+      const targetIdx = Math.min(chars.length, 3);
+      otpInputRefs.current[targetIdx]?.focus();
+      if (newOtp.every(d => d !== '') && newOtp.length === 4) {
+        verifyManagerOtp(newOtp.join(''));
+      }
+      return;
+    }
+
+    const char = rawDigits.charAt(rawDigits.length - 1);
+    const newOtp = [...managerOtp];
+    newOtp[index] = char;
+    setManagerOtp(newOtp);
+    setIsOtpError(false);
+    setLoginError('');
+
+    if (index < 3) {
+      otpInputRefs.current[index + 1]?.focus();
+    }
+
+    if (newOtp.every(d => d !== '')) {
+      verifyManagerOtp(newOtp.join(''));
+    }
+  };
+
+  const handleOtpKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Backspace') {
+      if (!managerOtp[index] && index > 0) {
+        const newOtp = [...managerOtp];
+        newOtp[index - 1] = '';
+        setManagerOtp(newOtp);
+        otpInputRefs.current[index - 1]?.focus();
+      } else {
+        const newOtp = [...managerOtp];
+        newOtp[index] = '';
+        setManagerOtp(newOtp);
+      }
+    } else if (e.key === 'ArrowLeft' && index > 0) {
+      otpInputRefs.current[index - 1]?.focus();
+    } else if (e.key === 'ArrowRight' && index < 3) {
+      otpInputRefs.current[index + 1]?.focus();
+    } else if (e.key === 'Enter') {
+      const fullPin = managerOtp.join('');
+      if (fullPin.length === 4) {
+        verifyManagerOtp(fullPin);
+      } else {
+        setLoginError('Must enter all 4 digits.');
+      }
+    }
+  };
+
+  const handleOtpPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 4);
+    if (!pasted) return;
+    const chars = pasted.split('');
+    const newOtp = ['', '', '', ''];
+    chars.forEach((c, i) => {
+      newOtp[i] = c;
+    });
+    setManagerOtp(newOtp);
+    setIsOtpError(false);
+    setLoginError('');
+    const targetIdx = Math.min(chars.length, 3);
+    otpInputRefs.current[targetIdx]?.focus();
+    if (chars.length === 4) {
+      verifyManagerOtp(pasted);
+    }
+  };
+
   const handleLogout = () => {
     if (currentUser.role === 'manager') {
       setCurrentUser({ name: initialMember ? initialMember.name : 'Guest', role: 'employee', bdNo: initialMember?.bdNo });
@@ -188,14 +417,15 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
         setLoginError('Checking...');
         const { data, error } = await supabase
           .from('Canteen')
-          .select('Surname, Rank')
+          .select('Surname, Rank, DP, Due')
           .eq('BD No', loginInput)
           .single();
           
         if (error || !data) {
           setLoginError('Member not found. Check BD No.');
         } else {
-          setCurrentUser({ name: `${data.Rank} ${data.Surname}`, role: 'employee', bdNo: loginInput });
+          setCurrentUser({ name: `${data.Rank} ${data.Surname}`, role: 'employee', bdNo: loginInput, DP: data.DP, due: data.Due });
+          if (data.DP) setCustomerDp(data.DP);
           setActiveTab('personal_portal');
           setShowLogin(false);
           setLoginInput('');
@@ -205,18 +435,12 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
         setLoginError('Network Error.');
       }
     } else {
-      const validPin = (canteenConfig.password || (canteenConfig as any).adminPassword || '0000').trim();
-      const entered = loginInput.trim();
-      const isBdMatch = canteenConfig.managerBdNo && entered === canteenConfig.managerBdNo.trim();
-      if (entered === validPin || isBdMatch) {
-        setCurrentUser({ name: canteenConfig.managerName || 'Canteen Manager', role: 'manager' });
-        setActiveTab('manager_dashboard');
-        setShowLogin(false);
-        setLoginInput('');
-        setLoginError('');
-      } else {
-        setLoginError('Invalid Manager Password. Please enter the password configured in Settings.');
+      const fullPin = managerOtp.join('');
+      if (fullPin.length < 4) {
+        setLoginError('Must enter all 4 digits of the PIN.');
+        return;
       }
+      verifyManagerOtp(fullPin);
     }
   };
 
@@ -253,7 +477,13 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
   const renderContent = () => {
     switch(activeTab) {
       case 'dashboard': return <EmployeeDashboard currentUser={currentUser} onManagerPortalClick={() => { setLoginTab('manager'); setShowLogin(true); setLoginInput(''); setLoginError(''); }} />;
-      case 'personal_portal': return <PersonalPortal currentUser={currentUser} />;
+      case 'personal_portal': return (
+        <PersonalPortal 
+          currentUser={currentUser} 
+          customerDp={customerDp} 
+          onCustomerProfileClick={handleCustomerProfileClick} 
+        />
+      );
 
       case 'manager_dashboard': return <ManagerDashboard />;
       case 'pos_sales': return <PosSales />;
@@ -536,6 +766,14 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
                   className="w-full h-full object-cover"
                   onError={(e) => { e.currentTarget.style.display = 'none'; }}
                 />
+              ) : (customerDp || currentUser.DP) ? (
+                <img 
+                  src={resolveImageUrl(customerDp || currentUser.DP)} 
+                  alt={currentUser.name} 
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover"
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                />
               ) : (
                 <User className="w-4 h-4" />
               )}
@@ -579,7 +817,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
 
                 <div className="mb-6 mt-2">
                    <label className="block text-[11px] font-black text-slate-400 tracking-widest mb-3">
-                     {loginTab === 'member' ? '# MEMBER ID' : '# MANAGER PASSWORD'}
+                     {loginTab === 'member' ? '# MEMBER ID' : '# MANAGER 4-DIGIT PIN'}
                    </label>
                    {loginTab === 'member' ? (
                        <input 
@@ -591,44 +829,76 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
                          onKeyDown={e => { if (e.key === 'Enter') handleLogin(); }}
                        />
                    ) : (
-                       <div className="space-y-3">
-                           <div className="relative">
-                               <input 
-                                   type={showManagerPassword ? "text" : "password"}
-                                   value={loginInput}
-                                   onChange={e => {
-                                       setLoginInput(e.target.value);
-                                       setLoginError('');
-                                   }}
-                                   onKeyDown={e => {
-                                       if (e.key === 'Enter') handleLogin();
-                                   }}
-                                   placeholder="Enter Manager Password"
-                                   autoFocus
-                                   className="w-full bg-[#0f172a] border border-slate-700 text-white px-5 py-4 pr-12 rounded-xl text-center text-lg tracking-wider font-bold focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all placeholder:text-slate-500 placeholder:text-sm placeholder:tracking-normal"
-                               />
+                       <div className="space-y-4">
+                           <div className="flex items-center justify-center gap-3 sm:gap-4 my-2">
+                               {[0, 1, 2, 3].map((idx) => {
+                                   const val = managerOtp[idx];
+                                   return (
+                                       <input
+                                           key={idx}
+                                           ref={(el) => { otpInputRefs.current[idx] = el; }}
+                                           type={showManagerPassword ? "text" : "password"}
+                                           inputMode="numeric"
+                                           pattern="[0-9]*"
+                                           maxLength={1}
+                                           value={val}
+                                           disabled={isOtpSuccess}
+                                           onChange={(e) => handleOtpChange(idx, e.target.value)}
+                                           onKeyDown={(e) => handleOtpKeyDown(idx, e)}
+                                           onPaste={handleOtpPaste}
+                                           className={`w-14 h-16 sm:w-16 sm:h-18 text-center text-2xl sm:text-3xl font-black font-mono rounded-2xl border-2 transition-all outline-none shadow-lg ${
+                                               isOtpError
+                                                   ? 'border-rose-500 bg-rose-950/40 text-rose-300 ring-4 ring-rose-500/30 animate-shake'
+                                                   : isOtpSuccess
+                                                   ? 'border-emerald-500 bg-emerald-950/40 text-emerald-300 ring-4 ring-emerald-500/30 scale-105'
+                                                   : val
+                                                   ? 'border-indigo-500 bg-indigo-950/30 text-white ring-2 ring-indigo-500/30'
+                                                   : 'border-slate-700 bg-[#0f172a] text-white hover:border-slate-600 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/20'
+                                           }`}
+                                       />
+                                   );
+                               })}
+                           </div>
+
+                           <div className="flex items-center justify-between px-1">
+                               <p className="text-[11px] text-slate-400">
+                                   Configured in <span className="text-indigo-400 font-bold">Canteen Settings</span>
+                               </p>
                                <button
                                    type="button"
                                    onClick={() => setShowManagerPassword(!showManagerPassword)}
-                                   className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition-colors p-1"
+                                   className="text-slate-400 hover:text-white transition-colors text-xs flex items-center gap-1 font-bold cursor-pointer"
                                >
-                                   {showManagerPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                                   {showManagerPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                   <span>{showManagerPassword ? 'Hide PIN' : 'Show PIN'}</span>
                                </button>
                            </div>
-                           <p className="text-[11px] text-center text-slate-400">
-                               Enter password configured in <span className="text-indigo-400 font-bold">Canteen Settings</span>
-                           </p>
                        </div>
                    )}
-                   {loginError && <p className="text-rose-500 text-xs font-bold mt-3 text-center">{loginError}</p>}
+                   {loginError && (
+                     <p className={`text-xs font-bold mt-3 text-center ${isOtpSuccess ? 'text-emerald-400' : 'text-rose-500'}`}>
+                       {loginError}
+                     </p>
+                   )}
                 </div>
 
                 <button 
                    onClick={handleLogin}
-                   className="w-full bg-[#4f46e5] hover:bg-[#4338ca] text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-indigo-500/30 hover:shadow-indigo-500/50 active:scale-[0.98] flex items-center justify-center space-x-2"
+                   disabled={isOtpSuccess}
+                   className={`w-full text-white font-bold py-4 rounded-xl transition-all shadow-lg flex items-center justify-center space-x-2 ${
+                     isOtpSuccess 
+                       ? 'bg-emerald-600 shadow-emerald-500/30' 
+                       : 'bg-[#4f46e5] hover:bg-[#4338ca] shadow-indigo-500/30 hover:shadow-indigo-500/50 active:scale-[0.98]'
+                   }`}
                 >
                    <Lock className="w-4 h-4" />
-                   <span>{loginTab === 'member' ? 'ESTABLISH SESSION' : 'ENTER MANAGER PORTAL'}</span>
+                   <span>
+                     {loginTab === 'member' 
+                       ? 'ESTABLISH SESSION' 
+                       : isOtpSuccess 
+                       ? 'VERIFIED! LOGGING IN...' 
+                       : 'ENTER MANAGER PORTAL'}
+                   </span>
                 </button>
              </div>
           </div>

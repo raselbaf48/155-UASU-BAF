@@ -35,7 +35,8 @@ import {
   DutyCategoryCode,
   FlightName,
   IDAShift,
-  DutyAssignment
+  DutyAssignment,
+  UserRole
 } from '../types';
 import { DUTY_TYPES, DUTY_TYPE_MAP } from '../data/dutyTypes';
 import { getCurrentUserSession } from '../utils/authSession';
@@ -452,7 +453,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
 
     // Permission check
     const perm = checkDutyPermission(
-      session?.assignedRole || 'USER',
+      (session?.assignedRole as UserRole) || 'USER',
       airman.flightName,
       fromDate,
       session?.flightName

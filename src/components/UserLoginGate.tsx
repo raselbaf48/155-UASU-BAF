@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { CanteenLayout } from '../features/canteen/components/CanteenLayout';
 import { EmployeeDashboard } from '../features/canteen/pages/EmployeeDashboard';
+import { supabase } from '../supabase';
+import { fetchDirectImageUrl } from '../features/canteen/utils/canteenSettings';
 
 import { Airman } from '../types';
 import { Logo155UASU } from './Logo155UASU';
-import { X, Shield, ArrowRight, AlertCircle, CheckCircle2, Lock, LogIn, ChevronRight, ChevronUp, ArrowLeft, Eye, EyeOff, Building2, Moon, Coffee } from 'lucide-react';
+import { X, Shield, ArrowRight, AlertCircle, CheckCircle2, Lock, LogIn, ChevronRight, ChevronUp, ArrowLeft, Eye, EyeOff, Building2, Moon, Coffee, Loader2, Sparkles, Check } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { NightCountStateView } from './NightCountStateView';
 import { getAppConfig, isFeatureActive } from '../utils/appConfig';
 
@@ -28,6 +31,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
   const [showPin, setShowPin] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isSuccessAnimation, setIsSuccessAnimation] = useState<boolean>(false);
   const [successAirman, setSuccessAirman] = useState<Airman | null>(null);
   const [isUserIdFocused, setIsUserIdFocused] = useState<boolean>(false);
   const [isPasswordFocused, setIsPasswordFocused] = useState<boolean>(false);
@@ -136,36 +140,72 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
-    setIsLoading(true);
 
     const cleanInput = bdInput.replace(/^BD\/?/i, '').trim();
     if (!cleanInput) {
       setErrorMsg('Please enter a valid User ID.');
-      setIsLoading(false);
       return;
     }
 
-    
-    
-
-    
     if (activeTab === 'Canteen') {
       const airman = airmen.find(a => a.bdNo.toLowerCase() === cleanInput.toLowerCase());
-      if (airman) {
-        const updatedRecents = [cleanInput, ...canteenRecentLogins.filter(x => x !== cleanInput)].slice(0, 4);
-        setCanteenRecentLogins(updatedRecents);
-        localStorage.setItem('baf_canteen_recent_logins', JSON.stringify(updatedRecents));
-        
-        setIsLoading(false);
-        setIsCanteenAuth(true);
-        setSuccessAirman(airman);
-        return;
-      } else {
+      if (!airman) {
         setErrorMsg('Member ID not found.');
-        setIsLoading(false);
         return;
       }
+
+      const updatedRecents = [cleanInput, ...canteenRecentLogins.filter(x => x !== cleanInput)].slice(0, 4);
+      setCanteenRecentLogins(updatedRecents);
+      localStorage.setItem('baf_canteen_recent_logins', JSON.stringify(updatedRecents));
+
+      let canteenData: any = null;
+      try {
+        const raw = localStorage.getItem(`canteen_member_${cleanInput.toLowerCase()}`);
+        if (raw) canteenData = JSON.parse(raw);
+      } catch {}
+
+      // Non-blocking background sync with Supabase so login is 100% instantaneous
+      (async () => {
+        try {
+          const { data } = await supabase
+            .from('Canteen')
+            .select('DP, Due, Rank, Surname, Contact, "BD No", airman_id')
+            .or(`"BD No".eq.${cleanInput},airman_id.eq.${cleanInput},airman_id.eq.airman-${cleanInput}`)
+            .limit(1);
+
+          if (data && data.length > 0) {
+            const freshData = {
+              dp: data[0].DP || '',
+              due: Number(data[0].Due) || 0,
+              rank: data[0].Rank || airman.rank,
+              surname: data[0].Surname || airman.name,
+              contact: data[0].Contact || airman.mobileNo,
+              bdNo: cleanInput
+            };
+            localStorage.setItem(`canteen_member_${cleanInput.toLowerCase()}`, JSON.stringify(freshData));
+            if (freshData.dp) {
+              await fetchDirectImageUrl(freshData.dp);
+            }
+          }
+        } catch (err) {
+          console.warn('Could not prefetch canteen member data in background:', err);
+        }
+      })();
+
+      const enrichedAirman: any = {
+        ...airman,
+        photoUrl: canteenData?.dp || airman.photoUrl || '',
+        due: canteenData?.due !== undefined ? canteenData.due : 0,
+        rank: canteenData?.rank || airman.rank,
+        surname: canteenData?.surname || airman.name
+      };
+
+      setSuccessAirman(enrichedAirman);
+      setIsCanteenAuth(true);
+      return;
     }
+
+    setIsLoading(true);
 
     const validation = await validateUserLogin(cleanInput, passwordInput, airmen);
 
@@ -198,7 +238,10 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
       localStorage.setItem('baf_last_used_id', cleanInput);
       
       setIsLoading(false);
-      onAuthenticated();
+      setIsSuccessAnimation(true);
+      setTimeout(() => {
+        onAuthenticated();
+      }, 450);
     } else {
       setErrorMsg(validation.message || 'Invalid User ID or PIN.');
       setPasswordInput('');
@@ -332,14 +375,55 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
               </div>
             )}
 
-            {successAirman && (
+            {successAirman && !isSuccessAnimation && (
               <div className="p-3.5 bg-emerald-950/70 border border-emerald-800 rounded-2xl flex items-center justify-center space-x-2.5 text-xs text-emerald-200 animate-fadeIn">
                 <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
                 <span>Verified: {successAirman.rank} {successAirman.fullName || successAirman.name}</span>
               </div>
             )}
 
-            {!isResetMode ? (
+            {isSuccessAnimation ? (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.88 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ type: "spring", stiffness: 350, damping: 25 }}
+                className="py-6 flex flex-col items-center justify-center space-y-4"
+              >
+                <div className="relative flex items-center justify-center">
+                  <motion.div
+                    initial={{ scale: 0.8, opacity: 0.6 }}
+                    animate={{ scale: [1, 1.45, 1.2], opacity: [0.6, 0.25, 0] }}
+                    transition={{ duration: 0.9, repeat: Infinity }}
+                    className="absolute w-20 h-20 rounded-full bg-emerald-500/30 blur-md"
+                  />
+                  <div className="relative w-16 h-16 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center shadow-xl shadow-emerald-500/25 border border-emerald-400/40 text-white">
+                    <Check className="w-8 h-8 stroke-[3]" />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="inline-flex items-center space-x-1.5 px-3 py-0.5 rounded-full bg-emerald-950/90 border border-emerald-500/40 text-emerald-400 text-[11px] font-black uppercase tracking-widest">
+                    <Sparkles className="w-3 h-3" />
+                    <span>Access Granted</span>
+                  </div>
+                  <h2 className="text-xl font-black text-white">
+                    {successAirman?.rank} {successAirman?.fullName || successAirman?.name}
+                  </h2>
+                  <p className="text-xs text-slate-400 font-mono">
+                    BD/{successAirman?.bdNo || bdInput} • 155 UASU BAF
+                  </p>
+                </div>
+
+                <div className="w-48 h-1.5 bg-slate-800 rounded-full overflow-hidden mt-2">
+                  <motion.div
+                    initial={{ width: "0%" }}
+                    animate={{ width: "100%" }}
+                    transition={{ duration: 0.45, ease: "easeInOut" }}
+                    className="h-full bg-gradient-to-r from-emerald-500 to-teal-400"
+                  />
+                </div>
+              </motion.div>
+            ) : !isResetMode ? (
               <form onSubmit={handleSubmit} className="space-y-5" ref={loginPinRef}>
                 <div className="text-left space-y-2">
                   <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">{activeTab === 'Canteen' ? 'Member ID' : 'User ID'}</label>
@@ -427,7 +511,17 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                   disabled={isLoading || !!successAirman}
                   className="w-full py-3.5 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-black tracking-wide uppercase transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-lg disabled:opacity-50"
                 >
-                  {isLoading ? <span>Verifying...</span> : <> <LogIn className="w-4 h-4" /> <span>Login</span> </>}
+                  {isLoading ? (
+                    <span className="flex items-center justify-center space-x-2">
+                      <Loader2 className="w-4 h-4 animate-spin text-emerald-200" />
+                      <span className="tracking-widest animate-pulse">VERIFYING PIN...</span>
+                    </span>
+                  ) : (
+                    <>
+                      <LogIn className="w-4 h-4" />
+                      <span>Login</span>
+                    </>
+                  )}
                 </button>
 
                 {activeTab !== 'Canteen' && (<div className="text-center mt-4">
@@ -568,7 +662,13 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
 
         {activeTab === 'Canteen' && isCanteenAuth && (
           <CanteenLayout 
-             initialMember={successAirman ? { name: (successAirman.rank && successAirman.name) ? (successAirman.rank + ' ' + successAirman.name) : (successAirman.name || successAirman.fullName || 'Guest'), bdNo: successAirman.bdNo, role: 'employee', photoUrl: successAirman.photoUrl } : undefined}
+             initialMember={successAirman ? { 
+               name: (successAirman.rank && successAirman.name) ? (successAirman.rank + ' ' + successAirman.name) : (successAirman.name || successAirman.fullName || 'Guest'), 
+               bdNo: successAirman.bdNo, 
+               role: 'employee', 
+               photoUrl: successAirman.photoUrl,
+               due: (successAirman as any)?.due
+             } : undefined}
              onBack={() => { setIsCanteenAuth(false); setBdInput(canteenRecentLogins[0] || ''); setPasswordInput(''); setSuccessAirman(null); setTargetAirman(null); }} 
           />
         )}

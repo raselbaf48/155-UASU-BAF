@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Utensils, Search, X, Check, ChefHat, Clock, Plus, XCircle, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { getCanteenConfig, resolveImageUrl, CanteenConfig } from '../utils/canteenSettings';
+import { formatCanteenDate } from '../utils/dateUtils';
 import {
   BarChart,
   Bar,
@@ -596,7 +597,6 @@ export const ManagerDashboard: React.FC = () => {
 
 
   const { t, i18n } = useTranslation();
-  const [memberSid, setMemberSid] = useState('');
   const [manualBd, setManualBd] = useState('');
   const [manualName, setManualName] = useState('');
   const [manualItemId, setManualItemId] = useState('');
@@ -638,7 +638,12 @@ export const ManagerDashboard: React.FC = () => {
   };
   
   const handleRevertPreOrder = async (order: any) => {
-      const member = members.find(m => String(m['BD No']) === String(order.memberId));
+      const cleanOrderBd = String(order.memberId || '').replace(/^BD\/?/i, '').trim().toLowerCase();
+      let member = members.find(m => {
+          const mBd = String(m['BD No'] || '').replace(/^BD\/?/i, '').trim().toLowerCase();
+          const mAid = String(m.airman_id || '').replace(/^airman-/i, '').replace(/^BD\/?/i, '').trim().toLowerCase();
+          return mBd === cleanOrderBd || mAid === cleanOrderBd || String(m['BD No']) === String(order.memberId);
+      });
       if (member) {
           const currentDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
           const newDue = Math.max(0, currentDue - order.total);
@@ -654,7 +659,7 @@ export const ManagerDashboard: React.FC = () => {
       }
       
       const txs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-      const updatedTxs = txs.filter((t: any) => t.amount !== order.total || t.date !== new Date(order.timestamp).toLocaleDateString('bn-BD') || !t.items.includes(order.items[0].name));
+      const updatedTxs = txs.filter((t: any) => t.orderId !== order.orderId && t.id !== 'tx-po-' + order.orderId);
       localStorage.setItem('canteen_txs', JSON.stringify(updatedTxs));
       
       const existingStr = localStorage.getItem('canteen_pre_orders') || '[]';
@@ -666,11 +671,31 @@ export const ManagerDashboard: React.FC = () => {
       
       const parsed = updated.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       setPreOrders(parsed);
+      fetchMembers();
+      fetchCatalog();
+
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('canteen_txs_updated'));
+      window.dispatchEvent(new Event('baf_state_updated'));
+      window.dispatchEvent(new Event('storage'));
   };
 
   const handleCompletePreOrder = async (order: any) => {
       // Find member
-      const member = members.find(m => String(m['BD No']) === String(order.memberId));
+      const cleanOrderBd = String(order.memberId || '').replace(/^BD\/?/i, '').trim().toLowerCase();
+      let member = members.find(m => {
+          const mBd = String(m['BD No'] || '').replace(/^BD\/?/i, '').trim().toLowerCase();
+          const mAid = String(m.airman_id || '').replace(/^airman-/i, '').replace(/^BD\/?/i, '').trim().toLowerCase();
+          return mBd === cleanOrderBd || mAid === cleanOrderBd || String(m['BD No']) === String(order.memberId);
+      });
+      if (!member) {
+          try {
+              const { data } = await supabase.from('Canteen').select('*').or(`"BD No".eq.${cleanOrderBd},airman_id.eq.${cleanOrderBd},airman_id.eq.airman-${cleanOrderBd}`).limit(1);
+              if (data && data.length > 0) {
+                  member = data[0];
+              }
+          } catch(e) {}
+      }
       if (!member) {
           alert('Member not found!');
           return;
@@ -691,22 +716,32 @@ export const ManagerDashboard: React.FC = () => {
       }
       
       // Record transaction
+      const memberName = [member.rank || member.Rank, member.name || member.surname || member.Surname].filter(Boolean).join(' ') || member['BD No'] || order.memberName || order.memberId;
       const tx = {
-          id: Date.now() + Math.random(),
-          date: new Date().toLocaleDateString('bn-BD'),
+          id: 'tx-po-' + order.orderId,
+          date: formatCanteenDate(new Date()),
           airman_id: member.airman_id,
+          bdNo: member['BD No'] || order.memberId,
+          memberName: memberName,
+          rank: member.rank || member.Rank || '',
           items: order.items.map((i: any) => `${i.name} (${i.qty})`).join(', '),
-          amount: order.total
+          amount: Number(order.total || 0),
+          type: 'SALE',
+          gateway: 'DUE',
+          orderId: order.orderId,
+          isPreOrder: true,
+          preOrderCompleted: true
       };
       const existingTx = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-      localStorage.setItem('canteen_txs', JSON.stringify([tx, ...existingTx]));
+      const filteredTxs = existingTx.filter((t: any) => t.orderId !== order.orderId && t.id !== tx.id);
+      localStorage.setItem('canteen_txs', JSON.stringify([tx, ...filteredTxs]));
       
       // Update order status
       const existingStr = localStorage.getItem('canteen_pre_orders') || '[]';
       let existing = [];
       try { existing = JSON.parse(existingStr); } catch(e) {}
       
-      const updated = existing.map((p: any) => p.orderId === order.orderId ? {...p, status: 'completed'} : p);
+      const updated = existing.map((p: any) => p.orderId === order.orderId ? {...p, status: 'completed', completedAt: new Date().toISOString()} : p);
       localStorage.setItem('canteen_pre_orders', JSON.stringify(updated));
       
       const parsed = updated.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
@@ -715,6 +750,11 @@ export const ManagerDashboard: React.FC = () => {
       // Refresh local state to reflect baki and stock
       fetchMembers();
       fetchCatalog();
+
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('canteen_txs_updated'));
+      window.dispatchEvent(new Event('baf_state_updated'));
+      window.dispatchEvent(new Event('storage'));
   };
 
   const handleCancelPreOrder = () => {
@@ -830,320 +870,417 @@ export const ManagerDashboard: React.FC = () => {
                )}
             </div>
             
-            <h2 className="text-4xl font-black text-white tracking-widest flex items-center space-x-3">
-               <span>{canteenConfig.name || '🍽️ CAFEUAV 🍽️'}</span>
+            <h2 className="text-2xl sm:text-3xl md:text-4xl font-black text-white tracking-wider sm:tracking-widest flex items-center justify-center whitespace-nowrap text-center px-2">
+               <span>{canteenConfig.name || '🍽️ CAFE UAV 🍽️'}</span>
             </h2>
-            <p className="text-[10px] tracking-widest text-slate-400 font-bold uppercase pb-2">Eat Good Food, Serve Good!</p>
-            
-            <button onClick={() => setShowCurateMenu(true)} className="px-6 py-3 bg-[#4f46e5] hover:bg-[#4338ca] text-white rounded-xl text-[10px] font-black tracking-widest uppercase transition-all shadow-md shadow-indigo-500/20 flex items-center space-x-2">
-               <span className="text-indigo-200">🍳</span>
-               <span>CURATE DAILY MENU</span>
-            </button>
+            <p className="text-[10px] sm:text-xs tracking-widest text-slate-400 font-bold uppercase pb-1">Eat Good Food, Serve Good!</p>
          </div>
       </div>
 
-      {/* Grid Content */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-         {/* Left Col - Cafe Performance */}
-         <div className="lg:col-span-2 bg-slate-900 rounded-[2rem] p-8 shadow-sm border border-slate-800 flex flex-col min-h-[400px]">
-            <div className="flex items-center justify-between mb-8">
-               <h3 className="text-xs font-black text-white tracking-widest uppercase flex items-center space-x-2">
-                  <span className="text-[#4f46e5]">📋</span>
-                  <span>TODAY'S MENU & PRE-ORDERS</span>
-               </h3>
-               <div className="bg-indigo-500/20 text-indigo-400 px-4 py-1.5 rounded-full text-xs font-bold">
-                  Total Pre-Orders: {todaysPreOrders.length}
+      {/* Centered Pre-Order Content & Separate Boxes */}
+      <div className="max-w-4xl mx-auto w-full space-y-6">
+         {/* 1. MENU BOX */}
+         <div className="bg-slate-900 rounded-[2rem] p-6 sm:p-8 shadow-xl border border-slate-800 flex flex-col">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+               <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+                     <Utensils className="w-5 h-5" />
+                  </div>
+                  <div>
+                     <h3 className="text-sm font-black text-white tracking-widest uppercase">
+                        TODAY'S MENU
+                     </h3>
+                     <p className="text-[11px] text-slate-400 font-medium">
+                        Items curated and available for order today
+                     </p>
+                  </div>
                </div>
+               <button 
+                  onClick={() => setShowCurateMenu(true)} 
+                  className="self-start sm:self-auto px-5 py-2.5 bg-[#4f46e5] hover:bg-[#4338ca] text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md shadow-indigo-500/20 flex items-center space-x-2 active:scale-95 cursor-pointer"
+               >
+                  <ChefHat className="w-4 h-4" />
+                  <span>CURATE MENU</span>
+               </button>
             </div>
 
             {/* Curated Menu Items */}
-            <div className="mb-6">
-               <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Today's Menu Items</h4>
-               <div className="flex flex-wrap gap-2">
-                   {(!selectedItems || selectedItems.length === 0) ? (
-                       <span className="text-slate-500 text-xs font-bold">No items curated</span>
-                   ) : (
-                       catalog.filter(i => selectedItems.includes(i.id)).map(item => (
-                           <div key={item.id} className="bg-[#4f46e5]/10 border border-[#4f46e5]/20 text-[#4f46e5] px-3 py-1.5 rounded-lg text-xs font-bold flex items-center space-x-2">
-                               <span>{item.name}</span>
-                               <span className="opacity-50">৳{item.price}</span>
-                           </div>
-                       ))
-                   )}
+            {(!selectedItems || selectedItems.length === 0) ? (
+               <div className="py-8 px-4 rounded-2xl bg-slate-950/60 border border-slate-800/80 flex flex-col items-center justify-center text-center">
+                  <Utensils className="w-10 h-10 text-slate-600 mb-2" />
+                  <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-2">No menu items curated for today</p>
+                  <button 
+                     onClick={() => setShowCurateMenu(true)}
+                     className="text-xs text-indigo-400 hover:text-indigo-300 font-bold underline cursor-pointer"
+                  >
+                     Click here to curate today's menu
+                  </button>
                </div>
-            </div>
-
-
-            <div className="p-5 bg-slate-800/40 rounded-2xl border border-slate-700">
-                <h3 className="text-xs font-black text-white tracking-widest uppercase mb-4">Manual Pre-Order</h3>
-                <div className="flex flex-col gap-3">
-                    {selectedMembers.length > 0 && (
-                        <div className="flex flex-wrap gap-2">
-                            {selectedMembers.map(m => (
-                                <span key={m.airman_id} className="flex items-center space-x-1 px-3 py-1.5 bg-indigo-900/30 text-indigo-400 rounded-lg text-[10px] font-bold border border-indigo-500/20">
-                                    <span>{m['Rank']} {m['Surname']}</span>
-                                    <button onClick={() => setSelectedMembers(selectedMembers.filter(sm => sm.airman_id !== m.airman_id))} className="text-indigo-400 hover:text-indigo-300 ml-1">
-                                        <X className="w-3 h-3" />
-                                    </button>
-                                </span>
-                            ))}
-                        </div>
-                    )}
-                    <div className="relative">
-                        <input 
-                            type="text" 
-                            placeholder="Search Member by Name or BD No..." 
-                            value={memberSearchTerm} 
-                            onChange={e => {
-                                setMemberSearchTerm(e.target.value);
-                                setShowMemberDropdown(true);
-                            }}
-                            onFocus={() => setShowMemberDropdown(true)}
-                            onBlur={() => setTimeout(() => setShowMemberDropdown(false), 200)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm font-bold text-slate-200 outline-none focus:border-indigo-500" 
-                        />
-                        {showMemberDropdown && (
-                       <div className="absolute left-0 right-0 top-full mt-2 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-60 overflow-y-auto z-50">
-                           {members.filter(m => {
-                               const name = m['Surname'] || '';
-                               const bd = m['BD No'] || '';
-                               return name.toLowerCase().includes(memberSearchTerm.toLowerCase()) || String(bd).includes(memberSearchTerm);
-                           }).slice(0, 10).map(m => (
-                               <div 
-                                   key={m.airman_id} 
-                                   onMouseDown={(e) => {
-                                       e.preventDefault();
-                                       if (!selectedMembers.find(sm => sm.airman_id === m.airman_id)) {
-                                           setSelectedMembers([...selectedMembers, m]);
-                                       }
-                                       setMemberSearchTerm('');
-                                       setShowMemberDropdown(false);
-                                   }}
-                                   className="px-4 py-3 hover:bg-slate-700 cursor-pointer flex items-center justify-between border-b border-slate-700/50 last:border-0 transition-colors"
-                               >
-                                   <div>
-                                       <p className="text-xs font-bold text-white">{m['Rank']} {m['Surname']}</p>
-                                       <p className="text-[10px] text-slate-400">BD: {m['BD No']}</p>
-                                   </div>
-                                   <Plus className="w-4 h-4 text-slate-400" />
-                               </div>
-                           ))}
-                           {memberSearchTerm !== '' && members.filter(m => {
-                               const name = m['Surname'] || '';
-                               const bd = m['BD No'] || '';
-                               return name.toLowerCase().includes(memberSearchTerm.toLowerCase()) || String(bd).includes(memberSearchTerm);
-                           }).length === 0 && (
-                               <div className="px-4 py-3 text-xs text-slate-400 text-center">No members found</div>
-                           )}
-                       </div>
-                   )}
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <select 
-                            value={manualItemId} 
-                            onChange={e => setManualItemId(e.target.value)} 
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-sm font-bold text-slate-200 outline-none focus:border-indigo-500"
-                        >
-                            <option value="">Select Item</option>
-                            {catalog.filter(i => selectedItems.includes(i.id)).map(i => (
-                                <option key={i.id} value={i.id}>{i.name} - ৳{i.price}</option>
-                            ))}
-                        </select>
-                        <div className="flex items-center bg-slate-950 border border-slate-800 rounded-xl px-4 py-2">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mr-2">Qty:</span>
-                            <input 
-                                type="number" 
-                                min="1" 
-                                value={manualQty} 
-                                onChange={e => setManualQty(Number(e.target.value) || 1)} 
-                                className="w-full bg-transparent text-sm font-bold text-slate-200 outline-none focus:border-indigo-500"
-                            />
-                        </div>
-                        <button 
-                            onClick={handleManualPreOrder} 
-                            disabled={selectedMembers.length === 0 || !manualItemId}
-                            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black tracking-widest uppercase py-2 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            Add Pre-Order
-                        </button>
-                    </div>
-                </div>
-            </div>
-         </div>
-
-         <div className="lg:col-span-3 bg-slate-900 rounded-[2rem] p-8 shadow-sm border border-slate-800 flex flex-col mt-6">
-            <h3 className="text-xs font-black text-white tracking-widest uppercase mb-6 flex items-center justify-between">
-               <div className="flex items-center space-x-2">
-                  <span className="text-[#4f46e5]">🛎️</span>
-                  <span>LIVE PRE-ORDERS</span>
-               </div>
-               <div className="flex bg-slate-800 p-1 rounded-full">
-                   <button onClick={() => setPreOrderTab('pending')} className={`px-4 py-1.5 rounded-full text-[10px] uppercase font-bold transition-colors ${preOrderTab === 'pending' ? 'bg-[#4f46e5] text-white' : 'text-slate-400 hover:text-white'}`}>Pending ({preOrders.filter(p => p.status === 'pending').length})</button>
-                   <button onClick={() => setPreOrderTab('completed')} className={`px-4 py-1.5 rounded-full text-[10px] uppercase font-bold transition-colors ${preOrderTab === 'completed' ? 'bg-[#4f46e5] text-white' : 'text-slate-400 hover:text-white'}`}>Completed ({preOrders.filter(p => p.status === 'completed').length})</button>
-               </div>
-            </h3>
-            
-            {preOrders.length === 0 ? (
-                <div className="py-12 flex flex-col items-center justify-center text-slate-400">
-                    <Clock className="w-12 h-12 mb-3 opacity-20" />
-                    <p className="text-xs font-bold uppercase tracking-widest">No Pre-Orders Yet</p>
-                </div>
             ) : (
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                        <thead>
-                            <tr className="border-b border-slate-800">
-                                <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Time</th>
-                                <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Member</th>
-                                <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Items</th>
-                                <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Qty</th>
-                                <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Total</th>
-                                <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</th>
-                                <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-50">
-                            {preOrders.filter((order: any) => order.status === preOrderTab).map((order: any, idx: number) => (
-                                <tr key={idx} className="hover:bg-slate-950 transition-colors">
-                                    <td className="py-4 px-4 text-xs font-bold text-slate-400">
-                                        {new Date(order.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                                    </td>
-                                    <td className="py-4 px-4">
-                                        <div className="text-xs font-bold text-white">{order.memberName}</div>
-                                        <div className="text-[10px] font-bold text-slate-400">{order.memberId}</div>
-                                    </td>
-                                    <td className="py-4 px-4">
-                                        <div className="flex flex-col gap-1">
-                                            {order.items.map((it:any, i:number) => (
-                                                <span key={i} className="text-slate-300 text-xs font-bold whitespace-nowrap">
-                                                    {it.name}
-                                                </span>
-                                            ))}
-                                        </div>
-                                    </td>
-                                    <td className="py-4 px-4">
-                                        <div className="flex flex-col gap-1">
-                                            {order.items.map((it:any, i:number) => (
-                                                <span key={i} className="bg-slate-800 text-slate-400 px-2 py-0.5 rounded-md text-[10px] font-bold w-fit text-center min-w-[24px]">
-                                                    {it.qty}
-                                                </span>
-                                            ))}
-                                        </div>
-                                    </td>
-                                    <td className="py-4 px-4 text-xs font-black text-[#4f46e5]">৳{order.total}</td>
-                                    <td className="py-4 px-4">
-                                        <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${order.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-400'}`}>
-                                            {order.status}
-                                        </span>
-                                    </td>
-                                    <td className="py-4 px-4 text-right">
-                                        {order.status === 'pending' ? (
-                                            <div className="flex items-center justify-end space-x-3">
-                                                <button 
-                                                    onClick={() => {
-                                                        handleCompletePreOrder(order);
-                                                        alert('Order completed successfully!');
-                                                    }}
-                                                    title="Mark Done"
-                                                    className="p-1.5 bg-emerald-900/30 hover:bg-emerald-900/60 text-emerald-400 rounded-full transition-colors flex items-center justify-center border border-emerald-500/20"
-                                                >
-                                                    <CheckCircle2 className="w-5 h-5" />
-                                                </button>
-                                                <button 
-                                                    onClick={() => setCancelConfirmId(order.orderId)}
-                                                    className="p-1 text-rose-400 hover:text-rose-300 transition-colors flex items-center justify-center"
-                                                    title="Cancel Order"
-                                                >
-                                                    <XCircle className="w-5 h-5" />
-                                                </button>
-                                            </div>
-                                        ) : (
-                                            <div className="flex items-center justify-end">
-                                                <button 
-                                                    onClick={() => handleRevertPreOrder(order)}
-                                                    className="px-3 py-1.5 bg-amber-900/30 hover:bg-amber-900/60 text-amber-500 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-colors"
-                                                >
-                                                    Revert to Pending
-                                                </button>
-                                            </div>
-                                        )}
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
+               <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-4 w-full py-2">
+                  {catalog.filter(i => selectedItems.includes(i.id)).map(item => (
+                     <div 
+                        key={item.id} 
+                        className="bg-slate-950/90 border border-slate-800 hover:border-indigo-500/50 shadow-md px-6 py-4 rounded-2xl text-center min-w-[200px] sm:min-w-[240px] flex items-center justify-center transition-all hover:scale-[1.02]"
+                     >
+                        <span className="text-white font-black text-base sm:text-lg tracking-wide uppercase">
+                           {item.name}
+                        </span>
+                     </div>
+                  ))}
+               </div>
             )}
          </div>
 
-
-         {/* Cancel Confirm Modal */}
-         {cancelConfirmId && (
-            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-                <div className="bg-slate-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-slate-800 animate-in zoom-in-95">
-                    <div className="text-center">
-                        <div className="w-16 h-16 bg-rose-900/30 text-rose-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                            <AlertTriangle className="w-8 h-8" />
-                        </div>
-                        <h3 className="text-lg font-black text-white uppercase tracking-tighter mb-2">Cancel Pre-Order?</h3>
-                        <p className="text-sm font-bold text-slate-400 mb-6">Are you sure you want to cancel this order? This action cannot be undone.</p>
-                        <div className="flex space-x-3">
-                            <button 
-                                onClick={() => setCancelConfirmId(null)}
-                                className="flex-1 px-4 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-colors"
-                            >
-                                Keep
-                            </button>
-                            <button 
-                                onClick={handleCancelPreOrder}
-                                className="flex-1 px-4 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-colors shadow-lg shadow-rose-900/20"
-                            >
-                                Cancel It
-                            </button>
-                        </div>
-                    </div>
-                </div>
+         {/* 2. TOTAL PRE ORDER BOX */}
+         <div className="bg-slate-900 rounded-[2rem] p-6 sm:p-8 shadow-xl border border-slate-800 flex flex-col">
+            <div className="flex items-center justify-between mb-6">
+               <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+                     <Clock className="w-5 h-5" />
+                  </div>
+                  <div>
+                     <h3 className="text-sm font-black text-white tracking-widest uppercase">
+                        TOTAL PRE-ORDERS
+                     </h3>
+                     <p className="text-[11px] text-slate-400 font-medium">
+                        Live summary of today's and all active pre-orders
+                     </p>
+                  </div>
+               </div>
+               <div className="bg-indigo-500/20 text-indigo-400 px-3.5 py-1.5 rounded-full text-xs font-black">
+                  Today: {todaysPreOrders.length}
+               </div>
             </div>
-         )}
-         
-         {/* Right Col */}
-         <div className="space-y-6 flex flex-col">
-            {/* Account Check Card */}
-            <div className="bg-[#0f172a] rounded-[2rem] p-8 shadow-xl shadow-slate-900/10">
-               <h3 className="text-xs font-black text-white tracking-widest uppercase mb-6 flex items-center space-x-2">
-                  <Search className="w-4 h-4 text-indigo-400" />
-                  <span>ACCOUNT CHECK</span>
-               </h3>
-               <div className="space-y-4">
-                  <div className="relative">
+
+            {/* Centered Stats Cards Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 text-center">
+               <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex flex-col items-center justify-center">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Today's Orders</p>
+                  <h4 className="text-2xl sm:text-3xl font-black text-white">{todaysPreOrders.length}</h4>
+               </div>
+
+               <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex flex-col items-center justify-center">
+                  <p className="text-[10px] font-black text-amber-400 uppercase tracking-widest mb-1">Pending</p>
+                  <h4 className="text-2xl sm:text-3xl font-black text-amber-400">
+                     {preOrders.filter(p => p.status === 'pending').length}
+                  </h4>
+               </div>
+
+               <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex flex-col items-center justify-center">
+                  <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-1">Completed</p>
+                  <h4 className="text-2xl sm:text-3xl font-black text-emerald-400">
+                     {preOrders.filter(p => p.status === 'completed').length}
+                  </h4>
+               </div>
+
+               <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex flex-col items-center justify-center">
+                  <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">Today's Value</p>
+                  <h4 className="text-2xl sm:text-3xl font-black text-indigo-400">
+                     ৳{todaysPreOrders.reduce((sum, po) => sum + (Number(po.total) || 0), 0)}
+                  </h4>
+               </div>
+            </div>
+         </div>
+
+         {/* 3. MANUAL PRE-ORDER BOX */}
+         <div className="bg-slate-900 rounded-[2rem] p-6 sm:p-8 shadow-xl border border-slate-800 flex flex-col">
+            <div className="flex items-center space-x-3 mb-6">
+               <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+                  <Plus className="w-5 h-5" />
+               </div>
+               <div>
+                  <h3 className="text-sm font-black text-white tracking-widest uppercase">
+                     MANUAL PRE-ORDER
+                  </h3>
+                  <p className="text-[11px] text-slate-400 font-medium">
+                     Create pre-order on behalf of airmen or canteen members
+                  </p>
+               </div>
+            </div>
+
+            <div className="space-y-4">
+               {/* Selected Members Chips */}
+               {selectedMembers.length > 0 && (
+                  <div className="flex flex-wrap gap-2 p-3 bg-slate-950/60 rounded-xl border border-slate-800">
+                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider self-center mr-1">
+                        Selected ({selectedMembers.length}):
+                     </span>
+                     {selectedMembers.map(m => (
+                        <span key={m.airman_id} className="flex items-center space-x-1.5 px-3 py-1.5 bg-indigo-950/60 text-indigo-300 rounded-lg text-xs font-bold border border-indigo-500/30">
+                           <span>{m['Rank']} {m['Surname']} (BD: {m['BD No']})</span>
+                           <button 
+                              type="button"
+                              onClick={() => setSelectedMembers(selectedMembers.filter(sm => sm.airman_id !== m.airman_id))} 
+                              className="text-indigo-400 hover:text-white transition-colors ml-1 p-0.5"
+                           >
+                              <X className="w-3.5 h-3.5" />
+                           </button>
+                        </span>
+                     ))}
+                  </div>
+               )}
+
+               {/* Member Search with Autocomplete */}
+               <div className="relative">
+                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">
+                     <Search className="w-4 h-4" />
+                  </div>
+                  <input 
+                     type="text" 
+                     placeholder="Search Member by Name or BD No..." 
+                     value={memberSearchTerm} 
+                     onChange={e => {
+                        setMemberSearchTerm(e.target.value);
+                        setShowMemberDropdown(true);
+                     }}
+                     onFocus={() => setShowMemberDropdown(true)}
+                     onBlur={() => setTimeout(() => setShowMemberDropdown(false), 250)}
+                     className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-11 pr-4 py-3.5 text-sm font-bold text-slate-200 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all placeholder:text-slate-500" 
+                  />
+                  {showMemberDropdown && (
+                     <div className="absolute left-0 right-0 top-full mt-2 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-60 overflow-y-auto z-50 divide-y divide-slate-800">
+                        {members.filter(m => {
+                           const name = m['Surname'] || '';
+                           const bd = m['BD No'] || '';
+                           return name.toLowerCase().includes(memberSearchTerm.toLowerCase()) || String(bd).includes(memberSearchTerm);
+                        }).slice(0, 10).map(m => (
+                           <div 
+                              key={m.airman_id} 
+                              onMouseDown={(e) => {
+                                 e.preventDefault();
+                                 if (!selectedMembers.find(sm => sm.airman_id === m.airman_id)) {
+                                    setSelectedMembers([...selectedMembers, m]);
+                                 }
+                                 setMemberSearchTerm('');
+                                 setShowMemberDropdown(false);
+                              }}
+                              className="px-4 py-3 hover:bg-slate-800 cursor-pointer flex items-center justify-between transition-colors"
+                           >
+                              <div>
+                                 <p className="text-xs font-bold text-white">{m['Rank']} {m['Surname']}</p>
+                                 <p className="text-[10px] text-slate-400">BD No: {m['BD No']}</p>
+                              </div>
+                              <span className="p-1 bg-indigo-500/10 text-indigo-400 rounded-lg">
+                                 <Plus className="w-4 h-4" />
+                              </span>
+                           </div>
+                        ))}
+                        {memberSearchTerm !== '' && members.filter(m => {
+                           const name = m['Surname'] || '';
+                           const bd = m['BD No'] || '';
+                           return name.toLowerCase().includes(memberSearchTerm.toLowerCase()) || String(bd).includes(memberSearchTerm);
+                        }).length === 0 && (
+                           <div className="px-4 py-3 text-xs text-slate-400 text-center">No members found</div>
+                        )}
+                     </div>
+                  )}
+               </div>
+
+               {/* Item & Quantity Selector */}
+               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="sm:col-span-1">
+                     <select 
+                        value={manualItemId} 
+                        onChange={e => setManualItemId(e.target.value)} 
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3.5 text-sm font-bold text-slate-200 outline-none focus:border-indigo-500 transition-all"
+                     >
+                        <option value="">Select Item</option>
+                        {catalog.filter(i => selectedItems.includes(i.id)).map(i => (
+                           <option key={i.id} value={i.id}>{i.name} - ৳{i.price}</option>
+                        ))}
+                     </select>
+                  </div>
+
+                  <div className="flex items-center bg-slate-950 border border-slate-800 rounded-xl px-4 py-2">
+                     <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest mr-2">Qty:</span>
                      <input 
-                        type="text"
-                        placeholder="ENTER MEMBER SID..."
-                        value={memberSid}
-                        onChange={(e) => setMemberSid(e.target.value)}
-                        className="w-full bg-[#1e293b] text-white px-5 py-4 rounded-2xl text-[10px] font-bold tracking-widest focus:outline-none focus:ring-2 focus:ring-[#4f46e5] placeholder:text-slate-400 border border-slate-800 text-center"
+                        type="number" 
+                        min="1" 
+                        value={manualQty} 
+                        onChange={e => setManualQty(Math.max(1, Number(e.target.value) || 1))} 
+                        className="w-full bg-transparent text-sm font-bold text-slate-200 outline-none"
                      />
                   </div>
-                  <button className="w-full bg-[#4f46e5] hover:bg-[#4338ca] text-white py-4 rounded-2xl text-[10px] font-black tracking-widest transition-all shadow-md shadow-indigo-500/20">
-                     VALIDATE IDENTITY
+
+                  <button 
+                     type="button"
+                     onClick={handleManualPreOrder} 
+                     disabled={selectedMembers.length === 0 || !manualItemId}
+                     className="w-full bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black tracking-widest uppercase py-3.5 transition-all shadow-lg shadow-emerald-950/40 disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] cursor-pointer"
+                  >
+                     Add Pre-Order
+                  </button>
+               </div>
+            </div>
+         </div>
+
+         {/* 4. LIVE PRE-ORDERS TABLE */}
+         <div className="bg-slate-900 rounded-[2rem] p-6 sm:p-8 shadow-xl border border-slate-800 flex flex-col">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+               <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+                     <Clock className="w-5 h-5" />
+                  </div>
+                  <div>
+                     <h3 className="text-sm font-black text-white tracking-widest uppercase">
+                        LIVE PRE-ORDERS
+                     </h3>
+                     <p className="text-[11px] text-slate-400 font-medium">
+                        Real-time tracking of pending and completed orders
+                     </p>
+                  </div>
+               </div>
+               <div className="flex bg-slate-950 p-1 rounded-full border border-slate-800 self-start sm:self-auto">
+                  <button 
+                     type="button"
+                     onClick={() => setPreOrderTab('pending')} 
+                     className={`px-4 py-1.5 rounded-full text-xs uppercase font-bold transition-all cursor-pointer ${preOrderTab === 'pending' ? 'bg-[#4f46e5] text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
+                  >
+                     Pending ({preOrders.filter(p => p.status === 'pending').length})
+                  </button>
+                  <button 
+                     type="button"
+                     onClick={() => setPreOrderTab('completed')} 
+                     className={`px-4 py-1.5 rounded-full text-xs uppercase font-bold transition-all cursor-pointer ${preOrderTab === 'completed' ? 'bg-[#4f46e5] text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
+                  >
+                     Completed ({preOrders.filter(p => p.status === 'completed').length})
                   </button>
                </div>
             </div>
 
-            {/* Cycle Sales Card */}
-            <div className="bg-slate-900 rounded-[2rem] p-8 shadow-sm border border-slate-800 flex-1 flex flex-col justify-center">
-               <p className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-2">CYCLE SALES</p>
-               <h2 className="text-4xl font-black text-white tracking-tighter">৳14,069</h2>
-            </div>
-
-            {/* Global Debt Card */}
-            <div className="bg-rose-900/30 rounded-[2rem] p-8 shadow-sm border border-rose-900/50 flex-1 flex flex-col justify-center">
-               <p className="text-[10px] font-black text-rose-400 tracking-widest uppercase mb-2">GLOBAL DEBT</p>
-               <h2 className="text-4xl font-black text-rose-600 tracking-tighter">৳-1,816,144</h2>
-            </div>
+            {preOrders.length === 0 ? (
+               <div className="py-12 flex flex-col items-center justify-center text-slate-400 text-center">
+                  <Clock className="w-12 h-12 mb-3 opacity-20" />
+                  <p className="text-xs font-bold uppercase tracking-widest">No Pre-Orders Yet</p>
+               </div>
+            ) : (
+               <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                     <thead>
+                        <tr className="border-b border-slate-800">
+                           <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Time</th>
+                           <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Member</th>
+                           <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Items</th>
+                           <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Qty</th>
+                           <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Total</th>
+                           <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</th>
+                           <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Action</th>
+                        </tr>
+                     </thead>
+                     <tbody className="divide-y divide-slate-800">
+                        {preOrders.filter((order: any) => order.status === preOrderTab).map((order: any, idx: number) => (
+                           <tr key={idx} className="hover:bg-slate-950/60 transition-colors">
+                              <td className="py-4 px-4 text-xs font-bold text-slate-400">
+                                 {new Date(order.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                              </td>
+                              <td className="py-4 px-4">
+                                 <div className="text-xs font-bold text-white">{order.memberName}</div>
+                                 <div className="text-[10px] font-bold text-slate-400">BD: {order.memberId}</div>
+                              </td>
+                              <td className="py-4 px-4">
+                                 <div className="flex flex-col gap-1">
+                                    {order.items.map((it:any, i:number) => (
+                                       <span key={i} className="text-slate-300 text-xs font-bold whitespace-nowrap">
+                                          {it.name}
+                                       </span>
+                                    ))}
+                                 </div>
+                              </td>
+                              <td className="py-4 px-4">
+                                 <div className="flex flex-col gap-1">
+                                    {order.items.map((it:any, i:number) => (
+                                       <span key={i} className="bg-slate-800 text-slate-300 px-2 py-0.5 rounded-md text-[10px] font-bold w-fit text-center min-w-[24px]">
+                                          {it.qty}
+                                       </span>
+                                    ))}
+                                 </div>
+                              </td>
+                              <td className="py-4 px-4 text-xs font-black text-[#4f46e5]">৳{order.total}</td>
+                              <td className="py-4 px-4">
+                                 <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${order.status === 'pending' ? 'bg-amber-950/50 text-amber-400 border border-amber-500/20' : 'bg-emerald-950/50 text-emerald-400 border border-emerald-500/20'}`}>
+                                    {order.status}
+                                 </span>
+                              </td>
+                              <td className="py-4 px-4 text-right">
+                                 {order.status === 'pending' ? (
+                                    <div className="flex items-center justify-end space-x-2">
+                                       <button 
+                                          type="button"
+                                          onClick={() => {
+                                             handleCompletePreOrder(order);
+                                             alert('Order completed successfully!');
+                                          }}
+                                          title="Mark Done"
+                                          className="p-2 bg-emerald-900/30 hover:bg-emerald-900/60 text-emerald-400 rounded-xl transition-colors flex items-center justify-center border border-emerald-500/20 cursor-pointer"
+                                       >
+                                          <CheckCircle2 className="w-4 h-4" />
+                                       </button>
+                                       <button 
+                                          type="button"
+                                          onClick={() => setCancelConfirmId(order.orderId)}
+                                          className="p-2 text-rose-400 hover:bg-rose-950/50 rounded-xl transition-colors flex items-center justify-center cursor-pointer"
+                                          title="Cancel Order"
+                                       >
+                                          <XCircle className="w-4 h-4" />
+                                       </button>
+                                    </div>
+                                 ) : (
+                                    <div className="flex items-center justify-end">
+                                       <button 
+                                          type="button"
+                                          onClick={() => handleRevertPreOrder(order)}
+                                          className="px-3 py-1.5 bg-amber-900/30 hover:bg-amber-900/60 text-amber-500 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-colors border border-amber-500/20 cursor-pointer"
+                                       >
+                                          Revert to Pending
+                                       </button>
+                                    </div>
+                                 )}
+                              </td>
+                           </tr>
+                        ))}
+                        {preOrders.filter((order: any) => order.status === preOrderTab).length === 0 && (
+                           <tr>
+                              <td colSpan={7} className="py-8 text-center text-xs font-bold text-slate-500 uppercase tracking-wider">
+                                 No {preOrderTab} pre-orders
+                              </td>
+                           </tr>
+                        )}
+                     </tbody>
+                  </table>
+               </div>
+            )}
          </div>
       </div>
+
+      {/* Cancel Confirm Modal */}
+      {cancelConfirmId && (
+         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+             <div className="bg-slate-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-slate-800 animate-in zoom-in-95">
+                 <div className="text-center">
+                     <div className="w-16 h-16 bg-rose-900/30 text-rose-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                         <AlertTriangle className="w-8 h-8" />
+                     </div>
+                     <h3 className="text-lg font-black text-white uppercase tracking-tighter mb-2">Cancel Pre-Order?</h3>
+                     <p className="text-sm font-bold text-slate-400 mb-6">Are you sure you want to cancel this order? This action cannot be undone.</p>
+                     <div className="flex space-x-3">
+                         <button 
+                             onClick={() => setCancelConfirmId(null)}
+                             className="flex-1 px-4 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-colors cursor-pointer"
+                         >
+                             Keep
+                         </button>
+                         <button 
+                             onClick={handleCancelPreOrder}
+                             className="flex-1 px-4 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-colors shadow-lg shadow-rose-900/20 cursor-pointer"
+                         >
+                             Cancel It
+                         </button>
+                     </div>
+                 </div>
+             </div>
+         </div>
+      )}
     </div>
   );
 };

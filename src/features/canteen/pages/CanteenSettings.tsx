@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Image as ImageIcon, CheckCircle2, Loader2, Users, Search, UserCheck, Eye, EyeOff, ShieldCheck, Phone, IdCard } from 'lucide-react';
+import { Save, Image as ImageIcon, CheckCircle2, Loader2, Users, Search, UserCheck, Eye, EyeOff, ShieldCheck, Phone, IdCard, AlertTriangle, RotateCcw } from 'lucide-react';
 import { getCanteenConfig, saveCanteenConfig, resolveImageUrl, fetchDirectImageUrl, fetchCanteenConfigFromCloud, CanteenConfig } from '../utils/canteenSettings';
+import { resetAllCanteenData } from '../utils/resetCanteenData';
 import { supabase } from '../../../supabase';
 
 export const CanteenSettings: React.FC = () => {
@@ -16,6 +17,20 @@ export const CanteenSettings: React.FC = () => {
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [showMemberPicker, setShowMemberPicker] = useState(false);
   const [memberSearch, setMemberSearch] = useState('');
+
+  // Clean Slate / Reset Data state
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetSuccess, setResetSuccess] = useState(false);
+
+  const handleResetAllData = async () => {
+    setIsResetting(true);
+    await resetAllCanteenData(true);
+    setIsResetting(false);
+    setShowResetModal(false);
+    setResetSuccess(true);
+    setTimeout(() => setResetSuccess(false), 5000);
+  };
 
   useEffect(() => {
     // 1. Initial config & Cloud pull
@@ -385,6 +400,93 @@ export const CanteenSettings: React.FC = () => {
           )}
         </button>
       </div>
+
+      {/* Brand New Start / Data Reset Section */}
+      <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-6 md:p-10 shadow-sm border border-rose-500/20 dark:border-rose-950/40 space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center space-x-2 text-rose-500">
+              <RotateCcw className="w-5 h-5" />
+              <h3 className="text-base md:text-lg font-black uppercase tracking-tight text-rose-500">
+                DATA RESET & BRAND NEW START (ব্র্যান্ড নিউ শুরু)
+              </h3>
+            </div>
+            <p className="text-xs text-slate-400 max-w-xl">
+              ক্যান্টিনের পূর্বের সকল বিক্রয় হিসাব (Sales), সদস্যদের বকেয়া (Due 0), খরচের তালিকা (Expenditures) এবং প্রি-অর্ডার সম্পূর্ণ রিসেট করে একদম নতুন করে শুরু করুন।
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowResetModal(true)}
+            className="px-6 py-3.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white rounded-2xl text-xs font-black tracking-wider uppercase flex items-center justify-center space-x-2 transition-all shadow-lg shadow-rose-600/25 shrink-0"
+          >
+            <RotateCcw className="w-4 h-4" />
+            <span>RESET ALL CANTEEN DATA</span>
+          </button>
+        </div>
+
+        {resetSuccess && (
+          <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl flex items-center space-x-3 text-emerald-400 animate-in fade-in">
+            <CheckCircle2 className="w-5 h-5 shrink-0" />
+            <span className="text-xs font-bold">
+              ক্যান্টিনের বিক্রয়, বকেয়া (Due 0), খরচ (Expenditures) ও অর্ডারসমূহ সফলভাবে সম্পূর্ণ রিসেট করা হয়েছে! অ্যাপ একদম ফ্রেশ শুরু করার জন্য প্রস্তুত।
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Reset Confirmation Modal */}
+      {showResetModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[180] flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 w-full max-w-md shadow-2xl animate-in zoom-in-95 space-y-6 text-center">
+            <div className="w-14 h-14 rounded-2xl bg-rose-500/10 text-rose-500 border border-rose-500/20 flex items-center justify-center mx-auto">
+              <AlertTriangle className="w-7 h-7" />
+            </div>
+
+            <div>
+              <h3 className="text-lg font-black text-white uppercase tracking-tight">
+                সব ডাটা রিসেট করতে চান?
+              </h3>
+              <p className="text-xs text-slate-300 mt-2 leading-relaxed">
+                এটি নিশ্চিত করলে ক্যান্টিনের সমস্ত পূর্ববর্তী <strong className="text-rose-400">বিক্রয় (Sale)</strong>, <strong className="text-rose-400">সদস্যদের বকেয়া (Due = 0)</strong>, <strong className="text-rose-400">খরচের হিসাব (Expenditures)</strong> এবং <strong className="text-rose-400">প্রি-অর্ডার</strong> মুছে গিয়ে অ্যাপটি সম্পূর্ণ ফ্রেশ শুরু হবে।
+              </p>
+              <p className="text-[11px] font-bold text-amber-400 mt-2">
+                (সদস্যদের তালিকা, নাম ও পদবী অপরিবর্তিত থাকবে)
+              </p>
+            </div>
+
+            <div className="flex items-center space-x-3 pt-2">
+              <button
+                type="button"
+                disabled={isResetting}
+                onClick={() => setShowResetModal(false)}
+                className="flex-1 py-3.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-2xl text-xs font-bold transition-colors"
+              >
+                বাতিল করুন
+              </button>
+              <button
+                type="button"
+                disabled={isResetting}
+                onClick={handleResetAllData}
+                className="flex-1 py-3.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white rounded-2xl text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-rose-600/25 flex items-center justify-center space-x-2"
+              >
+                {isResetting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>রিসেট হচ্ছে...</span>
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw className="w-4 h-4" />
+                    <span>হ্যাঁ, রিসেট করুন</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Member Selection Modal */}
       {showMemberPicker && (

@@ -426,64 +426,140 @@ export const validateUserLogin = async (
     return { success: false, message: 'Please enter your User ID.' };
   }
 
-  // Check Supabase first
+  // 1. Instant Local Verification (Zero latency check)
+  const detailedList = getDetailedUsers(nominalAirmen);
+  const matchedDetail = detailedList.find((u) => u.bdNo.toLowerCase() === cleanInput);
+
+  if (matchedDetail) {
+    const expectedPassword = matchedDetail.password || matchedDetail.bdNo;
+    if (passwordInput.trim() === expectedPassword?.toString().trim()) {
+      if (matchedDetail.status === 'DISABLED') {
+        return {
+          success: false,
+          message: 'You are not authorized to access the portal. User ID is disabled. Please contact administrator.',
+        };
+      }
+      if (matchedDetail.status === 'SUSPENDED') {
+        return {
+          success: false,
+          message: 'You are not authorized to access the portal. User ID is temporarily suspended.',
+        };
+      }
+
+      // Find corresponding airman or construct one
+      let airman = nominalAirmen.find(
+        (a) => (a.bdNo || "").trim().replace(/^BD\/?/i, '').toLowerCase() === cleanInput || a.id === matchedDetail.airmanId
+      );
+
+      if (!airman) {
+        airman = {
+          id: (matchedDetail.airmanId && matchedDetail.airmanId !== "airman-undefined") ? matchedDetail.airmanId : `airman-${matchedDetail.bdNo && matchedDetail.bdNo !== "undefined" ? matchedDetail.bdNo : Math.random().toString(36).slice(2, 10)}`,
+          serNo: 99,
+          code: `${matchedDetail.rank}-${matchedDetail.name.slice(0, 3).toUpperCase()}`,
+          bdNo: `BD/${matchedDetail.bdNo}`,
+          rank: matchedDetail.rank as any,
+          name: matchedDetail.name,
+          trade: matchedDetail.trade || 'General',
+          addressBlock: '155 UASU',
+          mobileNo: '',
+          flightName: (matchedDetail.flightName as any) || 'Admin',
+          remarks: matchedDetail.remarks || '',
+          active: true,
+        };
+      }
+
+      // Update lastLoginAt
+      matchedDetail.lastLoginAt = new Date().toISOString();
+      saveDetailedUsers(detailedList);
+
+      // Non-blocking background sync with Supabase
+      if (isSupabaseConfigured) {
+        (async () => {
+          try {
+            await supabase
+              .from('user_profiles')
+              .update({ last_login_at: new Date().toISOString() })
+              .eq('User ID', cleanInput);
+          } catch (e) {
+            // silent catch
+          }
+        })();
+      }
+
+      return {
+        success: true,
+        airman,
+        detailedUser: matchedDetail,
+        message: `Access granted for ${matchedDetail.rank} ${matchedDetail.name}`,
+      };
+    }
+  }
+
+  // 2. Cloud Fallback (if local check failed or PIN was updated on another device)
   try {
     if (isSupabaseConfigured) {
-      const { data: supaUser, error: supaErr } = await supabase
+      const fetchPromise = supabase
         .from('user_profiles')
         .select('*')
         .eq('User ID', cleanInput)
         .single();
         
+      // Max 1.2s timeout so the UI never hangs
+      const timeoutPromise = new Promise<{ data: null; error: any }>((resolve) => 
+        setTimeout(() => resolve({ data: null, error: new Error('Timeout') }), 1200)
+      );
+
+      const { data: supaUser, error: supaErr } = await Promise.race([fetchPromise, timeoutPromise]);
+        
       if (supaUser) {
         if (supaUser['Status'] === 'DISABLED') {
-        return { success: false, message: 'You are not authorized to access the portal. User ID is disabled. Please contact administrator.' };
-      }
-      if (supaUser['Status'] === 'SUSPENDED') {
-        return { success: false, message: 'You are not authorized to access the portal. User ID is temporarily suspended.' };
-      }
-      
-      const expectedPassword = supaUser['User Login PIN']?.toString() || supaUser.password || supaUser['User ID'];
-      if (passwordInput.trim() !== expectedPassword?.toString().trim()) {
-         return { success: false, message: `Invalid User ID or PIN.` };
-      }
-      
-      const mappedUser: DetailedUserLogin = {
-        id: supaUser.id || `user-${supaUser['User ID']}`,
-        airmanId: supaUser.airman_id || 'unknown',
-        bdNo: supaUser['User ID'],
-        rank: supaUser['Rank'] || '',
-        name: supaUser['Name'] || '',
-        flightName: supaUser['Flight'] || '',
-        trade: supaUser['Trade'] || '',
-        role: supaUser['Role'] as UserLoginRole,
-        password: expectedPassword,
-        status: supaUser['Status'] as UserLoginStatus,
-        detailOrder: supaUser.detail_order || '',
-        detailedAt: supaUser.created_at || new Date().toISOString(),
-        detailedBy: 'Supabase'
-      };
-      
-      let nominalMatch = nominalAirmen.find(a => a.id === supaUser.airman_id || a.bdNo.toLowerCase() === cleanInput);
-      
-      if (!nominalMatch) {
-         nominalMatch = {
-           id: (supaUser.airman_id && supaUser.airman_id !== "airman-undefined") ? supaUser.airman_id : `airman-${supaUser['User ID'] && supaUser['User ID'] !== "undefined" ? supaUser['User ID'] : Math.random().toString(36).slice(2, 10)}`,
-           serNo: 99,
-           code: `${supaUser['Rank'] || ''}-${(supaUser['Name'] || '').slice(0, 3).toUpperCase()}`,
-           bdNo: `BD/${supaUser['User ID']}`,
-           rank: supaUser['Rank'] as any,
-           name: supaUser['Name'] || '',
-           trade: supaUser['Trade'] || 'General',
-           addressBlock: '155 UASU',
-           mobileNo: '',
-           flightName: supaUser['Flight'] as any || 'Admin',
-           remarks: '',
-           active: true,
-         };
-      }
-      
-      return { success: true, airman: nominalMatch, detailedUser: mappedUser, message: `Access granted for ${supaUser['Rank']} ${supaUser['Name']}` };
+          return { success: false, message: 'You are not authorized to access the portal. User ID is disabled. Please contact administrator.' };
+        }
+        if (supaUser['Status'] === 'SUSPENDED') {
+          return { success: false, message: 'You are not authorized to access the portal. User ID is temporarily suspended.' };
+        }
+        
+        const expectedPassword = supaUser['User Login PIN']?.toString() || supaUser.password || supaUser['User ID'];
+        if (passwordInput.trim() !== expectedPassword?.toString().trim()) {
+           return { success: false, message: `Invalid User ID or PIN.` };
+        }
+        
+        const mappedUser: DetailedUserLogin = {
+          id: supaUser.id || `user-${supaUser['User ID']}`,
+          airmanId: supaUser.airman_id || 'unknown',
+          bdNo: supaUser['User ID'],
+          rank: supaUser['Rank'] || '',
+          name: supaUser['Name'] || '',
+          flightName: supaUser['Flight'] || '',
+          trade: supaUser['Trade'] || '',
+          role: supaUser['Role'] as UserLoginRole,
+          password: expectedPassword,
+          status: supaUser['Status'] as UserLoginStatus,
+          detailOrder: supaUser.detail_order || '',
+          detailedAt: supaUser.created_at || new Date().toISOString(),
+          detailedBy: 'Supabase'
+        };
+        
+        let nominalMatch = nominalAirmen.find(a => a.id === supaUser.airman_id || a.bdNo.toLowerCase() === cleanInput);
+        
+        if (!nominalMatch) {
+           nominalMatch = {
+             id: (supaUser.airman_id && supaUser.airman_id !== "airman-undefined") ? supaUser.airman_id : `airman-${supaUser['User ID'] && supaUser['User ID'] !== "undefined" ? supaUser['User ID'] : Math.random().toString(36).slice(2, 10)}`,
+             serNo: 99,
+             code: `${supaUser['Rank'] || ''}-${(supaUser['Name'] || '').slice(0, 3).toUpperCase()}`,
+             bdNo: `BD/${supaUser['User ID']}`,
+             rank: supaUser['Rank'] as any,
+             name: supaUser['Name'] || '',
+             trade: supaUser['Trade'] || 'General',
+             addressBlock: '155 UASU',
+             mobileNo: '',
+             flightName: supaUser['Flight'] as any || 'Admin',
+             remarks: '',
+             active: true,
+           };
+        }
+        
+        return { success: true, airman: nominalMatch, detailedUser: mappedUser, message: `Access granted for ${supaUser['Rank']} ${supaUser['Name']}` };
       }
     }
   } catch(e) {

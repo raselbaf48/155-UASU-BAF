@@ -2,6 +2,7 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { formatMoney } from '../i18n';
 import { CreditCard, Download, FileText } from 'lucide-react';
+import { formatCanteenDate } from '../utils/dateUtils';
 
 export const MyBill: React.FC = () => {
   const { t, i18n } = useTranslation();
@@ -66,7 +67,7 @@ export const MyBill: React.FC = () => {
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50 text-slate-200 dark:text-slate-300">
               {ledgerData.map((row) => (
                   <tr key={row.id} className="hover:bg-slate-800 dark:hover:bg-slate-800/20 transition-colors">
-                     <td className="px-6 py-4 font-medium">{row.date}</td>
+                     <td className="px-6 py-4 font-medium">{formatCanteenDate(row.date)}</td>
                      <td className="px-6 py-4 font-bold">{i18n.language === 'bn' ? row.desc_bn : row.desc_en}</td>
                      <td className="px-6 py-4 text-right font-medium text-rose-600">
                         {row.debit > 0 ? formatMoney(row.debit, i18n.language) : '-'}
