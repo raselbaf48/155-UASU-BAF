@@ -314,6 +314,38 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
     }
   }, [logs]);
 
+  // Real-time synchronization when raw inventory is updated (e.g. from POS sales or other tabs)
+  useEffect(() => {
+    const handleSync = () => {
+      try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setItems(parsed);
+          }
+        }
+      } catch (e) {}
+
+      try {
+        const storedLogs = localStorage.getItem(LOGS_STORAGE_KEY);
+        if (storedLogs) {
+          const parsedLogs = JSON.parse(storedLogs);
+          if (Array.isArray(parsedLogs)) {
+            setLogs(parsedLogs);
+          }
+        }
+      } catch (e) {}
+    };
+
+    window.addEventListener('canteen_raw_inventory_updated', handleSync);
+    window.addEventListener('storage', handleSync);
+    return () => {
+      window.removeEventListener('canteen_raw_inventory_updated', handleSync);
+      window.removeEventListener('storage', handleSync);
+    };
+  }, []);
+
   // Statistics calculation
   const stats = useMemo(() => {
     const totalItems = items.length;
@@ -843,6 +875,14 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
 
       {/* Raw Inventory Table */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+        <div className="px-5 py-2.5 bg-slate-950/40 border-b border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
+          <span className="flex items-center gap-1.5">
+            <Edit2 className="w-3 h-3 text-indigo-400" />
+            <span className="font-semibold text-slate-300">তথ্য এডিট করতে যে কোনো আইটেমের রো (Row)-তে ক্লিক করুন</span>
+            <span className="hidden sm:inline text-slate-500">(Click any row to edit info)</span>
+          </span>
+          <span className="text-[10px] text-slate-500 font-mono">Total: {filteredItems.length} items</span>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm whitespace-nowrap">
             <thead className="bg-slate-800/70 border-b border-slate-800 text-slate-400 text-xs font-black uppercase tracking-wider">
@@ -887,9 +927,13 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                   return (
                     <tr 
                       key={item.id} 
-                      className={`hover:bg-slate-800/40 transition-colors ${
+                      onClick={() => {
+                        if (!readOnly) handleEditItem(item);
+                      }}
+                      className={`hover:bg-slate-800/60 transition-colors ${!readOnly ? 'cursor-pointer' : ''} ${
                         isLow ? 'bg-amber-500/[0.02]' : ''
                       }`}
+                      title={!readOnly ? "Click this row to edit item details / তথ্য এডিট করতে ক্লিক করুন" : undefined}
                     >
                       {/* Item Name & Details */}
                       <td className="px-5 py-3.5">
@@ -985,7 +1029,10 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                         <td className="px-5 py-3.5 text-right">
                           <div className="flex items-center justify-end space-x-1.5">
                             <button
-                              onClick={() => handleOpenRestock(item)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenRestock(item);
+                              }}
                               className="px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30 rounded-lg text-xs font-black transition-all"
                               title="Restock this item"
                             >
@@ -993,7 +1040,10 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                             </button>
 
                             <button
-                              onClick={() => handleOpenIssue(item)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenIssue(item);
+                              }}
                               className="px-2.5 py-1 bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/30 rounded-lg text-xs font-black transition-all"
                               title="Issue / Deduct for cooking"
                             >
@@ -1001,7 +1051,10 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                             </button>
 
                             <button
-                              onClick={() => handleEditItem(item)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEditItem(item);
+                              }}
                               className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors border border-slate-700"
                               title="Edit item details"
                             >
@@ -1009,7 +1062,10 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                             </button>
 
                             <button
-                              onClick={() => handleDeleteItem(item)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteItem(item);
+                              }}
                               className="p-1.5 bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white rounded-lg transition-colors border border-rose-500/20"
                               title="Delete item"
                             >

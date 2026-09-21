@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, ShoppingCart, Minus, Trash2, CheckCircle2, X, History, Calendar, Package as PackageIcon, AlertTriangle } from 'lucide-react';
+import { Search, Plus, ShoppingCart, Minus, Trash2, CheckCircle2, X, History, Calendar, Package as PackageIcon, AlertTriangle, ChefHat } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl } from '../utils/canteenSettings';
 import { formatCanteenDate } from '../utils/dateUtils';
+import { deductRawStockForSales, getRecipeForMenuItem, getRawInventoryItems } from '../utils/recipeManager';
 
 export const PosSales: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -582,15 +583,8 @@ export const PosSales: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
 
   const addToBasket = (item: any) => {
-      const currentStock = Number(item.stock ?? 0);
-      if (currentStock <= 0) {
-          return;
-      }
       const existing = basket.find(b => b.id === item.id);
       if (existing) {
-          if (existing.qty >= currentStock) {
-              return;
-          }
           setBasket(basket.map(b => b.id === item.id ? { ...b, qty: b.qty + 1 } : b));
       } else {
           setBasket([...basket, { ...item, qty: 1 }]);
@@ -600,13 +594,8 @@ export const PosSales: React.FC = () => {
   const updateQty = (id: string, delta: number) => {
       setBasket(basket.map(b => {
           if (b.id === id) {
-              const catalogItem = catalog.find(c => c.id === id);
-              const maxStock = Number(catalogItem?.stock ?? 99999);
               let newQty = b.qty + delta;
               if (newQty < 1) newQty = 1;
-              if (delta > 0 && newQty > maxStock) {
-                  newQty = maxStock;
-              }
               return { ...b, qty: newQty };
           }
           return b;
@@ -659,13 +648,25 @@ export const PosSales: React.FC = () => {
           localStorage.setItem('canteen_recent_members', JSON.stringify(newRecents));
       }
 
+      // Deduct raw materials stock according to menu recipes
+      const itemsForDeduction = basket.map(b => ({
+          menuItemId: b.id,
+          menuItemName: b.name,
+          qty: b.qty * multiplier
+      }));
+      const deductionResult = deductRawStockForSales(itemsForDeduction);
+
       for (const b of basket) {
           const totalQtySold = b.qty * multiplier;
           const newStock = Math.max(0, (b.stock || 0) - totalQtySold);
           await supabase.from('Canteen_Inventory').update({ stock: newStock }).eq('id', b.id);
       }
 
-      setToastMessage(`✅ Sale completed successfully for ৳${memberChargeAmount * multiplier}!`); setTimeout(() => setToastMessage(''), 2500);
+      const deductionSummary = deductionResult.deducted.length > 0 
+          ? ` (${deductionResult.deducted.length}টি কাঁচামালের স্টক বিয়োগ হয়েছে)`
+          : '';
+      setToastMessage(`✅ Sale completed successfully for ৳${memberChargeAmount * multiplier}!${deductionSummary}`); 
+      setTimeout(() => setToastMessage(''), 3000);
       
       setBasket([]);
       setSelectedMembers([]);
@@ -761,106 +762,81 @@ export const PosSales: React.FC = () => {
             })}
          </div>
 
-         {/* Items List */}
-         <div className="space-y-3 h-[600px] overflow-y-auto pr-2">
+          {/* Items List */}
+          <div className="space-y-3 h-[600px] overflow-y-auto pr-2">
             {filteredCatalog.map((item, i) => {
                const inBasket = basket.find(b => b.id === item.id);
-               const currentStock = Number(item.stock ?? 0);
-               const isOutOfStock = currentStock <= 0;
-               const isLowStock = currentStock > 0 && currentStock < 10;
-               const isMaxBasketReached = inBasket && inBasket.qty >= currentStock;
+               const itemRecipe = getRecipeForMenuItem(item.id, item.name);
 
                return (
                <div 
                   key={i} 
-                  onClick={() => {
-                     if (!isOutOfStock) addToBasket(item);
-                  }} 
-                  className={`rounded-2xl p-4 flex items-center justify-between border transition-all duration-300 ${
-                     isOutOfStock
-                        ? 'bg-slate-950/60 border-rose-900/40 opacity-60 cursor-not-allowed select-none'
-                        : `bg-slate-900 cursor-pointer hover:-translate-y-1 hover:shadow-[0_15px_30px_-10px_rgba(79,70,229,0.3)] group ${
-                           inBasket 
-                              ? 'border-[#4f46e5] shadow-[0_10px_20px_-10px_rgba(79,70,229,0.2)]' 
-                              : isLowStock 
-                              ? 'border-amber-500/40 hover:border-amber-400' 
-                              : 'border-slate-800 hover:border-indigo-500/50'
-                        }`
+                  onClick={() => addToBasket(item)} 
+                  className={`rounded-2xl p-4 flex items-center justify-between border transition-all duration-300 bg-slate-900 cursor-pointer hover:-translate-y-1 hover:shadow-[0_15px_30px_-10px_rgba(79,70,229,0.3)] group ${
+                     inBasket 
+                        ? 'border-[#4f46e5] shadow-[0_10px_20px_-10px_rgba(79,70,229,0.2)]' 
+                        : 'border-slate-800 hover:border-indigo-500/50'
                   }`}
                >
-                  <div className="flex items-center space-x-4">
+                  <div className="flex items-center space-x-4 min-w-0 flex-1 mr-2">
                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-inner transition-colors duration-300 overflow-hidden shrink-0 border border-slate-800/80 ${
-                        isOutOfStock ? 'bg-rose-950/30 text-rose-500' : inBasket ? 'bg-indigo-900/30 text-indigo-400' : 'bg-[#0f172a] text-slate-400 group-hover:bg-slate-800 group-hover:text-indigo-300'
+                        inBasket ? 'bg-indigo-900/30 text-indigo-400' : 'bg-[#0f172a] text-slate-400 group-hover:bg-slate-800 group-hover:text-indigo-300'
                      }`}>
                         {item.DP ? (
                           <img 
                             src={resolveImageUrl(item.DP)} 
                             alt={item.name} 
                             referrerPolicy="no-referrer"
-                            className={`w-full h-full object-cover ${isOutOfStock ? 'grayscale opacity-60' : ''}`}
+                            className="w-full h-full object-cover"
                             onError={(e) => { e.currentTarget.style.display = 'none'; }}
                           />
                         ) : (
                           <PackageIcon className="w-6 h-6 group-hover:scale-110 transition-transform duration-300" />
                         )}
                      </div>
-                     <div>
+                     <div className="min-w-0 flex-1">
                         <p className="text-[10px] font-black text-[#4f46e5] uppercase tracking-widest mb-0.5">{item.category}</p>
-                        <h3 className={`font-black text-base transition-colors ${isOutOfStock ? 'text-slate-500 line-through' : 'text-white group-hover:text-indigo-400'}`}>
+                        <h3 className="font-black text-base text-white group-hover:text-indigo-400 transition-colors truncate">
                            {item.name}
                         </h3>
                         
-                        {/* Stock Warning & Badge */}
-                        {isOutOfStock ? (
-                           <div className="flex items-center space-x-1.5 mt-0.5">
-                              <span className="flex items-center space-x-1 px-2 py-0.5 rounded-lg bg-rose-950/80 border border-rose-500/40 text-[9px] font-black text-rose-400 tracking-wider">
-                                 <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
-                                 <span>OUT OF STOCK (0)</span>
-                              </span>
-                           </div>
-                        ) : isLowStock ? (
-                           <div className="flex items-center space-x-1.5 mt-0.5 animate-pulse">
-                              <span className="flex items-center space-x-1 px-2 py-0.5 rounded-lg bg-amber-950/80 border border-amber-500/40 text-[9px] font-black text-amber-400 tracking-wider">
-                                 <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
-                                 <span>⚠️ LOW STOCK: {currentStock}</span>
+                        {/* Raw Items / Recipe Badge */}
+                        {itemRecipe.length > 0 ? (
+                           <div className="flex items-center space-x-1 mt-1 overflow-x-auto scrollbar-none">
+                              <span className="flex items-center space-x-1 px-2 py-0.5 rounded-lg bg-indigo-950/60 border border-indigo-500/30 text-[9px] font-bold text-indigo-300 tracking-wide truncate">
+                                 <ChefHat className="w-3 h-3 text-indigo-400 shrink-0" />
+                                 <span className="truncate">
+                                    {itemRecipe.map(r => `${r.rawItemName} ${r.quantity}${r.unit}`).join(', ')}
+                                 </span>
                               </span>
                            </div>
                         ) : (
-                           <p className="text-[9px] font-bold text-emerald-500 uppercase tracking-widest mt-0.5">STOCK: {currentStock}</p>
+                           <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider mt-0.5">READY TO SERVE</p>
                         )}
                      </div>
                   </div>
-                  <div className="flex items-center space-x-6">
-                     <p className={`text-xl font-black tracking-tighter ${isOutOfStock ? 'text-slate-500' : 'text-white'}`}>৳{item.price}</p>
+                  <div className="flex items-center space-x-4 shrink-0">
+                     <p className="text-xl font-black tracking-tighter text-white font-mono">৳{item.price}</p>
                      
-                     {isOutOfStock ? (
-                        <div className="px-3 py-1.5 rounded-xl bg-slate-800/80 border border-rose-900/40 text-rose-500/80 font-black text-[9px] tracking-wider uppercase">
-                           OUT OF STOCK
-                        </div>
-                     ) : (
-                        <button 
-                           onClick={(e) => { 
-                              e.stopPropagation(); 
-                              addToBasket(item); 
-                           }} 
-                           disabled={isMaxBasketReached}
-                           className={`w-10 h-10 rounded-xl flex items-center justify-center font-black shadow-sm transition-all duration-300 ${
-                              isMaxBasketReached
-                                 ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                                 : inBasket 
-                                 ? 'bg-[#4f46e5] text-white hover:bg-[#4338ca] hover:scale-110 cursor-pointer' 
-                                 : 'bg-[#0f172a] text-white group-hover:bg-[#4f46e5] group-hover:scale-110 cursor-pointer'
-                           }`}
-                           title={isMaxBasketReached ? 'Stock limit reached' : 'Add to basket'}
-                        >
-                           <Plus className="w-5 h-5" />
-                        </button>
-                     )}
+                     <button 
+                        onClick={(e) => { 
+                           e.stopPropagation(); 
+                           addToBasket(item); 
+                        }} 
+                        className={`w-10 h-10 rounded-xl flex items-center justify-center font-black shadow-sm transition-all duration-300 ${
+                           inBasket 
+                              ? 'bg-[#4f46e5] text-white hover:bg-[#4338ca] hover:scale-110 cursor-pointer' 
+                              : 'bg-[#0f172a] text-white group-hover:bg-[#4f46e5] group-hover:scale-110 cursor-pointer'
+                        }`}
+                        title="Add to basket"
+                     >
+                        <Plus className="w-5 h-5" />
+                     </button>
                   </div>
                </div>
             )})}
-         </div>
-      </div>
+          </div>
+       </div>
 
       {/* Right Column: Member Basket */}
       <div className="md:w-1/3">

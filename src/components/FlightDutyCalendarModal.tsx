@@ -7,6 +7,7 @@ interface FlightDutyCalendarModalProps {
   table: DutyRatioTable;
   flight: FlightName;
   matrix?: DutyRatioTable[];
+  target?: number;
   onClose: () => void;
   onSave: (newData: number[]) => void;
 }
@@ -15,11 +16,15 @@ export const FlightDutyCalendarModal: React.FC<FlightDutyCalendarModalProps> = (
   table,
   flight,
   matrix,
+  target,
   onClose,
   onSave,
 }) => {
   const [data, setData] = useState<number[]>(table.data[flight] || new Array(31).fill(0));
-  const [flightViewMetric, setFlightViewMetric] = useState<'THIS_DUTY' | 'ALL_DUTIES'>('THIS_DUTY');
+
+  const reqValue = target !== undefined 
+    ? target 
+    : (table.flightTargets?.[flight] ?? 0);
 
   const handleCellClick = (dayIdx: number) => {
     const val = data[dayIdx] || 0;
@@ -63,14 +68,14 @@ export const FlightDutyCalendarModal: React.FC<FlightDutyCalendarModalProps> = (
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="flex items-center space-x-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <div className="flex items-center bg-white dark:bg-slate-900 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
                 <input 
                   type="number"
                   min="0"
                   id="modalGlobalReqInput"
                   placeholder="0"
-                  className="w-10 px-1 py-0.5 text-xs font-bold font-mono text-center bg-transparent border-none focus:outline-none text-slate-800 dark:text-slate-100 placeholder:text-slate-400"
+                  className="w-9 px-1 py-0.5 text-xs font-bold font-mono text-center bg-transparent border-none focus:outline-none text-slate-800 dark:text-slate-100 placeholder:text-slate-400"
                 />
                 <button 
                   onClick={() => {
@@ -84,57 +89,55 @@ export const FlightDutyCalendarModal: React.FC<FlightDutyCalendarModalProps> = (
                   Apply All
                 </button>
               </div>
-              <div className="flex items-center space-x-2 bg-white dark:bg-slate-900 px-3 py-1 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
+
+              {/* Req (Target) Display before Total */}
+              <div 
+                className="flex items-center space-x-1.5 bg-white dark:bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm"
+                title={`Target requirement for ${flight} in this duty table (${reqValue} required)`}
+              >
+                <span className="text-xs font-bold text-slate-500 uppercase">Req:</span>
+                <span className="text-sm font-black text-amber-600 dark:text-amber-400 font-mono">{reqValue}</span>
+              </div>
+
+              {/* Total Display */}
+              <div 
+                className="flex items-center space-x-1.5 bg-white dark:bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm"
+                title={`Currently assigned total duties: ${totalFlightSelected}${reqValue > 0 ? ` (Target: ${reqValue})` : ''}`}
+              >
                 <span className="text-xs font-bold text-slate-500 uppercase">Total:</span>
-                <span className="text-sm font-black text-indigo-600 dark:text-indigo-400">{totalFlightSelected}</span>
+                <span className={`text-sm font-black font-mono ${
+                  reqValue > 0
+                    ? totalFlightSelected === reqValue
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : totalFlightSelected > reqValue
+                        ? 'text-rose-600 dark:text-rose-400'
+                        : 'text-amber-600 dark:text-amber-400'
+                    : 'text-indigo-600 dark:text-indigo-400'
+                }`}>
+                  {totalFlightSelected}
+                </span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Legend & View Metric Switcher */}
-        <div className="px-4 sm:px-6 py-2.5 bg-slate-100/80 dark:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-[11px]">
-          <div className="flex items-center space-x-3">
-            <div className="flex items-center space-x-1.5" title={`Duties assigned to ${flight} on that date`}>
-              <span className="w-2.5 h-2.5 rounded-full bg-indigo-600 inline-block"></span>
+        {/* Legend */}
+        <div className="px-4 sm:px-6 py-2 bg-slate-100/80 dark:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 text-[11px]">
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-1.5" title={`Total duties assigned to ${flight} across all duties on this date`}>
+              <span className="w-2.5 h-2.5 rounded-full bg-purple-600 inline-block"></span>
               <span className="font-bold text-slate-700 dark:text-slate-300">Left:</span>
-              <span className="text-slate-600 dark:text-slate-400 font-semibold">{flight} Duty</span>
+              <span className="text-slate-600 dark:text-slate-400 font-semibold">{flight} All Duty Day Total</span>
             </div>
-            <div className="flex items-center space-x-1.5" title="Total duties of all flights / Daily requirement">
+            <div className="flex items-center space-x-1.5" title="Total duties of all flights in this post / Daily requirement">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span>
               <span className="font-bold text-slate-700 dark:text-slate-300">Right:</span>
               <span className="text-slate-600 dark:text-slate-400 font-semibold">Total / Req</span>
             </div>
           </div>
-
-          {matrix && (
-            <div className="flex items-center bg-white dark:bg-slate-900 rounded-lg p-0.5 border border-slate-200 dark:border-slate-700 font-bold text-[10px]">
-              <button
-                type="button"
-                onClick={() => setFlightViewMetric('THIS_DUTY')}
-                className={`px-2 py-0.5 rounded transition-all cursor-pointer ${
-                  flightViewMetric === 'THIS_DUTY'
-                    ? 'bg-indigo-600 text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-                title={`Show ${flight} duty count in this duty table`}
-              >
-                This Duty
-              </button>
-              <button
-                type="button"
-                onClick={() => setFlightViewMetric('ALL_DUTIES')}
-                className={`px-2 py-0.5 rounded transition-all cursor-pointer ${
-                  flightViewMetric === 'ALL_DUTIES'
-                    ? 'bg-purple-600 text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-                title={`Show ${flight} total duties across all 8 tables on that date`}
-              >
-                All Duties Day Total
-              </button>
-            </div>
-          )}
+          <div className="text-[10px] text-slate-500 dark:text-slate-400 italic">
+            Click circle to toggle (0 → 1 → 2)
+          </div>
         </div>
 
         {/* Calendar Grid */}
@@ -158,33 +161,27 @@ export const FlightDutyCalendarModal: React.FC<FlightDutyCalendarModalProps> = (
                 : 0;
               const totalFlightDayCount = val + otherTablesCount;
 
-              const displayFlightCount = flightViewMetric === 'ALL_DUTIES' ? totalFlightDayCount : val;
-
               return (
                 <button
                   key={i}
                   type="button"
                   onClick={() => handleCellClick(i)}
-                  title={`${flight} on Day ${i + 1}: ${val} in ${table.title}${otherTablesCount > 0 ? ` (${totalFlightDayCount} total across all duties on this day)` : ''}`}
+                  title={`${flight} on Day ${i + 1}: Total ${totalFlightDayCount} duties (${val} in ${table.title}, ${otherTablesCount} in other duties)`}
                   className={`relative aspect-square rounded-full border-2 flex flex-col items-center justify-center transition-all ${
                     isPositive
                       ? 'bg-indigo-50 border-indigo-200 dark:bg-indigo-900/20 dark:border-indigo-800/50 cursor-pointer'
                       : 'bg-slate-50 border-slate-200 hover:border-indigo-300 dark:bg-slate-800/50 dark:border-slate-700 dark:hover:border-indigo-500 cursor-pointer'
                   }`}
                 >
-                  {/* Left Badge: Flight Duty Count on this Date */}
+                  {/* Left Badge: Flight All Duty Day Total on this Date */}
                   <div
                     className={`absolute -top-2 -left-2 text-[9px] font-black px-1.5 py-0.5 rounded-full shadow-sm border transition-colors ${
-                      flightViewMetric === 'ALL_DUTIES'
-                        ? totalFlightDayCount > 0
-                          ? 'bg-purple-600 border-purple-700 text-white dark:bg-purple-500'
-                          : 'bg-slate-200 border-slate-300 text-slate-500 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-400'
-                        : val > 0
-                          ? 'bg-indigo-600 border-indigo-700 text-white dark:bg-indigo-500'
-                          : 'bg-slate-200 border-slate-300 text-slate-500 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-400'
+                      totalFlightDayCount > 0
+                        ? 'bg-purple-600 border-purple-700 text-white dark:bg-purple-500'
+                        : 'bg-slate-200 border-slate-300 text-slate-500 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-400'
                     }`}
                   >
-                    {displayFlightCount}
+                    {totalFlightDayCount}
                   </div>
 
                   {/* Right Badge: Duty Table Daily Total vs Requirement */}

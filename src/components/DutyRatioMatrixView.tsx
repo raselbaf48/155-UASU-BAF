@@ -978,6 +978,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
           table={matrix[editingCalendar.tableIdx]}
           matrix={matrix}
           flight={editingCalendar.flight}
+          target={autoTargets?.[editingCalendar.flight]?.[matrix[editingCalendar.tableIdx].id] ?? matrix[editingCalendar.tableIdx].flightTargets?.[editingCalendar.flight] ?? 0}
           onClose={() => setEditingCalendar(null)}
           onSave={(newData) => {
             const updated = [...matrix];

@@ -1,7 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, Edit2, Trash2, ImageIcon, Save, X, Loader2, PackagePlus, AlertTriangle, CheckCircle2, RotateCcw, Layers } from 'lucide-react';
+import { Search, Plus, Edit2, Trash2, ImageIcon, Save, X, Loader2, AlertTriangle, CheckCircle2, ChefHat, Sparkles, AlertCircle, ShoppingBag } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, fetchDirectImageUrl } from '../utils/canteenSettings';
+import { 
+  RecipeIngredient, 
+  getRecipeForMenuItem, 
+  saveRecipeForMenuItem, 
+  getRawInventoryItems, 
+  RawInventoryItem, 
+  getMenuRecipes 
+} from '../utils/recipeManager';
 
 export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = false}) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -528,6 +536,32 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
+  // Recipe & Raw Inventory states
+  const [recipes, setRecipes] = useState<Record<string, RecipeIngredient[]>>(() => getMenuRecipes());
+  const [availableRawItems, setAvailableRawItems] = useState<RawInventoryItem[]>(() => getRawInventoryItems());
+  const [itemRecipe, setItemRecipe] = useState<RecipeIngredient[]>([]);
+
+  // Quick Recipe Modal for an individual menu item
+  const [quickRecipeItem, setQuickRecipeItem] = useState<any | null>(null);
+  const [quickRecipeIngredients, setQuickRecipeIngredients] = useState<RecipeIngredient[]>([]);
+  const [recipeNotice, setRecipeNotice] = useState<string>('');
+
+  // Sync recipes and raw inventory
+  useEffect(() => {
+    const handleSync = () => {
+      setRecipes(getMenuRecipes());
+      setAvailableRawItems(getRawInventoryItems());
+    };
+    window.addEventListener('canteen_menu_recipes_updated', handleSync);
+    window.addEventListener('canteen_raw_inventory_updated', handleSync);
+    window.addEventListener('storage', handleSync);
+    return () => {
+      window.removeEventListener('canteen_menu_recipes_updated', handleSync);
+      window.removeEventListener('canteen_raw_inventory_updated', handleSync);
+      window.removeEventListener('storage', handleSync);
+    };
+  }, []);
+
   const handleEdit = (item: any) => {
     setIsEditMode(true);
     setEditingId(item.id);
@@ -535,9 +569,10 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       name: item.name,
       category: item.category,
       price: item.price,
-      stock: item.stock,
+      stock: item.stock || 99999,
       DP: item.DP || ''
     });
+    setItemRecipe(getRecipeForMenuItem(item.id, item.name));
     setShowAddModal(true);
   };
 
@@ -555,10 +590,11 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
           name: newItem.name.trim(),
           category: newItem.category,
           price: newItem.price,
-          stock: newItem.stock,
+          stock: 99999, // Stock is managed by raw materials
           DP: finalDp || null
       };
 
+      let targetId = editingId;
       if (isEditMode && editingId) {
           const { error } = await supabase.from('Canteen_Inventory').update(payload).eq('id', editingId);
           if (!error) {
@@ -574,16 +610,29 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
           if (!error) {
               setShowAddModal(false);
               if (data && data[0]) {
+                targetId = data[0].id;
                 setItems(prev => [data[0], ...prev]);
               } else {
                 fetchItems();
               }
           } else {
-              setItems([{ ...payload, id: Math.random().toString() }, ...items]);
+              const generatedId = Math.random().toString();
+              targetId = generatedId;
+              setItems([{ ...payload, id: generatedId }, ...items]);
               setShowAddModal(false);
           }
       }
-      setNewItem({ name: '', category: 'SNACKS', price: 0, stock: 0, DP: '' });
+
+      // Save Recipe Ingredients
+      if (targetId) {
+        saveRecipeForMenuItem(targetId, itemRecipe, newItem.name.trim());
+      } else {
+        saveRecipeForMenuItem(newItem.name.trim(), itemRecipe, newItem.name.trim());
+      }
+      setRecipes(getMenuRecipes());
+
+      setNewItem({ name: '', category: 'SNACKS', price: 0, stock: 99999, DP: '' });
+      setItemRecipe([]);
       setIsEditMode(false);
       setEditingId(null);
   };
@@ -600,13 +649,113 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
 
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
 
-  // Restock Modal States
-  const [showRestockModal, setShowRestockModal] = useState<boolean>(false);
-  const [restockEntries, setRestockEntries] = useState<Record<string, number | ''>>({});
-  const [restockSearch, setRestockSearch] = useState<string>('');
-  const [restockCategory, setRestockCategory] = useState<string>('ALL');
-  const [isSavingRestock, setIsSavingRestock] = useState<boolean>(false);
-  const [restockNotice, setRestockNotice] = useState<string>('');
+  // Recipe Row Controls for Add/Edit Modal
+  const handleAddIngredientRow = () => {
+    const rawList = availableRawItems.length > 0 ? availableRawItems : getRawInventoryItems();
+    if (rawList.length === 0) return;
+    const defaultRaw = rawList[0];
+    setItemRecipe(prev => [
+      ...prev,
+      {
+        rawItemId: defaultRaw.id,
+        rawItemName: defaultRaw.name,
+        quantity: 1,
+        unit: defaultRaw.unit
+      }
+    ]);
+  };
+
+  const handleRemoveIngredientRow = (index: number) => {
+    setItemRecipe(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleIngredientRawItemChange = (index: number, rawId: string) => {
+    const raw = availableRawItems.find(r => r.id === rawId);
+    if (!raw) return;
+    setItemRecipe(prev => prev.map((ing, i) => {
+      if (i === index) {
+        return {
+          ...ing,
+          rawItemId: raw.id,
+          rawItemName: raw.name,
+          unit: raw.unit
+        };
+      }
+      return ing;
+    }));
+  };
+
+  const handleIngredientQtyChange = (index: number, qty: number) => {
+    setItemRecipe(prev => prev.map((ing, i) => {
+      if (i === index) {
+        return { ...ing, quantity: isNaN(qty) ? 0 : qty };
+      }
+      return ing;
+    }));
+  };
+
+  // Quick Recipe Modal Controls
+  const handleOpenQuickRecipe = (item: any) => {
+    setQuickRecipeItem(item);
+    const existing = getRecipeForMenuItem(item.id, item.name);
+    setQuickRecipeIngredients([...existing]);
+    setRecipeNotice('');
+  };
+
+  const handleAddQuickIngredientRow = () => {
+    const rawList = availableRawItems.length > 0 ? availableRawItems : getRawInventoryItems();
+    if (rawList.length === 0) return;
+    const defaultRaw = rawList[0];
+    setQuickRecipeIngredients(prev => [
+      ...prev,
+      {
+        rawItemId: defaultRaw.id,
+        rawItemName: defaultRaw.name,
+        quantity: 1,
+        unit: defaultRaw.unit
+      }
+    ]);
+  };
+
+  const handleRemoveQuickIngredientRow = (index: number) => {
+    setQuickRecipeIngredients(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleQuickIngredientRawChange = (index: number, rawId: string) => {
+    const raw = availableRawItems.find(r => r.id === rawId);
+    if (!raw) return;
+    setQuickRecipeIngredients(prev => prev.map((ing, i) => {
+      if (i === index) {
+        return {
+          ...ing,
+          rawItemId: raw.id,
+          rawItemName: raw.name,
+          unit: raw.unit
+        };
+      }
+      return ing;
+    }));
+  };
+
+  const handleQuickIngredientQtyChange = (index: number, qty: number) => {
+    setQuickRecipeIngredients(prev => prev.map((ing, i) => {
+      if (i === index) {
+        return { ...ing, quantity: isNaN(qty) ? 0 : qty };
+      }
+      return ing;
+    }));
+  };
+
+  const handleSaveQuickRecipe = () => {
+    if (!quickRecipeItem) return;
+    saveRecipeForMenuItem(quickRecipeItem.id, quickRecipeIngredients, quickRecipeItem.name);
+    setRecipes(getMenuRecipes());
+    setRecipeNotice('কাঁচামাল রেসিপি সফলভাবে সংরক্ষণ করা হয়েছে!');
+    setTimeout(() => {
+      setQuickRecipeItem(null);
+      setRecipeNotice('');
+    }, 900);
+  };
 
   // Extract all categories dynamically
   const availableCategories = useMemo(() => {
@@ -633,76 +782,6 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       return matchesSearch && matchesCategory;
   });
 
-  const handleAddQuickStock = (itemId: string, amount: number) => {
-    setRestockEntries(prev => {
-      const currentVal = typeof prev[itemId] === 'number' ? Number(prev[itemId]) : 0;
-      return {
-        ...prev,
-        [itemId]: currentVal + amount
-      };
-    });
-  };
-
-  const handleRestockQtyChange = (itemId: string, valStr: string) => {
-    if (valStr === '') {
-      setRestockEntries(prev => {
-        const next = { ...prev };
-        delete next[itemId];
-        return next;
-      });
-      return;
-    }
-    const val = parseInt(valStr, 10);
-    if (!isNaN(val) && val >= 0) {
-      setRestockEntries(prev => ({
-        ...prev,
-        [itemId]: val
-      }));
-    }
-  };
-
-  const handleSaveRestock = async () => {
-    const itemsToUpdate = Object.entries(restockEntries).filter(([_, qty]) => typeof qty === 'number' && qty > 0);
-    if (itemsToUpdate.length === 0) return;
-
-    setIsSavingRestock(true);
-    try {
-      const updatedList = [...items];
-      for (const [id, addQty] of itemsToUpdate) {
-        const currentItem = updatedList.find(i => i.id === id);
-        const prevStock = Number(currentItem?.stock ?? 0);
-        const newStock = prevStock + Number(addQty);
-
-        // Update in Supabase
-        await supabase.from('Canteen_Inventory').update({ stock: newStock }).eq('id', id);
-
-        // Update local item
-        const idx = updatedList.findIndex(i => i.id === id);
-        if (idx !== -1) {
-          updatedList[idx] = { ...updatedList[idx], stock: newStock };
-        }
-      }
-
-      setItems(updatedList);
-      window.dispatchEvent(new Event('canteen_inventory_updated'));
-      window.dispatchEvent(new Event('canteen_state_updated'));
-
-      setRestockNotice(`Successfully updated stock for ${itemsToUpdate.length} item(s)!`);
-      setTimeout(() => {
-        setShowRestockModal(false);
-        setRestockEntries({});
-        setRestockNotice('');
-      }, 1000);
-    } catch (err) {
-      console.error('Failed to restock items:', err);
-    } finally {
-      setIsSavingRestock(false);
-    }
-  };
-
-  const totalRestockCount = Object.values(restockEntries).filter((v): v is number => typeof v === 'number' && v > 0).length;
-  const totalRestockUnits = Object.values(restockEntries).reduce<number>((sum, v) => sum + (typeof v === 'number' ? v : 0), 0);
-
   return (
     <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300 pb-10">
       
@@ -710,27 +789,15 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
          <div>
             <h2 className="text-2xl font-black text-white uppercase tracking-tighter">CANTEEN MENU</h2>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">CLOUD INTEGRATED MENU & ITEMS</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">CLOUD INTEGRATED MENU & RECIPES</p>
          </div>
          {!readOnly ? (
            <div className="flex items-center space-x-3">
-              <button 
-                onClick={() => {
-                   setRestockEntries({});
-                   setRestockSearch('');
-                   setRestockCategory('ALL');
-                   setRestockNotice('');
-                   setShowRestockModal(true);
-                }} 
-                className="flex items-center space-x-2 px-5 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[10px] font-black tracking-widest transition-colors shadow-md shadow-emerald-600/20 cursor-pointer"
-              >
-                 <PackagePlus className="w-4 h-4" />
-                 <span>RESTOCK</span>
-              </button>
               <button onClick={() => {
                  setIsEditMode(false);
                  setEditingId(null);
-                 setNewItem({ name: '', category: 'SNACKS', price: 0, stock: 0, DP: '' });
+                 setNewItem({ name: '', category: 'SNACKS', price: 0, stock: 99999, DP: '' });
+                 setItemRecipe([]);
                  setShowAddModal(true);
               }} className="flex items-center space-x-2 px-5 py-3 bg-[#4f46e5] text-white rounded-xl text-[10px] font-black tracking-widest hover:bg-[#4338ca] transition-colors shadow-md shadow-indigo-500/20 cursor-pointer">
                  <Plus className="w-4 h-4" />
@@ -790,46 +857,48 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
              {filteredItems.map((item, i) => {
-                const stockVal = Number(item.stock ?? 0);
-                const isOutOfStock = stockVal <= 0;
-                const isLowStock = stockVal > 0 && stockVal < 10;
+                const itemRec = getRecipeForMenuItem(item.id, item.name);
 
                 return (
                 <div 
                    key={i} 
                    className={`bg-slate-900 rounded-[2rem] p-6 border-2 shadow-sm transition-all hover:shadow-md flex flex-col justify-between ${
-                      isOutOfStock
-                         ? 'border-rose-900/60 bg-slate-900/95 shadow-rose-950/20'
-                         : isLowStock
-                         ? 'border-amber-500/40 bg-slate-900/95 shadow-amber-950/20'
-                         : item.active 
+                      item.active 
                          ? 'border-[#4f46e5] shadow-indigo-500/10' 
                          : 'border-slate-800'
                    }`}
                 >
                    <div>
                       <div className="flex items-start justify-between mb-4">
-                         <div className={`w-14 h-14 rounded-2xl bg-slate-800 border overflow-hidden flex items-center justify-center shrink-0 shadow-sm ${
-                            isOutOfStock ? 'border-rose-900/40' : 'border-slate-700/60'
-                         }`}>
+                         <div className="w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700/60 overflow-hidden flex items-center justify-center shrink-0 shadow-sm">
                             {item.DP ? (
                                <img 
                                   src={resolveImageUrl(item.DP)} 
                                   alt={item.name} 
                                   referrerPolicy="no-referrer"
-                                  className={`w-full h-full object-cover group-hover:scale-110 transition-transform duration-300 ${isOutOfStock ? 'grayscale opacity-60' : ''}`}
+                                  className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
                                   onError={(e) => { e.currentTarget.style.display = 'none'; }}
                                />
                             ) : (
-                               <ImageIcon className={`w-6 h-6 ${isOutOfStock ? 'text-rose-500/50' : 'text-indigo-400'}`} />
+                               <ImageIcon className="w-6 h-6 text-indigo-400" />
                             )}
                          </div>
                          {!readOnly && (
-                           <div className="flex items-center space-x-2">
-                              <button onClick={() => handleEdit(item)} className="p-1.5 text-indigo-400 hover:text-indigo-300 transition-colors cursor-pointer">
+                           <div className="flex items-center space-x-1.5">
+                              <button 
+                                 onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenQuickRecipe(item);
+                                 }} 
+                                 className="p-1.5 text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 rounded-lg transition-colors cursor-pointer"
+                                 title="Recipe / Raw Materials (কাঁচামাল রেসিপি)"
+                              >
+                                 <ChefHat className="w-4 h-4" />
+                              </button>
+                              <button onClick={() => handleEdit(item)} className="p-1.5 text-slate-400 hover:text-white transition-colors cursor-pointer" title="Edit Item">
                                  <Edit2 className="w-4 h-4" />
                               </button>
-                              <button onClick={() => setDeleteConfirmId(item.id)} className="p-1.5 text-rose-400 hover:text-rose-300 transition-colors cursor-pointer">
+                              <button onClick={() => setDeleteConfirmId(item.id)} className="p-1.5 text-rose-400 hover:text-rose-300 transition-colors cursor-pointer" title="Delete Item">
                                  <Trash2 className="w-4 h-4" />
                               </button>
                            </div>
@@ -838,261 +907,180 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
 
                       <div className="mb-4">
                          <p className="text-[8px] font-black text-[#4f46e5] tracking-widest uppercase mb-1">{item.category}</p>
-                         <h3 className={`font-black text-sm leading-tight uppercase ${isOutOfStock ? 'text-slate-400' : 'text-white'}`}>
+                         <h3 className="font-black text-sm leading-tight uppercase text-white">
                             {item.name}
                          </h3>
-                         <p className="text-[8px] font-bold text-slate-400 uppercase mt-1">PRICES ARE NOT FIXED</p>
+                         {itemRec.length > 0 ? (
+                            <p className="text-[9px] font-semibold text-slate-400 truncate mt-1.5 flex items-center gap-1.5">
+                               <span className="text-slate-500">Raw:</span>
+                               <span className="text-slate-300 truncate">
+                                  {itemRec.map(r => `${r.rawItemName} (${r.quantity} ${r.unit})`).join(', ')}
+                               </span>
+                            </p>
+                         ) : (
+                            <p className="text-[9px] font-bold text-slate-500 uppercase mt-1">NO RECIPE CONFIGURED</p>
+                         )}
                       </div>
                    </div>
 
-                   {/* Price and Stock Box - SYNC REMOVED, WARNING HIGHLIGHTED */}
+                   {/* Price and Recipe Button Box */}
                    <div className="flex items-center justify-between mt-auto pt-3 border-t border-slate-800/80">
                       <div className="flex items-center space-x-2">
                          <span className="text-2xl font-black tracking-tighter text-white">৳{item.price}</span>
                       </div>
                       
-                      {isOutOfStock ? (
-                         <div className="px-2.5 py-1 rounded-xl bg-rose-950/70 border border-rose-500/60 flex items-center space-x-1.5 shadow-sm shadow-rose-950/50">
-                            <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                            <span className="text-[9px] font-black text-rose-400 tracking-wider uppercase">STOCK: 0 (OUT)</span>
-                         </div>
-                      ) : isLowStock ? (
-                         <div className="px-2.5 py-1 rounded-xl bg-amber-950/70 border border-amber-500/60 flex items-center space-x-1.5 shadow-sm shadow-amber-950/50 animate-pulse">
-                            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                            <span className="text-[9px] font-black text-amber-400 tracking-wider uppercase">STOCK: {stockVal} (LOW)</span>
-                         </div>
-                      ) : (
-                         <div className="px-2.5 py-1 rounded-xl bg-slate-800/90 border border-slate-700/80">
-                            <span className="text-[9px] font-black text-emerald-400 tracking-wider uppercase">STOCK: {stockVal}</span>
-                         </div>
-                      )}
+                      <button
+                         onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenQuickRecipe(item);
+                         }}
+                         className={`px-3 py-1.5 rounded-xl border flex items-center space-x-1.5 transition-all cursor-pointer group/rec ${
+                            itemRec.length > 0 
+                               ? 'bg-indigo-950/40 border-indigo-500/40 text-indigo-300 hover:bg-indigo-900/50 hover:border-indigo-400 shadow-sm' 
+                               : 'bg-slate-800/80 border-slate-700/80 text-slate-400 hover:text-white hover:bg-slate-700'
+                         }`}
+                         title="View / Edit Raw Ingredients (কাঁচামাল রেসিপি)"
+                      >
+                         <ChefHat className="w-3.5 h-3.5 text-indigo-400 group-hover/rec:rotate-12 transition-transform" />
+                         <span className="text-[10px] font-black tracking-wider uppercase">
+                            {itemRec.length > 0 ? `${itemRec.length} RAW ITEMS` : '+ RECIPE'}
+                         </span>
+                      </button>
                    </div>
                 </div>
              )})}
           </div>
       )}
 
-      {/* Bulk Restock Modal */}
-      {showRestockModal && (
-         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fadeIn">
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-3xl shadow-2xl flex flex-col max-h-[90vh]">
-               {/* Modal Header */}
+      {/* Quick Recipe Modal */}
+      {quickRecipeItem && (
+         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in zoom-in-95">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-xl shadow-2xl flex flex-col max-h-[90vh]">
+               {/* Header */}
                <div className="flex items-center justify-between pb-4 border-b border-slate-800 shrink-0">
                   <div className="flex items-center space-x-3">
-                     <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-                        <PackagePlus className="w-5 h-5" />
+                     <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+                        <ChefHat className="w-5 h-5" />
                      </div>
                      <div>
-                        <h3 className="text-lg font-black text-white uppercase tracking-tight">RESTOCK MENU ITEMS</h3>
+                        <h3 className="text-lg font-black text-white uppercase tracking-tight">
+                           {quickRecipeItem.name} — RECIPE
+                        </h3>
                         <p className="text-[11px] font-bold text-slate-400">
-                           নতুন এন্ট্রি করা সংখ্যা পূর্বের স্টকের সাথে যোগ (Add) হয়ে যাবে
+                           মেনু আইটেম তৈরিতে প্রয়োজনীয় কাঁচামাল ও পরিমাণ নির্ধারণ করুন
                         </p>
                      </div>
                   </div>
                   <button 
-                     onClick={() => setShowRestockModal(false)} 
+                     onClick={() => setQuickRecipeItem(null)} 
                      className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
                   >
                      <X className="w-5 h-5" />
                   </button>
                </div>
 
-               {/* Modal Filter and Search */}
-               <div className="py-4 space-y-3 shrink-0 border-b border-slate-800/80">
-                  <div className="flex flex-col sm:flex-row gap-3">
-                     <div className="relative flex-1">
-                        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                        <input 
-                           type="text" 
-                           placeholder="Search items to restock..."
-                           value={restockSearch}
-                           onChange={(e) => setRestockSearch(e.target.value)}
-                           className="w-full bg-slate-800/80 border border-slate-700/80 rounded-xl pl-10 pr-4 py-2.5 text-xs font-bold text-slate-200 focus:outline-none focus:border-emerald-500"
-                        />
-                     </div>
-                     {/* Category pills in Restock Modal */}
-                     <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-                        {availableCategories.map(cat => (
-                           <button
-                              key={cat}
-                              onClick={() => setRestockCategory(cat)}
-                              className={`px-3 py-1.5 rounded-lg text-[10px] font-black tracking-wider uppercase transition-all shrink-0 cursor-pointer ${
-                                 restockCategory === cat
-                                    ? 'bg-emerald-600 text-white'
-                                    : 'bg-slate-800 text-slate-400 hover:text-white'
-                              }`}
-                           >
-                              {cat}
-                           </button>
-                        ))}
-                     </div>
-                  </div>
-               </div>
-
-               {/* Items List */}
-               <div className="overflow-y-auto py-3 space-y-2.5 flex-1 pr-1">
-                  {items
-                     .filter(item => {
-                        const matchesSearch = (item.name || '').toLowerCase().includes(restockSearch.toLowerCase()) || 
-                                              (item.category || '').toLowerCase().includes(restockSearch.toLowerCase());
-                        const itemCategory = (item.category || 'SNACKS').toUpperCase();
-                        const matchesCat = restockCategory === 'ALL' || itemCategory === restockCategory;
-                        return matchesSearch && matchesCat;
-                     })
-                     .map((item) => {
-                        const currentStock = Number(item.stock ?? 0);
-                        const addedQty = typeof restockEntries[item.id] === 'number' ? Number(restockEntries[item.id]) : 0;
-                        const newTotal = currentStock + addedQty;
-                        const isEntered = addedQty > 0;
-
-                        return (
-                           <div 
-                              key={item.id}
-                              className={`p-3.5 rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                                 isEntered
-                                    ? 'bg-emerald-950/20 border-emerald-500/50 shadow-sm'
-                                    : currentStock <= 0
-                                    ? 'bg-slate-900/90 border-rose-900/40'
-                                    : currentStock < 10
-                                    ? 'bg-slate-900/90 border-amber-500/30'
-                                    : 'bg-slate-800/40 border-slate-800'
-                              }`}
-                           >
-                              {/* Left Info */}
-                              <div className="flex items-center space-x-3 min-w-0 flex-1">
-                                 <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700/60 overflow-hidden shrink-0 flex items-center justify-center">
-                                    {item.DP ? (
-                                       <img 
-                                          src={resolveImageUrl(item.DP)} 
-                                          alt={item.name} 
-                                          referrerPolicy="no-referrer"
-                                          className="w-full h-full object-cover"
-                                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                                       />
-                                    ) : (
-                                       <ImageIcon className="w-4 h-4 text-slate-500" />
-                                    )}
-                                 </div>
-                                 <div className="truncate">
-                                    <div className="flex items-center space-x-2">
-                                       <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">{item.category}</span>
-                                       <span className="text-[10px] font-bold text-slate-400 font-mono">৳{item.price}</span>
-                                    </div>
-                                    <h4 className="text-xs font-black text-white uppercase truncate">{item.name}</h4>
-                                 </div>
-                              </div>
-
-                              {/* Current Stock */}
-                              <div className="flex items-center space-x-2 shrink-0">
-                                 <div className="text-right">
-                                    <span className="text-[9px] font-bold text-slate-400 block uppercase">Previous Stock</span>
-                                    <span className={`text-xs font-black font-mono ${
-                                       currentStock <= 0 ? 'text-rose-400' : currentStock < 10 ? 'text-amber-400' : 'text-slate-200'
-                                    }`}>
-                                       {currentStock} {currentStock <= 0 ? '(OUT)' : currentStock < 10 ? '(LOW)' : ''}
-                                    </span>
-                                 </div>
-                              </div>
-
-                              {/* Restock Input & Quick Add Chips */}
-                              <div className="flex items-center space-x-2 shrink-0">
-                                 <div className="flex items-center space-x-1">
-                                    {[10, 25, 50].map((step) => (
-                                       <button
-                                          key={step}
-                                          type="button"
-                                          onClick={() => handleAddQuickStock(item.id, step)}
-                                          className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-emerald-400 hover:text-white rounded-lg text-[10px] font-bold transition-colors cursor-pointer"
-                                       >
-                                          +{step}
-                                       </button>
-                                    ))}
-                                 </div>
-
-                                 <div className="w-24">
-                                    <input 
-                                       type="number"
-                                       min={0}
-                                       placeholder="+ Add"
-                                       value={restockEntries[item.id] ?? ''}
-                                       onChange={(e) => handleRestockQtyChange(item.id, e.target.value)}
-                                       className={`w-full text-center py-1.5 px-2 rounded-xl text-xs font-black font-mono bg-slate-950 border focus:outline-none transition-all ${
-                                          isEntered
-                                             ? 'border-emerald-500 text-emerald-300 ring-2 ring-emerald-500/20'
-                                             : 'border-slate-700 text-white focus:border-indigo-500'
-                                       }`}
-                                    />
-                                 </div>
-
-                                 {/* Result Preview */}
-                                 <div className="w-24 text-right">
-                                    <span className="text-[9px] font-bold text-slate-500 block uppercase">New Stock</span>
-                                    <span className={`text-xs font-black font-mono ${
-                                       isEntered ? 'text-emerald-400 font-bold' : 'text-slate-500'
-                                    }`}>
-                                       {newTotal}
-                                    </span>
-                                 </div>
-                              </div>
-                           </div>
-                        );
-                     })}
-               </div>
-
-               {/* Notice if any */}
-               {restockNotice && (
-                  <div className="py-2 px-3 bg-emerald-950/60 border border-emerald-500/50 rounded-xl text-emerald-400 text-xs font-bold flex items-center space-x-2 my-2 animate-fadeIn shrink-0">
-                     <CheckCircle2 className="w-4 h-4 shrink-0" />
-                     <span>{restockNotice}</span>
-                  </div>
-               )}
-
-               {/* Modal Footer */}
-               <div className="pt-4 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
-                  <div className="text-xs text-slate-400">
-                     {totalRestockCount > 0 ? (
-                        <span>
-                           Selected: <strong className="text-emerald-400">{totalRestockCount} items</strong> (+{totalRestockUnits} units to add)
-                        </span>
-                     ) : (
-                        <span>আইটেমে যোগ করার সংখ্যা লিখুন বা +10, +25 বাটনে চাপ দিন</span>
-                     )}
-                  </div>
-
-                  <div className="flex items-center space-x-3 w-full sm:w-auto">
-                     {totalRestockCount > 0 && (
-                        <button
-                           type="button"
-                           onClick={() => setRestockEntries({})}
-                           className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl transition-colors cursor-pointer"
-                        >
-                           Clear All
-                        </button>
-                     )}
+               {/* Body */}
+               <div className="py-4 space-y-3 flex-1 overflow-y-auto pr-1">
+                  <div className="flex items-center justify-between">
+                     <span className="text-xs font-bold text-slate-300">
+                        কাঁচামাল তালিকা ({quickRecipeIngredients.length} টি উপাদান)
+                     </span>
                      <button
                         type="button"
-                        onClick={() => setShowRestockModal(false)}
-                        className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl transition-colors cursor-pointer"
+                        onClick={handleAddQuickIngredientRow}
+                        className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-colors shadow-sm cursor-pointer"
+                     >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>কাঁচামাল যোগ করুন</span>
+                     </button>
+                  </div>
+
+                  {quickRecipeIngredients.length === 0 ? (
+                     <div className="p-8 text-center bg-slate-800/40 border border-dashed border-slate-700/80 rounded-2xl">
+                        <ChefHat className="w-8 h-8 text-slate-600 mx-auto mb-2" />
+                        <p className="text-sm font-bold text-slate-300">কোনো কাঁচামাল যুক্ত করা হয়নি</p>
+                        <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                           এই আইটেমটি বিক্রি হলে যাতে স্বয়ংক্রিয়ভাবে কাঁচামালের স্টক কমে যায়, সেজন্য কাঁচামাল যোগ করুন।
+                        </p>
+                     </div>
+                  ) : (
+                     <div className="space-y-2.5">
+                        {quickRecipeIngredients.map((ing, idx) => (
+                           <div key={idx} className="flex items-center space-x-2 bg-slate-800/90 border border-slate-700/90 p-2.5 rounded-2xl shadow-sm">
+                              <div className="flex-1 min-w-0">
+                                 <label className="text-[9px] font-bold text-slate-400 block mb-1">কাঁচামাল (Raw Item)</label>
+                                 <select
+                                    value={ing.rawItemId}
+                                    onChange={(e) => handleQuickIngredientRawChange(idx, e.target.value)}
+                                    className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-indigo-500 truncate"
+                                 >
+                                    {availableRawItems.map(raw => (
+                                       <option key={raw.id} value={raw.id}>
+                                          {raw.name} ({raw.nameBn}) — বর্তমান স্টক: {raw.currentStock} {raw.unit}
+                                       </option>
+                                    ))}
+                                 </select>
+                              </div>
+                              <div className="w-24 shrink-0">
+                                 <label className="text-[9px] font-bold text-slate-400 block mb-1">পরিমাণ (Qty)</label>
+                                 <input
+                                    type="number"
+                                    step="any"
+                                    min="0.0001"
+                                    value={ing.quantity}
+                                    onChange={(e) => handleQuickIngredientQtyChange(idx, parseFloat(e.target.value) || 0)}
+                                    className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-2 py-2 text-xs font-bold text-center focus:outline-none focus:border-indigo-500"
+                                 />
+                              </div>
+                              <div className="w-16 shrink-0 text-center">
+                                 <label className="text-[9px] font-bold text-slate-400 block mb-1">একক</label>
+                                 <span className="inline-block py-2 text-xs font-black text-indigo-300 uppercase">
+                                    {ing.unit}
+                                 </span>
+                              </div>
+                              <div className="pt-4 shrink-0">
+                                 <button
+                                    type="button"
+                                    onClick={() => handleRemoveQuickIngredientRow(idx)}
+                                    className="p-2 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-xl transition-colors cursor-pointer"
+                                    title="মুছে ফেলুন"
+                                 >
+                                    <Trash2 className="w-4 h-4" />
+                                 </button>
+                              </div>
+                           </div>
+                        ))}
+                     </div>
+                  )}
+
+                  {recipeNotice && (
+                     <div className="p-3 bg-emerald-950/60 border border-emerald-500/50 rounded-xl text-emerald-300 text-xs font-bold flex items-center space-x-2">
+                        <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                        <span>{recipeNotice}</span>
+                     </div>
+                  )}
+               </div>
+
+               {/* Footer */}
+               <div className="pt-4 border-t border-slate-800 flex items-center justify-between shrink-0">
+                  <span className="text-[11px] text-slate-400">
+                     💡 বিক্রির সাথে সাথে কাঁচামালের স্টক বিয়োগ হবে
+                  </span>
+                  <div className="flex items-center space-x-2">
+                     <button
+                        type="button"
+                        onClick={() => setQuickRecipeItem(null)}
+                        className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl transition-colors cursor-pointer"
                      >
                         Cancel
                      </button>
                      <button
                         type="button"
-                        onClick={handleSaveRestock}
-                        disabled={totalRestockCount === 0 || isSavingRestock}
-                        className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 text-white rounded-xl text-xs font-black tracking-wider transition-all shadow-md shadow-emerald-600/30 cursor-pointer disabled:cursor-not-allowed"
+                        onClick={handleSaveQuickRecipe}
+                        className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black rounded-xl transition-colors shadow-md shadow-indigo-600/30 flex items-center space-x-1.5 cursor-pointer"
                      >
-                        {isSavingRestock ? (
-                           <>
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                              <span>Saving Stock...</span>
-                           </>
-                        ) : (
-                           <>
-                              <PackagePlus className="w-4 h-4" />
-                              <span>Save & Restock ({totalRestockCount})</span>
-                           </>
-                        )}
+                        <Save className="w-4 h-4" />
+                        <span>Save Recipe</span>
                      </button>
                   </div>
                </div>
@@ -1100,18 +1088,18 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
          </div>
       )}
 
-      {/* Add Item Modal */}
+      {/* Add / Edit Item Modal */}
       {showAddModal && (
-         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-slate-900 rounded-3xl p-6 w-full max-w-md shadow-xl animate-in zoom-in-95">
-               <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-lg font-black text-white uppercase tracking-tighter">{isEditMode ? "EDIT ITEM" : "ADD NEW ENTRY"}</h3>
-                  <button onClick={() => setShowAddModal(false)} className="p-2 text-slate-400 hover:bg-slate-800 rounded-full">
+         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-xl shadow-2xl animate-in zoom-in-95 max-h-[90vh] flex flex-col">
+               <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800 shrink-0">
+                  <h3 className="text-lg font-black text-white uppercase tracking-tight">{isEditMode ? "EDIT MENU ITEM" : "ADD NEW ENTRY"}</h3>
+                  <button onClick={() => setShowAddModal(false)} className="p-2 text-slate-400 hover:bg-slate-800 rounded-xl transition-colors cursor-pointer">
                      <X className="w-5 h-5" />
                   </button>
                </div>
                
-               <div className="space-y-4">
+               <div className="space-y-4 overflow-y-auto pr-1 flex-1">
                   <div>
                      <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Item Name</label>
                      <input 
@@ -1133,6 +1121,8 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                              <option value="SNACKS">SNACKS</option>
                              <option value="DRINK">DRINK</option>
                              <option value="LUNCH">LUNCH</option>
+                             <option value="BREAKFAST">BREAKFAST</option>
+                             <option value="DINNER">DINNER</option>
                          </select>
                       </div>
                       <div>
@@ -1146,15 +1136,75 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                          />
                       </div>
                   </div>
-                  <div>
-                     <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Initial Stock</label>
-                     <input 
-                        type="number" 
-                        value={newItem.stock || ''}
-                        onChange={(e) => setNewItem({...newItem, stock: parseInt(e.target.value) || 0})}
-                        className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                        placeholder="0"
-                     />
+
+                  {/* Recipe / Raw Materials Builder */}
+                  <div className="pt-3 pb-2 border-t border-slate-800 space-y-3">
+                     <div className="flex items-center justify-between">
+                        <div>
+                           <label className="text-[11px] font-black text-indigo-300 tracking-wider uppercase flex items-center gap-1.5">
+                              <ChefHat className="w-4 h-4 text-indigo-400" />
+                              <span>Required Raw Materials (প্রয়োজনীয় কাঁচামাল)</span>
+                           </label>
+                           <p className="text-[9px] text-slate-400 mt-0.5">এই মেনু তৈরি করতে প্রতি ইউনিটে কী পরিমাণ কাঁচামাল লাগে</p>
+                        </div>
+                        <button
+                           type="button"
+                           onClick={handleAddIngredientRow}
+                           className="px-2.5 py-1 bg-indigo-600/30 hover:bg-indigo-600 text-indigo-200 hover:text-white border border-indigo-500/40 rounded-lg text-[10px] font-bold flex items-center space-x-1 transition-colors cursor-pointer"
+                        >
+                           <Plus className="w-3 h-3" />
+                           <span>+ Add Raw Item</span>
+                        </button>
+                     </div>
+
+                     {itemRecipe.length === 0 ? (
+                        <div className="p-4 bg-slate-800/40 border border-dashed border-slate-700 rounded-2xl text-center text-slate-400">
+                           <p className="text-xs font-semibold text-slate-300">কোনো কাঁচামাল এখনো যুক্ত করা হয়নি</p>
+                           <p className="text-[10px] text-slate-500 mt-0.5">মেনু বিক্রির সাথে সাথে কাঁচামালের স্টক কমাতে "+ Add Raw Item" বাটনে ক্লিক করুন</p>
+                        </div>
+                     ) : (
+                        <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                           {itemRecipe.map((ing, idx) => (
+                              <div key={idx} className="flex items-center space-x-2 bg-slate-800/80 border border-slate-700/80 p-2.5 rounded-xl">
+                                 <div className="flex-1 min-w-0">
+                                    <select
+                                       value={ing.rawItemId}
+                                       onChange={(e) => handleIngredientRawItemChange(idx, e.target.value)}
+                                       className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-2.5 py-1.5 text-xs font-bold focus:outline-none focus:border-indigo-500 truncate"
+                                    >
+                                       {availableRawItems.map(raw => (
+                                          <option key={raw.id} value={raw.id}>
+                                             {raw.name} ({raw.nameBn}) - Stock: {raw.currentStock} {raw.unit}
+                                          </option>
+                                       ))}
+                                    </select>
+                                 </div>
+                                 <div className="w-24 shrink-0">
+                                    <input
+                                       type="number"
+                                       step="any"
+                                       min="0.0001"
+                                       value={ing.quantity}
+                                       onChange={(e) => handleIngredientQtyChange(idx, parseFloat(e.target.value) || 0)}
+                                       placeholder="Qty"
+                                       className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-2 py-1.5 text-xs font-bold text-center focus:outline-none focus:border-indigo-500"
+                                    />
+                                 </div>
+                                 <span className="text-[11px] font-bold text-slate-400 w-14 shrink-0 text-center uppercase">
+                                    {ing.unit}
+                                 </span>
+                                 <button
+                                    type="button"
+                                    onClick={() => handleRemoveIngredientRow(idx)}
+                                    className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
+                                    title="Remove ingredient"
+                                 >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                 </button>
+                              </div>
+                           ))}
+                        </div>
+                     )}
                   </div>
 
                   {/* DP URL input with preview and auto-resolution */}
@@ -1204,13 +1254,15 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                   </div>
                </div>
 
-               <button 
-                  onClick={handleAddItem}
-                  className="w-full mt-8 flex items-center justify-center space-x-2 py-3.5 bg-indigo-600 text-white rounded-xl text-xs font-black tracking-widest hover:bg-indigo-700 transition-all shadow-md shadow-indigo-500/30"
-               >
-                  <Save className="w-4 h-4" />
-                  <span>SAVE TO INVENTORY</span>
-               </button>
+               <div className="pt-4 border-t border-slate-800 shrink-0">
+                  <button 
+                     onClick={handleAddItem}
+                     className="w-full flex items-center justify-center space-x-2 py-3.5 bg-indigo-600 text-white rounded-xl text-xs font-black tracking-widest hover:bg-indigo-700 transition-all shadow-md shadow-indigo-500/30 cursor-pointer"
+                  >
+                     <Save className="w-4 h-4" />
+                     <span>SAVE TO INVENTORY</span>
+                  </button>
+               </div>
             </div>
          </div>
       )}

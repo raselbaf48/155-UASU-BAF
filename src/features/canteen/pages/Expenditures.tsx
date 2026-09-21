@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Plus, Trash2, Banknote, X, Save, Edit2, AlertTriangle, CheckCircle2, Calendar, Tag, FileText, ArrowLeft } from 'lucide-react';
+import { Search, Plus, Trash2, Banknote, X, Save, Edit2, AlertTriangle, CheckCircle2, Calendar, Tag, FileText, ArrowLeft, Boxes, PackagePlus } from 'lucide-react';
 import { formatCanteenDate } from '../utils/dateUtils';
+import { autoRestockFromExpense, getRawInventoryItems, RawInventoryItem } from '../utils/recipeManager';
 
 export interface ExpenseRecord {
   id: string | number;
@@ -33,6 +34,11 @@ export const Expenditures: React.FC = () => {
     category: 'FOOD ITEMS',
     amount: 0
   });
+
+  // State for linking expense to raw inventory auto-restock
+  const [rawItems, setRawItems] = useState<RawInventoryItem[]>([]);
+  const [selectedRawItemId, setSelectedRawItemId] = useState<string>('');
+  const [rawItemQty, setRawItemQty] = useState<string>('');
 
   // State for editing/deleting an existing row
   const [editingExpense, setEditingExpense] = useState<ExpenseRecord | null>(null);
