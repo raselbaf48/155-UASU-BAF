@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { DutyRatioTable } from '../data/officialDutyRatioMatrix';
 import { FlightName } from '../types';
 import { Printer, X, Download, FileSpreadsheet } from 'lucide-react';
-import { exportTableToCSV, exportDutyRatioMatrixCSV, exportDutyRatioMatrixExcel } from '../utils/csvExport';
+import { exportTableToCSV, exportDutyRatioMatrixExcel } from '../utils/csvExport';
 import { exportHtmlToWord } from '../utils/htmlExport';
 import { DUTY_TYPE_MAP } from '../data/dutyTypes';
 
@@ -154,15 +154,6 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
           >
             <FileSpreadsheet className="w-4 h-4" />
             <span>Export Excel</span>
-          </button>
-
-          <button
-            onClick={() => exportDutyRatioMatrixCSV(matrix, 'Duty_Ratio_Matrix_Complete.csv')}
-            className="flex items-center space-x-2 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold text-xs transition-colors cursor-pointer shadow-xs"
-            title="Export to CSV (.csv) with calculated sums"
-          >
-            <Download className="w-4 h-4" />
-            <span>Export CSV</span>
           </button>
 
           <button

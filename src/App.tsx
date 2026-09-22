@@ -769,6 +769,7 @@ return () => mediaQuery.removeEventListener('change', listener);
         <AddEditAirmanModal
           variant={activeTab === 'biodata-register' ? 'biodata' : 'nominal'}
           airmanToEdit={airmanToEdit}
+          existingAirmen={airmen}
           onSave={handleSaveAirman}
           onClose={() => {
             setIsAddEditOpen(false);

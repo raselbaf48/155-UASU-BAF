@@ -90,7 +90,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
       case 'night-count-state':
         return { category: 'NIGHT COUNT STATE', title: 'Night Count State (Airmen)' };
       case 'nominal':
-        return { category: 'ORG STRUCTURE', title: 'Nominal Roll (Seniority Order)' };
+        return { category: 'ORG STRUCTURE', title: 'Nominal Roll' };
       case 'flights':
         return { category: 'ORG STRUCTURE', title: 'Flights & Section Overview' };
       case 'biodata-register':

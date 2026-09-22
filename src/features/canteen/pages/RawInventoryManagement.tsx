@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Search, Plus, Edit2, Trash2, PackagePlus, AlertTriangle, 
   CheckCircle2, RotateCcw, Layers, ArrowDownRight, ArrowUpRight, 
@@ -34,7 +34,10 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
     lastRestockedDate: '2026-09-18',
     supplier: 'Local Poultry Market',
     notes: 'Fresh broiler chicken for daily dishes',
-    wastagePercentage: 30
+    wastagePercentage: 30,
+    hasSubUnits: true,
+    packSize: 1000,
+    subUnit: 'gm'
   },
   {
     id: 'raw-2',
@@ -47,7 +50,10 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
     unitCost: 75,
     lastRestockedDate: '2026-09-15',
     supplier: 'Base Ration Depot',
-    notes: 'Premium Miniket rice 50kg sacks'
+    notes: 'Premium Miniket rice 50kg sacks',
+    hasSubUnits: true,
+    packSize: 1000,
+    subUnit: 'gm'
   },
   {
     id: 'raw-3',
@@ -60,7 +66,10 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
     unitCost: 135,
     lastRestockedDate: '2026-09-16',
     supplier: 'Base Ration Depot',
-    notes: 'Red split lentils'
+    notes: 'Red split lentils',
+    hasSubUnits: true,
+    packSize: 1000,
+    subUnit: 'gm'
   },
   {
     id: 'raw-4',
@@ -73,7 +82,10 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
     unitCost: 880,
     lastRestockedDate: '2026-09-17',
     supplier: 'City Super Store',
-    notes: 'For canteen milk tea and coffee preparation'
+    notes: 'For canteen milk tea and coffee preparation',
+    hasSubUnits: true,
+    packSize: 1000,
+    subUnit: 'gm'
   },
   {
     id: 'raw-5',
@@ -154,7 +166,10 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
     unitCost: 145,
     lastRestockedDate: '2026-09-15',
     supplier: 'City Grocery',
-    notes: 'Evening snacks pasta preparation'
+    notes: 'Evening snacks pasta preparation',
+    hasSubUnits: true,
+    packSize: 1000,
+    subUnit: 'gm'
   },
   {
     id: 'raw-12',
@@ -180,7 +195,10 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
     unitCost: 132,
     lastRestockedDate: '2026-09-17',
     supplier: 'Local Wholesale',
-    notes: 'For tea, coffee and desserts'
+    notes: 'For tea, coffee and desserts',
+    hasSubUnits: true,
+    packSize: 1000,
+    subUnit: 'gm'
   },
   {
     id: 'raw-14',
@@ -193,7 +211,10 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
     unitCost: 78,
     lastRestockedDate: '2026-09-20',
     supplier: 'Local Bazar',
-    notes: 'Daily kitchen staple'
+    notes: 'Daily kitchen staple',
+    hasSubUnits: true,
+    packSize: 1000,
+    subUnit: 'gm'
   },
   {
     id: 'raw-15',
@@ -260,7 +281,10 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
     wastagePercentage: 10,
     lastRestockedDate: '2026-09-22',
     supplier: 'Local Bazar',
-    notes: 'Fresh green chili for omelet, noodles & snacks'
+    notes: 'Fresh green chili for omelet, noodles & snacks',
+    hasSubUnits: true,
+    packSize: 1000,
+    subUnit: 'gm'
   },
   {
     id: 'raw-20',
@@ -367,7 +391,10 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
     unitCost: 40,
     lastRestockedDate: '2026-09-18',
     supplier: 'Molla / ACI Salt',
-    notes: 'Iodized cooking salt for all kitchen dishes'
+    notes: 'Iodized cooking salt for all kitchen dishes',
+    hasSubUnits: true,
+    packSize: 1000,
+    subUnit: 'gm'
   },
   {
     id: 'raw-28',
@@ -516,10 +543,23 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
     supplier: '',
     notes: '',
     wastagePercentage: 0,
-    hasSubUnits: false,
-    packSize: 1,
-    subUnit: 'pcs'
+    hasSubUnits: true,
+    packSize: 1000,
+    subUnit: 'gm'
   });
+
+  // Keep track of serialized state to avoid infinite re-render loops and redundant dispatches
+  const lastSavedItemsJsonRef = useRef<string>('');
+  const lastSavedLogsJsonRef = useRef<string>('');
+  const isSelfDispatchingRef = useRef<boolean>(false);
+
+  // Initialize cached strings
+  if (!lastSavedItemsJsonRef.current && items && items.length > 0) {
+    lastSavedItemsJsonRef.current = JSON.stringify(items);
+  }
+  if (!lastSavedLogsJsonRef.current && logs && logs.length > 0) {
+    lastSavedLogsJsonRef.current = JSON.stringify(logs);
+  }
 
   // Fetch raw inventory from Supabase Canteen_Inventory table
   useEffect(() => {
@@ -530,13 +570,15 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
           const mapped: RawInventoryItem[] = data.map((r: any) => {
             const meta = decodeNotesMeta(r.notes);
             const cleanNotes = (r.notes || '').replace(/<!--META:[\s\S]*?-->/g, '').trim();
+            const unit = r.unit || 'kg';
+            const isKg = unit.toLowerCase().trim() === 'kg';
             return {
               id: String(r.id),
               name: r.name || '',
               nameBn: r.nameBn || r.name_bn || r.name || '',
               category: meta.category || r.category || 'Packaging & Disposables',
               subCategory: meta.subCategory || r.subCategory || r.sub_category || '',
-              unit: r.unit || 'kg',
+              unit: unit,
               currentStock: Number(r.currentStock ?? r.current_stock ?? 0),
               minStockAlert: Number(r.minStockAlert ?? r.min_stock_alert ?? 5),
               unitCost: Number(r.unitCost ?? r.unit_cost ?? 0),
@@ -544,16 +586,21 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
               lastRestockedDate: r.lastRestockedDate || r.last_restocked_date || '',
               supplier: r.supplier || '',
               notes: cleanNotes,
-              hasSubUnits: Boolean(meta.hasSubUnits ?? r.hasSubUnits ?? r.has_sub_units ?? (Number(r.packSize ?? r.pack_size) > 1)),
-              packSize: Number(meta.packSize ?? r.packSize ?? r.pack_size ?? 1),
-              subUnit: meta.subUnit || r.subUnit || r.sub_unit || 'pcs'
+              hasSubUnits: isKg ? true : Boolean(meta.hasSubUnits ?? r.hasSubUnits ?? r.has_sub_units ?? (Number(r.packSize ?? r.pack_size) > 1)),
+              packSize: isKg ? (Number(meta.packSize ?? r.packSize ?? r.pack_size) > 1 ? Number(meta.packSize ?? r.packSize ?? r.pack_size) : 1000) : Number(meta.packSize ?? r.packSize ?? r.pack_size ?? 1),
+              subUnit: isKg ? 'gm' : (meta.subUnit || r.subUnit || r.sub_unit || 'pcs')
             };
           });
           setItems(prev => {
             const combined = [...(Array.isArray(prev) ? prev : []), ...mapped];
             const { deduplicated } = deduplicateRawItems(combined);
+            const dedupJson = JSON.stringify(deduplicated);
+            if (dedupJson === lastSavedItemsJsonRef.current) {
+              return prev;
+            }
+            lastSavedItemsJsonRef.current = dedupJson;
             try {
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(deduplicated));
+              localStorage.setItem(STORAGE_KEY, dedupJson);
             } catch {}
             return deduplicated;
           });
@@ -568,10 +615,20 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
   // Save changes to localStorage, app_settings Cloud, and Supabase Canteen_Inventory table
   useEffect(() => {
     if (!Array.isArray(items)) return;
+    const jsonStr = JSON.stringify(items);
+    if (jsonStr === lastSavedItemsJsonRef.current) {
+      return;
+    }
+    lastSavedItemsJsonRef.current = jsonStr;
+
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-      window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
-      window.dispatchEvent(new Event('canteen_state_updated'));
+      localStorage.setItem(STORAGE_KEY, jsonStr);
+      isSelfDispatchingRef.current = true;
+      try {
+        window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+      } finally {
+        isSelfDispatchingRef.current = false;
+      }
     } catch (e) {
       console.warn('Failed to save raw items:', e);
     }
@@ -605,10 +662,21 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
   }, [items]);
 
   useEffect(() => {
+    if (!Array.isArray(logs)) return;
+    const jsonStr = JSON.stringify(logs);
+    if (jsonStr === lastSavedLogsJsonRef.current) {
+      return;
+    }
+    lastSavedLogsJsonRef.current = jsonStr;
+
     try {
-      localStorage.setItem(LOGS_STORAGE_KEY, JSON.stringify(logs));
-      window.dispatchEvent(new Event('canteen_raw_stock_logs_updated'));
-      window.dispatchEvent(new Event('canteen_state_updated'));
+      localStorage.setItem(LOGS_STORAGE_KEY, jsonStr);
+      isSelfDispatchingRef.current = true;
+      try {
+        window.dispatchEvent(new Event('canteen_raw_stock_logs_updated'));
+      } finally {
+        isSelfDispatchingRef.current = false;
+      }
     } catch (e) {
       console.warn('Failed to save raw stock logs:', e);
     }
@@ -617,14 +685,18 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
   // Real-time synchronization when raw inventory is updated (e.g. from POS sales or other tabs)
   useEffect(() => {
     const handleSync = () => {
+      // Ignore if triggered by this component's own save action
+      if (isSelfDispatchingRef.current) return;
+
       try {
         const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored) {
+        if (stored && stored !== lastSavedItemsJsonRef.current) {
           let parsed = JSON.parse(stored);
           if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray(parsed.deduplicated)) {
             parsed = parsed.deduplicated;
           }
           if (Array.isArray(parsed) && parsed.length > 0) {
+            lastSavedItemsJsonRef.current = stored;
             setItems(parsed);
           }
         }
@@ -632,9 +704,10 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
 
       try {
         const storedLogs = localStorage.getItem(LOGS_STORAGE_KEY);
-        if (storedLogs) {
+        if (storedLogs && storedLogs !== lastSavedLogsJsonRef.current) {
           const parsedLogs = JSON.parse(storedLogs);
           if (Array.isArray(parsedLogs)) {
+            lastSavedLogsJsonRef.current = storedLogs;
             setLogs(parsedLogs);
           }
         }
@@ -643,12 +716,10 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
 
     window.addEventListener('canteen_raw_inventory_updated', handleSync);
     window.addEventListener('canteen_raw_stock_logs_updated', handleSync);
-    window.addEventListener('canteen_state_updated', handleSync);
     window.addEventListener('storage', handleSync);
     return () => {
       window.removeEventListener('canteen_raw_inventory_updated', handleSync);
       window.removeEventListener('canteen_raw_stock_logs_updated', handleSync);
-      window.removeEventListener('canteen_state_updated', handleSync);
       window.removeEventListener('storage', handleSync);
     };
   }, []);
@@ -873,22 +944,28 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
       // Edit mode
       setItems(prev => prev.map(i => {
         if (i.id === editingItem.id) {
+          const unit = newItemData.unit || i.unit || 'kg';
+          const isKg = unit.toLowerCase().trim() === 'kg';
+          const hasSubUnits = isKg ? true : Boolean(newItemData.hasSubUnits);
+          const packSize = isKg ? (Number(newItemData.packSize) > 1 ? Number(newItemData.packSize) : 1000) : (newItemData.hasSubUnits ? Math.max(1, Number(newItemData.packSize) || 1) : 1);
+          const subUnit = isKg ? 'gm' : (newItemData.hasSubUnits ? (newItemData.subUnit || 'pcs').trim() : undefined);
+
           return {
             ...i,
             name: newItemData.name!.trim(),
             nameBn: newItemData.nameBn?.trim() || newItemData.name!.trim(),
             category: newItemData.category?.trim() || i.category || 'Fuel & Utilities',
             subCategory: newItemData.subCategory !== undefined ? newItemData.subCategory.trim() : (i.subCategory || ''),
-            unit: newItemData.unit || 'kg',
+            unit: unit,
             currentStock: Number(newItemData.currentStock) || 0,
             minStockAlert: Number(newItemData.minStockAlert) || 5,
             unitCost: Number(newItemData.unitCost) || 0,
             supplier: newItemData.supplier?.trim(),
             notes: newItemData.notes?.trim(),
             wastagePercentage: newItemData.wastagePercentage !== undefined ? Number(newItemData.wastagePercentage) : 0,
-            hasSubUnits: Boolean(newItemData.hasSubUnits),
-            packSize: newItemData.hasSubUnits ? Math.max(1, Number(newItemData.packSize) || 1) : 1,
-            subUnit: newItemData.hasSubUnits ? (newItemData.subUnit || 'pcs').trim() : undefined
+            hasSubUnits,
+            packSize,
+            subUnit
           };
         }
         return i;
@@ -906,13 +983,19 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
         effectiveStock = Math.round((inputStock - wasteQty) * 1000) / 1000;
       }
 
+      const unit = newItemData.unit || 'kg';
+      const isKg = unit.toLowerCase().trim() === 'kg';
+      const hasSubUnits = isKg ? true : Boolean(newItemData.hasSubUnits);
+      const packSize = isKg ? (Number(newItemData.packSize) > 1 ? Number(newItemData.packSize) : 1000) : (newItemData.hasSubUnits ? Math.max(1, Number(newItemData.packSize) || 1) : 1);
+      const subUnit = isKg ? 'gm' : (newItemData.hasSubUnits ? (newItemData.subUnit || 'pcs').trim() : undefined);
+
       const newItem: RawInventoryItem = {
         id: `raw-${Date.now()}`,
         name: newItemData.name.trim(),
         nameBn: newItemData.nameBn?.trim() || newItemData.name.trim(),
         category: newItemData.category?.trim() || 'Fuel & Utilities',
         subCategory: newItemData.subCategory?.trim() || '',
-        unit: newItemData.unit || 'kg',
+        unit: unit,
         currentStock: effectiveStock,
         minStockAlert: Number(newItemData.minStockAlert) || 5,
         unitCost: Number(newItemData.unitCost) || 0,
@@ -920,9 +1003,9 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
         supplier: newItemData.supplier?.trim(),
         notes: newItemData.notes?.trim(),
         wastagePercentage: wastagePct,
-        hasSubUnits: Boolean(newItemData.hasSubUnits),
-        packSize: newItemData.hasSubUnits ? Math.max(1, Number(newItemData.packSize) || 1) : 1,
-        subUnit: newItemData.hasSubUnits ? (newItemData.subUnit || 'pcs').trim() : undefined
+        hasSubUnits,
+        packSize,
+        subUnit
       };
       setItems(prev => [newItem, ...prev]);
 
@@ -971,6 +1054,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
   const handleEditItem = (item: RawInventoryItem) => {
     setEditingItem(item);
     setEditModalTab('DETAILS');
+    const isKg = (item.unit || '').toLowerCase().trim() === 'kg';
     setNewItemData({
       name: item.name,
       nameBn: item.nameBn,
@@ -983,9 +1067,9 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
       supplier: item.supplier || '',
       notes: item.notes || '',
       wastagePercentage: item.wastagePercentage || 0,
-      hasSubUnits: Boolean(item.hasSubUnits || (item.packSize && item.packSize > 1)),
-      packSize: item.packSize || 1,
-      subUnit: item.subUnit || 'pcs'
+      hasSubUnits: isKg ? true : Boolean(item.hasSubUnits || (item.packSize && item.packSize > 1)),
+      packSize: isKg ? (item.packSize && item.packSize > 1 ? item.packSize : 1000) : (item.packSize || 1),
+      subUnit: isKg ? 'gm' : (item.subUnit || 'pcs')
     });
     setShowAddModal(true);
   };
@@ -1778,7 +1862,19 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                   <label className="block text-xs font-bold text-slate-400 mb-1">Unit of Measure (পরিমাপের একক)</label>
                   <select
                     value={newItemData.unit || 'kg'}
-                    onChange={(e) => setNewItemData({ ...newItemData, unit: e.target.value })}
+                    onChange={(e) => {
+                      const newUnit = e.target.value;
+                      const isKg = newUnit.toLowerCase().trim() === 'kg';
+                      setNewItemData({
+                        ...newItemData,
+                        unit: newUnit,
+                        ...(isKg ? {
+                          hasSubUnits: true,
+                          packSize: 1000,
+                          subUnit: 'gm'
+                        } : {})
+                      });
+                    }}
                     className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500"
                   >
                     <option value="kg">kg (Kilogram / কেজি)</option>

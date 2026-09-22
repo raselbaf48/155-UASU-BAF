@@ -25,7 +25,7 @@ export const AddEditAirmanModal: React.FC<AddEditAirmanModalProps> = ({
     const [flightName, setFlightName] = useState<FlightName | ''>(airmanToEdit?.flightName || '');
   const [mobileNo, setMobileNo] = useState(airmanToEdit?.mobileNo || '');
   const [bloodGroup, setBloodGroup] = useState(airmanToEdit?.bloodGroup || '');
-  const [jcoSeniorityOrder, setJcoSeniorityOrder] = useState<number | ''>(airmanToEdit?.jcoSeniorityOrder || '');
+  const [seniority, setSeniority] = useState<number | ''>(airmanToEdit?.seniority !== undefined ? airmanToEdit.seniority : '');
   const [permanentAddress, setPermanentAddress] = useState(airmanToEdit?.permanentAddress || '');
 
   const [isAddressPreset, setIsAddressPreset] = useState(() => {
@@ -208,7 +208,7 @@ export const AddEditAirmanModal: React.FC<AddEditAirmanModalProps> = ({
       dateLeft: dateLeft || '',
       leaveReason: finalLeaveReason || '',
       active: !dateLeft, // Set active to false if dateLeft is provided
-      jcoSeniorityOrder: ['MWO', 'SWO', 'WO'].includes(rank) ? (jcoSeniorityOrder ? Number(jcoSeniorityOrder) : 9999) : 9999,
+      seniority: seniority !== '' ? Number(seniority) : undefined,
     });
     onClose();
   };
@@ -344,21 +344,35 @@ export const AddEditAirmanModal: React.FC<AddEditAirmanModalProps> = ({
             </div>
           </div>
 
-          {/* JCO Seniority */}
-          {['MWO', 'SWO', 'WO'].includes(rank) && (
-            <div className="p-3 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-xl">
-              <label className="block text-xs font-bold text-indigo-800 dark:text-indigo-300 mb-1">
-                JCO Seniority Order (Rank Date basis)
-              </label>
-              <input
-                type="number"
-                value={jcoSeniorityOrder}
-                onChange={(e) => setJcoSeniorityOrder(e.target.value === '' ? '' : Number(e.target.value))}
-                placeholder="e.g. 1, 2, 3..."
-                className="w-full px-3.5 py-2 bg-white dark:bg-slate-800 border border-indigo-300 dark:border-indigo-700 rounded-lg text-sm font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-              <p className="text-[10px] text-indigo-600 dark:text-indigo-400 mt-1 leading-tight">
-                Since BD No does not determine JCO seniority, enter an explicit order number (e.g., 1 for most senior, 2 for next).
+          {/* Seniority Order Setting (Synced with Cloud Biodata Register) - only in Biodata Register */}
+          {variant === 'biodata' && (
+            <div className="p-3.5 bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/80 rounded-xl space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-bold text-emerald-900 dark:text-emerald-200">
+                  Seniority / জ্যেষ্ঠতা নম্বর (Cloud Sync)
+                </label>
+                {airmanToEdit && (
+                  <span className="text-[10px] font-mono font-bold bg-emerald-200/70 dark:bg-emerald-900/80 text-emerald-900 dark:text-emerald-200 px-2 py-0.5 rounded-md border border-emerald-300 dark:border-emerald-700">
+                    Current: #{airmanToEdit.seniority !== undefined ? airmanToEdit.seniority : 'Auto (BD No)'}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center space-x-2">
+                <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-mono font-bold text-sm shrink-0">
+                  #
+                </div>
+                <input
+                  type="number"
+                  min="1"
+                  max={existingAirmen?.length || 999}
+                  value={seniority}
+                  onChange={(e) => setSeniority(e.target.value === '' ? '' : Math.max(1, Number(e.target.value)))}
+                  placeholder={airmanToEdit?.seniority !== undefined ? String(airmanToEdit.seniority) : "e.g. 1, 2, 15..."}
+                  className="w-full px-3.5 py-2 bg-white dark:bg-slate-800 border border-emerald-300 dark:border-emerald-700 rounded-lg text-sm font-black text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
+                />
+              </div>
+              <p className="text-[11px] text-emerald-800 dark:text-emerald-300 leading-tight font-medium">
+                BD No অনুযায়ী ক্রম বজায় থাকে। ক্রম পরিবর্তন করলে (যেমন ১৫ থেকে ২ দিলে) বাকিদের ক্রম স্বয়ংক্রিয়ভাবে নিচে শিফট হয়ে ক্লাউডে সিঙ্ক হবে।
               </p>
             </div>
           )}

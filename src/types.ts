@@ -34,6 +34,7 @@ export type ParadeShift = 'Morning' | 'Afternoon' | 'Night';
 export interface Airman {
   id: string;
   serNo: number;
+  seniority?: number;  // Explicit Seniority order (1..N), synced with Cloud Supabase Biodata Register
   code: string;        // e.g., MSR, RSL, OMR, etc.
   bdNo: string;        // e.g. BD/102341
   rank: Rank;
@@ -50,7 +51,6 @@ export interface Airman {
   dateJoined?: string; // YYYY-MM-DD
   dateLeft?: string;   // YYYY-MM-DD
   leaveReason?: string;
-  jcoSeniorityOrder?: number; // Tie-breaker for MWO, SWO, WO based on date of rank
   photoUrl?: string;
 }
 

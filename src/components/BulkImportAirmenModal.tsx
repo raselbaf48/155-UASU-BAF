@@ -18,6 +18,7 @@ import {
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import { localDb } from '../services/localDatabase';
+import { exportAirmenTemplateExcel, normalizeDateToISO, formatShortDate } from '../utils/csvExport';
 
 interface BulkImportAirmenModalProps {
   isOpen: boolean;
@@ -28,6 +29,7 @@ interface BulkImportAirmenModalProps {
 
 export interface ParsedAirmanRow {
   id: string;
+  seniority?: number;
   rank: string;
   fullName?: string;
   name: string;
@@ -159,6 +161,7 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
 
     // Columns matching exact Export CSV sequence:
     // Ser, BD No, Rank, Full Name, Surname, Trade, Flight, Blood Group, Present Address, Permanent Address, Mobile No, Dt of Posting
+    const seniorityIdx = findCol(['seniority', 'senior', 'জ্যেষ্ঠতা']);
     const bdIdx = findCol(['bd no', 'bdno', 'service no', 'svc no', 'bd']);
     const rankIdx = findCol(['rank', 'পদবি']);
     const fullNameIdx = findCol(['full name', 'fullname', 'পুরো নাম', 'সম্পূর্ণ নাম']);
@@ -181,7 +184,19 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
         continue;
       }
 
-      const getVal = (idx: number, fallback = '') => (idx >= 0 && row[idx] !== undefined && row[idx] !== null ? String(row[idx]).trim() : fallback);
+      const getVal = (idx: number, fallback = '') => {
+        if (idx < 0 || row[idx] === undefined || row[idx] === null) return fallback;
+        const val = row[idx];
+        if (val instanceof Date) {
+          if (!isNaN(val.getTime())) {
+            const year = val.getFullYear();
+            const month = String(val.getMonth() + 1).padStart(2, '0');
+            const day = String(val.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+          }
+        }
+        return String(val).trim();
+      };
 
       const rawRank = getVal(rankIdx, 'LAC');
       const rawFullName = getVal(fullNameIdx, '');
@@ -216,10 +231,14 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
       }
 
       const rawPostingDate = getVal(postingDateIdx, '');
+      const cleanPostingDate = normalizeDateToISO(rawPostingDate);
       const rawRemarks = getVal(remarksIdx, '');
+      const rawSeniorityVal = getVal(seniorityIdx, '');
+      const numSeniority = rawSeniorityVal && !isNaN(Number(rawSeniorityVal)) ? Number(rawSeniorityVal) : undefined;
 
       parsed.push({
         id: `row-${i}-${Date.now()}`,
+        seniority: numSeniority,
         rank: rawRank,
         fullName: effectiveFullName,
         name: effectiveSurname,
@@ -230,7 +249,7 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
         addressBlock: rawPresentAddress,
         permanentAddress: rawPermanentAddress,
         mobileNo: rawMobile,
-        dateJoined: rawPostingDate,
+        dateJoined: cleanPostingDate,
         remarks: rawRemarks,
         errors: [],
         warnings: [],
@@ -267,7 +286,7 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
       reader.onload = (evt) => {
         try {
           const bstr = evt.target?.result;
-          const wb = XLSX.read(bstr, { type: 'binary' });
+          const wb = XLSX.read(bstr, { type: 'binary', cellDates: true });
           const firstSheet = wb.Sheets[wb.SheetNames[0]];
           const data = XLSX.utils.sheet_to_json(firstSheet, { header: 1 }) as any[][];
           processData(data);
@@ -277,7 +296,7 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
       };
       reader.readAsBinaryString(file);
     } else {
-      alert('Please upload a valid .csv or .xlsx Excel file.');
+      alert('Please upload a valid .xlsx Excel file.');
     }
   };
 
@@ -315,41 +334,8 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
     setRows(validateRows(updated, existingAirmen));
   };
 
-  const handleDownloadSample = () => {
-    // Exact same heading row sequence as the Export CSV file:
-    const headers = [
-      'Ser',
-      'BD No',
-      'Rank',
-      'Full Name',
-      'Surname',
-      'Trade',
-      'Flight',
-      'Blood Group',
-      'Present Address',
-      'Permanent Address',
-      'Mobile No',
-      'Dt of Posting',
-    ];
-
-    const sampleRows = [
-      ['1', '478546', 'Sgt', 'Md Sazzad Hossain', 'Sazzad', 'Afr Fitt', 'Mechanics', 'B+', "Sgt's Mess Block 05", 'Mirpur-10, Dhaka', '01712345678', '12-Jan-22'],
-      ['2', '489123', 'Cpl', 'Russel Ahmed', 'Russel', 'Eng Fitt', 'Mechanics', 'O+', "Airmen's Mess Block 08", 'Sadar, Bogura', '01812345678', '15-Jun-23'],
-      ['3', '495678', 'LAC', 'Md Anowar Hossain', 'Anowar', 'E&I Fitt', 'Avionics', 'A+', 'Svc Qtr D-14', 'Kotwali, Chattogram', '01912345678', '01-Nov-23'],
-      ['4', '498901', 'AC', 'Rakib Hasan', 'Rakib', 'Radio Fitt', 'Avionics', 'AB+', 'Outside Base: Agrabad', 'Gouripur, Mymensingh', '01612345678', '10-Feb-24'],
-      ['5', '499120', 'AC', 'Tanvir Ahmed', 'Tanvir', 'Armt Fitt', 'Mechanics', 'O+', "Airmen's Mess Block 02", 'Sadar, Jashore', '01798765432', '18-Mar-24'],
-    ];
-
-    const csvContent = [headers.join(','), ...sampleRows.map((r) => r.map((c) => `"${c.replace(/"/g, '""')}"`).join(','))].join('\n');
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', 'BAF_155_UASU_Airmen_Biodata_Template.csv');
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+  const handleDownloadExcelSample = () => {
+    exportAirmenTemplateExcel('BAF_155_UASU_Airmen_Biodata_Template.xlsx');
   };
 
   const totalErrors = rows.reduce((sum, r) => sum + r.errors.length, 0);
@@ -366,6 +352,7 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
         const cleanBd = r.bdNo.trim().replace(/^BD\/?/i, '').trim();
         return {
           rank: rankObj.rank,
+          seniority: r.seniority !== undefined ? r.seniority : undefined,
           fullName: (r.fullName || r.name).trim(),
           name: r.name.trim(),
           bdNo: cleanBd,
@@ -408,11 +395,11 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
                   Bulk Import Airmen to Biodata Register
                 </h2>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-950 border border-emerald-500/40 text-emerald-400 uppercase">
-                  CSV / Excel (.xlsx)
+                  Excel (.xlsx)
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Upload airmen roster sheet to batch-create airmen records with instant validation.
+                Upload an Excel spreadsheet (.xlsx) to batch-create airmen records with instant validation.
               </p>
             </div>
           </div>
@@ -444,7 +431,7 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".csv, .xlsx, .xls"
+                accept=".xlsx, .xls, .csv"
                 className="hidden"
                 onChange={handleFileChange}
               />
@@ -452,10 +439,10 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
                 <Upload className="w-6 h-6" />
               </div>
               <div className="text-sm font-bold text-slate-900 dark:text-white">
-                {fileName ? `Selected: ${fileName}` : 'Click to select or drag & drop CSV/Excel file'}
+                {fileName ? `Selected: ${fileName}` : 'Click to select or drag & drop Excel (.xlsx) file'}
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Supports .CSV and Excel .XLSX spreadsheets
+                Supports Excel (.xlsx) spreadsheets
               </p>
             </div>
 
@@ -464,19 +451,19 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
               <div>
                 <div className="flex items-center space-x-1.5 text-xs font-black text-emerald-900 dark:text-emerald-300 uppercase tracking-wide">
                   <Shield className="w-3.5 h-3.5" />
-                  <span>Standard Template</span>
+                  <span>Standard Excel Template</span>
                 </div>
                 <p className="text-xs text-emerald-800 dark:text-emerald-200/80 mt-1 leading-relaxed">
-                  Download our pre-formatted spreadsheet template with the correct column headers (BD No without 'BD/', related trades like Afr Fitt, Eng Fitt, E&I Fitt, Radio Fitt, Armt Fitt).
+                  Download our pre-formatted Excel (.xlsx) spreadsheet template with official column headers, custom styling, and thin table grid borders.
                 </p>
               </div>
               <button
                 type="button"
-                onClick={handleDownloadSample}
+                onClick={handleDownloadExcelSample}
                 className="mt-4 w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs flex items-center justify-center space-x-2 shadow-xs transition-colors cursor-pointer"
               >
-                <Download className="w-4 h-4" />
-                <span>Download Sample CSV</span>
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>Download Template (.xlsx)</span>
               </button>
             </div>
           </div>
@@ -523,6 +510,7 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
                         <th className="p-2.5 border-b border-slate-200 dark:border-slate-700">Flight</th>
                         <th className="p-2.5 border-b border-slate-200 dark:border-slate-700">Address</th>
                         <th className="p-2.5 border-b border-slate-200 dark:border-slate-700">Mobile</th>
+                        <th className="p-2.5 border-b border-slate-200 dark:border-slate-700 whitespace-nowrap">Dt of Posting</th>
                         <th className="p-2.5 border-b border-slate-200 dark:border-slate-700 text-center">Action</th>
                       </tr>
                     </thead>
@@ -630,6 +618,22 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
                                 className="w-28 px-2 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-900 dark:text-white"
                               />
                             </td>
+                            <td className="p-2">
+                              <input
+                                type="date"
+                                value={row.dateJoined ? normalizeDateToISO(row.dateJoined) : ''}
+                                onChange={(e) => handleRowChange(row.id, 'dateJoined', e.target.value)}
+                                onDoubleClick={(e) => {
+                                  try {
+                                    if (typeof (e.currentTarget as any).showPicker === 'function') {
+                                      (e.currentTarget as any).showPicker();
+                                    }
+                                  } catch (err) {}
+                                }}
+                                title="Double-click to open calendar (Short date format: dd mmm yy)"
+                                className="w-32 px-2 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-900 dark:text-white"
+                              />
+                            </td>
                             <td className="p-2 text-center">
                               <button
                                 type="button"
@@ -664,7 +668,7 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
                 <strong>{rows.length}</strong> airmen ready • {totalErrors === 0 ? 'All validations passed' : `${totalErrors} errors to resolve`}
               </span>
             ) : (
-              <span>Please upload a CSV or Excel spreadsheet to begin</span>
+              <span>Please upload an Excel (.xlsx) spreadsheet to begin</span>
             )}
           </div>
 

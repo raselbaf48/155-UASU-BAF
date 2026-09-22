@@ -720,13 +720,9 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                 <span className="text-xs font-mono font-black text-indigo-400 bg-indigo-950 px-2 py-0.5 rounded border border-indigo-800">
                   {canteenMemberData?.['BD No'] || airman.bdNo}
                 </span>
-                {canteenOnly ? (
+                {canteenOnly && (
                   <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">
                     Canteen Customer
-                  </span>
-                ) : (
-                  <span className="text-xs font-bold text-slate-300">
-                    #{airman.serNo}
                   </span>
                 )}
               </div>
@@ -1922,6 +1918,14 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                 </div>
                 
                 <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                  {variant === 'biodata' && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500 font-semibold text-xs">Seniority</span>
+                      <span className="font-mono font-black text-emerald-600 dark:text-emerald-400 text-sm bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
+                        #{airman.seniority !== undefined ? airman.seniority : 'Auto'}
+                      </span>
+                    </div>
+                  )}
                   {variant === 'biodata' && (
                     <div className="flex items-center justify-between">
                       <span className="text-slate-500 font-semibold text-xs">Blood Group</span>

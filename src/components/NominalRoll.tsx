@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Airman, FlightName, Rank, UserRole } from '../types';
-import { Search, UserPlus, Edit3, Trash2, Filter, Phone, MapPin, Shield, CheckCircle, RefreshCw, Printer, FileDown, FileSpreadsheet, Upload, KeyRound, UserCheck, AlertTriangle } from 'lucide-react';
+import { Search, UserPlus, Edit3, Trash2, Filter, Phone, MapPin, Shield, CheckCircle, RefreshCw, Printer, FileDown, FileSpreadsheet, Upload, KeyRound, UserCheck, AlertTriangle, Calendar } from 'lucide-react';
 import { handleSafePrint } from "../utils/printUtils";
 import { sortAirmenBySeniority } from '../utils/seniority';
 import { PrintableNominalRollModal } from './PrintableNominalRollModal';
@@ -9,6 +9,7 @@ import { BulkImportAirmenModal } from './BulkImportAirmenModal';
 import { EntryHistoryModal } from './EntryHistoryModal';
 import { History } from 'lucide-react';
 import { localDb } from '../services/localDatabase';
+import { formatShortDate, normalizeDateToISO } from '../utils/csvExport';
 
 
 const formatAirmanName = (name: string) => {
@@ -60,6 +61,8 @@ export const NominalRoll: React.FC<NominalRollProps> = ({
   const [airmanToDelete, setAirmanToDelete] = useState<Airman | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [activeContactMenu, setActiveContactMenu] = useState<string | null>(null);
+  const [editingDateAirmanId, setEditingDateAirmanId] = useState<string | null>(null);
+  const [editingDateValue, setEditingDateValue] = useState<string>('');
 
   // Close menu on outside click
   useEffect(() => {
@@ -137,7 +140,7 @@ export const NominalRoll: React.FC<NominalRollProps> = ({
           <h1 className="text-xl font-black text-slate-900 dark:text-slate-100 flex items-center space-x-2">
             <span>{variant === 'biodata' ? 'Biodata Register' : 'Nominal Roll'}</span>
             <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-emerald-100 text-emerald-900 dark:bg-emerald-950/80 dark:text-emerald-300">
-              {filteredAirmen.length} Airmen (Seniority Order)
+              {filteredAirmen.length} Airmen{variant === 'biodata' ? ' (Seniority Order)' : ''}
             </span>
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
@@ -161,7 +164,7 @@ export const NominalRoll: React.FC<NominalRollProps> = ({
               type="button"
               onClick={() => setIsBulkImportOpen(true)}
               className="flex items-center space-x-1.5 px-3.5 py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl font-bold text-xs shadow-xs transition-colors cursor-pointer"
-              title="Import Airmen via CSV or Excel"
+              title="Import Airmen via Excel (.xlsx)"
             >
               <Upload className="w-4 h-4" />
               <span>Import</span>
@@ -396,8 +399,69 @@ export const NominalRoll: React.FC<NominalRollProps> = ({
                     )}
                   </td>
                   {variant === 'biodata' && (
-                    <td className="py-3 px-4 text-slate-600 dark:text-slate-300 whitespace-nowrap font-medium text-center">
-                      {airman.dateJoined ? new Date(airman.dateJoined).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '-'}
+                    <td 
+                      className="py-3 px-4 whitespace-nowrap text-center text-xs"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {editingDateAirmanId === airman.id ? (
+                        <div 
+                          className="inline-flex items-center space-x-1"
+                          onClick={(e) => e.stopPropagation()}
+                          onDoubleClick={(e) => e.stopPropagation()}
+                        >
+                          <input
+                            type="date"
+                            autoFocus
+                            ref={(el) => {
+                              if (el) {
+                                try {
+                                  if (typeof el.showPicker === 'function') {
+                                    el.showPicker();
+                                  }
+                                } catch (err) {}
+                              }
+                            }}
+                            value={editingDateValue}
+                            onChange={(e) => setEditingDateValue(e.target.value)}
+                            onBlur={async () => {
+                              const prevIso = airman.dateJoined ? normalizeDateToISO(airman.dateJoined) : '';
+                              if (editingDateValue !== prevIso) {
+                                localDb.updateAirman(airman.id, { dateJoined: editingDateValue });
+                                if (onRefresh) await onRefresh();
+                              }
+                              setEditingDateAirmanId(null);
+                            }}
+                            onKeyDown={async (e) => {
+                              if (e.key === 'Enter') {
+                                const prevIso = airman.dateJoined ? normalizeDateToISO(airman.dateJoined) : '';
+                                if (editingDateValue !== prevIso) {
+                                  localDb.updateAirman(airman.id, { dateJoined: editingDateValue });
+                                  if (onRefresh) await onRefresh();
+                                }
+                                setEditingDateAirmanId(null);
+                              } else if (e.key === 'Escape') {
+                                setEditingDateAirmanId(null);
+                              }
+                            }}
+                            className="px-2 py-1 bg-white dark:bg-slate-800 border-2 border-emerald-500 rounded-lg text-xs font-semibold text-slate-900 dark:text-white shadow-md focus:outline-hidden"
+                          />
+                        </div>
+                      ) : (
+                        <div 
+                          className="group/date inline-flex items-center justify-center space-x-1.5 cursor-pointer py-1 px-2.5 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-950/40 border border-transparent hover:border-emerald-200 dark:hover:border-emerald-800 transition-all select-none"
+                          title="Double-click to open calendar & edit date"
+                          onDoubleClick={(e) => {
+                            e.stopPropagation();
+                            setEditingDateAirmanId(airman.id);
+                            setEditingDateValue(airman.dateJoined ? normalizeDateToISO(airman.dateJoined) : '');
+                          }}
+                        >
+                          <span className="font-mono text-slate-700 dark:text-slate-200 group-hover/date:text-emerald-700 dark:group-hover/date:text-emerald-300 font-bold transition-colors">
+                            {formatShortDate(airman.dateJoined)}
+                          </span>
+                          <Calendar className="w-3.5 h-3.5 text-slate-400 group-hover/date:text-emerald-600 dark:group-hover/date:text-emerald-400 transition-colors shrink-0" />
+                        </div>
+                      )}
                     </td>
                   )}
                   {variant === 'biodata' && (

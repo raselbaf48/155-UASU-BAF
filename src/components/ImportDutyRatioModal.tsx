@@ -16,7 +16,7 @@ import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import { DutyRatioTable } from '../data/officialDutyRatioMatrix';
 import { FlightName } from '../types';
-import { exportDutyRatioMatrixCSV, exportDutyRatioMatrixExcel } from '../utils/csvExport';
+import { exportDutyRatioMatrixExcel } from '../utils/csvExport';
 
 interface ImportDutyRatioModalProps {
   isOpen: boolean;
@@ -591,10 +591,6 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
     }
   };
 
-  const handleDownloadSample = () => {
-    exportDutyRatioMatrixCSV(currentMatrix, 'BAF_155_UASU_Duty_Ratio_Template.csv');
-  };
-
   const handleDownloadExcelSample = () => {
     exportDutyRatioMatrixExcel(currentMatrix, 'BAF_155_UASU_Duty_Ratio_Template.xlsx');
   };
@@ -656,7 +652,7 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Upload a CSV or Excel spreadsheet containing official daily duty quotas for all flights.
+                Upload an Excel spreadsheet (.xlsx) containing official daily duty quotas for all flights.
               </p>
             </div>
           </div>
@@ -698,7 +694,7 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".csv, .xlsx, .xls"
+                accept=".xlsx, .xls, .csv"
                 className="hidden"
                 onChange={handleFileChange}
               />
@@ -706,10 +702,10 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
                 <Upload className="w-6 h-6" />
               </div>
               <div className="text-sm font-bold text-slate-900 dark:text-white">
-                {fileName ? `Selected: ${fileName}` : 'Click to select or drag & drop CSV/Excel matrix file'}
+                {fileName ? `Selected: ${fileName}` : 'Click to select or drag & drop Excel (.xlsx) matrix file'}
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Format: Duty Matrix with Date, 1 through 31, Total (100% Identical to Export CSV format)
+                Format: Duty Matrix with Date, 1 through 31, Total (Official Excel Workbook format)
               </p>
             </div>
 
@@ -717,13 +713,13 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
               <div>
                 <div className="flex items-center space-x-1.5 text-xs font-black text-indigo-900 dark:text-indigo-300 uppercase tracking-wide">
                   <FileSpreadsheet className="w-3.5 h-3.5" />
-                  <span>Standard Matrix Template</span>
+                  <span>Standard Excel Template</span>
                 </div>
                 <p className="text-xs text-indigo-800 dark:text-indigo-200/80 mt-1 leading-relaxed">
-                  Download the official duty ratio spreadsheet template in the exact same format as Export CSV (Date, 1..31 for all duties).
+                  Download the official duty ratio spreadsheet template in Microsoft Excel (.xlsx) format with live formulas (Date, 1..31 for all duties).
                 </p>
               </div>
-              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="mt-4">
                 <button
                   type="button"
                   onClick={handleDownloadExcelSample}
@@ -732,15 +728,6 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
                 >
                   <FileSpreadsheet className="w-4 h-4" />
                   <span>Download Template (.xlsx)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDownloadSample}
-                  className="w-full py-2.5 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs flex items-center justify-center space-x-1.5 shadow-xs transition-colors cursor-pointer"
-                  title="Download CSV file with Calculated Totals"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>Download Template (.csv)</span>
                 </button>
               </div>
             </div>

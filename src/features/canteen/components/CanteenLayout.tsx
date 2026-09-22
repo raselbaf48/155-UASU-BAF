@@ -131,7 +131,10 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
             if (!error && data && data.length > 0 && data[0].DP) {
               if (isMounted) {
                 setCustomerDp(data[0].DP);
-                setCurrentUser((prev: any) => ({ ...prev, DP: data[0].DP }));
+                setCurrentUser((prev: any) => {
+                  if (prev?.DP === data[0].DP) return prev;
+                  return { ...prev, DP: data[0].DP };
+                });
               }
               try {
                 localStorage.setItem(`canteen_member_${cleanBd.toLowerCase()}`, JSON.stringify({

@@ -14,7 +14,6 @@ export const INITIAL_AIRMEN: Airman[] = [
     flightName: 'Admin',
     remarks: '',
     active: true,
-    jcoSeniorityOrder: 1,
   },
   {
     id: 'airman-2',
@@ -29,7 +28,6 @@ export const INITIAL_AIRMEN: Airman[] = [
     flightName: 'Mechanics',
     remarks: '',
     active: true,
-    jcoSeniorityOrder: 2,
   },
   {
     id: 'airman-3',
@@ -44,7 +42,6 @@ export const INITIAL_AIRMEN: Airman[] = [
     flightName: 'GCS',
     remarks: '',
     active: true,
-    jcoSeniorityOrder: 3,
   },
   {
     id: 'airman-4',
@@ -59,7 +56,6 @@ export const INITIAL_AIRMEN: Airman[] = [
     flightName: 'Mechanics',
     remarks: '',
     active: true,
-    jcoSeniorityOrder: 4,
   },
   {
     id: 'airman-5',
@@ -74,7 +70,6 @@ export const INITIAL_AIRMEN: Airman[] = [
     flightName: 'Avionics',
     remarks: '',
     active: true,
-    jcoSeniorityOrder: 5,
   },
   {
     id: 'airman-6',
@@ -89,7 +84,6 @@ export const INITIAL_AIRMEN: Airman[] = [
     flightName: 'Admin',
     remarks: '',
     active: true,
-    jcoSeniorityOrder: 6,
   },
   {
     id: 'airman-7',
@@ -104,7 +98,6 @@ export const INITIAL_AIRMEN: Airman[] = [
     flightName: 'Avionics',
     remarks: '',
     active: true,
-    jcoSeniorityOrder: 7,
   },
   {
     id: 'airman-8',
@@ -119,7 +112,6 @@ export const INITIAL_AIRMEN: Airman[] = [
     flightName: 'Avionics',
     remarks: '',
     active: true,
-    jcoSeniorityOrder: 8,
   },
   {
     id: 'airman-9',

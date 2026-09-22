@@ -18,7 +18,7 @@ import { generateOfficialMonthAssignments, getOfficialParadeStateDocument } from
 import { calculateDutyStats, detectConflicts, getDaysInMonth } from '../data/rosterGenerator';
 import { DutyRatioTable, INITIAL_OFFICIAL_DUTY_MATRIX, getStoredDutyMatrix, saveDutyMatrix } from '../data/officialDutyRatioMatrix';
 import { findBestAirmanMatch as matchAirmanRankFirst, parseRosterTextHeuristically } from '../utils/airmanMatcher';
-import { sortAirmenBySeniority } from '../utils/seniority';
+import { sortAirmenBySeniority, normalizeAirmenSeniority, reorderAirmanSeniority } from '../utils/seniority';
 // import { saveDbToFirebase, getDbFromFirebase } from '../firebase';
 
 export interface LocalStorageDB {
@@ -256,9 +256,14 @@ export class LocalDatabaseEngine {
         const parsedAirmen = staffData.map((s: any, idx: number) => {
           const generatedId = (s.airman_id && s.airman_id !== "airman-undefined") ? s.airman_id : 'airman-' + (s['BD No'] && String(s['BD No']) !== "undefined" ? s['BD No'] : Math.random().toString(36).slice(2, 10));
           const localMatch = this.db.airmen.find(a => a.id === generatedId);
+          const rawSeniority = s['Seniority'];
+          const parsedSeniority = (rawSeniority !== null && rawSeniority !== undefined && !isNaN(Number(rawSeniority)))
+            ? Number(rawSeniority)
+            : (localMatch?.seniority !== undefined ? localMatch.seniority : undefined);
           return {
             id: generatedId,
             serNo: (localMatch && localMatch.serNo !== undefined) ? localMatch.serNo : idx + 1,
+            seniority: parsedSeniority,
             code: `${s['Rank'] || ''}-${(s['Surname'] || '').slice(0, 3).toUpperCase()}`,
             bdNo: String(s['BD No'] || ''),
             rank: s['Rank'] || '',
@@ -276,14 +281,13 @@ export class LocalDatabaseEngine {
             dateLeft: s['Unit Left date'] || undefined,
             
             // Preserve local-only fields that are not in Supabase schema
-            jcoSeniorityOrder: localMatch ? localMatch.jcoSeniorityOrder : undefined,
             remarks: localMatch ? localMatch.remarks : '',
             leaveReason: localMatch ? localMatch.leaveReason : undefined
           };
         });
         
-        // Force replace to ensure 48 rows overrides 61 rows
-        newDb.airmen = parsedAirmen.sort((a: any, b: any) => (a.serNo || 9999) - (b.serNo || 9999));
+        // Ensure all airmen have normalized seniority 1..N based on BD No / Rank order if not set
+        newDb.airmen = normalizeAirmenSeniority(parsedAirmen);
         dataChanged = true;
         }
       }
@@ -681,6 +685,7 @@ export class LocalDatabaseEngine {
         if (changedAirmen.length > 0) {
           let staffPayload = changedAirmen.map(a => ({
             airman_id: a.id,
+            'Seniority': (a.seniority !== undefined && a.seniority !== null && !isNaN(Number(a.seniority))) ? Number(a.seniority) : null,
             'BD No': a.bdNo || '000000',
             'Rank': a.rank || 'LAC',
             'Surname': a.name || 'Unknown',
@@ -1120,7 +1125,7 @@ export class LocalDatabaseEngine {
             }
 
             const db: LocalStorageDB = {
-              airmen: migratedAirmen.sort((a: any, b: any) => a.serNo - b.serNo),
+              airmen: normalizeAirmenSeniority(migratedAirmen),
               assignments: migratedAssignments,
 
               activityHistory: parsed.activityHistory || [],
@@ -1252,6 +1257,7 @@ export class LocalDatabaseEngine {
     const newAirman: Airman = {
       id,
       serNo: newSerNo,
+      seniority: (data.seniority !== undefined && data.seniority !== null && !isNaN(Number(data.seniority))) ? Number(data.seniority) : (this.db.airmen.length + 1),
       code: data.code || `${data.rank || 'LAC'}-${(data.name || 'AIR').slice(0, 3).toUpperCase()}`,
       bdNo: data.bdNo || `BD/${Date.now().toString().slice(-6)}`,
       rank: data.rank || 'LAC',
@@ -1268,10 +1274,15 @@ export class LocalDatabaseEngine {
       dateLeft: data.dateLeft || '',
       leaveReason: data.leaveReason || '',
       active: data.active !== undefined ? data.active : true,
-      jcoSeniorityOrder: data.jcoSeniorityOrder,
     };
 
     this.db.airmen.push(newAirman);
+    if (data.seniority !== undefined && data.seniority !== null && !isNaN(Number(data.seniority))) {
+      const { updatedAirmen } = reorderAirmanSeniority(this.db.airmen, newAirman.id, Number(data.seniority));
+      this.db.airmen = updatedAirmen;
+    } else {
+      this.db.airmen = normalizeAirmenSeniority(this.db.airmen);
+    }
     this.logSystemAction(newAirman.id, `${newAirman.rank} ${newAirman.name}`, 'Added new airman to Nominal Roll');
     this.saveToStorage();
 
@@ -1298,7 +1309,7 @@ export class LocalDatabaseEngine {
       console.warn('Auto-sync airman to Canteen caught error:', cErr);
     }
 
-    return newAirman;
+    return this.db.airmen.find(a => a.id === id) || newAirman;
   }
 
   public bulkAddAirmen(airmenList: Partial<Airman>[]): { count: number; airmen: Airman[] } {
@@ -1312,6 +1323,7 @@ export class LocalDatabaseEngine {
       const newAirman: Airman = {
         id,
         serNo: currentSerNo,
+        seniority: item.seniority !== undefined ? Number(item.seniority) : undefined,
         code: item.code || `${item.rank || 'LAC'}-${(item.name || 'AIR').slice(0, 3).toUpperCase()}`,
         bdNo: cleanBd,
         rank: item.rank || 'LAC',
@@ -1332,6 +1344,7 @@ export class LocalDatabaseEngine {
       this.db.airmen.push(newAirman);
     }
 
+    this.db.airmen = normalizeAirmenSeniority(this.db.airmen);
     this.saveToStorage();
 
     // Auto add imported airmen to Canteen Member DB
@@ -1374,12 +1387,27 @@ export class LocalDatabaseEngine {
     const idx = this.db.airmen.findIndex((a) => a.id === id);
     if (idx === -1) return null;
     const previous = this.db.airmen[idx];
-    this.db.airmen[idx] = {
-      ...previous,
-      ...data,
-      id,
-    };
-    
+
+    // Check if seniority order needs shifting
+    if (data.seniority !== undefined && data.seniority !== null && !isNaN(Number(data.seniority))) {
+      const targetSen = Number(data.seniority);
+      const currentSen = previous.seniority ?? (idx + 1);
+      if (targetSen !== currentSen) {
+        const { updatedAirmen } = reorderAirmanSeniority(this.db.airmen, id, targetSen);
+        this.db.airmen = updatedAirmen;
+      }
+    }
+
+    const newIdx = this.db.airmen.findIndex((a) => a.id === id);
+    if (newIdx !== -1) {
+      this.db.airmen[newIdx] = {
+        ...this.db.airmen[newIdx],
+        ...data,
+        seniority: this.db.airmen[newIdx].seniority,
+        id,
+      };
+    }
+
     if (previous.active && !data.active) {
       this.logSystemAction(id, `${previous.rank} ${previous.name}`, 'Posted out / Marked inactive from Nominal Roll');
     } else if (!previous.active && data.active) {
@@ -1388,7 +1416,7 @@ export class LocalDatabaseEngine {
 
     this.saveToStorage();
 
-    return this.db.airmen[idx];
+    return this.db.airmen[newIdx !== -1 ? newIdx : idx];
   }
 
   public deleteAirman(id: string): boolean {
@@ -1397,7 +1425,7 @@ export class LocalDatabaseEngine {
     if (target) {
         this.logSystemAction(id, `${target.rank} ${target.name}`, 'Permanently deleted from Nominal Roll');
     }
-    this.db.airmen = this.db.airmen.filter((a) => a.id !== id);
+    this.db.airmen = normalizeAirmenSeniority(this.db.airmen.filter((a) => a.id !== id));
 
     // Clean assignments
     if (this.db.assignments) {
