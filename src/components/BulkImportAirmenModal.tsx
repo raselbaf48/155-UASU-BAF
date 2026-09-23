@@ -19,6 +19,7 @@ import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import { localDb } from '../services/localDatabase';
 import { exportAirmenTemplateExcel, normalizeDateToISO, formatShortDate } from '../utils/csvExport';
+import { isJcoRank } from '../utils/seniority';
 
 interface BulkImportAirmenModalProps {
   isOpen: boolean;
@@ -352,7 +353,7 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
         const cleanBd = r.bdNo.trim().replace(/^BD\/?/i, '').trim();
         return {
           rank: rankObj.rank,
-          seniority: r.seniority !== undefined ? r.seniority : undefined,
+          seniority: isJcoRank(rankObj.rank) && r.seniority !== undefined ? r.seniority : undefined,
           fullName: (r.fullName || r.name).trim(),
           name: r.name.trim(),
           bdNo: cleanBd,

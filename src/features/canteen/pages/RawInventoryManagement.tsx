@@ -509,6 +509,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
 
   const [searchTerm, setSearchTerm] = useState('');
   const [stockStatusFilter, setStockStatusFilter] = useState<'ALL' | 'LOW' | 'NORMAL'>('ALL');
+  const [subCatFilter, setSubCatFilter] = useState<string>('ALL');
   const [logFilter, setLogFilter] = useState<'ALL' | 'RESTOCK' | 'ISSUE' | 'WASTAGE'>('ALL');
   const [viewMode, setViewMode] = useState<'BOX' | 'TABLE'>('BOX');
 
@@ -760,14 +761,24 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
 
       // Stock status filter
       if (stockStatusFilter === 'LOW') {
-        return item.currentStock <= item.minStockAlert;
+        if (item.currentStock > item.minStockAlert) return false;
       } else if (stockStatusFilter === 'NORMAL') {
-        return item.currentStock > item.minStockAlert;
+        if (item.currentStock <= item.minStockAlert) return false;
+      }
+
+      // SubCategory filter (Ltr - ml, Kg - gm, Packet - Pcs, etc.)
+      if (subCatFilter !== 'ALL') {
+        const itemSub = (item.subCategory || '').trim();
+        if (subCatFilter === 'OTHER') {
+          if (['Kg - gm', 'Ltr - ml', 'Packet - Pcs', 'Gas Cylinder'].includes(itemSub)) return false;
+        } else if (itemSub !== subCatFilter) {
+          return false;
+        }
       }
 
       return true;
     });
-  }, [items, searchTerm, stockStatusFilter]);
+  }, [items, searchTerm, stockStatusFilter, subCatFilter]);
 
   // Open Restock Modal for specific item
   const handleOpenRestock = (item?: RawInventoryItem) => {
@@ -1352,6 +1363,48 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
             </button>
           )}
         </div>
+
+        {/* SubCategory quick filter bar */}
+        <div className="flex items-center gap-2 pt-2 border-t border-slate-800/80 overflow-x-auto scrollbar-none text-xs">
+          <span className="text-[11px] font-bold text-slate-400 shrink-0 flex items-center gap-1">
+            <Layers className="w-3.5 h-3.5 text-indigo-400" />
+            <span>সাব-ক্যাটাগরি:</span>
+          </span>
+          {[
+            { id: 'ALL', label: 'সকল সাব-ক্যাটাগরি' },
+            { id: 'Kg - gm', label: 'Kg - gm (কেজি/গ্রাম)' },
+            { id: 'Ltr - ml', label: 'Ltr - ml (লিটার/মিলি)' },
+            { id: 'Packet - Pcs', label: 'Packet - Pcs (প্যাকেট/পিস)' },
+            { id: 'Gas Cylinder', label: 'Gas Cylinder' },
+            { id: 'OTHER', label: 'অন্যান্য' }
+          ].map(sc => {
+            const isSel = subCatFilter === sc.id;
+            const count = sc.id === 'ALL'
+              ? items.length
+              : sc.id === 'OTHER'
+              ? items.filter(i => !['Kg - gm', 'Ltr - ml', 'Packet - Pcs', 'Gas Cylinder'].includes(i.subCategory || '')).length
+              : items.filter(i => (i.subCategory || '').trim() === sc.id).length;
+
+            return (
+              <button
+                key={sc.id}
+                onClick={() => setSubCatFilter(sc.id)}
+                className={`px-2.5 py-1 rounded-lg font-bold text-xs shrink-0 transition-all flex items-center gap-1.5 cursor-pointer ${
+                  isSel
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'bg-slate-800/90 text-slate-400 hover:text-slate-200 hover:bg-slate-750'
+                }`}
+              >
+                <span>{sc.label}</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                  isSel ? 'bg-white/20 text-white' : 'bg-slate-700/70 text-slate-400'
+                }`}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Main Inventory Content: Box View or Table View */}
@@ -1427,8 +1480,12 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                                 {item.nameBn}
                               </p>
                               {(item.subCategory || item.category) && (
-                                <span className="text-[10px] px-1.5 py-0.5 bg-slate-800 text-indigo-300 rounded-md border border-slate-700/60 font-semibold truncate max-w-[120px]">
-                                  {item.subCategory || item.category}
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded-md border font-semibold truncate max-w-[140px] ${
+                                  item.subCategory 
+                                    ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30 font-bold'
+                                    : 'bg-slate-800 text-slate-300 border-slate-700/60'
+                                }`}>
+                                  {item.subCategory ? `SubCat: ${item.subCategory}` : item.category}
                                 </span>
                               )}
                             </div>
@@ -1630,6 +1687,11 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                               </div>
                               <div className="text-xs text-slate-400 font-medium flex items-center gap-1.5 flex-wrap">
                                 <span>{item.nameBn}</span>
+                                {item.subCategory && (
+                                  <span className="text-[10px] font-bold px-1.5 py-0.2 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded">
+                                    SubCat: {item.subCategory}
+                                  </span>
+                                )}
                                 {Boolean(item.hasSubUnits || (item.packSize && item.packSize > 1)) && (
                                   <span className="text-[10px] font-black px-1.5 py-0.2 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded inline-flex items-center gap-1">
                                     <Boxes className="w-2.5 h-2.5" />
@@ -1847,12 +1909,60 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-400 mb-1">সাব-ক্যাটাগরি (SubCat / Sub-Category)</label>
+                    <label className="block text-xs font-bold text-slate-400 mb-1 flex items-center justify-between">
+                      <span>সাব-ক্যাটাগরি (SubCat / Sub-Category)</span>
+                      <span className="text-[10px] text-indigo-400 font-semibold">ক্লিক করে নির্বাচন করুন</span>
+                    </label>
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      {[
+                        { label: 'Kg - gm', unit: 'kg', subUnit: 'gm', packSize: 1000, hasSubUnits: true },
+                        { label: 'Ltr - ml', unit: 'liter', subUnit: 'ml', packSize: 1000, hasSubUnits: true },
+                        { label: 'Packet - Pcs', unit: 'packet', subUnit: 'pcs', packSize: 24, hasSubUnits: true },
+                        { label: 'Gas Cylinder', unit: 'cylinder', subUnit: undefined, packSize: 1, hasSubUnits: false }
+                      ].map(preset => {
+                        const isPresetActive = newItemData.subCategory === preset.label;
+                        return (
+                          <button
+                            key={preset.label}
+                            type="button"
+                            onClick={() => {
+                              setNewItemData({
+                                ...newItemData,
+                                subCategory: preset.label,
+                                unit: preset.unit,
+                                subUnit: preset.subUnit,
+                                packSize: preset.packSize,
+                                hasSubUnits: preset.hasSubUnits
+                              });
+                            }}
+                            className={`px-2 py-1 rounded-lg text-xs font-black transition-all cursor-pointer border ${
+                              isPresetActive
+                                ? 'bg-indigo-600 text-white border-indigo-500 shadow-xs'
+                                : 'bg-slate-800 text-slate-300 border-slate-700 hover:border-indigo-400 hover:text-white'
+                            }`}
+                          >
+                            {preset.label}
+                          </button>
+                        );
+                      })}
+                    </div>
                     <input
                       type="text"
                       value={newItemData.subCategory || ''}
-                      onChange={(e) => setNewItemData({ ...newItemData, subCategory: e.target.value })}
-                      placeholder="e.g. Gas Cylinder, 12kg LPG, Spices"
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const valTrim = val.trim();
+                        let extra: Partial<RawInventoryItem> = {};
+                        if (valTrim === 'Kg - gm') {
+                          extra = { unit: 'kg', subUnit: 'gm', packSize: 1000, hasSubUnits: true };
+                        } else if (valTrim === 'Ltr - ml') {
+                          extra = { unit: 'liter', subUnit: 'ml', packSize: 1000, hasSubUnits: true };
+                        } else if (valTrim === 'Packet - Pcs') {
+                          extra = { unit: 'packet', subUnit: 'pcs', packSize: 24, hasSubUnits: true };
+                        }
+                        setNewItemData({ ...newItemData, subCategory: val, ...extra });
+                      }}
+                      placeholder="e.g. Kg - gm, Ltr - ml, Packet - Pcs, Gas Cylinder"
                       className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500"
                     />
                   </div>
@@ -1865,24 +1975,37 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                     onChange={(e) => {
                       const newUnit = e.target.value;
                       const isKg = newUnit.toLowerCase().trim() === 'kg';
+                      const isLtr = newUnit.toLowerCase().trim() === 'liter';
+                      const isPkt = newUnit.toLowerCase().trim() === 'packet';
                       setNewItemData({
                         ...newItemData,
                         unit: newUnit,
                         ...(isKg ? {
+                          subCategory: newItemData.subCategory || 'Kg - gm',
                           hasSubUnits: true,
                           packSize: 1000,
                           subUnit: 'gm'
+                        } : isLtr ? {
+                          subCategory: newItemData.subCategory || 'Ltr - ml',
+                          hasSubUnits: true,
+                          packSize: 1000,
+                          subUnit: 'ml'
+                        } : isPkt ? {
+                          subCategory: newItemData.subCategory || 'Packet - Pcs',
+                          hasSubUnits: true,
+                          packSize: newItemData.packSize && newItemData.packSize > 1 ? newItemData.packSize : 24,
+                          subUnit: 'pcs'
                         } : {})
                       });
                     }}
                     className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500"
                   >
-                    <option value="kg">kg (Kilogram / কেজি)</option>
-                    <option value="gm">gm (Gram / গ্রাম)</option>
-                    <option value="liter">liter (Liter / লিটার)</option>
+                    <option value="kg">kg (Kilogram / কেজি) — SubCat: Kg - gm</option>
+                    <option value="liter">liter (Liter / লিটার) — SubCat: Ltr - ml</option>
+                    <option value="packet">packet (Packet / প্যাকেট) — SubCat: Packet - Pcs</option>
                     <option value="pcs">pcs (Pieces / পিস)</option>
                     <option value="cylinder">cylinder (Cylinder / সিলিন্ডার)</option>
-                    <option value="packet">packet (Packet / প্যাকেট)</option>
+                    <option value="gm">gm (Gram / গ্রাম)</option>
                     <option value="box">box (Box / বক্স)</option>
                     <option value="bag">bag (Sack/Bag / বস্তা)</option>
                   </select>

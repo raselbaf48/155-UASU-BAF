@@ -1398,6 +1398,11 @@ export class LocalDatabaseEngine {
       }
     }
 
+    // If rank changed, re-normalize to ensure military hierarchy
+    if (data.rank && data.rank !== previous.rank) {
+      this.db.airmen = normalizeAirmenSeniority(this.db.airmen);
+    }
+
     const newIdx = this.db.airmen.findIndex((a) => a.id === id);
     if (newIdx !== -1) {
       this.db.airmen[newIdx] = {

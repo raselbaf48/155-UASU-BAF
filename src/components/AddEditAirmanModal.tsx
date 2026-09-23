@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Airman, FlightName, Rank } from '../types';
 import { X, Check, Building2, Home, MapPin, User, Phone, Shield, AlertCircle } from 'lucide-react';
+import { getRankSeniorityRange, resolveTargetSeniority, isJcoRank } from '../utils/seniority';
 
 interface AddEditAirmanModalProps {
+  variant?: 'nominal' | 'biodata';
   airmanToEdit?: Airman | null;
   existingAirmen?: Airman[];
   onSave: (airmanData: Partial<Airman>) => void;
@@ -63,6 +65,16 @@ export const AddEditAirmanModal: React.FC<AddEditAirmanModalProps> = ({
     return '';
   });
   const [validationError, setValidationError] = useState<string>('');
+
+  const rankRange = useMemo(() => {
+    const effectiveRank = rank || airmanToEdit?.rank || 'LAC';
+    return getRankSeniorityRange(existingAirmen || [], effectiveRank);
+  }, [existingAirmen, rank, airmanToEdit]);
+
+  const targetResolved = useMemo(() => {
+    if (seniority === '' || !rank) return null;
+    return resolveTargetSeniority(existingAirmen || [], rank, Number(seniority));
+  }, [existingAirmen, rank, seniority]);
 
   // Address Selection States: L/In vs L/Out
   const [livingType, setLivingType] = useState<'L_IN' | 'L_OUT' | null>(() => {
@@ -208,7 +220,10 @@ export const AddEditAirmanModal: React.FC<AddEditAirmanModalProps> = ({
       dateLeft: dateLeft || '',
       leaveReason: finalLeaveReason || '',
       active: !dateLeft, // Set active to false if dateLeft is provided
-      seniority: seniority !== '' ? Number(seniority) : undefined,
+      // Only Warrant Officers (MWO, SWO, WO) can have custom seniority order; others are strictly BD-No sorted
+      seniority: isJcoRank(rank) && seniority !== '' && targetResolved
+        ? targetResolved.resolvedSeniority
+        : (isJcoRank(rank) && seniority !== '' ? Number(seniority) : undefined),
     });
     onClose();
   };
@@ -344,19 +359,25 @@ export const AddEditAirmanModal: React.FC<AddEditAirmanModalProps> = ({
             </div>
           </div>
 
-          {/* Seniority Order Setting (Synced with Cloud Biodata Register) - only in Biodata Register */}
-          {variant === 'biodata' && (
-            <div className="p-3.5 bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/80 rounded-xl space-y-1.5">
+          {/* Seniority Order Setting (Synced with Cloud Biodata Register) - only in Biodata Register for MWO, SWO, WO */}
+          {variant === 'biodata' && isJcoRank(rank) && (
+            <div className="p-3.5 bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/80 rounded-xl space-y-2">
               <div className="flex items-center justify-between">
                 <label className="block text-xs font-bold text-emerald-900 dark:text-emerald-200">
-                  Seniority / জ্যেষ্ঠতা নম্বর (Cloud Sync)
+                  Seniority / জ্যেষ্ঠতা নম্বর (MWO, SWO, WO)
                 </label>
-                {airmanToEdit && (
-                  <span className="text-[10px] font-mono font-bold bg-emerald-200/70 dark:bg-emerald-900/80 text-emerald-900 dark:text-emerald-200 px-2 py-0.5 rounded-md border border-emerald-300 dark:border-emerald-700">
-                    Current: #{airmanToEdit.seniority !== undefined ? airmanToEdit.seniority : 'Auto (BD No)'}
+                <div className="flex items-center space-x-1.5">
+                  <span className="text-[10px] font-mono font-bold bg-indigo-100 dark:bg-indigo-950/80 text-indigo-900 dark:text-indigo-200 px-2 py-0.5 rounded-md border border-indigo-300 dark:border-indigo-700">
+                    {rank || 'Rank'} Range: #{rankRange.minSeniority} - #{rankRange.maxSeniority}
                   </span>
-                )}
+                  {airmanToEdit && (
+                    <span className="text-[10px] font-mono font-bold bg-emerald-200/70 dark:bg-emerald-900/80 text-emerald-900 dark:text-emerald-200 px-2 py-0.5 rounded-md border border-emerald-300 dark:border-emerald-700">
+                      Current: #{airmanToEdit.seniority !== undefined ? airmanToEdit.seniority : 'Auto (BD No)'}
+                    </span>
+                  )}
+                </div>
               </div>
+
               <div className="flex items-center space-x-2">
                 <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-mono font-bold text-sm shrink-0">
                   #
@@ -367,13 +388,34 @@ export const AddEditAirmanModal: React.FC<AddEditAirmanModalProps> = ({
                   max={existingAirmen?.length || 999}
                   value={seniority}
                   onChange={(e) => setSeniority(e.target.value === '' ? '' : Math.max(1, Number(e.target.value)))}
-                  placeholder={airmanToEdit?.seniority !== undefined ? String(airmanToEdit.seniority) : "e.g. 1, 2, 15..."}
+                  placeholder={`e.g. 1 (seniormost of ${rank || 'rank'}) or #${rankRange.minSeniority}`}
                   className="w-full px-3.5 py-2 bg-white dark:bg-slate-800 border border-emerald-300 dark:border-emerald-700 rounded-lg text-sm font-black text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
                 />
               </div>
+
+              {/* Dynamic feedback showing resolved position */}
+              {targetResolved && (
+                <div className="text-[11px] font-bold text-emerald-900 dark:text-emerald-200 bg-emerald-100/90 dark:bg-emerald-900/50 px-2.5 py-1.5 rounded-lg border border-emerald-300 dark:border-emerald-700 flex items-center space-x-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                  <span>
+                    লক্ষ্য ক্রম: <strong>#{targetResolved.resolvedSeniority}</strong> ({rank}-এর {targetResolved.relativeRankIndex === 1 ? '১ম (জ্যেষ্ঠতম)' : `${targetResolved.relativeRankIndex}তম`} ব্যক্তি হিসেবে নির্ধারিত হবে)
+                  </span>
+                </div>
+              )}
+
               <p className="text-[11px] text-emerald-800 dark:text-emerald-300 leading-tight font-medium">
-                BD No অনুযায়ী ক্রম বজায় থাকে। ক্রম পরিবর্তন করলে (যেমন ১৫ থেকে ২ দিলে) বাকিদের ক্রম স্বয়ংক্রিয়ভাবে নিচে শিফট হয়ে ক্লাউডে সিঙ্ক হবে।
+                MWO, SWO ও WO-দের ক্ষেত্রে পদোন্নতির তারিখ বা জ্যেষ্ঠতা অনুসারে ম্যানুয়ালি ক্রম পরিবর্তন করা যায়।
               </p>
+            </div>
+          )}
+
+          {/* For Non-JCOs (Sgt, Cpl, LAC, AC), show informative banner */}
+          {variant === 'biodata' && rank && !isJcoRank(rank) && (
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-between text-xs">
+              <span className="font-semibold text-slate-600 dark:text-slate-400">জ্যেষ্ঠতা ক্রম (Seniority):</span>
+              <span className="font-mono text-emerald-700 dark:text-emerald-300 font-bold bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
+                {rank} পদবির জ্যেষ্ঠতা স্বয়ংক্রিয়ভাবে BD No অনুযায়ী নির্ধারিত
+              </span>
             </div>
           )}
 

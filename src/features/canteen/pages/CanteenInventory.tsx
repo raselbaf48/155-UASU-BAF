@@ -16,7 +16,8 @@ import {
   getMenuRecipes,
   calculateMenuItemCost,
   getEffectiveRawUnitCost,
-  ensureCookingIngredients
+  ensureCookingIngredients,
+  groupRawItemsBySubCategory
 } from '../utils/recipeManager';
 
 export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = false}) => {
@@ -547,6 +548,9 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
   // Recipe & Raw Inventory states
   const [recipes, setRecipes] = useState<Record<string, RecipeIngredient[]>>(() => getMenuRecipes());
   const [availableRawItems, setAvailableRawItems] = useState<RawInventoryItem[]>(() => getRawInventoryItems());
+  const groupedRawItems = useMemo(() => {
+    return groupRawItemsBySubCategory(availableRawItems);
+  }, [availableRawItems]);
   const [itemRecipe, setItemRecipe] = useState<RecipeIngredient[]>([]);
 
   // Quick Recipe Modal for an individual menu item
@@ -810,13 +814,16 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     const rawList = availableRawItems.length > 0 ? availableRawItems : getRawInventoryItems();
     if (rawList.length === 0) return;
     const defaultRaw = rawList[0];
+    const defaultUnit = (defaultRaw.hasSubUnits || (defaultRaw.packSize && defaultRaw.packSize > 1)) && defaultRaw.subUnit 
+      ? defaultRaw.subUnit 
+      : defaultRaw.unit;
     setItemRecipe(prev => [
       ...prev,
       {
         rawItemId: defaultRaw.id,
         rawItemName: defaultRaw.name,
         quantity: 1,
-        unit: defaultRaw.unit
+        unit: defaultUnit
       }
     ]);
   };
@@ -828,13 +835,16 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
   const handleIngredientRawItemChange = (index: number, rawId: string) => {
     const raw = availableRawItems.find(r => r.id === rawId);
     if (!raw) return;
+    const rawUnit = (raw.hasSubUnits || (raw.packSize && raw.packSize > 1)) && raw.subUnit 
+      ? raw.subUnit 
+      : raw.unit;
     setItemRecipe(prev => prev.map((ing, i) => {
       if (i === index) {
         return {
           ...ing,
           rawItemId: raw.id,
           rawItemName: raw.name,
-          unit: raw.unit
+          unit: rawUnit
         };
       }
       return ing;
@@ -862,13 +872,16 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     const rawList = availableRawItems.length > 0 ? availableRawItems : getRawInventoryItems();
     if (rawList.length === 0) return;
     const defaultRaw = rawList[0];
+    const defaultUnit = (defaultRaw.hasSubUnits || (defaultRaw.packSize && defaultRaw.packSize > 1)) && defaultRaw.subUnit 
+      ? defaultRaw.subUnit 
+      : defaultRaw.unit;
     setQuickRecipeIngredients(prev => [
       ...prev,
       {
         rawItemId: defaultRaw.id,
         rawItemName: defaultRaw.name,
         quantity: 1,
-        unit: defaultRaw.unit
+        unit: defaultUnit
       }
     ]);
   };
@@ -880,13 +893,16 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
   const handleQuickIngredientRawChange = (index: number, rawId: string) => {
     const raw = availableRawItems.find(r => r.id === rawId);
     if (!raw) return;
+    const rawUnit = (raw.hasSubUnits || (raw.packSize && raw.packSize > 1)) && raw.subUnit 
+      ? raw.subUnit 
+      : raw.unit;
     setQuickRecipeIngredients(prev => prev.map((ing, i) => {
       if (i === index) {
         return {
           ...ing,
           rawItemId: raw.id,
           rawItemName: raw.name,
-          unit: raw.unit
+          unit: rawUnit
         };
       }
       return ing;

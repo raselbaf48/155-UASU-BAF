@@ -484,18 +484,15 @@ export function exportAirmenExcel(
   filename?: string
 ) {
   const wb = XLSX.utils.book_new();
-  const headers = ['Ser'];
-  if (variant === 'biodata') {
-    headers.push('Seniority');
-  }
-  headers.push(
+  const headers = [
+    'Ser',
     'BD No',
     'Rank',
     'Full Name',
     'Surname',
     'Trade',
     'Flight'
-  );
+  ];
 
   if (variant === 'biodata') {
     headers.push('Blood Group', 'Present Address', 'Permanent Address');
@@ -512,18 +509,15 @@ export function exportAirmenExcel(
   const rows: any[][] = [headers];
 
   airmen.forEach((a, index) => {
-    const row: any[] = [index + 1];
-    if (variant === 'biodata') {
-      row.push(a.seniority !== undefined ? a.seniority : index + 1);
-    }
-    row.push(
+    const row: any[] = [
+      index + 1,
       a.bdNo || '',
       a.rank || '',
       a.fullName || a.name || '',
       a.name || a.fullName || '',
       a.trade || '',
       a.flightName || ''
-    );
+    ];
 
     if (variant === 'biodata') {
       row.push(a.bloodGroup || '-');
@@ -623,8 +617,6 @@ export function exportAirmenExcel(
     switch (h) {
       case 'Ser':
         return { wch: 6 };
-      case 'Seniority':
-        return { wch: 10 };
       case 'BD No':
         return { wch: 12 };
       case 'Rank':
@@ -683,7 +675,6 @@ export function exportAirmenTemplateExcel(
   const wb = XLSX.utils.book_new();
   const headers = [
     'Ser',
-    'Seniority',
     'BD No',
     'Rank',
     'Full Name',
@@ -698,16 +689,16 @@ export function exportAirmenTemplateExcel(
   ];
 
   const sampleRows: any[][] = [
-    ['1', 1, '478546', 'Sgt', 'Md Sazzad Hossain', 'Sazzad', 'Afr Fitt', 'Mechanics', 'B+', "Sgt's Mess Block 05", 'Mirpur-10, Dhaka', '01712345678', new Date(Date.UTC(2022, 0, 12))],
-    ['2', 2, '489123', 'Cpl', 'Russel Ahmed', 'Russel', 'Eng Fitt', 'Mechanics', 'O+', "Airmen's Mess Block 08", 'Sadar, Bogura', '01812345678', new Date(Date.UTC(2023, 5, 15))],
-    ['3', 3, '495678', 'LAC', 'Md Anowar Hossain', 'Anowar', 'E&I Fitt', 'Avionics', 'A+', 'Svc Qtr D-14', 'Kotwali, Chattogram', '01912345678', new Date(Date.UTC(2023, 10, 1))],
-    ['4', 4, '498901', 'AC', 'Rakib Hasan', 'Rakib', 'Radio Fitt', 'Avionics', 'AB+', 'Outside Base: Agrabad', 'Gouripur, Mymensingh', '01612345678', new Date(Date.UTC(2024, 1, 10))],
-    ['5', 5, '499120', 'AC', 'Tanvir Ahmed', 'Tanvir', 'Armt Fitt', 'Mechanics', 'O+', "Airmen's Mess Block 02", 'Sadar, Jashore', '01798765432', new Date(Date.UTC(2024, 2, 18))],
+    ['1', '478546', 'Sgt', 'Md Sazzad Hossain', 'Sazzad', 'Afr Fitt', 'Mechanics', 'B+', "Sgt's Mess Block 05", 'Mirpur-10, Dhaka', '01712345678', new Date(Date.UTC(2022, 0, 12))],
+    ['2', '489123', 'Cpl', 'Russel Ahmed', 'Russel', 'Eng Fitt', 'Mechanics', 'O+', "Airmen's Mess Block 08", 'Sadar, Bogura', '01812345678', new Date(Date.UTC(2023, 5, 15))],
+    ['3', '495678', 'LAC', 'Md Anowar Hossain', 'Anowar', 'E&I Fitt', 'Avionics', 'A+', 'Svc Qtr D-14', 'Kotwali, Chattogram', '01912345678', new Date(Date.UTC(2023, 10, 1))],
+    ['4', '498901', 'AC', 'Rakib Hasan', 'Rakib', 'Radio Fitt', 'Avionics', 'AB+', 'Outside Base: Agrabad', 'Gouripur, Mymensingh', '01612345678', new Date(Date.UTC(2024, 1, 10))],
+    ['5', '499120', 'AC', 'Tanvir Ahmed', 'Tanvir', 'Armt Fitt', 'Mechanics', 'O+', "Airmen's Mess Block 02", 'Sadar, Jashore', '01798765432', new Date(Date.UTC(2024, 2, 18))],
   ];
 
   // Provide blank pre-formatted rows for direct user entry
   for (let b = 6; b <= 30; b++) {
-    sampleRows.push([String(b), b, '', '', '', '', '', '', '', '', '', '', '']);
+    sampleRows.push([String(b), '', '', '', '', '', '', '', '', '', '', '']);
   }
 
   const rows: any[][] = [headers, ...sampleRows];
@@ -777,7 +768,6 @@ export function exportAirmenTemplateExcel(
 
   ws['!cols'] = [
     { wch: 6 },  // Ser
-    { wch: 10 }, // Seniority
     { wch: 12 }, // BD No
     { wch: 10 }, // Rank
     { wch: 25 }, // Full Name
