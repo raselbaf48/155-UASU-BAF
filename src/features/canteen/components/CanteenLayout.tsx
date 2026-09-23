@@ -38,25 +38,42 @@ interface CanteenLayoutProps {
 
 export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMember }) => {
   const { t, i18n } = useTranslation();
-  const [activeTab, setActiveTab] = useState<string>(initialMember?.role === 'manager' ? 'manager_dashboard' : 'personal_portal');
+  const [canteenConfig, setCanteenConfig] = useState<CanteenConfig>(() => getCanteenConfig());
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<CloudSyncStatus>(() => getCanteenCloudSyncStatus());
 
   const cleanBdInitial = initialMember?.bdNo ? initialMember.bdNo.replace(/^BD\/?/i, '').trim() : '';
+  const currentMgrBd = (canteenConfig.managerBdNo || '').replace(/^BD\/?/i, '').trim().toLowerCase();
+  const isMasterManager = cleanBdInitial.toLowerCase() === '48456';
+  const isCurrentManager = Boolean(currentMgrBd && cleanBdInitial.toLowerCase() === currentMgrBd);
+  const isManager = initialMember?.role === 'manager' || isMasterManager || isCurrentManager;
+
+  const [activeTab, setActiveTab] = useState<string>(isManager ? 'manager_dashboard' : 'personal_portal');
+
   const cachedMember = (() => {
-    if (!cleanBdInitial) return null;
+    if (!cleanBdInitial || isMasterManager) return null;
     try {
       const raw = localStorage.getItem(`canteen_member_${cleanBdInitial.toLowerCase()}`);
       return raw ? JSON.parse(raw) : null;
     } catch { return null; }
   })();
 
-  const initialDp = initialMember?.photoUrl || cachedMember?.dp || '';
+  const initialDp = isMasterManager 
+    ? '' 
+    : (isCurrentManager ? (canteenConfig.adminImage || initialMember?.photoUrl || '') : (initialMember?.photoUrl || cachedMember?.dp || ''));
   const [customerDp, setCustomerDp] = useState<string>(initialDp);
+
+  const initialName = isMasterManager
+    ? 'LAC Rizwan Islam'
+    : (isCurrentManager
+        ? (canteenConfig.managerName || initialMember?.name || 'Canteen Manager')
+        : (initialMember ? initialMember.name : (cachedMember ? `${cachedMember.rank || ''} ${cachedMember.surname || ''}`.trim() : 'Guest')));
+
   const [currentUser, setCurrentUser] = useState<any>({ 
-    name: initialMember ? initialMember.name : (cachedMember ? `${cachedMember.rank || ''} ${cachedMember.surname || ''}`.trim() : 'Guest'), 
-    role: (initialMember && initialMember.role) ? initialMember.role : 'employee', 
+    name: initialName, 
+    role: isManager ? 'manager' : 'employee', 
     bdNo: initialMember?.bdNo || cleanBdInitial, 
     DP: initialDp,
-    due: initialMember?.due !== undefined ? initialMember.due : (cachedMember?.due !== undefined ? cachedMember.due : 0)
+    due: isManager ? 0 : (initialMember?.due !== undefined ? initialMember.due : (cachedMember?.due !== undefined ? cachedMember.due : 0))
   });
   const [showLogin, setShowLogin] = useState(false);
   const [loginTab, setLoginTab] = useState<'member'|'manager'>('manager');
@@ -70,8 +87,6 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showCustomerProfile, setShowCustomerProfile] = useState(false);
   const [currentCustomerAirman, setCurrentCustomerAirman] = useState<any>(null);
-  const [canteenConfig, setCanteenConfig] = useState<CanteenConfig>(() => getCanteenConfig());
-  const [cloudSyncStatus, setCloudSyncStatus] = useState<CloudSyncStatus>(() => getCanteenCloudSyncStatus());
 
   // Cloud config synchronization on mount & event listeners
   useEffect(() => {
@@ -422,12 +437,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
   };
 
   const handleLogout = () => {
-    if (currentUser.role === 'manager') {
-      setCurrentUser({ name: initialMember ? initialMember.name : 'Guest', role: 'employee', bdNo: initialMember?.bdNo });
-      setActiveTab('personal_portal');
-    } else {
-      onBack();
-    }
+    onBack();
   };
 
   const handleLogin = async () => {
@@ -493,12 +503,23 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
     { id: 'personal_portal', name: 'Personal Portal', icon: UserCircle },
     { id: 'menu', name: 'Menu', icon: UtensilsCrossed },
     { id: 'inventory', name: 'Inventory', icon: Boxes },
-    { id: 'manager_login', name: 'Manager Portal', icon: LogIn }
   ];
 
   const renderContent = () => {
+    // If not a manager, prevent access to any manager tabs
+    const managerTabs = ['manager_dashboard', 'pos_sales', 'member_db', 'due_register', 'expenditures', 'reports', 'fund', 'settings'];
+    if (currentUser.role !== 'manager' && managerTabs.includes(activeTab)) {
+      return (
+        <PersonalPortal 
+          currentUser={currentUser} 
+          customerDp={customerDp} 
+          onCustomerProfileClick={handleCustomerProfileClick} 
+        />
+      );
+    }
+
     switch(activeTab) {
-      case 'dashboard': return <EmployeeDashboard currentUser={currentUser} onManagerPortalClick={() => { setLoginTab('manager'); setShowLogin(true); setLoginInput(''); setLoginError(''); }} />;
+      case 'dashboard': return <EmployeeDashboard currentUser={currentUser} />;
       case 'personal_portal': return (
         <PersonalPortal 
           currentUser={currentUser} 
@@ -593,16 +614,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
             return (
               <button 
                 key={item.id}
-                onClick={() => {
-                  if (item.id === 'manager_login') {
-                      setLoginTab('manager'); 
-                      setShowLogin(true); 
-                      setLoginInput(''); 
-                      setLoginError('');
-                  } else {
-                      setActiveTab(item.id);
-                  }
-                }}
+                onClick={() => setActiveTab(item.id)}
                 className={`w-full flex items-center space-x-3 px-5 py-3.5 rounded-2xl transition-all font-bold ${
                   isActive 
                   ? 'bg-[#4f46e5] text-white shadow-lg shadow-indigo-500/30' 
@@ -704,14 +716,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
                               <button 
                                   key={item.id}
                                   onClick={() => {
-                                      if (item.id === 'manager_login') {
-                                          setLoginTab('manager'); 
-                                          setShowLogin(true); 
-                                          setLoginInput(''); 
-                                          setLoginError('');
-                                      } else {
-                                          setActiveTab(item.id as any);
-                                      }
+                                      setActiveTab(item.id as any);
                                       setMobileMenuOpen(false);
                                   }}
                                   className={`w-full flex items-center space-x-3 px-4 py-3 rounded-2xl transition-all font-bold ${

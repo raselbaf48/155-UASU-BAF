@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { CanteenLayout } from '../features/canteen/components/CanteenLayout';
 import { EmployeeDashboard } from '../features/canteen/pages/EmployeeDashboard';
 import { supabase } from '../supabase';
-import { fetchDirectImageUrl } from '../features/canteen/utils/canteenSettings';
+import { fetchDirectImageUrl, getCanteenConfig } from '../features/canteen/utils/canteenSettings';
 
 import { Airman } from '../types';
 import { Logo155UASU } from './Logo155UASU';
@@ -148,7 +148,47 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
     }
 
     if (activeTab === 'Canteen') {
-      const airman = airmen.find(a => a.bdNo.toLowerCase() === cleanInput.toLowerCase());
+      const cfg = getCanteenConfig();
+      const cleanLower = cleanInput.toLowerCase();
+      const currentMgrBd = (cfg.managerBdNo || '').replace(/^BD\/?/i, '').trim().toLowerCase();
+      const isMasterManager = cleanLower === '48456';
+      const isCurrentManager = Boolean(currentMgrBd && cleanLower === currentMgrBd);
+      const isManager = isMasterManager || isCurrentManager;
+
+      let airman = airmen.find(a => a.bdNo.toLowerCase() === cleanLower);
+
+      if (isMasterManager) {
+        airman = {
+          id: 'airman-48456',
+          serNo: 1,
+          code: '48456',
+          bdNo: '48456',
+          rank: 'LAC',
+          name: 'Rizwan Islam',
+          fullName: 'LAC Rizwan Islam',
+          flightName: 'Avionics',
+          trade: 'Special',
+          mobileNo: '01700000000',
+          active: true,
+          photoUrl: ''
+        };
+      } else if (isCurrentManager && !airman) {
+        airman = {
+          id: `airman-${cleanInput}`,
+          serNo: 1,
+          code: cleanInput,
+          bdNo: cleanInput,
+          rank: (cfg.managerName?.split(' ')[0] as any) || 'LAC',
+          name: cfg.managerName ? cfg.managerName.replace(/^[A-Za-z\-]+\s+/, '') : 'Manager',
+          fullName: cfg.managerName || 'Canteen Manager',
+          flightName: 'Admin',
+          trade: 'Manager',
+          mobileNo: cfg.phone || '',
+          active: true,
+          photoUrl: cfg.adminImage || ''
+        };
+      }
+
       if (!airman) {
         setErrorMsg('Member ID not found.');
         return;
@@ -159,49 +199,53 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
       localStorage.setItem('baf_canteen_recent_logins', JSON.stringify(updatedRecents));
 
       let canteenData: any = null;
-      try {
-        const raw = localStorage.getItem(`canteen_member_${cleanInput.toLowerCase()}`);
-        if (raw) canteenData = JSON.parse(raw);
-      } catch {}
-
-      // Non-blocking background sync with Supabase so login is 100% instantaneous
-      (async () => {
+      if (!isMasterManager) {
         try {
-          const { data } = await supabase
-            .from('Canteen_Member')
-            .select('DP, Due, Rank, Surname, Contact, "BD No", airman_id')
-            .or(`"BD No".eq.${cleanInput},airman_id.eq.${cleanInput},airman_id.eq.airman-${cleanInput}`)
-            .limit(1);
+          const raw = localStorage.getItem(`canteen_member_${cleanInput.toLowerCase()}`);
+          if (raw) canteenData = JSON.parse(raw);
+        } catch {}
 
-          if (data && data.length > 0) {
-            const freshData = {
-              dp: data[0].DP || '',
-              due: Number(data[0].Due) || 0,
-              rank: data[0].Rank || airman.rank,
-              surname: data[0].Surname || airman.name,
-              contact: data[0].Contact || airman.mobileNo,
-              bdNo: cleanInput
-            };
-            localStorage.setItem(`canteen_member_${cleanInput.toLowerCase()}`, JSON.stringify(freshData));
-            if (freshData.dp) {
-              await fetchDirectImageUrl(freshData.dp);
+        // Non-blocking background sync with Supabase so login is 100% instantaneous
+        (async () => {
+          try {
+            const { data } = await supabase
+              .from('Canteen_Member')
+              .select('DP, Due, Rank, Surname, Contact, "BD No", airman_id')
+              .or(`"BD No".eq.${cleanInput},airman_id.eq.${cleanInput},airman_id.eq.airman-${cleanInput}`)
+              .limit(1);
+
+            if (data && data.length > 0) {
+              const freshData = {
+                dp: data[0].DP || '',
+                due: Number(data[0].Due) || 0,
+                rank: data[0].Rank || airman.rank,
+                surname: data[0].Surname || airman.name,
+                contact: data[0].Contact || airman.mobileNo,
+                bdNo: cleanInput
+              };
+              localStorage.setItem(`canteen_member_${cleanInput.toLowerCase()}`, JSON.stringify(freshData));
+              if (freshData.dp) {
+                await fetchDirectImageUrl(freshData.dp);
+              }
             }
+          } catch (err) {
+            console.warn('Could not prefetch canteen member data in background:', err);
           }
-        } catch (err) {
-          console.warn('Could not prefetch canteen member data in background:', err);
-        }
-      })();
+        })();
+      }
 
       const enrichedAirman: any = {
         ...airman,
-        photoUrl: canteenData?.dp || airman.photoUrl || '',
-        due: canteenData?.due !== undefined ? canteenData.due : 0,
-        rank: canteenData?.rank || airman.rank,
-        surname: canteenData?.surname || airman.name
+        photoUrl: isMasterManager ? '' : (canteenData?.dp || (isCurrentManager ? cfg.adminImage : '') || airman.photoUrl || ''),
+        due: isMasterManager ? 0 : (canteenData?.due !== undefined ? canteenData.due : 0),
+        rank: isMasterManager ? 'LAC' : (canteenData?.rank || airman.rank),
+        surname: isMasterManager ? 'Rizwan Islam' : (canteenData?.surname || airman.name),
+        role: isManager ? 'manager' : 'employee'
       };
 
       setSuccessAirman(enrichedAirman);
       setIsCanteenAuth(true);
+      setIsCanteenManagerMode(isManager);
       return;
     }
 
@@ -665,11 +709,11 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
              initialMember={successAirman ? { 
                name: (successAirman.rank && successAirman.name) ? (successAirman.rank + ' ' + successAirman.name) : (successAirman.name || successAirman.fullName || 'Guest'), 
                bdNo: successAirman.bdNo, 
-               role: 'employee', 
+               role: (isCanteenManagerMode || (successAirman as any)?.role === 'manager') ? 'manager' : 'employee', 
                photoUrl: successAirman.photoUrl,
                due: (successAirman as any)?.due
              } : undefined}
-             onBack={() => { setIsCanteenAuth(false); setBdInput(canteenRecentLogins[0] || ''); setPasswordInput(''); setSuccessAirman(null); setTargetAirman(null); }} 
+             onBack={() => { setIsCanteenAuth(false); setIsCanteenManagerMode(false); setBdInput(canteenRecentLogins[0] || ''); setPasswordInput(''); setSuccessAirman(null); setTargetAirman(null); }} 
           />
         )}
       </div>

@@ -71,13 +71,13 @@ export const MemberDB: React.FC = () => {
 
   // Add Member Modal state
   const [showAddModal, setShowAddModal] = useState(false);
-  const [newMember, setNewMember] = useState({ bdNo: '', rank: '', surname: '', contact: '', dp: '' });
+  const [newMember, setNewMember] = useState({ bdNo: '', rank: '', surname: '', contact: '', dp: '', role: 'Member' });
   const [resolvingDp, setResolvingDp] = useState(false);
 
   // Profile Modal state
   const [profileMember, setProfileMember] = useState<any | null>(null);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
-  const [editMemberData, setEditMemberData] = useState({ bdNo: '', rank: '', surname: '', contact: '', dp: '' });
+  const [editMemberData, setEditMemberData] = useState({ bdNo: '', rank: '', surname: '', contact: '', dp: '', role: 'Member' });
   const [profileTx, setProfileTx] = useState<any[]>([]);
 
   // Statement Modal state
@@ -124,6 +124,7 @@ export const MemberDB: React.FC = () => {
       rank: member['Rank'] || '',
       surname: member['Surname'] || '',
       contact: member['Contact'] || '',
+      role: member['Role'] || member.role || 'Member',
       dp: member['DP'] || ''
     });
     try {
@@ -379,7 +380,9 @@ ${rowsList}
           });
         }
 
-        const payload = biodata.filter((b: any) => b.airman_id).map((b: any) => ({
+        const payload = biodata
+          .filter((b: any) => b.airman_id && String(b['BD No'] || '').replace(/\D/g, '') !== '48456')
+          .map((b: any) => ({
           airman_id: b.airman_id,
           "BD No": b['BD No'] || '',
           "Rank": b['Rank'] || '',
@@ -400,8 +403,15 @@ ${rowsList}
     setLoading(true);
     const { data, error } = await supabase.from('Canteen_Member').select('*');
     if (!error && data) {
-      const formatted = data.map((m: any) => ({
+      const formatted = data
+        .filter((m: any) => {
+          const bd = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
+          return bd !== '48456';
+        })
+        .map((m: any) => ({
         ...m,
+        Role: m.Role ?? m.role ?? '',
+        role: m.Role ?? m.role ?? '',
         Due: Number(m.Due ?? m.due ?? m.baki ?? 0),
         baki: Number(m.Due ?? m.due ?? m.baki ?? 0),
         DP: m.DP || ''
@@ -432,10 +442,10 @@ ${rowsList}
     };
     init();
 
-    // Subscribe to realtime updates on Canteen table
+    // Subscribe to realtime updates on Canteen_Member table
     const channel = supabase
       .channel('canteen_members_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'Canteen' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'Canteen_Member' }, () => {
         fetchMembers();
       })
       .subscribe();
@@ -484,6 +494,8 @@ ${rowsList}
       "Rank": newMember.rank,
       "Surname": newMember.surname,
       "Contact": newMember.contact,
+      "Role": newMember.role || 'Member',
+      role: newMember.role || 'Member',
       DP: finalDp || null,
       Due: 0
     };
@@ -492,7 +504,7 @@ ${rowsList}
     if (!error) {
       setShowAddModal(false);
       fetchMembers();
-      setNewMember({ bdNo: '', rank: '', surname: '', contact: '', dp: '' });
+      setNewMember({ bdNo: '', rank: '', surname: '', contact: '', dp: '', role: 'Member' });
     } else {
       alert("Error adding member: " + error.message);
     }
@@ -518,12 +530,14 @@ ${rowsList}
       "Rank": editMemberData.rank,
       "Surname": editMemberData.surname,
       "Contact": editMemberData.contact,
+      "Role": editMemberData.role || 'Member',
+      role: editMemberData.role || 'Member',
       DP: finalDp || null
     };
 
     const { error } = await supabase.from('Canteen_Member').update(updatePayload).eq('airman_id', profileMember.airman_id);
     if (!error) {
-      const updated = { ...profileMember, ...updatePayload, DP: finalDp };
+      const updated = { ...profileMember, ...updatePayload, DP: finalDp, Role: editMemberData.role || 'Member' };
       setProfileMember(updated);
       setMembers(prev => prev.map(m => m.airman_id === profileMember.airman_id ? updated : m));
       setIsEditingProfile(false);
@@ -551,7 +565,8 @@ ${rowsList}
   const filteredMembers = members.filter(m => 
     (m['BD No'] || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
     (m['Rank'] || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (m['Surname'] || '').toLowerCase().includes(searchTerm.toLowerCase())
+    (m['Surname'] || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (m['Role'] || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const resolvedAddDp = resolveImageUrl(newMember.dp);
@@ -631,13 +646,24 @@ ${rowsList}
                       )}
                     </div>
                     <div>
-                      <div className="flex items-center space-x-1.5 mb-1">
+                      <div className="flex items-center space-x-1.5 mb-1 flex-wrap gap-y-1">
                         <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-indigo-500/15 border-t border-indigo-400/40 border-b-2 border-indigo-950 text-indigo-300 shadow-sm">
                           {member['Rank']}
                         </span>
                         <span className="text-[10px] font-bold text-slate-400 font-mono">
                           #{member['BD No']}
                         </span>
+                        {member.Role && (
+                          <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider border shadow-sm ${
+                            member.Role.toLowerCase() === 'manager' 
+                              ? 'bg-amber-500/15 text-amber-300 border-amber-500/30' 
+                              : member.Role.toLowerCase() === 'staff' || member.Role.toLowerCase() === 'cook'
+                              ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
+                              : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                          }`}>
+                            {member.Role}
+                          </span>
+                        )}
                       </div>
                       <h3 className="font-black text-white text-base leading-snug group-hover:text-indigo-300 transition-colors">
                         {member['Surname']}
@@ -741,6 +767,30 @@ ${rowsList}
                   className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   placeholder="e.g. 017XXXXXXXX"
                 />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Role (পদবি / ভূমিকা)</label>
+                <div className="flex gap-2">
+                  <input 
+                    type="text" 
+                    value={newMember.role}
+                    onChange={(e) => setNewMember({...newMember, role: e.target.value})}
+                    className="flex-1 bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    placeholder="e.g. Member, Manager, Staff, Cook"
+                  />
+                  <select
+                    value={newMember.role}
+                    onChange={(e) => setNewMember({...newMember, role: e.target.value})}
+                    className="bg-slate-800 border border-slate-700 text-slate-200 rounded-xl px-3 py-3 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="Member">Member</option>
+                    <option value="Manager">Manager</option>
+                    <option value="Staff">Staff</option>
+                    <option value="Cook">Cook</option>
+                    <option value="Cashier">Cashier</option>
+                  </select>
+                </div>
               </div>
 
               {/* DP Field with auto Google Photos resolve */}
@@ -892,14 +942,39 @@ ${rowsList}
                     </div>
                   </div>
 
-                  <div>
-                    <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Contact Number</label>
-                    <input 
-                      type="text" 
-                      value={editMemberData.contact}
-                      onChange={(e) => setEditMemberData({ ...editMemberData, contact: e.target.value })}
-                      className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Contact Number</label>
+                      <input 
+                        type="text" 
+                        value={editMemberData.contact}
+                        onChange={(e) => setEditMemberData({ ...editMemberData, contact: e.target.value })}
+                        className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Role (পদবি / ভূমিকা)</label>
+                      <div className="flex gap-2">
+                        <input 
+                          type="text" 
+                          value={editMemberData.role}
+                          onChange={(e) => setEditMemberData({ ...editMemberData, role: e.target.value })}
+                          className="flex-1 bg-slate-800 border border-slate-700 text-white rounded-xl px-3 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          placeholder="e.g. Member, Manager"
+                        />
+                        <select
+                          value={editMemberData.role}
+                          onChange={(e) => setEditMemberData({ ...editMemberData, role: e.target.value })}
+                          className="bg-slate-800 border border-slate-700 text-slate-200 rounded-xl px-2.5 py-2.5 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        >
+                          <option value="Member">Member</option>
+                          <option value="Manager">Manager</option>
+                          <option value="Staff">Staff</option>
+                          <option value="Cook">Cook</option>
+                          <option value="Cashier">Cashier</option>
+                        </select>
+                      </div>
+                    </div>
                   </div>
 
                   {/* DP URL Input (Displayed ONLY in Edit mode as requested) */}
@@ -958,14 +1033,20 @@ ${rowsList}
                 /* VIEW MODE: Simple Member Info + History (NO Pay Bill, NO Statement, NO DP input) */
                 <div className="space-y-6">
                   {/* Basic Member Info Cards (Without Pay Bill Button) */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Contact Number</p>
-                      <p className="text-base font-bold text-white font-mono">{profileMember['Contact'] || 'Not Provided'}</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Role / পদবি</p>
+                      <p className="text-sm font-black text-indigo-300 uppercase tracking-wide">
+                        {profileMember['Role'] || profileMember.role || 'Member'}
+                      </p>
                     </div>
-                    <div className="bg-slate-800/80 p-4 rounded-2xl border border-slate-700">
+                    <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Contact Number</p>
+                      <p className="text-sm font-bold text-white font-mono">{profileMember['Contact'] || 'Not Provided'}</p>
+                    </div>
+                    <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700">
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Due</p>
-                      <p className={`text-2xl font-black font-mono ${(profileMember.Due ?? profileMember.baki) === 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
+                      <p className={`text-xl font-black font-mono ${(profileMember.Due ?? profileMember.baki) === 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
                         ৳{profileMember.Due ?? profileMember.baki ?? 0}
                       </p>
                     </div>

@@ -357,11 +357,18 @@ export const PosSales: React.FC = () => {
   const fetchMembers = async () => {
     const { data, error } = await supabase.from('Canteen_Member').select('*');
     if (!error && data) {
-        setMembers(data.map((m: any) => ({
-          ...m,
-          Due: Number(m.Due ?? m.due ?? m.baki ?? 0),
-          baki: Number(m.Due ?? m.due ?? m.baki ?? 0)
-        })));
+        setMembers(
+          data
+            .filter((m: any) => {
+              const bd = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
+              return bd !== '48456';
+            })
+            .map((m: any) => ({
+              ...m,
+              Due: Number(m.Due ?? m.due ?? m.baki ?? 0),
+              baki: Number(m.Due ?? m.due ?? m.baki ?? 0)
+            }))
+        );
     }
   };
 

@@ -142,11 +142,13 @@ export const CanteenSettings: React.FC = () => {
   const resolvedManagerDp = resolveImageUrl(settings.adminImage);
 
   const filteredMembers = members.filter((m) => {
+    const bd = String(m['BD No'] || '').toLowerCase().replace(/\D/g, '');
+    if (bd === '48456') return false;
     const term = memberSearch.toLowerCase();
-    const bd = String(m['BD No'] || '').toLowerCase();
+    const bdRaw = String(m['BD No'] || '').toLowerCase();
     const name = String(m['Surname'] || '').toLowerCase();
     const rank = String(m['Rank'] || '').toLowerCase();
-    return bd.includes(term) || name.includes(term) || rank.includes(term);
+    return bdRaw.includes(term) || name.includes(term) || rank.includes(term);
   });
 
   return (
@@ -316,16 +318,6 @@ export const CanteenSettings: React.FC = () => {
                 </div>
               </div>
             </div>
-
-            {/* Quick action button inside card */}
-            <button
-              type="button"
-              onClick={() => setShowMemberPicker(true)}
-              className="w-full sm:w-auto px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold border border-slate-700 transition-all flex items-center justify-center space-x-2"
-            >
-              <UserCheck className="w-4 h-4 text-emerald-400" />
-              <span>Member List</span>
-            </button>
           </div>
         </div>
 

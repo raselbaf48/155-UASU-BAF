@@ -16,8 +16,7 @@ import {
   getMenuRecipes,
   calculateMenuItemCost,
   getEffectiveRawUnitCost,
-  ensureCookingIngredients,
-  groupRawItemsBySubCategory
+  ensureCookingIngredients
 } from '../utils/recipeManager';
 
 export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = false}) => {
@@ -264,6 +263,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     category: 'SNACKS',
     price: 0,
     cost: 0,
+    rawItem: '',
     DP: ''
   });
   const [resolvingItemDp, setResolvingItemDp] = useState(false);
@@ -286,260 +286,44 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     }
   };
 
-  useEffect(() => {
-    fetchItems();
-  }, []);
-
   const fetchItems = async () => {
     setLoading(false); // Instant load
     try {
         const { data, error } = await supabase.from('Canteen_Menu').select('*');
         console.log('CanteenInventory fetchItems:', { data, error });
         if (!error && data && data.length > 0) {
-            setItems(data);
+            const formatted = data.map((it: any) => ({
+              ...it,
+              price: Number(it.price) || 0,
+              cost: Number(it.Cost ?? it.cost ?? 0),
+              Cost: Number(it.Cost ?? it.cost ?? 0),
+              rawItem: it['Raw Item'] ?? it.rawItem ?? it.raw_item ?? '',
+              'Raw Item': it['Raw Item'] ?? it.rawItem ?? it.raw_item ?? ''
+            }));
+            setItems(formatted);
         } else {
             console.error('Failed or empty fetch:', error);
-            // Fallback
-            setItems([
-  {
-    "id": "28d0782c-1bdf-42f6-a616-683a9d5038f1",
-    "name": "EGG MUMLET",
-    "category": "SNACKS",
-    "price": 15,
-    "stock": 99999,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "bcb8b137-36b8-4fd0-9e11-0e9502859618",
-    "name": "EGG NOODLES",
-    "category": "SNACKS",
-    "price": 50,
-    "stock": 99999,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "da73d5ab-f0e9-4df1-b3bd-89ed86a1da4f",
-    "name": "GREEN TEA",
-    "category": "SNACKS",
-    "price": 8,
-    "stock": 99999,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "c6ca22ca-0a4a-4a2b-8b48-0d839d240e7b",
-    "name": "HALIM",
-    "category": "SNACKS",
-    "price": 50,
-    "stock": 99999,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "3d86a07a-2c53-416a-abb6-52b0b448ca63",
-    "name": "LEMON JUICE",
-    "category": "DRINK",
-    "price": 10,
-    "stock": 99999,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "0e5511c2-9014-4aeb-8e57-624d6994986a",
-    "name": "LIQUOR TEA",
-    "category": "DRINK",
-    "price": 5,
-    "stock": 99999,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "02d2b676-3b4b-4e7d-9b58-477c53ede8ae",
-    "name": "MILK COFFEE",
-    "category": "DRINK",
-    "price": 25,
-    "stock": 99999,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "136e714f-1272-4723-a0a5-2048cb81e94f",
-    "name": "MILK TEA",
-    "category": "DRINK",
-    "price": 12,
-    "stock": 99999,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "5db26171-f6dc-4268-8d64-a5b53140e368",
-    "name": "NOODLES",
-    "category": "SNACKS",
-    "price": 30,
-    "stock": 99999,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "0a1f36fc-aad0-4d45-a0d8-9222ca1ca07e",
-    "name": "NORMAL BISCUIT",
-    "category": "SNACKS",
-    "price": 5,
-    "stock": 99999,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "38bc5293-57ed-4e5a-b817-cbdcb37bfebd",
-    "name": "ONE TIME BOX",
-    "category": "SNACKS",
-    "price": 5,
-    "stock": 99999,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "3dde1a4e-9b62-49a9-8b24-d758c2afc24a",
-    "name": "PASTA",
-    "category": "SNACKS",
-    "price": 35,
-    "stock": 99999,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "98b60d30-301c-49ea-9e99-7661e30fca39",
-    "name": "PORATA",
-    "category": "SNACKS",
-    "price": 15,
-    "stock": 99999,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "cebd3bcc-1802-4f63-90f3-0bb2fa27e121",
-    "name": "PORATA (HOTEL)",
-    "category": "SNACKS",
-    "price": 10,
-    "stock": 99999,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "b83a0120-d891-481a-a27f-9c7834bc48ee",
-    "name": "PORATA (UNIT)",
-    "category": "SNACKS",
-    "price": 15,
-    "stock": 99999,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "eb34adaf-7ae0-4a52-8a90-291cc88b1a1f",
-    "name": "SOSA",
-    "category": "SNACKS",
-    "price": 10,
-    "stock": 99999,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "dc82a6b4-6cea-4188-b6f1-7e176ec26cff",
-    "name": "SWARMA",
-    "category": "SNACKS",
-    "price": 50,
-    "stock": 99999,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "4b63bf8e-cedb-4d4b-b25c-fd9451df7a49",
-    "name": "BOILED EGG",
-    "category": "SNACKS",
-    "price": 15,
-    "stock": 99999,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "089a215f-20f3-47b2-983b-5a0a94cba18e",
-    "name": "CHICKEN BIRIYANI",
-    "category": "SNACKS",
-    "price": 65,
-    "stock": 10,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "5cc854fa-cdf0-43e9-a4cf-339f8a1dcbd3",
-    "name": "CHICKEN CURRY",
-    "category": "SNACKS",
-    "price": 50,
-    "stock": 99998,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "c149451c-7fe4-4531-9984-0addc2742fdb",
-    "name": "CHICKEN KHICHURI",
-    "category": "SNACKS",
-    "price": 65,
-    "stock": 99998,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "c5d4c577-81ab-43cf-88ca-d0e431661a2f",
-    "name": "CHICKEN ONION",
-    "category": "SNACKS",
-    "price": 45,
-    "stock": 99998,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "2a22e09c-cc55-4528-8a73-225de8456c1c",
-    "name": "CHICKEN PASTA",
-    "category": "SNACKS",
-    "price": 55,
-    "stock": 99998,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "b3785b27-f250-4000-85bf-3fbaf804cc63",
-    "name": "CHICKEN PULAW",
-    "category": "SNACKS",
-    "price": 65,
-    "stock": 99997,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "e37bb8e1-db3f-464a-8968-74bec924ac87",
-    "name": "CHOTPOTI",
-    "category": "SNACKS",
-    "price": 30,
-    "stock": 99998,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "c06d9508-2367-404d-b7ca-b5c9670a4b6c",
-    "name": "COLD COFFEE",
-    "category": "DRINK",
-    "price": 40,
-    "stock": 99997,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "7bb1b308-130a-4ee5-b2c4-bff0a5e25c49",
-    "name": "DRY CAKE",
-    "category": "SNACKS",
-    "price": 12,
-    "stock": 99998,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "2cb63ae0-6f65-48c7-92f5-77add415f5ea",
-    "name": "EGG FRY",
-    "category": "SNACKS",
-    "price": 18,
-    "stock": 0,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  },
-  {
-    "id": "51d5db48-1160-468c-a55a-ef21b7e4b81d",
-    "name": "EGG KHICURI",
-    "category": "SNACKS",
-    "price": 45,
-    "stock": 99997,
-    "created_at": "2026-09-16T11:21:03.555622+00:00"
-  }
-]);
         }
-    } catch (e) {
-        console.error('Exception fetching items:', e);
+    } catch (err) {
+        console.error('Exception fetching items:', err);
     }
-    setLoading(false); console.log('Finished fetchItems, items array length:', items.length);
   };
+
+  useEffect(() => {
+    fetchItems();
+
+    // Realtime channel for Canteen_Menu
+    const channel = supabase
+      .channel('canteen_menu_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'Canteen_Menu' }, () => {
+        fetchItems();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const [isEditMode, setIsEditMode] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -548,9 +332,6 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
   // Recipe & Raw Inventory states
   const [recipes, setRecipes] = useState<Record<string, RecipeIngredient[]>>(() => getMenuRecipes());
   const [availableRawItems, setAvailableRawItems] = useState<RawInventoryItem[]>(() => getRawInventoryItems());
-  const groupedRawItems = useMemo(() => {
-    return groupRawItemsBySubCategory(availableRawItems);
-  }, [availableRawItems]);
   const [itemRecipe, setItemRecipe] = useState<RecipeIngredient[]>([]);
 
   // Quick Recipe Modal for an individual menu item
@@ -565,6 +346,8 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     name: '',
     category: 'SNACKS',
     price: 0,
+    cost: 0,
+    rawItem: '',
     DP: ''
   });
   const [modalRecipe, setModalRecipe] = useState<RecipeIngredient[]>([]);
@@ -578,13 +361,20 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     setModalTab('EDIT');
     setModalNotice('');
     setHistorySearchTerm('');
+    const existingRecipe = getRecipeForMenuItem(item.id, item.name);
+    const rawList = availableRawItems.length > 0 ? availableRawItems : getRawInventoryItems();
+    const recipeCost = calculateMenuItemCost(existingRecipe, rawList).totalCost;
+    const initialCost = Number(item.Cost ?? item.cost ?? (recipeCost > 0 ? recipeCost : 0));
+    const initialRawItem = item['Raw Item'] ?? item.rawItem ?? (existingRecipe.map(r => r.rawItemName).join(', '));
     setModalFormData({
       name: item.name || '',
       category: item.category || 'SNACKS',
       price: Number(item.price) || 0,
+      cost: initialCost,
+      rawItem: initialRawItem,
       DP: item.DP || ''
     });
-    setModalRecipe(getRecipeForMenuItem(item.id, item.name));
+    setModalRecipe(existingRecipe);
 
     // Load matching transaction records from canteen_txs
     try {
@@ -661,17 +451,18 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     }));
   };
 
-  const handleModalIngredientQtyChange = (index: number, qty: number) => {
+  const handleModalIngredientQtyChange = (index: number, qty: number | string) => {
     setModalRecipe(prev => prev.map((ing, i) => {
       if (i === index) {
-        return { ...ing, quantity: isNaN(qty) ? 0 : qty };
+        return { ...ing, quantity: qty as any };
       }
       return ing;
     }));
   };
 
   const handleSaveModalChanges = async () => {
-    if (!selectedItemForModal || !modalFormData.name.trim() || modalFormData.price < 0) return;
+    const parsedPrice = Number(modalFormData.price) || 0;
+    if (!selectedItemForModal || !modalFormData.name.trim() || parsedPrice < 0) return;
 
     let finalDp = (modalFormData.DP || '').trim();
     if (finalDp.includes('photos.app.goo.gl') || finalDp.includes('photos.google.com/share')) {
@@ -680,13 +471,22 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       setResolvingModalDp(false);
     }
 
-    const finalRecipeWithCooking = ensureCookingIngredients(modalRecipe, availableRawItems);
+    const sanitizedRecipe = modalRecipe.map(r => ({
+      ...r,
+      quantity: (r.quantity !== '' && r.quantity !== undefined && !isNaN(Number(r.quantity))) ? Number(r.quantity) : 0
+    }));
+    const finalRecipeWithCooking = ensureCookingIngredients(sanitizedRecipe, availableRawItems);
     const modalRecipeCost = calculateMenuItemCost(finalRecipeWithCooking, availableRawItems).totalCost;
+    const parsedCost = Number(modalFormData.cost) >= 0 ? Number(modalFormData.cost) : (modalRecipeCost || selectedItemForModal.cost || 0);
+    const rawItemValue = modalFormData.rawItem?.trim() || finalRecipeWithCooking.map(r => r.rawItemName).join(', ');
     const payload = {
       name: modalFormData.name.trim(),
       category: modalFormData.category,
-      price: modalFormData.price,
-      cost: modalRecipeCost || selectedItemForModal.cost || 0,
+      price: parsedPrice,
+      cost: parsedCost,
+      "Cost": parsedCost,
+      rawItem: rawItemValue,
+      "Raw Item": rawItemValue,
       DP: finalDp || null
     };
 
@@ -724,19 +524,24 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
   const handleEdit = (item: any) => {
     setIsEditMode(true);
     setEditingId(item.id);
+    const existingRec = getRecipeForMenuItem(item.id, item.name);
+    const rawList = availableRawItems.length > 0 ? availableRawItems : getRawInventoryItems();
+    const recipeCost = calculateMenuItemCost(existingRec, rawList).totalCost;
     setNewItem({
       name: item.name,
       category: item.category,
       price: item.price,
-      cost: item.cost || 0,
+      cost: Number(item.Cost ?? item.cost ?? (recipeCost > 0 ? recipeCost : 0)),
+      rawItem: item['Raw Item'] ?? item.rawItem ?? (existingRec.map(r => r.rawItemName).join(', ')),
       DP: item.DP || ''
     });
-    setItemRecipe(getRecipeForMenuItem(item.id, item.name));
+    setItemRecipe(existingRec);
     setShowAddModal(true);
   };
 
   const handleAddItem = async () => {
-      if (!newItem.name || newItem.price <= 0) return;
+      const parsedPrice = Number(newItem.price) || 0;
+      if (!newItem.name || parsedPrice <= 0) return;
       
       let finalDp = (newItem.DP || '').trim();
       if (finalDp.includes('photos.app.goo.gl') || finalDp.includes('photos.google.com/share')) {
@@ -746,11 +551,16 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       }
 
       const itemRecipeCost = calculateMenuItemCost(itemRecipe, availableRawItems).totalCost;
+      const parsedCost = Number(newItem.cost) >= 0 ? Number(newItem.cost) : (itemRecipeCost || 0);
+      const rawItemValue = newItem.rawItem?.trim() || itemRecipe.map(r => r.rawItemName).join(', ');
       const payload = {
           name: newItem.name.trim(),
           category: newItem.category,
-          price: newItem.price,
-          cost: itemRecipeCost || newItem.cost || 0,
+          price: parsedPrice,
+          cost: parsedCost,
+          "Cost": parsedCost,
+          rawItem: rawItemValue,
+          "Raw Item": rawItemValue,
           DP: finalDp || null
       };
 
@@ -1032,9 +842,11 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                 const itemRec = getRecipeForMenuItem(item.id, item.name);
                 const costResult = calculateMenuItemCost(itemRec, availableRawItems);
                 const prodCost = costResult.totalCost;
+                const rawCostValue = Number(item.Cost ?? item.cost ?? (prodCost > 0 ? prodCost : 0));
+                const rawItemDisplay = (item['Raw Item'] || item.rawItem || (itemRec.length > 0 ? itemRec.map(r => r.rawItemName).join(', ') : ''));
                 const salePrice = Number(item.price) || 0;
-                const profit = Math.round((salePrice - prodCost) * 10) / 10;
-                const marginPct = salePrice > 0 ? Math.round(((salePrice - prodCost) / salePrice) * 100) : 0;
+                const profit = Math.round((salePrice - rawCostValue) * 10) / 10;
+                const marginPct = salePrice > 0 ? Math.round(((salePrice - rawCostValue) / salePrice) * 100) : 0;
                 const hasWastageIng = costResult.breakdown.some(b => b.wastagePercentage > 0);
 
                 return (
@@ -1095,12 +907,13 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                          <h3 className="font-black text-base leading-snug uppercase text-white group-hover:text-indigo-300 transition-colors truncate" title={item.name}>
                             {item.name}
                          </h3>
-                         {itemRec.length > 0 ? (
-                            <p className="text-[11px] font-medium text-slate-400 truncate mt-1" title={itemRec.map(r => r.rawItemName).join(', ')}>
-                               {itemRec.map(r => r.rawItemName).join(', ')}
+                         {rawItemDisplay ? (
+                            <p className="text-[11px] font-medium text-slate-400 truncate mt-1" title={rawItemDisplay}>
+                               <span className="text-indigo-400 font-bold">কাঁচামাল: </span>
+                               <span>{rawItemDisplay}</span>
                             </p>
                          ) : (
-                            <p className="text-[10px] font-bold text-slate-500 uppercase mt-1">রেসিপি কনফিগার করা নেই</p>
+                            <p className="text-[10px] font-bold text-slate-500 uppercase mt-1">কাঁচামাল নির্ধারিত নেই</p>
                          )}
                       </div>
                    </div>
@@ -1111,13 +924,13 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                          {/* Production Cost (With wastage adjustment) */}
                          <div>
                             <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                               <span>প্রস্তুত খরচ</span>
+                               <span>খরচ (Cost)</span>
                                {hasWastageIng && (
                                   <span className="text-[9px] text-amber-400 font-bold" title="অপচয় বাদ দিয়ে নিট কার্যকর দর অনুযায়ী">*</span>
                                )}
                             </div>
                             <div className="text-sm font-black text-amber-300 mt-0.5">
-                               {prodCost > 0 ? `৳${prodCost}` : '৳০.০'}
+                               {rawCostValue > 0 ? `৳${rawCostValue}` : '৳০.০'}
                             </div>
                          </div>
 
@@ -1133,7 +946,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                       </div>
 
                       {/* Profit Margin Indicator */}
-                      {prodCost > 0 && (
+                      {(rawCostValue > 0 || prodCost > 0) && (
                          <div className="flex items-center justify-between px-2.5 py-1 bg-emerald-950/30 border border-emerald-500/25 rounded-xl text-[11px]">
                             <span className="text-emerald-400 font-medium">মুনাফা (Profit):</span>
                             <span className={`font-black ${profit >= 0 ? 'text-emerald-300' : 'text-rose-400'}`}>
@@ -1160,8 +973,9 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       {selectedItemForModal && (() => {
          const currentCost = calculateMenuItemCost(modalRecipe, availableRawItems);
          const currentSalePrice = Number(modalFormData.price) || 0;
-         const currentProfit = Math.round((currentSalePrice - currentCost.totalCost) * 10) / 10;
-         const currentMargin = currentSalePrice > 0 ? Math.round(((currentSalePrice - currentCost.totalCost) / currentSalePrice) * 100) : 0;
+         const effectiveModalCost = Number(modalFormData.cost) > 0 ? Number(modalFormData.cost) : currentCost.totalCost;
+         const currentProfit = Math.round((currentSalePrice - effectiveModalCost) * 10) / 10;
+         const currentMargin = currentSalePrice > 0 ? Math.round(((currentSalePrice - effectiveModalCost) / currentSalePrice) * 100) : 0;
 
          // Sales stats
          const totalSoldUnits = itemSalesHistory.reduce((sum, tx) => {
@@ -1306,10 +1120,70 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                                  </label>
                                  <input 
                                     type="number" 
-                                    value={modalFormData.price}
-                                    onChange={(e) => setModalFormData({ ...modalFormData, price: parseFloat(e.target.value) || 0 })}
+                                    value={modalFormData.price ?? ''}
+                                    onChange={(e) => {
+                                       const val = e.target.value;
+                                       setModalFormData(prev => ({ ...prev, price: val as any }));
+                                    }}
+                                    onKeyDown={(e) => {
+                                       if (e.key === 'Enter') {
+                                          const val = modalFormData.price;
+                                          if (val === '' || val === null || val === undefined || isNaN(Number(val))) {
+                                             e.preventDefault();
+                                             setModalFormData(prev => ({ ...prev, price: 0 }));
+                                          }
+                                       }
+                                    }}
+                                    onBlur={() => {
+                                       const val = modalFormData.price;
+                                       if (val === '' || val === null || val === undefined || isNaN(Number(val))) {
+                                          setModalFormData(prev => ({ ...prev, price: 0 }));
+                                       } else {
+                                          setModalFormData(prev => ({ ...prev, price: Number(val) }));
+                                       }
+                                    }}
                                     className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                                     placeholder="0"
+                                 />
+                              </div>
+                           </div>
+
+                           {/* Cost & Raw Item Fields */}
+                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              <div>
+                                 <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1.5 block">
+                                    Cost (উৎপাদন খরচ ৳)
+                                 </label>
+                                 <input 
+                                    type="number" 
+                                    value={modalFormData.cost ?? ''}
+                                    onChange={(e) => {
+                                       const val = e.target.value;
+                                       setModalFormData(prev => ({ ...prev, cost: val as any }));
+                                    }}
+                                    onBlur={() => {
+                                       const val = modalFormData.cost;
+                                       if (val === '' || val === null || val === undefined || isNaN(Number(val))) {
+                                          setModalFormData(prev => ({ ...prev, cost: 0 }));
+                                       } else {
+                                          setModalFormData(prev => ({ ...prev, cost: Number(val) }));
+                                       }
+                                    }}
+                                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    placeholder="0"
+                                 />
+                              </div>
+
+                              <div>
+                                 <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1.5 block">
+                                    Raw Item (কাঁচামালের বিবরণ / উপকরণ)
+                                 </label>
+                                 <input 
+                                    type="text" 
+                                    value={modalFormData.rawItem ?? ''}
+                                    onChange={(e) => setModalFormData({ ...modalFormData, rawItem: e.target.value })}
+                                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    placeholder="e.g. ডিম, তেল, লবণ, পেঁয়াজ"
                                  />
                               </div>
                            </div>
@@ -1368,7 +1242,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                                  <div className="bg-slate-900/90 border border-slate-800 p-3 rounded-xl">
                                     <div className="text-[10px] font-bold text-slate-400 uppercase">প্রস্তুত খরচ (Cost)</div>
-                                    <div className="text-lg font-black text-amber-300 mt-1">৳{currentCost.totalCost}</div>
+                                    <div className="text-lg font-black text-amber-300 mt-1">৳{effectiveModalCost}</div>
                                  </div>
                                  <div className="bg-slate-900/90 border border-slate-800 p-3 rounded-xl">
                                     <div className="text-[10px] font-bold text-slate-400 uppercase">বিক্রয় মূল্য (Sale)</div>
@@ -1454,10 +1328,28 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                                                     <input
                                                        type="number"
                                                        step="any"
-                                                       min="0.0001"
-                                                       value={ing.quantity}
-                                                       onChange={(e) => handleModalIngredientQtyChange(idx, parseFloat(e.target.value) || 0)}
+                                                       value={ing.quantity ?? ""}
+                                                       onChange={(e) => {
+                                                          const val = e.target.value;
+                                                          handleModalIngredientQtyChange(idx, val);
+                                                       }}
+                                                       onKeyDown={(e) => {
+                                                          if (e.key === "Enter") {
+                                                             if (ing.quantity === "" || ing.quantity === null || ing.quantity === undefined || isNaN(Number(ing.quantity))) {
+                                                                e.preventDefault();
+                                                                handleModalIngredientQtyChange(idx, 0);
+                                                             }
+                                                          }
+                                                       }}
+                                                       onBlur={() => {
+                                                          if (ing.quantity === "" || ing.quantity === null || ing.quantity === undefined || isNaN(Number(ing.quantity))) {
+                                                             handleModalIngredientQtyChange(idx, 0);
+                                                          } else {
+                                                             handleModalIngredientQtyChange(idx, Number(ing.quantity));
+                                                          }
+                                                       }}
                                                        className="w-16 bg-slate-900 border border-slate-700 text-white rounded-xl px-2 py-2 text-xs font-bold text-center focus:outline-none focus:border-indigo-500"
+                                                       placeholder="0"
                                                     />
                                                     {isSubUnitItem && raw ? (
                                                        <select
@@ -1745,7 +1637,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                                           {raw.name} ({raw.nameBn}) — বর্তমান স্টক: {raw.currentStock} {raw.unit}
                                        </option>
                                     ))}
-                                 </select>
+                                  </select>
                               </div>
                               <div className="w-24 shrink-0">
                                  <label className="text-[9px] font-bold text-slate-400 block mb-1">পরিমাণ (Qty)</label>
@@ -1758,11 +1650,32 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                                     className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-2 py-2 text-xs font-bold text-center focus:outline-none focus:border-indigo-500"
                                  />
                               </div>
-                              <div className="w-16 shrink-0 text-center">
-                                 <label className="text-[9px] font-bold text-slate-400 block mb-1">একক</label>
-                                 <span className="inline-block py-2 text-xs font-black text-indigo-300 uppercase">
-                                    {ing.unit}
-                                 </span>
+                              <div className="w-24 shrink-0">
+                                 <label className="text-[9px] font-bold text-slate-400 block mb-1">একক (Unit)</label>
+                                 {(() => {
+                                    const raw = availableRawItems.find(r => r.id === ing.rawItemId);
+                                    const hasSub = Boolean(raw && (raw.hasSubUnits || (raw.packSize && raw.packSize > 1)));
+                                    if (hasSub && raw) {
+                                       return (
+                                          <select
+                                             value={ing.unit}
+                                             onChange={(e) => {
+                                                const u = e.target.value;
+                                                setQuickRecipeIngredients(prev => prev.map((item, i) => i === idx ? { ...item, unit: u } : item));
+                                             }}
+                                             className="w-full bg-slate-900 border border-indigo-500/40 text-indigo-300 text-xs font-bold rounded-xl px-1.5 py-2 focus:outline-none focus:border-indigo-500"
+                                          >
+                                             <option value={raw.subUnit || "pcs"}>{raw.subUnit || "pcs"}</option>
+                                             <option value={raw.unit}>{raw.unit}</option>
+                                          </select>
+                                       );
+                                    }
+                                    return (
+                                       <span className="inline-block py-2 text-xs font-black text-indigo-300 uppercase">
+                                          {ing.unit}
+                                       </span>
+                                    );
+                                 })()}
                               </div>
                               <div className="pt-4 shrink-0">
                                  <button
@@ -1855,10 +1768,61 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                          <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Price (৳)</label>
                          <input 
                             type="number" 
-                            value={newItem.price || ''}
-                            onChange={(e) => setNewItem({...newItem, price: parseInt(e.target.value) || 0})}
+                            value={newItem.price ?? ""}
+                            onChange={(e) => {
+                               const val = e.target.value;
+                               setNewItem(prev => ({ ...prev, price: val as any }));
+                            }}
+                            onKeyDown={(e) => {
+                               if (e.key === "Enter") {
+                                  if (newItem.price === "" || newItem.price === null || newItem.price === undefined || isNaN(Number(newItem.price))) {
+                                     e.preventDefault();
+                                     setNewItem(prev => ({ ...prev, price: 0 }));
+                                  }
+                               }
+                            }}
+                            onBlur={() => {
+                               if (newItem.price === "" || newItem.price === null || newItem.price === undefined || isNaN(Number(newItem.price))) {
+                                  setNewItem(prev => ({ ...prev, price: 0 }));
+                               } else {
+                                  setNewItem(prev => ({ ...prev, price: Number(newItem.price) }));
+                               }
+                            }}
                             className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                             placeholder="0"
+                         />
+                      </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                      <div>
+                         <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Cost (খরচ ৳)</label>
+                         <input 
+                            type="number" 
+                            value={newItem.cost ?? ""}
+                            onChange={(e) => {
+                               const val = e.target.value;
+                               setNewItem(prev => ({ ...prev, cost: val as any }));
+                            }}
+                            onBlur={() => {
+                               if (newItem.cost === "" || newItem.cost === null || newItem.cost === undefined || isNaN(Number(newItem.cost))) {
+                                  setNewItem(prev => ({ ...prev, cost: 0 }));
+                               } else {
+                                  setNewItem(prev => ({ ...prev, cost: Number(newItem.cost) }));
+                               }
+                            }}
+                            className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            placeholder="0"
+                         />
+                      </div>
+                      <div>
+                         <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Raw Item (কাঁচামালের বিবরণ)</label>
+                         <input 
+                            type="text" 
+                            value={newItem.rawItem ?? ""}
+                            onChange={(e) => setNewItem({...newItem, rawItem: e.target.value})}
+                            className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            placeholder="e.g. ডিম, তেল, লবণ"
                          />
                       </div>
                   </div>

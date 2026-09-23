@@ -128,23 +128,25 @@ export const getDetailedUsers = (nominalAirmen: Airman[] = []): DetailedUserLogi
     modified = true;
   }
   
-  // Force 48456 to be OWNER
+  // Force 48456 to be OWNER with name Rizwan Islam
   const ownerIdx = parsed.findIndex(u => (u.bdNo || "").replace(/^BD\/?/i, '').trim() === '48456');
   if (ownerIdx >= 0) {
-    if (parsed[ownerIdx].role !== 'OWNER') {
+    if (parsed[ownerIdx].role !== 'OWNER' || parsed[ownerIdx].name !== 'Rizwan Islam') {
       parsed[ownerIdx].role = 'OWNER';
+      parsed[ownerIdx].name = 'Rizwan Islam';
+      parsed[ownerIdx].rank = 'LAC';
       modified = true;
     }
   } else {
-    // If 48456 does not exist in detailed users, let's create a placeholder or wait for them to log in.
+    // If 48456 does not exist in detailed users, let's create it
     parsed.push({
       id: 'user-login-48456',
       airmanId: 'airman-48456',
       bdNo: '48456',
       rank: 'LAC',
-      name: 'Rasel',
+      name: 'Rizwan Islam',
       flightName: 'Avionics',
-      trade: 'E&I Fitt',
+      trade: 'Special',
       role: 'OWNER',
       password: '48456',
       adminPass: '1124',
@@ -152,7 +154,7 @@ export const getDetailedUsers = (nominalAirmen: Airman[] = []): DetailedUserLogi
       detailOrder: 'DO-155/ADMIN/01',
       detailedAt: new Date().toISOString(),
       detailedBy: 'System',
-      remarks: 'Primary Admin User ID (LAC Rasel)'
+      remarks: 'Primary Admin User ID (LAC Rizwan Islam)'
     });
     modified = true;
   }
@@ -231,19 +233,19 @@ export const getDetailedUsers = (nominalAirmen: Airman[] = []): DetailedUserLogi
   // Fallback single primary user
   const primaryFallback: DetailedUserLogin[] = [
     {
-      id: 'user-login-474455',
+      id: 'user-login-48456',
       bdNo: '48456',
       rank: 'LAC',
-      name: 'Rasel',
+      name: 'Rizwan Islam',
       flightName: 'Avionics',
-      trade: 'E&I Fitt',
+      trade: 'Special',
       role: 'OWNER',
       password: '48456',
       status: 'ACTIVE',
       detailOrder: 'DO-155/ADMIN/01',
       detailedAt: new Date().toISOString(),
       detailedBy: '155 UASU Unit HQ',
-      remarks: 'Primary Admin User ID (LAC Rasel)',
+      remarks: 'Primary Admin User ID (LAC Rizwan Islam)',
     },
    SYSTEM_OWNER];
   return primaryFallback;
