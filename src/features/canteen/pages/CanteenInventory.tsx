@@ -3,7 +3,7 @@ import {
   Search, Plus, Edit2, Trash2, ImageIcon, Save, X, Loader2, 
   AlertTriangle, CheckCircle2, ChefHat, Sparkles, AlertCircle, 
   ShoppingBag, History, TrendingUp, DollarSign, Calendar, User, 
-  Percent, ArrowRight, UtensilsCrossed, Info
+  Percent, ArrowRight, UtensilsCrossed, Info, Lock, Eye, EyeOff
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, fetchDirectImageUrl } from '../utils/canteenSettings';
@@ -16,7 +16,12 @@ import {
   getMenuRecipes,
   calculateMenuItemCost,
   getEffectiveRawUnitCost,
-  ensureCookingIngredients
+  ensureCookingIngredients,
+  formatRecipeRawItemsString,
+  getIngredientToInventoryRatio,
+  getRawItemSubUnitInfo,
+  decodeNotesMeta,
+  RAW_ITEMS_STORAGE_KEY
 } from '../utils/recipeManager';
 
 export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = false}) => {
@@ -286,20 +291,71 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     }
   };
 
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+
+  // Recipe & Raw Inventory states
+  const [recipes, setRecipes] = useState<Record<string, RecipeIngredient[]>>(() => getMenuRecipes());
+  const [availableRawItems, setAvailableRawItems] = useState<RawInventoryItem[]>(() => getRawInventoryItems());
+  const [itemRecipe, setItemRecipe] = useState<RecipeIngredient[]>([]);
+  const [showCostAndRawItem, setShowCostAndRawItem] = useState(false);
+
+  const fetchRawItems = async () => {
+    try {
+      const { data, error } = await supabase.from('Canteen_Inventory').select('*');
+      if (!error && data && data.length > 0) {
+        const parsedRaw = data.map((r: any) => {
+          const meta = decodeNotesMeta(r.notes);
+          const sub = r['Sub Unit'] ?? r.subUnit ?? r.sub_unit ?? meta.subUnit;
+          const pSize = Number(r.packSize) || Number(meta.packSize) || (['kg', 'কেজি'].includes((r.unit || '').toLowerCase()) ? 1000 : (['liter', 'ltr', 'লিটার'].includes((r.unit || '').toLowerCase()) ? 1000 : 1));
+          return {
+            ...r,
+            subUnit: sub,
+            packSize: pSize,
+            hasSubUnits: r.hasSubUnits ?? meta.hasSubUnits ?? Boolean(sub && sub !== r.unit)
+          };
+        });
+        setAvailableRawItems(parsedRaw);
+        try {
+          localStorage.setItem(RAW_ITEMS_STORAGE_KEY, JSON.stringify(parsedRaw));
+        } catch {}
+      }
+    } catch (e) {
+      console.warn('Failed to load raw items from DB in CanteenInventory:', e);
+    }
+  };
+
   const fetchItems = async () => {
     setLoading(false); // Instant load
     try {
         const { data, error } = await supabase.from('Canteen_Menu').select('*');
-        console.log('CanteenInventory fetchItems:', { data, error });
         if (!error && data && data.length > 0) {
-            const formatted = data.map((it: any) => ({
-              ...it,
-              price: Number(it.price) || 0,
-              cost: Number(it.Cost ?? it.cost ?? 0),
-              Cost: Number(it.Cost ?? it.cost ?? 0),
-              rawItem: it['Raw Item'] ?? it.rawItem ?? it.raw_item ?? '',
-              'Raw Item': it['Raw Item'] ?? it.rawItem ?? it.raw_item ?? ''
-            }));
+            const rawList = availableRawItems.length > 0 ? availableRawItems : getRawInventoryItems();
+            const formatted = data.map((it: any) => {
+              const itemRec = getRecipeForMenuItem(it.id, it.name);
+              const costRes = calculateMenuItemCost(itemRec, rawList);
+              const prodCost = costRes.totalCost;
+              const resolvedCost = (itemRec.length > 0 || prodCost > 0) ? prodCost : Number(it.Cost ?? it.cost ?? 0);
+              const resolvedRawItem = itemRec.length > 0 ? formatRecipeRawItemsString(itemRec, rawList) : (it['Raw Item'] ?? it.rawItem ?? it.raw_item ?? '');
+              
+              // Real-time DB sync: if DB Cost or Raw Item differs from resolved recipe calculation, sync back to DB silently
+              if (itemRec.length > 0 && (Number(it.Cost) !== resolvedCost || it['Raw Item'] !== resolvedRawItem)) {
+                supabase.from('Canteen_Menu').update({
+                  Cost: resolvedCost,
+                  'Raw Item': resolvedRawItem
+                }).eq('id', it.id).then();
+              }
+
+              return {
+                ...it,
+                price: Number(it.price) || 0,
+                cost: resolvedCost,
+                Cost: resolvedCost,
+                rawItem: resolvedRawItem,
+                'Raw Item': resolvedRawItem
+              };
+            });
             setItems(formatted);
         } else {
             console.error('Failed or empty fetch:', error);
@@ -310,29 +366,29 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
   };
 
   useEffect(() => {
-    fetchItems();
+    fetchRawItems().then(() => fetchItems());
 
     // Realtime channel for Canteen_Menu
-    const channel = supabase
+    const menuChannel = supabase
       .channel('canteen_menu_realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'Canteen_Menu' }, () => {
         fetchItems();
       })
       .subscribe();
 
+    // Realtime channel for Canteen_Inventory
+    const inventoryChannel = supabase
+      .channel('canteen_inventory_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'Canteen_Inventory' }, () => {
+        fetchRawItems().then(() => fetchItems());
+      })
+      .subscribe();
+
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(menuChannel);
+      supabase.removeChannel(inventoryChannel);
     };
   }, []);
-
-  const [isEditMode, setIsEditMode] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
-
-  // Recipe & Raw Inventory states
-  const [recipes, setRecipes] = useState<Record<string, RecipeIngredient[]>>(() => getMenuRecipes());
-  const [availableRawItems, setAvailableRawItems] = useState<RawInventoryItem[]>(() => getRawInventoryItems());
-  const [itemRecipe, setItemRecipe] = useState<RecipeIngredient[]>([]);
 
   // Quick Recipe Modal for an individual menu item
   const [quickRecipeItem, setQuickRecipeItem] = useState<any | null>(null);
@@ -364,8 +420,10 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     const existingRecipe = getRecipeForMenuItem(item.id, item.name);
     const rawList = availableRawItems.length > 0 ? availableRawItems : getRawInventoryItems();
     const recipeCost = calculateMenuItemCost(existingRecipe, rawList).totalCost;
-    const initialCost = Number(item.Cost ?? item.cost ?? (recipeCost > 0 ? recipeCost : 0));
-    const initialRawItem = item['Raw Item'] ?? item.rawItem ?? (existingRecipe.map(r => r.rawItemName).join(', '));
+    const initialCost = existingRecipe.length > 0 ? recipeCost : Number(item.Cost ?? item.cost ?? 0);
+    const initialRawItem = existingRecipe.length > 0 
+      ? formatRecipeRawItemsString(existingRecipe, rawList) 
+      : (item['Raw Item'] ?? item.rawItem ?? '');
     setModalFormData({
       name: item.name || '',
       category: item.category || 'SNACKS',
@@ -475,18 +533,20 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       ...r,
       quantity: (r.quantity !== '' && r.quantity !== undefined && !isNaN(Number(r.quantity))) ? Number(r.quantity) : 0
     }));
-    const finalRecipeWithCooking = ensureCookingIngredients(sanitizedRecipe, availableRawItems);
-    const modalRecipeCost = calculateMenuItemCost(finalRecipeWithCooking, availableRawItems).totalCost;
-    const parsedCost = Number(modalFormData.cost) >= 0 ? Number(modalFormData.cost) : (modalRecipeCost || selectedItemForModal.cost || 0);
-    const rawItemValue = modalFormData.rawItem?.trim() || finalRecipeWithCooking.map(r => r.rawItemName).join(', ');
+    const finalRecipe = sanitizedRecipe;
+    const modalRecipeCost = calculateMenuItemCost(finalRecipe, availableRawItems).totalCost;
+    const parsedCost = finalRecipe.length > 0 
+      ? modalRecipeCost 
+      : (Number(modalFormData.cost) >= 0 ? Number(modalFormData.cost) : 0);
+    const rawItemValue = finalRecipe.length > 0
+      ? formatRecipeRawItemsString(finalRecipe, availableRawItems)
+      : (modalFormData.rawItem !== undefined ? modalFormData.rawItem.trim() : '');
     const payload = {
       name: modalFormData.name.trim(),
       category: modalFormData.category,
       price: parsedPrice,
-      cost: parsedCost,
-      "Cost": parsedCost,
-      rawItem: rawItemValue,
-      "Raw Item": rawItemValue,
+      Cost: parsedCost,
+      'Raw Item': rawItemValue,
       DP: finalDp || null
     };
 
@@ -496,9 +556,14 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       console.warn('Supabase update warning:', e);
     }
 
-    setItems(prev => prev.map(i => i.id === selectedItemForModal.id ? { ...i, ...payload } : i));
+    setItems(prev => prev.map(i => i.id === selectedItemForModal.id ? { 
+      ...i, 
+      ...payload,
+      cost: parsedCost,
+      rawItem: rawItemValue
+    } : i));
 
-    saveRecipeForMenuItem(selectedItemForModal.id, finalRecipeWithCooking, modalFormData.name.trim());
+    saveRecipeForMenuItem(selectedItemForModal.id, finalRecipe, modalFormData.name.trim());
     setRecipes(getMenuRecipes());
 
     setSelectedItemForModal(null);
@@ -531,8 +596,8 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       name: item.name,
       category: item.category,
       price: item.price,
-      cost: Number(item.Cost ?? item.cost ?? (recipeCost > 0 ? recipeCost : 0)),
-      rawItem: item['Raw Item'] ?? item.rawItem ?? (existingRec.map(r => r.rawItemName).join(', ')),
+      cost: existingRec.length > 0 ? recipeCost : Number(item.Cost ?? item.cost ?? 0),
+      rawItem: existingRec.length > 0 ? formatRecipeRawItemsString(existingRec, rawList) : (item['Raw Item'] ?? item.rawItem ?? ''),
       DP: item.DP || ''
     });
     setItemRecipe(existingRec);
@@ -551,16 +616,14 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       }
 
       const itemRecipeCost = calculateMenuItemCost(itemRecipe, availableRawItems).totalCost;
-      const parsedCost = Number(newItem.cost) >= 0 ? Number(newItem.cost) : (itemRecipeCost || 0);
-      const rawItemValue = newItem.rawItem?.trim() || itemRecipe.map(r => r.rawItemName).join(', ');
+      const parsedCost = itemRecipe.length > 0 ? itemRecipeCost : (Number(newItem.cost) >= 0 ? Number(newItem.cost) : 0);
+      const rawItemValue = itemRecipe.length > 0 ? formatRecipeRawItemsString(itemRecipe, availableRawItems) : (newItem.rawItem?.trim() || '');
       const payload = {
           name: newItem.name.trim(),
           category: newItem.category,
           price: parsedPrice,
-          cost: parsedCost,
-          "Cost": parsedCost,
-          rawItem: rawItemValue,
-          "Raw Item": rawItemValue,
+          Cost: parsedCost,
+          'Raw Item': rawItemValue,
           DP: finalDp || null
       };
 
@@ -728,10 +791,33 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     }));
   };
 
-  const handleSaveQuickRecipe = () => {
+  const handleSaveQuickRecipe = async () => {
     if (!quickRecipeItem) return;
+    const rawList = availableRawItems.length > 0 ? availableRawItems : getRawInventoryItems();
+    const costRes = calculateMenuItemCost(quickRecipeIngredients, rawList);
+    const prodCost = costRes.totalCost;
+    const rawItemValue = formatRecipeRawItemsString(quickRecipeIngredients, rawList);
+
     saveRecipeForMenuItem(quickRecipeItem.id, quickRecipeIngredients, quickRecipeItem.name);
     setRecipes(getMenuRecipes());
+
+    try {
+      await supabase.from('Canteen_Menu').update({
+        Cost: prodCost,
+        'Raw Item': rawItemValue
+      }).eq('id', quickRecipeItem.id);
+    } catch (e) {
+      console.warn('Failed to sync quick recipe cost to DB:', e);
+    }
+
+    setItems(prev => prev.map(i => i.id === quickRecipeItem.id ? {
+      ...i,
+      cost: prodCost,
+      Cost: prodCost,
+      rawItem: rawItemValue,
+      'Raw Item': rawItemValue
+    } : i));
+
     setRecipeNotice('কাঁচামাল রেসিপি সফলভাবে সংরক্ষণ করা হয়েছে!');
     setTimeout(() => {
       setQuickRecipeItem(null);
@@ -773,24 +859,38 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
             <h2 className="text-2xl font-black text-white uppercase tracking-tighter">CANTEEN MENU</h2>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">CLOUD INTEGRATED MENU & RECIPES</p>
          </div>
-         {!readOnly ? (
-           <div className="flex items-center space-x-3">
-              <button onClick={() => {
-                 setIsEditMode(false);
-                 setEditingId(null);
-                 setNewItem({ name: '', category: 'SNACKS', price: 0, cost: 0, DP: '' });
-                 setItemRecipe([]);
-                 setShowAddModal(true);
-              }} className="flex items-center space-x-2 px-5 py-3 bg-[#4f46e5] text-white rounded-xl text-[10px] font-black tracking-widest hover:bg-[#4338ca] transition-colors shadow-md shadow-indigo-500/20 cursor-pointer">
-                 <Plus className="w-4 h-4" />
-                 <span>ADD NEW ENTRY</span>
-              </button>
-           </div>
-         ) : (
-           <div className="flex items-center space-x-2 px-4 py-2 bg-slate-800/80 border border-slate-700/80 rounded-xl text-slate-400 text-xs font-bold uppercase tracking-wider">
-              <span>VIEW ONLY MODE</span>
-           </div>
-         )}
+         <div className="flex items-center space-x-3">
+            <button
+               type="button"
+               onClick={() => setShowCostAndRawItem(prev => !prev)}
+               className={`flex items-center space-x-2 px-4 py-3 rounded-xl text-[10px] font-black tracking-wider uppercase border transition-colors cursor-pointer ${
+                  showCostAndRawItem
+                     ? 'bg-amber-500/15 text-amber-300 border-amber-500/40 hover:bg-amber-500/25'
+                     : 'bg-slate-900 border-slate-700/80 text-slate-400 hover:text-white hover:bg-slate-800'
+               }`}
+               title={showCostAndRawItem ? "কাঁচামালের তালিকা লুকান" : "কাঁচামালের তালিকা দেখুন"}
+            >
+               {showCostAndRawItem ? <EyeOff className="w-4 h-4 text-amber-400" /> : <Eye className="w-4 h-4 text-slate-400" />}
+               <span>{showCostAndRawItem ? 'Hide Raw Items' : 'Show Raw Items'}</span>
+            </button>
+
+            {!readOnly ? (
+               <button onClick={() => {
+                  setIsEditMode(false);
+                  setEditingId(null);
+                  setNewItem({ name: '', category: 'SNACKS', price: 0, cost: 0, DP: '' });
+                  setItemRecipe([]);
+                  setShowAddModal(true);
+               }} className="flex items-center space-x-2 px-5 py-3 bg-[#4f46e5] text-white rounded-xl text-[10px] font-black tracking-widest hover:bg-[#4338ca] transition-colors shadow-md shadow-indigo-500/20 cursor-pointer">
+                  <Plus className="w-4 h-4" />
+                  <span>ADD NEW ENTRY</span>
+               </button>
+            ) : (
+               <div className="flex items-center space-x-2 px-4 py-2 bg-slate-800/80 border border-slate-700/80 rounded-xl text-slate-400 text-xs font-bold uppercase tracking-wider">
+                  <span>VIEW ONLY MODE</span>
+               </div>
+            )}
+         </div>
       </div>
 
       {/* Search Bar */}
@@ -842,8 +942,8 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                 const itemRec = getRecipeForMenuItem(item.id, item.name);
                 const costResult = calculateMenuItemCost(itemRec, availableRawItems);
                 const prodCost = costResult.totalCost;
-                const rawCostValue = Number(item.Cost ?? item.cost ?? (prodCost > 0 ? prodCost : 0));
-                const rawItemDisplay = (item['Raw Item'] || item.rawItem || (itemRec.length > 0 ? itemRec.map(r => r.rawItemName).join(', ') : ''));
+                const rawCostValue = (itemRec.length > 0 || prodCost > 0) ? prodCost : Number(item.Cost ?? item.cost ?? 0);
+                const rawItemDisplay = (itemRec.length > 0 ? formatRecipeRawItemsString(itemRec, availableRawItems) : (item['Raw Item'] || item.rawItem || ''));
                 const salePrice = Number(item.price) || 0;
                 const profit = Math.round((salePrice - rawCostValue) * 10) / 10;
                 const marginPct = salePrice > 0 ? Math.round(((salePrice - rawCostValue) / salePrice) * 100) : 0;
@@ -907,13 +1007,15 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                          <h3 className="font-black text-base leading-snug uppercase text-white group-hover:text-indigo-300 transition-colors truncate" title={item.name}>
                             {item.name}
                          </h3>
-                         {rawItemDisplay ? (
-                            <p className="text-[11px] font-medium text-slate-400 truncate mt-1" title={rawItemDisplay}>
-                               <span className="text-indigo-400 font-bold">কাঁচামাল: </span>
-                               <span>{rawItemDisplay}</span>
-                            </p>
-                         ) : (
-                            <p className="text-[10px] font-bold text-slate-500 uppercase mt-1">কাঁচামাল নির্ধারিত নেই</p>
+                         {showCostAndRawItem && (
+                            rawItemDisplay ? (
+                               <p className="text-[11px] font-medium text-slate-400 truncate mt-1" title={rawItemDisplay}>
+                                  <span className="text-indigo-400 font-bold">কাঁচামাল: </span>
+                                  <span>{rawItemDisplay}</span>
+                               </p>
+                            ) : (
+                               <p className="text-[10px] font-bold text-slate-500 uppercase mt-1">কাঁচামাল নির্ধারিত নেই</p>
+                            )
                          )}
                       </div>
                    </div>
@@ -921,20 +1023,20 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                    {/* Cost & Price Comparison Financial Box */}
                    <div className="pt-3 border-t border-slate-800/80 space-y-2 mt-auto">
                       <div className="grid grid-cols-2 gap-2 bg-slate-950/70 border border-slate-800/80 rounded-2xl p-2.5">
-                         {/* Production Cost (With wastage adjustment) */}
+                         {/* Production Cost (প্রস্তুত খরচ) */}
                          <div>
                             <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                               <span>খরচ (Cost)</span>
+                               <span>প্রস্তুত খরচ</span>
                                {hasWastageIng && (
                                   <span className="text-[9px] text-amber-400 font-bold" title="অপচয় বাদ দিয়ে নিট কার্যকর দর অনুযায়ী">*</span>
                                )}
                             </div>
                             <div className="text-sm font-black text-amber-300 mt-0.5">
-                               {rawCostValue > 0 ? `৳${rawCostValue}` : '৳০.০'}
+                               {rawCostValue > 0 ? `৳${rawCostValue}` : (prodCost > 0 ? `৳${prodCost}` : '৳০.০')}
                             </div>
                          </div>
 
-                         {/* Sale Price (Exact existing sale price) */}
+                         {/* Sale Price (বিক্রয় মূল্য) */}
                          <div className="text-right">
                             <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                                বিক্রয় মূল্য
@@ -973,9 +1075,12 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       {selectedItemForModal && (() => {
          const currentCost = calculateMenuItemCost(modalRecipe, availableRawItems);
          const currentSalePrice = Number(modalFormData.price) || 0;
-         const effectiveModalCost = Number(modalFormData.cost) > 0 ? Number(modalFormData.cost) : currentCost.totalCost;
+         const effectiveModalCost = modalRecipe.length > 0 ? currentCost.totalCost : (Number(modalFormData.cost) || 0);
          const currentProfit = Math.round((currentSalePrice - effectiveModalCost) * 10) / 10;
          const currentMargin = currentSalePrice > 0 ? Math.round(((currentSalePrice - effectiveModalCost) / currentSalePrice) * 100) : 0;
+         const realTimeRawItemString = modalRecipe.length > 0 
+           ? formatRecipeRawItemsString(modalRecipe, availableRawItems)
+           : (modalFormData.rawItem || '');
 
          // Sales stats
          const totalSoldUnits = itemSalesHistory.reduce((sum, tx) => {
@@ -1148,46 +1253,6 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                               </div>
                            </div>
 
-                           {/* Cost & Raw Item Fields */}
-                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                              <div>
-                                 <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1.5 block">
-                                    Cost (উৎপাদন খরচ ৳)
-                                 </label>
-                                 <input 
-                                    type="number" 
-                                    value={modalFormData.cost ?? ''}
-                                    onChange={(e) => {
-                                       const val = e.target.value;
-                                       setModalFormData(prev => ({ ...prev, cost: val as any }));
-                                    }}
-                                    onBlur={() => {
-                                       const val = modalFormData.cost;
-                                       if (val === '' || val === null || val === undefined || isNaN(Number(val))) {
-                                          setModalFormData(prev => ({ ...prev, cost: 0 }));
-                                       } else {
-                                          setModalFormData(prev => ({ ...prev, cost: Number(val) }));
-                                       }
-                                    }}
-                                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                    placeholder="0"
-                                 />
-                              </div>
-
-                              <div>
-                                 <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1.5 block">
-                                    Raw Item (কাঁচামালের বিবরণ / উপকরণ)
-                                 </label>
-                                 <input 
-                                    type="text" 
-                                    value={modalFormData.rawItem ?? ''}
-                                    onChange={(e) => setModalFormData({ ...modalFormData, rawItem: e.target.value })}
-                                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                    placeholder="e.g. ডিম, তেল, লবণ, পেঁয়াজ"
-                                 />
-                              </div>
-                           </div>
-
                            {/* Photo URL */}
                            <div>
                               <div className="flex items-center justify-between mb-1.5">
@@ -1296,14 +1361,19 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                               ) : (
                                  <div className="space-y-2.5">
                                     {modalRecipe.map((ing, idx) => {
-                                       const raw = availableRawItems.find(r => r.id === ing.rawItemId) || availableRawItems.find(r => r.name.toLowerCase() === ing.rawItemName.toLowerCase());
+                                       const raw = availableRawItems.find(r => r.id === ing.rawItemId) || 
+                                                   availableRawItems.find(r => r.name.toLowerCase() === (ing.rawItemName || '').toLowerCase()) ||
+                                                   availableRawItems.find(r => r.nameBn && ing.rawItemName && (r.nameBn.toLowerCase().includes(ing.rawItemName.toLowerCase()) || ing.rawItemName.toLowerCase().includes(r.nameBn.toLowerCase())));
                                        const baseRate = raw ? raw.unitCost : 0;
                                        const wastagePct = raw ? (raw.wastagePercentage || 0) : 0;
                                        const effectiveRate = raw ? getEffectiveRawUnitCost(raw) : baseRate;
                                        const costItem = currentCost.breakdown ? currentCost.breakdown[idx] : null;
-                                       const lineCost = costItem ? costItem.lineCost : Math.round((Number(ing.quantity) || 0) * effectiveRate * 10) / 10;
-                                       const displayUnitCost = costItem ? costItem.effectiveUnitCost : effectiveRate;
-                                       const isSubUnitItem = Boolean(raw && (raw.hasSubUnits || (raw.packSize && raw.packSize > 1)));
+                                       const ratio = raw ? getIngredientToInventoryRatio(raw, ing.unit) : 1;
+                                       const effectiveUnitPrice = raw ? (effectiveRate / ratio) : 0;
+                                       const lineCost = costItem ? costItem.lineCost : Math.round((Number(ing.quantity) || 0) * effectiveUnitPrice * 100) / 100;
+                                       const displayUnitCost = costItem ? costItem.effectiveUnitCost : Math.round(effectiveUnitPrice * 100) / 100;
+                                       const subInfo = raw ? getRawItemSubUnitInfo(raw) : { hasSubUnit: false, subUnit: '', packSize: 1, label: '' };
+                                       const isSubUnitItem = Boolean(raw && (subInfo.hasSubUnit || raw.hasSubUnits || (raw.packSize && raw.packSize > 1) || ['kg', 'liter', 'case'].includes(raw.unit?.toLowerCase() || '')));
 
                                        return (
                                           <div key={idx} className="flex flex-col sm:flex-row sm:items-center gap-3 bg-slate-950/70 border border-slate-800 p-3 rounded-2xl">
@@ -1360,7 +1430,12 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                                                           }}
                                                           className="flex-1 bg-slate-900 border border-indigo-500/40 text-indigo-300 text-xs font-bold rounded-xl px-1.5 py-2 focus:outline-none focus:border-indigo-500"
                                                        >
-                                                          <option value={raw.subUnit || "pcs"}>{raw.subUnit || "pcs"}</option>
+                                                          {subInfo.subUnit && subInfo.subUnit !== raw.unit && (
+                                                             <option value={subInfo.subUnit}>{subInfo.subUnit}</option>
+                                                          )}
+                                                          {raw.subUnit && raw.subUnit !== raw.unit && raw.subUnit !== subInfo.subUnit && (
+                                                             <option value={raw.subUnit}>{raw.subUnit}</option>
+                                                          )}
                                                           <option value={raw.unit}>{raw.unit}</option>
                                                        </select>
                                                     ) : (
@@ -1379,11 +1454,15 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                                                  <div className="text-[9px] text-slate-400 truncate" title={`দর: ৳${displayUnitCost} প্রতি ${ing.unit}`}>
                                                     দর: ৳{displayUnitCost}/{ing.unit}
                                                  </div>
-                                                 {isSubUnitItem && raw && (
-                                                    <div className="text-[8px] text-indigo-400/90 font-medium truncate">
-                                                       ১ {raw.unit} = {raw.packSize} {raw.subUnit || "pcs"}
+                                                 {subInfo.label ? (
+                                                    <div className="text-[8px] text-indigo-400/90 font-medium truncate" title={subInfo.label}>
+                                                       {subInfo.label}
                                                     </div>
-                                                 )}
+                                                 ) : (isSubUnitItem && raw && (
+                                                    <div className="text-[8px] text-indigo-400/90 font-medium truncate">
+                                                       ১ {raw.unit} = {raw.packSize || subInfo.packSize} {raw.subUnit || subInfo.subUnit || "pcs"}
+                                                    </div>
+                                                 ))}
                                               </div>
 
                                               <div className="shrink-0 text-right">
@@ -1654,7 +1733,8 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                                  <label className="text-[9px] font-bold text-slate-400 block mb-1">একক (Unit)</label>
                                  {(() => {
                                     const raw = availableRawItems.find(r => r.id === ing.rawItemId);
-                                    const hasSub = Boolean(raw && (raw.hasSubUnits || (raw.packSize && raw.packSize > 1)));
+                                    const subInfo = raw ? getRawItemSubUnitInfo(raw) : { hasSubUnit: false, subUnit: '', packSize: 1, label: '' };
+                                    const hasSub = Boolean(raw && (subInfo.hasSubUnit || raw.hasSubUnits || (raw.packSize && raw.packSize > 1) || ['kg', 'liter', 'case'].includes(raw.unit?.toLowerCase() || '')));
                                     if (hasSub && raw) {
                                        return (
                                           <select
@@ -1665,7 +1745,12 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                                              }}
                                              className="w-full bg-slate-900 border border-indigo-500/40 text-indigo-300 text-xs font-bold rounded-xl px-1.5 py-2 focus:outline-none focus:border-indigo-500"
                                           >
-                                             <option value={raw.subUnit || "pcs"}>{raw.subUnit || "pcs"}</option>
+                                             {subInfo.subUnit && subInfo.subUnit !== raw.unit && (
+                                                <option value={subInfo.subUnit}>{subInfo.subUnit}</option>
+                                             )}
+                                             {raw.subUnit && raw.subUnit !== raw.unit && raw.subUnit !== subInfo.subUnit && (
+                                                <option value={raw.subUnit}>{raw.subUnit}</option>
+                                             )}
                                              <option value={raw.unit}>{raw.unit}</option>
                                           </select>
                                        );
@@ -1790,40 +1875,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                             }}
                             className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                             placeholder="0"
-                         />
-                      </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                      <div>
-                         <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Cost (খরচ ৳)</label>
-                         <input 
-                            type="number" 
-                            value={newItem.cost ?? ""}
-                            onChange={(e) => {
-                               const val = e.target.value;
-                               setNewItem(prev => ({ ...prev, cost: val as any }));
-                            }}
-                            onBlur={() => {
-                               if (newItem.cost === "" || newItem.cost === null || newItem.cost === undefined || isNaN(Number(newItem.cost))) {
-                                  setNewItem(prev => ({ ...prev, cost: 0 }));
-                               } else {
-                                  setNewItem(prev => ({ ...prev, cost: Number(newItem.cost) }));
-                               }
-                            }}
-                            className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                            placeholder="0"
-                         />
-                      </div>
-                      <div>
-                         <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Raw Item (কাঁচামালের বিবরণ)</label>
-                         <input 
-                            type="text" 
-                            value={newItem.rawItem ?? ""}
-                            onChange={(e) => setNewItem({...newItem, rawItem: e.target.value})}
-                            className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                            placeholder="e.g. ডিম, তেল, লবণ"
-                         />
+                          />
                       </div>
                   </div>
 
@@ -1880,9 +1932,36 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                                        className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-2 py-1.5 text-xs font-bold text-center focus:outline-none focus:border-indigo-500"
                                     />
                                  </div>
-                                 <span className="text-[11px] font-bold text-slate-400 w-14 shrink-0 text-center uppercase">
-                                    {ing.unit}
-                                 </span>
+                                 {(() => {
+                                    const raw = availableRawItems.find(r => r.id === ing.rawItemId);
+                                    const subInfo = raw ? getRawItemSubUnitInfo(raw) : { hasSubUnit: false, subUnit: '', packSize: 1, label: '' };
+                                    const hasSub = Boolean(raw && (subInfo.hasSubUnit || raw.hasSubUnits || (raw.packSize && raw.packSize > 1) || ['kg', 'liter', 'case'].includes(raw.unit?.toLowerCase() || '')));
+                                    if (hasSub && raw) {
+                                       return (
+                                          <select
+                                             value={ing.unit}
+                                             onChange={(e) => {
+                                                const u = e.target.value;
+                                                setItemRecipe(prev => prev.map((item, i) => i === idx ? { ...item, unit: u } : item));
+                                             }}
+                                             className="w-20 bg-slate-900 border border-indigo-500/40 text-indigo-300 text-xs font-bold rounded-lg px-1 py-1.5 focus:outline-none focus:border-indigo-500"
+                                          >
+                                             {subInfo.subUnit && subInfo.subUnit !== raw.unit && (
+                                                <option value={subInfo.subUnit}>{subInfo.subUnit}</option>
+                                             )}
+                                             {raw.subUnit && raw.subUnit !== raw.unit && raw.subUnit !== subInfo.subUnit && (
+                                                <option value={raw.subUnit}>{raw.subUnit}</option>
+                                             )}
+                                             <option value={raw.unit}>{raw.unit}</option>
+                                          </select>
+                                       );
+                                    }
+                                    return (
+                                       <span className="text-[11px] font-bold text-slate-400 w-14 shrink-0 text-center uppercase">
+                                          {ing.unit}
+                                       </span>
+                                    );
+                                 })()}
                                  <button
                                     type="button"
                                     onClick={() => handleRemoveIngredientRow(idx)}

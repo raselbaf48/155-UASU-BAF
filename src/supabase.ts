@@ -25,8 +25,12 @@ function cleanSupabaseAnonKey(key: string | undefined): string {
   return cleaned;
 }
 
-const DIRECT_SUPABASE_URL = cleanSupabaseUrl(import.meta.env.VITE_SUPABASE_URL);
-export const supabaseAnonKey = cleanSupabaseAnonKey(import.meta.env.VITE_SUPABASE_ANON_KEY);
+const DIRECT_SUPABASE_URL = cleanSupabaseUrl(
+  (typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_SUPABASE_URL : process.env.VITE_SUPABASE_URL) || ''
+);
+export const supabaseAnonKey = cleanSupabaseAnonKey(
+  (typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_SUPABASE_ANON_KEY : process.env.VITE_SUPABASE_ANON_KEY) || ''
+);
 export const isSupabaseConfigured = Boolean(DIRECT_SUPABASE_URL && supabaseAnonKey);
 
 if (!isSupabaseConfigured) {

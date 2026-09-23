@@ -923,9 +923,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
         name: it.name,
         nameBn: it.nameBn || '',
         unit: it.unit || 'kg',
-        "Sub Unit": it.subUnit || (it.unit?.toLowerCase() === 'kg' ? 'gm' : (it.unit?.toLowerCase() === 'liter' ? 'ml' : (it.unit?.toLowerCase() === 'case' || it.unit?.toLowerCase() === 'packet' ? 'pcs' : ''))),
-        subUnit: it.subUnit || (it.unit?.toLowerCase() === 'kg' ? 'gm' : (it.unit?.toLowerCase() === 'liter' ? 'ml' : (it.unit?.toLowerCase() === 'case' || it.unit?.toLowerCase() === 'packet' ? 'pcs' : ''))),
-        sub_unit: it.subUnit || (it.unit?.toLowerCase() === 'kg' ? 'gm' : (it.unit?.toLowerCase() === 'liter' ? 'ml' : (it.unit?.toLowerCase() === 'case' || it.unit?.toLowerCase() === 'packet' ? 'pcs' : ''))),
+        "Sub Unit": it.subUnit || (it.unit?.toLowerCase() === 'kg' ? 'gm' : (it.unit?.toLowerCase() === 'liter' ? 'ml' : (it.unit?.toLowerCase() === 'case' || it.unit?.toLowerCase() === 'packet' ? 'pcs' : null))),
         currentStock: it.currentStock ?? 0,
         minStockAlert: it.minStockAlert ?? 5,
         unitCost: it.unitCost ?? 0,
@@ -1282,7 +1280,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
             ? Number(newItemData.wastagePercentage)
             : 0;
 
-          return {
+          const updated: RawInventoryItem = {
             ...i,
             name: newItemData.name!.trim(),
             nameBn: newItemData.nameBn?.trim() || newItemData.name!.trim(),
@@ -1297,6 +1295,34 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
             packSize,
             subUnit
           };
+
+          // Directly sync to Supabase Canteen_Inventory table
+          const dbItem = {
+            id: updated.id,
+            name: updated.name,
+            nameBn: updated.nameBn || '',
+            unit: updated.unit,
+            "Sub Unit": updated.subUnit || (updated.unit?.toLowerCase() === 'kg' ? 'gm' : (updated.unit?.toLowerCase() === 'liter' ? 'ml' : (updated.unit?.toLowerCase() === 'case' || updated.unit?.toLowerCase() === 'packet' ? 'pcs' : null))),
+            currentStock: updated.currentStock,
+            minStockAlert: updated.minStockAlert,
+            unitCost: updated.unitCost,
+            wastagePercentage: updated.wastagePercentage ?? 0,
+            lastRestockedDate: updated.lastRestockedDate || '',
+            supplier: updated.supplier || '',
+            notes: encodeNotesWithMeta(updated.notes, {
+              category: updated.category,
+              subCategory: updated.subCategory,
+              hasSubUnits: updated.hasSubUnits,
+              packSize: updated.packSize,
+              subUnit: updated.subUnit
+            })
+          };
+          supabase.from('Canteen_Inventory').upsert([dbItem], { onConflict: 'id' })
+            .then(({ error }) => {
+              if (error) console.error('Failed to sync updated item to Canteen_Inventory:', error);
+            });
+
+          return updated;
         }
         return i;
       }));
@@ -1370,6 +1396,32 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
         subUnit
       };
       setItems(prev => [newItem, ...prev]);
+
+      // Directly sync new item to Supabase Canteen_Inventory table
+      const newDbItem = {
+        id: newItem.id,
+        name: newItem.name,
+        nameBn: newItem.nameBn || '',
+        unit: newItem.unit,
+        "Sub Unit": newItem.subUnit || (newItem.unit?.toLowerCase() === 'kg' ? 'gm' : (newItem.unit?.toLowerCase() === 'liter' ? 'ml' : (newItem.unit?.toLowerCase() === 'case' || newItem.unit?.toLowerCase() === 'packet' ? 'pcs' : null))),
+        currentStock: newItem.currentStock,
+        minStockAlert: newItem.minStockAlert,
+        unitCost: newItem.unitCost,
+        wastagePercentage: newItem.wastagePercentage ?? 0,
+        lastRestockedDate: newItem.lastRestockedDate || '',
+        supplier: newItem.supplier || '',
+        notes: encodeNotesWithMeta(newItem.notes, {
+          category: newItem.category,
+          subCategory: newItem.subCategory,
+          hasSubUnits: newItem.hasSubUnits,
+          packSize: newItem.packSize,
+          subUnit: newItem.subUnit
+        })
+      };
+      supabase.from('Canteen_Inventory').upsert([newDbItem], { onConflict: 'id' })
+        .then(({ error }) => {
+          if (error) console.error('Failed to sync new item to Canteen_Inventory:', error);
+        });
 
       // Add log
       const initialLogs: RawStockLog[] = [];

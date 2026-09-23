@@ -240,7 +240,7 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
         // If both exist and are arrays (e.g. transactions, orders, expenses, stock logs) -> smart merge
         if (Array.isArray(cloudVal) && Array.isArray(localVal)) {
           if (key === 'canteen_raw_inventory_items_v2') {
-            const { deduplicated } = deduplicateRawItems([...cloudVal, ...localVal]);
+            const { deduplicated } = deduplicateRawItems([...localVal, ...cloudVal]);
             finalVal = deduplicated;
           } else {
             const keyField = key === 'canteen_pre_orders' ? 'orderId' : (key === 'canteen_expense_last_unit_prices' ? 'key' : 'id');

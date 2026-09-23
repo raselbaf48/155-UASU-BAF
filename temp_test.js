@@ -1,6 +1,6 @@
-import { supabase } from '../../../supabase';
+const supabase = { from: () => ({ upsert: () => Promise.resolve() }) };
 
-export interface RawInventoryItem {
+interface RawInventoryItem {
   id: string;
   name: string;
   nameBn: string;
@@ -19,7 +19,7 @@ export interface RawInventoryItem {
   hasSubUnits?: boolean;
 }
 
-export interface RawStockLog {
+interface RawStockLog {
   id: string;
   itemId: string;
   itemName: string;
@@ -34,33 +34,19 @@ export interface RawStockLog {
   recordedBy?: string;
 }
 
-export interface RecipeIngredient {
+interface RecipeIngredient {
   rawItemId: string;
   rawItemName: string;
   quantity: number;
   unit: string;
 }
 
-export type MenuRecipeMap = Record<string, RecipeIngredient[]>;
+type MenuRecipeMap = Record<string, RecipeIngredient[]>;
 
-export const RAW_ITEMS_STORAGE_KEY = 'canteen_raw_inventory_items_v2';
-export const RAW_LOGS_STORAGE_KEY = 'canteen_raw_stock_logs_v2';
-export const RECIPES_STORAGE_KEY = 'canteen_menu_recipes_v3';
-export const LEGACY_RECIPES_STORAGE_KEY = 'canteen_menu_recipes_v2';
-
-/**
- * Helper to safely decode metadata embedded inside notes (<!--META:{...}-->)
- */
-export const decodeNotesMeta = (notes?: string): Record<string, any> => {
-  if (!notes) return {};
-  const match = notes.match(/<!--META:([\s\S]*?)-->/);
-  if (match && match[1]) {
-    try {
-      return JSON.parse(match[1]);
-    } catch {}
-  }
-  return {};
-};
+const RAW_ITEMS_STORAGE_KEY = 'canteen_raw_inventory_items_v2';
+const RAW_LOGS_STORAGE_KEY = 'canteen_raw_stock_logs_v2';
+const RECIPES_STORAGE_KEY = 'canteen_menu_recipes_v3';
+const LEGACY_RECIPES_STORAGE_KEY = 'canteen_menu_recipes_v2';
 
 /**
  * Information about sub-unit / subcategory conversions:
@@ -68,30 +54,22 @@ export const decodeNotesMeta = (notes?: string): Record<string, any> => {
  * Kg - gm (1 Kg = 1000 gm)
  * Packet - Pcs (1 Packet = packSize pcs)
  */
-export interface RawSubUnitInfo {
+interface RawSubUnitInfo {
   hasSubUnit: boolean;
   subUnit: string;
   packSize: number;
   label: string;
 }
 
-export const getRawItemSubUnitInfo = (item?: Partial<RawInventoryItem> | null): RawSubUnitInfo => {
+const getRawItemSubUnitInfo = (item?: Partial<RawInventoryItem> | null): RawSubUnitInfo => {
   if (!item) {
     return { hasSubUnit: false, subUnit: '', packSize: 1, label: '' };
   }
-  const meta = decodeNotesMeta(item.notes);
   const u = (item.unit || '').toLowerCase().trim();
-  const explicitSub = (
-    item.subUnit || 
-    (item as any)['Sub Unit'] || 
-    (item as any).sub_unit || 
-    meta.subUnit || 
-    ''
-  ).toLowerCase().trim();
-  const packSizeVal = Number(item.packSize) || Number(meta.packSize) || 0;
+  const explicitSub = (item.subUnit || '').toLowerCase().trim();
 
   // 1. RULE: Pcs / Piece / টি items have NO sub-unit at all
-  if (['pcs', 'pc', 'piece', 'pieces', 'টি', 'টা', 'পিস'].includes(u)) {
+  if (u === 'pcs' || u === 'pc' || u === 'piece' || u === 'টি' || u === 'টা') {
     return { hasSubUnit: false, subUnit: '', packSize: 1, label: '' };
   }
 
@@ -101,41 +79,35 @@ export const getRawItemSubUnitInfo = (item?: Partial<RawInventoryItem> | null): 
   }
 
   // 3. Kg - gm (1 kg = 1000 gm)
-  if (['kg', 'kg.', 'কেজি', 'কে.জি.', 'কে.জি', 'kilo', 'kilogram'].includes(u) || (explicitSub === 'gm' && !['gm', 'g', 'gram', 'গ্রাম'].includes(u))) {
-    const size = packSizeVal > 1 ? packSizeVal : 1000;
+  if (u === 'kg' || (explicitSub === 'gm' && u !== 'gm')) {
+    const size = (item.packSize && item.packSize > 1) ? item.packSize : 1000;
     return { hasSubUnit: true, subUnit: 'gm', packSize: size, label: `১ কেজি = ${size} গ্রাম` };
   }
 
   // 4. Ltr - ml (1 Ltr = 1000 ml)
-  if (['liter', 'ltr', 'litre', 'l', 'লিটার', 'লি.'].includes(u) || (explicitSub === 'ml' && !['ml', 'milli', 'milliliter', 'মিলি'].includes(u))) {
-    const size = packSizeVal > 1 ? packSizeVal : 1000;
+  if (['liter', 'ltr', 'litre', 'l'].includes(u) || (explicitSub === 'ml' && !['liter', 'ltr', 'litre', 'l'].includes(u))) {
+    const size = (item.packSize && item.packSize > 1) ? item.packSize : 1000;
     return { hasSubUnit: true, subUnit: 'ml', packSize: size, label: `১ লিটার = ${size} মিলি` };
   }
 
   // 5. Case / Crate - Pcs (1 Case = packSize pcs, default 30)
-  if (['case', 'crate', 'কেস', 'ক্রেট'].includes(u) || (u.includes('case') && explicitSub === 'pcs')) {
-    const size = packSizeVal > 1 ? packSizeVal : 30;
+  if (['case', 'crate'].includes(u) || (u.includes('case') && explicitSub === 'pcs')) {
+    const size = (item.packSize && item.packSize > 1) ? item.packSize : 30;
     return { hasSubUnit: true, subUnit: 'pcs', packSize: size, label: `১ কেস = ${size} পিস` };
   }
 
-  // 6. Packet / Box - Pcs / Slice / Cup / gm (ONLY if main unit is packet/box/pkt/bottle/cylinder)
-  if (['packet', 'box', 'pkt', 'প্যাকেট', 'বক্স', 'bottle', 'বোতল', 'cylinder', 'সিলিন্ডার', 'can', 'tin', 'jar', 'pack'].includes(u)) {
-    const sub = explicitSub && explicitSub !== u ? explicitSub : 'pcs';
-    const isWeightSub = ['gm', 'g', 'gram', 'গ্রাম'].includes(sub);
-    const isVolumeSub = ['ml', 'milli', 'মিলি'].includes(sub);
-    const defaultSize = isWeightSub ? 1000 : (isVolumeSub ? 1000 : 24);
-    const size = packSizeVal > 1 ? packSizeVal : defaultSize;
+  // 6. Packet / Box - Pcs / Slice / Cup (ONLY if main unit is packet/box/pkt)
+  if (['packet', 'box', 'pkt'].includes(u)) {
+    const sub = item.subUnit && item.subUnit.toLowerCase().trim() !== u ? item.subUnit.trim() : 'pcs';
+    const size = (item.packSize && item.packSize > 1) ? item.packSize : 24;
     return { hasSubUnit: true, subUnit: sub, packSize: size, label: `১ ${item.unit || 'প্যাকেট'} = ${size} ${sub}` };
   }
 
   // 7. Explicit configured sub-units where packSize > 1 and subUnit differs from unit
-  if (explicitSub && explicitSub !== u) {
-    const isWeightSub = ['gm', 'g', 'gram', 'গ্রাম'].includes(explicitSub);
-    const isVolumeSub = ['ml', 'milli', 'মিলি'].includes(explicitSub);
-    const defaultSize = isWeightSub ? 1000 : (isVolumeSub ? 1000 : 1);
-    const size = packSizeVal > 1 ? packSizeVal : defaultSize;
+  if (Boolean(item.hasSubUnits) && item.subUnit && item.subUnit.toLowerCase().trim() !== u) {
+    const size = (item.packSize && item.packSize > 1) ? item.packSize : 1;
     if (size > 1) {
-      return { hasSubUnit: true, subUnit: explicitSub, packSize: size, label: `১ ${item.unit} = ${size} ${explicitSub}` };
+      return { hasSubUnit: true, subUnit: item.subUnit, packSize: size, label: `১ ${item.unit} = ${size} ${item.subUnit}` };
     }
   }
 
@@ -143,90 +115,59 @@ export const getRawItemSubUnitInfo = (item?: Partial<RawInventoryItem> | null): 
 };
 
 /**
- * Determines conversion ratio between recipe ingredient unit and inventory stock unit.
- * When ingredient unit is a sub-unit (e.g., gm when stock is kg or packet),
- * ratio returns how many sub-units are in 1 stock unit (e.g., 1000 gm in 1 kg, or packSize).
- * Effective price per ingredient unit = unitCost / ratio.
+ * Determines conversion ratio between recipe ingredient unit and inventory stock unit
  */
-export const getIngredientToInventoryRatio = (
+const getIngredientToInventoryRatio = (
   rawItem: RawInventoryItem | Partial<RawInventoryItem>,
   ingredientUnit?: string
 ): number => {
-  if (!rawItem) return 1;
   const ingUnit = (ingredientUnit || '').toLowerCase().trim();
   const rawUnit = (rawItem.unit || '').toLowerCase().trim();
-  const meta = decodeNotesMeta(rawItem.notes);
-  const subUnit = (
-    rawItem.subUnit || 
-    (rawItem as any)['Sub Unit'] || 
-    (rawItem as any).sub_unit || 
-    meta.subUnit || 
-    ''
-  ).toLowerCase().trim();
-  const packSize = Number(rawItem.packSize) || Number(meta.packSize) || 0;
+  const subUnit = (rawItem.subUnit || '').toLowerCase().trim();
 
   // If units are identical, ratio is always 1:1
-  if (ingUnit && rawUnit && ingUnit === rawUnit) {
+  if (ingUnit === rawUnit) {
     return 1;
   }
 
-  // Stock items with Pcs / Piece / টি have NO sub-unit
-  if (['pcs', 'pc', 'piece', 'pieces', 'টি', 'টা', 'পিস'].includes(rawUnit)) {
+  // Pcs items have NO sub-unit
+  if (rawUnit === 'pcs' || rawUnit === 'pc' || rawUnit === 'piece' || rawUnit === 'টি' || rawUnit === 'টা') {
     return 1;
   }
 
-  // 1. Weight Conversion (Kg to gm, or packet/box/bottle/cylinder to gm)
-  const isGm = ['gm', 'g', 'gram', 'গ্রাম', 'গ্রা', 'gms', 'gm.', 'g.'].includes(ingUnit);
-  const isKg = ['kg', 'kg.', 'কেজি', 'কে.জি.', 'কে.জি', 'kilo', 'kilogram', 'kgs'].includes(rawUnit);
-  if (isGm) {
-    if (isKg || ['gm', 'g', 'gram', 'গ্রাম', 'গ্রা'].includes(subUnit)) {
-      return packSize > 1 ? packSize : 1000;
-    }
-    // Any container/package where ingredient is measured in grams
-    if (['packet', 'box', 'pkt', 'bottle', 'cylinder', 'pack', 'can', 'tin', 'jar', 'প্যাকেট', 'বক্স', 'বোতল'].includes(rawUnit)) {
-      return packSize > 1 ? packSize : 1000;
-    }
+  // Kg - gm
+  const isGm = ingUnit === 'gm' || ingUnit === 'g' || ingUnit === 'gram';
+  const isKg = rawUnit === 'kg';
+  if (isGm && (isKg || subUnit === 'gm')) {
+    return (rawItem.packSize && rawItem.packSize > 1) ? rawItem.packSize : 1000;
   }
 
-  // 2. Volume Conversion (Liter to ml, or bottle/can/box to ml)
-  const isMl = ['ml', 'milli', 'milliliter', 'মিলি', 'মি.লি.', 'মি.লি', 'মিলিলিটার', 'mls'].includes(ingUnit);
-  const isLtr = ['liter', 'ltr', 'litre', 'l', 'লিটার', 'লি.', 'লি'].includes(rawUnit);
-  if (isMl) {
-    if (isLtr || ['ml', 'milli', 'milliliter', 'মিলি'].includes(subUnit)) {
-      return packSize > 1 ? packSize : 1000;
-    }
-    if (['bottle', 'packet', 'box', 'can', 'tin', 'jar', 'pack', 'বোতল', 'প্যাকেট'].includes(rawUnit)) {
-      return packSize > 1 ? packSize : 1000;
-    }
+  // Ltr - ml
+  const isMl = ingUnit === 'ml' || ingUnit === 'milli' || ingUnit === 'milliliter';
+  const isLtr = rawUnit === 'liter' || rawUnit === 'ltr' || rawUnit === 'litre' || rawUnit === 'l';
+  if (isMl && (isLtr || subUnit === 'ml')) {
+    return (rawItem.packSize && rawItem.packSize > 1) ? rawItem.packSize : 1000;
   }
 
-  // 3. Count Conversion (Case / Crate to Pcs)
-  const isPcs = ['pcs', 'pc', 'piece', 'pieces', 'টি', 'টা', 'পিস', 'slice', 'স্লাইস', 'cup', 'কাপ', 'sheet'].includes(ingUnit);
-  const isCase = ['case', 'crate', 'কেস', 'ক্রেট'].includes(rawUnit);
+  // Case - Pcs (1 Case = packSize pcs, default 30)
+  const isPcs = ingUnit === 'pcs' || ingUnit === 'piece' || ingUnit === 'pc' || ingUnit === 'slice' || ingUnit === 'cup' || ingUnit === 'sheet';
+  const isCase = rawUnit === 'case' || rawUnit === 'crate';
   if (isCase && isPcs) {
-    return packSize > 1 ? packSize : 30;
+    return (rawItem.packSize && rawItem.packSize > 1) ? rawItem.packSize : 30;
   }
 
-  // 4. Packet / Box to Pcs / SubUnits
-  const isPkt = ['packet', 'box', 'pkt', 'বক্স', 'প্যাকেট', 'pack'].includes(rawUnit);
-  if (isPkt && isPcs) {
-    return packSize > 1 ? packSize : 24;
-  }
-
-  // 5. Explicit Sub-unit match
-  if (subUnit && subUnit !== rawUnit && (ingUnit === subUnit || ingUnit.includes(subUnit) || subUnit.includes(ingUnit))) {
-    if (packSize > 1) {
-      return packSize;
-    }
-    if (isGm || isMl) {
-      return 1000;
+  // Packet - Pcs / SubUnits
+  const isPkt = rawUnit === 'packet' || rawUnit === 'box' || rawUnit === 'pkt';
+  if (rawItem.packSize && rawItem.packSize > 1 && subUnit && subUnit !== rawUnit) {
+    if (ingUnit === subUnit || (isPkt && isPcs)) {
+      return rawItem.packSize;
     }
   }
 
   return 1;
 };
 
-export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
+const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-1',
     name: 'Chicken',
@@ -1308,7 +1249,7 @@ const DEFAULT_MENU_RECIPES: Record<string, RecipeIngredient[]> = {
   ]
 };
 
-export const normalizeRawItemName = (name: string): string => {
+const normalizeRawItemName = (name: string): string => {
   const s = (name || '').toLowerCase().trim();
   if (s.includes('black salt') || s.includes('bit lobon') || s.includes('bit laban') || s.includes('বিট লবণ') || s.includes('বিট লবন') || s.includes('beet salt')) return 'black-salt';
   if (s.includes('cucumber') || s.includes('শসা') || s.includes('shosa') || s.includes('sosa')) return 'cucumber';
@@ -1365,7 +1306,7 @@ const encodeNotesWithMeta = (notes?: string, meta?: any) => {
   return base;
 };
 
-export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplicated: RawInventoryItem[]; removedIds: string[] } => {
+const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplicated: RawInventoryItem[]; removedIds: string[] } => {
   const actualItems: RawInventoryItem[] = Array.isArray(items)
     ? items
     : (items && Array.isArray(items.deduplicated) ? items.deduplicated : []);
@@ -1377,26 +1318,18 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
     const key = normalizeRawItemName(item.name);
     const u = (item.unit || '').toLowerCase().trim();
     const subCatLower = (item.subCategory || '').toLowerCase().trim();
-    const meta = decodeNotesMeta(item.notes);
-    const explicitSub = (
-      item.subUnit || 
-      (item as any)['Sub Unit'] || 
-      (item as any).sub_unit || 
-      meta.subUnit || 
-      ''
-    ).toLowerCase().trim();
-    const explicitPackSize = Number(item.packSize) || Number(meta.packSize) || 0;
+    const explicitSub = (item.subUnit || '').toLowerCase().trim();
 
     const isPcs = u === 'pcs' || u === 'pc' || u === 'piece' || u === 'টি' || u === 'টা';
-    const isKg = !isPcs && (['kg', 'kg.', 'কেজি', 'কে.জি.'].includes(u) || explicitSub === 'gm' || subCatLower.includes('kg'));
-    const isLtr = !isPcs && (['liter', 'ltr', 'litre', 'l', 'লিটার'].includes(u) || explicitSub === 'ml' || subCatLower.includes('ltr'));
-    const isCase = !isPcs && (['case', 'crate', 'কেস', 'ক্রেট'].includes(u) || subCatLower.includes('case') || (key === 'egg'));
-    const isPacket = !isPcs && (['packet', 'box', 'pkt', 'bottle', 'cylinder', 'can', 'tin', 'jar', 'pack', 'প্যাকেট', 'বক্স', 'বোতল'].includes(u) || subCatLower.includes('packet'));
+    const isKg = !isPcs && (u === 'kg' || explicitSub === 'gm' || subCatLower.includes('kg'));
+    const isLtr = !isPcs && (u === 'liter' || u === 'ltr' || u === 'litre' || u === 'l' || explicitSub === 'ml' || subCatLower.includes('ltr'));
+    const isCase = !isPcs && (u === 'case' || u === 'crate' || subCatLower.includes('case') || (key === 'egg'));
+    const isPacket = !isPcs && (u === 'packet' || u === 'box' || u === 'pkt' || subCatLower.includes('packet'));
 
-    let subCategory = item.subCategory || meta.subCategory;
-    let subUnit = item.subUnit || explicitSub;
-    let packSize = explicitPackSize;
-    let hasSubUnits = item.hasSubUnits ?? meta.hasSubUnits ?? Boolean(explicitSub && explicitSub !== u);
+    let subCategory = item.subCategory;
+    let subUnit = item.subUnit;
+    let packSize = item.packSize;
+    let hasSubUnits = Boolean(item.hasSubUnits);
 
     if (isPcs) {
       subCategory = item.subCategory || 'Pcs';
@@ -1406,24 +1339,22 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
     } else if (isKg) {
       subCategory = item.subCategory || 'Kg - gm';
       subUnit = 'gm';
-      packSize = explicitPackSize > 1 ? explicitPackSize : 1000;
+      packSize = (item.packSize && item.packSize > 1) ? item.packSize : 1000;
       hasSubUnits = true;
     } else if (isLtr) {
       subCategory = item.subCategory || 'Ltr - ml';
       subUnit = 'ml';
-      packSize = explicitPackSize > 1 ? explicitPackSize : 1000;
+      packSize = (item.packSize && item.packSize > 1) ? item.packSize : 1000;
       hasSubUnits = true;
     } else if (isCase || key === 'egg') {
       subCategory = item.subCategory || 'Case - Pcs';
       subUnit = 'pcs';
-      packSize = explicitPackSize > 1 ? explicitPackSize : 30;
+      packSize = (item.packSize && item.packSize > 1) ? item.packSize : 30;
       hasSubUnits = true;
-    } else if (isPacket || (explicitSub && explicitSub !== u)) {
-      const isWeight = ['gm', 'g', 'gram', 'গ্রাম'].includes(explicitSub);
-      const isVol = ['ml', 'milli', 'মিলি'].includes(explicitSub);
-      subCategory = item.subCategory || (isWeight ? 'Kg - gm' : (isVol ? 'Ltr - ml' : 'Packet - Pcs'));
-      subUnit = explicitSub && explicitSub !== u ? explicitSub : 'pcs';
-      packSize = explicitPackSize > 1 ? explicitPackSize : (isWeight ? 1000 : (isVol ? 1000 : 24));
+    } else if (isPacket) {
+      subCategory = item.subCategory || 'Packet - Pcs';
+      subUnit = (item.subUnit && item.subUnit.toLowerCase().trim() !== u) ? item.subUnit : 'pcs';
+      packSize = (item.packSize && item.packSize > 1) ? item.packSize : 24;
       hasSubUnits = true;
     }
 
@@ -1447,9 +1378,9 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
       if (key === 'egg') {
         const wasPcs = u === 'pcs';
         const eggPackSize = (item.packSize && item.packSize > 1) ? item.packSize : 30;
-        const currentStock = wasPcs ? Math.round(((item.currentStock ?? 0) / eggPackSize) * 100) / 100 : (item.currentStock ?? 10);
-        const unitCost = wasPcs ? Math.round((item.unitCost ?? 12.5) * eggPackSize) : (item.unitCost ?? 375);
-        const minStockAlert = wasPcs ? Math.max(1, Math.round(((item.minStockAlert ?? 80) / eggPackSize) * 10) / 10) : (item.minStockAlert ?? 3);
+        const currentStock = wasPcs ? Math.round(((item.currentStock || 0) / eggPackSize) * 100) / 100 : (item.currentStock || 10);
+        const unitCost = wasPcs ? Math.round((item.unitCost || 12.5) * eggPackSize) : (item.unitCost || 375);
+        const minStockAlert = wasPcs ? Math.max(1, Math.round(((item.minStockAlert || 80) / eggPackSize) * 10) / 10) : (item.minStockAlert || 3);
 
         seenKeys.set(key, {
           ...normalizedItem,
@@ -1544,18 +1475,16 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
         const mergedUnit = existing.unit || normalizedItem.unit || 'kg';
         const mergedIsPcs = ['pcs', 'pc', 'piece', 'টি', 'টা'].includes(mergedUnit.toLowerCase().trim());
         seenKeys.set(key, {
-          ...existing,
           ...normalizedItem,
+          ...existing,
           name: preferredName,
           nameBn: preferredNameBn,
           category: chosenCategory,
           subCategory: chosenSubCategory,
-          currentStock: (normalizedItem.currentStock !== undefined && normalizedItem.currentStock !== null) ? normalizedItem.currentStock : existing.currentStock,
-          minStockAlert: (normalizedItem.minStockAlert !== undefined && normalizedItem.minStockAlert !== null) ? normalizedItem.minStockAlert : existing.minStockAlert,
-          unitCost: (normalizedItem.unitCost !== undefined && normalizedItem.unitCost !== null) ? normalizedItem.unitCost : existing.unitCost,
-          packSize: mergedIsPcs ? 1 : (normalizedItem.packSize || existing.packSize || 1),
-          subUnit: mergedIsPcs ? undefined : (normalizedItem.subUnit || existing.subUnit),
-          hasSubUnits: mergedIsPcs ? false : (normalizedItem.hasSubUnits ?? existing.hasSubUnits)
+          currentStock: Math.max(existing.currentStock, normalizedItem.currentStock),
+          packSize: mergedIsPcs ? 1 : (existing.packSize || normalizedItem.packSize || 1),
+          subUnit: mergedIsPcs ? undefined : (existing.subUnit || normalizedItem.subUnit),
+          hasSubUnits: mergedIsPcs ? false : (existing.hasSubUnits ?? normalizedItem.hasSubUnits)
         });
       }
     }
@@ -1577,9 +1506,9 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
         packSize: eggPackSize,
         subUnit: 'pcs',
         hasSubUnits: true,
-        currentStock: wasPcs ? Math.round(((it.currentStock ?? 0) / eggPackSize) * 100) / 100 : (it.currentStock ?? 10),
-        unitCost: wasPcs ? Math.round((it.unitCost ?? 12.5) * eggPackSize) : (it.unitCost ?? 375),
-        minStockAlert: wasPcs ? Math.max(1, Math.round(((it.minStockAlert ?? 80) / eggPackSize) * 10) / 10) : (it.minStockAlert ?? 3),
+        currentStock: wasPcs ? Math.round(((it.currentStock || 0) / eggPackSize) * 100) / 100 : it.currentStock,
+        unitCost: wasPcs ? Math.round((it.unitCost || 12.5) * eggPackSize) : it.unitCost,
+        minStockAlert: wasPcs ? Math.max(1, Math.round(((it.minStockAlert || 80) / eggPackSize) * 10) / 10) : it.minStockAlert,
         notes: it.notes || 'Daily breakfast and snacks omelet supply (১ কেস = ৩০ পিস ডিম)'
       };
     }
@@ -1599,7 +1528,7 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
   return { deduplicated, removedIds };
 };
 
-export const getRawInventoryItems = (): RawInventoryItem[] => {
+const getRawInventoryItems = (): RawInventoryItem[] => {
   try {
     const stored = localStorage.getItem(RAW_ITEMS_STORAGE_KEY);
     let itemsToProcess: RawInventoryItem[] = INITIAL_RAW_ITEMS;
@@ -1645,7 +1574,7 @@ export const getRawInventoryItems = (): RawInventoryItem[] => {
   return INITIAL_RAW_ITEMS;
 };
 
-export const saveRawInventoryItems = (items: RawInventoryItem[]): void => {
+const saveRawInventoryItems = (items: RawInventoryItem[]): void => {
   try {
     const { deduplicated } = deduplicateRawItems(items);
     localStorage.setItem(RAW_ITEMS_STORAGE_KEY, JSON.stringify(deduplicated));
@@ -1658,7 +1587,9 @@ export const saveRawInventoryItems = (items: RawInventoryItem[]): void => {
         name: it.name,
         nameBn: it.nameBn || '',
         unit: it.unit || 'kg',
-        "Sub Unit": it.subUnit || (it.unit?.toLowerCase() === 'kg' ? 'gm' : (it.unit?.toLowerCase() === 'liter' ? 'ml' : (it.unit?.toLowerCase() === 'case' || it.unit?.toLowerCase() === 'packet' ? 'pcs' : null))),
+        "Sub Unit": it.subUnit || (it.unit?.toLowerCase() === 'kg' ? 'gm' : (it.unit?.toLowerCase() === 'liter' ? 'ml' : (it.unit?.toLowerCase() === 'case' || it.unit?.toLowerCase() === 'packet' ? 'pcs' : ''))),
+        subUnit: it.subUnit || (it.unit?.toLowerCase() === 'kg' ? 'gm' : (it.unit?.toLowerCase() === 'liter' ? 'ml' : (it.unit?.toLowerCase() === 'case' || it.unit?.toLowerCase() === 'packet' ? 'pcs' : ''))),
+        sub_unit: it.subUnit || (it.unit?.toLowerCase() === 'kg' ? 'gm' : (it.unit?.toLowerCase() === 'liter' ? 'ml' : (it.unit?.toLowerCase() === 'case' || it.unit?.toLowerCase() === 'packet' ? 'pcs' : ''))),
         currentStock: it.currentStock ?? 0,
         minStockAlert: it.minStockAlert ?? 5,
         unitCost: it.unitCost ?? 0,
@@ -1681,7 +1612,7 @@ export const saveRawInventoryItems = (items: RawInventoryItem[]): void => {
   }
 };
 
-export const getMenuRecipes = (): MenuRecipeMap => {
+const getMenuRecipes = (): MenuRecipeMap => {
   try {
     let stored = localStorage.getItem(RECIPES_STORAGE_KEY);
     if (!stored) {
@@ -1693,11 +1624,36 @@ export const getMenuRecipes = (): MenuRecipeMap => {
         let hasChanges = false;
         const merged: MenuRecipeMap = { ...parsed };
 
-        // Only populate default recipes for menu items that NEVER existed in stored recipes at all
         for (const [key, defaultIngredients] of Object.entries(DEFAULT_MENU_RECIPES)) {
-          if (!(key in merged)) {
+          if (!merged[key] || merged[key].length === 0) {
             merged[key] = defaultIngredients;
             hasChanges = true;
+          } else {
+            // Check if any essential default ingredient (spices, salt, gas, sauce, etc.) is missing
+            const existingIds = new Set(merged[key].map((ing: any) => ing.rawItemId));
+            const existingNames = new Set(merged[key].map((ing: any) => (ing.rawItemName || '').toLowerCase().trim()));
+            
+            const missingItems = defaultIngredients.filter(defIng => {
+              const defName = (defIng.rawItemName || '').toLowerCase().trim();
+              const hasById = existingIds.has(defIng.rawItemId);
+              const hasByName = existingNames.has(defName);
+              const isBlackSalt = defIng.rawItemId === 'raw-44' || defName.includes('black') || defName.includes('বিট');
+              const isNormalSalt = !isBlackSalt && (defName.includes('salt') || defName.includes('লবণ'));
+              const hasBlackSalt = isBlackSalt && (existingIds.has('raw-44') || Array.from(existingNames).some(n => n.includes('black') || n.includes('বিট')));
+              const hasNormalSalt = isNormalSalt && Array.from(existingNames).some(n => (n.includes('salt') || n.includes('লবণ')) && !n.includes('black') && !n.includes('বিট'));
+              const isGas = defName.includes('gas') || defName.includes('lpg') || defName.includes('cylinder') || defName.includes('গ্যাস');
+              const hasGas = isGas && Array.from(existingNames).some(n => n.includes('gas') || n.includes('lpg') || n.includes('cylinder'));
+              
+              if (isBlackSalt) return !hasBlackSalt;
+              if (isNormalSalt) return !hasNormalSalt;
+              if (isGas) return !hasGas;
+              return !hasById && !hasByName;
+            });
+
+            if (missingItems.length > 0) {
+              merged[key] = [...merged[key], ...missingItems];
+              hasChanges = true;
+            }
           }
         }
 
@@ -1745,13 +1701,11 @@ export const getMenuRecipes = (): MenuRecipeMap => {
   return DEFAULT_MENU_RECIPES;
 };
 
-export const getRecipeForMenuItem = (menuItemId: string, menuItemName?: string): RecipeIngredient[] => {
+const getRecipeForMenuItem = (menuItemId: string, menuItemName?: string): RecipeIngredient[] => {
   const recipes = getMenuRecipes();
-  let found: RecipeIngredient[] | undefined = undefined;
-  if (menuItemId && (menuItemId in recipes)) {
+  let found: RecipeIngredient[] = [];
+  if (menuItemId && recipes[menuItemId]) {
     found = recipes[menuItemId];
-  } else if (menuItemName && (menuItemName.trim().toUpperCase() in recipes)) {
-    found = recipes[menuItemName.trim().toUpperCase()];
   } else if (menuItemName) {
     const normalized = menuItemName.trim().toUpperCase();
     if (recipes[normalized]) {
@@ -1783,7 +1737,7 @@ export const getRecipeForMenuItem = (menuItemId: string, menuItemName?: string):
     }
   }
 
-  if (!found || found.length === 0) return [];
+  if (found.length === 0) return [];
 
   // Guarantee that ingredients for raw items with sub-units/subcats are returned subcat-wise!
   try {
@@ -1823,7 +1777,7 @@ export const getRecipeForMenuItem = (menuItemId: string, menuItemName?: string):
  * Automatically ensures cooking ingredients (Gas Cylinder and Salt) are included
  * for recipes that involve cooking raw items (chicken, meat, egg, rice, dal, pasta, oil, vegetables, etc.)
  */
-export const ensureCookingIngredients = (
+const ensureCookingIngredients = (
   ingredients: RecipeIngredient[],
   rawItems?: RawInventoryItem[]
 ): RecipeIngredient[] => {
@@ -1900,14 +1854,14 @@ export const ensureCookingIngredients = (
   return updated;
 };
 
-export const saveRecipeForMenuItem = (
+const saveRecipeForMenuItem = (
   menuItemId: string,
   ingredients: RecipeIngredient[],
   menuItemName?: string
 ): void => {
   try {
     const recipes = { ...getMenuRecipes() };
-    const validatedIngredients = ingredients;
+    const validatedIngredients = ensureCookingIngredients(ingredients);
     if (menuItemId) {
       recipes[menuItemId] = validatedIngredients;
     }
@@ -1922,7 +1876,7 @@ export const saveRecipeForMenuItem = (
   }
 };
 
-export interface RawStockDeductionResult {
+interface RawStockDeductionResult {
   success: boolean;
   deducted: Array<{
     rawItemId: string;
@@ -1935,7 +1889,7 @@ export interface RawStockDeductionResult {
   warnings: string[];
 }
 
-export const deductRawStockForSales = (
+const deductRawStockForSales = (
   soldItems: Array<{ menuItemId?: string; menuItemName?: string; name?: string; qty?: number; quantity?: number }>
 ): RawStockDeductionResult => {
   const rawItems = getRawInventoryItems();
@@ -2058,7 +2012,7 @@ export const deductRawStockForSales = (
   };
 };
 
-export interface AutoRestockExpenseInput {
+interface AutoRestockExpenseInput {
   desc: string;
   subdesc?: string;
   category?: string;
@@ -2071,7 +2025,7 @@ export interface AutoRestockExpenseInput {
 /**
  * Automatically restocks a raw inventory item when an expense is recorded in Expenditures
  */
-export const autoRestockFromExpense = (input: AutoRestockExpenseInput): {
+const autoRestockFromExpense = (input: AutoRestockExpenseInput): {
   success: boolean;
   restockedItem?: RawInventoryItem;
   quantity?: number;
@@ -2300,7 +2254,7 @@ export const autoRestockFromExpense = (input: AutoRestockExpenseInput): {
   };
 };
 
-export interface RawStockRestorationResult {
+interface RawStockRestorationResult {
   success: boolean;
   restored: Array<{
     rawItemId: string;
@@ -2315,7 +2269,7 @@ export interface RawStockRestorationResult {
 /**
  * Restores raw material stock when a POS Sale transaction is removed/cancelled from Sales History
  */
-export const restoreRawStockForSaleCancellation = (
+const restoreRawStockForSaleCancellation = (
   soldItems: Array<{ menuItemId?: string; menuItemName?: string; name?: string; qty?: number; quantity?: number }>,
   txInfo?: { id?: string | number; memberName?: string; date?: string }
 ): RawStockRestorationResult => {
@@ -2437,7 +2391,7 @@ export const restoreRawStockForSaleCancellation = (
  * Calculates the effective unit cost of a raw inventory item accounting for wastage percentage.
  * Example: Purchased 1 kg at 230 tk with 30% wastage -> 700 gm usable for 230 tk -> Effective rate = 230 / (1 - 0.3) = 328.57 tk/kg.
  */
-export const getEffectiveRawUnitCost = (item: RawInventoryItem): number => {
+const getEffectiveRawUnitCost = (item: RawInventoryItem): number => {
   const baseCost = Number(item.unitCost) || 0;
   const wastage = Number(item.wastagePercentage) || 0;
   if (wastage > 0 && wastage < 100) {
@@ -2446,7 +2400,7 @@ export const getEffectiveRawUnitCost = (item: RawInventoryItem): number => {
   return baseCost;
 };
 
-export interface MenuItemCostBreakdown {
+interface MenuItemCostBreakdown {
   rawItemId: string;
   rawItemName: string;
   quantity: number;
@@ -2457,7 +2411,7 @@ export interface MenuItemCostBreakdown {
   lineCost: number;
 }
 
-export interface MenuItemCostResult {
+interface MenuItemCostResult {
   totalCost: number;
   breakdown: MenuItemCostBreakdown[];
 }
@@ -2465,7 +2419,7 @@ export interface MenuItemCostResult {
 /**
  * Computes total production cost of a menu item recipe with wastage adjustments.
  */
-export const calculateMenuItemCost = (
+const calculateMenuItemCost = (
   ingredients: RecipeIngredient[],
   customRawItems?: RawInventoryItem[]
 ): MenuItemCostResult => {
@@ -2474,27 +2428,13 @@ export const calculateMenuItemCost = (
   rawItems.forEach(r => {
     rawMap.set(r.id, r);
     rawMap.set(r.name.toLowerCase().trim(), r);
-    if (r.nameBn) {
-      rawMap.set(r.nameBn.toLowerCase().trim(), r);
-      const cleanBn = r.nameBn.replace(/\s*\([a-zA-Z\s\/\-_0-9]+\)\s*$/, '').toLowerCase().trim();
-      if (cleanBn) rawMap.set(cleanBn, r);
-    }
-    const norm = normalizeRawItemName(r.name);
-    if (norm) rawMap.set(norm, r);
   });
 
   const breakdown: MenuItemCostBreakdown[] = [];
   let totalCost = 0;
 
   for (const ing of ingredients) {
-    const ingName = (ing.rawItemName || '').toLowerCase().trim();
-    const raw = rawMap.get(ing.rawItemId) || 
-                rawMap.get(ingName) ||
-                (ingName ? rawMap.get(normalizeRawItemName(ingName)) : undefined) ||
-                rawItems.find(r => r.id === ing.rawItemId) ||
-                rawItems.find(r => r.name.toLowerCase() === ingName) ||
-                rawItems.find(r => r.nameBn && ingName && (r.nameBn.toLowerCase().includes(ingName) || ingName.includes(r.nameBn.toLowerCase())));
-
+    const raw = rawMap.get(ing.rawItemId) || rawMap.get(ing.rawItemName.toLowerCase().trim());
     const baseCost = raw ? (Number(raw.unitCost) || 0) : 0;
     const wastage = raw ? (Number(raw.wastagePercentage) || 0) : 0;
     const effectiveCost = raw ? getEffectiveRawUnitCost(raw) : baseCost;
@@ -2534,7 +2474,7 @@ export const calculateMenuItemCost = (
  * Generates formatted raw item string from recipe ingredients in real-time.
  * e.g. "লেবু (1 pcs), সাদা চিনি (25 gm), Black Salt (1 gm)"
  */
-export const formatRecipeRawItemsString = (
+const formatRecipeRawItemsString = (
   recipe: RecipeIngredient[], 
   rawItemsList: RawInventoryItem[]
 ): string => {
@@ -2557,8 +2497,9 @@ export const formatRecipeRawItemsString = (
         name = ing.rawItemName || '';
       }
 
-      const numQty = Number(ing.quantity);
-      const qty = !isNaN(numQty) && numQty >= 0 ? numQty : 0;
+      const qty = (ing.quantity !== '' && ing.quantity !== undefined && !isNaN(Number(ing.quantity)))
+        ? Number(ing.quantity) 
+        : (ing.quantity ?? 0);
       const unit = ing.unit || (raw ? raw.unit : '') || '';
 
       if (!name) return '';
