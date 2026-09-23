@@ -265,23 +265,37 @@ export const saveDetailedUsers = (users: DetailedUserLogin[]): void => {
     // Async sync to Supabase
     (async () => {
       try {
-        const supaPayload = users.filter(u => u && u.bdNo).map(u => ({
-          'User ID': String(u.bdNo).toLowerCase(),
-          airman_id: u.airmanId || null,
-          'Name': u.name || String(u.bdNo),
-          'Rank': u.rank || null,
-          'Flight': u.flightName || null,
-          'Trade': u.trade || null,
-          'Role': u.role || 'USER',
-          'User Login PIN': (u.password && u.password.trim() !== '') ? Number(u.password) : null,
-          'Admin Login PIN': (u.adminPass && u.adminPass.trim() !== '') ? Number(u.adminPass) : null,
-          'Status': u.status || 'ACTIVE',
-          detail_order: u.detailOrder || null
-        }));
+        const rawPayload = users
+          .filter(u => u && u.bdNo)
+          .map(u => {
+            const cleanBd = String(u.bdNo || '').replace(/^BD\/?/i, '').trim();
+            const name = (u.name && String(u.name).trim() !== '') ? String(u.name).trim() : (cleanBd ? `Airman ${cleanBd}` : 'Airman');
+            const userPin = (u.password && String(u.password).trim() !== '' && !isNaN(Number(u.password))) ? Number(u.password) : null;
+            const adminPin = (u.adminPass && String(u.adminPass).trim() !== '' && !isNaN(Number(u.adminPass))) ? Number(u.adminPass) : null;
+            return {
+              'User ID': cleanBd,
+              airman_id: u.airmanId || null,
+              'Name': name,
+              'Rank': u.rank || null,
+              'Flight': u.flightName || null,
+              'Trade': u.trade || null,
+              'Role': u.role || 'USER',
+              'User Login PIN': userPin,
+              'Admin Login PIN': adminPin,
+              'Status': u.status || 'ACTIVE',
+              detail_order: u.detailOrder || null
+            };
+          })
+          .filter(u => u['User ID'] && u['User ID'].toLowerCase() !== 'deleted_admin');
+        
+        // Deduplicate on User ID
+        const uniqueMap = new Map();
+        rawPayload.forEach(p => uniqueMap.set(p['User ID'].toLowerCase(), p));
+        const supaPayload = Array.from(uniqueMap.values());
         
         // Upsert users to Supabase
-        if (isSupabaseConfigured) {
-          const { error } = await supabase.from('user_profiles').upsert(supaPayload, { onConflict: '"User ID"' });
+        if (isSupabaseConfigured && supaPayload.length > 0) {
+          const { error } = await supabase.from('user_profiles').upsert(supaPayload, { onConflict: 'User ID' });
           if (error) {
             if (error.message?.includes('Failed to fetch') || (error as any)?.details?.includes('Failed to fetch')) {
               console.warn("Supabase sync currently offline or blocked; local changes preserved.");

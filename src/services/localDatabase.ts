@@ -531,6 +531,7 @@ export class LocalDatabaseEngine {
       } else {
         addSyncLog({ timestamp: new Date().toISOString(), type: "PULL", status: "SUCCESS", message: "Supabase data is up to date." });
       }
+      this.lastSyncedDbStr = JSON.stringify(this.db);
       
       return true;
     } catch (err: any) {
@@ -849,43 +850,66 @@ export class LocalDatabaseEngine {
 
         // 4. Sync User Profiles
         if (changedUsers.length > 0) {
-           let usersPayload = changedUsers.filter(u => u && u.bdNo).map((u: any) => ({
-              airman_id: u.airmanId || null,
-              'User ID': u.bdNo,
-              'Rank': u.rank || '',
-              'Name': u.name || '',
-              'Flight': u.flightName || '',
-              'Trade': u.trade || '',
-              'Role': u.role || 'USER',
-              'User Login PIN': (u.password && String(u.password).trim() !== '' && !isNaN(Number(u.password))) ? Number(u.password) : null,
-              'Admin Login PIN': (u.adminPass && String(u.adminPass).trim() !== '' && !isNaN(Number(u.adminPass))) ? Number(u.adminPass) : null
-           }));
+           let usersPayload = changedUsers
+             .filter(u => u && u.bdNo)
+             .map((u: any) => {
+               const cleanBd = String(u.bdNo || '').replace(/^BD\/?/i, '').trim();
+               const name = (u.name && String(u.name).trim() !== '') ? String(u.name).trim() : (cleanBd ? `Airman ${cleanBd}` : 'Airman');
+               const userPin = (u.password && String(u.password).trim() !== '' && !isNaN(Number(u.password))) ? Number(u.password) : null;
+               const adminPin = (u.adminPass && String(u.adminPass).trim() !== '' && !isNaN(Number(u.adminPass))) ? Number(u.adminPass) : null;
+               return {
+                 airman_id: u.airmanId || null,
+                 'User ID': cleanBd,
+                 'Rank': u.rank || '',
+                 'Name': name,
+                 'Flight': u.flightName || '',
+                 'Trade': u.trade || '',
+                 'Role': u.role || 'USER',
+                 'Status': u.status || 'ACTIVE',
+                 'User Login PIN': userPin,
+                 'Admin Login PIN': adminPin,
+                 detail_order: u.detailOrder || null
+               };
+             })
+             .filter(u => u['User ID'] && u['User ID'].toLowerCase() !== 'deleted_admin');
            
-           // Deduplicate
+           // Deduplicate strictly by case-insensitive User ID
            const uniqueUsersMap = new Map();
-           usersPayload.forEach(a => uniqueUsersMap.set(a['User ID'], a));
+           usersPayload.forEach(a => uniqueUsersMap.set(String(a['User ID']).toLowerCase(), a));
            usersPayload = Array.from(uniqueUsersMap.values());
            
-           const usersChunkSize = 50;
+           const usersChunkSize = 25;
            for (let i = 0; i < usersPayload.length; i += usersChunkSize) {
               const chunk = usersPayload.slice(i, i + usersChunkSize);
               emitSyncProgress(90 + Math.round((i / usersPayload.length) * 10), `Uploading users ${i} of ${usersPayload.length}...`);
-              const { data: usersDataRes, error: usersErr } = await supabase.from('user_profiles').upsert(chunk, { onConflict: '"User ID"' }).select();
-              await delay(100);
               
-              if (!usersErr && (!usersDataRes || usersDataRes.length === 0) && chunk.length > 0) {
-                 console.error('User profiles upsert blocked by RLS');
-                 hasError = true;
-                 errorMessage = 'Row Level Security (RLS) is blocking the User Profiles upload in Supabase. Please disable RLS or add policies.';
-                 break;
-              } else if (usersErr) {
-                 console.error("Error syncing users to Supabase:", usersErr);
-                 hasError = true;
-                 errorMessage = usersErr.message?.includes('Failed to fetch')
-                    ? 'Network error (Failed to fetch). If you have an Adblocker or Brave Shields enabled, it might be blocking Supabase.'
-                    : (usersErr.message || 'Users error');
-                 break;
+              // Upsert batch directly without forcing .select() to avoid RLS read policy issues and payload bloat
+              let { error: usersErr } = await supabase.from('user_profiles').upsert(chunk, { onConflict: 'User ID' });
+              
+              // If batch upsert encountered an error, retry users individually to pinpoint and preserve all valid profiles
+              if (usersErr) {
+                 console.warn("Chunk upsert noticed an issue, verifying individual user profiles:", usersErr);
+                 let chunkAllFailed = true;
+                 let lastErr = usersErr;
+                 for (const singleUser of chunk) {
+                    const { error: singleErr } = await supabase.from('user_profiles').upsert([singleUser], { onConflict: 'User ID' });
+                    if (!singleErr) {
+                       chunkAllFailed = false;
+                    } else {
+                       lastErr = singleErr;
+                       console.warn(`User profile ${singleUser['User ID']} sync notice:`, singleErr);
+                    }
+                 }
+                 if (chunkAllFailed) {
+                    console.error("Error syncing users to Supabase:", lastErr);
+                    hasError = true;
+                    errorMessage = lastErr.message?.includes('Failed to fetch')
+                       ? 'Network error (Failed to fetch). If you have an Adblocker or Brave Shields enabled, it might be blocking Supabase.'
+                       : (lastErr.message || (lastErr as any).details || (lastErr as any).hint || (lastErr as any).code || 'Users sync error');
+                    break;
+                 }
               }
+              await delay(80);
            }
         }
         
@@ -979,7 +1003,8 @@ export class LocalDatabaseEngine {
         }
       } catch (err: any) {
         console.warn("Supabase Save Error:", err);
-        addSyncLog({ timestamp: new Date().toISOString(), type: "PUSH", status: "ERROR", message: "Failed to push to Supabase." });
+        const errMsg = err?.message || (typeof err === 'string' ? err : 'Network/server error');
+        addSyncLog({ timestamp: new Date().toISOString(), type: "PUSH", status: "ERROR", message: "Failed to push to Supabase: " + errMsg });
         if (typeof window !== 'undefined') window.localStorage.setItem('baf_pending_sync', 'true');
         return false;
       } finally {
