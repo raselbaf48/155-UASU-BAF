@@ -1,34 +1,49 @@
 {
+  "id": "/",
   "short_name": "155 UASU",
   "name": "155 UASU BAF | Duty & Office Management System",
+  "description": "Military personnel duty register, parade state tracker, TDY register, and monthly roster management system for 155 UASU BAF BASE ZHR.",
   "icons": [
     {
-      "src": "/pwa-192x192.png?v=5",
+      "src": "/pwa-pc-1024x1024.png?v=7",
+      "type": "image/png",
+      "sizes": "1024x1024",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-pc-512x512.png?v=7",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-pc-256x256.png?v=7",
+      "type": "image/png",
+      "sizes": "256x256",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-pc-192x192.png?v=7",
       "type": "image/png",
       "sizes": "192x192",
       "purpose": "any"
     },
     {
-      "src": "/pwa-192x192-full.png?v=5",
+      "src": "/pwa-mobile-maskable-512x512.png?v=7",
       "type": "image/png",
-      "sizes": "192x192",
+      "sizes": "512x512",
       "purpose": "maskable"
     },
     {
-      "src": "/pwa-512x512.png?v=5",
+      "src": "/pwa-mobile-maskable-192x192.png?v=7",
       "type": "image/png",
-      "sizes": "512x512",
-      "purpose": "any"
-    },
-    {
-      "src": "/pwa-512x512-full.png?v=5",
-      "type": "image/png",
-      "sizes": "512x512",
+      "sizes": "192x192",
       "purpose": "maskable"
     }
   ],
   "start_url": "/",
   "background_color": "#0f172a",
   "display": "standalone",
-  "theme_color": "#0f172a"
+  "theme_color": "#0f172a",
+  "orientation": "any"
 }
