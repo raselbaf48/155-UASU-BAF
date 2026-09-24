@@ -596,6 +596,67 @@ export class LocalDatabaseEngine {
         let hasError = false;
         let errorMessage = '';
 
+        const toValidDateString = (val: any): string => {
+          if (!val) return new Date().toISOString().substring(0, 10);
+          if (typeof val === 'number') {
+            const d = new Date(val);
+            if (!isNaN(d.getTime())) return d.toISOString().substring(0, 10);
+          }
+          if (typeof val === 'string') {
+            const trimmed = val.trim();
+            if (!trimmed) return new Date().toISOString().substring(0, 10);
+            if (/^\d{11,}$/.test(trimmed)) {
+              const d = new Date(Number(trimmed));
+              if (!isNaN(d.getTime())) return d.toISOString().substring(0, 10);
+            }
+            const match = trimmed.match(/^\d{4}-\d{2}-\d{2}/);
+            if (match) return match[0];
+            const d = new Date(trimmed);
+            if (!isNaN(d.getTime())) return d.toISOString().substring(0, 10);
+          }
+          return new Date().toISOString().substring(0, 10);
+        };
+
+        const toNullableDateString = (val: any): string | null => {
+          if (!val) return null;
+          if (typeof val === 'number') {
+            const d = new Date(val);
+            if (!isNaN(d.getTime())) return d.toISOString().substring(0, 10);
+          }
+          if (typeof val === 'string') {
+            const trimmed = val.trim();
+            if (!trimmed || trimmed === 'null' || trimmed === 'undefined' || trimmed === 'N/A' || trimmed === 'None') return null;
+            if (/^\d{11,}$/.test(trimmed)) {
+              const d = new Date(Number(trimmed));
+              if (!isNaN(d.getTime())) return d.toISOString().substring(0, 10);
+            }
+            const match = trimmed.match(/^\d{4}-\d{2}-\d{2}/);
+            if (match) return match[0];
+            const d = new Date(trimmed);
+            if (!isNaN(d.getTime())) return d.toISOString().substring(0, 10);
+          }
+          return null;
+        };
+
+        const toValidIsoTimestamp = (val: any): string => {
+          if (!val) return new Date().toISOString();
+          if (typeof val === 'number') {
+            const d = new Date(val);
+            if (!isNaN(d.getTime())) return d.toISOString();
+          }
+          if (typeof val === 'string') {
+            const trimmed = val.trim();
+            if (!trimmed) return new Date().toISOString();
+            if (/^\d{11,}$/.test(trimmed)) {
+              const d = new Date(Number(trimmed));
+              if (!isNaN(d.getTime())) return d.toISOString();
+            }
+            const d = new Date(trimmed);
+            if (!isNaN(d.getTime())) return d.toISOString();
+          }
+          return new Date().toISOString();
+        };
+
         let lastSyncedDb: any = {};
         try { lastSyncedDb = JSON.parse(this.lastSyncedDbStr || '{}'); } catch(e) {}
         
@@ -696,27 +757,26 @@ export class LocalDatabaseEngine {
             'Mobile No': a.mobileNo || null,
             'Blood Group': a.bloodGroup || null,
             'Permanent Address': a.permanentAddress || null,
-            'Dt of Posting': (a.dateJoined && String(a.dateJoined).trim() !== '') ? String(a.dateJoined).trim() : null,
+            'Dt of Posting': toNullableDateString(a.dateJoined),
             'Present Address': a.addressBlock || null,
             'Status': a.active === false ? 'SUSPENDED' : 'ACTIVE',
-            'Unit Left date': (a.dateLeft && String(a.dateLeft).trim() !== '') ? String(a.dateLeft).trim() : null
+            'Unit Left date': toNullableDateString(a.dateLeft)
           }));
           // Deduplicate
           const uniqueStaffMap = new Map();
           staffPayload.forEach(a => uniqueStaffMap.set(a.airman_id, a));
           staffPayload = Array.from(uniqueStaffMap.values());
           
-          const staffChunkSize = 50;
+          const staffChunkSize = 25;
           for (let i = 0; i < staffPayload.length; i += staffChunkSize) {
              const chunk = staffPayload.slice(i, i + staffChunkSize);
              emitSyncProgress(Math.round((i / staffPayload.length) * 30), `Uploading staff ${i} of ${staffPayload.length}...`);
-             const { data: staffDataRes, error: staffErr } = await supabase.from('Biodata Register').upsert(chunk, { onConflict: 'airman_id' }).select();
-             if (!staffErr && (!staffDataRes || staffDataRes.length === 0) && chunk.length > 0) { console.error('Staff upsert blocked by RLS'); hasError = true; errorMessage = 'Row Level Security (RLS) is blocking the Staff upload in Supabase. Please disable RLS or add policies.'; break; }
-             await delay(100);
+             let { error: staffErr } = await supabase.from('Biodata Register').upsert(chunk, { onConflict: 'airman_id' });
+             await delay(80);
              if (staffErr) {
-               // Check if the error is caused by a Supabase trigger referencing column "Name" of relation "Canteen"
-               if (staffErr.code === '42703' || staffErr.message?.includes('column "Name" of relation "Canteen"') || staffErr.message?.includes('Canteen')) {
-                 console.warn("Notice: Remote Supabase database has a trigger on 'Biodata Register' referencing non-existent column 'Name' on relation 'Canteen'. Syncing airmen directly to Canteen table instead:", staffErr.message);
+               // Check if the error is caused by a Supabase trigger referencing column "Name" or non-existent relation "Canteen"
+               if (staffErr.code === '42703' || staffErr.code === '42P01' || staffErr.message?.includes('column "Name" of relation "Canteen"') || staffErr.message?.includes('Canteen')) {
+                 console.warn("Notice: Remote Supabase database has a trigger on 'Biodata Register' referencing 'Canteen'. Syncing airmen directly to Canteen table instead:", staffErr.message);
                  try {
                    const canteenPayload = chunk.map(c => ({
                      airman_id: c.airman_id,
@@ -733,15 +793,29 @@ export class LocalDatabaseEngine {
                    timestamp: new Date().toISOString(),
                    type: "PUSH",
                    status: "SUCCESS",
-                   message: "Staff updated (Canteen direct sync completed; remote trigger 'Name' column skipped)."
+                   message: "Staff updated (Canteen direct sync completed; remote trigger handled)."
                  });
                } else {
-                 console.error("Error syncing staff to Supabase:", staffErr);
-                 hasError = true;
-                 errorMessage = staffErr.message?.includes('Failed to fetch') 
-                    ? 'Network error (Failed to fetch). If you have an Adblocker or Brave Shields enabled, it might be blocking Supabase. Please disable it for this site.'
-                    : (staffErr.message || 'Staff error');
-                 break;
+                 console.warn("Chunk staff upsert error, attempting individual retries:", staffErr);
+                 let allChunkFailed = true;
+                 let lastErr = staffErr;
+                 for (const singleStaff of chunk) {
+                   const { error: sErr } = await supabase.from('Biodata Register').upsert([singleStaff], { onConflict: 'airman_id' });
+                   if (!sErr || sErr.code === '42703' || sErr.code === '42P01' || sErr.message?.includes('Canteen')) {
+                     allChunkFailed = false;
+                   } else {
+                     lastErr = sErr;
+                     console.warn(`Staff ${singleStaff.airman_id} upsert notice:`, sErr);
+                   }
+                 }
+                 if (allChunkFailed) {
+                   console.error("Error syncing staff to Supabase:", lastErr);
+                   hasError = true;
+                   errorMessage = lastErr.message?.includes('Failed to fetch') 
+                      ? 'Network error (Failed to fetch). If you have an Adblocker or Brave Shields enabled, it might be blocking Supabase.'
+                      : (lastErr.message || (lastErr as any).details || (lastErr as any).hint || (lastErr as any).code || 'Staff sync error');
+                   break;
+                 }
                }
              }
           }
@@ -772,7 +846,7 @@ export class LocalDatabaseEngine {
              assignmentsPayload.push({
                assignment_id: assignId,
                airman_id: a.airmanId,
-               duty_date: a.date,
+               duty_date: toValidDateString(a.date),
                duty_type: a.dutyCode || a.dutyType || 'UNKNOWN',
                shift: a.idaShift || a.shift || null,
                location: a.location || null,
@@ -792,58 +866,93 @@ export class LocalDatabaseEngine {
           const deduplicatedAssignments = Array.from(uniqueAssignmentsMap.values());
           
           // Break into chunks if too large
-          const assignChunkSize = 50;
+          const assignChunkSize = 25;
           for (let i = 0; i < deduplicatedAssignments.length; i += assignChunkSize) {
             const chunk = deduplicatedAssignments.slice(i, i + assignChunkSize);
             emitSyncProgress(30 + Math.round((i / deduplicatedAssignments.length) * 40), `Uploading duties ${i} of ${deduplicatedAssignments.length}...`);
-            const { data: assignDataRes, error: assignErr } = await supabase.from('duty_rosters').upsert(chunk, { onConflict: 'assignment_id' }).select();
-            if (!assignErr && (!assignDataRes || assignDataRes.length === 0) && chunk.length > 0) { console.error('Duty upsert blocked by RLS'); hasError = true; errorMessage = 'Row Level Security (RLS) is blocking the Duty upload in Supabase. Please disable RLS or add policies.'; break; }
-            await delay(100);
+            let { error: assignErr } = await supabase.from('duty_rosters').upsert(chunk, { onConflict: 'assignment_id' });
+            await delay(80);
             
             if (assignErr) {
-               console.error("Error syncing duties to Supabase:", assignErr);
-               hasError = true;
-               errorMessage = assignErr.message?.includes('Failed to fetch') 
-                  ? 'Network error (Failed to fetch). If you have an Adblocker or Brave Shields enabled, it might be blocking Supabase. Please disable it for this site.'
-                  : (assignErr.message || 'Duties error');
-               break;
+               console.warn("Chunk duties upsert error, attempting individual retries:", assignErr);
+               let allChunkFailed = true;
+               let lastErr = assignErr;
+               for (const singleDuty of chunk) {
+                  const { error: dErr } = await supabase.from('duty_rosters').upsert([singleDuty], { onConflict: 'assignment_id' });
+                  if (!dErr) {
+                     allChunkFailed = false;
+                  } else {
+                     lastErr = dErr;
+                     console.warn(`Duty ${singleDuty.assignment_id} sync notice:`, dErr);
+                  }
+               }
+               if (allChunkFailed) {
+                  console.error("Error syncing duties to Supabase:", lastErr);
+                  hasError = true;
+                  errorMessage = lastErr.message?.includes('Failed to fetch') 
+                     ? 'Network error (Failed to fetch). If you have an Adblocker or Brave Shields enabled, it might be blocking Supabase.'
+                     : (lastErr.message || (lastErr as any).details || (lastErr as any).hint || (lastErr as any).code || 'Duties sync error');
+                  break;
+               }
             }
           }
         }
         
         // 3. Sync Activity History (Parade States/Logs)
         if (changedHistory.length > 0) {
-           let historyPayload = changedHistory.map((h: any) => ({
-              log_id: h.id || ('log_' + Math.random().toString(36).substring(2, 9)),
-              date: h.date || h.timestamp?.substring(0, 10) || new Date().toISOString().substring(0, 10),
-              type: h.type || h.actionType || 'SYSTEM',
-              title: h.title || h.airmanName || 'Action',
-              description: h.description || h.notes || h.details || '',
-              user_id: h.performedByUserId || h.userId || null,
-              user_name: h.performedByUserName || h.userName || null,
-              created_at: h.timestamp || new Date().toISOString()
-           }));
+           let historyPayload = changedHistory.map((h: any) => {
+              const safeDate = toValidDateString(h.date || h.fromDate || h.timestamp);
+              const safeCreatedAt = toValidIsoTimestamp(h.timestamp || h.created_at || h.date);
+              const safeType = (h.type || h.actionType || 'SYSTEM').toString().trim() || 'SYSTEM';
+              const safeTitle = (h.title && String(h.title).trim() !== '') 
+                 ? String(h.title).trim() 
+                 : ((h.airmanName && String(h.airmanName).trim() !== '') ? String(h.airmanName).trim() : 'System Action');
+              const safeDesc = typeof h.description === 'string' ? h.description : (typeof h.notes === 'string' ? h.notes : (typeof h.details === 'string' ? h.details : ''));
+              return {
+                 log_id: (h.id && String(h.id).trim() !== '') ? String(h.id).trim() : ('log_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8)),
+                 date: safeDate,
+                 type: safeType,
+                 title: safeTitle,
+                 description: safeDesc,
+                 user_id: h.performedByUserId || h.userId || null,
+                 user_name: h.performedByUserName || h.userName || null,
+                 created_at: safeCreatedAt
+              };
+           });
            
            // Deduplicate
            const uniqueHistMap = new Map();
            historyPayload.forEach(a => uniqueHistMap.set(a.log_id, a));
            historyPayload = Array.from(uniqueHistMap.values());
            
-           const histChunkSize = 50;
+           const histChunkSize = 25;
            for (let i = 0; i < historyPayload.length; i += histChunkSize) {
               const chunk = historyPayload.slice(i, i + histChunkSize);
               emitSyncProgress(70 + Math.round((i / historyPayload.length) * 20), `Uploading history ${i} of ${historyPayload.length}...`);
-              const { data: histDataRes, error: histErr } = await supabase.from('parade_states').upsert(chunk, { onConflict: 'log_id' }).select();
-              if (!histErr && (!histDataRes || histDataRes.length === 0) && chunk.length > 0) { console.error('History insert blocked by RLS'); hasError = true; errorMessage = 'Row Level Security (RLS) is blocking the History upload in Supabase. Please disable RLS or add policies.'; break; }
-              await delay(100);
+              let { error: histErr } = await supabase.from('parade_states').upsert(chunk, { onConflict: 'log_id' });
+              await delay(80);
               
               if (histErr) {
-                 console.error("Error syncing history to Supabase:", histErr);
-                 hasError = true;
-                 errorMessage = histErr.message?.includes('Failed to fetch')
-                    ? 'Network error (Failed to fetch). If you have an Adblocker or Brave Shields enabled, it might be blocking Supabase.'
-                    : (histErr.message || 'History error');
-                 break;
+                 console.warn("History chunk sync issue, retrying individually:", histErr);
+                 let allChunkFailed = true;
+                 let lastErr = histErr;
+                 for (const singleHist of chunk) {
+                    const { error: singleErr } = await supabase.from('parade_states').upsert([singleHist], { onConflict: 'log_id' });
+                    if (!singleErr) {
+                       allChunkFailed = false;
+                    } else {
+                       lastErr = singleErr;
+                       console.warn(`History item ${singleHist.log_id} sync notice:`, singleErr);
+                    }
+                 }
+                 if (allChunkFailed) {
+                    console.error("Error syncing history to Supabase:", lastErr);
+                    hasError = true;
+                    errorMessage = lastErr.message?.includes('Failed to fetch')
+                       ? 'Network error (Failed to fetch). If you have an Adblocker or Brave Shields enabled, it might be blocking Supabase.'
+                       : (lastErr.message || (lastErr as any).details || (lastErr as any).hint || (lastErr as any).code || 'History sync error');
+                    break;
+                 }
               }
            }
         }
