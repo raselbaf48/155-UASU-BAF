@@ -170,7 +170,7 @@ async function startServer() {
   const supabaseUrl = cleanSupabaseUrl(process.env.VITE_SUPABASE_URL);
   const supabaseAnonKey = cleanSupabaseAnonKey(process.env.VITE_SUPABASE_ANON_KEY);
   
-  app.all('/api/supabase/*', async (req, res) => {
+  app.all('/api/supabase/*', express.raw({ type: '*/*', limit: '50mb' }), async (req, res) => {
     let targetUrl = '';
     try {
       targetUrl = `${supabaseUrl}${req.originalUrl.replace('/api/supabase', '')}`;
@@ -199,12 +199,12 @@ async function startServer() {
       };
       
       if (req.method !== 'GET' && req.method !== 'HEAD') {
-        const chunks = [];
-        for await (const chunk of req) {
-          chunks.push(chunk);
-        }
-        if (chunks.length > 0) {
-          reqOptions.body = Buffer.concat(chunks);
+        if (Buffer.isBuffer(req.body) && req.body.length > 0) {
+          reqOptions.body = req.body;
+        } else if (typeof req.body === 'string' && req.body.length > 0) {
+          reqOptions.body = req.body;
+        } else if (req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0) {
+          reqOptions.body = JSON.stringify(req.body);
         }
       }
       

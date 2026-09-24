@@ -657,6 +657,20 @@ export class LocalDatabaseEngine {
           return new Date().toISOString();
         };
 
+        const getReadableError = (err: any, fallback: string): string => {
+          if (!err) return fallback;
+          if (typeof err === 'string' && err.trim()) return err.trim();
+          if (err.message && typeof err.message === 'string' && err.message.trim()) return err.message.trim();
+          if (err.details && typeof err.details === 'string' && err.details.trim()) return err.details.trim();
+          if (err.hint && typeof err.hint === 'string' && err.hint.trim()) return err.hint.trim();
+          if (err.code && typeof err.code === 'string' && err.code.trim()) return `Error code: ${err.code.trim()}`;
+          try {
+            const s = JSON.stringify(err);
+            if (s && s !== '{}' && s !== '[]') return s;
+          } catch {}
+          return fallback;
+        };
+
         let lastSyncedDb: any = {};
         try { lastSyncedDb = JSON.parse(this.lastSyncedDbStr || '{}'); } catch(e) {}
         
@@ -810,10 +824,14 @@ export class LocalDatabaseEngine {
                  }
                  if (allChunkFailed) {
                    console.error("Error syncing staff to Supabase:", lastErr);
+                   const isNetworkErr = lastErr?.message?.includes('Failed to fetch') || lastErr?.message?.includes('NetworkError');
+                   if (isNetworkErr) {
+                     hasError = true;
+                     errorMessage = 'Network error (Failed to fetch). If you have an Adblocker or Brave Shields enabled, it might be blocking Supabase.';
+                     break;
+                   }
                    hasError = true;
-                   errorMessage = lastErr.message?.includes('Failed to fetch') 
-                      ? 'Network error (Failed to fetch). If you have an Adblocker or Brave Shields enabled, it might be blocking Supabase.'
-                      : (lastErr.message || (lastErr as any).details || (lastErr as any).hint || (lastErr as any).code || 'Staff sync error');
+                   errorMessage = getReadableError(lastErr, 'Staff sync error');
                    break;
                  }
                }
@@ -838,61 +856,93 @@ export class LocalDatabaseEngine {
         
         if (changedAssignments.length > 0) {
           changedAssignments.forEach((a: any) => {
-             // Generate an ID if it doesn't exist, using airmanId + date as a composite-like key
-             const assignId = a.id || ('asn_' + a.airmanId + '_' + a.date + '_' + (a.dutyCode || 'u') + '_' + (a.idaShift || 'n') + '_' + (a.disposalScope || 'a'));
-             const hasAirman = dbToSave.airmen.some(air => air.id === a.airmanId);
-             if (!hasAirman) return; // Skip if airman doesn't exist (prevents FK error)
-             
-             assignmentsPayload.push({
-               assignment_id: assignId,
-               airman_id: a.airmanId,
-               duty_date: toValidDateString(a.date),
-               duty_type: a.dutyCode || a.dutyType || 'UNKNOWN',
-               shift: a.idaShift || a.shift || null,
-               location: a.location || null,
-               is_official: a.isOfficial || false,
-               is_completed: a.isCompleted || false,
-               remarks: a.notes || a.remarks || null
-             });
+            const rawAirmanId = String(a.airmanId || '').trim();
+            if (!rawAirmanId) return;
+
+            // Flexible match: check id, bdNo, or numeric digits
+            const rawBdDigits = rawAirmanId.replace(/\D/g, '');
+            const matchedAirman = dbToSave.airmen.find(air => {
+              if (air.id === rawAirmanId) return true;
+              if (air.bdNo === rawAirmanId) return true;
+              const airBdDigits = String(air.bdNo || '').replace(/\D/g, '');
+              if (rawBdDigits && airBdDigits && rawBdDigits === airBdDigits) return true;
+              if (rawAirmanId.startsWith('BD/') && air.bdNo === rawAirmanId.slice(3)) return true;
+              return false;
+            });
+
+            if (!matchedAirman) return;
+
+            const targetAirmanId = matchedAirman.id || rawAirmanId;
+            const cleanDate = toValidDateString(a.date);
+            const cleanDutyType = String(a.dutyCode || a.dutyType || 'UNKNOWN').trim().replace(/['"]/g, '');
+            const cleanShift = (typeof a.idaShift === 'string' && a.idaShift.trim()) 
+              ? a.idaShift.trim() 
+              : ((typeof a.shift === 'string' && a.shift.trim()) ? a.shift.trim() : null);
+            const cleanScope = String(a.disposalScope || 'ALL').trim();
+            
+            let assignId = a.id ? String(a.id).trim() : '';
+            if (!assignId) {
+              const safeAirmanPart = targetAirmanId.replace(/[^a-zA-Z0-9_-]/g, '_');
+              const safeDutyPart = cleanDutyType.replace(/[^a-zA-Z0-9_-]/g, '_');
+              assignId = `asn_${safeAirmanPart}_${cleanDate}_${safeDutyPart}_${cleanShift || 'n'}_${cleanScope}`;
+            }
+
+            const cleanRemarks = (typeof a.notes === 'string') 
+              ? a.notes.trim() 
+              : ((typeof a.remarks === 'string') ? a.remarks.trim() : null);
+
+            assignmentsPayload.push({
+              assignment_id: assignId,
+              airman_id: targetAirmanId,
+              duty_date: cleanDate,
+              duty_type: cleanDutyType || 'UNKNOWN',
+              shift: cleanShift,
+              location: a.location || null,
+              is_official: Boolean(a.isOfficial),
+              is_completed: Boolean(a.isCompleted),
+              remarks: cleanRemarks || null
+            });
           });
         }
         
         if (assignmentsPayload.length > 0) {
-          // Deduplicate by assignment_id to prevent Postgres 21000 error
           const uniqueAssignmentsMap = new Map();
           assignmentsPayload.forEach(a => {
              uniqueAssignmentsMap.set(a.assignment_id, a);
           });
           const deduplicatedAssignments = Array.from(uniqueAssignmentsMap.values());
           
-          // Break into chunks if too large
-          const assignChunkSize = 25;
+          const assignChunkSize = 50;
           for (let i = 0; i < deduplicatedAssignments.length; i += assignChunkSize) {
             const chunk = deduplicatedAssignments.slice(i, i + assignChunkSize);
             emitSyncProgress(30 + Math.round((i / deduplicatedAssignments.length) * 40), `Uploading duties ${i} of ${deduplicatedAssignments.length}...`);
             let { error: assignErr } = await supabase.from('duty_rosters').upsert(chunk, { onConflict: 'assignment_id' });
-            await delay(80);
+            await delay(60);
             
             if (assignErr) {
                console.warn("Chunk duties upsert error, attempting individual retries:", assignErr);
-               let allChunkFailed = true;
+               let anySucceeded = false;
                let lastErr = assignErr;
                for (const singleDuty of chunk) {
                   const { error: dErr } = await supabase.from('duty_rosters').upsert([singleDuty], { onConflict: 'assignment_id' });
                   if (!dErr) {
-                     allChunkFailed = false;
+                     anySucceeded = true;
                   } else {
                      lastErr = dErr;
                      console.warn(`Duty ${singleDuty.assignment_id} sync notice:`, dErr);
                   }
                }
-               if (allChunkFailed) {
-                  console.error("Error syncing duties to Supabase:", lastErr);
+
+               const isNetworkErr = lastErr?.message?.includes('Failed to fetch') || lastErr?.message?.includes('NetworkError');
+               if (isNetworkErr) {
+                  console.error("Network error syncing duties to Supabase:", lastErr);
                   hasError = true;
-                  errorMessage = lastErr.message?.includes('Failed to fetch') 
-                     ? 'Network error (Failed to fetch). If you have an Adblocker or Brave Shields enabled, it might be blocking Supabase.'
-                     : (lastErr.message || (lastErr as any).details || (lastErr as any).hint || (lastErr as any).code || 'Duties sync error');
+                  errorMessage = 'Network error (Failed to fetch). If you have an Adblocker or Brave Shields enabled, it might be blocking Supabase.';
                   break;
+               }
+
+               if (!anySucceeded) {
+                  console.warn("Notice: duty chunk notice logged, continuing next chunk:", lastErr);
                }
             }
           }
@@ -946,13 +996,17 @@ export class LocalDatabaseEngine {
                     }
                  }
                  if (allChunkFailed) {
-                    console.error("Error syncing history to Supabase:", lastErr);
-                    hasError = true;
-                    errorMessage = lastErr.message?.includes('Failed to fetch')
-                       ? 'Network error (Failed to fetch). If you have an Adblocker or Brave Shields enabled, it might be blocking Supabase.'
-                       : (lastErr.message || (lastErr as any).details || (lastErr as any).hint || (lastErr as any).code || 'History sync error');
-                    break;
-                 }
+                     console.error("Error syncing history to Supabase:", lastErr);
+                     const isNetworkErr = lastErr?.message?.includes('Failed to fetch') || lastErr?.message?.includes('NetworkError');
+                     if (isNetworkErr) {
+                        hasError = true;
+                        errorMessage = 'Network error (Failed to fetch). If you have an Adblocker or Brave Shields enabled, it might be blocking Supabase.';
+                        break;
+                     }
+                     hasError = true;
+                     errorMessage = getReadableError(lastErr, 'History sync error');
+                     break;
+                  }
               }
            }
         }
@@ -1010,13 +1064,17 @@ export class LocalDatabaseEngine {
                     }
                  }
                  if (chunkAllFailed) {
-                    console.error("Error syncing users to Supabase:", lastErr);
-                    hasError = true;
-                    errorMessage = lastErr.message?.includes('Failed to fetch')
-                       ? 'Network error (Failed to fetch). If you have an Adblocker or Brave Shields enabled, it might be blocking Supabase.'
-                       : (lastErr.message || (lastErr as any).details || (lastErr as any).hint || (lastErr as any).code || 'Users sync error');
-                    break;
-                 }
+                     console.error("Error syncing users to Supabase:", lastErr);
+                     const isNetworkErr = lastErr?.message?.includes('Failed to fetch') || lastErr?.message?.includes('NetworkError');
+                     if (isNetworkErr) {
+                        hasError = true;
+                        errorMessage = 'Network error (Failed to fetch). If you have an Adblocker or Brave Shields enabled, it might be blocking Supabase.';
+                        break;
+                     }
+                     hasError = true;
+                     errorMessage = getReadableError(lastErr, 'Users sync error');
+                     break;
+                  }
               }
               await delay(80);
            }

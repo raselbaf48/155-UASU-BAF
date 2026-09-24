@@ -39,18 +39,12 @@ if (!isSupabaseConfigured) {
 
 /**
  * Smart fetch for Supabase:
- * Routes REST requests through the same-origin /api/supabase proxy to bypass
- * iframe restrictions, ad-blockers, and CORS network barriers,
- * with automatic fallback to direct fetch.
+ * Attempts direct fetch first for maximum speed, native streaming, and zero proxy bottlenecks.
+ * If direct fetch is blocked by an ad-blocker or iframe restriction (Failed to fetch),
+ * it automatically falls back to the same-origin /api/supabase proxy.
  */
 const smartFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-
-  // Determine local proxy base
-  let proxyBase = '/api/supabase';
-  if (typeof window !== 'undefined') {
-    proxyBase = `${window.location.origin}/api/supabase`;
-  }
 
   // Ensure headers are sanitized with valid clean keys
   const headers = new Headers(init?.headers);
@@ -65,16 +59,34 @@ const smartFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
     headers,
   };
 
-  // If this is a call to the Supabase endpoint, route through our local proxy first
-  if (urlStr.includes(DIRECT_SUPABASE_URL) || urlStr.includes('supabase.co')) {
+  const isSupabaseCall = urlStr.includes(DIRECT_SUPABASE_URL) || urlStr.includes('supabase.co');
+
+  if (isSupabaseCall) {
+    // 1. Try direct fetch first (standard CORS, fast, native)
+    try {
+      const directRes = await fetch(input, modifiedInit);
+      // Return if successful or if Supabase PostgREST returned standard HTTP response
+      if (directRes.ok || (directRes.status >= 200 && directRes.status < 500)) {
+        return directRes;
+      }
+    } catch (directErr) {
+      // Network failure, browser block, or Adblocker blocked supabase.co - try local proxy fallback
+      console.warn('Direct Supabase fetch failed (network or adblocker), attempting proxy fallback:', directErr);
+    }
+
+    // 2. Fallback to same-origin proxy
+    let proxyBase = '/api/supabase';
+    if (typeof window !== 'undefined') {
+      proxyBase = `${window.location.origin}/api/supabase`;
+    }
     const proxyUrl = urlStr.replace(/^https?:\/\/[^\/]+/, proxyBase);
     try {
-      const res = await fetch(proxyUrl, modifiedInit);
-      if (res.status !== 502 && res.status !== 504) {
-        return res;
+      const proxyRes = await fetch(proxyUrl, modifiedInit);
+      if (proxyRes.ok || (proxyRes.status >= 200 && proxyRes.status < 500)) {
+        return proxyRes;
       }
-    } catch {
-      // Local proxy unreachable, proceed to direct fetch
+    } catch (proxyErr) {
+      console.warn('Proxy fallback also failed:', proxyErr);
     }
   }
 
