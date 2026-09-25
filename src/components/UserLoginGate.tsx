@@ -392,10 +392,10 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
       <div className="fixed bottom-10 right-10 w-72 h-72 bg-sky-600/10 rounded-full blur-3xl pointer-events-none z-0 print:hidden" />
       
       {/* Content Area */}
-      <div className={`w-full ${(activeTab === 'Nt Count' || (activeTab === 'Canteen' && isCanteenAuth)) ? 'flex-1 z-10 p-0 m-0' : 'max-w-md relative z-10'}`}>
+      <div className={`w-full ${(activeTab === 'Nt Count' || (activeTab === 'Canteen' && isCanteenAuth)) ? 'flex-1 z-10 p-0 m-0' : 'max-w-md md:max-w-[580px] relative z-10'}`}>
         
         {(activeTab === 'Office' || (activeTab === 'Canteen' && !isCanteenAuth)) && (
-          <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-800 rounded-3xl p-8 shadow-2xl space-y-6 text-white text-center mb-16">
+          <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-800 rounded-3xl p-8 md:p-10 shadow-2xl space-y-6 text-white text-center mb-16">
             {/* Header */}
             <div className="flex flex-col items-center space-y-3">
               <div className="flex items-center justify-center p-2">
@@ -406,7 +406,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                   <Shield className="w-3 h-3" />
                   <span>{isResetMode ? 'PASSWORD RECOVERY' : (activeTab === 'Canteen' ? 'CANTEEN LOGIN PORTAL' : 'USER LOGIN PORTAL')}</span>
                 </div>
-                <h1 className="text-2xl font-black tracking-tight text-white flex items-center justify-center space-x-3">
+                <h1 className="text-2xl md:text-[27px] font-black tracking-tight text-white flex items-center justify-center space-x-3">
             <span>{activeTab === 'Canteen' ? 'Canteen Management' : '155 UASU BAF'}</span>
           </h1>
               </div>

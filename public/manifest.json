@@ -5,39 +5,27 @@
   "description": "Military personnel duty register, parade state tracker, TDY register, and monthly roster management system for 155 UASU BAF BASE ZHR.",
   "icons": [
     {
-      "src": "/pwa-pc-1024x1024.png?v=7",
-      "type": "image/png",
-      "sizes": "1024x1024",
-      "purpose": "any"
-    },
-    {
-      "src": "/pwa-pc-512x512.png?v=7",
-      "type": "image/png",
-      "sizes": "512x512",
-      "purpose": "any"
-    },
-    {
-      "src": "/pwa-pc-256x256.png?v=7",
-      "type": "image/png",
-      "sizes": "256x256",
-      "purpose": "any"
-    },
-    {
-      "src": "/pwa-pc-192x192.png?v=7",
+      "src": "/pwa-192x192.png?v=10",
       "type": "image/png",
       "sizes": "192x192",
       "purpose": "any"
     },
     {
-      "src": "/pwa-mobile-maskable-512x512.png?v=7",
+      "src": "/pwa-512x512.png?v=10",
       "type": "image/png",
       "sizes": "512x512",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-mobile-maskable-192x192.png?v=10",
+      "type": "image/png",
+      "sizes": "192x192",
       "purpose": "maskable"
     },
     {
-      "src": "/pwa-mobile-maskable-192x192.png?v=7",
+      "src": "/pwa-mobile-maskable-512x512.png?v=10",
       "type": "image/png",
-      "sizes": "192x192",
+      "sizes": "512x512",
       "purpose": "maskable"
     }
   ],
