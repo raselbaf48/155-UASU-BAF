@@ -1,40 +1,87 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Helper to sanitize duplicated/malformed Supabase environment values
-function cleanSupabaseUrl(url: string | undefined): string {
-  if (!url) return 'https://asevtncnoytawykhcleg.supabase.co';
-  let cleaned = url.trim();
-  if (cleaned.length % 2 === 0 && cleaned.slice(0, cleaned.length / 2) === cleaned.slice(cleaned.length / 2)) {
-    cleaned = cleaned.slice(0, cleaned.length / 2);
-  }
-  const httpsMatch = cleaned.match(/https?:\/\/[^\/]+/g);
-  if (httpsMatch && httpsMatch.length > 1) {
-    cleaned = httpsMatch[0];
-  }
-  return cleaned.replace(/\/+$/, '');
+const FALLBACK_SUPABASE_URL = 'https://asevtncnoytawykhcleg.supabase.co';
+const FALLBACK_SUPABASE_ANON_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFzZXZ0bmNub3l0YXd5a2hjbGVnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkyNjEzMjksImV4cCI6MjEwNDgzNzMyOX0.YpeamrrHPpZdxGcj03PGIm4Z8OC9ShbLpJ16x9cl6RE';
+
+function isJwtKey(str: string | undefined | null): boolean {
+  if (!str || typeof str !== 'string') return false;
+  const trimmed = str.trim();
+  return trimmed.startsWith('eyJ') || (trimmed.split('.').length === 3 && !trimmed.startsWith('http'));
 }
 
-function cleanSupabaseAnonKey(key: string | undefined): string {
-  const fallbackKey =
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFzZXZ0bmNub3l0YXd5a2hjbGVnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkyNjEzMjksImV4cCI6MjEwNDgzNzMyOX0.YpeamrrHPpZdxGcj03PGIm4Z8OC9ShbLpJ16x9cl6RE';
-  if (!key) return fallbackKey;
-  let cleaned = key.trim();
+function isHttpUrl(str: string | undefined | null): boolean {
+  if (!str || typeof str !== 'string') return false;
+  const trimmed = str.trim();
+  return /^https?:\/\//i.test(trimmed);
+}
+
+// Helper to sanitize duplicated/malformed Supabase environment values
+function cleanSupabaseUrl(url: string | undefined | null): string {
+  if (!url || typeof url !== 'string') return FALLBACK_SUPABASE_URL;
+  let cleaned = url.trim();
+  if (!cleaned || cleaned === 'undefined' || cleaned === 'null' || cleaned === '""' || cleaned === "''") {
+    return FALLBACK_SUPABASE_URL;
+  }
+  // If a JWT key was passed as URL, return fallback
+  if (isJwtKey(cleaned)) {
+    return FALLBACK_SUPABASE_URL;
+  }
   if (cleaned.length % 2 === 0 && cleaned.slice(0, cleaned.length / 2) === cleaned.slice(cleaned.length / 2)) {
     cleaned = cleaned.slice(0, cleaned.length / 2);
+  }
+  const httpsMatch = cleaned.match(/https?:\/\/[^\/\s]+/g);
+  if (httpsMatch && httpsMatch.length > 0) {
+    cleaned = httpsMatch[0];
+  }
+  cleaned = cleaned.replace(/\/+$/, '');
+
+  // Must match http:// or https:// with a valid domain or localhost
+  if (!/^https?:\/\/[a-zA-Z0-9_.-]+/.test(cleaned)) {
+    return FALLBACK_SUPABASE_URL;
   }
   return cleaned;
 }
 
-const DIRECT_SUPABASE_URL = cleanSupabaseUrl(
-  (typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_SUPABASE_URL : process.env.VITE_SUPABASE_URL) || ''
-);
-export const supabaseAnonKey = cleanSupabaseAnonKey(
-  (typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_SUPABASE_ANON_KEY : process.env.VITE_SUPABASE_ANON_KEY) || ''
-);
+function cleanSupabaseAnonKey(key: string | undefined | null): string {
+  if (!key || typeof key !== 'string') return FALLBACK_SUPABASE_ANON_KEY;
+  let cleaned = key.trim();
+  if (!cleaned || cleaned === 'undefined' || cleaned === 'null' || cleaned === '""' || cleaned === "''") {
+    return FALLBACK_SUPABASE_ANON_KEY;
+  }
+  // If an HTTP URL was passed as key, return fallback
+  if (isHttpUrl(cleaned)) {
+    return FALLBACK_SUPABASE_ANON_KEY;
+  }
+  if (cleaned.length % 2 === 0 && cleaned.slice(0, cleaned.length / 2) === cleaned.slice(cleaned.length / 2)) {
+    cleaned = cleaned.slice(0, cleaned.length / 2);
+  }
+  if (!isJwtKey(cleaned)) {
+    return FALLBACK_SUPABASE_ANON_KEY;
+  }
+  return cleaned;
+}
+
+const rawEnvUrl = (typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_SUPABASE_URL : process.env.VITE_SUPABASE_URL) || '';
+const rawEnvKey = (typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_SUPABASE_ANON_KEY : process.env.VITE_SUPABASE_ANON_KEY) || '';
+
+// Detect and auto-heal if VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY were swapped in the environment
+let resolvedUrl = rawEnvUrl;
+let resolvedKey = rawEnvKey;
+
+if ((!resolvedUrl || isJwtKey(resolvedUrl)) && isHttpUrl(resolvedKey)) {
+  resolvedUrl = rawEnvKey;
+  resolvedKey = rawEnvUrl;
+} else if (isHttpUrl(resolvedKey) && !isHttpUrl(resolvedUrl)) {
+  resolvedUrl = resolvedKey;
+}
+
+export const DIRECT_SUPABASE_URL = cleanSupabaseUrl(resolvedUrl);
+export const supabaseAnonKey = cleanSupabaseAnonKey(resolvedKey);
 export const isSupabaseConfigured = Boolean(DIRECT_SUPABASE_URL && supabaseAnonKey);
 
 if (!isSupabaseConfigured) {
-  console.warn('Supabase URL or Anon Key is missing. Please check your .env file.');
+  console.warn('Supabase URL or Anon Key is missing. Using default fallback values.');
 }
 
 /**
@@ -95,17 +142,38 @@ const smartFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
 };
 
 // Create a single supabase client for interacting with your database
-export const supabase = createClient(
-  DIRECT_SUPABASE_URL,
-  supabaseAnonKey,
-  {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-    },
-    global: {
-      fetch: smartFetch,
-    },
+function initSupabaseClient() {
+  try {
+    return createClient(
+      DIRECT_SUPABASE_URL,
+      supabaseAnonKey,
+      {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+        },
+        global: {
+          fetch: smartFetch,
+        },
+      }
+    );
+  } catch (err) {
+    console.error('Failed to initialize custom Supabase client, falling back to default:', err);
+    return createClient(
+      FALLBACK_SUPABASE_URL,
+      FALLBACK_SUPABASE_ANON_KEY,
+      {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+        },
+        global: {
+          fetch: smartFetch,
+        },
+      }
+    );
   }
-);
+}
+
+export const supabase = initSupabaseClient();
 

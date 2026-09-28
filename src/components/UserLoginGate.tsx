@@ -392,36 +392,36 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
       <div className="fixed bottom-10 right-10 w-72 h-72 bg-sky-600/10 rounded-full blur-3xl pointer-events-none z-0 print:hidden" />
       
       {/* Content Area */}
-      <div className={`w-full ${(activeTab === 'Nt Count' || (activeTab === 'Canteen' && isCanteenAuth)) ? 'flex-1 z-10 p-0 m-0' : 'max-w-md md:max-w-[580px] relative z-10'}`}>
+      <div className={`w-full ${(activeTab === 'Nt Count' || (activeTab === 'Canteen' && isCanteenAuth)) ? 'flex-1 z-10 p-0 m-0' : 'max-w-[360px] sm:max-w-[380px] relative z-10'}`}>
         
         {(activeTab === 'Office' || (activeTab === 'Canteen' && !isCanteenAuth)) && (
-          <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-800 rounded-3xl p-8 md:p-10 shadow-2xl space-y-6 text-white text-center mb-16">
+          <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-800 rounded-2xl p-6 sm:p-7 shadow-2xl space-y-5 text-white text-center mb-16">
             {/* Header */}
-            <div className="flex flex-col items-center space-y-3">
-              <div className="flex items-center justify-center p-2">
-                <Logo155UASU size="lg" />
+            <div className="flex flex-col items-center space-y-2.5">
+              <div className="flex items-center justify-center p-1">
+                <Logo155UASU size="md" />
               </div>
               <div>
-                <div className="inline-flex items-center space-x-1.5 px-3 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-500/30 text-emerald-400 text-[11px] font-black uppercase tracking-widest mb-1.5">
+                <div className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-500/30 text-emerald-400 text-[10px] font-black uppercase tracking-widest mb-1">
                   <Shield className="w-3 h-3" />
                   <span>{isResetMode ? 'PASSWORD RECOVERY' : (activeTab === 'Canteen' ? 'CANTEEN LOGIN PORTAL' : 'USER LOGIN PORTAL')}</span>
                 </div>
-                <h1 className="text-2xl md:text-[27px] font-black tracking-tight text-white flex items-center justify-center space-x-3">
+                <h1 className="text-xl sm:text-2xl font-black tracking-tight text-white flex items-center justify-center space-x-2">
             <span>{activeTab === 'Canteen' ? 'Canteen Management' : '155 UASU BAF'}</span>
           </h1>
               </div>
             </div>
 
             {errorMsg && (
-              <div className="p-3.5 bg-red-950/70 border border-red-800 rounded-2xl flex items-start space-x-2.5 text-left text-xs text-red-200 animate-fadeIn">
+              <div className="p-3 bg-red-950/70 border border-red-800 rounded-xl flex items-start space-x-2 text-left text-xs text-red-200 animate-fadeIn">
                 <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
                 <span>{errorMsg}</span>
               </div>
             )}
 
             {successAirman && !isSuccessAnimation && (
-              <div className="p-3.5 bg-emerald-950/70 border border-emerald-800 rounded-2xl flex items-center justify-center space-x-2.5 text-xs text-emerald-200 animate-fadeIn">
-                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+              <div className="p-3 bg-emerald-950/70 border border-emerald-800 rounded-xl flex items-center justify-center space-x-2 text-xs text-emerald-200 animate-fadeIn">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                 <span>Verified: {successAirman.rank} {successAirman.fullName || successAirman.name}</span>
               </div>
             )}
@@ -431,26 +431,26 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                 initial={{ opacity: 0, scale: 0.88 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ type: "spring", stiffness: 350, damping: 25 }}
-                className="py-6 flex flex-col items-center justify-center space-y-4"
+                className="py-5 flex flex-col items-center justify-center space-y-3.5"
               >
                 <div className="relative flex items-center justify-center">
                   <motion.div
                     initial={{ scale: 0.8, opacity: 0.6 }}
                     animate={{ scale: [1, 1.45, 1.2], opacity: [0.6, 0.25, 0] }}
                     transition={{ duration: 0.9, repeat: Infinity }}
-                    className="absolute w-20 h-20 rounded-full bg-emerald-500/30 blur-md"
+                    className="absolute w-16 h-16 rounded-full bg-emerald-500/30 blur-md"
                   />
-                  <div className="relative w-16 h-16 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center shadow-xl shadow-emerald-500/25 border border-emerald-400/40 text-white">
-                    <Check className="w-8 h-8 stroke-[3]" />
+                  <div className="relative w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center shadow-xl shadow-emerald-500/25 border border-emerald-400/40 text-white">
+                    <Check className="w-7 h-7 stroke-[3]" />
                   </div>
                 </div>
 
                 <div className="space-y-1">
-                  <div className="inline-flex items-center space-x-1.5 px-3 py-0.5 rounded-full bg-emerald-950/90 border border-emerald-500/40 text-emerald-400 text-[11px] font-black uppercase tracking-widest">
+                  <div className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-emerald-950/90 border border-emerald-500/40 text-emerald-400 text-[10px] font-black uppercase tracking-widest">
                     <Sparkles className="w-3 h-3" />
                     <span>Access Granted</span>
                   </div>
-                  <h2 className="text-xl font-black text-white">
+                  <h2 className="text-lg font-black text-white">
                     {successAirman?.rank} {successAirman?.fullName || successAirman?.name}
                   </h2>
                   <p className="text-xs text-slate-400 font-mono">
@@ -458,7 +458,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                   </p>
                 </div>
 
-                <div className="w-48 h-1.5 bg-slate-800 rounded-full overflow-hidden mt-2">
+                <div className="w-40 h-1.5 bg-slate-800 rounded-full overflow-hidden mt-1">
                   <motion.div
                     initial={{ width: "0%" }}
                     animate={{ width: "100%" }}
@@ -468,9 +468,9 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                 </div>
               </motion.div>
             ) : !isResetMode ? (
-              <form onSubmit={handleSubmit} className="space-y-5" ref={loginPinRef}>
-                <div className="text-left space-y-2">
-                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">{activeTab === 'Canteen' ? 'Member ID' : 'User ID'}</label>
+              <form onSubmit={handleSubmit} className="space-y-4" ref={loginPinRef}>
+                <div className="text-left space-y-1.5">
+                  <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider">{activeTab === 'Canteen' ? 'Member ID' : 'User ID'}</label>
                   <div className="relative">
                     <input
                       type="text"
@@ -488,19 +488,17 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                            setTargetAirman(found || null);
                         }
                       }}
-                      className="w-full bg-slate-800/90 border border-slate-700 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-2xl px-4 py-3.5 text-sm font-mono font-bold text-white outline-none transition-all"
+                      className="w-full bg-slate-800/90 border border-slate-700 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-xl px-3.5 py-2.5 text-sm font-mono font-bold text-white outline-none transition-all"
                       placeholder=""
                       autoComplete="username"
                     />
-                    
-                    {/* Rank badge removed per user request */}
                   </div>
                   
                   {recentLogins.length > 0 && isUserIdFocused && (
                     <div className="mt-2 p-2 bg-slate-800/50 rounded-xl border border-slate-700">
                       <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 px-1">Recent Accounts</div>
                       {recentLogins.map(id => (
-                        <div key={id} className="flex items-center justify-between p-2 hover:bg-slate-700 rounded-lg group transition-colors">
+                        <div key={id} className="flex items-center justify-between p-1.5 hover:bg-slate-700 rounded-lg group transition-colors">
                           <button
                             type="button"
                             onClick={() => {
@@ -510,13 +508,13 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                                const found = airmen.find(a => a.bdNo === id);
                                setTargetAirman(found || null);
                             }}
-                            className="flex-1 text-left font-mono text-sm text-slate-300 group-hover:text-white flex items-center space-x-2"
+                            className="flex-1 text-left font-mono text-xs text-slate-300 group-hover:text-white flex items-center space-x-2"
                           >
-                             <Lock className="w-3.5 h-3.5 text-slate-500 group-hover:text-emerald-400" />
+                             <Lock className="w-3 h-3 text-slate-500 group-hover:text-emerald-400" />
                              <span>{id}</span>
                           </button>
-                          <button type="button" onClick={() => removeRecent(id)} className="p-1 text-slate-500 hover:text-red-400 rounded-full hover:bg-slate-700 transition-colors ml-4">
-                            <X className="w-3.5 h-3.5" />
+                          <button type="button" onClick={() => removeRecent(id)} className="p-1 text-slate-500 hover:text-red-400 rounded-full hover:bg-slate-700 transition-colors ml-2">
+                            <X className="w-3 h-3" />
                           </button>
                         </div>
                       ))}
@@ -524,8 +522,8 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                   )}
                 </div>
 
-                {activeTab !== 'Canteen' && (<div className="text-left space-y-2">
-                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">PIN</label>
+                {activeTab !== 'Canteen' && (<div className="text-left space-y-1.5">
+                  <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider">PIN</label>
                   <div className="relative">
                     <input
                       type="text"
@@ -536,15 +534,15 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                         setPasswordInput(e.target.value);
                         setErrorMsg('');
                       }}
-                      className="w-full bg-slate-800/90 border border-slate-700 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-2xl px-4 py-3.5 pr-12 text-sm font-mono font-bold text-white outline-none transition-all"
+                      className="w-full bg-slate-800/90 border border-slate-700 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-xl px-3.5 py-2.5 pr-11 text-sm font-mono font-bold text-white outline-none transition-all"
                       placeholder="Enter PIN"
                     />
                     <button
                       type="button"
                       onClick={() => setShowPin(!showPin)}
-                      className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-emerald-400 transition-colors"
+                      className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-emerald-400 transition-colors"
                     >
-                      {showPin ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                      {showPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
                   
@@ -553,7 +551,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                 <button
                   type="submit"
                   disabled={isLoading || !!successAirman}
-                  className="w-full py-3.5 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-black tracking-wide uppercase transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-lg disabled:opacity-50"
+                  className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold tracking-wide uppercase transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-lg disabled:opacity-50"
                 >
                   {isLoading ? (
                     <span className="flex items-center justify-center space-x-2">
@@ -568,11 +566,11 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                   )}
                 </button>
 
-                {activeTab !== 'Canteen' && (<div className="text-center mt-4">
+                {activeTab !== 'Canteen' && (<div className="text-center mt-3">
                   <button
                     type="button"
                     onClick={() => { setIsResetMode(true); setErrorMsg(''); }}
-                    className="text-xs font-bold text-slate-500 hover:text-emerald-500 transition-colors cursor-pointer underline"
+                    className="text-xs font-semibold text-slate-500 hover:text-emerald-400 transition-colors cursor-pointer underline"
                   >
                     Forgot Login PIN?
                   </button>
@@ -580,19 +578,16 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
               </form>
             ) : (
               /* PIN Reset Flow */
-              <form onSubmit={handleNextStep} className="space-y-5 animate-fadeIn">
+              <form onSubmit={handleNextStep} className="space-y-4 animate-fadeIn">
                 {resetStep === 1 && (
-                  <div className="space-y-2 text-left">
-                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Step 1: Enter User ID (User ID)</label>
+                  <div className="space-y-1.5 text-left">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Step 1: Enter User ID (User ID)</label>
                     <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                        
-                      </div>
                       <input
                         type="text"
                         inputMode="numeric" pattern="[0-9]*" value={resetBd}
                         onChange={(e) => setResetBd(e.target.value)}
-                        className="w-full pl-4 pr-4 py-3.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition-all"
+                        className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition-all text-sm"
                         placeholder=""
                         required
                         autoFocus
@@ -602,13 +597,13 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                 )}
                 
                 {resetStep === 2 && (
-                  <div className="space-y-2 text-left">
-                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Step 2: Enter Your Full Name</label>
+                  <div className="space-y-1.5 text-left">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Step 2: Enter Your Full Name</label>
                     <input
                       type="text"
                       value={resetName}
                       onChange={(e) => setResetName(e.target.value)}
-                      className="w-full px-4 py-3.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-bold placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition-all"
+                      className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-bold placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition-all text-sm"
                       placeholder="e.g. Rasel"
                       required
                       autoFocus
@@ -617,13 +612,13 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                 )}
 
                 {resetStep === 3 && (
-                  <div className="space-y-2 text-left">
-                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Step 3: Enter Your Mobile Number</label>
+                  <div className="space-y-1.5 text-left">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Step 3: Enter Your Mobile Number</label>
                     <input
                       type="tel"
                       value={resetMobile}
                       onChange={(e) => setResetMobile(e.target.value)}
-                      className="w-full px-4 py-3.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition-all"
+                      className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition-all text-sm"
                       placeholder="e.g. 01711223344"
                       required
                       autoFocus
@@ -632,27 +627,27 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                 )}
 
                 {resetStep === 4 && (
-                  <div className="space-y-4 text-left">
-                    <div className="space-y-2" ref={resetPinRef}>
-                      <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Enter New PIN</label>
+                  <div className="space-y-3.5 text-left">
+                    <div className="space-y-1.5" ref={resetPinRef}>
+                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Enter New PIN</label>
                       <input
                         type="text" style={{ WebkitTextSecurity: "disc" }}
                         
                         inputMode="numeric" pattern="[0-9]*" value={newPass}
                         onChange={(e) => { setNewPass(e.target.value); setErrorMsg(''); }}
-                        className="w-full px-4 py-3.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition-all"
+                        className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition-all text-sm"
                         placeholder="Enter New PIN"
                         required
                       />
                     </div>
-                    <div className="space-y-2" ref={confirmPinRef}>
-                      <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Confirm Your PIN</label>
+                    <div className="space-y-1.5" ref={confirmPinRef}>
+                      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Confirm Your PIN</label>
                       <input
                         type="text" style={{ WebkitTextSecurity: "disc" }}
                         
                         inputMode="numeric" pattern="[0-9]*" value={confirmPass}
                         onChange={(e) => { setConfirmPass(e.target.value); setErrorMsg(''); }}
-                        className="w-full px-4 py-3.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition-all"
+                        className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition-all text-sm"
                         placeholder="Confirm New PIN"
                         required
                       />
@@ -660,17 +655,17 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                   </div>
                 )}
 
-                <div className="flex space-x-3 pt-2">
+                <div className="flex space-x-2.5 pt-1">
                   <button
                     type="button"
                     onClick={cancelReset}
-                    className="flex-1 py-3.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold transition-colors shadow-lg cursor-pointer"
+                    className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold transition-colors shadow-lg cursor-pointer text-xs"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold transition-colors shadow-lg flex items-center justify-center space-x-1 cursor-pointer"
+                    className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold transition-colors shadow-lg flex items-center justify-center space-x-1 cursor-pointer text-xs"
                   >
                     <span>{resetStep === 4 ? 'Save PIN' : 'Next'}</span>
                     {resetStep < 4 && <ChevronRight className="w-4 h-4" />}

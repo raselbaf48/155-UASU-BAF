@@ -1,6 +1,6 @@
 import { DUTY_TYPE_MAP } from '../data/dutyTypes';
 import React, { useState, useEffect, useMemo } from 'react';
-import { AlertCircle, Settings, Info, Users, ChevronDown, ChevronUp, Calendar, X, Save, Power, PowerOff, Trash, Filter, Plus, Minus } from 'lucide-react';
+import { AlertCircle, Settings, Info, Users, ChevronDown, ChevronUp, Calendar, X, Save, Power, PowerOff, Trash, Filter, Plus, Minus, Printer } from 'lucide-react';
 import { localDb } from '../services/localDatabase';
 import { Airman, Rank, FlightName, DutyCategoryCode } from '../types';
 import { addCustomDuty, CustomDutyConfig, removeCustomDuty } from '../utils/customDuties';
@@ -149,9 +149,10 @@ export interface DutyRatioConfigPanelProps {
   onMatrixChange?: (newMatrix: DutyRatioTable[]) => void;
   activeTab?: 'DUTY_DISTRIBUTION' | 'MANPOWER' | 'DUTY_LIST';
   targetDate?: string;
+  onOpenManpowerExport?: () => void;
 }
 
-export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ activeTab, matrix, onMatrixChange, targetDate }) => {
+export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ activeTab, matrix, onMatrixChange, targetDate, onOpenManpowerExport }) => {
   const [totalDuty, setTotalDuty] = useState(() => {
     const savedDuty = localStorage.getItem('baf_duty_distribution_total_duty');
     return savedDuty ? JSON.parse(savedDuty) : DEFAULT_TOTAL_DUTY;
@@ -690,7 +691,9 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
           <>
           <div className="w-full max-w-4xl mx-auto space-y-6">
             <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
-              <div className="font-bold underline text-center mb-4 text-slate-800 dark:text-slate-200">EFFECTIVE MANPOWER</div>
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mb-4">
+                <div className="font-bold underline text-center sm:text-left text-slate-800 dark:text-slate-200 text-base">EFFECTIVE MANPOWER</div>
+              </div>
               <div className="overflow-x-auto mb-6">
                 <table className="w-full border-collapse border border-slate-400 dark:border-slate-700 text-center bg-white dark:bg-slate-900 text-sm">
                   <thead className="bg-slate-100 dark:bg-slate-800">
@@ -805,9 +808,9 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                             >
                               <td className="px-3 py-2 text-center font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap">{idx + 1}</td>
                               <td className="px-3 py-2 text-center font-semibold text-slate-800 dark:text-slate-200 whitespace-nowrap">{formatAirmanName(a.rank)}</td>
-                              <td className="px-3 py-2 text-center text-slate-800 dark:text-slate-200 whitespace-nowrap">{a.name}</td>
-                              <td className="px-3 py-2 text-center text-slate-500 dark:text-slate-400 whitespace-nowrap">{a.trade}</td>
-                              <td className="px-3 py-2 text-center text-slate-500 dark:text-slate-400 whitespace-nowrap">{a.flightName}</td>
+                              <td className="px-3 py-2 text-left font-medium text-slate-800 dark:text-slate-200 whitespace-nowrap">{a.name}</td>
+                              <td className="px-3 py-2 text-left text-slate-600 dark:text-slate-400 whitespace-nowrap">{a.trade}</td>
+                              <td className="px-3 py-2 text-left text-slate-600 dark:text-slate-400 whitespace-nowrap">{a.flightName}</td>
                               <td className="px-3 py-2 text-center whitespace-nowrap">
                                 <select
                                   value={currentVal}

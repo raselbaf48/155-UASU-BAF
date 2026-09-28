@@ -327,6 +327,36 @@ export function exportDutyRatioMatrixCSV(
   saveAs(blob, cleanName);
 }
 
+function formatDisplayDate(dateStr?: string): string {
+  if (!dateStr) {
+    const now = new Date();
+    const day = String(now.getDate()).padStart(2, '0');
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${day} ${months[now.getMonth()]} ${String(now.getFullYear()).slice(-2)}`;
+  }
+  try {
+    const trimmed = dateStr.trim();
+    const parts = trimmed.split('-');
+    if (parts.length === 3 && parts[0].length === 4) {
+      const year = parts[0].slice(-2);
+      const monthNum = parseInt(parts[1], 10);
+      const day = parts[2].padStart(2, '0');
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const monthName = months[monthNum - 1] || parts[1];
+      return `${day} ${monthName} ${year}`;
+    }
+    const d = new Date(trimmed);
+    if (!isNaN(d.getTime())) {
+      const day = String(d.getDate()).padStart(2, '0');
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return `${day} ${months[d.getMonth()]} ${String(d.getFullYear()).slice(-2)}`;
+    }
+    return dateStr;
+  } catch {
+    return dateStr;
+  }
+}
+
 export function exportDutyRatioMatrixExcel(
   matrix: Array<{
     id?: string;
@@ -338,18 +368,24 @@ export function exportDutyRatioMatrixExcel(
     dailyRequirements?: number[];
     totalRequiredDaily?: number;
   }>,
-  filename = 'BAF_155_UASU_Duty_Ratio_Matrix.xlsx'
+  filename = 'BAF_155_UASU_Duty_Ratio_Matrix.xlsx',
+  flightFilter?: string,
+  targetDate?: string
 ) {
   const activeTables = matrix.filter((t) => !t.isDisabled);
   const wb = XLSX.utils.book_new();
   const rows: any[][] = [];
 
-  const flights: Array<{ key: string; label: string }> = [
+  const allFlights: Array<{ key: string; label: string }> = [
     { key: 'Mechanics', label: 'Mechanics' },
     { key: 'Avionics', label: 'Avionics' },
     { key: 'GCS', label: 'GCS' },
     { key: 'Admin', label: 'Admin' },
   ];
+
+  const flights = (flightFilter && flightFilter !== 'Overall')
+    ? allFlights.filter(f => f.key === flightFilter)
+    : allFlights;
 
   const tableRanges: Array<{ headerRow: number; startRow: number; endRow: number }> = [];
 
@@ -369,7 +405,7 @@ export function exportDutyRatioMatrixExcel(
       rows.push([
         dutyName,
         label,
-        ...days,
+        ...days.map(d => (d > 0 ? d : '')),
         { f: `SUM(C${currentRow}:AG${currentRow})`, v: rowSum },
       ]);
     });
@@ -440,6 +476,24 @@ export function exportDutyRatioMatrixExcel(
         const isHeader = r === headerRow;
         const isSummary = r >= endRow - 1; // Daily Total and Daily Req
         const isTotalCol = c === 33;
+        const isDataRow = !isHeader && !isSummary;
+        const isAltRow = isDataRow && (r - headerRow) % 2 === 0;
+        const isAltCol = c >= 2 && c <= 32 && (c - 2 + 1) % 2 === 0;
+
+        let fgColor = 'FFFFFF';
+        if (isHeader) {
+          fgColor = isAltCol ? 'E2E8F0' : 'F1F5F9';
+        } else if (isSummary) {
+          fgColor = isAltCol ? 'CBD5E1' : 'E2E8F0';
+        } else if (isTotalCol) {
+          fgColor = isAltRow ? 'E2E8F0' : 'F1F5F9';
+        } else if (isAltRow && isAltCol) {
+          fgColor = 'E2E8F0';
+        } else if (isAltRow) {
+          fgColor = 'F1F5F9';
+        } else if (isAltCol) {
+          fgColor = 'F8FAFC';
+        }
 
         cell.s = {
           border: thinBorder,
@@ -454,11 +508,7 @@ export function exportDutyRatioMatrixExcel(
             horizontal: c === 0 || (c === 1 && !isHeader && !isSummary) ? 'left' : 'center',
             wrapText: false,
           },
-          ...(isHeader
-            ? { fill: { fgColor: { rgb: 'E2E8F0' } } }
-            : isSummary
-            ? { fill: { fgColor: { rgb: 'F1F5F9' } } }
-            : {}),
+          fill: { fgColor: { rgb: fgColor } },
         };
       }
     }
@@ -791,5 +841,214 @@ export function exportAirmenTemplateExcel(
   applyExcelDateValidation(wbout, colLetter, 2, 500).then((blob) => {
     saveAs(blob, finalName);
   });
+}
+
+export function exportManpowerAndNominalRollExcel(
+  manpowerData: {
+    mechSgt: number;
+    mechCpl: number;
+    aviSgt: number;
+    aviCpl: number;
+    gcsSgt: number;
+    gcsCpl: number;
+    adminSgt: number;
+    adminCpl: number;
+  },
+  airmenList: Array<{
+    rank: string;
+    name: string;
+    trade: string;
+    flightName: string;
+    disposal?: string;
+  }>,
+  filename = 'BAF_155_UASU_Effective_Manpower_Nominal_Roll.xlsx'
+) {
+  const wb = XLSX.utils.book_new();
+
+  const thinBorder = {
+    top: { style: 'thin', color: { rgb: '000000' } },
+    bottom: { style: 'thin', color: { rgb: '000000' } },
+    left: { style: 'thin', color: { rgb: '000000' } },
+    right: { style: 'thin', color: { rgb: '000000' } },
+  };
+
+  // Sheet 1: Effective Manpower
+  const totalSgt = manpowerData.mechSgt + manpowerData.aviSgt + manpowerData.gcsSgt + manpowerData.adminSgt;
+  const totalCpl = manpowerData.mechCpl + manpowerData.aviCpl + manpowerData.gcsCpl + manpowerData.adminCpl;
+  const totalAll = totalSgt + totalCpl;
+
+  const mpRows = [
+    ['155 UASU BAF • BAF BASE ZHR'],
+    ['EFFECTIVE MANPOWER'],
+    ['Flight', 'Sgt', 'Cpl & Below', 'Total'],
+    ['Mech', manpowerData.mechSgt, manpowerData.mechCpl, manpowerData.mechSgt + manpowerData.mechCpl],
+    ['Avi', manpowerData.aviSgt, manpowerData.aviCpl, manpowerData.aviSgt + manpowerData.aviCpl],
+    ['GCS', manpowerData.gcsSgt, manpowerData.gcsCpl, manpowerData.gcsSgt + manpowerData.gcsCpl],
+    ['Admin', manpowerData.adminSgt, manpowerData.adminCpl, manpowerData.adminSgt + manpowerData.adminCpl],
+    ['Total', totalSgt, totalCpl, totalAll],
+  ];
+
+  const wsMp = XLSX.utils.aoa_to_sheet(mpRows);
+  for (let r = 2; r < mpRows.length; r++) {
+    for (let c = 0; c < 4; c++) {
+      const cellAddr = XLSX.utils.encode_cell({ r, c });
+      if (!wsMp[cellAddr]) wsMp[cellAddr] = { t: 's', v: '' };
+      const isHeader = r === 2;
+      const isTotal = r === mpRows.length - 1;
+      wsMp[cellAddr].s = {
+        border: thinBorder,
+        font: { name: 'Calibri', sz: 11, bold: isHeader || isTotal },
+        alignment: { vertical: 'center', horizontal: 'center' },
+        ...(isHeader ? { fill: { fgColor: { rgb: 'E2E8F0' } } } : {}),
+      };
+    }
+  }
+  wsMp['!cols'] = [{ wch: 16 }, { wch: 12 }, { wch: 16 }, { wch: 14 }];
+  XLSX.utils.book_append_sheet(wb, wsMp, 'Effective Manpower');
+
+  // Sheet 2: Nominal Roll
+  const nrRows: any[][] = [
+    ['155 UASU BAF • BAF BASE ZHR'],
+    ['NOMINAL ROLL'],
+    ['Ser No', 'Rank', 'Name', 'Trade', 'Flight', 'Disposal'],
+  ];
+
+  airmenList.forEach((a, idx) => {
+    nrRows.push([
+      idx + 1,
+      a.rank,
+      a.name,
+      a.trade,
+      a.flightName,
+      a.disposal || '-',
+    ]);
+  });
+
+  const wsNr = XLSX.utils.aoa_to_sheet(nrRows);
+  for (let r = 2; r < nrRows.length; r++) {
+    for (let c = 0; c < 6; c++) {
+      const cellAddr = XLSX.utils.encode_cell({ r, c });
+      if (!wsNr[cellAddr]) wsNr[cellAddr] = { t: 's', v: '' };
+      const isHeader = r === 2;
+      wsNr[cellAddr].s = {
+        border: thinBorder,
+        font: { name: 'Calibri', sz: 11, bold: isHeader },
+        alignment: { vertical: 'center', horizontal: 'center' },
+        ...(isHeader ? { fill: { fgColor: { rgb: 'E2E8F0' } } } : {}),
+      };
+    }
+  }
+  wsNr['!cols'] = [{ wch: 8 }, { wch: 12 }, { wch: 24 }, { wch: 16 }, { wch: 16 }, { wch: 20 }];
+  XLSX.utils.book_append_sheet(wb, wsNr, 'Nominal Roll');
+
+  const finalName = filename.replace(/\.(xlsx|csv)$/i, '') + '.xlsx';
+  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([wbout], { type: 'application/octet-stream' });
+  saveAs(blob, finalName);
+}
+
+export function exportFlightDutyScheduleExcel(
+  matrix: Array<{
+    id: string;
+    serNo?: number;
+    title: string;
+    isDisabled?: boolean;
+    data: Record<string, number[]>;
+  }>,
+  flightName: string,
+  targetDate?: string,
+  filename?: string
+) {
+  const activeTables = matrix.filter((t) => !t.isDisabled);
+  const wb = XLSX.utils.book_new();
+  const rows: any[][] = [];
+
+  const thinBorder = {
+    top: { style: 'thin', color: { rgb: '000000' } },
+    bottom: { style: 'thin', color: { rgb: '000000' } },
+    left: { style: 'thin', color: { rgb: '000000' } },
+    right: { style: 'thin', color: { rgb: '000000' } },
+  };
+
+  const formattedDate = targetDate || '';
+  rows.push([`155 UASU BAF • BAF BASE ZHR`]);
+  rows.push([`${flightName.toUpperCase()} DUTY SCHEDULE (SCALE 1-31)` + (formattedDate ? ` - ${formattedDate}` : '')]);
+
+  const headerRowIndex = rows.length;
+  rows.push(['Duty Name / Date', ...Array.from({ length: 31 }, (_, i) => i + 1), 'Total']);
+
+  const startDataRow = rows.length;
+  let monthTotal = 0;
+
+  activeTables.forEach((table, tIdx) => {
+    const dutyTitle = (table.serNo !== undefined ? `${table.serNo}. ` : `${tIdx + 1}. `) + (table.title || '').replace(/\s*\(\d+\)$/, '').trim();
+    const days = (table.data?.[flightName] || Array(31).fill(0)).map(d => Number(d) || 0);
+    const rowSum = days.reduce((a, b) => a + b, 0);
+    monthTotal += rowSum;
+    rows.push([dutyTitle, ...days.map(d => (d > 0 ? d : '')), rowSum]);
+  });
+
+  // Daily Total row
+  const dailyTotals = Array.from({ length: 31 }, (_, d) => {
+    return activeTables.reduce((sum, table) => sum + (Number(table.data?.[flightName]?.[d]) || 0), 0);
+  });
+  rows.push(['DAILY TOTAL', ...dailyTotals.map(d => (d > 0 ? d : '')), monthTotal]);
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+
+  // Apply styling with alternating Col & Row wise colors
+  for (let r = 2; r < rows.length; r++) {
+    const isHeader = r === headerRowIndex;
+    const isTotalRow = r === rows.length - 1;
+    for (let c = 0; c < 33; c++) {
+      const cellAddr = XLSX.utils.encode_cell({ r, c });
+      if (!ws[cellAddr]) ws[cellAddr] = { t: 's', v: '' };
+
+      const isFirstCol = c === 0;
+      const isTotalCol = c === 32;
+      const isAltRow = (r - startDataRow) % 2 === 1;
+      const isAltCol = !isFirstCol && !isTotalCol && c % 2 === 0;
+
+      let fgColor = 'FFFFFF';
+      if (isHeader) {
+        fgColor = isAltCol ? 'E2E8F0' : 'F1F5F9';
+      } else if (isTotalRow) {
+        fgColor = isAltCol ? 'CBD5E1' : 'E2E8F0';
+      } else if (isTotalCol) {
+        fgColor = 'F1F5F9';
+      } else if (isAltRow && isAltCol) {
+        fgColor = 'E2E8F0';
+      } else if (isAltRow) {
+        fgColor = 'F1F5F9';
+      } else if (isAltCol) {
+        fgColor = 'F8FAFC';
+      }
+
+      ws[cellAddr].s = {
+        border: thinBorder,
+        font: {
+          name: 'Calibri',
+          sz: 10,
+          bold: isHeader || isTotalRow || isFirstCol || isTotalCol,
+        },
+        alignment: {
+          vertical: 'center',
+          horizontal: isFirstCol ? 'left' : 'center',
+        },
+        fill: { fgColor: { rgb: fgColor } },
+      };
+    }
+  }
+
+  const colWidths = [{ wch: 32 }, ...Array.from({ length: 31 }, () => ({ wch: 4.5 })), { wch: 8 }];
+  ws['!cols'] = colWidths;
+
+  XLSX.utils.book_append_sheet(wb, ws, `${flightName} Schedule`);
+
+  const exportFilename = filename || `${flightName}_Duty_Schedule.xlsx`;
+  const finalName = exportFilename.replace(/\.(xlsx|csv)$/i, '') + '.xlsx';
+  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([wbout], { type: 'application/octet-stream' });
+  saveAs(blob, finalName);
 }
 

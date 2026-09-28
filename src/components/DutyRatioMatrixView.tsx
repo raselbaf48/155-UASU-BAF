@@ -30,7 +30,7 @@ import {
 import { exportDutyRatioDocx } from '../utils/docxExport';
 import { ImportDutyRatioModal } from './ImportDutyRatioModal';
 import { FlightDutyCalendarModal } from './FlightDutyCalendarModal';
-import { PrintableDutyRatioModal } from "./PrintableDutyRatioModal";
+import { PrintableDutyRatioModal, formatDisplayDate } from "./PrintableDutyRatioModal";
 
 interface DutyRatioMatrixViewProps {
   role?: UserRole;
@@ -47,6 +47,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
   const [selectedFlightFilter, setSelectedFlightFilter] = useState<FlightName | 'Overall'>('Overall');
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState<boolean>(false);
+  const [printModalMode, setPrintModalMode] = useState<'ALL' | 'DUTY_RATIO_ONLY' | 'MANPOWER_ONLY'>('ALL');
   const [showAllTableInfo, setShowAllTableInfo] = useState<boolean>(false);
   const [settingsTableIdx, setSettingsTableIdx] = useState<number | null>(null);
   const [resetConfirmTableIdx, setResetConfirmTableIdx] = useState<number | null>(null);
@@ -358,7 +359,10 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
 
               <button
                 type="button"
-                onClick={() => setIsPrintModalOpen(true)}
+                onClick={() => {
+                  setPrintModalMode('ALL');
+                  setIsPrintModalOpen(true);
+                }}
                 className="px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-xl transition-colors flex items-center space-x-1.5 shadow-xs cursor-pointer"
                 title="Print Preview / Export"
               >
@@ -383,8 +387,11 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
     {/* CONTROLS SECTION */}
     <div className="flex flex-col items-center justify-center space-y-4">
       {/* LAST UPDATING DATE */}
-      <div className="flex flex-col items-center justify-center w-48 mx-auto">
-        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Last Updating Date</div>
+      <div className="flex flex-col items-center justify-center w-56 mx-auto">
+        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 flex items-center justify-center gap-1.5">
+          <span>Last Updating Date:</span>
+          <span className="text-indigo-600 dark:text-indigo-400 font-mono font-bold">{formatDisplayDate(targetDate)}</span>
+        </div>
         <input 
           type="date"
           value={targetDate}
@@ -417,7 +424,12 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
       <div className="max-w-7xl mx-auto space-y-8">
         
         {viewMode !== 'DUTY_RATIO' && (
-          <DutyRatioConfigPanel activeTab={viewMode as any} matrix={matrix} onMatrixChange={handleRatioCalculated} targetDate={targetDate} />
+          <DutyRatioConfigPanel
+            activeTab={viewMode as any}
+            matrix={matrix}
+            onMatrixChange={handleRatioCalculated}
+            targetDate={targetDate}
+          />
         )}
 
                 {viewMode === 'DUTY_RATIO' && (
@@ -444,38 +456,24 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
               </div>
             </div>
             
-            <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
-              <button
-                onClick={() => setShowAllTableInfo(!showAllTableInfo)}
-                className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-sm font-bold transition-all shadow-sm border ${showAllTableInfo ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-              >
-                <Info className="w-4 h-4" />
-                <span>{showAllTableInfo ? 'Hide Info' : 'Show Info'}</span>
-              </button>
+            <div className="flex flex-col items-center justify-center gap-2 mb-6">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setShowAllTableInfo(!showAllTableInfo)}
+                  className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-sm font-bold transition-all shadow-sm border ${showAllTableInfo ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                >
+                  <Info className="w-4 h-4" />
+                  <span>{showAllTableInfo ? 'Hide Info' : 'Show Info'}</span>
+                </button>
+              </div>
 
-              {selectedFlightFilter !== 'Overall' && (
-                <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold">
-                  <button
-                    onClick={() => setFlightViewMode('SCHEDULE')}
-                    className={`px-3 py-1.5 rounded-lg transition-all ${flightViewMode === 'SCHEDULE' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
-                  >
-                    Consolidated Schedule
-                  </button>
-                  <button
-                    onClick={() => setFlightViewMode('DUTY_CARDS')}
-                    className={`px-3 py-1.5 rounded-lg transition-all ${flightViewMode === 'DUTY_CARDS' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-xs' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'}`}
-                  >
-                    Per-Duty Cards
-                  </button>
-                </div>
-              )}
+
             </div>
           </>
         )}
 
-        {/* Existing Mapping for Overall or Specific Single Flight Rendering */}
-
-        {viewMode === 'DUTY_RATIO' && (selectedFlightFilter === 'Overall' || flightViewMode === 'DUTY_CARDS') && matrix.filter(t => !t.isDisabled).map((table, tableIdx) => {
+        {/* Existing Mapping for Overall Rendering */}
+        {viewMode === 'DUTY_RATIO' && selectedFlightFilter === 'Overall' && matrix.filter(t => !t.isDisabled).map((table, tableIdx) => {
           const tableTotal = flights.reduce((sum, fl) => sum + table.data[fl].reduce((a,b) => a+b, 0), 0);
           // Keep specific styling for first tables
           let colors = {
@@ -508,7 +506,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                   </span>
                   <button
                     onClick={() => handleResetTable(tableIdx)}
-                    className="p-1.5 hover:bg-white/20 rounded-lg transition-colors group"
+                    className="p-1.5 hover:bg-white/20 rounded-lg transition-colors group cursor-pointer"
                     title="Reset this duty table"
                   >
                     <RotateCcw className="w-4 h-4 text-white/70 group-hover:text-white" />
@@ -524,7 +522,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                           Date
                         </th>
                         {daysArray.map((d) => (
-                          <th key={d} className="p-1 min-w-[28px] max-w-[32px] font-mono text-[11px] text-center align-middle">
+                          <th key={d} className={`p-1 min-w-[28px] max-w-[32px] font-mono text-[11px] text-center align-middle ${d % 2 === 0 ? 'bg-slate-200/70 dark:bg-slate-700/70' : 'bg-slate-100/70 dark:bg-slate-800/70'}`}>
                             {d}
                           </th>
                         ))}
@@ -543,15 +541,16 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                       {flights
                         .filter((fl) => selectedFlightFilter === 'Overall' || selectedFlightFilter === fl)
                         .filter((fl) => !table.eligibleFlights || table.eligibleFlights.includes(fl as any))
-                        .map((flight) => {
+                        .map((flight, flightIdx) => {
                           const rowSum = table.data[flight].reduce((a, b) => a + b, 0);
+                          const isAltRow = flightIdx % 2 === 1;
 
                           return (
                             <tr
                               key={flight}
-                              className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors"
+                              className={`transition-colors ${isAltRow ? 'bg-slate-50/80 dark:bg-slate-800/40 hover:bg-slate-100/70 dark:hover:bg-slate-800/60' : 'bg-white dark:bg-slate-900 hover:bg-slate-50/80 dark:hover:bg-slate-800/40'}`}
                             >
-                              <td className="p-2 text-center font-bold text-slate-900 dark:text-white sticky left-0 bg-white dark:bg-slate-900 z-10 border-r border-slate-200 dark:border-slate-800 text-center align-middle">
+                              <td className={`p-2 text-center font-bold text-slate-900 dark:text-white sticky left-0 z-10 border-r border-slate-200 dark:border-slate-800 text-center align-middle ${isAltRow ? 'bg-slate-100/95 dark:bg-slate-800/95' : 'bg-white dark:bg-slate-900'}`}>
                                 <div className="flex items-center justify-between">
                                   <span>{flight}</span>
                                   {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') ? (
@@ -571,14 +570,21 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                               {daysArray.map((dayNum, dayIdx) => {
                                 const val = table.data[flight][dayIdx] || 0;
                                 const isPositive = val > 0;
+                                const isAltCol = dayNum % 2 === 0;
 
                                 return (
                                   <td
                                     key={dayNum}
                                     className={`p-0.5 border border-slate-100 dark:border-slate-800/50 ${
                                       isPositive
-                                        ? 'bg-emerald-50/80 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-200 font-black'
-                                        : 'text-slate-400 dark:text-slate-600 font-normal'
+                                        ? (isAltRow
+                                            ? (isAltCol ? 'bg-emerald-100/90 dark:bg-emerald-900/60 text-emerald-950 dark:text-emerald-100 font-black' : 'bg-emerald-100/70 dark:bg-emerald-950/60 text-emerald-950 dark:text-emerald-100 font-black')
+                                            : (isAltCol ? 'bg-emerald-50/90 dark:bg-emerald-950/50 text-emerald-950 dark:text-emerald-200 font-black' : 'bg-emerald-50/60 dark:bg-emerald-950/40 text-emerald-950 dark:text-emerald-200 font-black')
+                                          )
+                                        : (isAltRow
+                                            ? (isAltCol ? 'bg-slate-200/50 dark:bg-slate-800/70 text-slate-400 dark:text-slate-600' : 'bg-slate-100/50 dark:bg-slate-800/40 text-slate-400 dark:text-slate-600')
+                                            : (isAltCol ? 'bg-slate-100/40 dark:bg-slate-800/30 text-slate-400 dark:text-slate-600' : 'bg-white dark:bg-slate-900 text-slate-400 dark:text-slate-600')
+                                          )
                                     }`}
                                   >
                                     <span className="inline-block py-1 font-mono text-xs">{val || ''}</span>
@@ -587,7 +593,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                               })}
 
                               {showAllTableInfo ? (
-                                <td className="p-2 font-mono font-bold bg-slate-50 dark:bg-slate-800/50 border-l border-slate-200 dark:border-slate-700 text-center align-middle">
+                                <td className={`p-2 font-mono font-bold border-l border-slate-200 dark:border-slate-700 text-center align-middle ${isAltRow ? 'bg-slate-100/80 dark:bg-slate-800/80' : 'bg-slate-50 dark:bg-slate-800/50'}`}>
                                   <div className="flex items-center justify-center space-x-1 text-[11px]">
                                     <span className={rowSum !== (autoTargets?.[flight]?.[table.id] ?? table.flightTargets?.[flight] ?? 0) ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}>{rowSum}</span>
                                     <span className="text-slate-400">/</span>
@@ -595,7 +601,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                                   </div>
                                 </td>
                               ) : (
-                                <td className="p-2 font-mono font-black text-slate-900 dark:text-white bg-slate-50 dark:bg-slate-800/50 border-l border-slate-200 dark:border-slate-700 text-center align-middle">
+                                <td className={`p-2 font-mono font-black text-slate-900 dark:text-white border-l border-slate-200 dark:border-slate-700 text-center align-middle ${isAltRow ? 'bg-slate-100/80 dark:bg-slate-800/80' : 'bg-slate-50 dark:bg-slate-800/50'}`}>
                                   {rowSum}
                                 </td>
                               )}
@@ -630,14 +636,15 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                               }
                           }
                           const isPositive = dailySum > 0;
+                          const isAltCol = dayNum % 2 === 0;
 
                           return (
                             <td
                               key={dayNum}
                               className={`p-0.5 border border-slate-200 dark:border-slate-700/70 font-mono font-black ${
                                 isPositive
-                                  ? 'bg-emerald-100/70 dark:bg-emerald-950/60 text-emerald-950 dark:text-emerald-200'
-                                  : 'text-slate-400 dark:text-slate-600 font-normal'
+                                  ? (isAltCol ? 'bg-emerald-200/70 dark:bg-emerald-900/60 text-emerald-950 dark:text-emerald-100' : 'bg-emerald-100/70 dark:bg-emerald-950/60 text-emerald-950 dark:text-emerald-200')
+                                  : (isAltCol ? 'bg-slate-200/60 dark:bg-slate-700/60 text-slate-400 dark:text-slate-500 font-normal' : 'text-slate-400 dark:text-slate-600 font-normal')
                               }`}
                             >
                               {showAllTableInfo ? (
@@ -673,7 +680,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
           })}
           
 
-        {viewMode === 'DUTY_RATIO' && selectedFlightFilter !== 'Overall' && flightViewMode === 'SCHEDULE' && (
+        {viewMode === 'DUTY_RATIO' && selectedFlightFilter !== 'Overall' && (
           <div className="space-y-4">
             {showAllTableInfo && (
               <div className="bg-indigo-50/90 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 rounded-2xl p-4 shadow-xs">
@@ -727,7 +734,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                         Duty Name / Date
                       </th>
                       {daysArray.map((d) => (
-                        <th key={d} className="p-1 min-w-[28px] max-w-[32px] font-mono text-[11px] align-middle">
+                        <th key={d} className={`p-1 min-w-[28px] max-w-[32px] font-mono text-[11px] align-middle ${d % 2 === 0 ? 'bg-slate-200/70 dark:bg-slate-700/70' : 'bg-slate-100/70 dark:bg-slate-800/70'}`}>
                           {d}
                         </th>
                       ))}
@@ -747,15 +754,20 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                       const rowData = table.data[selectedFlightFilter as FlightName];
                       const rowSum = rowData.reduce((a, b) => a + b, 0);
                       const target = autoTargets?.[selectedFlightFilter as FlightName]?.[table.id] ?? table.flightTargets?.[selectedFlightFilter as FlightName] ?? 0;
+                      const isAltRow = tableIdx % 2 === 1;
+
                       return (
-                        <tr key={table.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
-                          <td className="p-2 text-center font-bold text-slate-900 dark:text-white sticky left-0 bg-white dark:bg-slate-900 z-10 border-r border-slate-200 dark:border-slate-800 align-middle text-[11px] leading-tight">
+                        <tr
+                          key={table.id}
+                          className={`transition-colors ${isAltRow ? 'bg-slate-50/80 dark:bg-slate-800/40 hover:bg-slate-100/70 dark:hover:bg-slate-800/60' : 'bg-white dark:bg-slate-900 hover:bg-slate-50/80 dark:hover:bg-slate-800/40'}`}
+                        >
+                          <td className={`p-2 text-center font-bold text-slate-900 dark:text-white sticky left-0 z-10 border-r border-slate-200 dark:border-slate-800 align-middle text-[11px] leading-tight ${isAltRow ? 'bg-slate-100/95 dark:bg-slate-800/95' : 'bg-white dark:bg-slate-900'}`}>
                             <div className="flex items-center justify-between">
                               <span>{table.serNo !== undefined ? `${table.serNo}. ` : ''}{table.title}</span>
                               {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') ? (
                                 <button
                                   onClick={() => setEditingCalendar({ tableIdx: matrix.findIndex(x => x.id === table.id), flight: selectedFlightFilter as FlightName })}
-                                  className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-indigo-500 transition-colors cursor-pointer ml-2"
+                                  className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 text-indigo-500 transition-colors cursor-pointer ml-2"
                                   title="Edit in Calendar"
                                 >
                                   <Calendar className="w-3.5 h-3.5" />
@@ -768,13 +780,21 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                           {daysArray.map((dayNum, dayIdx) => {
                             const val = rowData[dayIdx] || 0;
                             const isPositive = val > 0;
+                            const isAltCol = dayNum % 2 === 0;
+
                             return (
                               <td
                                 key={dayNum}
                                 className={`p-0.5 border border-slate-100 dark:border-slate-800/50 ${
                                   isPositive
-                                    ? 'bg-emerald-50/80 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-200 font-black'
-                                    : 'text-slate-400 dark:text-slate-600 font-normal'
+                                    ? (isAltRow
+                                        ? (isAltCol ? 'bg-emerald-100/90 dark:bg-emerald-900/60 text-emerald-950 dark:text-emerald-100 font-black' : 'bg-emerald-100/70 dark:bg-emerald-950/60 text-emerald-950 dark:text-emerald-100 font-black')
+                                        : (isAltCol ? 'bg-emerald-50/90 dark:bg-emerald-950/50 text-emerald-950 dark:text-emerald-200 font-black' : 'bg-emerald-50/60 dark:bg-emerald-950/40 text-emerald-950 dark:text-emerald-200 font-black')
+                                      )
+                                    : (isAltRow
+                                        ? (isAltCol ? 'bg-slate-200/50 dark:bg-slate-800/70 text-slate-400 dark:text-slate-600' : 'bg-slate-100/50 dark:bg-slate-800/40 text-slate-400 dark:text-slate-600')
+                                        : (isAltCol ? 'bg-slate-100/40 dark:bg-slate-800/30 text-slate-400 dark:text-slate-600' : 'bg-white dark:bg-slate-900 text-slate-400 dark:text-slate-600')
+                                      )
                                 }`}
                               >
                                 <span className="inline-block py-1 font-mono text-xs">{val || ''}</span>
@@ -782,7 +802,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                             );
                           })}
                           {showAllTableInfo ? (
-                            <td className="p-2 font-mono font-bold bg-slate-50 dark:bg-slate-800/50 border-l border-slate-200 dark:border-slate-700 align-middle">
+                            <td className={`p-2 font-mono font-bold border-l border-slate-200 dark:border-slate-700 align-middle ${isAltRow ? 'bg-slate-100/80 dark:bg-slate-800/80' : 'bg-slate-50 dark:bg-slate-800/50'}`}>
                               <div className="flex items-center justify-center space-x-1 text-[11px]">
                                 <span className={rowSum !== target ? 'text-red-600 dark:text-red-400 font-black' : 'text-emerald-700 dark:text-emerald-400 font-bold'}>
                                   {rowSum}
@@ -792,7 +812,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                               </div>
                             </td>
                           ) : (
-                            <td className="p-2 font-mono font-black text-slate-900 dark:text-white bg-slate-50 dark:bg-slate-800/50 border-l border-slate-200 dark:border-slate-700 align-middle">
+                            <td className={`p-2 font-mono font-black text-slate-900 dark:text-white border-l border-slate-200 dark:border-slate-700 align-middle ${isAltRow ? 'bg-slate-100/80 dark:bg-slate-800/80' : 'bg-slate-50 dark:bg-slate-800/50'}`}>
                               {rowSum}
                             </td>
                           )}
@@ -814,13 +834,15 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                       {daysArray.map((dayNum, dayIdx) => {
                         const dailySum = matrix.filter(t => !t.isDisabled).reduce((sum, table) => sum + (table.data[selectedFlightFilter as FlightName]?.[dayIdx] || 0), 0);
                         const isPositive = dailySum > 0;
+                        const isAltCol = dayNum % 2 === 0;
+
                         return (
                           <td
                             key={dayNum}
                             className={`p-0.5 border border-slate-200 dark:border-slate-700/70 font-mono font-black ${
                               isPositive
-                                ? 'bg-emerald-100/70 dark:bg-emerald-950/60 text-emerald-950 dark:text-emerald-200'
-                                : 'text-slate-400 dark:text-slate-600 font-normal'
+                                ? (isAltCol ? 'bg-emerald-200/70 dark:bg-emerald-900/60 text-emerald-950 dark:text-emerald-100' : 'bg-emerald-100/70 dark:bg-emerald-950/60 text-emerald-950 dark:text-emerald-200')
+                                : (isAltCol ? 'bg-slate-200/60 dark:bg-slate-700/60 text-slate-400 dark:text-slate-500 font-normal' : 'text-slate-400 dark:text-slate-600 font-normal')
                             }`}
                           >
                             <span className="inline-block py-1 text-xs">{dailySum}</span>
@@ -974,6 +996,8 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
           matrix={matrix}
           selectedFlightFilter={selectedFlightFilter}
           onClose={() => setIsPrintModalOpen(false)}
+          exportMode={printModalMode}
+          targetDate={targetDate}
         />
       )}
 

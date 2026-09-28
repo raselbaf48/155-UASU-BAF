@@ -108,7 +108,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
       case 'duty-roster':
         return { category: 'SCHEDULE MANAGEMENT', title: 'Duty Roster Period' };
       case 'duty-ratio':
-        return { category: 'DUTY RATIO', title: 'Duty Ratio Matrix (Scale 1–31)' };
+        return { category: 'DUTY RATIO', title: 'Duty Ratio Matrix' };
       case 'analytics':
         return { category: 'SCHEDULE MANAGEMENT', title: 'Duty Analytics & Load Balance' };
       case 'conflicts':

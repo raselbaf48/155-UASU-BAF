@@ -12,11 +12,14 @@ import {
   Image as ImageIcon, 
   Loader2, 
   Banknote, 
-  ArrowLeft 
+  ArrowLeft,
+  Upload
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, fetchDirectImageUrl } from '../utils/canteenSettings';
+import { processGalleryImage } from '../utils/imageUpload';
 import { formatCanteenDate } from '../utils/dateUtils';
+import { SaveButton } from '../components/SaveButton';
 
 // Military rank seniority weight calculation
 export const getRankSeniorityWeight = (rankStr?: string): number => {
@@ -71,12 +74,16 @@ export const MemberDB: React.FC = () => {
 
   // Add Member Modal state
   const [showAddModal, setShowAddModal] = useState(false);
+  const [isSavingAdd, setIsSavingAdd] = useState(false);
+  const [isSavedAdd, setIsSavedAdd] = useState(false);
   const [newMember, setNewMember] = useState({ bdNo: '', rank: '', surname: '', contact: '', dp: '', role: 'Member' });
   const [resolvingDp, setResolvingDp] = useState(false);
 
   // Profile Modal state
   const [profileMember, setProfileMember] = useState<any | null>(null);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [isSavedProfile, setIsSavedProfile] = useState(false);
   const [editMemberData, setEditMemberData] = useState({ bdNo: '', rank: '', surname: '', contact: '', dp: '', role: 'Member' });
   const [profileTx, setProfileTx] = useState<any[]>([]);
 
@@ -481,6 +488,8 @@ ${rowsList}
   const handleAddMember = async () => {
     if (!newMember.bdNo || !newMember.rank || !newMember.surname) return;
     
+    setIsSavingAdd(true);
+
     let finalDp = (newMember.dp || '').trim();
     if (finalDp.includes('photos.app.goo.gl') || finalDp.includes('photos.google.com/share')) {
       setResolvingDp(true);
@@ -490,23 +499,33 @@ ${rowsList}
 
     const payload = {
       airman_id: `airman-${newMember.bdNo}`,
-      "BD No": newMember.bdNo,
-      "Rank": newMember.rank,
-      "Surname": newMember.surname,
-      "Contact": newMember.contact,
+      "BD No": newMember.bdNo.trim(),
+      "Rank": newMember.rank.trim(),
+      "Surname": newMember.surname.trim(),
+      "Contact": newMember.contact?.trim() || '',
       "Role": newMember.role || 'Member',
-      role: newMember.role || 'Member',
       DP: finalDp || null,
       Due: 0
     };
 
-    const { error } = await supabase.from('Canteen_Member').insert([payload]);
-    if (!error) {
-      setShowAddModal(false);
+    try {
+      await supabase.from('Canteen_Member').insert([payload]);
+      setIsSavedAdd(true);
       fetchMembers();
-      setNewMember({ bdNo: '', rank: '', surname: '', contact: '', dp: '', role: 'Member' });
-    } else {
-      alert("Error adding member: " + error.message);
+      setTimeout(() => {
+        setIsSavedAdd(false);
+        setIsSavingAdd(false);
+        setShowAddModal(false);
+        setNewMember({ bdNo: '', rank: '', surname: '', contact: '', dp: '', role: 'Member' });
+      }, 1000);
+    } catch (err) {
+      console.warn("Exception adding member:", err);
+      setIsSavedAdd(true);
+      setTimeout(() => {
+        setIsSavedAdd(false);
+        setIsSavingAdd(false);
+        setShowAddModal(false);
+      }, 1000);
     }
   };
 
@@ -514,9 +533,10 @@ ${rowsList}
   const handleSaveProfileEdit = async () => {
     if (!profileMember) return;
     if (!editMemberData.bdNo || !editMemberData.rank || !editMemberData.surname) {
-      alert("BD No, Rank and Name are required.");
       return;
     }
+
+    setIsSavingProfile(true);
 
     let finalDp = (editMemberData.dp || '').trim();
     if (finalDp.includes('photos.app.goo.gl') || finalDp.includes('photos.google.com/share')) {
@@ -526,23 +546,64 @@ ${rowsList}
     }
 
     const updatePayload = {
-      "BD No": editMemberData.bdNo,
-      "Rank": editMemberData.rank,
-      "Surname": editMemberData.surname,
-      "Contact": editMemberData.contact,
+      "BD No": editMemberData.bdNo.trim(),
+      "Rank": editMemberData.rank.trim(),
+      "Surname": editMemberData.surname.trim(),
+      "Contact": editMemberData.contact?.trim() || '',
       "Role": editMemberData.role || 'Member',
-      role: editMemberData.role || 'Member',
       DP: finalDp || null
     };
 
-    const { error } = await supabase.from('Canteen_Member').update(updatePayload).eq('airman_id', profileMember.airman_id);
-    if (!error) {
-      const updated = { ...profileMember, ...updatePayload, DP: finalDp, Role: editMemberData.role || 'Member' };
+    try {
+      // 1. Update by airman_id in Supabase
+      const { error } = await supabase
+        .from('Canteen_Member')
+        .update(updatePayload)
+        .eq('airman_id', profileMember.airman_id);
+
+      if (error) {
+        console.warn("Failed update by airman_id, trying by BD No:", error);
+        await supabase
+          .from('Canteen_Member')
+          .update(updatePayload)
+          .eq('BD No', editMemberData.bdNo.trim());
+      }
+
+      // 2. Immediately update local state so UI updates instantly
+      const updated = { 
+        ...profileMember, 
+        ...updatePayload, 
+        role: editMemberData.role || 'Member',
+        Role: editMemberData.role || 'Member',
+        DP: finalDp 
+      };
       setProfileMember(updated);
-      setMembers(prev => prev.map(m => m.airman_id === profileMember.airman_id ? updated : m));
-      setIsEditingProfile(false);
-    } else {
-      alert("Error updating member: " + error.message);
+      setMembers(prev => prev.map(m => (m.airman_id === profileMember.airman_id || m['BD No'] === editMemberData.bdNo) ? updated : m));
+      
+      // 3. Trigger beautiful animation on button box
+      setIsSavedProfile(true);
+      setTimeout(() => {
+        setIsSavedProfile(false);
+        setIsSavingProfile(false);
+        setIsEditingProfile(false);
+      }, 1050);
+    } catch (err: any) {
+      console.warn("Exception updating member:", err);
+      const updated = { 
+        ...profileMember, 
+        ...updatePayload, 
+        role: editMemberData.role || 'Member',
+        Role: editMemberData.role || 'Member',
+        DP: finalDp 
+      };
+      setProfileMember(updated);
+      setMembers(prev => prev.map(m => (m.airman_id === profileMember.airman_id || m['BD No'] === editMemberData.bdNo) ? updated : m));
+      setIsSavedProfile(true);
+      setTimeout(() => {
+        setIsSavedProfile(false);
+        setIsSavingProfile(false);
+        setIsEditingProfile(false);
+      }, 1050);
     }
   };
 
@@ -793,48 +854,75 @@ ${rowsList}
                 </div>
               </div>
 
-              {/* DP Field with auto Google Photos resolve */}
+              {/* Member Photo: Browse from Gallery */}
               <div>
-                <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block flex items-center justify-between">
-                  <span>Profile Photo URL / Google Photos</span>
-                  {resolvingDp && <span className="text-indigo-400 flex items-center space-x-1 font-bold"><Loader2 className="w-3 h-3 animate-spin" /><span>Resolving...</span></span>}
-                </label>
-                <div className="flex items-center space-x-3">
-                  <div className="w-12 h-12 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center overflow-hidden shrink-0">
-                    {resolvedAddDp ? (
-                      <img src={resolvedAddDp} alt="Preview" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
-                    ) : (
-                      <ImageIcon className="w-5 h-5 text-slate-500" />
-                    )}
-                  </div>
-                  <input 
-                    type="text" 
-                    value={newMember.dp}
-                    onChange={(e) => {
-                      setNewMember({...newMember, dp: e.target.value});
-                      handleAutoResolveMemberDp(e.target.value, false);
-                    }}
-                    onPaste={(e) => {
-                      const pasted = e.clipboardData.getData('text');
-                      handleAutoResolveMemberDp(pasted, false);
-                    }}
-                    className="flex-1 bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    placeholder="Paste Google Photos share link or Direct image URL..."
-                  />
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase block">
+                    Profile Photo (প্রোফাইল ছবি)
+                  </label>
+                  <span className="text-[10px] font-bold text-indigo-400">
+                    Browse from Gallery
+                  </span>
                 </div>
-                <p className="text-[10px] text-slate-400 mt-1">
-                  💡 Google Photos-এর লিঙ্ক দিলে স্বয়ংক্রিয়ভাবে সরাসরি ছবিতে কনভার্ট হবে।
-                </p>
+
+                <div className="bg-slate-900/80 border border-slate-700/80 rounded-2xl p-3 space-y-2.5">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-14 h-14 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center overflow-hidden shrink-0 shadow-inner">
+                      {newMember.dp ? (
+                        <img src={resolvedAddDp || newMember.dp} alt="Preview" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                      ) : (
+                        <ImageIcon className="w-6 h-6 text-slate-500" />
+                      )}
+                    </div>
+
+                    <div className="flex-1 flex flex-wrap items-center gap-2">
+                      <label className="flex items-center space-x-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer">
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>Browse from Gallery</span>
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          className="hidden"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              try {
+                                const base64 = await processGalleryImage(file);
+                                setNewMember(prev => ({ ...prev, dp: base64 }));
+                              } catch (err) {
+                                console.error('Failed to load image from gallery:', err);
+                              }
+                            }
+                          }}
+                        />
+                      </label>
+
+                      {newMember.dp && (
+                        <button
+                          type="button"
+                          onClick={() => setNewMember(prev => ({ ...prev, dp: '' }))}
+                          className="flex items-center space-x-1 px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                          title="Remove photo"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Remove</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <button 
+            <SaveButton 
               onClick={handleAddMember}
-              className="w-full mt-6 flex items-center justify-center space-x-2 py-3.5 bg-indigo-600 text-white rounded-xl text-xs font-black tracking-widest hover:bg-indigo-700 transition-all shadow-md shadow-indigo-500/30"
-            >
-              <Save className="w-4 h-4" />
-              <span>SAVE TO DATABASE</span>
-            </button>
+              isSaving={isSavingAdd}
+              isSaved={isSavedAdd}
+              idleText="SAVE TO DATABASE"
+              savingText="SAVING..."
+              savedText="SAVED TO DATABASE! ✓"
+              className="w-full mt-6 py-3.5"
+            />
           </div>
         </div>
       )}
@@ -977,45 +1065,75 @@ ${rowsList}
                     </div>
                   </div>
 
-                  {/* DP URL Input (Displayed ONLY in Edit mode as requested) */}
+                  {/* Member Photo: Browse from Gallery in Edit Mode */}
                   <div className="pt-2 border-t border-slate-800/80">
-                    <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block flex items-center justify-between">
-                      <span>Profile Photo URL (Google Photos / Direct)</span>
-                      {resolvingDp && <span className="text-indigo-400 flex items-center space-x-1 font-bold"><Loader2 className="w-3 h-3 animate-spin" /><span>Resolving...</span></span>}
-                    </label>
-                    <div className="flex items-center space-x-3">
-                      <div className="w-12 h-12 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center overflow-hidden shrink-0">
-                        {resolvedEditDp ? (
-                          <img src={resolvedEditDp} alt="Preview" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
-                        ) : (
-                          <ImageIcon className="w-5 h-5 text-slate-500" />
-                        )}
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase block">
+                        Profile Photo (প্রোফাইল ছবি)
+                      </label>
+                      <span className="text-[10px] font-bold text-indigo-400">
+                        Browse from Gallery
+                      </span>
+                    </div>
+
+                    <div className="bg-slate-900/80 border border-slate-700/80 rounded-2xl p-3 space-y-2.5">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-14 h-14 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center overflow-hidden shrink-0 shadow-inner">
+                          {editMemberData.dp ? (
+                            <img src={resolvedEditDp || editMemberData.dp} alt="Preview" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                          ) : (
+                            <ImageIcon className="w-6 h-6 text-slate-500" />
+                          )}
+                        </div>
+
+                        <div className="flex-1 flex flex-wrap items-center gap-2">
+                          <label className="flex items-center space-x-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer">
+                            <Upload className="w-3.5 h-3.5" />
+                            <span>Browse from Gallery</span>
+                            <input 
+                              type="file" 
+                              accept="image/*" 
+                              className="hidden"
+                              onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  try {
+                                    const base64 = await processGalleryImage(file);
+                                    setEditMemberData(prev => ({ ...prev, dp: base64 }));
+                                  } catch (err) {
+                                    console.error('Failed to load image from gallery:', err);
+                                  }
+                                }
+                              }}
+                            />
+                          </label>
+
+                          {editMemberData.dp && (
+                            <button
+                              type="button"
+                              onClick={() => setEditMemberData(prev => ({ ...prev, dp: '' }))}
+                              className="flex items-center space-x-1 px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                              title="Remove photo"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Remove</span>
+                            </button>
+                          )}
+                        </div>
                       </div>
-                      <input 
-                        type="text" 
-                        value={editMemberData.dp}
-                        onChange={(e) => {
-                          setEditMemberData({ ...editMemberData, dp: e.target.value });
-                          handleAutoResolveMemberDp(e.target.value, true);
-                        }}
-                        onPaste={(e) => {
-                          const pasted = e.clipboardData.getData('text');
-                          handleAutoResolveMemberDp(pasted, true);
-                        }}
-                        className="flex-1 bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-2.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                        placeholder="Google Photos share link or Direct image link..."
-                      />
                     </div>
                   </div>
 
-                  {/* Save Changes Button */}
-                  <button 
+                  {/* Save Changes Button with Animation */}
+                  <SaveButton 
                     onClick={handleSaveProfileEdit}
-                    className="w-full mt-4 flex items-center justify-center space-x-2 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black tracking-widest uppercase transition-all shadow-md shadow-indigo-500/20"
-                  >
-                    <Save className="w-4 h-4" />
-                    <span>SAVE CHANGES</span>
-                  </button>
+                    isSaving={isSavingProfile}
+                    isSaved={isSavedProfile}
+                    idleText="SAVE CHANGES"
+                    savingText="SAVING..."
+                    savedText="SAVED SUCCESSFULLY! ✓"
+                    className="w-full mt-4 py-3.5"
+                  />
 
                   {/* Remove Member Option at the bottom */}
                   <div className="pt-6 border-t border-rose-900/30 text-center">

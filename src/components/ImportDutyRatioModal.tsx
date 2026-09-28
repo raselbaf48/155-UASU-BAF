@@ -647,9 +647,6 @@ export const ImportDutyRatioModal: React.FC<ImportDutyRatioModalProps> = ({
                 <h2 className="text-lg font-black tracking-tight text-white">
                   Import Duty Ratio Quotas
                 </h2>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-950 border border-indigo-500/40 text-indigo-400 uppercase">
-                  Scale 1–31
-                </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
                 Upload an Excel spreadsheet (.xlsx) containing official daily duty quotas for all flights.
