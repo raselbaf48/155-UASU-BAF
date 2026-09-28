@@ -102,20 +102,20 @@ export const MenuManagement: React.FC = () => {
                 <form onSubmit={handleAdd} className="space-y-4">
                     <div>
                         <label className="block text-sm font-bold text-slate-200 dark:text-slate-300 mb-1">Name (Bangla)</label>
-                        <input required type="text" value={formData.name_bn} onChange={e => setFormData({...formData, name_bn: e.target.value})} className="w-full px-4 py-2 border border-slate-700 dark:border-slate-700 bg-slate-800 dark:bg-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500" placeholder="যেমন: সিঙ্গারা" />
+                        <input required type="text" value={formData.name_bn ?? ""} onChange={e => setFormData({...formData, name_bn: e.target.value})} className="w-full px-4 py-2 border border-slate-700 dark:border-slate-700 bg-slate-800 dark:bg-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500" placeholder="যেমন: সিঙ্গারা" />
                     </div>
                     <div>
                         <label className="block text-sm font-bold text-slate-200 dark:text-slate-300 mb-1">Name (English)</label>
-                        <input required type="text" value={formData.name_en} onChange={e => setFormData({...formData, name_en: e.target.value})} className="w-full px-4 py-2 border border-slate-700 dark:border-slate-700 bg-slate-800 dark:bg-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500" placeholder="e.g. Singara" />
+                        <input required type="text" value={formData.name_en ?? ""} onChange={e => setFormData({...formData, name_en: e.target.value})} className="w-full px-4 py-2 border border-slate-700 dark:border-slate-700 bg-slate-800 dark:bg-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500" placeholder="e.g. Singara" />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm font-bold text-slate-200 dark:text-slate-300 mb-1">Price (৳)</label>
-                            <input required type="number" value={formData.price} onChange={e => setFormData({...formData, price: e.target.value})} className="w-full px-4 py-2 border border-slate-700 dark:border-slate-700 bg-slate-800 dark:bg-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500" />
+                            <input required type="number" value={formData.price ?? ""} onChange={e => setFormData({...formData, price: e.target.value})} className="w-full px-4 py-2 border border-slate-700 dark:border-slate-700 bg-slate-800 dark:bg-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500" />
                         </div>
                         <div>
                             <label className="block text-sm font-bold text-slate-200 dark:text-slate-300 mb-1">Max Qty</label>
-                            <input required type="number" value={formData.max} onChange={e => setFormData({...formData, max: e.target.value})} className="w-full px-4 py-2 border border-slate-700 dark:border-slate-700 bg-slate-800 dark:bg-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500" />
+                            <input required type="number" value={formData.max ?? ""} onChange={e => setFormData({...formData, max: e.target.value})} className="w-full px-4 py-2 border border-slate-700 dark:border-slate-700 bg-slate-800 dark:bg-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500" />
                         </div>
                     </div>
                     <div className="pt-4">

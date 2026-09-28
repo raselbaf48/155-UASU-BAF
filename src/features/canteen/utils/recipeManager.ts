@@ -967,9 +967,8 @@ const DEFAULT_MENU_RECIPES: Record<string, RecipeIngredient[]> = {
     { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 2, unit: 'gm' }
   ],
   'EGG NOODLES': [
-    { rawItemId: 'raw-6', rawItemName: 'Noodles', quantity: 1, unit: 'packet' },
-    { rawItemId: 'raw-7', rawItemName: 'Egg', quantity: 1, unit: 'pcs' },
-    { rawItemId: 'raw-18', rawItemName: 'Maggi Masala', quantity: 1, unit: 'packet' },
+    { rawItemId: 'raw-6', rawItemName: 'Noodles', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-18', rawItemName: 'Maggi Masala', quantity: 1, unit: 'pcs' },
     { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 20, unit: 'gm' },
     { rawItemId: 'raw-19', rawItemName: 'Green Chili', quantity: 5, unit: 'gm' },
     { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 15, unit: 'ml' },
@@ -1032,8 +1031,8 @@ const DEFAULT_MENU_RECIPES: Record<string, RecipeIngredient[]> = {
     { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.0015, unit: 'cylinder' }
   ],
   'NOODLES': [
-    { rawItemId: 'raw-6', rawItemName: 'Noodles', quantity: 1, unit: 'packet' },
-    { rawItemId: 'raw-18', rawItemName: 'Maggi Masala', quantity: 1, unit: 'packet' },
+    { rawItemId: 'raw-6', rawItemName: 'Noodles', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-18', rawItemName: 'Maggi Masala', quantity: 1, unit: 'pcs' },
     { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 15, unit: 'gm' },
     { rawItemId: 'raw-19', rawItemName: 'Green Chili', quantity: 5, unit: 'gm' },
     { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 10, unit: 'ml' },
@@ -1041,10 +1040,10 @@ const DEFAULT_MENU_RECIPES: Record<string, RecipeIngredient[]> = {
     { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 2, unit: 'gm' }
   ],
   'NORMAL BISCUIT': [
-    { rawItemId: 'raw-8', rawItemName: 'Biscuit', quantity: 1, unit: 'packet' }
+    { rawItemId: 'raw-8', rawItemName: 'Biscuit', quantity: 1, unit: 'pcs' }
   ],
   'DRY CAKE': [
-    { rawItemId: 'raw-21', rawItemName: 'Dry Cake', quantity: 1, unit: 'packet' }
+    { rawItemId: 'raw-21', rawItemName: 'Dry Cake', quantity: 1, unit: 'pcs' }
   ],
   'BUTTER BAN': [
     { rawItemId: 'raw-23', rawItemName: 'Butter Ban', quantity: 1, unit: 'pcs' }
@@ -1802,14 +1801,16 @@ export const getRecipeForMenuItem = (menuItemId: string, menuItemName?: string):
         const currentUnit = (ing.unit || '').toLowerCase().trim();
         const rawUnit = (raw.unit || '').toLowerCase().trim();
         const subUnitLower = subInfo.subUnit.toLowerCase().trim();
-        // If entered in parent unit, convert to sub-unit
-        if (currentUnit === rawUnit && currentUnit !== subUnitLower) {
-          const ratio = subInfo.packSize || 1000;
-          return {
-            ...ing,
-            quantity: Math.round(ing.quantity * ratio * 100) / 100,
-            unit: subInfo.subUnit
-          };
+        if (currentUnit !== subUnitLower) {
+          const isLargeOrLegacy = currentUnit === rawUnit || 
+            ['packet', 'box', 'case', 'crate', 'kg', 'liter', 'ltr'].includes(currentUnit) ||
+            !currentUnit;
+          if (isLargeOrLegacy) {
+            return {
+              ...ing,
+              unit: subInfo.subUnit
+            };
+          }
         }
       }
       return ing;

@@ -13,10 +13,11 @@ import {
   Loader2, 
   Banknote, 
   ArrowLeft,
-  Upload
+  Upload,
+  RefreshCw
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
-import { resolveImageUrl, fetchDirectImageUrl } from '../utils/canteenSettings';
+import { resolveImageUrl, fetchDirectImageUrl, getCanteenConfig } from '../utils/canteenSettings';
 import { processGalleryImage } from '../utils/imageUpload';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { SaveButton } from '../components/SaveButton';
@@ -69,8 +70,26 @@ interface StatementRow {
 
 export const MemberDB: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [members, setMembers] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [members, setMembers] = useState<any[]>(() => {
+    try {
+      const cached = localStorage.getItem('canteen_members_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return [];
+  });
+  const [loading, setLoading] = useState<boolean>(() => {
+    try {
+      const cached = localStorage.getItem('canteen_members_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return false;
+      }
+    } catch {}
+    return true;
+  });
 
   // Add Member Modal state
   const [showAddModal, setShowAddModal] = useState(false);
@@ -110,9 +129,38 @@ export const MemberDB: React.FC = () => {
     setPayMethod('CASH');
   };
 
+  // Helper to get effective DP with fallback to manager config or device cache
+  const getMemberEffectiveDp = (m: any): string => {
+    if (m?.DP && typeof m.DP === 'string' && m.DP.trim()) return m.DP.trim();
+    const bdClean = String(m?.['BD No'] || m?.airman_id || '').replace(/\D/g, '');
+    const surnameClean = String(m?.['Surname'] || '').toLowerCase();
+
+    // 1. If Manager / Rasel (BD 474455)
+    if (bdClean === '474455' || surnameClean === 'rasel') {
+      try {
+        const cfg = getCanteenConfig();
+        if (cfg.adminImage) return cfg.adminImage;
+      } catch {}
+    }
+
+    // 2. Check device local storage cache for this member if previously stored
+    if (typeof window !== 'undefined' && bdClean) {
+      try {
+        const stored = localStorage.getItem(`canteen_member_${bdClean}`);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed.dp) return parsed.dp;
+        }
+      } catch {}
+    }
+
+    return '';
+  };
+
   // Open Statement Modal
   const openStatement = (member: any) => {
-    setStatementMember(member);
+    const effDp = getMemberEffectiveDp(member);
+    setStatementMember({ ...member, DP: effDp || member['DP'] || '' });
     try {
       const txs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
       const memberTxs = txs.filter((tx: any) => tx.airman_id === member.airman_id);
@@ -124,15 +172,20 @@ export const MemberDB: React.FC = () => {
 
   // Open Profile Modal
   const openProfile = (member: any) => {
-    setProfileMember(member);
+    const effDp = getMemberEffectiveDp(member);
+    const fullMember = {
+      ...member,
+      DP: effDp || member['DP'] || ''
+    };
+    setProfileMember(fullMember);
     setIsEditingProfile(false);
     setEditMemberData({
       bdNo: member['BD No'] || '',
       rank: member['Rank'] || '',
       surname: member['Surname'] || '',
-      contact: member['Contact'] || '',
+      contact: member['Contact'] || member['Mobile No'] || '',
       role: member['Role'] || member.role || 'Member',
-      dp: member['DP'] || ''
+      dp: effDp || member['DP'] || ''
     });
     try {
       const txs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
@@ -372,92 +425,140 @@ ${rowsList}
     setTxDeleteConfirmId(null);
   };
 
-  // Auto-sync Biodata silently in background
+  // Helper to format and sort members by rank seniority
+  const formatAndSortMembers = (data: any[]) => {
+    const formatted = data
+      .filter((m: any) => {
+        const bd = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
+        return bd !== '48456';
+      })
+      .map((m: any) => {
+        const effectiveDp = getMemberEffectiveDp(m);
+        // If Supabase didn't have DP but we found it in local storage or config, save it back to cloud
+        if (!m.DP && effectiveDp && m.airman_id) {
+          supabase.from('Canteen_Member').update({ DP: effectiveDp }).eq('airman_id', m.airman_id).then();
+        }
+        return {
+          ...m,
+          Role: m.Role ?? m.role ?? '',
+          role: m.Role ?? m.role ?? '',
+          Due: Number(m.Due ?? m.due ?? m.baki ?? 0),
+          baki: Number(m.Due ?? m.due ?? m.baki ?? 0),
+          DP: effectiveDp || m.DP || ''
+        };
+      });
+
+    // Sort by military Rank Seniority & BD Number
+    formatted.sort((a, b) => {
+      const weightA = getRankSeniorityWeight(a.Rank);
+      const weightB = getRankSeniorityWeight(b.Rank);
+      if (weightA !== weightB) return weightA - weightB;
+
+      const bdA = parseInt(String(a['BD No'] || '').replace(/\D/g, ''), 10) || 9999999;
+      const bdB = parseInt(String(b['BD No'] || '').replace(/\D/g, ''), 10) || 9999999;
+      return bdA - bdB;
+    });
+
+    return formatted;
+  };
+
+  // Auto-sync Biodata silently in background if Canteen_Member is empty or missing airmen
   const autoSyncBiodata = async () => {
     try {
       const { data: biodata } = await supabase.from('Biodata Register').select('*');
       if (biodata && biodata.length > 0) {
-        const { data: existingCanteen } = await supabase.from('Canteen_Member').select('airman_id, Due, DP');
+        const { data: existingCanteen } = await supabase.from('Canteen_Member').select('airman_id, Due, DP, Role');
         const existingDueMap = new Map();
         const existingDpMap = new Map();
+        const existingRoleMap = new Map();
         if (existingCanteen) {
           existingCanteen.forEach((m: any) => {
             existingDueMap.set(m.airman_id, Number(m.Due ?? m.due ?? m.baki ?? 0));
             existingDpMap.set(m.airman_id, m.DP || null);
+            existingRoleMap.set(m.airman_id, m.Role || 'Member');
           });
         }
 
         const payload = biodata
           .filter((b: any) => b.airman_id && String(b['BD No'] || '').replace(/\D/g, '') !== '48456')
-          .map((b: any) => ({
-          airman_id: b.airman_id,
-          "BD No": b['BD No'] || '',
-          "Rank": b['Rank'] || '',
-          "Surname": b['Surname'] || '',
-          "Contact": b['Mobile No'] || '',
-          Due: existingDueMap.has(b.airman_id) ? existingDueMap.get(b.airman_id) : 0,
-          DP: existingDpMap.has(b.airman_id) ? existingDpMap.get(b.airman_id) : null
-        }));
+          .map((b: any) => {
+            const currentDp = existingDpMap.get(b.airman_id) || getMemberEffectiveDp(b) || null;
+            return {
+              airman_id: b.airman_id,
+              "BD No": b['BD No'] || '',
+              "Rank": b['Rank'] || '',
+              "Surname": b['Surname'] || '',
+              "Contact": b['Mobile No'] || '',
+              Due: existingDueMap.has(b.airman_id) ? existingDueMap.get(b.airman_id) : 0,
+              DP: currentDp,
+              Role: existingRoleMap.get(b.airman_id) || 'Member'
+            };
+          });
 
         await supabase.from('Canteen_Member').upsert(payload, { onConflict: 'airman_id' });
+        
+        // Refresh after background upsert
+        const { data: refreshed } = await supabase.from('Canteen_Member').select('*');
+        if (refreshed && refreshed.length > 0) {
+          const sorted = formatAndSortMembers(refreshed);
+          setMembers(sorted);
+          try {
+            localStorage.setItem('canteen_members_cache', JSON.stringify(sorted));
+          } catch {}
+        }
       }
     } catch (err) {
       console.warn('Auto-sync biodata silent note:', err);
     }
   };
 
-  const fetchMembers = async () => {
-    setLoading(true);
-    const { data, error } = await supabase.from('Canteen_Member').select('*');
-    if (!error && data) {
-      const formatted = data
-        .filter((m: any) => {
-          const bd = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
-          return bd !== '48456';
-        })
-        .map((m: any) => ({
-        ...m,
-        Role: m.Role ?? m.role ?? '',
-        role: m.Role ?? m.role ?? '',
-        Due: Number(m.Due ?? m.due ?? m.baki ?? 0),
-        baki: Number(m.Due ?? m.due ?? m.baki ?? 0),
-        DP: m.DP || ''
-      }));
-
-      // Sort by military Rank Seniority & BD Number
-      formatted.sort((a, b) => {
-        const weightA = getRankSeniorityWeight(a.Rank);
-        const weightB = getRankSeniorityWeight(b.Rank);
-        if (weightA !== weightB) return weightA - weightB;
-
-        const bdA = parseInt(String(a['BD No'] || '').replace(/\D/g, ''), 10) || 9999999;
-        const bdB = parseInt(String(b['BD No'] || '').replace(/\D/g, ''), 10) || 9999999;
-        return bdA - bdB;
-      });
-
-      setMembers(formatted);
-    } else {
-      console.error(error);
+  const fetchMembers = async (forceShowLoading = false) => {
+    if (forceShowLoading) {
+      setLoading(true);
     }
-    setLoading(false);
+    try {
+      const { data, error } = await supabase.from('Canteen_Member').select('*');
+      if (!error && data && data.length > 0) {
+        const sorted = formatAndSortMembers(data);
+        setMembers(sorted);
+        try {
+          localStorage.setItem('canteen_members_cache', JSON.stringify(sorted));
+        } catch {}
+      } else if (!data || data.length === 0) {
+        // If table is completely empty, trigger sync
+        await autoSyncBiodata();
+      }
+    } catch (err) {
+      console.error('Error fetching Canteen members:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    const init = async () => {
-      await autoSyncBiodata();
-      await fetchMembers();
-    };
-    init();
+    // 1. Fetch instantly without waiting for any heavy sync
+    fetchMembers();
 
-    // Subscribe to realtime updates on Canteen_Member table
+    // 2. Safety timeout: never leave loading true for more than 2.5 seconds on slow/offline mobile
+    const safetyTimer = setTimeout(() => {
+      setLoading(false);
+    }, 2500);
+
+    // 3. Subscribe to realtime updates on Canteen_Member table (debounced)
+    let debounceTimer: any = null;
     const channel = supabase
       .channel('canteen_members_realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'Canteen_Member' }, () => {
-        fetchMembers();
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          fetchMembers(false);
+        }, 600);
       })
       .subscribe();
 
     return () => {
+      clearTimeout(safetyTimer);
+      clearTimeout(debounceTimer);
       supabase.removeChannel(channel);
     };
   }, []);
@@ -673,8 +774,30 @@ ${rowsList}
         />
       </div>
 
-      {loading ? (
-        <div className="text-center py-10 text-slate-400 font-bold animate-pulse">Loading members from Canteen database...</div>
+      {loading && members.length === 0 ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in duration-200">
+          {[1, 2, 3, 4, 5, 6].map((k) => (
+            <div key={k} className="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 h-36 animate-pulse flex items-center space-x-4">
+              <div className="w-14 h-14 rounded-2xl bg-slate-850 border border-slate-800" />
+              <div className="space-y-2.5 flex-1">
+                <div className="h-4 bg-slate-800 rounded-lg w-28" />
+                <div className="h-5 bg-slate-800 rounded-lg w-44" />
+                <div className="h-3 bg-slate-800/80 rounded w-20" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : filteredMembers.length === 0 ? (
+        <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-12 text-center">
+          <p className="text-slate-400 font-bold text-sm mb-4">No member records found</p>
+          <button
+            onClick={() => fetchMembers(true)}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-black uppercase tracking-wider inline-flex items-center space-x-2 cursor-pointer shadow-md shadow-indigo-600/30 transition-all"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Reload Members</span>
+          </button>
+        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredMembers.map((member, i) => {
@@ -793,7 +916,7 @@ ${rowsList}
                 <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">BD No (ID)</label>
                 <input 
                   type="text" 
-                  value={newMember.bdNo}
+                  value={newMember.bdNo ?? ""}
                   onChange={(e) => setNewMember({...newMember, bdNo: e.target.value})}
                   className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   placeholder="e.g. 102341"
@@ -803,7 +926,7 @@ ${rowsList}
                 <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Rank</label>
                 <input 
                   type="text" 
-                  value={newMember.rank}
+                  value={newMember.rank ?? ""}
                   onChange={(e) => setNewMember({...newMember, rank: e.target.value})}
                   className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   placeholder="e.g. LAC"
@@ -813,7 +936,7 @@ ${rowsList}
                 <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Name / Surname</label>
                 <input 
                   type="text" 
-                  value={newMember.surname}
+                  value={newMember.surname ?? ""}
                   onChange={(e) => setNewMember({...newMember, surname: e.target.value})}
                   className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   placeholder="e.g. Jahid"
@@ -823,7 +946,7 @@ ${rowsList}
                 <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Contact Number</label>
                 <input 
                   type="text" 
-                  value={newMember.contact}
+                  value={newMember.contact ?? ""}
                   onChange={(e) => setNewMember({...newMember, contact: e.target.value})}
                   className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   placeholder="e.g. 017XXXXXXXX"
@@ -835,13 +958,13 @@ ${rowsList}
                 <div className="flex gap-2">
                   <input 
                     type="text" 
-                    value={newMember.role}
+                    value={newMember.role ?? "Member"}
                     onChange={(e) => setNewMember({...newMember, role: e.target.value})}
                     className="flex-1 bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     placeholder="e.g. Member, Manager, Staff, Cook"
                   />
                   <select
-                    value={newMember.role}
+                    value={newMember.role ?? "Member"}
                     onChange={(e) => setNewMember({...newMember, role: e.target.value})}
                     className="bg-slate-800 border border-slate-700 text-slate-200 rounded-xl px-3 py-3 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   >
@@ -1003,7 +1126,7 @@ ${rowsList}
                     <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">BD No (ID)</label>
                     <input 
                       type="text" 
-                      value={editMemberData.bdNo}
+                      value={editMemberData.bdNo ?? ""}
                       onChange={(e) => setEditMemberData({ ...editMemberData, bdNo: e.target.value })}
                       className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
@@ -1014,7 +1137,7 @@ ${rowsList}
                       <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Rank</label>
                       <input 
                         type="text" 
-                        value={editMemberData.rank}
+                        value={editMemberData.rank ?? ""}
                         onChange={(e) => setEditMemberData({ ...editMemberData, rank: e.target.value })}
                         className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                       />
@@ -1023,7 +1146,7 @@ ${rowsList}
                       <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Name / Surname</label>
                       <input 
                         type="text" 
-                        value={editMemberData.surname}
+                        value={editMemberData.surname ?? ""}
                         onChange={(e) => setEditMemberData({ ...editMemberData, surname: e.target.value })}
                         className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                       />
@@ -1035,7 +1158,7 @@ ${rowsList}
                       <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Contact Number</label>
                       <input 
                         type="text" 
-                        value={editMemberData.contact}
+                        value={editMemberData.contact ?? ""}
                         onChange={(e) => setEditMemberData({ ...editMemberData, contact: e.target.value })}
                         className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                       />
@@ -1045,13 +1168,13 @@ ${rowsList}
                       <div className="flex gap-2">
                         <input 
                           type="text" 
-                          value={editMemberData.role}
+                          value={editMemberData.role ?? "Member"}
                           onChange={(e) => setEditMemberData({ ...editMemberData, role: e.target.value })}
                           className="flex-1 bg-slate-800 border border-slate-700 text-white rounded-xl px-3 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                           placeholder="e.g. Member, Manager"
                         />
                         <select
-                          value={editMemberData.role}
+                          value={editMemberData.role ?? "Member"}
                           onChange={(e) => setEditMemberData({ ...editMemberData, role: e.target.value })}
                           className="bg-slate-800 border border-slate-700 text-slate-200 rounded-xl px-2.5 py-2.5 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                         >
@@ -1426,7 +1549,7 @@ ${rowsList}
                 <input 
                   type="number"
                   placeholder="0.00"
-                  value={payAmount}
+                  value={payAmount ?? ""}
                   onChange={(e) => setPayAmount(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-lg font-black font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />

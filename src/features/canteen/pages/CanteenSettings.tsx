@@ -1,16 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Image as ImageIcon, CheckCircle2, Loader2, Users, Search, UserCheck, Eye, EyeOff, ShieldCheck, Phone, IdCard, AlertTriangle, RotateCcw } from 'lucide-react';
-import { getCanteenConfig, saveCanteenConfig, resolveImageUrl, fetchDirectImageUrl, fetchCanteenConfigFromCloud, CanteenConfig } from '../utils/canteenSettings';
+import { Save, CheckCircle2, Loader2, Users, Search, UserCheck, Eye, EyeOff, ShieldCheck, Phone, IdCard, AlertTriangle, RotateCcw } from 'lucide-react';
+import { getCanteenConfig, saveCanteenConfig, resolveImageUrl, fetchCanteenConfigFromCloud, CanteenConfig } from '../utils/canteenSettings';
 import { resetAllCanteenData } from '../utils/resetCanteenData';
 import { supabase } from '../../../supabase';
+import { SaveButton } from '../components/SaveButton';
 
 export const CanteenSettings: React.FC = () => {
   const [settings, setSettings] = useState<CanteenConfig>(() => getCanteenConfig());
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showPassword, setShowPassword] = useState(true); // Password visible by default as requested
-  const [resolvingLogo, setResolvingLogo] = useState(false);
-  const [logoPreviewError, setLogoPreviewError] = useState(false);
 
   // Member DB selection
   const [members, setMembers] = useState<any[]>([]);
@@ -55,27 +54,6 @@ export const CanteenSettings: React.FC = () => {
     setLoadingMembers(false);
   };
 
-  const handleAutoResolveLogo = async (url: string) => {
-    const trimmed = url.trim();
-    if (!trimmed) return;
-    if (trimmed.includes('photos.app.goo.gl') || trimmed.includes('photos.google.com/share') || trimmed.includes('drive.google.com')) {
-      setResolvingLogo(true);
-      try {
-        const directUrl = await fetchDirectImageUrl(trimmed);
-        if (directUrl && directUrl !== trimmed) {
-          const updated = { ...settings, logoUrl: directUrl };
-          setSettings(updated);
-          saveCanteenConfig(updated);
-          setLogoPreviewError(false);
-        }
-      } catch (err) {
-        console.error('Logo resolution failed:', err);
-      } finally {
-        setResolvingLogo(false);
-      }
-    }
-  };
-
   const handleSelectManager = (member: any) => {
     const rank = member['Rank'] || '';
     const surname = member['Surname'] || '';
@@ -112,21 +90,7 @@ export const CanteenSettings: React.FC = () => {
 
   const handleSaveAll = async () => {
     setIsSaving(true);
-    let finalLogo = settings.logoUrl.trim();
-
-    if (finalLogo.includes('photos.app.goo.gl') || finalLogo.includes('photos.google.com/share')) {
-      setResolvingLogo(true);
-      finalLogo = await fetchDirectImageUrl(finalLogo);
-      setResolvingLogo(false);
-    }
-
-    const toSave: CanteenConfig = {
-      ...settings,
-      logoUrl: finalLogo
-    };
-
-    setSettings(toSave);
-    saveCanteenConfig(toSave);
+    saveCanteenConfig(settings);
     setIsSaving(false);
     showSavedFeedback();
   };
@@ -138,7 +102,6 @@ export const CanteenSettings: React.FC = () => {
     }, 3000);
   };
 
-  const resolvedLogo = resolveImageUrl(settings.logoUrl);
   const resolvedManagerDp = resolveImageUrl(settings.adminImage);
 
   const filteredMembers = members.filter((m) => {
@@ -175,75 +138,18 @@ export const CanteenSettings: React.FC = () => {
       {/* Main Configuration Card */}
       <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-6 md:p-10 shadow-sm border border-slate-200/80 dark:border-slate-800 space-y-8">
         
-        {/* Row 1: Canteen Name & Logo URL */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-7">
-          {/* CANTEEN NAME */}
-          <div className="space-y-2">
-            <label className="text-[11px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
-              CANTEEN NAME
-            </label>
-            <input
-              type="text"
-              value={settings.name}
-              onChange={(e) => handleNameChange(e.target.value)}
-              placeholder="e.g. 🍽️ Cafe UAV 🍽️"
-              className="w-full bg-[#1a2333] dark:bg-[#111928] text-white rounded-2xl px-5 py-4 text-sm font-black tracking-wide border border-slate-700/60 shadow-inner focus:outline-none focus:ring-2 focus:ring-[#4f46e5] focus:border-transparent transition-all"
-            />
-          </div>
-
-          {/* LOGO URL */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-[11px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
-                LOGO URL
-              </label>
-              <span className="text-[10px] font-bold text-indigo-500 dark:text-indigo-400 flex items-center space-x-1">
-                {resolvingLogo ? (
-                  <>
-                    <Loader2 className="w-3 h-3 animate-spin text-indigo-400" />
-                    <span>Resolving Photo...</span>
-                  </>
-                ) : (
-                  <span>Google Photos / Web URL</span>
-                )}
-              </span>
-            </div>
-            <div className="relative">
-              <input
-                type="text"
-                value={settings.logoUrl}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setSettings({ ...settings, logoUrl: val });
-                  setLogoPreviewError(false);
-                  if (val.includes('photos.app.goo.gl') || val.includes('photos.google.com/share')) {
-                    handleAutoResolveLogo(val);
-                  }
-                }}
-                onBlur={() => handleAutoResolveLogo(settings.logoUrl)}
-                placeholder="https://... (Google Photos / Web Image)"
-                className="w-full bg-[#1a2333] dark:bg-[#111928] text-white rounded-2xl pl-5 pr-14 py-4 text-xs font-bold font-mono tracking-normal border border-slate-700/60 shadow-inner focus:outline-none focus:ring-2 focus:ring-[#4f46e5] focus:border-transparent transition-all truncate"
-              />
-              <div className="absolute right-2.5 top-1/2 -translate-y-1/2 w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center overflow-hidden shrink-0 shadow">
-                {resolvingLogo ? (
-                  <Loader2 className="w-4 h-4 text-indigo-400 animate-spin" />
-                ) : resolvedLogo && !logoPreviewError ? (
-                  <img
-                    src={resolvedLogo}
-                    alt="Logo Preview"
-                    referrerPolicy="no-referrer"
-                    className="w-full h-full object-contain p-0.5"
-                    onError={() => setLogoPreviewError(true)}
-                  />
-                ) : (
-                  <ImageIcon className="w-4 h-4 text-slate-500" />
-                )}
-              </div>
-            </div>
-            <p className="text-[9px] text-slate-400 leading-tight">
-              💡 Google Photos / Drive লিঙ্ক দিলেও স্বয়ংক্রিয়ভাবে সরাসরি ছবিতে রূপান্তরিত হবে।
-            </p>
-          </div>
+        {/* Row 1: Canteen Name */}
+        <div className="space-y-2">
+          <label className="text-[11px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider block">
+            CANTEEN NAME
+          </label>
+          <input
+            type="text"
+            value={settings.name}
+            onChange={(e) => handleNameChange(e.target.value)}
+            placeholder="e.g. 🍽️ Cafe UAV 🍽️"
+            className="w-full bg-[#1a2333] dark:bg-[#111928] text-white rounded-2xl px-5 py-4 text-sm font-black tracking-wide border border-slate-700/60 shadow-inner focus:outline-none focus:ring-2 focus:ring-[#4f46e5] focus:border-transparent transition-all"
+          />
         </div>
 
         {/* Row 2: CANTEEN MANAGER (Selected from Member DB with auto Rank, Name, Contact & DP) */}
@@ -368,29 +274,16 @@ export const CanteenSettings: React.FC = () => {
         </div>
 
         {/* Save / Sync Button */}
-        <button
+        <SaveButton
           type="button"
           onClick={handleSaveAll}
-          disabled={isSaving}
-          className="w-full py-4 bg-[#4f46e5] hover:bg-[#4338ca] active:scale-[0.99] text-white rounded-2xl text-xs font-black tracking-widest uppercase flex items-center justify-center space-x-2 transition-all shadow-md shadow-indigo-500/25 disabled:opacity-50"
-        >
-          {isSaving ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin text-white" />
-              <span>SYNCING TO CLOUD...</span>
-            </>
-          ) : saveSuccess ? (
-            <>
-              <CheckCircle2 className="w-4 h-4 text-emerald-300" />
-              <span className="text-emerald-200">SAVED & SYNCED TO CLOUD!</span>
-            </>
-          ) : (
-            <>
-              <Save className="w-4 h-4" />
-              <span>SYNC ALL SETTINGS TO CLOUD</span>
-            </>
-          )}
-        </button>
+          isSaving={isSaving}
+          isSaved={saveSuccess}
+          idleText="SYNC ALL SETTINGS TO CLOUD"
+          savingText="SYNCING TO CLOUD..."
+          savedText="SAVED & SYNCED TO CLOUD! ✓"
+          className="w-full py-4 text-xs font-black tracking-widest"
+        />
       </div>
 
       {/* Brand New Start / Data Reset Section */}

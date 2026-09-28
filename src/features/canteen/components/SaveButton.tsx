@@ -35,12 +35,15 @@ export const SaveButton: React.FC<SaveButtonProps> = ({
       <button
         type="button"
         disabled
-        className={`relative overflow-hidden flex items-center justify-center space-x-2 py-3 px-5 rounded-xl text-xs font-black tracking-wider uppercase transition-all duration-300 ease-out transform scale-[1.02] bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 text-white shadow-xl shadow-emerald-500/40 ring-4 ring-emerald-400/60 cursor-default ${className}`}
+        className={`relative overflow-hidden flex items-center justify-center space-x-2 py-3 px-5 rounded-xl text-xs font-black tracking-wider uppercase transition-all duration-300 ease-out animate-success-pop bg-gradient-to-r from-emerald-600 via-teal-500 to-emerald-600 text-white shadow-2xl shadow-emerald-500/50 ring-4 ring-emerald-400/80 cursor-default ${className}`}
         {...props}
       >
-        <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/25 to-transparent -translate-x-full animate-[shimmer_1.5s_infinite]" />
-        <CheckCircle2 className="w-4 h-4 text-emerald-100 animate-in zoom-in-75 spin-in-180 duration-400 shrink-0" />
-        <span className="animate-in fade-in slide-in-from-bottom-1 duration-200 tracking-widest font-black">
+        {/* Shimmer light sweep */}
+        <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/35 to-transparent -translate-x-full animate-shimmer pointer-events-none" />
+        {/* Ambient glow */}
+        <span className="absolute -inset-1 bg-emerald-400/20 blur-sm rounded-xl animate-pulse pointer-events-none" />
+        <CheckCircle2 className="w-4 h-4 text-emerald-100 animate-in zoom-in-75 spin-in-180 duration-500 shrink-0 drop-shadow-md z-10" />
+        <span className="animate-in fade-in slide-in-from-bottom-2 duration-300 tracking-widest font-black drop-shadow-sm text-emerald-50 z-10">
           {savedText}
         </span>
       </button>

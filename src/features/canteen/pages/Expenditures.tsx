@@ -14,6 +14,7 @@ import {
   RAW_LOGS_STORAGE_KEY
 } from '../utils/recipeManager';
 import { supabase } from '../../../supabase';
+import { SaveButton } from '../components/SaveButton';
 
 export interface ExpenseRecord {
   id: string | number;
@@ -85,6 +86,10 @@ export const Expenditures: React.FC = () => {
   const [editingExpense, setEditingExpense] = useState<ExpenseRecord | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | number | null>(null);
   const [notification, setNotification] = useState<string | null>(null);
+  const [isSavingBatch, setIsSavingBatch] = useState(false);
+  const [isSavedBatch, setIsSavedBatch] = useState(false);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [isSavedEdit, setIsSavedEdit] = useState(false);
 
   // Sync with localStorage & events
   useEffect(() => {
@@ -367,6 +372,8 @@ export const Expenditures: React.FC = () => {
       }
     });
 
+    setIsSavingBatch(true);
+
     // Save expenses
     const updatedExpenses = [...newRecords, ...expenses];
     saveToStorage(updatedExpenses);
@@ -379,14 +386,19 @@ export const Expenditures: React.FC = () => {
       console.warn('Failed to save last unit prices:', e);
     }
 
-    setIsAddPage(false);
-    setItemRows([]);
+    setIsSavedBatch(true);
+    setTimeout(() => {
+      setIsSavedBatch(false);
+      setIsSavingBatch(false);
+      setIsAddPage(false);
+      setItemRows([]);
 
-    if (restockedCount > 0) {
-      showToast(`${newRecords.length} টি খরচের হিসাব যুক্ত হয়েছে এবং ${restockedCount} টি কাঁচামাল স্টকে স্বয়ংক্রিয় রিস্টক হয়েছে!`);
-    } else {
-      showToast(`${newRecords.length} টি খরচের হিসাব সফলভাবে যুক্ত করা হয়েছে!`);
-    }
+      if (restockedCount > 0) {
+        showToast(`${newRecords.length} টি খরচের হিসাব যুক্ত হয়েছে এবং ${restockedCount} টি কাঁচামাল স্টকে স্বয়ংক্রিয় রিস্টক হয়েছে!`);
+      } else {
+        showToast(`${newRecords.length} টি খরচের হিসাব সফলভাবে যুক্ত করা হয়েছে!`);
+      }
+    }, 1050);
   };
 
   const handleOpenEdit = (expense: ExpenseRecord) => {
@@ -418,9 +430,15 @@ export const Expenditures: React.FC = () => {
       return e;
     });
 
+    setIsSavingEdit(true);
     saveToStorage(updatedList);
-    setEditingExpense(null);
-    showToast('খরচের রেকর্ড সফলভাবে হালনাগাদ করা হয়েছে!');
+    setIsSavedEdit(true);
+    setTimeout(() => {
+      setIsSavedEdit(false);
+      setIsSavingEdit(false);
+      setEditingExpense(null);
+      showToast('খরচের রেকর্ড সফলভাবে হালনাগাদ করা হয়েছে!');
+    }, 1050);
   };
 
   const handleDelete = (id: string | number) => {
@@ -509,7 +527,7 @@ export const Expenditures: React.FC = () => {
               <input 
                 type="text" 
                 placeholder="e.g. 21 Sep 26"
-                value={batchDate}
+                value={batchDate ?? ""}
                 onChange={(e) => setBatchDate(e.target.value)}
                 className="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3.5 text-sm font-bold text-white focus:outline-none focus:ring-2 focus:ring-[#4f46e5]"
               />
@@ -522,7 +540,7 @@ export const Expenditures: React.FC = () => {
                 <span>DETAILER PERSON (দায়িত্বপ্রাপ্ত সদস্য)</span>
               </label>
               <select 
-                value={detailedPerson}
+                value={detailedPerson ?? ""}
                 onChange={(e) => setDetailedPerson(e.target.value)}
                 className="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3.5 text-sm font-bold text-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
               >
@@ -541,7 +559,7 @@ export const Expenditures: React.FC = () => {
                 <span>PAYMENT METHOD (পেমেন্ট মাধ্যম)</span>
               </label>
               <select 
-                value={batchPaymentMethod}
+                value={batchPaymentMethod ?? "Cash"}
                 onChange={(e) => setBatchPaymentMethod(e.target.value as 'Cash' | 'UCB' | 'Due')}
                 className="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3.5 text-sm font-bold text-white focus:outline-none focus:ring-2 focus:ring-[#4f46e5]"
               >
@@ -654,13 +672,13 @@ export const Expenditures: React.FC = () => {
                           <input 
                             type="text"
                             placeholder="e.g. Bazar Rickshaw/Bag/Misc"
-                            value={row.itemName}
+                            value={row.itemName ?? ""}
                             onChange={(e) => handleUpdateRowField(row.uid, 'itemName', e.target.value)}
                             className="w-full bg-slate-900 border border-amber-500/40 rounded-xl px-3.5 py-2.5 text-xs font-black text-amber-200 focus:outline-none focus:ring-2 focus:ring-amber-500"
                           />
                         ) : (
                           <select
-                            value={row.rawItemId}
+                            value={row.rawItemId ?? ""}
                             onChange={(e) => handleUpdateRowField(row.uid, 'rawItemId', e.target.value)}
                             className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-black text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                           >
@@ -683,7 +701,7 @@ export const Expenditures: React.FC = () => {
                           type="number"
                           step="0.01"
                           placeholder="1"
-                          value={row.qty}
+                          value={row.qty ?? ""}
                           onChange={(e) => handleUpdateRowField(row.uid, 'qty', e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
                           className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-center"
                         />
@@ -714,7 +732,7 @@ export const Expenditures: React.FC = () => {
                         <input 
                           type="text"
                           placeholder="kg"
-                          value={row.unit}
+                          value={row.unit ?? ""}
                           onChange={(e) => handleUpdateRowField(row.uid, 'unit', e.target.value)}
                           className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2 py-2.5 text-xs font-bold text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-center"
                         />
@@ -729,7 +747,7 @@ export const Expenditures: React.FC = () => {
                           type="number"
                           step="0.01"
                           placeholder="Last rate"
-                          value={row.unitPrice}
+                          value={row.unitPrice ?? ""}
                           onChange={(e) => handleUpdateRowField(row.uid, 'unitPrice', e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
                           className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-right"
                         />
@@ -783,14 +801,16 @@ export const Expenditures: React.FC = () => {
             >
               CANCEL
             </button>
-            <button 
+            <SaveButton 
               type="button"
               onClick={handleSaveBatchExpenses}
-              className="px-8 py-4 bg-[#4f46e5] hover:bg-[#4338ca] text-white rounded-2xl text-xs font-black tracking-widest uppercase transition-all shadow-lg shadow-indigo-500/25 flex items-center space-x-2"
-            >
-              <Save className="w-4 h-4" />
-              <span>SAVE EXPENDITURE RECORDS (৳{batchTotalAmount.toLocaleString('en-US')})</span>
-            </button>
+              isSaving={isSavingBatch}
+              isSaved={isSavedBatch}
+              idleText={`SAVE EXPENDITURE RECORDS (৳${batchTotalAmount.toLocaleString('en-US')})`}
+              savingText="SAVING EXPENSES..."
+              savedText="EXPENDITURES SAVED! ✓"
+              className="px-8 py-4 text-xs font-black tracking-widest"
+            />
           </div>
         </div>
       </div>
@@ -1031,7 +1051,7 @@ export const Expenditures: React.FC = () => {
                   </label>
                   <input 
                     type="text"
-                    value={editingExpense.date}
+                    value={editingExpense.date ?? ""}
                     onChange={(e) => setEditingExpense({ ...editingExpense, date: e.target.value })}
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-sm font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
@@ -1063,7 +1083,7 @@ export const Expenditures: React.FC = () => {
                 </label>
                 <input 
                   type="text"
-                  value={editingExpense.desc}
+                  value={editingExpense.desc ?? ""}
                   onChange={(e) => setEditingExpense({ ...editingExpense, desc: e.target.value })}
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-sm font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 uppercase"
                 />
@@ -1177,14 +1197,16 @@ export const Expenditures: React.FC = () => {
                 >
                   CANCEL
                 </button>
-                <button
+                <SaveButton
                   type="button"
                   onClick={handleUpdateExpense}
-                  className="flex-1 sm:flex-initial px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center space-x-2 transition-all shadow-md shadow-indigo-500/20"
-                >
-                  <Save className="w-4 h-4" />
-                  <span>SAVE CHANGES</span>
-                </button>
+                  isSaving={isSavingEdit}
+                  isSaved={isSavedEdit}
+                  idleText="SAVE CHANGES"
+                  savingText="SAVING..."
+                  savedText="RECORD UPDATED! ✓"
+                  className="flex-1 sm:flex-initial px-6 py-3"
+                />
               </div>
             </div>
 

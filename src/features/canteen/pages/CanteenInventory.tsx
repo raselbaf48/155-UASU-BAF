@@ -428,10 +428,36 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     setHistorySearchTerm('');
     const existingRecipe = getRecipeForMenuItem(item.id, item.name);
     const rawList = availableRawItems.length > 0 ? availableRawItems : getRawInventoryItems();
-    const recipeCost = calculateMenuItemCost(existingRecipe, rawList).totalCost;
-    const initialCost = existingRecipe.length > 0 ? recipeCost : Number(item.Cost ?? item.cost ?? 0);
-    const initialRawItem = existingRecipe.length > 0 
-      ? formatRecipeRawItemsString(existingRecipe, rawList) 
+    const normalizedRecipe = existingRecipe.map(ing => {
+      const raw = rawList.find(r => r.id === ing.rawItemId || (r.name && ing.rawItemName && r.name.toLowerCase() === ing.rawItemName.toLowerCase()));
+      if (raw) {
+        const sub = getRawItemSubUnitInfo(raw);
+        const validUnits = [
+          ...(sub.hasSubUnit && sub.subUnit ? [sub.subUnit.toLowerCase()] : []),
+          ...(raw.unit ? [raw.unit.toLowerCase()] : [])
+        ];
+        let unit = (ing.unit || '').trim();
+        if (sub.hasSubUnit && sub.subUnit) {
+          if (!unit || !validUnits.includes(unit.toLowerCase()) || unit.toLowerCase() === (raw.unit || '').toLowerCase()) {
+            unit = sub.subUnit;
+          }
+        } else if (!unit && raw.unit) {
+          unit = raw.unit;
+        }
+        return {
+          ...ing,
+          rawItemId: raw.id,
+          rawItemName: raw.name,
+          unit
+        };
+      }
+      return ing;
+    });
+
+    const recipeCost = calculateMenuItemCost(normalizedRecipe, rawList).totalCost;
+    const initialCost = normalizedRecipe.length > 0 ? recipeCost : Number(item.Cost ?? item.cost ?? 0);
+    const initialRawItem = normalizedRecipe.length > 0 
+      ? formatRecipeRawItemsString(normalizedRecipe, rawList) 
       : (item['Raw Item'] ?? item.rawItem ?? '');
     setModalFormData({
       name: item.name || '',
@@ -441,7 +467,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       rawItem: initialRawItem,
       DP: item.DP || ''
     });
-    setModalRecipe(existingRecipe);
+    setModalRecipe(normalizedRecipe);
 
     // Load matching transaction records from canteen_txs
     try {
@@ -487,13 +513,15 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     const rawList = availableRawItems.length > 0 ? availableRawItems : getRawInventoryItems();
     if (rawList.length === 0) return;
     const defaultRaw = rawList[0];
+    const sub = getRawItemSubUnitInfo(defaultRaw);
+    const defaultUnit = sub.hasSubUnit && sub.subUnit ? sub.subUnit : (defaultRaw.unit || 'pcs');
     setModalRecipe(prev => [
       ...prev,
       {
         rawItemId: defaultRaw.id,
         rawItemName: defaultRaw.name,
         quantity: 1,
-        unit: (defaultRaw.hasSubUnits || (defaultRaw.packSize && defaultRaw.packSize > 1)) && defaultRaw.subUnit ? defaultRaw.subUnit : defaultRaw.unit
+        unit: defaultUnit
       }
     ]);
   };
@@ -505,14 +533,25 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
   const handleModalIngredientRawChange = (index: number, rawId: string) => {
     const raw = availableRawItems.find(r => r.id === rawId);
     if (!raw) return;
+    const sub = getRawItemSubUnitInfo(raw);
+    const defaultUnit = sub.hasSubUnit && sub.subUnit ? sub.subUnit : (raw.unit || 'pcs');
     setModalRecipe(prev => prev.map((ing, i) => {
       if (i === index) {
         return {
           ...ing,
           rawItemId: raw.id,
           rawItemName: raw.name,
-          unit: (raw.hasSubUnits || (raw.packSize && raw.packSize > 1)) && raw.subUnit ? raw.subUnit : raw.unit
+          unit: defaultUnit
         };
+      }
+      return ing;
+    }));
+  };
+
+  const handleModalIngredientUnitChange = (index: number, newUnit: string) => {
+    setModalRecipe(prev => prev.map((ing, i) => {
+      if (i === index) {
+        return { ...ing, unit: newUnit };
       }
       return ing;
     }));
@@ -758,7 +797,33 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
   const handleOpenQuickRecipe = (item: any) => {
     setQuickRecipeItem(item);
     const existing = getRecipeForMenuItem(item.id, item.name);
-    setQuickRecipeIngredients([...existing]);
+    const rawList = availableRawItems.length > 0 ? availableRawItems : getRawInventoryItems();
+    const normalized = existing.map(ing => {
+      const raw = rawList.find(r => r.id === ing.rawItemId || (r.name && ing.rawItemName && r.name.toLowerCase() === ing.rawItemName.toLowerCase()));
+      if (raw) {
+        const sub = getRawItemSubUnitInfo(raw);
+        const validUnits = [
+          ...(sub.hasSubUnit && sub.subUnit ? [sub.subUnit.toLowerCase()] : []),
+          ...(raw.unit ? [raw.unit.toLowerCase()] : [])
+        ];
+        let unit = (ing.unit || '').trim();
+        if (sub.hasSubUnit && sub.subUnit) {
+          if (!unit || !validUnits.includes(unit.toLowerCase()) || unit.toLowerCase() === (raw.unit || '').toLowerCase()) {
+            unit = sub.subUnit;
+          }
+        } else if (!unit && raw.unit) {
+          unit = raw.unit;
+        }
+        return {
+          ...ing,
+          rawItemId: raw.id,
+          rawItemName: raw.name,
+          unit
+        };
+      }
+      return ing;
+    });
+    setQuickRecipeIngredients(normalized);
     setRecipeNotice('');
   };
 
@@ -766,9 +831,8 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     const rawList = availableRawItems.length > 0 ? availableRawItems : getRawInventoryItems();
     if (rawList.length === 0) return;
     const defaultRaw = rawList[0];
-    const defaultUnit = (defaultRaw.hasSubUnits || (defaultRaw.packSize && defaultRaw.packSize > 1)) && defaultRaw.subUnit 
-      ? defaultRaw.subUnit 
-      : defaultRaw.unit;
+    const sub = getRawItemSubUnitInfo(defaultRaw);
+    const defaultUnit = sub.hasSubUnit && sub.subUnit ? sub.subUnit : (defaultRaw.unit || 'pcs');
     setQuickRecipeIngredients(prev => [
       ...prev,
       {
@@ -787,17 +851,25 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
   const handleQuickIngredientRawChange = (index: number, rawId: string) => {
     const raw = availableRawItems.find(r => r.id === rawId);
     if (!raw) return;
-    const rawUnit = (raw.hasSubUnits || (raw.packSize && raw.packSize > 1)) && raw.subUnit 
-      ? raw.subUnit 
-      : raw.unit;
+    const sub = getRawItemSubUnitInfo(raw);
+    const defaultUnit = sub.hasSubUnit && sub.subUnit ? sub.subUnit : (raw.unit || 'pcs');
     setQuickRecipeIngredients(prev => prev.map((ing, i) => {
       if (i === index) {
         return {
           ...ing,
           rawItemId: raw.id,
           rawItemName: raw.name,
-          unit: rawUnit
+          unit: defaultUnit
         };
+      }
+      return ing;
+    }));
+  };
+
+  const handleQuickIngredientUnitChange = (index: number, newUnit: string) => {
+    setQuickRecipeIngredients(prev => prev.map((ing, i) => {
+      if (i === index) {
+        return { ...ing, unit: newUnit };
       }
       return ing;
     }));
@@ -884,24 +956,551 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">CLOUD INTEGRATED MENU & RECIPES</p>
          </div>
          <div className="flex items-center space-x-3">
-            <SaveButton
-   type="button"
-   onClick={handleSaveModalChanges}
-   isSaving={isSavingModal}
-   isSaved={isSavedModal}
-   idleText="Save Changes"
-   savingText="Saving..."
-   savedText="SAVED CHANGES! ✓"
-   className="px-5 py-2.5"
-/>
+            {!readOnly && (
+               <button 
+                  onClick={() => {
+                     setIsEditMode(false);
+                     setEditingId(null);
+                     setNewItem({ name: "", category: "SNACKS", price: 0, cost: 0, rawItem: "", DP: "" });
+                     setItemRecipe([]);
+                     setShowAddModal(true);
+                  }}
+                  className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-indigo-600/30 transition-all cursor-pointer"
+               >
+                  <Plus className="w-4 h-4" />
+                  <span>ADD NEW ITEM</span>
+               </button>
+            )}
+         </div>
+      </div>
+
+      {/* Search & Category Filter */}
+      <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
+         <div className="relative w-full sm:w-80">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <input 
+               type="text" 
+               placeholder="Search menu items..." 
+               value={searchTerm}
+               onChange={(e) => setSearchTerm(e.target.value)}
+               className="w-full bg-slate-900 border border-slate-800 text-white rounded-xl pl-10 pr-4 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+         </div>
+
+         <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0 scrollbar-none">
+            {availableCategories.map(cat => (
+               <button
+                  key={cat}
+                  onClick={() => setSelectedCategory(cat)}
+                  className={`px-3 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer ${
+                     selectedCategory === cat 
+                        ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/20" 
+                        : "bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800"
+                  }`}
+               >
+                  {cat}
+               </button>
+            ))}
+         </div>
+      </div>
+
+      {/* Items Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+         {filteredItems.map(item => {
+            const itemRecipe = getRecipeForMenuItem(item.id, item.name);
+            const costRes = calculateMenuItemCost(itemRecipe, availableRawItems);
+            const displayCost = itemRecipe.length > 0 ? costRes.totalCost : Number(item.Cost ?? item.cost ?? 0);
+            const priceNum = Number(item.price) || 0;
+            const profit = priceNum - displayCost;
+            const profitPct = priceNum > 0 ? Math.round((profit / priceNum) * 100) : (profit > 0 ? 100 : (profit < 0 ? -100 : 0));
+
+            return (
+               <div 
+                  key={item.id} 
+                  onClick={() => handleOpenItemModal(item)}
+                  className="relative bg-gradient-to-b from-slate-800/90 via-slate-900 to-slate-950 rounded-3xl p-5 border-t border-t-slate-600/60 border-x border-x-slate-700/60 border-b-4 border-b-slate-950 shadow-[0_12px_24px_-4px_rgba(0,0,0,0.65),0_4px_8px_-2px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.12),inset_0_-2px_4px_0_rgba(0,0,0,0.4)] hover:-translate-y-1.5 hover:shadow-[0_20px_35px_-6px_rgba(0,0,0,0.8),0_0_22px_0_rgba(79,70,229,0.3),inset_0_1px_0_0_rgba(255,255,255,0.2)] hover:border-b-indigo-900 transition-all duration-300 cursor-pointer group flex flex-col justify-between"
+               >
+                  <div>
+                     {/* Top Row: Avatar & Category / Ingredients */}
+                     <div className="flex items-start justify-between">
+                        <div className="w-14 h-14 rounded-2xl bg-indigo-950/70 border border-indigo-500/30 flex items-center justify-center text-indigo-400 font-black text-lg overflow-hidden shrink-0 shadow-inner group-hover:scale-105 transition-transform duration-300">
+                           {item.DP ? (
+                              <img 
+                                 src={resolveImageUrl(item.DP)} 
+                                 alt={item.name} 
+                                 className="w-full h-full object-cover"
+                                 onError={(e) => {
+                                    (e.target as HTMLElement).style.display = "none";
+                                 }}
+                              />
+                           ) : (
+                              <span>{item.name ? item.name.trim().slice(0, 2).toUpperCase() : 'IT'}</span>
+                           )}
                         </div>
+
+                        <div className="flex flex-col items-end space-y-1.5">
+                           <span className="px-3 py-1 rounded-full text-[10px] font-black tracking-wider uppercase bg-indigo-950/80 text-indigo-300 border border-indigo-500/30 shadow-sm">
+                              {item.category || "SNACKS"}
+                           </span>
+                           <div className="flex items-center space-x-1 text-slate-400 text-xs">
+                              <ChefHat className="w-3.5 h-3.5 text-indigo-400" />
+                              <span>{itemRecipe.length > 0 ? `${itemRecipe.length}টি উপকরণ` : "কোনো উপকরণ নেই"}</span>
+                           </div>
+                        </div>
+                     </div>
+
+                     {/* Item Name */}
+                     <div className="mt-4">
+                        <h3 className="font-black text-white text-lg tracking-tight uppercase group-hover:text-indigo-300 transition-colors truncate" title={item.name}>
+                           {item.name}
+                        </h3>
+                     </div>
+
+                     {/* Cost & Selling Price Box */}
+                     <div className="mt-4 bg-[#0a101d]/90 rounded-2xl p-4 border border-slate-800/80 flex items-center justify-between">
+                        <div className="space-y-0.5">
+                           <span className="text-slate-400 text-xs font-bold block">প্রস্তুত খরচ</span>
+                           <span className="text-amber-400 font-black text-lg font-mono">৳{displayCost.toFixed(1)}</span>
+                        </div>
+                        <div className="text-right space-y-0.5">
+                           <span className="text-slate-400 text-xs font-bold block">বিক্রয় মূল্য</span>
+                           <span className="text-white font-black text-lg font-mono">৳{priceNum}</span>
+                        </div>
+                     </div>
+
+                     {/* Profit Pill */}
+                     <div className="mt-2.5 px-4 py-2 rounded-xl bg-slate-950/70 border border-slate-800/80 flex items-center justify-between">
+                        <span className="text-emerald-400 text-xs font-bold">মুনাফা (Profit):</span>
+                        <span className={`font-mono font-black text-xs ${profit >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                           {profit < 0 ? '-' : ''}৳{Math.abs(profit).toFixed(1)} ({profitPct >= 0 ? `+${profitPct}` : profitPct}%)
+                        </span>
+                     </div>
+                  </div>
+
+                  {/* Card Footer */}
+                  <div className="mt-4 pt-3 border-t border-slate-800/60 flex items-center justify-between text-slate-400 text-xs font-medium">
+                     <span>এডিট ও হিস্ট্রি দেখতে ক্লিক করুন</span>
+                     <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-indigo-400 group-hover:translate-x-1 transition-all" />
+                  </div>
+               </div>
+            );
+         })}
+      </div>
+
+      {filteredItems.length === 0 && (
+         <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-12 text-center">
+            <UtensilsCrossed className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+            <h4 className="text-white font-black text-sm uppercase tracking-wider mb-1">No Menu Items Found</h4>
+            <p className="text-slate-400 text-xs">Try adjusting your search query or category filter.</p>
+         </div>
+      )}
+
+      {/* Unified Item Details & Recipe Modal */}
+      {selectedItemForModal && (
+         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in zoom-in-95">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-4xl shadow-2xl flex flex-col max-h-[92vh]">
+               {/* Modal Header */}
+               <div className="flex items-center justify-between pb-4 border-b border-slate-800 shrink-0">
+                  <div className="flex items-center space-x-3">
+                     <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+                        <UtensilsCrossed className="w-5 h-5" />
+                     </div>
+                     <div>
+                        <h3 className="text-lg font-black text-white uppercase tracking-tight">
+                           {modalFormData.name || selectedItemForModal.name}
+                        </h3>
+                        <p className="text-[11px] font-bold text-slate-400">
+                           {selectedItemForModal.category} • PRICE: ৳{modalFormData.price}
+                        </p>
+                     </div>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                     <button
+                        onClick={() => setSelectedItemForModal(null)}
+                        className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition-colors cursor-pointer"
+                     >
+                        <X className="w-5 h-5" />
+                     </button>
+                  </div>
+               </div>
+
+               {/* Tabs */}
+               <div className="flex items-center space-x-2 border-b border-slate-800 pt-3 pb-2 shrink-0">
+                  <button
+                     onClick={() => setModalTab("EDIT")}
+                     className={`flex items-center space-x-1.5 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                        modalTab === "EDIT" 
+                           ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30" 
+                           : "text-slate-400 hover:text-white hover:bg-slate-800"
+                     }`}
+                  >
+                     <Edit2 className="w-3.5 h-3.5" />
+                     <span>Edit Details & Recipe</span>
+                  </button>
+
+                  <button
+                     onClick={() => setModalTab("HISTORY")}
+                     className={`flex items-center space-x-1.5 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                        modalTab === "HISTORY" 
+                           ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30" 
+                           : "text-slate-400 hover:text-white hover:bg-slate-800"
+                     }`}
+                  >
+                     <History className="w-3.5 h-3.5" />
+                     <span>Sales & Issued History ({itemSalesHistory.length})</span>
+                  </button>
+               </div>
+
+               {/* Tab Content */}
+               <div className="flex-1 overflow-y-auto py-4 space-y-6 pr-1">
+                  {modalTab === "EDIT" ? (
+                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Left: General Details */}
+                        <div className="space-y-4">
+                           <h4 className="text-xs font-black text-indigo-400 uppercase tracking-wider flex items-center space-x-1.5">
+                              <Info className="w-4 h-4" />
+                              <span>General Information</span>
+                           </h4>
+
+                           <div>
+                              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Item Name</label>
+                              <input 
+                                 type="text" 
+                                 value={modalFormData.name ?? ""}
+                                 onChange={(e) => setModalFormData(prev => ({ ...prev, name: e.target.value }))}
+                                 className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                              />
+                           </div>
+
+                           <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Category</label>
+                                 <select 
+                                    value={modalFormData.category ?? "SNACKS"}
+                                    onChange={(e) => setModalFormData(prev => ({ ...prev, category: e.target.value }))}
+                                    className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3 py-2.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                 >
+                                    <option value="SNACKS">SNACKS</option>
+                                    <option value="DRINK">DRINK</option>
+                                    <option value="BREAKFAST">BREAKFAST</option>
+                                    <option value="LUNCH">LUNCH</option>
+                                    <option value="DINNER">DINNER</option>
+                                 </select>
+                              </div>
+
+                              <div>
+                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Selling Price (৳)</label>
+                                 <input 
+                                    type="number" 
+                                    value={modalFormData.price ?? ""}
+                                    onChange={(e) => setModalFormData(prev => ({ ...prev, price: Number(e.target.value) || 0 }))}
+                                    className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+                                 />
+                              </div>
+                           </div>
+
+                           {/* Photo Upload Section (Browse Gallery & Remove only - No Link Box) */}
+                           <div className="bg-slate-950/70 border border-slate-800/80 rounded-2xl p-4 space-y-3">
+                              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Item Photo</label>
+                              <div className="flex items-center space-x-4">
+                                 <div className="w-16 h-16 rounded-xl bg-slate-900 border border-slate-800 overflow-hidden flex items-center justify-center shrink-0">
+                                    {modalFormData.DP ? (
+                                       <img src={resolveImageUrl(modalFormData.DP)} alt="Item" className="w-full h-full object-cover" />
+                                    ) : (
+                                       <ImageIcon className="w-6 h-6 text-slate-500" />
+                                    )}
+                                 </div>
+
+                                 <div className="flex-1 flex flex-wrap items-center gap-2">
+                                    <label className="flex items-center space-x-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer">
+                                       <Upload className="w-3.5 h-3.5" />
+                                       <span>Browse from Gallery</span>
+                                       <input 
+                                          type="file" 
+                                          accept="image/*" 
+                                          className="hidden"
+                                          onChange={async (e) => {
+                                             const file = e.target.files?.[0];
+                                             if (file) {
+                                                try {
+                                                   const base64 = await processGalleryImage(file);
+                                                   setModalFormData(prev => ({ ...prev, DP: base64 }));
+                                                } catch (err) {
+                                                   console.error("Failed to load image from gallery:", err);
+                                                }
+                                             }
+                                          }}
+                                       />
+                                    </label>
+
+                                    {modalFormData.DP && (
+                                       <button
+                                          type="button"
+                                          onClick={() => setModalFormData(prev => ({ ...prev, DP: "" }))}
+                                          className="flex items-center space-x-1 px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                                          title="Remove photo"
+                                       >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                          <span>Remove</span>
+                                       </button>
+                                    )}
+                                 </div>
+                              </div>
+                           </div>
+
+                           {/* Financial Summary */}
+                           {(() => {
+                              const calcCost = calculateMenuItemCost(modalRecipe.map(ing => {
+                                  const r = availableRawItems.find(raw => raw.id === ing.rawItemId);
+                                  const sub = r ? getRawItemSubUnitInfo(r) : null;
+                                  const valid = [
+                                     ...(sub && sub.hasSubUnit && sub.subUnit ? [sub.subUnit.toLowerCase()] : []),
+                                     ...(r && r.unit ? [r.unit.toLowerCase()] : [])
+                                  ];
+                                  const safeUnit = (valid.length > 0 && valid.some(u => u === (ing.unit || '').toLowerCase()))
+                                     ? ing.unit
+                                     : (sub && sub.hasSubUnit && sub.subUnit ? sub.subUnit : (r?.unit || ing.unit || 'pcs'));
+                                  return { ...ing, unit: safeUnit };
+                               }), availableRawItems).totalCost;
+                              const selling = Number(modalFormData.price) || 0;
+                              const profit = selling - calcCost;
+                              const marginPct = selling > 0 ? ((profit / selling) * 100).toFixed(1) : "0";
+
+                              return (
+                                 <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 grid grid-cols-3 gap-2 text-center">
+                                    <div>
+                                       <span className="text-[10px] font-bold text-slate-400 block">SELLING PRICE</span>
+                                       <span className="text-sm font-black text-white font-mono">৳{selling}</span>
+                                    </div>
+                                    <div>
+                                       <span className="text-[10px] font-bold text-slate-400 block">PROD. COST</span>
+                                       <span className="text-sm font-black text-amber-400 font-mono">৳{calcCost.toFixed(1)}</span>
+                                    </div>
+                                    <div>
+                                       <span className="text-[10px] font-bold text-slate-400 block">PROFIT ({marginPct}%)</span>
+                                       <span className={`text-sm font-black font-mono ${profit >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                                          ৳{profit.toFixed(1)}
+                                       </span>
+                                    </div>
+                                 </div>
+                              );
+                           })()}
+                        </div>
+
+                        {/* Right: Recipe Ingredients Editor */}
+                        <div className="space-y-4">
+                           <div className="flex items-center justify-between">
+                              <h4 className="text-xs font-black text-amber-400 uppercase tracking-wider flex items-center space-x-1.5">
+                                 <ChefHat className="w-4 h-4" />
+                                 <span>Recipe Ingredients ({modalRecipe.length})</span>
+                              </h4>
+
+                              <button
+                                 type="button"
+                                 onClick={handleAddModalIngredientRow}
+                                 className="flex items-center space-x-1 px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                              >
+                                 <Plus className="w-3.5 h-3.5" />
+                                 <span>Add Ingredient</span>
+                              </button>
+                           </div>
+
+                           {modalRecipe.length === 0 ? (
+                              <div className="bg-slate-950/60 border border-dashed border-slate-800 rounded-2xl p-8 text-center">
+                                 <ChefHat className="w-8 h-8 text-slate-600 mx-auto mb-2" />
+                                 <p className="text-xs font-bold text-slate-400">No recipe ingredients added yet.</p>
+                                 <p className="text-[10px] text-slate-500 mt-1">Click "Add Ingredient" to deduct raw materials automatically during sales.</p>
+                              </div>
+                           ) : (
+                              <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                                 {modalRecipe.map((ing, idx) => {
+                                     const itemRaw = availableRawItems.find(r => r.id === ing.rawItemId);
+                                     const subInfo = itemRaw ? getRawItemSubUnitInfo(itemRaw) : null;
+                                     const unitOptions: string[] = [];
+                                     if (subInfo && subInfo.hasSubUnit && subInfo.subUnit) {
+                                        unitOptions.push(subInfo.subUnit);
+                                     }
+                                     if (itemRaw && itemRaw.unit && !unitOptions.includes(itemRaw.unit)) {
+                                        unitOptions.push(itemRaw.unit);
+                                     }
+
+                                     const currentUnit = (unitOptions.length > 0 && unitOptions.some(u => u.toLowerCase() === (ing.unit || '').toLowerCase()))
+                                        ? ing.unit
+                                        : (subInfo && subInfo.hasSubUnit && subInfo.subUnit ? subInfo.subUnit : (itemRaw?.unit || ing.unit || 'pcs'));
+
+                                     const ratio = itemRaw ? getIngredientToInventoryRatio(itemRaw, currentUnit) : 1;
+                                     const effectiveCost = itemRaw ? getEffectiveRawUnitCost(itemRaw) : 0;
+                                     const effectiveUnitPrice = ratio > 0 ? (effectiveCost / ratio) : effectiveCost;
+                                     const rowCost = (Number(ing.quantity) || 0) * effectiveUnitPrice;
+
+                                     return (
+                                        <div key={idx} className="bg-slate-950/80 border border-slate-800/80 rounded-2xl p-3 space-y-2.5">
+                                           {/* Top Line: Ingredient Name only & Delete Button */}
+                                           <div className="flex items-center justify-between gap-2">
+                                              <div className="flex-1 min-w-0">
+                                                 <select
+                                                    value={ing.rawItemId ?? ""}
+                                                    onChange={(e) => handleModalIngredientRawChange(idx, e.target.value)}
+                                                    className="w-full bg-slate-900 border border-slate-700/80 text-white rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                                 >
+                                                    {availableRawItems.map(r => (
+                                                       <option key={r.id} value={r.id} className="bg-slate-900 text-white">
+                                                          {r.name}
+                                                       </option>
+                                                    ))}
+                                                 </select>
+                                              </div>
+
+                                              <button
+                                                 type="button"
+                                                 onClick={() => handleRemoveModalIngredientRow(idx)}
+                                                 className="p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-xl transition-colors cursor-pointer shrink-0"
+                                                 title="Remove ingredient"
+                                              >
+                                                 <Trash2 className="w-3.5 h-3.5" />
+                                              </button>
+                                           </div>
+
+                                           {/* Bottom Line: Small Qty Box, Sub-Unit Badge/Select, and Row Cost */}
+                                           <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-900">
+                                              <div className="flex items-center space-x-2">
+                                                 <span className="text-[11px] font-bold text-slate-400">পরিমাণ:</span>
+                                                 <div className="flex items-center space-x-1.5">
+                                                    <input 
+                                                       type="number"
+                                                       step="any"
+                                                       value={ing.quantity ?? ""}
+                                                       onChange={(e) => handleModalIngredientQtyChange(idx, e.target.value)}
+                                                       className="w-16 bg-slate-900 border border-slate-700/80 text-white rounded-lg px-2 py-1 text-xs font-mono font-bold text-center focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                                       placeholder="Qty"
+                                                    />
+                                                    {unitOptions.length <= 1 ? (
+                                                       <span className="px-2 py-1 rounded-lg bg-indigo-950/60 border border-indigo-500/30 text-[11px] font-mono font-bold text-indigo-300">
+                                                          {currentUnit}
+                                                       </span>
+                                                    ) : (
+                                                       <select
+                                                          value={currentUnit}
+                                                          onChange={(e) => handleModalIngredientUnitChange(idx, e.target.value)}
+                                                          className="bg-indigo-950/70 border border-indigo-500/40 text-[11px] font-mono font-bold text-indigo-300 rounded-lg px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                                                       >
+                                                          {unitOptions.map(u => (
+                                                             <option key={u} value={u} className="bg-slate-900 text-white font-mono">{u}</option>
+                                                          ))}
+                                                       </select>
+                                                    )}
+                                                 </div>
+                                              </div>
+
+                                              <div className="text-right">
+                                                 <span className="text-[10px] text-slate-500 uppercase block font-bold">খরচ</span>
+                                                 <span className="text-xs font-mono font-black text-amber-400">
+                                                    ৳{rowCost.toFixed(1)}
+                                                 </span>
+                                              </div>
+                                           </div>
+                                        </div>
+                                     );
+                                  })}
+                              </div>
+                           )}
+                        </div>
+                     </div>
+                  ) : (
+                     /* Tab 2: Sales & Issued History */
+                     <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                           <h4 className="text-xs font-black text-slate-300 uppercase tracking-wider flex items-center space-x-1.5">
+                              <History className="w-4 h-4 text-indigo-400" />
+                              <span>Sales & Consumption Log</span>
+                           </h4>
+
+                           <div className="relative w-64">
+                              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                              <input 
+                                 type="text" 
+                                 placeholder="Search transactions..."
+                                 value={historySearchTerm ?? ""}
+                                 onChange={(e) => setHistorySearchTerm(e.target.value)}
+                                 className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl pl-8 pr-3 py-1.5 text-xs focus:outline-none"
+                              />
+                           </div>
+                        </div>
+
+                        {itemSalesHistory.length === 0 ? (
+                           <div className="bg-slate-950/60 border border-dashed border-slate-800 rounded-2xl p-12 text-center">
+                              <ShoppingBag className="w-10 h-10 text-slate-600 mx-auto mb-2" />
+                              <p className="text-xs font-bold text-slate-400">No sales transactions found for this item.</p>
+                           </div>
+                        ) : (
+                           <div className="bg-slate-950 border border-slate-800/80 rounded-2xl overflow-hidden max-h-80 overflow-y-auto">
+                              <table className="w-full text-left text-xs">
+                                 <thead className="bg-slate-900 text-slate-400 text-[10px] uppercase font-bold tracking-wider border-b border-slate-800">
+                                    <tr>
+                                       <th className="py-2.5 px-3">Date</th>
+                                       <th className="py-2.5 px-3">Member / Buyer</th>
+                                       <th className="py-2.5 px-3 text-center">Qty</th>
+                                       <th className="py-2.5 px-3 text-right">Total</th>
+                                       <th className="py-2.5 px-3">Payment</th>
+                                    </tr>
+                                 </thead>
+                                 <tbody className="divide-y divide-slate-800/60 text-slate-300">
+                                    {itemSalesHistory
+                                       .filter(tx => {
+                                          if (!historySearchTerm) return true;
+                                          const term = historySearchTerm.toLowerCase();
+                                          return (tx.memberName || "").toLowerCase().includes(term) ||
+                                                 (tx.memberBd || "").toLowerCase().includes(term) ||
+                                                 (tx.date || "").includes(term);
+                                       })
+                                       .map((tx, idx) => (
+                                          <tr key={idx} className="hover:bg-slate-900/40 transition-colors">
+                                             <td className="py-2 px-3 font-mono text-[11px] text-slate-400">{tx.date || tx.timestamp || "—"}</td>
+                                             <td className="py-2 px-3 font-bold text-white">{tx.memberName || tx.memberBd || "Guest"}</td>
+                                             <td className="py-2 px-3 text-center font-mono font-bold text-indigo-400">{tx.quantity || 1}</td>
+                                             <td className="py-2 px-3 text-right font-mono font-bold text-emerald-400">৳{tx.totalAmount || tx.amount || 0}</td>
+                                             <td className="py-2 px-3">
+                                                <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-slate-800 text-slate-300">
+                                                   {tx.paymentMethod || "Cash"}
+                                                </span>
+                                             </td>
+                                          </tr>
+                                       ))}
+                                 </tbody>
+                              </table>
+                           </div>
+                        )}
                      </div>
                   )}
                </div>
-            </div>
-         );
-      })()}
 
+               {/* Modal Footer with SaveButton */}
+               {modalTab === "EDIT" && (
+                  <div className="pt-4 border-t border-slate-800 shrink-0 flex items-center justify-end space-x-3">
+                     <button
+                        type="button"
+                        onClick={() => setSelectedItemForModal(null)}
+                        className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-black uppercase tracking-wider transition-colors cursor-pointer"
+                     >
+                        Cancel
+                     </button>
+                     
+                     <SaveButton 
+                        type="button"
+                        onClick={handleSaveModalChanges}
+                        isSaving={isSavingModal}
+                        isSaved={isSavedModal}
+                        idleText="Save Changes"
+                        savingText="Saving..."
+                        savedText="SAVED CHANGES! ✓"
+                        className="px-6 py-2.5"
+                     />
+                  </div>
+               )}
+            </div>
+         </div>
+      )}
 
       {/* Quick Recipe Modal */}
       {quickRecipeItem && (
@@ -922,17 +1521,170 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                         </p>
                      </div>
                   </div>
-                  <SaveButton
-   type="button"
-   onClick={handleSaveQuickRecipe}
-   isSaving={isSavingQuick}
-   isSaved={isSavedQuick}
-   idleText="Save Recipe"
-   savingText="Saving..."
-   savedText="RECIPE SAVED! ✓"
-   className="px-5 py-2"
-/>
+
+                  <button
+                     onClick={() => setQuickRecipeItem(null)}
+                     className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition-colors cursor-pointer"
+                  >
+                     <X className="w-5 h-5" />
+                  </button>
+               </div>
+
+               {/* Ingredients list */}
+               <div className="flex-1 overflow-y-auto py-4 space-y-3 pr-1">
+                  <div className="flex items-center justify-between">
+                     <span className="text-xs font-black text-slate-300 uppercase tracking-wider">Ingredients ({quickRecipeIngredients.length})</span>
+                     <button
+                        type="button"
+                        onClick={handleAddQuickIngredientRow}
+                        className="flex items-center space-x-1 px-3 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-lg text-xs font-bold transition-all cursor-pointer"
+                     >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Add Row</span>
+                     </button>
                   </div>
+
+                  {quickRecipeIngredients.length === 0 ? (
+                     <div className="bg-slate-950/60 border border-dashed border-slate-800 rounded-2xl p-6 text-center">
+                        <p className="text-xs text-slate-400">No ingredients specified for this item.</p>
+                     </div>
+                  ) : (
+                     <div className="space-y-2">
+                        {quickRecipeIngredients.map((ing, idx) => {
+                            const itemRaw = availableRawItems.find(r => r.id === ing.rawItemId);
+                            const subInfo = itemRaw ? getRawItemSubUnitInfo(itemRaw) : null;
+                            const unitOptions: string[] = [];
+                            if (subInfo && subInfo.hasSubUnit && subInfo.subUnit) {
+                               unitOptions.push(subInfo.subUnit);
+                            }
+                            if (itemRaw && itemRaw.unit && !unitOptions.includes(itemRaw.unit)) {
+                               unitOptions.push(itemRaw.unit);
+                            }
+
+                            const currentUnit = (unitOptions.length > 0 && unitOptions.some(u => u.toLowerCase() === (ing.unit || '').toLowerCase()))
+                               ? ing.unit
+                               : (subInfo && subInfo.hasSubUnit && subInfo.subUnit ? subInfo.subUnit : (itemRaw?.unit || ing.unit || 'pcs'));
+
+                            const ratio = itemRaw ? getIngredientToInventoryRatio(itemRaw, currentUnit) : 1;
+                            const effectiveCost = itemRaw ? getEffectiveRawUnitCost(itemRaw) : 0;
+                            const effectiveUnitPrice = ratio > 0 ? (effectiveCost / ratio) : effectiveCost;
+                            const rowTotal = (Number(ing.quantity) || 0) * effectiveUnitPrice;
+
+                            return (
+                               <div key={idx} className="bg-slate-950/80 border border-slate-800/80 rounded-2xl p-3 space-y-2.5">
+                                  {/* Top Line: Ingredient Name only & Delete Button */}
+                                  <div className="flex items-center justify-between gap-2">
+                                     <div className="flex-1 min-w-0">
+                                        <select
+                                           value={ing.rawItemId ?? ""}
+                                           onChange={(e) => handleQuickIngredientRawChange(idx, e.target.value)}
+                                           className="w-full bg-slate-900 border border-slate-700/80 text-white rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                        >
+                                           {availableRawItems.map(r => (
+                                              <option key={r.id} value={r.id} className="bg-slate-900 text-white">
+                                                 {r.name}
+                                              </option>
+                                           ))}
+                                        </select>
+                                     </div>
+
+                                     <button
+                                        type="button"
+                                        onClick={() => handleRemoveQuickIngredientRow(idx)}
+                                        className="p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-xl transition-colors cursor-pointer shrink-0"
+                                        title="Remove ingredient"
+                                     >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                     </button>
+                                  </div>
+
+                                  {/* Bottom Line: Small Qty Box, Sub-Unit Badge/Select, and Row Cost */}
+                                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-900">
+                                     <div className="flex items-center space-x-2">
+                                        <span className="text-[11px] font-bold text-slate-400">পরিমাণ:</span>
+                                        <div className="flex items-center space-x-1.5">
+                                           <input 
+                                              type="number"
+                                              step="any"
+                                              value={ing.quantity ?? ""}
+                                              onChange={(e) => handleQuickIngredientQtyChange(idx, parseFloat(e.target.value))}
+                                              className="w-16 bg-slate-900 border border-slate-700/80 text-white rounded-lg px-2 py-1 text-xs font-mono font-bold text-center focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                              placeholder="Qty"
+                                           />
+                                           {unitOptions.length <= 1 ? (
+                                              <span className="px-2 py-1 rounded-lg bg-indigo-950/60 border border-indigo-500/30 text-[11px] font-mono font-bold text-indigo-300">
+                                                 {currentUnit}
+                                              </span>
+                                           ) : (
+                                              <select
+                                                 value={currentUnit}
+                                                 onChange={(e) => handleQuickIngredientUnitChange(idx, e.target.value)}
+                                                 className="bg-indigo-950/70 border border-indigo-500/40 text-[11px] font-mono font-bold text-indigo-300 rounded-lg px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                                              >
+                                                 {unitOptions.map(u => (
+                                                    <option key={u} value={u} className="bg-slate-900 text-white font-mono">{u}</option>
+                                                 ))}
+                                              </select>
+                                           )}
+                                        </div>
+                                     </div>
+
+                                     <div className="text-right">
+                                        <span className="text-[10px] text-slate-500 uppercase block font-bold">খরচ</span>
+                                        <span className="text-xs font-mono font-black text-amber-400">
+                                           ৳{rowTotal.toFixed(1)}
+                                        </span>
+                                     </div>
+                                  </div>
+                               </div>
+                            );
+                         })}
+                     </div>
+                  )}
+
+                  {/* Summary */}
+                  {(() => {
+                     const cost = calculateMenuItemCost(quickRecipeIngredients, availableRawItems).totalCost;
+                     const price = Number(quickRecipeItem.price) || 0;
+                     const profit = price - cost;
+
+                     return (
+                        <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-3 flex items-center justify-between text-xs">
+                           <div>
+                              <span className="text-slate-400 text-[10px] font-bold block">TOTAL COST</span>
+                              <span className="font-mono font-black text-amber-400">৳{cost.toFixed(1)}</span>
+                           </div>
+                           <div className="text-right">
+                              <span className="text-slate-400 text-[10px] font-bold block">PROFIT / ITEM</span>
+                              <span className={`font-mono font-black ${profit >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                                 ৳{profit.toFixed(1)}
+                              </span>
+                           </div>
+                        </div>
+                     );
+                  })()}
+               </div>
+
+               {/* Footer with SaveButton */}
+               <div className="pt-4 border-t border-slate-800 shrink-0 flex items-center justify-end space-x-3">
+                  <button
+                     type="button"
+                     onClick={() => setQuickRecipeItem(null)}
+                     className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                  >
+                     Cancel
+                  </button>
+
+                  <SaveButton 
+                     type="button"
+                     onClick={handleSaveQuickRecipe}
+                     isSaving={isSavingQuick}
+                     isSaved={isSavedQuick}
+                     idleText="Save Recipe"
+                     savingText="Saving..."
+                     savedText="RECIPE SAVED! ✓"
+                     className="px-5 py-2.5"
+                  />
                </div>
             </div>
          </div>
@@ -940,38 +1692,146 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
 
       {/* Add / Edit Item Modal */}
       {showAddModal && (
-         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-xl shadow-2xl animate-in zoom-in-95 max-h-[90vh] flex flex-col">
-               <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800 shrink-0">
-                  <h3 className="text-lg font-black text-white uppercase tracking-tight">{isEditMode ? "EDIT MENU ITEM" : "ADD NEW ENTRY"}</h3>
+         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in zoom-in-95">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-xl shadow-2xl flex flex-col max-h-[90vh]">
+               <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0 mb-4">
+                  <h3 className="text-lg font-black text-white uppercase tracking-tight">
+                     {isEditMode ? "EDIT MENU ITEM" : "ADD NEW ENTRY"}
+                  </h3>
+                  <button
+                     onClick={() => setShowAddModal(false)}
+                     className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition-colors cursor-pointer"
+                  >
+                     <X className="w-5 h-5" />
+                  </button>
+               </div>
+
+               <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+                  <div>
+                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Item Name</label>
+                     <input 
+                        type="text" 
+                        value={newItem.name ?? ""}
+                        onChange={(e) => setNewItem(prev => ({ ...prev, name: e.target.value }))}
+                        className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        placeholder="e.g. SPECIAL SAMOSA"
+                     />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                     <div>
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Category</label>
+                        <select 
+                           value={newItem.category ?? "SNACKS"}
+                           onChange={(e) => setNewItem(prev => ({ ...prev, category: e.target.value }))}
+                           className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3 py-2.5 text-xs font-bold focus:outline-none"
+                        >
+                           <option value="SNACKS">SNACKS</option>
+                           <option value="DRINK">DRINK</option>
+                           <option value="BREAKFAST">BREAKFAST</option>
+                           <option value="LUNCH">LUNCH</option>
+                           <option value="DINNER">DINNER</option>
+                        </select>
+                     </div>
+
+                     <div>
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Price (৳)</label>
+                        <input 
+                           type="number" 
+                           value={newItem.price ?? ""}
+                           onChange={(e) => setNewItem(prev => ({ ...prev, price: Number(e.target.value) || 0 }))}
+                           className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold focus:outline-none"
+                           placeholder="0"
+                        />
+                     </div>
+                  </div>
+
+                  {/* Photo Upload (Browse Gallery only - No Link Box) */}
+                  <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-3">
+                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Photo</label>
+                     <div className="flex items-center space-x-4">
+                        <div className="w-16 h-16 rounded-xl bg-slate-900 border border-slate-800 overflow-hidden flex items-center justify-center shrink-0">
+                           {newItem.DP ? (
+                              <img src={resolveImageUrl(newItem.DP)} alt="Item" className="w-full h-full object-cover" />
+                           ) : (
+                              <ImageIcon className="w-6 h-6 text-slate-500" />
+                           )}
+                        </div>
+
+                        <div className="flex-1 flex flex-wrap items-center gap-2">
+                           <label className="flex items-center space-x-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer">
+                              <Upload className="w-3.5 h-3.5" />
+                              <span>Browse from Gallery</span>
+                              <input 
+                                 type="file" 
+                                 accept="image/*" 
+                                 className="hidden"
+                                 onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) {
+                                       try {
+                                          const base64 = await processGalleryImage(file);
+                                          setNewItem(prev => ({ ...prev, DP: base64 }));
+                                       } catch (err) {
+                                          console.error("Failed to load image from gallery:", err);
+                                       }
+                                    }
+                                 }}
+                              />
+                           </label>
+
+                           {newItem.DP && (
+                              <button
+                                 type="button"
+                                 onClick={() => setNewItem(prev => ({ ...prev, DP: "" }))}
+                                 className="flex items-center space-x-1 px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                              >
+                                 <Trash2 className="w-3.5 h-3.5" />
+                                 <span>Remove</span>
+                              </button>
+                           )}
+                        </div>
+                     </div>
+                  </div>
+               </div>
+
+               {/* Footer with SaveButton */}
+               <div className="pt-4 border-t border-slate-800 shrink-0">
                   <SaveButton 
-   onClick={handleAddItem}
-   isSaving={isSavingAdd}
-   isSaved={isSavedAdd}
-   idleText="SAVE TO INVENTORY"
-   savingText="SAVING..."
-   savedText="SAVED TO INVENTORY! ✓"
-   className="w-full py-3.5"
-/>
+                     onClick={handleAddItem}
+                     isSaving={isSavingAdd}
+                     isSaved={isSavedAdd}
+                     idleText={isEditMode ? "UPDATE MENU ITEM" : "SAVE TO INVENTORY"}
+                     savingText="SAVING..."
+                     savedText={isEditMode ? "ITEM UPDATED! ✓" : "SAVED TO INVENTORY! ✓"}
+                     className="w-full py-3.5"
+                  />
                </div>
             </div>
          </div>
       )}
+
       {/* Delete Confirmation Modal */}
       {deleteConfirmId && (
-         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-slate-900 rounded-3xl p-6 w-full max-w-sm shadow-xl animate-in zoom-in-95 text-center">
-               <div className="w-16 h-16 bg-rose-100 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-4">
+         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in zoom-in-95 text-center">
+               <div className="w-16 h-16 bg-rose-500/10 border border-rose-500/30 text-rose-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
                   <Trash2 className="w-8 h-8" />
                </div>
-               <h3 className="text-lg font-black text-white uppercase tracking-tighter mb-2">Delete Item?</h3>
-               <p className="text-sm font-bold text-slate-400 mb-6">Are you sure you want to delete this item? This action cannot be undone.</p>
+               <h3 className="text-lg font-black text-white uppercase tracking-tight mb-2">Delete Item?</h3>
+               <p className="text-xs font-bold text-slate-400 mb-6">Are you sure you want to delete this menu item? This action cannot be undone.</p>
                
                <div className="flex space-x-3">
-                  <button onClick={() => setDeleteConfirmId(null)} className="flex-1 py-3 bg-slate-800 text-slate-200 rounded-xl text-xs font-black tracking-widest hover:bg-slate-200 transition-colors">
+                  <button 
+                     onClick={() => setDeleteConfirmId(null)} 
+                     className="flex-1 py-3 bg-slate-800 text-slate-200 rounded-xl text-xs font-black tracking-widest hover:bg-slate-700 transition-colors cursor-pointer"
+                  >
                      CANCEL
                   </button>
-                  <button onClick={() => confirmDelete(deleteConfirmId)} className="flex-1 py-3 bg-rose-900/300 text-white rounded-xl text-xs font-black tracking-widest hover:bg-rose-600 transition-colors shadow-md shadow-rose-500/30">
+                  <button 
+                     onClick={() => confirmDelete(deleteConfirmId)} 
+                     className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black tracking-widest transition-colors shadow-md shadow-rose-600/30 cursor-pointer"
+                  >
                      DELETE
                   </button>
                </div>
@@ -981,7 +1841,3 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     </div>
   );
 };
-
-const BoltIcon: React.FC<{className?: string}> = ({className}) => (
-   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.29 7 12 12 20.71 7"/><line x1="12" x2="12" y1="22" y2="12"/></svg>
-);
