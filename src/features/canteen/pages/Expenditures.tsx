@@ -499,16 +499,14 @@ export const Expenditures: React.FC = () => {
                 <h2 className="text-2xl font-black text-white tracking-tight uppercase">
                   ADD NEW EXPENDITURE
                 </h2>
-                <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-1">
-                  একসাথে একাধিক আইটেম নির্বাচন, রেট ও ডিটেইলার হিসাব এন্ট্রি
-                </p>
+                
               </div>
             </div>
 
             {/* Total Batch Amount Badge */}
             <div className="bg-indigo-500/10 border border-indigo-500/30 px-6 py-3 rounded-2xl flex items-center space-x-3">
               <span className="text-[10px] font-black text-indigo-300 uppercase tracking-widest">
-                BATCH TOTAL (মোট টাকা):
+                TOTAL:
               </span>
               <span className="text-2xl font-black text-white tracking-tight">
                 ৳{batchTotalAmount.toLocaleString('en-US')}
@@ -522,7 +520,7 @@ export const Expenditures: React.FC = () => {
             <div>
               <label className="text-[11px] font-black text-slate-400 tracking-widest uppercase mb-2 block flex items-center space-x-1.5">
                 <Calendar className="w-3.5 h-3.5 text-indigo-400" />
-                <span>DATE (তারিখ)</span>
+                <span>Date</span>
               </label>
               <input 
                 type="text" 
@@ -537,7 +535,7 @@ export const Expenditures: React.FC = () => {
             <div>
               <label className="text-[11px] font-black text-slate-400 tracking-widest uppercase mb-2 block flex items-center space-x-1.5">
                 <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
-                <span>DETAILER PERSON (দায়িত্বপ্রাপ্ত সদস্য)</span>
+                <span>Detailer</span>
               </label>
               <select 
                 value={detailedPerson ?? ""}
@@ -556,7 +554,7 @@ export const Expenditures: React.FC = () => {
             <div>
               <label className="text-[11px] font-black text-slate-400 tracking-widest uppercase mb-2 block flex items-center space-x-1.5">
                 <Wallet className="w-3.5 h-3.5 text-indigo-400" />
-                <span>PAYMENT METHOD (পেমেন্ট মাধ্যম)</span>
+                <span>Payment Method</span>
               </label>
               <select 
                 value={batchPaymentMethod ?? "Cash"}
@@ -695,7 +693,7 @@ export const Expenditures: React.FC = () => {
                       {/* Qty */}
                       <div className="md:col-span-2">
                         <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider block mb-1">
-                          QTY (পরিমাণ)
+                          Qty
                         </label>
                         <input 
                           type="number"
@@ -741,7 +739,7 @@ export const Expenditures: React.FC = () => {
                       {/* Unit Price (Rate) */}
                       <div className="md:col-span-2">
                         <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider block mb-1 flex items-center justify-between">
-                          <span>UNIT PRICE (দর ৳)</span>
+                          <span>Rate (৳)</span>
                         </label>
                         <input 
                           type="number"
@@ -1079,7 +1077,7 @@ export const Expenditures: React.FC = () => {
               {/* Item Name */}
               <div>
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">
-                  ITEM NAME (বিবরণ)
+                  Item Name
                 </label>
                 <input 
                   type="text"
@@ -1114,7 +1112,7 @@ export const Expenditures: React.FC = () => {
 
                 <div>
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">
-                    UNIT (একক)
+                    Unit
                   </label>
                   <input 
                     type="text"
@@ -1166,7 +1164,7 @@ export const Expenditures: React.FC = () => {
                 {/* Amount (Total) */}
                 <div>
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">
-                    AMOUNT (টাকা ৳)
+                    Total (৳)
                   </label>
                   <input 
                     type="number"
@@ -1186,7 +1184,7 @@ export const Expenditures: React.FC = () => {
                 className="px-4 py-3 bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/20 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center space-x-2 transition-all"
               >
                 <Trash2 className="w-4 h-4" />
-                <span>REMOVE RECORD</span>
+                <span>Delete Record</span>
               </button>
 
               <div className="flex items-center space-x-3">

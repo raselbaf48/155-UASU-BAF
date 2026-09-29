@@ -1715,7 +1715,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
               type="text" 
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search raw items (e.g. Chicken, Rice, Dal, Milk Powder, Oil, Egg)..."
+              placeholder="Search raw inventory..."
               className="w-full pl-10 pr-4 py-2.5 bg-slate-800 border border-slate-700/80 rounded-xl text-sm text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
             />
             {searchTerm && (

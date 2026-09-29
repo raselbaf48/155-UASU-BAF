@@ -510,18 +510,13 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
   };
 
   const handleAddModalIngredientRow = () => {
-    const rawList = availableRawItems.length > 0 ? availableRawItems : getRawInventoryItems();
-    if (rawList.length === 0) return;
-    const defaultRaw = rawList[0];
-    const sub = getRawItemSubUnitInfo(defaultRaw);
-    const defaultUnit = sub.hasSubUnit && sub.subUnit ? sub.subUnit : (defaultRaw.unit || 'pcs');
     setModalRecipe(prev => [
       ...prev,
       {
-        rawItemId: defaultRaw.id,
-        rawItemName: defaultRaw.name,
-        quantity: 1,
-        unit: defaultUnit
+        rawItemId: '',
+        rawItemName: '',
+        quantity: '' as any,
+        unit: 'pcs'
       }
     ]);
   };
@@ -738,25 +733,22 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
           setItems(items.filter(i => i.id !== id));
       }
       setDeleteConfirmId(null);
+      if (selectedItemForModal?.id === id) {
+        setSelectedItemForModal(null);
+      }
   };
 
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
 
   // Recipe Row Controls for Add/Edit Modal
   const handleAddIngredientRow = () => {
-    const rawList = availableRawItems.length > 0 ? availableRawItems : getRawInventoryItems();
-    if (rawList.length === 0) return;
-    const defaultRaw = rawList[0];
-    const defaultUnit = (defaultRaw.hasSubUnits || (defaultRaw.packSize && defaultRaw.packSize > 1)) && defaultRaw.subUnit 
-      ? defaultRaw.subUnit 
-      : defaultRaw.unit;
     setItemRecipe(prev => [
       ...prev,
       {
-        rawItemId: defaultRaw.id,
-        rawItemName: defaultRaw.name,
-        quantity: 1,
-        unit: defaultUnit
+        rawItemId: '',
+        rawItemName: '',
+        quantity: '' as any,
+        unit: 'pcs'
       }
     ]);
   };
@@ -828,18 +820,13 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
   };
 
   const handleAddQuickIngredientRow = () => {
-    const rawList = availableRawItems.length > 0 ? availableRawItems : getRawInventoryItems();
-    if (rawList.length === 0) return;
-    const defaultRaw = rawList[0];
-    const sub = getRawItemSubUnitInfo(defaultRaw);
-    const defaultUnit = sub.hasSubUnit && sub.subUnit ? sub.subUnit : (defaultRaw.unit || 'pcs');
     setQuickRecipeIngredients(prev => [
       ...prev,
       {
-        rawItemId: defaultRaw.id,
-        rawItemName: defaultRaw.name,
-        quantity: 1,
-        unit: defaultUnit
+        rawItemId: '',
+        rawItemName: '',
+        quantity: '' as any,
+        unit: 'pcs'
       }
     ]);
   };
@@ -953,7 +940,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
          <div>
             <h2 className="text-2xl font-black text-white uppercase tracking-tighter">CANTEEN MENU</h2>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">CLOUD INTEGRATED MENU & RECIPES</p>
+            
          </div>
          <div className="flex items-center space-x-3">
             {!readOnly && (
@@ -980,7 +967,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input 
                type="text" 
-               placeholder="Search menu items..." 
+               placeholder="Search menu..." 
                value={searchTerm}
                onChange={(e) => setSearchTerm(e.target.value)}
                className="w-full bg-slate-900 border border-slate-800 text-white rounded-xl pl-10 pr-4 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
@@ -1044,7 +1031,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                            </span>
                            <div className="flex items-center space-x-1 text-slate-400 text-xs">
                               <ChefHat className="w-3.5 h-3.5 text-indigo-400" />
-                              <span>{itemRecipe.length > 0 ? `${itemRecipe.length}টি উপকরণ` : "কোনো উপকরণ নেই"}</span>
+                              <span>{itemRecipe.length > 0 ? `${itemRecipe.length} উপকরণ` : "রেসিপি নেই"}</span>
                            </div>
                         </div>
                      </div>
@@ -1059,11 +1046,11 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                      {/* Cost & Selling Price Box */}
                      <div className="mt-4 bg-[#0a101d]/90 rounded-2xl p-4 border border-slate-800/80 flex items-center justify-between">
                         <div className="space-y-0.5">
-                           <span className="text-slate-400 text-xs font-bold block">প্রস্তুত খরচ</span>
+                           <span className="text-slate-400 text-xs font-bold block">খরচ</span>
                            <span className="text-amber-400 font-black text-lg font-mono">৳{displayCost.toFixed(1)}</span>
                         </div>
                         <div className="text-right space-y-0.5">
-                           <span className="text-slate-400 text-xs font-bold block">বিক্রয় মূল্য</span>
+                           <span className="text-slate-400 text-xs font-bold block">মূল্য</span>
                            <span className="text-white font-black text-lg font-mono">৳{priceNum}</span>
                         </div>
                      </div>
@@ -1136,7 +1123,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                      }`}
                   >
                      <Edit2 className="w-3.5 h-3.5" />
-                     <span>Edit Details & Recipe</span>
+                     <span>Details & Recipe</span>
                   </button>
 
                   <button
@@ -1148,7 +1135,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                      }`}
                   >
                      <History className="w-3.5 h-3.5" />
-                     <span>Sales & Issued History ({itemSalesHistory.length})</span>
+                     <span>History ({itemSalesHistory.length})</span>
                   </button>
                </div>
 
@@ -1158,13 +1145,10 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         {/* Left: General Details */}
                         <div className="space-y-4">
-                           <h4 className="text-xs font-black text-indigo-400 uppercase tracking-wider flex items-center space-x-1.5">
-                              <Info className="w-4 h-4" />
-                              <span>General Information</span>
-                           </h4>
+                           
 
                            <div>
-                              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Item Name</label>
+                              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Name</label>
                               <input 
                                  type="text" 
                                  value={modalFormData.name ?? ""}
@@ -1190,7 +1174,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                               </div>
 
                               <div>
-                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Selling Price (৳)</label>
+                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Price (৳)</label>
                                  <input 
                                     type="number" 
                                     value={modalFormData.price ?? ""}
@@ -1202,7 +1186,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
 
                            {/* Photo Upload Section (Browse Gallery & Remove only - No Link Box) */}
                            <div className="bg-slate-950/70 border border-slate-800/80 rounded-2xl p-4 space-y-3">
-                              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Item Photo</label>
+                              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Photo</label>
                               <div className="flex items-center space-x-4">
                                  <div className="w-16 h-16 rounded-xl bg-slate-900 border border-slate-800 overflow-hidden flex items-center justify-center shrink-0">
                                     {modalFormData.DP ? (
@@ -1270,11 +1254,11 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                               return (
                                  <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 grid grid-cols-3 gap-2 text-center">
                                     <div>
-                                       <span className="text-[10px] font-bold text-slate-400 block">SELLING PRICE</span>
+                                       <span className="text-[10px] font-bold text-slate-400 block">PRICE</span>
                                        <span className="text-sm font-black text-white font-mono">৳{selling}</span>
                                     </div>
                                     <div>
-                                       <span className="text-[10px] font-bold text-slate-400 block">PROD. COST</span>
+                                       <span className="text-[10px] font-bold text-slate-400 block">COST</span>
                                        <span className="text-sm font-black text-amber-400 font-mono">৳{calcCost.toFixed(1)}</span>
                                     </div>
                                     <div>
@@ -1293,7 +1277,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                            <div className="flex items-center justify-between">
                               <h4 className="text-xs font-black text-amber-400 uppercase tracking-wider flex items-center space-x-1.5">
                                  <ChefHat className="w-4 h-4" />
-                                 <span>Recipe Ingredients ({modalRecipe.length})</span>
+                                 <span>Ingredients ({modalRecipe.length})</span>
                               </h4>
 
                               <button
@@ -1309,8 +1293,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                            {modalRecipe.length === 0 ? (
                               <div className="bg-slate-950/60 border border-dashed border-slate-800 rounded-2xl p-8 text-center">
                                  <ChefHat className="w-8 h-8 text-slate-600 mx-auto mb-2" />
-                                 <p className="text-xs font-bold text-slate-400">No recipe ingredients added yet.</p>
-                                 <p className="text-[10px] text-slate-500 mt-1">Click "Add Ingredient" to deduct raw materials automatically during sales.</p>
+                                 <p className="text-xs font-bold text-slate-500">No ingredients added</p>
                               </div>
                            ) : (
                               <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
@@ -1335,71 +1318,72 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                                      const rowCost = (Number(ing.quantity) || 0) * effectiveUnitPrice;
 
                                      return (
-                                        <div key={idx} className="bg-slate-950/80 border border-slate-800/80 rounded-2xl p-3 space-y-2.5">
-                                           {/* Top Line: Ingredient Name only & Delete Button */}
-                                           <div className="flex items-center justify-between gap-2">
-                                              <div className="flex-1 min-w-0">
+                                        <div key={idx} className="bg-slate-950/80 border border-slate-800/80 rounded-2xl p-2.5 flex items-center gap-2">
+                                           {/* Compact Ingredient Select Box */}
+                                           <div className="flex-1 min-w-0">
+                                              <select
+                                                 value={ing.rawItemId ?? ""}
+                                                 onChange={(e) => handleModalIngredientRawChange(idx, e.target.value)}
+                                                 className="w-full bg-slate-900 border border-slate-700/80 text-white rounded-xl px-2.5 py-2 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500 truncate"
+                                              >
+                                                 <option value="" disabled className="bg-slate-900 text-slate-400">
+                                                    -- Select Ingredient --
+                                                 </option>
+                                                 {availableRawItems.map(r => (
+                                                    <option key={r.id} value={r.id} className="bg-slate-900 text-white">
+                                                       {r.name}
+                                                    </option>
+                                                 ))}
+                                              </select>
+                                           </div>
+
+                                           {/* Compact Qty Box */}
+                                           <div className="w-14 shrink-0">
+                                              <input 
+                                                 type="number"
+                                                 step="any"
+                                                 value={ing.quantity ?? ""}
+                                                 onChange={(e) => handleModalIngredientQtyChange(idx, e.target.value)}
+                                                 className="w-full bg-slate-900 border border-slate-700/80 text-white rounded-xl px-1.5 py-2 text-xs font-mono font-bold text-center focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                                 placeholder="Qty"
+                                              />
+                                           </div>
+
+                                           {/* Compact Unit Badge / Select (Subunit Priority) */}
+                                           <div className="shrink-0">
+                                              {unitOptions.length <= 1 ? (
+                                                 <span className="inline-block px-2 py-2 rounded-xl bg-indigo-950/60 border border-indigo-500/30 text-[11px] font-mono font-bold text-indigo-300 min-w-[42px] text-center">
+                                                    {currentUnit}
+                                                 </span>
+                                              ) : (
                                                  <select
-                                                    value={ing.rawItemId ?? ""}
-                                                    onChange={(e) => handleModalIngredientRawChange(idx, e.target.value)}
-                                                    className="w-full bg-slate-900 border border-slate-700/80 text-white rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                                    value={currentUnit}
+                                                    onChange={(e) => handleModalIngredientUnitChange(idx, e.target.value)}
+                                                    className="bg-indigo-950/70 border border-indigo-500/40 text-[11px] font-mono font-bold text-indigo-300 rounded-xl px-2 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
                                                  >
-                                                    {availableRawItems.map(r => (
-                                                       <option key={r.id} value={r.id} className="bg-slate-900 text-white">
-                                                          {r.name}
-                                                       </option>
+                                                    {unitOptions.map(u => (
+                                                       <option key={u} value={u} className="bg-slate-900 text-white font-mono">{u}</option>
                                                     ))}
                                                  </select>
-                                              </div>
-
-                                              <button
-                                                 type="button"
-                                                 onClick={() => handleRemoveModalIngredientRow(idx)}
-                                                 className="p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-xl transition-colors cursor-pointer shrink-0"
-                                                 title="Remove ingredient"
-                                              >
-                                                 <Trash2 className="w-3.5 h-3.5" />
-                                              </button>
+                                              )}
                                            </div>
 
-                                           {/* Bottom Line: Small Qty Box, Sub-Unit Badge/Select, and Row Cost */}
-                                           <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-900">
-                                              <div className="flex items-center space-x-2">
-                                                 <span className="text-[11px] font-bold text-slate-400">পরিমাণ:</span>
-                                                 <div className="flex items-center space-x-1.5">
-                                                    <input 
-                                                       type="number"
-                                                       step="any"
-                                                       value={ing.quantity ?? ""}
-                                                       onChange={(e) => handleModalIngredientQtyChange(idx, e.target.value)}
-                                                       className="w-16 bg-slate-900 border border-slate-700/80 text-white rounded-lg px-2 py-1 text-xs font-mono font-bold text-center focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                                                       placeholder="Qty"
-                                                    />
-                                                    {unitOptions.length <= 1 ? (
-                                                       <span className="px-2 py-1 rounded-lg bg-indigo-950/60 border border-indigo-500/30 text-[11px] font-mono font-bold text-indigo-300">
-                                                          {currentUnit}
-                                                       </span>
-                                                    ) : (
-                                                       <select
-                                                          value={currentUnit}
-                                                          onChange={(e) => handleModalIngredientUnitChange(idx, e.target.value)}
-                                                          className="bg-indigo-950/70 border border-indigo-500/40 text-[11px] font-mono font-bold text-indigo-300 rounded-lg px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
-                                                       >
-                                                          {unitOptions.map(u => (
-                                                             <option key={u} value={u} className="bg-slate-900 text-white font-mono">{u}</option>
-                                                          ))}
-                                                       </select>
-                                                    )}
-                                                 </div>
-                                              </div>
-
-                                              <div className="text-right">
-                                                 <span className="text-[10px] text-slate-500 uppercase block font-bold">খরচ</span>
-                                                 <span className="text-xs font-mono font-black text-amber-400">
-                                                    ৳{rowCost.toFixed(1)}
-                                                 </span>
-                                              </div>
+                                           {/* Row Cost */}
+                                           <div className="text-right shrink-0 min-w-[50px] pr-1">
+                                              <span className="text-xs font-mono font-black text-amber-400 block">
+                                                 ৳{rowCost.toFixed(1)}
+                                              </span>
                                            </div>
+
+                                           {/* Delete Button */}
+                                           <button
+                                              type="button"
+                                              onClick={() => handleRemoveModalIngredientRow(idx)}
+                                              className="p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-xl transition-colors cursor-pointer shrink-0"
+                                              title="Remove ingredient"
+                                           >
+                                              <Trash2 className="w-3.5 h-3.5" />
+                                           </button>
                                         </div>
                                      );
                                   })}
@@ -1475,27 +1459,45 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                   )}
                </div>
 
-               {/* Modal Footer with SaveButton */}
+               {/* Modal Footer with SaveButton & Bottom-Left Delete Option */}
                {modalTab === "EDIT" && (
-                  <div className="pt-4 border-t border-slate-800 shrink-0 flex items-center justify-end space-x-3">
+                  <div className="pt-4 border-t border-slate-800 shrink-0 flex items-center justify-between gap-3">
+                     {/* Bottom Left Corner: Delete Item Option */}
                      <button
                         type="button"
-                        onClick={() => setSelectedItemForModal(null)}
-                        className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-black uppercase tracking-wider transition-colors cursor-pointer"
+                        onClick={() => {
+                           if (selectedItemForModal?.id) {
+                              setDeleteConfirmId(selectedItemForModal.id);
+                           }
+                        }}
+                        className="px-4 py-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-black uppercase tracking-wider flex items-center space-x-2 transition-all cursor-pointer shadow-xs"
+                        title="Delete this menu item"
                      >
-                        Cancel
+                        <Trash2 className="w-4 h-4" />
+                        <span>Delete Item</span>
                      </button>
-                     
-                     <SaveButton 
-                        type="button"
-                        onClick={handleSaveModalChanges}
-                        isSaving={isSavingModal}
-                        isSaved={isSavedModal}
-                        idleText="Save Changes"
-                        savingText="Saving..."
-                        savedText="SAVED CHANGES! ✓"
-                        className="px-6 py-2.5"
-                     />
+
+                     {/* Bottom Right: Cancel & Save Changes */}
+                     <div className="flex items-center space-x-3">
+                        <button
+                           type="button"
+                           onClick={() => setSelectedItemForModal(null)}
+                           className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-black uppercase tracking-wider transition-colors cursor-pointer"
+                        >
+                           Cancel
+                        </button>
+                        
+                        <SaveButton 
+                           type="button"
+                           onClick={handleSaveModalChanges}
+                           isSaving={isSavingModal}
+                           isSaved={isSavedModal}
+                           idleText="Save Changes"
+                           savingText="Saving..."
+                           savedText="SAVED CHANGES! ✓"
+                           className="px-6 py-2.5"
+                        />
+                     </div>
                   </div>
                )}
             </div>
@@ -1516,9 +1518,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                         <h3 className="text-lg font-black text-white uppercase tracking-tight">
                            {quickRecipeItem.name} — RECIPE
                         </h3>
-                        <p className="text-[11px] font-bold text-slate-400">
-                           মেনু আইটেম তৈরিতে প্রয়োজনীয় কাঁচামাল ও পরিমাণ নির্ধারণ করুন
-                        </p>
+                        
                      </div>
                   </div>
 
@@ -1571,71 +1571,72 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                             const rowTotal = (Number(ing.quantity) || 0) * effectiveUnitPrice;
 
                             return (
-                               <div key={idx} className="bg-slate-950/80 border border-slate-800/80 rounded-2xl p-3 space-y-2.5">
-                                  {/* Top Line: Ingredient Name only & Delete Button */}
-                                  <div className="flex items-center justify-between gap-2">
-                                     <div className="flex-1 min-w-0">
+                               <div key={idx} className="bg-slate-950/80 border border-slate-800/80 rounded-2xl p-2.5 flex items-center gap-2">
+                                  {/* Compact Ingredient Select Box */}
+                                  <div className="flex-1 min-w-0">
+                                     <select
+                                        value={ing.rawItemId ?? ""}
+                                        onChange={(e) => handleQuickIngredientRawChange(idx, e.target.value)}
+                                        className="w-full bg-slate-900 border border-slate-700/80 text-white rounded-xl px-2.5 py-2 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500 truncate"
+                                     >
+                                        <option value="" disabled className="bg-slate-900 text-slate-400">
+                                           -- Select Ingredient --
+                                        </option>
+                                        {availableRawItems.map(r => (
+                                           <option key={r.id} value={r.id} className="bg-slate-900 text-white">
+                                              {r.name}
+                                           </option>
+                                        ))}
+                                     </select>
+                                  </div>
+
+                                  {/* Compact Qty Box */}
+                                  <div className="w-14 shrink-0">
+                                     <input 
+                                        type="number"
+                                        step="any"
+                                        value={ing.quantity ?? ""}
+                                        onChange={(e) => handleQuickIngredientQtyChange(idx, parseFloat(e.target.value))}
+                                        className="w-full bg-slate-900 border border-slate-700/80 text-white rounded-xl px-1.5 py-2 text-xs font-mono font-bold text-center focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                        placeholder="Qty"
+                                     />
+                                  </div>
+
+                                  {/* Compact Unit Badge / Select */}
+                                  <div className="shrink-0">
+                                     {unitOptions.length <= 1 ? (
+                                        <span className="inline-block px-2 py-2 rounded-xl bg-indigo-950/60 border border-indigo-500/30 text-[11px] font-mono font-bold text-indigo-300 min-w-[42px] text-center">
+                                           {currentUnit}
+                                        </span>
+                                     ) : (
                                         <select
-                                           value={ing.rawItemId ?? ""}
-                                           onChange={(e) => handleQuickIngredientRawChange(idx, e.target.value)}
-                                           className="w-full bg-slate-900 border border-slate-700/80 text-white rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                           value={currentUnit}
+                                           onChange={(e) => handleQuickIngredientUnitChange(idx, e.target.value)}
+                                           className="bg-indigo-950/70 border border-indigo-500/40 text-[11px] font-mono font-bold text-indigo-300 rounded-xl px-2 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
                                         >
-                                           {availableRawItems.map(r => (
-                                              <option key={r.id} value={r.id} className="bg-slate-900 text-white">
-                                                 {r.name}
-                                              </option>
+                                           {unitOptions.map(u => (
+                                              <option key={u} value={u} className="bg-slate-900 text-white font-mono">{u}</option>
                                            ))}
                                         </select>
-                                     </div>
-
-                                     <button
-                                        type="button"
-                                        onClick={() => handleRemoveQuickIngredientRow(idx)}
-                                        className="p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-xl transition-colors cursor-pointer shrink-0"
-                                        title="Remove ingredient"
-                                     >
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                     </button>
+                                     )}
                                   </div>
 
-                                  {/* Bottom Line: Small Qty Box, Sub-Unit Badge/Select, and Row Cost */}
-                                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-900">
-                                     <div className="flex items-center space-x-2">
-                                        <span className="text-[11px] font-bold text-slate-400">পরিমাণ:</span>
-                                        <div className="flex items-center space-x-1.5">
-                                           <input 
-                                              type="number"
-                                              step="any"
-                                              value={ing.quantity ?? ""}
-                                              onChange={(e) => handleQuickIngredientQtyChange(idx, parseFloat(e.target.value))}
-                                              className="w-16 bg-slate-900 border border-slate-700/80 text-white rounded-lg px-2 py-1 text-xs font-mono font-bold text-center focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                                              placeholder="Qty"
-                                           />
-                                           {unitOptions.length <= 1 ? (
-                                              <span className="px-2 py-1 rounded-lg bg-indigo-950/60 border border-indigo-500/30 text-[11px] font-mono font-bold text-indigo-300">
-                                                 {currentUnit}
-                                              </span>
-                                           ) : (
-                                              <select
-                                                 value={currentUnit}
-                                                 onChange={(e) => handleQuickIngredientUnitChange(idx, e.target.value)}
-                                                 className="bg-indigo-950/70 border border-indigo-500/40 text-[11px] font-mono font-bold text-indigo-300 rounded-lg px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
-                                              >
-                                                 {unitOptions.map(u => (
-                                                    <option key={u} value={u} className="bg-slate-900 text-white font-mono">{u}</option>
-                                                 ))}
-                                              </select>
-                                           )}
-                                        </div>
-                                     </div>
-
-                                     <div className="text-right">
-                                        <span className="text-[10px] text-slate-500 uppercase block font-bold">খরচ</span>
-                                        <span className="text-xs font-mono font-black text-amber-400">
-                                           ৳{rowTotal.toFixed(1)}
-                                        </span>
-                                     </div>
+                                  {/* Row Cost */}
+                                  <div className="text-right shrink-0 min-w-[50px] pr-1">
+                                     <span className="text-xs font-mono font-black text-amber-400 block">
+                                        ৳{rowTotal.toFixed(1)}
+                                     </span>
                                   </div>
+
+                                  {/* Delete Button */}
+                                  <button
+                                     type="button"
+                                     onClick={() => handleRemoveQuickIngredientRow(idx)}
+                                     className="p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-xl transition-colors cursor-pointer shrink-0"
+                                     title="Remove ingredient"
+                                  >
+                                     <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
                                </div>
                             );
                          })}
@@ -1813,13 +1814,13 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
 
       {/* Delete Confirmation Modal */}
       {deleteConfirmId && (
-         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[70] flex items-center justify-center p-4">
             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in zoom-in-95 text-center">
                <div className="w-16 h-16 bg-rose-500/10 border border-rose-500/30 text-rose-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
                   <Trash2 className="w-8 h-8" />
                </div>
                <h3 className="text-lg font-black text-white uppercase tracking-tight mb-2">Delete Item?</h3>
-               <p className="text-xs font-bold text-slate-400 mb-6">Are you sure you want to delete this menu item? This action cannot be undone.</p>
+               <p className="text-xs font-bold text-slate-400 mb-6">Are you sure you want to delete this item?</p>
                
                <div className="flex space-x-3">
                   <button 

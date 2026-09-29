@@ -744,9 +744,7 @@ ${rowsList}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h2 className="text-2xl font-black text-white uppercase tracking-tighter">MEMBER DATABASE</h2>
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-            AIRMEN CANTEEN ACCOUNTS • SORTED BY RANK SENIORITY
-          </p>
+          
         </div>
         <div className="flex items-center space-x-3 w-full sm:w-auto">
           <button 
@@ -767,7 +765,7 @@ ${rowsList}
         <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
         <input 
           type="text" 
-          placeholder="Search members by BD No, Rank, or Surname..." 
+          placeholder="Search members..." 
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           className="w-full bg-slate-900 border border-slate-700 rounded-2xl pl-12 pr-4 py-3.5 text-sm font-bold text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#4f46e5]/20 focus:border-[#4f46e5] transition-all shadow-sm"
@@ -913,7 +911,7 @@ ${rowsList}
             
             <div className="space-y-4">
               <div>
-                <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">BD No (ID)</label>
+                <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">BD No</label>
                 <input 
                   type="text" 
                   value={newMember.bdNo ?? ""}
@@ -933,7 +931,7 @@ ${rowsList}
                 />
               </div>
               <div>
-                <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Name / Surname</label>
+                <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Surname</label>
                 <input 
                   type="text" 
                   value={newMember.surname ?? ""}
@@ -943,7 +941,7 @@ ${rowsList}
                 />
               </div>
               <div>
-                <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Contact Number</label>
+                <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Contact</label>
                 <input 
                   type="text" 
                   value={newMember.contact ?? ""}
@@ -954,7 +952,7 @@ ${rowsList}
               </div>
 
               <div>
-                <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Role (পদবি / ভূমিকা)</label>
+                <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Role</label>
                 <div className="flex gap-2">
                   <input 
                     type="text" 
@@ -981,11 +979,9 @@ ${rowsList}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase block">
-                    Profile Photo (প্রোফাইল ছবি)
+                    Photo
                   </label>
-                  <span className="text-[10px] font-bold text-indigo-400">
-                    Browse from Gallery
-                  </span>
+                  
                 </div>
 
                 <div className="bg-slate-900/80 border border-slate-700/80 rounded-2xl p-3 space-y-2.5">
@@ -1123,7 +1119,7 @@ ${rowsList}
                   </div>
 
                   <div>
-                    <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">BD No (ID)</label>
+                    <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">BD No</label>
                     <input 
                       type="text" 
                       value={editMemberData.bdNo ?? ""}
@@ -1143,7 +1139,7 @@ ${rowsList}
                       />
                     </div>
                     <div>
-                      <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Name / Surname</label>
+                      <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Surname</label>
                       <input 
                         type="text" 
                         value={editMemberData.surname ?? ""}
@@ -1155,7 +1151,7 @@ ${rowsList}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Contact Number</label>
+                      <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Contact</label>
                       <input 
                         type="text" 
                         value={editMemberData.contact ?? ""}
@@ -1164,7 +1160,7 @@ ${rowsList}
                       />
                     </div>
                     <div>
-                      <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Role (পদবি / ভূমিকা)</label>
+                      <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Role</label>
                       <div className="flex gap-2">
                         <input 
                           type="text" 
@@ -1192,11 +1188,9 @@ ${rowsList}
                   <div className="pt-2 border-t border-slate-800/80">
                     <div className="flex items-center justify-between mb-1.5">
                       <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase block">
-                        Profile Photo (প্রোফাইল ছবি)
+                        Photo
                       </label>
-                      <span className="text-[10px] font-bold text-indigo-400">
-                        Browse from Gallery
-                      </span>
+                      
                     </div>
 
                     <div className="bg-slate-900/80 border border-slate-700/80 rounded-2xl p-3 space-y-2.5">
@@ -1266,7 +1260,7 @@ ${rowsList}
                       className="w-full py-2.5 bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/30 rounded-xl text-xs font-black tracking-widest uppercase transition-all flex items-center justify-center space-x-2"
                     >
                       <Trash2 className="w-4 h-4" />
-                      <span>REMOVE MEMBER FROM DATABASE</span>
+                      <span>Delete Member</span>
                     </button>
                   </div>
                 </div>
@@ -1282,7 +1276,7 @@ ${rowsList}
                       </p>
                     </div>
                     <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Contact Number</p>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Contact</p>
                       <p className="text-sm font-bold text-white font-mono">{profileMember['Contact'] || 'Not Provided'}</p>
                     </div>
                     <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700">
