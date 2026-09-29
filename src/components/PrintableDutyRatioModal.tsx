@@ -117,6 +117,16 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
     selectedFlightFilter || 'Overall'
   );
 
+  // Default Page Setup orientation is strictly Portrait
+  const [pageOrientation, setPageOrientation] = useState<'portrait' | 'landscape'>('portrait');
+
+  useEffect(() => {
+    return () => {
+      const el = document.getElementById('baf-duty-ratio-print-page-style');
+      if (el) el.remove();
+    };
+  }, []);
+
   useEffect(() => {
     setCurrentFlightFilter(selectedFlightFilter || 'Overall');
   }, [selectedFlightFilter]);
@@ -216,20 +226,25 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
   };
 
   const getPdfTitle = () => {
-    const formattedDt = formatDisplayDate(targetDate).replace(/\s+/g, '_');
-    if (isFlightFiltered) {
-      return `${currentFlightFilter}_Duty_Schedule_${formattedDt || 'Schedule'}.pdf`;
-    }
-    if (activePreset === 'DUTY_RATIO') return `Duty_Ratio_Matrix_${formattedDt}.pdf`;
-    if (activePreset === 'MANPOWER') return `Effective_Manpower_Nominal_Roll_${formattedDt}.pdf`;
-    return `Duty_Ratio_Report_${formattedDt}.pdf`;
+    const displayDt = formatDisplayDate(targetDate);
+    return `Duty Ratio -155 UASU (Dt - ${displayDt})`;
   };
 
   const handlePrint = () => {
     document.title = getPdfTitle();
+    // Inject dynamic @page style directly into document.head to ensure browser sets Page Setup to Portrait
+    const printStyleId = 'baf-duty-ratio-print-page-style';
+    let styleEl = document.getElementById(printStyleId) as HTMLStyleElement | null;
+    if (!styleEl) {
+      styleEl = document.createElement('style');
+      styleEl.id = printStyleId;
+      document.head.appendChild(styleEl);
+    }
+    styleEl.innerHTML = `@media print { @page { size: ${pageOrientation} !important; margin: 8mm; } }`;
+
     setTimeout(() => {
       window.print();
-    }, 100);
+    }, 150);
   };
   
   // Get manpower from local storage as calculated by the main view
@@ -376,38 +391,37 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
   }, [matrix, currentManpower]);
 
   const handleExportExcel = () => {
-    const formattedDt = formatDisplayDate(targetDate).replace(/\s+/g, '_');
+    const displayDt = formatDisplayDate(targetDate);
+    const fileName = `Duty Ratio -155 UASU (Dt - ${displayDt}).xlsx`;
     if (isFlightFiltered) {
       exportFlightDutyScheduleExcel(
         matrix,
         currentFlightFilter,
-        formatDisplayDate(targetDate),
-        `${currentFlightFilter}_Duty_Schedule_${formattedDt || 'Scale_1_31'}.xlsx`
+        displayDt,
+        fileName
       );
     } else if (!showDutyRatio && (showManpower || showNominalRoll)) {
       const targetRoll = isFlightFiltered ? nominalRollAirmen.filter(a => a.flightName === currentFlightFilter) : nominalRollAirmen;
       exportManpowerAndNominalRollExcel(
         currentManpower,
         targetRoll,
-        `${isFlightFiltered ? currentFlightFilter + '_' : ''}Effective_Manpower_Nominal_Roll_${formattedDt || 'export'}.xlsx`
+        fileName
       );
-    } else if (showDutyRatio && !showManpower && !showDistribution) {
-      exportDutyRatioMatrixExcel(matrix, `Duty_Ratio_Matrix_Scale_1_31_${formattedDt || 'export'}.xlsx`, undefined, formatDisplayDate(targetDate));
     } else {
-      exportDutyRatioMatrixExcel(matrix, `Duty_Ratio_Matrix_Complete_${formattedDt || 'export'}.xlsx`, undefined, formatDisplayDate(targetDate));
+      exportDutyRatioMatrixExcel(matrix, fileName, undefined, displayDt);
     }
   };
 
   const handleExportDoc = () => {
-    const formattedDt = formatDisplayDate(targetDate).replace(/\s+/g, '_');
-    const docName = isFlightFiltered
-      ? `${currentFlightFilter}_Duty_Schedule_${formattedDt || 'Scale_1_31'}.doc`
-      : activePreset === 'DUTY_RATIO'
-      ? `Duty_Ratio_Matrix_Scale_1_31_${formattedDt || 'export'}.doc`
-      : activePreset === 'MANPOWER'
-      ? `Effective_Manpower_Nominal_Roll_${formattedDt || 'export'}.doc`
-      : `Duty_Ratio_Matrix_Report_${formattedDt || 'export'}.doc`;
-    exportHtmlToWord('print-duty-ratio-content', docName);
+    const displayDt = formatDisplayDate(targetDate);
+    const docName = `Duty Ratio -155 UASU (Dt - ${displayDt}).doc`;
+    exportHtmlToWord('print-duty-ratio-content', docName, pageOrientation);
+  };
+
+  const handleCloseModal = () => {
+    const el = document.getElementById('baf-duty-ratio-print-page-style');
+    if (el) el.remove();
+    onClose();
   };
 
   return createPortal(
@@ -422,7 +436,7 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
           {/* Title & Close */}
           <div className="flex items-center space-x-3 text-white">
             <button
-              onClick={onClose}
+              onClick={handleCloseModal}
               className="p-1.5 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer text-slate-400 hover:text-white"
               title="Close Print Preview"
             >
@@ -491,6 +505,31 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
                   {fl}
                 </button>
               ))}
+            </div>
+
+            {/* Page Setup Orientation (Default Portrait) */}
+            <div className="flex items-center bg-slate-800/90 border border-slate-700 p-0.5 rounded-xl">
+              <span className="text-[10px] font-bold text-slate-400 px-2 uppercase tracking-wider">Page:</span>
+              <button
+                type="button"
+                onClick={() => setPageOrientation('portrait')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  pageOrientation === 'portrait' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-300 hover:text-white hover:bg-slate-700'
+                }`}
+                title="Portrait Orientation (Default)"
+              >
+                Portrait
+              </button>
+              <button
+                type="button"
+                onClick={() => setPageOrientation('landscape')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  pageOrientation === 'landscape' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-300 hover:text-white hover:bg-slate-700'
+                }`}
+                title="Landscape Orientation"
+              >
+                Landscape
+              </button>
             </div>
           </div>
 
@@ -600,7 +639,7 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
         <div id="print-duty-ratio-content" className="w-max sm:w-full max-w-none sm:max-w-[1200px] mx-auto py-4 sm:py-8 px-2 sm:px-8 print:p-0 print:m-0 print:w-full print:max-w-none text-black bg-white">
           <style>{`
             @media print {
-              @page { size: A4 portrait; margin: 8mm; }
+              @page { size: A4 ${pageOrientation} !important; margin: 8mm; }
               body { 
                  background: white !important; 
                  color: black !important; 
@@ -608,13 +647,12 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
                  print-color-adjust: exact !important; 
                }
               
-              /* Prevent page breaks inside tables and rows */
-              table { page-break-inside: avoid !important; break-inside: avoid !important; }
+              /* Allow multi-page tables like nominal roll to flow naturally while keeping rows intact */
               tr    { page-break-inside: avoid !important; break-inside: avoid !important; }
               thead { display: table-header-group !important; }
               tfoot { display: table-footer-group !important; }
               /* Force elements with these classes to avoid breaking */
-              .print\\:break-inside-avoid {
+              .print\\:break-inside-avoid, .break-inside-avoid {
                 page-break-inside: avoid !important;
                 break-inside: avoid !important;
               }
@@ -710,10 +748,10 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
 
               {/* Effective Manpower for this flight */}
               {showManpower && (
-                <div className="flex justify-center my-2">
-                  <div className="w-full max-w-lg">
-                    <h4 className="font-bold underline text-center mb-2">EFFECTIVE MANPOWER</h4>
-                    <table className="no-zebra border-collapse border border-black text-center text-[12px] bg-white text-black w-full print:min-w-0">
+                <div className="w-full flex flex-col items-center justify-center my-3 print:my-2">
+                  <div className="w-full max-w-md mx-auto flex flex-col items-center" style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
+                    <h4 className="font-bold underline text-center mb-2 text-sm uppercase">EFFECTIVE MANPOWER</h4>
+                    <table className="no-zebra border-collapse border border-black text-center text-[12px] bg-white text-black w-full print:min-w-0 mx-auto">
                       <thead>
                         <tr className="bg-slate-100 print:bg-white">
                           <th className="border border-black p-1.5 w-28">Flight</th>
@@ -750,11 +788,16 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
 
               {/* Nominal Roll filtered for this flight */}
               {showNominalRoll && (
-                <div className="w-full my-2">
-                  <h4 className="font-bold underline text-center mb-2">
-                    NOMINAL ROLL ({currentFlightFilter.toUpperCase()})
-                  </h4>
-                  <table className="no-zebra border-collapse border border-black text-[12px] bg-white text-black w-full print:min-w-0">
+                <div className="w-full mt-4 print:mt-3" style={{ pageBreakInside: "auto", breakInside: "auto" }}>
+                  <div className="text-center mb-2">
+                    <h4 className="font-bold underline text-center text-sm uppercase">
+                      NOMINAL ROLL ({currentFlightFilter.toUpperCase()})
+                    </h4>
+                    <p className="font-bold text-center text-xs text-black uppercase mt-0.5">
+                      Sgt & Below
+                    </p>
+                  </div>
+                  <table className="no-zebra border-collapse border border-black text-[12px] bg-white text-black w-full print:min-w-0" style={{ pageBreakInside: "auto", breakInside: "auto" }}>
                     <thead>
                       <tr className="bg-slate-100 print:bg-white text-center">
                         <th className="border border-black p-1.5 w-[7%] text-center font-bold">Ser No</th>
@@ -789,12 +832,12 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
               
               {/* TOP SECTION: Total Duty Table & Effective Manpower Table */}
               {(showTotalDuty || showManpower) && (
-                <div className="flex flex-col xl:flex-row justify-center items-start gap-8 print:gap-6">
+                <div className={`w-full flex flex-col ${showTotalDuty && showManpower ? 'xl:flex-row justify-center items-start gap-8 print:gap-6' : 'items-center justify-center my-3 print:my-2'}`}>
                   
                   {/* TOTAL DUTY Table */}
                   {showTotalDuty && (
-                    <div className="w-full max-w-lg mx-auto sm:mx-0">
-                      <h4 className="font-bold underline text-center mb-2">TOTAL DUTY</h4>
+                    <div className="w-full max-w-lg mx-auto" style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
+                      <h4 className="font-bold underline text-center mb-2 text-sm uppercase">TOTAL DUTY</h4>
                       <table className="no-zebra border-collapse border border-black text-center text-[11px] sm:text-[12px] bg-white text-black w-full print:min-w-0">
                         <thead>
                           <tr className="bg-slate-100 print:bg-white text-center">
@@ -820,9 +863,9 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
 
                   {/* EFFECTIVE MANPOWER Table */}
                   {showManpower && (
-                    <div className="w-full max-w-md mx-auto sm:mx-0">
-                      <h4 className="font-bold underline text-center mb-2">EFFECTIVE MANPOWER</h4>
-                      <table className="no-zebra border-collapse border border-black text-center text-[12px] bg-white text-black w-full print:min-w-0">
+                    <div className="w-full max-w-md mx-auto flex flex-col items-center" style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
+                      <h4 className="font-bold underline text-center mb-2 text-sm uppercase">EFFECTIVE MANPOWER</h4>
+                      <table className="no-zebra border-collapse border border-black text-center text-[12px] bg-white text-black w-full print:min-w-0 mx-auto">
                         <thead>
                           <tr className="bg-slate-100 print:bg-white">
                             <th className="border border-black p-1.5 w-24">Flight</th>
@@ -1068,11 +1111,16 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
 
               {/* NOMINAL ROLL (if selected in overall view) */}
               {showNominalRoll && (
-                <div className="w-full pt-4">
-                  <h4 className="font-bold underline text-center mb-2">
-                    NOMINAL ROLL
-                  </h4>
-                  <table className="no-zebra border-collapse border border-black text-[12px] bg-white text-black w-full print:min-w-0">
+                <div className="w-full mt-4 print:mt-3" style={{ pageBreakInside: "auto", breakInside: "auto" }}>
+                  <div className="text-center mb-2">
+                    <h4 className="font-bold underline text-center text-sm uppercase">
+                      NOMINAL ROLL
+                    </h4>
+                    <p className="font-bold text-center text-xs text-black uppercase mt-0.5">
+                      Sgt & Below
+                    </p>
+                  </div>
+                  <table className="no-zebra border-collapse border border-black text-[12px] bg-white text-black w-full print:min-w-0" style={{ pageBreakInside: "auto", breakInside: "auto" }}>
                     <thead>
                       <tr className="bg-slate-100 print:bg-white text-center">
                         <th className="border border-black p-1.5 w-[7%] text-center font-bold">Ser No</th>

@@ -338,6 +338,7 @@ export function saveDutyMatrix(matrix: DutyRatioTable[]) {
     localStorage.setItem('baf_duty_matrix_metadata', JSON.stringify(metadata));
     localStorage.setItem('baf_duty_matrix_full', JSON.stringify(sanitizedMatrix));
     localStorage.setItem('baf_pending_sync', 'true');
+    localStorage.setItem('baf_matrix_last_modified', String(Date.now()));
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('baf_duty_ratio_updated', { detail: { matrix: sanitizedMatrix } }));

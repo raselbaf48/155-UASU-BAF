@@ -517,18 +517,45 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 text-xs font-medium">
-                    <span className="inline-flex items-center space-x-1.5 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 px-2.5 py-1 rounded-md">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
-                      <span>Target Matched</span>
-                    </span>
-                    <span className="inline-flex items-center space-x-1.5 bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-400 px-2.5 py-1 rounded-md">
-                      <span className="w-2 h-2 rounded-full bg-amber-500 inline-block"></span>
-                      <span>Under Quota (Yellow Border)</span>
-                    </span>
-                    <span className="inline-flex items-center space-x-1.5 bg-rose-500/10 text-rose-700 dark:text-rose-300 border border-rose-500/30 px-2.5 py-1 rounded-md">
-                      <span className="w-2 h-2 rounded-full bg-rose-500 inline-block"></span>
-                      <span>Quota Exceeded (Red Fill)</span>
-                    </span>
+                    {selectedFlightFilter === 'Overall' ? (
+                      <>
+                        <span className="inline-flex items-center space-x-1.5 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 px-2.5 py-1 rounded-md">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+                          <span>Target Matched</span>
+                        </span>
+                        <span className="inline-flex items-center space-x-1.5 bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-400 px-2.5 py-1 rounded-md">
+                          <span className="w-2 h-2 rounded-full bg-amber-500 inline-block"></span>
+                          <span>Under Quota (Yellow Border)</span>
+                        </span>
+                        <span className="inline-flex items-center space-x-1.5 bg-rose-500/10 text-rose-700 dark:text-rose-300 border border-rose-500/30 px-2.5 py-1 rounded-md">
+                          <span className="w-2 h-2 rounded-full bg-rose-500 inline-block"></span>
+                          <span>Quota Exceeded (Red Fill)</span>
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="inline-flex items-center space-x-1.5 bg-slate-200/80 dark:bg-slate-700/80 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-600 px-2.5 py-1 rounded-md font-bold">
+                          <span className="w-2 h-2 rounded-full bg-slate-500 inline-block"></span>
+                          <span>Target Matched (±0)</span>
+                        </span>
+                        <span className="inline-flex items-center space-x-1.5 bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-500/40 px-2.5 py-1 rounded-md font-bold">
+                          <span className="w-2 h-2 rounded-full bg-rose-500 inline-block"></span>
+                          <span>+1 Over (Red)</span>
+                        </span>
+                        <span className="inline-flex items-center space-x-1.5 bg-gradient-to-r from-pink-500/20 to-orange-500/20 text-pink-700 dark:text-orange-300 border border-pink-500/40 px-2.5 py-1 rounded-md font-bold">
+                          <span className="w-2 h-2 rounded-full bg-orange-500 inline-block"></span>
+                          <span>+2 Over (Pink/Orange)</span>
+                        </span>
+                        <span className="inline-flex items-center space-x-1.5 bg-sky-400/20 text-sky-700 dark:text-sky-300 border border-sky-400/50 px-2.5 py-1 rounded-md font-bold">
+                          <span className="w-2 h-2 rounded-full bg-sky-400 inline-block"></span>
+                          <span>-1 Under (Light Blue)</span>
+                        </span>
+                        <span className="inline-flex items-center space-x-1.5 bg-blue-600/25 text-blue-800 dark:text-blue-200 border border-blue-600/50 px-2.5 py-1 rounded-md font-bold">
+                          <span className="w-2 h-2 rounded-full bg-blue-600 inline-block"></span>
+                          <span>-2 Under (Dark Blue)</span>
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1050,25 +1077,65 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                           </span>
                         </div>
                       </td>
-                      {daysArray.map((dayNum, dayIdx) => {
-                        const dailySum = matrix.filter(t => !t.isDisabled).reduce((sum, table) => sum + (table.data[selectedFlightFilter as FlightName]?.[dayIdx] || 0), 0);
-                        const isPositive = dailySum > 0;
+                      {(() => {
+                        const activeDuties = matrix.filter(t => !t.isDisabled);
+                        const flightTotal = targetFlightTotal > 0 ? targetFlightTotal : (flightTotalsOverall[selectedFlightFilter as FlightName] || 0);
+                        const daysCount = daysArray.length || 31;
+                        const rawAverage = flightTotal > 0 ? (flightTotal / daysCount) : 0;
+                        // Rounding rule: < .5 rounds down to integer, >= .5 rounds up to integer
+                        const dailyThreshold = Math.round(rawAverage);
 
-                        return (
-                          <td
-                            key={dayNum}
-                            className="p-0.5 border border-slate-200/60 dark:border-slate-700/60 text-center align-middle"
-                          >
-                            {isPositive ? (
-                              <span className="inline-flex items-center justify-center w-5.5 h-5.5 sm:w-6 sm:h-6 rounded-md font-mono font-bold text-xs bg-slate-200/80 dark:bg-slate-700/80 text-slate-800 dark:text-slate-200">
-                                {dailySum}
-                              </span>
-                            ) : (
-                              <span className="text-slate-400 dark:text-slate-600 font-mono text-xs">0</span>
-                            )}
-                          </td>
-                        );
-                      })}
+                        return daysArray.map((dayNum, dayIdx) => {
+                          const dailySum = activeDuties.reduce((sum, table) => sum + (table.data[selectedFlightFilter as FlightName]?.[dayIdx] || 0), 0);
+                          const isPositive = dailySum > 0;
+                          const diff = dailyThreshold > 0 ? (dailySum - dailyThreshold) : 0;
+
+                          // Color logic as requested:
+                          // - 1 beshi hoy tahole red (diff === 1)
+                          // - 2 Beshi hole Pink/Orange (diff >= 2)
+                          // - 1 kom hole Light Blue (diff === -1)
+                          // - 2 kom hole dark blue hbe (diff <= -2)
+                          // - 0 hole neutral / matched
+                          let badgeClass = 'bg-slate-200/80 dark:bg-slate-700/80 text-slate-800 dark:text-slate-200 font-bold';
+                          let diffDesc = `Matches daily target (${dailyThreshold})`;
+
+                          if (dailyThreshold > 0) {
+                            if (diff >= 2) {
+                              // 2 Beshi hole Pink/Orange
+                              badgeClass = 'bg-gradient-to-br from-pink-500/25 to-orange-500/25 text-pink-700 dark:text-orange-300 border border-pink-500 dark:border-orange-400 font-black ring-1 ring-pink-400/50 shadow-xs';
+                              diffDesc = `+${diff} above target (+2 or more: Pink/Orange)`;
+                            } else if (diff === 1) {
+                              // 1 beshi hoy tahole red
+                              badgeClass = 'bg-rose-500/25 text-rose-600 dark:text-rose-400 border border-rose-500 font-black ring-1 ring-rose-500/50 shadow-xs';
+                              diffDesc = `+1 above target (+1: Red)`;
+                            } else if (diff === -1) {
+                              // 1 kom hole Light Blue
+                              badgeClass = 'bg-sky-400/25 text-sky-700 dark:text-sky-300 border border-sky-400 dark:border-sky-400 font-bold ring-1 ring-sky-400/50 shadow-xs';
+                              diffDesc = `-1 below target (-1: Light Blue)`;
+                            } else if (diff <= -2) {
+                              // 2 kom hole dark blue hbe
+                              badgeClass = 'bg-blue-600/30 text-blue-800 dark:text-blue-200 border border-blue-600 dark:border-blue-400 font-black ring-1 ring-blue-600/50 shadow-xs';
+                              diffDesc = `${diff} below target (-2 or more: Dark Blue)`;
+                            }
+                          }
+
+                          return (
+                            <td
+                              key={dayNum}
+                              className="p-0.5 border border-slate-200/60 dark:border-slate-700/60 text-center align-middle"
+                              title={`Date ${dayNum}: Flight Total ${dailySum} / Daily Target ${dailyThreshold} (Raw avg: ${rawAverage.toFixed(2)}) - ${diffDesc}`}
+                            >
+                              {isPositive || (dailyThreshold > 0 && diff !== 0) ? (
+                                <span className={`inline-flex items-center justify-center w-5.5 h-5.5 sm:w-6 sm:h-6 rounded-md font-mono text-xs transition-all ${badgeClass}`}>
+                                  {dailySum}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400 dark:text-slate-600 font-mono text-xs">0</span>
+                              )}
+                            </td>
+                          );
+                        });
+                      })()}
                       {(() => {
                         const flightTotal = flightTotalsOverall[selectedFlightFilter as FlightName];
                         const isTotalExceeded = flightTotal > targetFlightTotal;

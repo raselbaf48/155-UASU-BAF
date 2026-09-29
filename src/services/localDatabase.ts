@@ -391,6 +391,14 @@ export class LocalDatabaseEngine {
             let settingsChanged = false;
             settingsData.forEach((row: any) => {
                if (row.setting_key && row.setting_value && row.setting_key !== 'baf_official_duty_matrix_v4') {
+                  // Protect recent local disposal changes from being overwritten by stale cloud snapshot
+                  if (row.setting_key.startsWith('baf_duty_distribution_disposals_')) {
+                     const pendingKey = 'baf_pending_disposals_sync_' + row.setting_key;
+                     const pendingTime = Number(window.localStorage.getItem(pendingKey) || 0);
+                     if (Date.now() - pendingTime < 45000) {
+                        return; // Keep fresh local changes!
+                     }
+                  }
                   const currentVal = window.localStorage.getItem(row.setting_key);
                   if (currentVal !== row.setting_value) {
                      window.localStorage.setItem(row.setting_key, row.setting_value);
@@ -448,10 +456,12 @@ export class LocalDatabaseEngine {
 
              // Check if local has pending unsynced changes - if so, immediately push local latest matrix to Cloud
              const isPendingSync = typeof window !== 'undefined' && window.localStorage.getItem('baf_pending_sync') === 'true';
-             if (isPendingSync && currentMatrix.length > 0) {
+             const lastMatrixMod = typeof window !== 'undefined' ? Number(window.localStorage.getItem('baf_matrix_last_modified') || 0) : 0;
+             const hasRecentLocalMatrixChanges = isPendingSync || (Date.now() - lastMatrixMod < 45000);
+             if (hasRecentLocalMatrixChanges && currentMatrix.length > 0) {
                  setTimeout(() => {
                      this.syncDutyMatrixToCloud(currentMatrix);
-                 }, 100);
+                 }, 50);
              }
 
              const formattedMatrix = Array.from(dutyMap.values()).map(duty => {
@@ -509,7 +519,7 @@ export class LocalDatabaseEngine {
              });
 
              const newRaw = JSON.stringify(formattedMatrix);
-             if (currentRaw !== newRaw) {
+             if (!hasRecentLocalMatrixChanges && currentRaw !== newRaw && formattedMatrix.length > 0) {
                  window.localStorage.setItem('baf_official_duty_matrix_v4', newRaw);
                  window.dispatchEvent(new CustomEvent('baf_duty_ratio_updated', { detail: { matrix: formattedMatrix } }));
              }

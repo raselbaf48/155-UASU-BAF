@@ -1,6 +1,6 @@
 import { DUTY_TYPE_MAP } from '../data/dutyTypes';
 import React, { useState, useEffect, useMemo } from 'react';
-import { AlertCircle, Settings, Info, Users, ChevronDown, ChevronUp, Calendar, X, Save, Power, PowerOff, Trash, Filter, Plus, Minus, Printer, Edit2 } from 'lucide-react';
+import { AlertCircle, Settings, Info, Users, ChevronDown, ChevronUp, Calendar, X, Save, Power, PowerOff, Trash, Filter, Plus, Minus, Printer, Edit2, Shield } from 'lucide-react';
 import { localDb } from '../services/localDatabase';
 import { Airman, Rank, FlightName, DutyCategoryCode } from '../types';
 import { addCustomDuty, CustomDutyConfig, removeCustomDuty } from '../utils/customDuties';
@@ -192,14 +192,54 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
   
   const [showNominalRoll, setShowNominalRoll] = useState(false);
   const [nominalRollFlightFilter, setNominalRollFlightFilter] = useState<FlightName | 'All'>('All');
+  const [nominalRollRankFilter, setNominalRollRankFilter] = useState<string>('All');
   const [disposals, setDisposals] = useState<Record<string, string>>(() => {
     const saved = localStorage.getItem('baf_duty_distribution_disposals_' + (targetDate || 'default'));
     return saved ? JSON.parse(saved) : {};
   });
 
+  const saveAndSyncDisposals = (updatedDisposals: Record<string, string>) => {
+    setDisposals(updatedDisposals);
+    const dateKey = targetDate || 'default';
+    const storageKey = 'baf_duty_distribution_disposals_' + dateKey;
+    const pendingKey = 'baf_pending_disposals_sync_' + storageKey;
+    const valStr = JSON.stringify(updatedDisposals);
+    localStorage.setItem(storageKey, valStr);
+    localStorage.setItem(pendingKey, String(Date.now()));
+
+    // Directly and reliably push to Supabase Cloud app_settings
+    localDb.syncSettingToCloud(storageKey, valStr).then(() => {
+      setTimeout(() => {
+        localStorage.removeItem(pendingKey);
+      }, 5000);
+    });
+
+    window.dispatchEvent(new CustomEvent('baf_duty_ratio_updated'));
+  };
+
   useEffect(() => {
-    const saved = localStorage.getItem('baf_duty_distribution_disposals_' + (targetDate || 'default'));
+    const storageKey = 'baf_duty_distribution_disposals_' + (targetDate || 'default');
+    const saved = localStorage.getItem(storageKey);
     setDisposals(saved ? JSON.parse(saved) : {});
+  }, [targetDate]);
+
+  useEffect(() => {
+    const handleSettingsUpdated = () => {
+      const storageKey = 'baf_duty_distribution_disposals_' + (targetDate || 'default');
+      const pendingKey = 'baf_pending_disposals_sync_' + storageKey;
+      const pendingTime = Number(localStorage.getItem(pendingKey) || 0);
+      if (Date.now() - pendingTime < 45000) {
+        return; // Don't overwrite fresh local edits
+      }
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        try {
+          setDisposals(JSON.parse(saved));
+        } catch(e) {}
+      }
+    };
+    window.addEventListener('baf_settings_updated', handleSettingsUpdated);
+    return () => window.removeEventListener('baf_settings_updated', handleSettingsUpdated);
   }, [targetDate]);
 
   const [deleteConfirmIdx, setDeleteConfirmIdx] = useState<number | null>(null);
@@ -242,10 +282,10 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
       setSavedCustomList(getSavedCustomDisposals());
     }
 
-    setDisposals(prev => ({
-      ...prev,
+    saveAndSyncDisposals({
+      ...disposals,
       [customModalAirman.id]: finalVal,
-    }));
+    });
 
     setCustomModalAirman(null);
     setCustomInput('');
@@ -258,17 +298,17 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
     setSavedCustomList(updated);
 
     // Clean from disposals state for all airmen so it does not persist or re-save
-    setDisposals(prev => {
-      const next = { ...prev };
-      let changed = false;
-      Object.keys(next).forEach(id => {
-        if (next[id] && typeof next[id] === 'string' && next[id].trim().toLowerCase() === itemToDelete.trim().toLowerCase()) {
-          next[id] = '-';
-          changed = true;
-        }
-      });
-      return changed ? next : prev;
+    const next = { ...disposals };
+    let changed = false;
+    Object.keys(next).forEach(id => {
+      if (next[id] && typeof next[id] === 'string' && next[id].trim().toLowerCase() === itemToDelete.trim().toLowerCase()) {
+        next[id] = '-';
+        changed = true;
+      }
     });
+    if (changed) {
+      saveAndSyncDisposals(next);
+    }
 
     setDeletingCustomItem(null);
   };
@@ -280,11 +320,6 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
     const sgtAndBelow = allAirmen.filter(a => !['MWO', 'SWO', 'WO'].includes(a.rank));
     setAirmen(sgtAndBelow);
   }, []);
-
-  useEffect(() => {
-    localStorage.setItem('baf_duty_distribution_disposals_' + (targetDate || 'default'), JSON.stringify(disposals));
-    window.dispatchEvent(new CustomEvent('baf_duty_ratio_updated'));
-  }, [disposals, targetDate]);
 
   const airmanDefaults = useMemo(() => {
     const map: Record<string, string> = {};
@@ -324,9 +359,19 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
   }, [airmen, targetDate]);
 
   const filteredAirmen = useMemo(() => {
-    if (nominalRollFlightFilter === 'All') return airmen;
-    return airmen.filter(a => a.flightName === nominalRollFlightFilter);
-  }, [airmen, nominalRollFlightFilter]);
+    return airmen.filter(a => {
+      if (nominalRollFlightFilter !== 'All' && a.flightName !== nominalRollFlightFilter) {
+        return false;
+      }
+      if (nominalRollRankFilter === 'All') {
+        return true;
+      }
+      if (nominalRollRankFilter === 'Cpl & Below') {
+        return ['Cpl', 'LAC', 'AC-1', 'AC-2'].includes(a.rank);
+      }
+      return a.rank === nominalRollRankFilter;
+    });
+  }, [airmen, nominalRollFlightFilter, nominalRollRankFilter]);
 
   const getEffectiveManpower = () => {
     const counts = {
@@ -813,32 +858,59 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                 
                 {showNominalRoll && (
                   <div className="p-0 overflow-x-auto">
-                    {/* Flight Filter Bar */}
-                    <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 bg-slate-100 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700">
-                      <div className="flex items-center space-x-2 text-xs">
-                        <span className="font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1">
-                          <Filter className="w-3.5 h-3.5 text-indigo-500" />
-                          Flight:
+                    {/* Flight & Rank Filter Bar */}
+                    <div className="flex flex-col gap-2.5 px-4 py-2.5 bg-slate-100 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700">
+                      {/* Row 1: Flight Filter & Total Counter */}
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center space-x-2 text-xs">
+                          <span className="font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1 min-w-[50px]">
+                            <Filter className="w-3.5 h-3.5 text-indigo-500" />
+                            Flight:
+                          </span>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {(['All', 'Mechanics', 'Avionics', 'GCS', 'Admin'] as const).map(flt => (
+                              <button
+                                key={flt}
+                                type="button"
+                                onClick={() => setNominalRollFlightFilter(flt)}
+                                className={`px-3 py-1 rounded-md text-xs font-bold transition-all cursor-pointer ${
+                                  nominalRollFlightFilter === flt
+                                    ? 'bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-500'
+                                    : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-600'
+                                }`}
+                              >
+                                {flt}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                          Total: <span className="font-bold text-indigo-600 dark:text-indigo-400">{filteredAirmen.length}</span> Airmen
+                        </div>
+                      </div>
+
+                      {/* Row 2: Rank Filter (flt er niche) */}
+                      <div className="flex items-center space-x-2 text-xs pt-1.5 border-t border-slate-200 dark:border-slate-700/60">
+                        <span className="font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1 min-w-[50px]">
+                          <Shield className="w-3.5 h-3.5 text-indigo-500" />
+                          Rank:
                         </span>
                         <div className="flex flex-wrap items-center gap-1.5">
-                          {(['All', 'Mechanics', 'Avionics', 'GCS', 'Admin'] as const).map(flt => (
+                          {(['All', 'Sgt', 'Cpl & Below', 'Cpl', 'LAC', 'AC-1', 'AC-2'] as const).map(rk => (
                             <button
-                              key={flt}
+                              key={rk}
                               type="button"
-                              onClick={() => setNominalRollFlightFilter(flt)}
-                              className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${
-                                nominalRollFlightFilter === flt
+                              onClick={() => setNominalRollRankFilter(rk)}
+                              className={`px-3 py-1 rounded-md text-xs font-bold transition-all cursor-pointer ${
+                                nominalRollRankFilter === rk
                                   ? 'bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-500'
                                   : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-600'
                               }`}
                             >
-                              {flt}
+                              {rk}
                             </button>
                           ))}
                         </div>
-                      </div>
-                      <div className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-                        Total: <span className="font-bold text-indigo-600 dark:text-indigo-400">{filteredAirmen.length}</span> Airmen
                       </div>
                     </div>
 
@@ -890,7 +962,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                                   <select
                                     value={currentVal || '-'}
                                     onChange={(e) => {
-                                      setDisposals({ ...disposals, [a.id]: e.target.value });
+                                      saveAndSyncDisposals({ ...disposals, [a.id]: e.target.value });
                                     }}
                                     className="min-w-[130px] max-w-[165px] px-2.5 py-1 text-xs font-semibold rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-xs"
                                   >
