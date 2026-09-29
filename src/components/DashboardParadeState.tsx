@@ -102,7 +102,9 @@ export const DashboardParadeState: React.FC<DashboardParadeStateProps> = ({
   // Listen to global duty ratio updates across modals and views
   useEffect(() => {
     const handleRatioUpdated = () => {
-      setRatioRefreshTrigger((prev) => prev + 1);
+      setTimeout(() => {
+        setRatioRefreshTrigger((prev) => prev + 1);
+      }, 0);
     };
     window.addEventListener('baf_duty_ratio_updated', handleRatioUpdated);
     return () => {

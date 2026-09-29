@@ -9,6 +9,7 @@ import {
 } from '../data/officialDutyRatioMatrix';
 import { calculateBalancedAutoTargets, autoAllocateDutyMatrix, DEFAULT_MANPOWER } from '../utils/dutyDistribution';
 import { FlightName, UserRole } from '../types';
+import { pushDutyListToCloud } from '../utils/dutyCloudSync';
 import {
   Save,
   RotateCcw,
@@ -290,6 +291,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
     saveDutyMatrix(newMatrix);
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 2500);
+    pushDutyListToCloud(newMatrix).catch(err => console.warn('[DutyRatioMatrixViewV2] Realtime sync error:', err));
   };
 
   return (
@@ -851,7 +853,84 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
               </div>
             );
           })}
-          
+
+          {/* Flight-wise Total Duty Summary Card */}
+          {viewMode === 'DUTY_RATIO' && selectedFlightFilter === 'Overall' && (
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border-2 border-indigo-200 dark:border-indigo-800 shadow-md overflow-hidden mt-6">
+              <div className="px-4 py-3 flex items-center justify-between bg-gradient-to-r from-indigo-700 via-indigo-800 to-slate-900 text-white">
+                <div className="flex items-center space-x-2.5">
+                  <Layers className="w-5 h-5 text-indigo-300" />
+                  <span className="font-mono font-black text-sm tracking-wider uppercase">
+                    Flight-Wise Total Duty Summary
+                  </span>
+                </div>
+                <div className="text-xs font-bold bg-white/20 px-3 py-1 rounded-lg font-mono">
+                  Total Allocated: {flights.reduce((s, fl) => s + flightTotalsOverall[fl], 0)} / {totalSlotsOverall}
+                </div>
+              </div>
+              <div className="w-full overflow-x-auto">
+                <table className="w-full text-xs text-center border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
+                      <th className="p-2.5 text-left pl-4 font-bold">FLIGHT NAME</th>
+                      {matrix.filter(t => !t.isDisabled).map(t => (
+                        <th key={t.id} className="p-2 text-center font-bold">{t.title}</th>
+                      ))}
+                      <th className="p-2.5 text-center font-black bg-indigo-100 dark:bg-indigo-900/60 text-indigo-950 dark:text-indigo-200">TOTAL DUTY</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {flights.map(fl => {
+                      const totalAllocated = flightTotalsOverall[fl];
+                      const totalTarget = matrix.filter(t => !t.isDisabled).reduce((s, t) => s + (autoTargets?.[fl]?.[t.id] ?? t.flightTargets?.[fl] ?? 0), 0);
+                      return (
+                        <tr key={fl} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="p-2.5 text-left pl-4 font-bold text-slate-900 dark:text-white">
+                            {fl} Flight
+                          </td>
+                          {matrix.filter(t => !t.isDisabled).map(t => {
+                            const val = t.data[fl]?.reduce((a, b) => a + b, 0) ?? 0;
+                            const tgt = autoTargets?.[fl]?.[t.id] ?? t.flightTargets?.[fl] ?? 0;
+                            return (
+                              <td key={t.id} className="p-2 text-center font-mono font-bold">
+                                {t.eligibleFlights && !t.eligibleFlights.includes(fl) ? (
+                                  <span className="text-slate-400">N/A</span>
+                                ) : (
+                                  <span className={val === tgt ? 'text-emerald-600 dark:text-emerald-400' : 'text-indigo-600 dark:text-indigo-400'}>
+                                    {val}
+                                  </span>
+                                )}
+                              </td>
+                            );
+                          })}
+                          <td className="p-2.5 text-center font-mono font-black text-sm bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-800 dark:text-indigo-300">
+                            {totalAllocated}
+                            {showAllTableInfo && (
+                              <span className="text-xs text-slate-400 ml-1">/ {totalTarget}</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    <tr className="bg-slate-100 dark:bg-slate-800 font-bold border-t-2 border-slate-300 dark:border-slate-700">
+                      <td className="p-2.5 text-left pl-4 font-black">TOTAL</td>
+                      {matrix.filter(t => !t.isDisabled).map(t => {
+                        const sum = flights.reduce((s, fl) => s + (t.data[fl]?.reduce((a, b) => a + b, 0) ?? 0), 0);
+                        return (
+                          <td key={t.id} className="p-2 text-center font-mono font-black">
+                            {sum}
+                          </td>
+                        );
+                      })}
+                      <td className="p-2.5 text-center font-mono font-black text-sm bg-indigo-200 dark:bg-indigo-900 text-indigo-950 dark:text-indigo-100">
+                        {flights.reduce((s, fl) => s + flightTotalsOverall[fl], 0)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
         {viewMode === 'DUTY_RATIO' && selectedFlightFilter !== 'Overall' && (
           <div className="space-y-4">

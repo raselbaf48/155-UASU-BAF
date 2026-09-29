@@ -958,6 +958,7 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
                           {matrix.filter(t => !t.isDisabled).map(t => (
                             <th key={t.id} className="border border-black p-1">{t.title.split('(')[0].trim()}</th>
                           ))}
+                          <th className="border border-black p-1.5 w-24 font-bold" rowSpan={2}>TOTAL DUTY</th>
                         </tr>
                         <tr className="bg-slate-100 print:bg-white">
                           {matrix.filter(t => !t.isDisabled).map(t => {
@@ -975,6 +976,10 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
                       <tbody>
                         {['Mechanics', 'Avionics', 'GCS', 'Admin'].map(fl => {
                           const displayFl = fl === 'Mechanics' ? 'MECHANICS FLT' : fl === 'Avionics' ? 'AVIONICS FLT' : fl === 'GCS' ? 'GCS FLT' : 'ADMIN FLT';
+                          let flightSum = 0;
+                          matrix.filter(t => !t.isDisabled).forEach(t => {
+                            flightSum += (calculatedMatrixDistributions[t.id]?.[fl]?.autoVal || 0);
+                          });
                           return (
                             <tr key={fl} className="even:bg-gray-100 print:even:bg-gray-100">
                               <td className="border border-black p-1 text-center px-2 font-bold">{displayFl}</td>
@@ -982,6 +987,7 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
                                 const autoVal = calculatedMatrixDistributions[t.id]?.[fl]?.autoVal || 0;
                                 return <td key={t.id} className="border border-black p-1">{autoVal}</td>;
                               })}
+                              <td className="border border-black p-1 font-bold bg-slate-50 print:bg-white">{flightSum}</td>
                             </tr>
                           );
                         })}
@@ -990,6 +996,17 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
                           {matrix.filter(t => !t.isDisabled).map(t => (
                             <td key={t.id} className="border border-black p-1.5">{t.totalRequiredMonth}</td>
                           ))}
+                          <td className="border border-black p-1.5 font-bold">
+                            {(() => {
+                              let totalAll = 0;
+                              matrix.filter(t => !t.isDisabled).forEach(t => {
+                                ['Mechanics', 'Avionics', 'GCS', 'Admin'].forEach(fl => {
+                                  totalAll += (calculatedMatrixDistributions[t.id]?.[fl]?.autoVal || 0);
+                                });
+                              });
+                              return totalAll;
+                            })()}
+                          </td>
                         </tr>
                       </tbody>
                     </table>

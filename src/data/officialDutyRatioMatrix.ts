@@ -36,11 +36,12 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
     dutyCode: 'GD',
     totalRequiredMonth: 88,
     totalRequiredDaily: 3,
+    flightTargets: { Mechanics: 33, Avionics: 16, GCS: 33, Admin: 6 },
     data: {
-      Mechanics: [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1],
-      Avionics:  [1,1,0,1,1,0,0,1,1,0,0,1,1,0,1,1,0,1,0,1,1,0,0,0,1,1,0,1,1,0,0],
-      GCS:       [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1,1,1,1,1,1,1,2],
-      Admin:     [0,0,1,0,0,1,1,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,1,0,0,0,0],
+      Mechanics: [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1,2,1],
+      Avionics:  [1,1,1,0,1,1,0,1,1,0,0,1,0,1,1,0,0,1,0,1,1,0,1,0,1,0,1,0,0,0,0],
+      GCS:       [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1,2],
+      Admin:     [0,0,0,1,0,0,1,0,0,0,0,0,1,0,0,1,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0],
     },
   },
   // 2. BASE TASKFORCE DUTY
@@ -184,6 +185,9 @@ const MATRIX_STORAGE_KEY = 'baf_official_duty_matrix_v4';
 
 export function getStoredDutyMatrix(): DutyRatioTable[] {
   try {
+    if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+      return [...INITIAL_OFFICIAL_DUTY_MATRIX];
+    }
     const raw = localStorage.getItem(MATRIX_STORAGE_KEY) || localStorage.getItem('baf_official_duty_matrix_v3');
     if (raw) {
       const parsed = JSON.parse(raw);
@@ -232,21 +236,40 @@ export function getStoredDutyMatrix(): DutyRatioTable[] {
           finalMatrix = [...finalMatrix, ...missing];
         }
 
-        // Cleanse old corrupted flightTargets where security_duty had Mech: 29 or Admin: 13
+        // Cleanse old corrupted flightTargets so dynamic auto calculation always works
         finalMatrix.forEach(t => {
-          if (t.id === 'security_duty' && (t.flightTargets?.Mechanics === 29 || t.flightTargets?.Admin === 13)) {
-            t.flightTargets = { Mechanics: 28, Avionics: 18, GCS: 28, Admin: 14 };
-          }
-          if (t.id === 'base_tf' && t.flightTargets?.Admin === 1) {
-            t.flightTargets = { Mechanics: 8, Avionics: 5, GCS: 6, Admin: 3 };
-          }
-          if (t.id === 'idac_nt' && (t.flightTargets?.Mechanics === 22 || t.flightTargets?.Admin === 2)) {
-            t.flightTargets = { Mechanics: 21, Avionics: 15, GCS: 22, Admin: 4 };
-          }
-          if (t.id === 'halishahar_duty' && t.flightTargets?.Mechanics === 11) {
-            t.flightTargets = { Mechanics: 10, Avionics: 8, GCS: 11, Admin: 2 };
+          if (t.flightTargets && (
+            (t.id === 'security_duty' && (t.flightTargets.Admin === 14 || t.flightTargets.Admin === 16 || t.flightTargets.Admin === 13 || t.flightTargets.Admin === 5 || t.flightTargets.Avionics === 17)) ||
+            (t.id === 'base_tf' && t.flightTargets.Admin === 3) ||
+            (t.id === 'idac_nt' && t.flightTargets.Admin === 4)
+          )) {
+            delete t.flightTargets;
           }
         });
+
+        // Cleanse old corrupted long consecutive streaks in security_duty (e.g. 12+ continuous days without gaps)
+        const secTable = finalMatrix.find(t => t.id === 'security_duty');
+        if (secTable && secTable.data?.Mechanics) {
+          let mechStreak = 0, maxMechStreak = 0;
+          secTable.data.Mechanics.forEach((x: number) => {
+            if (x >= 1) { mechStreak++; maxMechStreak = Math.max(maxMechStreak, mechStreak); }
+            else { mechStreak = 0; }
+          });
+          if (maxMechStreak >= 12) {
+            const defSec = INITIAL_OFFICIAL_DUTY_MATRIX.find(t => t.id === 'security_duty');
+            if (defSec) {
+              secTable.data = {
+                Mechanics: [...defSec.data.Mechanics],
+                Avionics: [...defSec.data.Avionics],
+                GCS: [...defSec.data.GCS],
+                Admin: [...defSec.data.Admin],
+              };
+              try {
+                localStorage.setItem(MATRIX_STORAGE_KEY, JSON.stringify(finalMatrix));
+              } catch (e) {}
+            }
+          }
+        }
         
         // Dynamically append custom duties if they are missing
         // customDuties already declared
@@ -357,8 +380,10 @@ export function saveDutyMatrix(matrix: DutyRatioTable[]) {
     localStorage.setItem('baf_matrix_last_modified', String(Date.now()));
 
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('baf_duty_ratio_updated', { detail: { matrix: sanitizedMatrix } }));
-      window.dispatchEvent(new CustomEvent('baf_sync_duty_matrix_cloud', { detail: { matrix: sanitizedMatrix } }));
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('baf_duty_ratio_updated', { detail: { matrix: sanitizedMatrix } }));
+        window.dispatchEvent(new CustomEvent('baf_sync_duty_matrix_cloud', { detail: { matrix: sanitizedMatrix } }));
+      }, 0);
     }
   } catch (e) {
     console.error('Failed to save duty matrix:', e);
@@ -369,7 +394,9 @@ export function resetDutyMatrixToDefault(): DutyRatioTable[] {
   try {
     localStorage.removeItem(MATRIX_STORAGE_KEY);
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('baf_duty_ratio_updated', { detail: { matrix: INITIAL_OFFICIAL_DUTY_MATRIX } }));
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('baf_duty_ratio_updated', { detail: { matrix: INITIAL_OFFICIAL_DUTY_MATRIX } }));
+      }, 0);
     }
   } catch (e) {
     console.error('Failed to reset matrix:', e);
