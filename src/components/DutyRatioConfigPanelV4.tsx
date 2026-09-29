@@ -5,6 +5,7 @@ import { localDb } from '../services/localDatabase';
 import { Airman, Rank, FlightName, DutyCategoryCode } from '../types';
 import { addCustomDuty, CustomDutyConfig, removeCustomDuty } from '../utils/customDuties';
 import { getSavedCustomDisposals, saveCustomDisposal, removeSavedCustomDisposal } from '../utils/customDisposalStore';
+import { calculateBalancedAutoTargets, calculateExactDutyRatios } from '../utils/dutyDistribution';
 
 const STANDARD_DISPOSALS = [
   '-',
@@ -421,83 +422,22 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
 
   const calculatedMatrixDistributions = useMemo(() => {
     if (!matrix) return {};
+    const balanced = calculateBalancedAutoTargets(matrix, currentManpower);
+    const exactRatios = calculateExactDutyRatios(matrix, currentManpower);
     const result: Record<string, Record<string, { autoVal: number, exactVal: number }>> = {};
     
-    // Tracker to balance pure ties across different duty types
-    const tieBreakerTracker: Record<string, number> = {
-      'Mechanics': 0, 'Avionics': 0, 'GCS': 0, 'Admin': 0
-    };
-    
     matrix.forEach(t => {
-      const isSecurity = t.id === 'security_duty';
-      const dutyTotal = t.totalRequiredMonth || 0;
-      
-      const flights = ['Mechanics', 'Avionics', 'GCS', 'Admin'];
-      const flightPools: Record<string, number> = {};
-      
-      let actualPoolSize = 0;
-      flights.forEach(fl => {
-        let fltCpl = 0, fltSgt = 0;
-        if (fl === 'Mechanics') { fltCpl = currentManpower.mechCpl; fltSgt = currentManpower.mechSgt; }
-        if (fl === 'Avionics') { fltCpl = currentManpower.aviCpl; fltSgt = currentManpower.aviSgt; }
-        if (fl === 'GCS') { fltCpl = currentManpower.gcsCpl; fltSgt = currentManpower.gcsSgt; }
-        if (fl === 'Admin') { fltCpl = currentManpower.adminCpl; fltSgt = currentManpower.adminSgt; }
-        
-        let fltPool = isSecurity ? fltCpl : (fltCpl + fltSgt);
-        if (t.eligibleFlights && !t.eligibleFlights.includes(fl as any)) {
-          fltPool = 0;
-        }
-        flightPools[fl] = fltPool;
-        actualPoolSize += fltPool;
-      });
-
-      if (dutyTotal === 0 || actualPoolSize === 0) {
-        result[t.id] = flights.reduce((acc, fl) => ({ ...acc, [fl]: { autoVal: 0, exactVal: 0 } }), {});
-        return;
-      }
-
-      const exactVals = flights.map(fl => {
-        const exact = (flightPools[fl] / actualPoolSize) * dutyTotal;
-        return {
-          flight: fl,
-          exact: exact,
-          floor: Math.floor(exact),
-          remainder: exact - Math.floor(exact)
-        };
-      });
-
-      const allocated = exactVals.reduce((sum, item) => sum + item.floor, 0);
-      const remaining = dutyTotal - allocated;
-
-      const sortedForDistribution = [...exactVals]
-        .filter(item => flightPools[item.flight] > 0)
-        .sort((a, b) => {
-        const diff = b.remainder - a.remainder;
-        if (Math.abs(diff) > 1e-9) {
-          return diff; // larger remainder first
-        }
-        const floorDiff = a.floor - b.floor;
-        if (floorDiff !== 0) {
-          return floorDiff; // tie breaker 1: lower total duty (floor) first
-        }
-        // tie breaker 2: alternate based on who has received fewer extra tie-breaker duties
-        return tieBreakerTracker[a.flight] - tieBreakerTracker[b.flight];
-      });
-
-      for (let i = 0; i < remaining && i < sortedForDistribution.length; i++) {
-        sortedForDistribution[i].floor += 1;
-        // Record allocation to balance future pure ties
-        tieBreakerTracker[sortedForDistribution[i].flight] += 1;
-      }
-
       result[t.id] = {};
-      exactVals.forEach(item => {
-        result[t.id][item.flight] = { autoVal: item.floor, exactVal: item.exact };
+      const flights = ['Mechanics', 'Avionics', 'GCS', 'Admin'];
+      flights.forEach(fl => {
+        const autoVal = balanced[fl as FlightName]?.[t.id] ?? 0;
+        const exactVal = exactRatios[t.id]?.[fl as FlightName] ?? autoVal;
+        result[t.id][fl] = { autoVal, exactVal };
       });
     });
     
     return result;
-  }, [matrix, JSON.stringify(currentManpower), totalCpl, totalSgtAndBelow]);
+  }, [matrix, JSON.stringify(currentManpower)]);
 
   return (
     <div className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 p-4 md:p-8 min-h-max overflow-auto text-sm font-sans relative" style={{ fontFamily: 'Arial, sans-serif' }}>
@@ -1058,19 +998,19 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
 
           {/* DISTRIBUTION AS PER FLIGHT */}
           <div className="overflow-x-auto pb-4">
-            <div className="flex flex-col items-center mb-4 relative w-full">
-              <div className="font-bold underline text-sm mb-2 md:mb-0.5 mt-1 md:mt-0">DISTRIBUTION AS PER FLIGHT</div>
-              <div className="w-full flex justify-center md:absolute md:right-0 md:top-0 mb-3 md:mb-0 md:w-auto">
+            <div className="flex flex-col items-center justify-center mb-4 w-full gap-2">
+              <div className="font-bold underline text-sm text-center">DISTRIBUTION AS PER FLIGHT</div>
+              <div className="flex justify-center items-center">
                 <button 
                   onClick={() => setShowExactRatio(!showExactRatio)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold border transition-colors ${showExactRatio ? 'bg-blue-100 text-blue-700 border-blue-300 dark:bg-blue-900/40 dark:text-blue-300 dark:border-blue-700' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700 dark:hover:bg-slate-700'}`}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold border transition-colors shadow-xs ${showExactRatio ? 'bg-blue-100 text-blue-700 border-blue-300 dark:bg-blue-900/40 dark:text-blue-300 dark:border-blue-700' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700 dark:hover:bg-slate-700'}`}
                   title="Toggle view of exact mathematical ratio before rounding"
                 >
                   <Info className="w-4 h-4" />
                   <span>{showExactRatio ? 'Hide Exact Ratio' : 'View Exact Ratio'}</span>
                 </button>
               </div>
-              <div className="text-xs text-slate-500 dark:text-slate-400 mb-2 max-w-xl text-center">
+              <div className="text-xs text-slate-500 dark:text-slate-400 text-center max-w-xl">
                 Values auto-generate intelligently to exactly match the target total. You can edit cells manually. Delete manual values to revert to auto.
               </div>
             </div>
@@ -1110,6 +1050,8 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                         
                         const manualVal = t.flightTargets?.[fl as keyof typeof t.flightTargets];
                         
+                        const isOverridden = manualVal !== undefined && manualVal !== autoVal;
+                        
                         return (
                           <td key={t.id} className="border border-slate-400 dark:border-slate-700 px-0 py-0 relative">
                             {t.eligibleFlights && !t.eligibleFlights.includes(fl as any) ? (
@@ -1118,14 +1060,14 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                               <div className="w-full h-full min-h-[30px] flex items-center justify-center text-xs whitespace-nowrap px-1">
                                 <span className="text-slate-500 dark:text-slate-400">{exactVal.toFixed(2)}</span>
                                 <span className="mx-1 text-slate-300 dark:text-slate-600">➤</span>
-                                <span className={manualVal !== undefined ? 'text-indigo-700 dark:text-indigo-400 font-bold' : 'text-slate-700 dark:text-slate-300 font-bold'}>
+                                <span className={isOverridden ? 'text-indigo-700 dark:text-indigo-400 font-bold' : 'text-slate-700 dark:text-slate-300 font-bold'}>
                                   {manualVal !== undefined ? manualVal : autoVal}
                                 </span>
                               </div>
                             ) : (
                               <input
                                 type="number"
-                                className={`w-full h-full min-h-[30px] px-1 text-center bg-transparent outline-none focus:bg-indigo-50 dark:focus:bg-indigo-900/30 ${manualVal !== undefined ? 'text-indigo-700 dark:text-indigo-400 font-bold' : 'text-slate-700 dark:text-slate-300'}`}
+                                className={`w-full h-full min-h-[30px] px-1 text-center bg-transparent outline-none focus:bg-indigo-50 dark:focus:bg-indigo-900/30 ${isOverridden ? 'text-indigo-700 dark:text-indigo-400 font-bold' : 'text-slate-700 dark:text-slate-300'}`}
                                 placeholder={autoVal.toString()}
                                 value={manualVal !== undefined ? manualVal : ''}
                                 onChange={(e) => {

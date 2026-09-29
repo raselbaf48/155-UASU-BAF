@@ -231,6 +231,22 @@ export function getStoredDutyMatrix(): DutyRatioTable[] {
         if (missing.length > 0) {
           finalMatrix = [...finalMatrix, ...missing];
         }
+
+        // Cleanse old corrupted flightTargets where security_duty had Mech: 29 or Admin: 13
+        finalMatrix.forEach(t => {
+          if (t.id === 'security_duty' && (t.flightTargets?.Mechanics === 29 || t.flightTargets?.Admin === 13)) {
+            t.flightTargets = { Mechanics: 28, Avionics: 18, GCS: 28, Admin: 14 };
+          }
+          if (t.id === 'base_tf' && t.flightTargets?.Admin === 1) {
+            t.flightTargets = { Mechanics: 8, Avionics: 5, GCS: 6, Admin: 3 };
+          }
+          if (t.id === 'idac_nt' && (t.flightTargets?.Mechanics === 22 || t.flightTargets?.Admin === 2)) {
+            t.flightTargets = { Mechanics: 21, Avionics: 15, GCS: 22, Admin: 4 };
+          }
+          if (t.id === 'halishahar_duty' && t.flightTargets?.Mechanics === 11) {
+            t.flightTargets = { Mechanics: 10, Avionics: 8, GCS: 11, Admin: 2 };
+          }
+        });
         
         // Dynamically append custom duties if they are missing
         // customDuties already declared

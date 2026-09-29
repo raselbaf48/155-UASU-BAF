@@ -7,6 +7,7 @@ import {
   saveDutyMatrix,
   resetDutyMatrixToDefault,
 } from '../data/officialDutyRatioMatrix';
+import { calculateBalancedAutoTargets, autoAllocateDutyMatrix, DEFAULT_MANPOWER } from '../utils/dutyDistribution';
 import { FlightName, UserRole } from '../types';
 import {
   Save,
@@ -77,6 +78,21 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
   }, []);
   const [settingsTab, setSettingsTab] = useState<'Overall' | 'Mechanics' | 'Avionics' | 'GCS' | null>(null);
   const [editingCalendar, setEditingCalendar] = useState<{tableIdx: number, flight: FlightName} | null>(null);
+  const [autoAllocateToast, setAutoAllocateToast] = useState<boolean>(false);
+
+  const handleTriggerAutoAllocate = () => {
+    const savedManpower = localStorage.getItem('baf_duty_distribution_manpower');
+    let activeManpower = DEFAULT_MANPOWER;
+    if (savedManpower) {
+      try {
+        activeManpower = JSON.parse(savedManpower);
+      } catch (e) {}
+    }
+    const allocatedMatrix = autoAllocateDutyMatrix(matrix, activeManpower);
+    handleRatioCalculated(allocatedMatrix);
+    setAutoAllocateToast(true);
+    setTimeout(() => setAutoAllocateToast(false), 3500);
+  };
 
   const daysArray = Array.from({ length: 31 }, (_, i) => i + 1);
   const flights: FlightName[] = ['Mechanics', 'Avionics', 'GCS', 'Admin'];
@@ -238,82 +254,15 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
   }, 0);
 
   
-  // Calculate Auto Targets from localStorage
-  
+  // Calculate Auto Targets with Cross-Duty Workload Balancing
   const savedManpower = localStorage.getItem('baf_duty_distribution_manpower');
-  let autoTargets: Record<string, Record<string, number>> = {
-    Mechanics: {}, Avionics: {}, GCS: {}, Admin: {}
-  };
-  
+  let currentManpower = DEFAULT_MANPOWER;
   if (savedManpower) {
     try {
-      const manpower = JSON.parse(savedManpower);
-      const totalCpl = manpower.mechCpl + manpower.aviCpl + manpower.gcsCpl + manpower.adminCpl;
-      const totalSgt = manpower.mechSgt + manpower.aviSgt + manpower.gcsSgt + manpower.adminSgt;
-      const totalAll = totalCpl + totalSgt;
-      
-      const fltStrength = {
-         Mechanics: { cpl: manpower.mechCpl, sgt: manpower.mechSgt, total: manpower.mechCpl + manpower.mechSgt },
-         Avionics: { cpl: manpower.aviCpl, sgt: manpower.aviSgt, total: manpower.aviCpl + manpower.aviSgt },
-         GCS: { cpl: manpower.gcsCpl, sgt: manpower.gcsSgt, total: manpower.gcsCpl + manpower.gcsSgt },
-         Admin: { cpl: manpower.adminCpl, sgt: manpower.adminSgt, total: manpower.adminCpl + manpower.adminSgt },
-      };
-
-      let tieBreakerTracker = { Mechanics: 0, Avionics: 0, GCS: 0, Admin: 0 };
-      matrix.filter(t => !t.isDisabled).forEach(t => {
-         const isSecurity = t.id === 'security_duty';
-         const dutyTotal = t.totalRequiredMonth || 0;
-         let actualPoolSize = 0;
-         let flightPools = { Mechanics: 0, Avionics: 0, GCS: 0, Admin: 0 };
-         
-         flights.forEach(fl => {
-            let fltPool = isSecurity ? fltStrength[fl].cpl : fltStrength[fl].total;
-            if (t.eligibleFlights && !t.eligibleFlights.includes(fl)) {
-              fltPool = 0;
-            }
-            flightPools[fl] = fltPool;
-            actualPoolSize += fltPool;
-         });
-         
-         if (dutyTotal === 0 || actualPoolSize === 0) {
-            flights.forEach(fl => { autoTargets[fl][t.id] = 0; });
-            return;
-         }
-         
-         const exactVals = flights.map(fl => {
-            const exact = (flightPools[fl] / actualPoolSize) * dutyTotal;
-            return {
-              flight: fl,
-              exact: exact,
-              floor: Math.floor(exact),
-              remainder: exact - Math.floor(exact)
-            };
-         });
-         
-         const allocated = exactVals.reduce((sum, item) => sum + item.floor, 0);
-         const remaining = dutyTotal - allocated;
-         
-         const sortedForDistribution = [...exactVals]
-           .filter(item => flightPools[item.flight] > 0)
-           .sort((a, b) => {
-             const diff = b.remainder - a.remainder;
-             if (Math.abs(diff) > 1e-9) return diff;
-             const floorDiff = a.floor - b.floor;
-             if (floorDiff !== 0) return floorDiff;
-             return tieBreakerTracker[a.flight] - tieBreakerTracker[b.flight];
-           });
-           
-         for (let i = 0; i < remaining && i < sortedForDistribution.length; i++) {
-           sortedForDistribution[i].floor += 1;
-           tieBreakerTracker[sortedForDistribution[i].flight] += 1;
-         }
-         
-         exactVals.forEach(item => {
-           autoTargets[item.flight][t.id] = item.floor;
-         });
-      });
-    } catch(e){}
+      currentManpower = JSON.parse(savedManpower);
+    } catch (e) {}
   }
+  const autoTargets = calculateBalancedAutoTargets(matrix, currentManpower);
 
 
   const flightTotalsOverall: Record<FlightName, number> = {
@@ -379,6 +328,16 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
 
           {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') ? (
             <>
+              <button
+                type="button"
+                onClick={handleTriggerAutoAllocate}
+                className="px-3.5 py-2 text-xs font-bold text-white bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 rounded-xl transition-all flex items-center space-x-1.5 shadow-sm cursor-pointer border border-indigo-400/30"
+                title="Auto Allocate Daily Duties with Balanced Target Matching"
+              >
+                <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+                <span>Auto Allocate</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => setIsImportModalOpen(true)}
@@ -466,12 +425,12 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
 
                 {viewMode === 'DUTY_RATIO' && (
           <>
-            <div className="flex flex-col sm:flex-row items-center justify-between bg-white dark:bg-slate-900 p-4 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 mb-6">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-white dark:bg-slate-900 p-4 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 mb-6">
               <div className="flex items-center space-x-2 text-sm font-bold text-slate-700 dark:text-slate-300">
                 <Layers className="w-4 h-4 text-indigo-500" />
                 <span>Flight Filter:</span>
               </div>
-              <div className="flex flex-wrap gap-2 mt-3 sm:mt-0">
+              <div className="flex flex-wrap gap-2">
                 {['Overall', 'Mechanics', 'Avionics', 'GCS', 'Admin'].map((fl) => (
                   <button
                     key={fl}
@@ -486,7 +445,29 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                   </button>
                 ))}
               </div>
+
+              {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') && (
+                <button
+                  type="button"
+                  onClick={handleTriggerAutoAllocate}
+                  className="px-3.5 py-1.5 text-xs font-bold text-white bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 rounded-xl transition-all flex items-center space-x-1.5 shadow-sm cursor-pointer border border-indigo-400/30 shrink-0"
+                  title="Auto Allocate Daily Duties with Balanced Target Matching"
+                >
+                  <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+                  <span>Auto Allocate</span>
+                </button>
+              )}
             </div>
+
+            {autoAllocateToast && (
+              <div className="fixed top-20 right-4 z-50 bg-emerald-600 text-white px-4 py-3 rounded-2xl shadow-xl flex items-center space-x-3 border border-emerald-400/40 animate-in fade-in slide-in-from-top-4">
+                <Sparkles className="w-5 h-5 text-amber-300 shrink-0" />
+                <div>
+                  <div className="font-bold text-sm">Auto Allocation Complete!</div>
+                  <div className="text-xs text-emerald-100">Daily duties balanced smoothly with minimum color alerts.</div>
+                </div>
+              </div>
+            )}
             
             <div className="flex flex-col items-center justify-center gap-2 mb-6">
               <div className="flex items-center gap-3">
