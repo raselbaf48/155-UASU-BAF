@@ -535,7 +535,7 @@ return () => mediaQuery.removeEventListener('change', listener);
         />
 
         {/* Main View Area (Opens on Right Side based on clicked tab) */}
-        <main className={`flex-1 px-4 sm:px-6 lg:px-8 py-6 max-w-[1600px] w-full mx-auto print:p-0 print:m-0 print:max-w-none print:w-full`}>
+        <main className={`flex-1 ${activeTab === 'duty-ratio' ? 'px-1 sm:px-2 md:px-3 py-3 max-w-none' : activeTab === 'register' ? 'px-2 sm:px-4 lg:px-6 max-w-none' : 'px-4 sm:px-6 lg:px-8 max-w-[1600px]'} py-6 w-full mx-auto print:p-0 print:m-0 print:max-w-none print:w-full`}>
           {activeTab === 'biodata-register' && (
             <NominalRoll
               variant="biodata"

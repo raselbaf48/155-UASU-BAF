@@ -344,8 +344,8 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
   };
 
   return (
-    <div className="w-full h-full flex flex-col bg-slate-50 dark:bg-slate-900 overflow-hidden print:overflow-visible">
-      <div className="flex-none pt-4 px-4 md:pt-6 md:px-6 w-full max-w-7xl mx-auto animate-fadeIn space-y-6 print:hidden">
+    <div className="w-full flex flex-col bg-slate-50 dark:bg-slate-900 print:bg-white print:overflow-visible">
+      <div className="w-full pt-2 px-1 sm:px-2 md:px-3 max-w-none mx-auto animate-fadeIn space-y-4 print:hidden">
       {/* Top Banner & Header */}
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-6 border-b border-slate-200 dark:border-slate-800">
         <div className="flex items-center space-x-3.5">
@@ -452,8 +452,8 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
         >Duty Ratio</button>
       </div>
     </div>
-    <div className="flex-1 overflow-y-auto p-4 md:p-6 scroll-smooth print:hidden">
-      <div className="max-w-7xl mx-auto space-y-8">
+    <div className="flex-1 overflow-y-auto p-0 sm:p-1 md:p-2 scroll-smooth print:hidden">
+      <div className="w-full max-w-none mx-auto space-y-6">
         
         {viewMode !== 'DUTY_RATIO' && (
           <DutyRatioConfigPanel
@@ -578,27 +578,41 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                 </div>
               </div>
                 {/* Table Body (Days 1 to 31) */}
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs text-center border-collapse">
+                <div className="w-full overflow-x-auto scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-600">
+                  <table className="w-full text-xs text-center border-collapse table-auto md:table-fixed min-w-[940px]">
+                    <colgroup>
+                      <col className="w-20 sm:w-24 min-w-[80px]" />
+                      {daysArray.map((d) => (
+                        <col key={d} className="w-[26px] sm:w-[28px] min-w-[24px]" />
+                      ))}
+                      <col className={showAllTableInfo ? "w-[84px] sm:w-[92px] min-w-[80px]" : "w-[54px] sm:w-[60px] min-w-[50px]"} />
+                    </colgroup>
                     <thead>
                       <tr className="bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
-                        <th className="p-2 text-center sticky left-0 bg-slate-100 dark:bg-slate-800 z-10 w-28 min-w-28 border-r border-slate-200 dark:border-slate-700 text-center align-middle">
+                        <th className="p-1.5 sm:p-2 text-center sticky left-0 bg-slate-100 dark:bg-slate-800 z-10 w-20 sm:w-24 min-w-[80px] border-r border-slate-200 dark:border-slate-700 align-middle shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)]">
                           Date
                         </th>
                         {daysArray.map((d) => (
-                          <th key={d} className={`p-1 min-w-[28px] max-w-[32px] font-mono text-[11px] text-center align-middle ${d % 2 === 0 ? 'bg-slate-200/70 dark:bg-slate-700/70' : 'bg-slate-100/70 dark:bg-slate-800/70'}`}>
+                          <th key={d} className={`p-0.5 sm:p-1 font-mono text-[11px] text-center align-middle ${d % 2 === 0 ? 'bg-slate-200/70 dark:bg-slate-700/70' : 'bg-slate-100/70 dark:bg-slate-800/70'}`}>
                             {d}
                           </th>
                         ))}
-                        {showAllTableInfo ? (
-                          <th className="p-2 min-w-[96px] w-[96px] font-bold bg-slate-200/60 dark:bg-slate-700/60 border-l border-slate-200 dark:border-slate-700 text-center align-middle whitespace-nowrap">
-                            Total / Target
-                          </th>
-                        ) : (
-                          <th className="p-2 min-w-[64px] w-[64px] font-bold bg-slate-200/60 dark:bg-slate-700/60 border-l border-slate-200 dark:border-slate-700 text-center align-middle">
-                            Total
-                          </th>
-                        )}
+                        <th className="p-1 font-bold border-l border-slate-200 dark:border-slate-700 text-center align-middle bg-slate-100 dark:bg-slate-800/80">
+                          {showAllTableInfo ? (
+                            <div className="flex flex-col items-center justify-center leading-tight">
+                              <span className="text-[11px] font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                                Total
+                              </span>
+                              <span className="text-[9px] uppercase tracking-wider text-slate-500 dark:text-slate-400 font-bold">
+                                / Target
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-[11px] font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                              Total
+                            </span>
+                          )}
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -614,19 +628,19 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                               key={flight}
                               className={`transition-colors ${isAltRow ? 'bg-slate-50/80 dark:bg-slate-800/40 hover:bg-slate-100/70 dark:hover:bg-slate-800/60' : 'bg-white dark:bg-slate-900 hover:bg-slate-50/80 dark:hover:bg-slate-800/40'}`}
                             >
-                              <td className={`p-2 text-center font-bold text-slate-900 dark:text-white sticky left-0 z-10 border-r border-slate-200 dark:border-slate-800 text-center align-middle ${isAltRow ? 'bg-slate-100/95 dark:bg-slate-800/95' : 'bg-white dark:bg-slate-900'}`}>
-                                <div className="flex items-center justify-between">
-                                  <span>{flight}</span>
+                              <td className={`p-1.5 sm:p-2 text-center font-bold text-slate-900 dark:text-white sticky left-0 z-10 border-r border-slate-200 dark:border-slate-800 align-middle shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)] ${isAltRow ? 'bg-slate-100/95 dark:bg-slate-800/95' : 'bg-white dark:bg-slate-900'}`}>
+                                <div className="flex items-center justify-between gap-1">
+                                  <span className="text-[11px] sm:text-xs font-bold truncate">{flight}</span>
                                   {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') ? (
                                     <button
                                       onClick={() => setEditingCalendar({ tableIdx: matrix.findIndex(x => x.id === table.id), flight })}
-                                      className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-indigo-500 transition-colors cursor-pointer"
+                                      className="p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-indigo-500 transition-colors cursor-pointer shrink-0"
                                       title="Edit in Calendar"
                                     >
-                                      <Calendar className="w-4 h-4" />
+                                      <Calendar className="w-3.5 h-3.5" />
                                     </button>
                                   ) : (
-                                    <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                                    <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                                   )}
                                 </div>
                               </td>
@@ -666,7 +680,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                                       handleToggleFlightDutyCell(table.id, flight, dayIdx, cur === 2 ? 0 : 2);
                                     }}
                                     title={`Date ${dayNum} (${flight} - ${table.title}): Day Total ${dutyDaySum} / Required ${dutyDayReq}. Click for 1/0, Right-click or Double-click for 2`}
-                                    className={`p-1 border border-slate-200/60 dark:border-slate-800/60 text-center align-middle cursor-pointer select-none transition-colors hover:bg-indigo-500/10 ${
+                                    className={`p-0.5 border border-slate-200/60 dark:border-slate-800/60 text-center align-middle cursor-pointer select-none transition-colors hover:bg-indigo-500/10 ${
                                       isAltRow
                                         ? (isAltCol ? 'bg-slate-100/30 dark:bg-slate-800/25' : 'bg-slate-50/20 dark:bg-slate-800/10')
                                         : (isAltCol ? 'bg-slate-50/30 dark:bg-slate-900/40' : 'bg-white dark:bg-slate-900/20')
@@ -674,7 +688,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                                   >
                                     {isPositive ? (
                                       <div
-                                        className={`w-6 h-6 mx-auto rounded-md flex items-center justify-center font-mono text-[11px] font-bold transition-all shadow-2xs ${
+                                        className={`w-5.5 h-5.5 sm:w-6 sm:h-6 mx-auto rounded-md flex items-center justify-center font-mono text-[11px] font-bold transition-all shadow-2xs ${
                                           isDayExceeded
                                             ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/40 font-black'
                                             : isDayShortage
@@ -685,15 +699,15 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                                         {val}
                                       </div>
                                     ) : isDayExceeded ? (
-                                      <div className="w-6 h-6 mx-auto rounded-md flex items-center justify-center font-mono text-[11px] font-bold bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/40">
+                                      <div className="w-5.5 h-5.5 sm:w-6 sm:h-6 mx-auto rounded-md flex items-center justify-center font-mono text-[11px] font-bold bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/40">
                                         -
                                       </div>
                                     ) : isDayShortage ? (
-                                      <div className="w-6 h-6 mx-auto rounded-md flex items-center justify-center font-mono text-[11px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-300 border-1.5 border-amber-400 dark:border-amber-400">
+                                      <div className="w-5.5 h-5.5 sm:w-6 sm:h-6 mx-auto rounded-md flex items-center justify-center font-mono text-[11px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-300 border-1.5 border-amber-400 dark:border-amber-400">
                                         -
                                       </div>
                                     ) : (
-                                      <span className="inline-block w-6 h-6 leading-6 text-slate-300 dark:text-slate-700/60 font-mono text-xs select-none">
+                                      <span className="inline-block w-5.5 h-5.5 sm:w-6 sm:h-6 leading-5 text-slate-300 dark:text-slate-700/60 font-mono text-xs select-none">
                                         -
                                       </span>
                                     )}
@@ -702,23 +716,29 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                               })}
 
                               {showAllTableInfo ? (
-                                <td className={`p-2 font-mono border-l border-slate-200 dark:border-slate-700 text-center align-middle ${isAltRow ? 'bg-slate-100/80 dark:bg-slate-800/80' : 'bg-slate-50 dark:bg-slate-800/50'}`}>
+                                <td className={`p-1 font-mono border-l border-slate-200 dark:border-slate-700 text-center align-middle ${
+                                  isAltRow ? 'bg-slate-100/80 dark:bg-slate-800/80' : 'bg-slate-50/50 dark:bg-slate-800/40'
+                                }`}>
                                   <div className="flex items-center justify-center">
-                                    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-mono text-[11px] font-bold shadow-2xs whitespace-nowrap ${
+                                    <div className={`inline-flex items-center justify-center gap-1 px-1.5 py-0.5 rounded-lg font-mono text-xs shadow-xs border transition-all ${
                                       rowSum > (autoTargets?.[flight]?.[table.id] ?? table.flightTargets?.[flight] ?? 0)
-                                        ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 font-black'
+                                        ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/40 font-black'
                                         : rowSum < (autoTargets?.[flight]?.[table.id] ?? table.flightTargets?.[flight] ?? 0)
-                                          ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-400/40 font-bold'
-                                          : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
+                                          ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-400/60 font-bold'
+                                          : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/40 font-bold'
                                     }`}>
-                                      <span>{rowSum}</span>
-                                      <span className="text-[10px] text-slate-400 font-normal">/</span>
-                                      <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">{(autoTargets?.[flight]?.[table.id] ?? table.flightTargets?.[flight] ?? 0)}</span>
-                                    </span>
+                                      <span className="font-black text-[11px] sm:text-[12px]">{rowSum}</span>
+                                      <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold">/</span>
+                                      <span className="text-[10px] sm:text-[11px] text-slate-600 dark:text-slate-300 font-semibold">
+                                        {(autoTargets?.[flight]?.[table.id] ?? table.flightTargets?.[flight] ?? 0)}
+                                      </span>
+                                    </div>
                                   </div>
                                 </td>
                               ) : (
-                                <td className={`p-2 font-mono font-black text-slate-900 dark:text-white border-l border-slate-200 dark:border-slate-700 text-center align-middle ${isAltRow ? 'bg-slate-100/80 dark:bg-slate-800/80' : 'bg-slate-50 dark:bg-slate-800/50'}`}>
+                                <td className={`p-1 font-mono font-black text-slate-900 dark:text-white border-l border-slate-200 dark:border-slate-700 text-center align-middle ${
+                                  isAltRow ? 'bg-slate-100/80 dark:bg-slate-800/80' : 'bg-slate-50/50 dark:bg-slate-800/40'
+                                }`}>
                                   {rowSum}
                                 </td>
                               )}
@@ -728,13 +748,13 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
 
                       {/* Daily Total Row (Sum across all flights for each day) */}
                       <tr className="bg-slate-100/90 dark:bg-slate-800/90 font-bold border-t-2 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100">
-                        <td className="p-2 text-center font-black sticky left-0 bg-slate-100 dark:bg-slate-800 z-10 border-r border-slate-300 dark:border-slate-700 text-center align-middle">
-                          <div className="flex items-center justify-between">
-                            <span className="uppercase text-[11px] font-black tracking-wider text-slate-800 dark:text-slate-200">
-                              {showAllTableInfo ? 'Total / Reqr.' : 'Daily Total'}
+                        <td className="p-1.5 sm:p-2 text-center font-black sticky left-0 bg-slate-100 dark:bg-slate-800 z-10 w-20 sm:w-24 min-w-[80px] border-r border-slate-300 dark:border-slate-700 align-middle shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)]">
+                          <div className="flex flex-col items-center justify-center leading-tight">
+                            <span className="uppercase text-[10px] sm:text-[11px] font-black tracking-wider text-slate-800 dark:text-slate-200">
+                              {showAllTableInfo ? 'Total / Req' : 'Daily Total'}
                             </span>
-                            <span className="text-[9px] px-1 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-mono font-bold">
-                              TOTAL
+                            <span className="text-[9px] uppercase tracking-wider text-indigo-600 dark:text-indigo-400 font-bold mt-0.5">
+                              Unit Sum
                             </span>
                           </div>
                         </td>
@@ -759,11 +779,22 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                           return (
                             <td
                               key={dayNum}
-                              className="p-1 border border-slate-200/60 dark:border-slate-700/60 text-center align-middle"
+                              className="p-0.5 border border-slate-200/60 dark:border-slate-700/60 text-center align-middle"
                               title={`Date ${dayNum}: Total ${dailySum} / Required ${dailyReq}`}
                             >
-                              {isPositive || isDayShortage ? (
-                                <span className={`inline-flex items-center justify-center w-6 h-6 rounded-md font-mono font-bold text-xs shadow-2xs ${
+                              {showAllTableInfo ? (
+                                <div className={`mx-auto rounded-md flex flex-col items-center justify-center font-mono py-0.5 px-0.5 min-w-[22px] sm:min-w-[24px] ${
+                                  isDayExceeded
+                                    ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/40 font-black'
+                                    : isDayShortage
+                                      ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-400/60 font-bold'
+                                      : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
+                                }`}>
+                                  <span className="text-[11px] leading-tight font-black">{dailySum}</span>
+                                  <span className="text-[8px] leading-none opacity-80 font-bold">/{dailyReq}</span>
+                                </div>
+                              ) : isPositive || isDayShortage ? (
+                                <span className={`inline-flex items-center justify-center w-5.5 h-5.5 sm:w-6 sm:h-6 rounded-md font-mono font-bold text-xs shadow-2xs ${
                                   isDayExceeded
                                     ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/40 font-black'
                                     : isDayShortage
@@ -779,23 +810,32 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                           );
                         })}
 
-                        <td className="p-2 font-mono font-bold border-l border-slate-300 dark:border-slate-700 text-xs text-center align-middle bg-slate-200/50 dark:bg-slate-800/50">
-                          {showAllTableInfo ? (
-                            <div className="flex items-center justify-center">
-                              <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-mono text-[11px] font-bold shadow-2xs whitespace-nowrap ${
-                                tableTotal !== (table.totalRequiredMonth || 0)
-                                  ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 font-black'
-                                  : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
-                              }`}>
-                                <span>{tableTotal}</span>
-                                <span className="text-[10px] text-slate-400 font-normal">/</span>
-                                <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">{table.totalRequiredMonth || 0}</span>
-                              </span>
-                            </div>
-                          ) : (
-                            tableTotal
-                          )}
-                        </td>
+                        {(() => {
+                          const isTotalExceeded = tableTotal > (table.totalRequiredMonth || 0);
+                          const isTotalShortage = tableTotal < (table.totalRequiredMonth || 0);
+
+                          return (
+                            <td className="p-1 font-mono font-bold bg-slate-200/60 dark:bg-slate-800/80 border-l border-slate-300 dark:border-slate-700 text-xs text-center align-middle">
+                              {showAllTableInfo ? (
+                                <div className="flex items-center justify-center">
+                                  <div className={`inline-flex items-center justify-center gap-1 px-1.5 py-0.5 rounded-lg font-mono text-xs shadow-xs border transition-all ${
+                                    isTotalExceeded
+                                      ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/40 font-black'
+                                      : isTotalShortage
+                                        ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-400/60 font-bold'
+                                        : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/40 font-bold'
+                                  }`}>
+                                    <span className="font-black text-[11px] sm:text-[12px]">{tableTotal}</span>
+                                    <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold">/</span>
+                                    <span className="text-[10px] sm:text-[11px] text-slate-600 dark:text-slate-300 font-semibold">{table.totalRequiredMonth || 0}</span>
+                                  </div>
+                                </div>
+                              ) : (
+                                <span className="font-mono font-black text-slate-900 dark:text-white text-xs">{tableTotal}</span>
+                              )}
+                            </td>
+                          );
+                        })()}
                       </tr>
                     </tbody>
                   </table>
@@ -823,27 +863,41 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                   )}
                 </div>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs text-center border-collapse">
+              <div className="w-full overflow-x-auto scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-600">
+                <table className="w-full text-xs text-center border-collapse table-auto md:table-fixed min-w-[960px]">
+                  <colgroup>
+                    <col className="w-28 sm:w-36 min-w-[110px]" />
+                    {daysArray.map((d) => (
+                      <col key={d} className="w-[26px] sm:w-[28px] min-w-[24px]" />
+                    ))}
+                    <col className={showAllTableInfo ? "w-[84px] sm:w-[92px] min-w-[80px]" : "w-[54px] sm:w-[60px] min-w-[50px]"} />
+                  </colgroup>
                   <thead>
                     <tr className="bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
-                      <th className="p-2 text-center sticky left-0 bg-slate-100 dark:bg-slate-800 z-10 w-32 min-w-32 border-r border-slate-200 dark:border-slate-700 align-middle">
+                      <th className="p-1.5 sm:p-2 text-center sticky left-0 bg-slate-100 dark:bg-slate-800 z-10 w-28 sm:w-36 min-w-[110px] border-r border-slate-200 dark:border-slate-700 align-middle shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)]">
                         Duty Name / Date
                       </th>
                       {daysArray.map((d) => (
-                        <th key={d} className={`p-1 min-w-[28px] max-w-[32px] font-mono text-[11px] align-middle ${d % 2 === 0 ? 'bg-slate-200/70 dark:bg-slate-700/70' : 'bg-slate-100/70 dark:bg-slate-800/70'}`}>
+                        <th key={d} className={`p-0.5 sm:p-1 font-mono text-[11px] align-middle ${d % 2 === 0 ? 'bg-slate-200/70 dark:bg-slate-700/70' : 'bg-slate-100/70 dark:bg-slate-800/70'}`}>
                           {d}
                         </th>
                       ))}
-                      {showAllTableInfo ? (
-                        <th className="p-2 min-w-[96px] w-[96px] font-bold bg-slate-200/60 dark:bg-slate-700/60 border-l border-slate-200 dark:border-slate-700 text-center align-middle whitespace-nowrap">
-                          Total / Target
-                        </th>
-                      ) : (
-                        <th className="p-2 min-w-[64px] w-[64px] font-bold bg-slate-200/60 dark:bg-slate-700/60 border-l border-slate-200 dark:border-slate-700 text-center align-middle">
-                          Total
-                        </th>
-                      )}
+                      <th className="p-1 font-bold border-l border-slate-200 dark:border-slate-700 text-center align-middle bg-slate-100 dark:bg-slate-800/80">
+                        {showAllTableInfo ? (
+                          <div className="flex flex-col items-center justify-center leading-tight">
+                            <span className="text-[11px] font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                              Total
+                            </span>
+                            <span className="text-[9px] uppercase tracking-wider text-slate-500 dark:text-slate-400 font-bold">
+                              / Target
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-[11px] font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                            Total
+                          </span>
+                        )}
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -865,25 +919,25 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                               : 'bg-white dark:bg-slate-900 hover:bg-slate-50/80 dark:hover:bg-slate-800/40'
                           }`}
                         >
-                          <td className={`p-2 text-center font-bold text-slate-900 dark:text-white sticky left-0 z-10 border-r border-slate-200 dark:border-slate-800 align-middle text-[11px] leading-tight ${
+                          <td className={`p-1.5 sm:p-2 text-center font-bold text-slate-900 dark:text-white sticky left-0 z-10 border-r border-slate-200 dark:border-slate-800 align-middle text-[11px] leading-tight shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)] ${
                             isAltRow
                               ? 'bg-slate-100/95 dark:bg-slate-800/95'
                               : 'bg-white dark:bg-slate-900'
                           }`}>
-                            <div className="flex items-center justify-between">
-                              <span className={isExceeded ? 'text-red-600 dark:text-red-400 font-bold' : ''}>
+                            <div className="flex items-center justify-between gap-1">
+                              <span className={`truncate text-left ${isExceeded ? 'text-red-600 dark:text-red-400 font-bold' : ''}`}>
                                 {table.serNo !== undefined ? `${table.serNo}. ` : ''}{table.title}
                               </span>
                               {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') ? (
                                 <button
                                   onClick={() => setEditingCalendar({ tableIdx: matrix.findIndex(x => x.id === table.id), flight: selectedFlightFilter as FlightName })}
-                                  className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 text-indigo-500 transition-colors cursor-pointer ml-2"
+                                  className="p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-indigo-500 transition-colors cursor-pointer shrink-0 ml-1"
                                   title="Edit in Calendar"
                                 >
                                   <Calendar className="w-3.5 h-3.5" />
                                 </button>
                               ) : (
-                                <Calendar className="w-3.5 h-3.5 text-slate-400 ml-2" />
+                                <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-1" />
                               )}
                             </div>
                           </td>
@@ -921,8 +975,8 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                                   const cur = rowData[dayIdx] || 0;
                                   handleToggleFlightDutyCell(table.id, selectedFlightFilter as FlightName, dayIdx, cur === 2 ? 0 : 2);
                                 }}
-                                title={`Date ${dayNum} (${table.title}): Day Total ${dutyDaySum} / Required ${dutyDayReq}. Click for 1/0, Right-click or Double-click for 2`}
-                                className={`p-1 border border-slate-200/60 dark:border-slate-800/60 text-center align-middle cursor-pointer select-none transition-colors hover:bg-indigo-500/10 ${
+                                title={`Date ${dayNum} (${selectedFlightFilter} - ${table.title}): Day Total ${dutyDaySum} / Required ${dutyDayReq}. Click for 1/0, Right-click or Double-click for 2`}
+                                className={`p-0.5 border border-slate-200/60 dark:border-slate-800/60 text-center align-middle cursor-pointer select-none transition-colors hover:bg-indigo-500/10 ${
                                   isAltRow
                                     ? (isAltCol ? 'bg-slate-100/30 dark:bg-slate-800/25' : 'bg-slate-50/20 dark:bg-slate-800/10')
                                     : (isAltCol ? 'bg-slate-50/30 dark:bg-slate-900/40' : 'bg-white dark:bg-slate-900/20')
@@ -930,7 +984,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                               >
                                 {isPositive ? (
                                   <div
-                                    className={`w-6 h-6 mx-auto rounded-md flex items-center justify-center font-mono text-[11px] font-bold transition-all shadow-2xs ${
+                                    className={`w-5.5 h-5.5 sm:w-6 sm:h-6 mx-auto rounded-md flex items-center justify-center font-mono text-[11px] font-bold transition-all shadow-2xs ${
                                       isDayExceeded
                                         ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/40 font-black'
                                         : isDayShortage
@@ -941,15 +995,15 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                                     {val}
                                   </div>
                                 ) : isDayExceeded ? (
-                                  <div className="w-6 h-6 mx-auto rounded-md flex items-center justify-center font-mono text-[11px] font-bold bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/40">
+                                  <div className="w-5.5 h-5.5 sm:w-6 sm:h-6 mx-auto rounded-md flex items-center justify-center font-mono text-[11px] font-bold bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/40">
                                     -
                                   </div>
                                 ) : isDayShortage ? (
-                                  <div className="w-6 h-6 mx-auto rounded-md flex items-center justify-center font-mono text-[11px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-300 border-1.5 border-amber-400 dark:border-amber-400">
+                                  <div className="w-5.5 h-5.5 sm:w-6 sm:h-6 mx-auto rounded-md flex items-center justify-center font-mono text-[11px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-300 border-1.5 border-amber-400 dark:border-amber-400">
                                     -
                                   </div>
                                 ) : (
-                                  <span className="inline-block w-6 h-6 leading-6 text-slate-300 dark:text-slate-700/60 font-mono text-xs select-none">
+                                  <span className="inline-block w-5.5 h-5.5 sm:w-6 sm:h-6 leading-5 text-slate-300 dark:text-slate-700/60 font-mono text-xs select-none">
                                     -
                                   </span>
                                 )}
@@ -957,25 +1011,27 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                             );
                           })}
                           {showAllTableInfo ? (
-                            <td className={`p-2 font-mono border-l border-slate-200 dark:border-slate-700 text-center align-middle ${isAltRow ? 'bg-slate-100/80 dark:bg-slate-800/80' : 'bg-slate-50 dark:bg-slate-800/50'}`}>
+                            <td className={`p-1 font-mono border-l border-slate-200 dark:border-slate-700 text-center align-middle ${
+                              isAltRow ? 'bg-slate-100/80 dark:bg-slate-800/80' : 'bg-slate-50/50 dark:bg-slate-800/40'
+                            }`}>
                               <div className="flex items-center justify-center">
-                                <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-mono text-[11px] font-bold shadow-2xs whitespace-nowrap ${
+                                <div className={`inline-flex items-center justify-center gap-1 px-1.5 py-0.5 rounded-lg font-mono text-xs shadow-xs border transition-all ${
                                   isExceeded
-                                    ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 font-black'
+                                    ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/40 font-black'
                                     : isShortage
-                                      ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-400/40 font-bold'
-                                      : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
+                                      ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-400/60 font-bold'
+                                      : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/40 font-bold'
                                 }`}>
-                                  <span>{rowSum}</span>
-                                  <span className="text-[10px] text-slate-400 font-normal">/</span>
-                                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">{target}</span>
-                                </span>
+                                  <span className="font-black text-[11px] sm:text-[12px]">{rowSum}</span>
+                                  <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold">/</span>
+                                  <span className="text-[10px] sm:text-[11px] text-slate-600 dark:text-slate-300 font-semibold">{target}</span>
+                                </div>
                               </div>
                             </td>
                           ) : (
-                            <td className={`p-2 font-mono font-black border-l border-slate-200 dark:border-slate-700 align-middle ${
+                            <td className={`p-1 font-mono font-black border-l border-slate-200 dark:border-slate-700 align-middle text-center ${
                               isExceeded ? 'text-red-600 dark:text-red-400 font-black' : isShortage ? 'text-amber-600 dark:text-amber-400' : 'text-slate-900 dark:text-white'
-                            } ${isAltRow ? 'bg-slate-100/80 dark:bg-slate-800/80' : 'bg-slate-50 dark:bg-slate-800/50'}`}>
+                            } ${isAltRow ? 'bg-slate-100/80 dark:bg-slate-800/80' : 'bg-slate-50/50 dark:bg-slate-800/40'}`}>
                               {rowSum}
                             </td>
                           )}
@@ -984,13 +1040,13 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                     })}
                     {/* Daily Total Row */}
                     <tr className="bg-slate-100/90 dark:bg-slate-800/90 font-bold border-t-2 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100">
-                      <td className="p-2 text-center font-black sticky left-0 bg-slate-100 dark:bg-slate-800 z-10 border-r border-slate-300 dark:border-slate-700 align-middle">
-                        <div className="flex items-center justify-between">
-                          <span className="uppercase text-[11px] font-black tracking-wider text-slate-800 dark:text-slate-200">
+                      <td className="p-1.5 sm:p-2 text-center font-black sticky left-0 bg-slate-100 dark:bg-slate-800 z-10 w-28 sm:w-36 min-w-[110px] border-r border-slate-300 dark:border-slate-700 align-middle shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)]">
+                        <div className="flex flex-col items-center justify-center leading-tight">
+                          <span className="uppercase text-[10px] sm:text-[11px] font-black tracking-wider text-slate-800 dark:text-slate-200">
                             {showAllTableInfo ? 'Total / Target' : 'Daily Total'}
                           </span>
-                          <span className="text-[9px] px-1 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-mono font-bold">
-                            TOTAL
+                          <span className="text-[9px] uppercase tracking-wider text-indigo-600 dark:text-indigo-400 font-bold mt-0.5">
+                            Flight Sum
                           </span>
                         </div>
                       </td>
@@ -1001,10 +1057,10 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                         return (
                           <td
                             key={dayNum}
-                            className="p-1 border border-slate-200/60 dark:border-slate-700/60 text-center align-middle"
+                            className="p-0.5 border border-slate-200/60 dark:border-slate-700/60 text-center align-middle"
                           >
                             {isPositive ? (
-                              <span className="inline-flex items-center justify-center w-6 h-6 rounded-md font-mono font-bold text-xs bg-slate-200/80 dark:bg-slate-700/80 text-slate-800 dark:text-slate-200">
+                              <span className="inline-flex items-center justify-center w-5.5 h-5.5 sm:w-6 sm:h-6 rounded-md font-mono font-bold text-xs bg-slate-200/80 dark:bg-slate-700/80 text-slate-800 dark:text-slate-200">
                                 {dailySum}
                               </span>
                             ) : (
@@ -1013,23 +1069,33 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                           </td>
                         );
                       })}
-                      <td className="p-2 font-mono font-bold border-l border-slate-300 dark:border-slate-700 text-xs text-center align-middle bg-slate-200/50 dark:bg-slate-800/50">
-                        {showAllTableInfo ? (
-                          <div className="flex items-center justify-center">
-                            <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-mono text-[11px] font-bold shadow-2xs whitespace-nowrap ${
-                              flightTotalsOverall[selectedFlightFilter as FlightName] !== targetFlightTotal
-                                ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 font-black'
-                                : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
-                            }`}>
-                              <span>{flightTotalsOverall[selectedFlightFilter as FlightName]}</span>
-                              <span className="text-[10px] text-slate-400 font-normal">/</span>
-                              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">{targetFlightTotal}</span>
-                            </span>
-                          </div>
-                        ) : (
-                          flightTotalsOverall[selectedFlightFilter as FlightName]
-                        )}
-                      </td>
+                      {(() => {
+                        const flightTotal = flightTotalsOverall[selectedFlightFilter as FlightName];
+                        const isTotalExceeded = flightTotal > targetFlightTotal;
+                        const isTotalShortage = flightTotal < targetFlightTotal;
+
+                        return (
+                          <td className="p-1 font-mono font-bold bg-slate-200/60 dark:bg-slate-800/80 border-l border-slate-300 dark:border-slate-700 text-xs text-center align-middle">
+                            {showAllTableInfo ? (
+                              <div className="flex items-center justify-center">
+                                <div className={`inline-flex items-center justify-center gap-1 px-1.5 py-0.5 rounded-lg font-mono text-xs shadow-xs border transition-all ${
+                                  isTotalExceeded
+                                    ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/40 font-black'
+                                    : isTotalShortage
+                                      ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-400/60 font-bold'
+                                      : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/40 font-bold'
+                                }`}>
+                                  <span className="font-black text-[11px] sm:text-[12px]">{flightTotal}</span>
+                                  <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold">/</span>
+                                  <span className="text-[10px] sm:text-[11px] text-slate-600 dark:text-slate-300 font-semibold">{targetFlightTotal}</span>
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="font-mono font-black text-slate-900 dark:text-white text-xs">{flightTotal}</span>
+                            )}
+                          </td>
+                        );
+                      })()}
                     </tr>
                   </tbody>
                 </table>
