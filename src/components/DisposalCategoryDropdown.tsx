@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus } from 'lucide-react';
-import { getSavedCustomDisposals, saveCustomDisposal } from '../utils/customDisposalStore';
+import { Plus, X, Trash } from 'lucide-react';
+import { getSavedCustomDisposals, saveCustomDisposal, removeSavedCustomDisposal } from '../utils/customDisposalStore';
 
 export interface DisposalOption {
   code: string;
@@ -27,6 +27,7 @@ export const DisposalCategoryDropdown: React.FC<DisposalCategoryDropdownProps> =
   const [isWritingCustom, setIsWritingCustom] = useState(false);
   const [newCustomName, setNewCustomName] = useState('');
   const [customList, setCustomList] = useState<string[]>([]);
+  const [deletingCustomName, setDeletingCustomName] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -34,6 +35,14 @@ export const DisposalCategoryDropdown: React.FC<DisposalCategoryDropdownProps> =
       setCustomList(getSavedCustomDisposals());
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      setCustomList(getSavedCustomDisposals());
+    };
+    window.addEventListener('baf_custom_disposals_updated', handleUpdate);
+    return () => window.removeEventListener('baf_custom_disposals_updated', handleUpdate);
+  }, []);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent | TouchEvent) => {
@@ -74,7 +83,7 @@ export const DisposalCategoryDropdown: React.FC<DisposalCategoryDropdownProps> =
   const submitCustom = () => {
     const trimmed = newCustomName.trim();
     if (!trimmed) return;
-    saveCustomDisposal(trimmed);
+    saveCustomDisposal(trimmed, true);
     setCustomList(getSavedCustomDisposals());
     onSelectOption({
       code: 'OTHERS',
@@ -84,6 +93,13 @@ export const DisposalCategoryDropdown: React.FC<DisposalCategoryDropdownProps> =
     setNewCustomName('');
     setIsWritingCustom(false);
     setIsOpen(false);
+  };
+
+  const handleConfirmDelete = () => {
+    if (!deletingCustomName) return;
+    const updated = removeSavedCustomDisposal(deletingCustomName);
+    setCustomList(updated);
+    setDeletingCustomName(null);
   };
 
   // Filter standard options excluding raw OTHERS (Custom is handled specially at bottom)
@@ -149,17 +165,32 @@ export const DisposalCategoryDropdown: React.FC<DisposalCategoryDropdownProps> =
                     Custom Categories
                   </div>
                   {availableCustoms.map((customName) => (
-                    <button
+                    <div
                       key={`custom-${customName}`}
-                      type="button"
-                      onClick={() => handleSelectCustom(customName)}
-                      className="w-full text-left px-4 py-1.5 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 hover:text-emerald-900 dark:hover:text-emerald-100 transition-colors flex items-center justify-between"
+                      className="flex items-center justify-between px-3 py-1.5 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 hover:text-emerald-900 dark:hover:text-emerald-100 transition-colors group"
                     >
-                      <span className="truncate">{customName}</span>
-                      <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 font-normal">
-                        Custom
-                      </span>
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectCustom(customName)}
+                        className="flex-1 text-left truncate flex items-center justify-between cursor-pointer mr-1"
+                      >
+                        <span className="truncate">{customName}</span>
+                        <span className="ml-1.5 text-[9px] px-1 py-0.2 rounded bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 font-normal shrink-0">
+                          Custom
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        title={`Remove ${customName}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeletingCustomName(customName);
+                        }}
+                        className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/60 rounded cursor-pointer shrink-0 transition-colors"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}
@@ -213,6 +244,44 @@ export const DisposalCategoryDropdown: React.FC<DisposalCategoryDropdownProps> =
             </div>
           </div>
         </>
+      )}
+
+      {/* Delete Confirmation Popup */}
+      {deletingCustomName && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4 animate-fadeIn">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 max-w-sm w-full shadow-2xl space-y-4">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-950/50 flex items-center justify-center text-red-600 dark:text-red-400 shrink-0">
+                <Trash className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                  কাস্টম ক্যাটাগরি মুছে ফেলতে চান?
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  "{deletingCustomName}" তালিকা থেকে অপসারণ করা হবে।
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setDeletingCustomName(null)}
+                className="px-3.5 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+              >
+                বাতিল (Cancel)
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                className="px-4 py-1.5 text-xs font-bold bg-red-600 hover:bg-red-700 text-white rounded-xl shadow-xs transition-colors cursor-pointer"
+              >
+                মুছে ফেলুন (Remove)
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

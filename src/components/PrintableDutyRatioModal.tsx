@@ -264,7 +264,7 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
       } else if (myAssignments.some(assign => assign.dutyCode === 'CANTEEN')) {
         defaultDisp = 'Canteen';
       } else if (myAssignments.some(assign => assign.dutyCode === 'TDY')) {
-        defaultDisp = 'TDY';
+        defaultDisp = 'TDY (Air HQ)';
       } else if (a.rank === 'Sgt' && (a.trade === 'Sec Asst GD' || (a.trade && a.trade.toLowerCase().includes('sec asst')))) {
         defaultDisp = 'Orderly Room';
       } else if (a.rank === 'Sgt' && (a.trade === 'Admin asst' || a.trade === 'Admin Asst' || (a.trade && a.trade.toLowerCase().includes('admin asst')))) {
@@ -274,6 +274,9 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
       let currentDisp = (savedDisposals[a.id] !== undefined && savedDisposals[a.id] !== '') ? savedDisposals[a.id] : defaultDisp;
       if (currentDisp === 'Deployment' || currentDisp === 'Deployment (Bake & Bite)' || currentDisp === 'Deployment (Canteen)') {
         currentDisp = defaultDisp;
+      }
+      if (currentDisp === 'TDY') {
+        currentDisp = 'TDY (Air HQ)';
       }
       if (!currentDisp || currentDisp.trim() === '') {
         currentDisp = '-';

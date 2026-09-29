@@ -19,7 +19,7 @@ import { DeploymentRegisterView } from './components/DeploymentRegisterView';
 import { IdaCenterDutyView } from './components/IdaCenterDutyView';
 import { MonthlyDutyRegister } from './components/MonthlyDutyRegister';
 import { DutyRosterPeriodView } from './components/DutyRosterPeriodView';
-import { DutyRatioMatrixView } from './components/DutyRatioMatrixView';
+import { DutyRatioMatrixView } from './components/DutyRatioMatrixViewV2';
 import { DutyAnalytics } from './components/DutyAnalytics';
 import { DutyConflictMonitor } from './components/DutyConflictMonitor';
 import { AirmanProfileModal } from './components/AirmanProfileModal';

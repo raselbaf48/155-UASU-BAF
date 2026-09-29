@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { DutyRatioConfigPanel } from './DutyRatioConfigPanel';
+import { DutyRatioConfigPanel } from './DutyRatioConfigPanelV4';
 
 import {
   DutyRatioTable,
@@ -145,6 +145,38 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
     const flightData = { ...tableObj.data };
     const arr = [...flightData[flight]];
     arr[dayIndex] = num;
+    flightData[flight] = arr;
+    tableObj.data = flightData;
+    updated[tableIndex] = tableObj;
+    setMatrix(updated);
+    saveDutyMatrix(updated);
+    setIsSaved(true);
+    setTimeout(() => setIsSaved(false), 2000);
+  };
+
+  const handleToggleFlightDutyCell = (
+    tableId: string,
+    flight: FlightName,
+    dayIndex: number,
+    forceVal?: number
+  ) => {
+    const tableIndex = matrix.findIndex(t => t.id === tableId);
+    if (tableIndex === -1) return;
+
+    const currentVal = matrix[tableIndex].data[flight]?.[dayIndex] || 0;
+    let nextVal = 0;
+    if (forceVal !== undefined) {
+      nextVal = forceVal;
+    } else {
+      // 1 click -> 1, another click -> 0 (remove)
+      nextVal = currentVal > 0 ? 0 : 1;
+    }
+
+    const updated = [...matrix];
+    const tableObj = { ...updated[tableIndex] };
+    const flightData = { ...tableObj.data };
+    const arr = [...(flightData[flight] || Array(31).fill(0))];
+    arr[dayIndex] = nextVal;
     flightData[flight] = arr;
     tableObj.data = flightData;
     updated[tableIndex] = tableObj;
@@ -466,9 +498,41 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                   <span>{showAllTableInfo ? 'Hide Info' : 'Show Info'}</span>
                 </button>
               </div>
-
-
             </div>
+
+            {showAllTableInfo && (
+              <div className="bg-indigo-50/90 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 rounded-2xl p-4 shadow-xs mb-6">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center space-x-2.5">
+                    <Info className="w-5 h-5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                    <div>
+                      <h4 className="font-black text-sm text-indigo-950 dark:text-indigo-200">
+                        {selectedFlightFilter === 'Overall' ? 'Overall Unit Duty Ratio Matrix' : `${selectedFlightFilter} Flight Quota & Target Info`}
+                      </h4>
+                      <p className="text-xs text-indigo-700 dark:text-indigo-300">
+                        {selectedFlightFilter === 'Overall'
+                          ? `Month Target: ${totalSlotsOverall} slots distributed across all flights`
+                          : `Allocated Total: ${flightTotalsOverall[selectedFlightFilter as FlightName]} / Target Total: ${targetFlightTotal}`}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-xs font-medium">
+                    <span className="inline-flex items-center space-x-1.5 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 px-2.5 py-1 rounded-md">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+                      <span>Target Matched</span>
+                    </span>
+                    <span className="inline-flex items-center space-x-1.5 bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-400 px-2.5 py-1 rounded-md">
+                      <span className="w-2 h-2 rounded-full bg-amber-500 inline-block"></span>
+                      <span>Under Quota (Yellow Border)</span>
+                    </span>
+                    <span className="inline-flex items-center space-x-1.5 bg-rose-500/10 text-rose-700 dark:text-rose-300 border border-rose-500/30 px-2.5 py-1 rounded-md">
+                      <span className="w-2 h-2 rounded-full bg-rose-500 inline-block"></span>
+                      <span>Quota Exceeded (Red Fill)</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         )}
 
@@ -527,11 +591,11 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                           </th>
                         ))}
                         {showAllTableInfo ? (
-                          <th className="p-2 w-28 min-w-28 font-bold bg-slate-200/60 dark:bg-slate-700/60 border-l border-slate-200 dark:border-slate-700 text-center align-middle leading-tight">
-                            Total / Ratio
+                          <th className="p-2 min-w-[96px] w-[96px] font-bold bg-slate-200/60 dark:bg-slate-700/60 border-l border-slate-200 dark:border-slate-700 text-center align-middle whitespace-nowrap">
+                            Total / Target
                           </th>
                         ) : (
-                          <th className="p-2 w-16 min-w-16 font-bold bg-slate-200/60 dark:bg-slate-700/60 border-l border-slate-200 dark:border-slate-700 text-center align-middle">
+                          <th className="p-2 min-w-[64px] w-[64px] font-bold bg-slate-200/60 dark:bg-slate-700/60 border-l border-slate-200 dark:border-slate-700 text-center align-middle">
                             Total
                           </th>
                         )}
@@ -572,32 +636,85 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                                 const isPositive = val > 0;
                                 const isAltCol = dayNum % 2 === 0;
 
+                                // Calculate daily quota for this specific duty across all flights on this day
+                                const dutyDaySum = flights.reduce((sum, fl) => sum + (table.data[fl]?.[dayIdx] || 0), 0);
+                                let dutyDayReq = table.dailyRequirements?.[dayIdx];
+                                if (dutyDayReq === undefined) {
+                                  if (table.totalRequiredDaily && (table.totalRequiredDaily * 31 === table.totalRequiredMonth)) {
+                                    dutyDayReq = table.totalRequiredDaily;
+                                  } else if (table.totalRequiredDaily) {
+                                    dutyDayReq = table.totalRequiredDaily;
+                                  } else {
+                                    dutyDayReq = ['Mechanics', 'Avionics', 'GCS', 'Admin'].reduce((acc, fl) => acc + (table.data[fl as FlightName]?.[dayIdx] || 0), 0);
+                                  }
+                                }
+                                const isDayExceeded = dutyDaySum > dutyDayReq;
+                                const isDayShortage = dutyDaySum < dutyDayReq;
+
                                 return (
                                   <td
                                     key={dayNum}
-                                    className={`p-0.5 border border-slate-100 dark:border-slate-800/50 ${
-                                      isPositive
-                                        ? (isAltRow
-                                            ? (isAltCol ? 'bg-emerald-100/90 dark:bg-emerald-900/60 text-emerald-950 dark:text-emerald-100 font-black' : 'bg-emerald-100/70 dark:bg-emerald-950/60 text-emerald-950 dark:text-emerald-100 font-black')
-                                            : (isAltCol ? 'bg-emerald-50/90 dark:bg-emerald-950/50 text-emerald-950 dark:text-emerald-200 font-black' : 'bg-emerald-50/60 dark:bg-emerald-950/40 text-emerald-950 dark:text-emerald-200 font-black')
-                                          )
-                                        : (isAltRow
-                                            ? (isAltCol ? 'bg-slate-200/50 dark:bg-slate-800/70 text-slate-400 dark:text-slate-600' : 'bg-slate-100/50 dark:bg-slate-800/40 text-slate-400 dark:text-slate-600')
-                                            : (isAltCol ? 'bg-slate-100/40 dark:bg-slate-800/30 text-slate-400 dark:text-slate-600' : 'bg-white dark:bg-slate-900 text-slate-400 dark:text-slate-600')
-                                          )
+                                    onClick={() => handleToggleFlightDutyCell(table.id, flight, dayIdx)}
+                                    onContextMenu={(e) => {
+                                      e.preventDefault();
+                                      const cur = table.data[flight][dayIdx] || 0;
+                                      handleToggleFlightDutyCell(table.id, flight, dayIdx, cur === 2 ? 0 : 2);
+                                    }}
+                                    onDoubleClick={(e) => {
+                                      e.preventDefault();
+                                      const cur = table.data[flight][dayIdx] || 0;
+                                      handleToggleFlightDutyCell(table.id, flight, dayIdx, cur === 2 ? 0 : 2);
+                                    }}
+                                    title={`Date ${dayNum} (${flight} - ${table.title}): Day Total ${dutyDaySum} / Required ${dutyDayReq}. Click for 1/0, Right-click or Double-click for 2`}
+                                    className={`p-1 border border-slate-200/60 dark:border-slate-800/60 text-center align-middle cursor-pointer select-none transition-colors hover:bg-indigo-500/10 ${
+                                      isAltRow
+                                        ? (isAltCol ? 'bg-slate-100/30 dark:bg-slate-800/25' : 'bg-slate-50/20 dark:bg-slate-800/10')
+                                        : (isAltCol ? 'bg-slate-50/30 dark:bg-slate-900/40' : 'bg-white dark:bg-slate-900/20')
                                     }`}
                                   >
-                                    <span className="inline-block py-1 font-mono text-xs">{val || ''}</span>
+                                    {isPositive ? (
+                                      <div
+                                        className={`w-6 h-6 mx-auto rounded-md flex items-center justify-center font-mono text-[11px] font-bold transition-all shadow-2xs ${
+                                          isDayExceeded
+                                            ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/40 font-black'
+                                            : isDayShortage
+                                              ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-1.5 border-amber-400 dark:border-amber-400 font-bold'
+                                              : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
+                                        }`}
+                                      >
+                                        {val}
+                                      </div>
+                                    ) : isDayExceeded ? (
+                                      <div className="w-6 h-6 mx-auto rounded-md flex items-center justify-center font-mono text-[11px] font-bold bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/40">
+                                        -
+                                      </div>
+                                    ) : isDayShortage ? (
+                                      <div className="w-6 h-6 mx-auto rounded-md flex items-center justify-center font-mono text-[11px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-300 border-1.5 border-amber-400 dark:border-amber-400">
+                                        -
+                                      </div>
+                                    ) : (
+                                      <span className="inline-block w-6 h-6 leading-6 text-slate-300 dark:text-slate-700/60 font-mono text-xs select-none">
+                                        -
+                                      </span>
+                                    )}
                                   </td>
                                 );
                               })}
 
                               {showAllTableInfo ? (
-                                <td className={`p-2 font-mono font-bold border-l border-slate-200 dark:border-slate-700 text-center align-middle ${isAltRow ? 'bg-slate-100/80 dark:bg-slate-800/80' : 'bg-slate-50 dark:bg-slate-800/50'}`}>
-                                  <div className="flex items-center justify-center space-x-1 text-[11px]">
-                                    <span className={rowSum !== (autoTargets?.[flight]?.[table.id] ?? table.flightTargets?.[flight] ?? 0) ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}>{rowSum}</span>
-                                    <span className="text-slate-400">/</span>
-                                    <span className="text-slate-600 dark:text-slate-400">{(autoTargets?.[flight]?.[table.id] ?? table.flightTargets?.[flight] ?? 0)}</span>
+                                <td className={`p-2 font-mono border-l border-slate-200 dark:border-slate-700 text-center align-middle ${isAltRow ? 'bg-slate-100/80 dark:bg-slate-800/80' : 'bg-slate-50 dark:bg-slate-800/50'}`}>
+                                  <div className="flex items-center justify-center">
+                                    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-mono text-[11px] font-bold shadow-2xs whitespace-nowrap ${
+                                      rowSum > (autoTargets?.[flight]?.[table.id] ?? table.flightTargets?.[flight] ?? 0)
+                                        ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 font-black'
+                                        : rowSum < (autoTargets?.[flight]?.[table.id] ?? table.flightTargets?.[flight] ?? 0)
+                                          ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-400/40 font-bold'
+                                          : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
+                                    }`}>
+                                      <span>{rowSum}</span>
+                                      <span className="text-[10px] text-slate-400 font-normal">/</span>
+                                      <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">{(autoTargets?.[flight]?.[table.id] ?? table.flightTargets?.[flight] ?? 0)}</span>
+                                    </span>
                                   </div>
                                 </td>
                               ) : (
@@ -636,36 +753,44 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                               }
                           }
                           const isPositive = dailySum > 0;
-                          const isAltCol = dayNum % 2 === 0;
+                          const isDayExceeded = dailySum > dailyReq;
+                          const isDayShortage = dailySum < dailyReq;
 
                           return (
                             <td
                               key={dayNum}
-                              className={`p-0.5 border border-slate-200 dark:border-slate-700/70 font-mono font-black ${
-                                isPositive
-                                  ? (isAltCol ? 'bg-emerald-200/70 dark:bg-emerald-900/60 text-emerald-950 dark:text-emerald-100' : 'bg-emerald-100/70 dark:bg-emerald-950/60 text-emerald-950 dark:text-emerald-200')
-                                  : (isAltCol ? 'bg-slate-200/60 dark:bg-slate-700/60 text-slate-400 dark:text-slate-500 font-normal' : 'text-slate-400 dark:text-slate-600 font-normal')
-                              }`}
+                              className="p-1 border border-slate-200/60 dark:border-slate-700/60 text-center align-middle"
+                              title={`Date ${dayNum}: Total ${dailySum} / Required ${dailyReq}`}
                             >
-                              {showAllTableInfo ? (
-                                <div className="flex items-center justify-center space-x-0.5 text-[10px]">
-                                  <span className={dailySum !== dailyReq ? 'text-red-600 dark:text-red-400' : ''}>{dailySum}</span>
-                                  <span className="text-slate-400 font-normal">/</span>
-                                  <span className="text-slate-600 dark:text-slate-400">{dailyReq}</span>
-                                </div>
+                              {isPositive || isDayShortage ? (
+                                <span className={`inline-flex items-center justify-center w-6 h-6 rounded-md font-mono font-bold text-xs shadow-2xs ${
+                                  isDayExceeded
+                                    ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/40 font-black'
+                                    : isDayShortage
+                                      ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-1.5 border-amber-400 font-bold'
+                                      : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
+                                }`}>
+                                  {dailySum}
+                                </span>
                               ) : (
-                                <span className="inline-block py-1 text-xs">{dailySum}</span>
+                                <span className="text-slate-400 dark:text-slate-600 font-mono text-xs">0</span>
                               )}
                             </td>
                           );
                         })}
 
-                        <td className="p-2 font-mono font-black text-emerald-800 dark:text-emerald-300 bg-slate-200/90 dark:bg-slate-700/90 border-l border-slate-300 dark:border-slate-700 text-xs text-center align-middle">
+                        <td className="p-2 font-mono font-bold border-l border-slate-300 dark:border-slate-700 text-xs text-center align-middle bg-slate-200/50 dark:bg-slate-800/50">
                           {showAllTableInfo ? (
-                            <div className="flex items-center justify-center space-x-1">
-                              <span className={tableTotal !== (table.totalRequiredMonth || 0) ? 'text-red-600 dark:text-red-400' : ''}>{tableTotal}</span>
-                              <span className="text-slate-400 font-normal">/</span>
-                              <span className="text-slate-600 dark:text-slate-400">{table.totalRequiredMonth || 0}</span>
+                            <div className="flex items-center justify-center">
+                              <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-mono text-[11px] font-bold shadow-2xs whitespace-nowrap ${
+                                tableTotal !== (table.totalRequiredMonth || 0)
+                                  ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 font-black'
+                                  : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
+                              }`}>
+                                <span>{tableTotal}</span>
+                                <span className="text-[10px] text-slate-400 font-normal">/</span>
+                                <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">{table.totalRequiredMonth || 0}</span>
+                              </span>
                             </div>
                           ) : (
                             tableTotal
@@ -682,34 +807,6 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
 
         {viewMode === 'DUTY_RATIO' && selectedFlightFilter !== 'Overall' && (
           <div className="space-y-4">
-            {showAllTableInfo && (
-              <div className="bg-indigo-50/90 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 rounded-2xl p-4 shadow-xs">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center space-x-2.5">
-                    <Info className="w-5 h-5 text-indigo-600 dark:text-indigo-400 shrink-0" />
-                    <div>
-                      <h4 className="font-black text-sm text-indigo-950 dark:text-indigo-200">
-                        {selectedFlightFilter} Flight Quota & Target Info
-                      </h4>
-                      <p className="text-xs text-indigo-700 dark:text-indigo-300">
-                        Allocated Total: <strong className="font-mono">{flightTotalsOverall[selectedFlightFilter as FlightName]}</strong> / Target Total: <strong className="font-mono">{targetFlightTotal}</strong>
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-3 text-xs font-semibold">
-                    <span className="inline-flex items-center space-x-1.5 bg-emerald-100/70 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 px-2.5 py-1 rounded-lg">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
-                      <span>Target Matched</span>
-                    </span>
-                    <span className="inline-flex items-center space-x-1.5 bg-red-100/70 dark:bg-red-950/50 text-red-800 dark:text-red-300 px-2.5 py-1 rounded-lg">
-                      <span className="w-2 h-2 rounded-full bg-red-500 inline-block"></span>
-                      <span>Quota Mismatch</span>
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
-
             <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-md overflow-hidden">
               <div className="px-4 py-3 flex items-center justify-between bg-slate-800 text-white">
                 <div className="flex items-center space-x-3">
@@ -739,11 +836,11 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                         </th>
                       ))}
                       {showAllTableInfo ? (
-                        <th className="p-2 w-28 min-w-28 font-bold bg-slate-200/60 dark:bg-slate-700/60 border-l border-slate-200 dark:border-slate-700 align-middle leading-tight">
+                        <th className="p-2 min-w-[96px] w-[96px] font-bold bg-slate-200/60 dark:bg-slate-700/60 border-l border-slate-200 dark:border-slate-700 text-center align-middle whitespace-nowrap">
                           Total / Target
                         </th>
                       ) : (
-                        <th className="p-2 w-16 min-w-16 font-bold bg-slate-200/60 dark:bg-slate-700/60 border-l border-slate-200 dark:border-slate-700 align-middle">
+                        <th className="p-2 min-w-[64px] w-[64px] font-bold bg-slate-200/60 dark:bg-slate-700/60 border-l border-slate-200 dark:border-slate-700 text-center align-middle">
                           Total
                         </th>
                       )}
@@ -756,14 +853,27 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                       const target = autoTargets?.[selectedFlightFilter as FlightName]?.[table.id] ?? table.flightTargets?.[selectedFlightFilter as FlightName] ?? 0;
                       const isAltRow = tableIdx % 2 === 1;
 
+                      const isExceeded = rowSum > target;
+                      const isShortage = rowSum < target;
+
                       return (
                         <tr
                           key={table.id}
-                          className={`transition-colors ${isAltRow ? 'bg-slate-50/80 dark:bg-slate-800/40 hover:bg-slate-100/70 dark:hover:bg-slate-800/60' : 'bg-white dark:bg-slate-900 hover:bg-slate-50/80 dark:hover:bg-slate-800/40'}`}
+                          className={`transition-colors ${
+                            isAltRow
+                              ? 'bg-slate-50/80 dark:bg-slate-800/40 hover:bg-slate-100/70 dark:hover:bg-slate-800/60'
+                              : 'bg-white dark:bg-slate-900 hover:bg-slate-50/80 dark:hover:bg-slate-800/40'
+                          }`}
                         >
-                          <td className={`p-2 text-center font-bold text-slate-900 dark:text-white sticky left-0 z-10 border-r border-slate-200 dark:border-slate-800 align-middle text-[11px] leading-tight ${isAltRow ? 'bg-slate-100/95 dark:bg-slate-800/95' : 'bg-white dark:bg-slate-900'}`}>
+                          <td className={`p-2 text-center font-bold text-slate-900 dark:text-white sticky left-0 z-10 border-r border-slate-200 dark:border-slate-800 align-middle text-[11px] leading-tight ${
+                            isAltRow
+                              ? 'bg-slate-100/95 dark:bg-slate-800/95'
+                              : 'bg-white dark:bg-slate-900'
+                          }`}>
                             <div className="flex items-center justify-between">
-                              <span>{table.serNo !== undefined ? `${table.serNo}. ` : ''}{table.title}</span>
+                              <span className={isExceeded ? 'text-red-600 dark:text-red-400 font-bold' : ''}>
+                                {table.serNo !== undefined ? `${table.serNo}. ` : ''}{table.title}
+                              </span>
                               {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') ? (
                                 <button
                                   onClick={() => setEditingCalendar({ tableIdx: matrix.findIndex(x => x.id === table.id), flight: selectedFlightFilter as FlightName })}
@@ -782,37 +892,90 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                             const isPositive = val > 0;
                             const isAltCol = dayNum % 2 === 0;
 
+                            // Calculate daily quota for this specific duty across all flights on this day
+                            const dutyDaySum = flights.reduce((sum, fl) => sum + (table.data[fl]?.[dayIdx] || 0), 0);
+                            let dutyDayReq = table.dailyRequirements?.[dayIdx];
+                            if (dutyDayReq === undefined) {
+                              if (table.totalRequiredDaily && (table.totalRequiredDaily * 31 === table.totalRequiredMonth)) {
+                                dutyDayReq = table.totalRequiredDaily;
+                              } else if (table.totalRequiredDaily) {
+                                dutyDayReq = table.totalRequiredDaily;
+                              } else {
+                                dutyDayReq = ['Mechanics', 'Avionics', 'GCS', 'Admin'].reduce((acc, fl) => acc + (table.data[fl as FlightName]?.[dayIdx] || 0), 0);
+                              }
+                            }
+                            const isDayExceeded = dutyDaySum > dutyDayReq;
+                            const isDayShortage = dutyDaySum < dutyDayReq;
+
                             return (
                               <td
                                 key={dayNum}
-                                className={`p-0.5 border border-slate-100 dark:border-slate-800/50 ${
-                                  isPositive
-                                    ? (isAltRow
-                                        ? (isAltCol ? 'bg-emerald-100/90 dark:bg-emerald-900/60 text-emerald-950 dark:text-emerald-100 font-black' : 'bg-emerald-100/70 dark:bg-emerald-950/60 text-emerald-950 dark:text-emerald-100 font-black')
-                                        : (isAltCol ? 'bg-emerald-50/90 dark:bg-emerald-950/50 text-emerald-950 dark:text-emerald-200 font-black' : 'bg-emerald-50/60 dark:bg-emerald-950/40 text-emerald-950 dark:text-emerald-200 font-black')
-                                      )
-                                    : (isAltRow
-                                        ? (isAltCol ? 'bg-slate-200/50 dark:bg-slate-800/70 text-slate-400 dark:text-slate-600' : 'bg-slate-100/50 dark:bg-slate-800/40 text-slate-400 dark:text-slate-600')
-                                        : (isAltCol ? 'bg-slate-100/40 dark:bg-slate-800/30 text-slate-400 dark:text-slate-600' : 'bg-white dark:bg-slate-900 text-slate-400 dark:text-slate-600')
-                                      )
+                                onClick={() => handleToggleFlightDutyCell(table.id, selectedFlightFilter as FlightName, dayIdx)}
+                                onContextMenu={(e) => {
+                                  e.preventDefault();
+                                  const cur = rowData[dayIdx] || 0;
+                                  handleToggleFlightDutyCell(table.id, selectedFlightFilter as FlightName, dayIdx, cur === 2 ? 0 : 2);
+                                }}
+                                onDoubleClick={(e) => {
+                                  e.preventDefault();
+                                  const cur = rowData[dayIdx] || 0;
+                                  handleToggleFlightDutyCell(table.id, selectedFlightFilter as FlightName, dayIdx, cur === 2 ? 0 : 2);
+                                }}
+                                title={`Date ${dayNum} (${table.title}): Day Total ${dutyDaySum} / Required ${dutyDayReq}. Click for 1/0, Right-click or Double-click for 2`}
+                                className={`p-1 border border-slate-200/60 dark:border-slate-800/60 text-center align-middle cursor-pointer select-none transition-colors hover:bg-indigo-500/10 ${
+                                  isAltRow
+                                    ? (isAltCol ? 'bg-slate-100/30 dark:bg-slate-800/25' : 'bg-slate-50/20 dark:bg-slate-800/10')
+                                    : (isAltCol ? 'bg-slate-50/30 dark:bg-slate-900/40' : 'bg-white dark:bg-slate-900/20')
                                 }`}
                               >
-                                <span className="inline-block py-1 font-mono text-xs">{val || ''}</span>
+                                {isPositive ? (
+                                  <div
+                                    className={`w-6 h-6 mx-auto rounded-md flex items-center justify-center font-mono text-[11px] font-bold transition-all shadow-2xs ${
+                                      isDayExceeded
+                                        ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/40 font-black'
+                                        : isDayShortage
+                                          ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-1.5 border-amber-400 dark:border-amber-400 font-bold'
+                                          : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
+                                    }`}
+                                  >
+                                    {val}
+                                  </div>
+                                ) : isDayExceeded ? (
+                                  <div className="w-6 h-6 mx-auto rounded-md flex items-center justify-center font-mono text-[11px] font-bold bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/40">
+                                    -
+                                  </div>
+                                ) : isDayShortage ? (
+                                  <div className="w-6 h-6 mx-auto rounded-md flex items-center justify-center font-mono text-[11px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-300 border-1.5 border-amber-400 dark:border-amber-400">
+                                    -
+                                  </div>
+                                ) : (
+                                  <span className="inline-block w-6 h-6 leading-6 text-slate-300 dark:text-slate-700/60 font-mono text-xs select-none">
+                                    -
+                                  </span>
+                                )}
                               </td>
                             );
                           })}
                           {showAllTableInfo ? (
-                            <td className={`p-2 font-mono font-bold border-l border-slate-200 dark:border-slate-700 align-middle ${isAltRow ? 'bg-slate-100/80 dark:bg-slate-800/80' : 'bg-slate-50 dark:bg-slate-800/50'}`}>
-                              <div className="flex items-center justify-center space-x-1 text-[11px]">
-                                <span className={rowSum !== target ? 'text-red-600 dark:text-red-400 font-black' : 'text-emerald-700 dark:text-emerald-400 font-bold'}>
-                                  {rowSum}
+                            <td className={`p-2 font-mono border-l border-slate-200 dark:border-slate-700 text-center align-middle ${isAltRow ? 'bg-slate-100/80 dark:bg-slate-800/80' : 'bg-slate-50 dark:bg-slate-800/50'}`}>
+                              <div className="flex items-center justify-center">
+                                <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-mono text-[11px] font-bold shadow-2xs whitespace-nowrap ${
+                                  isExceeded
+                                    ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 font-black'
+                                    : isShortage
+                                      ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-400/40 font-bold'
+                                      : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
+                                }`}>
+                                  <span>{rowSum}</span>
+                                  <span className="text-[10px] text-slate-400 font-normal">/</span>
+                                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">{target}</span>
                                 </span>
-                                <span className="text-slate-400">/</span>
-                                <span className="text-slate-600 dark:text-slate-400 font-bold">{target}</span>
                               </div>
                             </td>
                           ) : (
-                            <td className={`p-2 font-mono font-black text-slate-900 dark:text-white border-l border-slate-200 dark:border-slate-700 align-middle ${isAltRow ? 'bg-slate-100/80 dark:bg-slate-800/80' : 'bg-slate-50 dark:bg-slate-800/50'}`}>
+                            <td className={`p-2 font-mono font-black border-l border-slate-200 dark:border-slate-700 align-middle ${
+                              isExceeded ? 'text-red-600 dark:text-red-400 font-black' : isShortage ? 'text-amber-600 dark:text-amber-400' : 'text-slate-900 dark:text-white'
+                            } ${isAltRow ? 'bg-slate-100/80 dark:bg-slate-800/80' : 'bg-slate-50 dark:bg-slate-800/50'}`}>
                               {rowSum}
                             </td>
                           )}
@@ -834,29 +997,34 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                       {daysArray.map((dayNum, dayIdx) => {
                         const dailySum = matrix.filter(t => !t.isDisabled).reduce((sum, table) => sum + (table.data[selectedFlightFilter as FlightName]?.[dayIdx] || 0), 0);
                         const isPositive = dailySum > 0;
-                        const isAltCol = dayNum % 2 === 0;
 
                         return (
                           <td
                             key={dayNum}
-                            className={`p-0.5 border border-slate-200 dark:border-slate-700/70 font-mono font-black ${
-                              isPositive
-                                ? (isAltCol ? 'bg-emerald-200/70 dark:bg-emerald-900/60 text-emerald-950 dark:text-emerald-100' : 'bg-emerald-100/70 dark:bg-emerald-950/60 text-emerald-950 dark:text-emerald-200')
-                                : (isAltCol ? 'bg-slate-200/60 dark:bg-slate-700/60 text-slate-400 dark:text-slate-500 font-normal' : 'text-slate-400 dark:text-slate-600 font-normal')
-                            }`}
+                            className="p-1 border border-slate-200/60 dark:border-slate-700/60 text-center align-middle"
                           >
-                            <span className="inline-block py-1 text-xs">{dailySum}</span>
+                            {isPositive ? (
+                              <span className="inline-flex items-center justify-center w-6 h-6 rounded-md font-mono font-bold text-xs bg-slate-200/80 dark:bg-slate-700/80 text-slate-800 dark:text-slate-200">
+                                {dailySum}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 dark:text-slate-600 font-mono text-xs">0</span>
+                            )}
                           </td>
                         );
                       })}
-                      <td className="p-2 font-mono font-black text-emerald-800 dark:text-emerald-300 bg-slate-200/90 dark:bg-slate-700/90 border-l border-slate-300 dark:border-slate-700 text-xs align-middle">
+                      <td className="p-2 font-mono font-bold border-l border-slate-300 dark:border-slate-700 text-xs text-center align-middle bg-slate-200/50 dark:bg-slate-800/50">
                         {showAllTableInfo ? (
-                          <div className="flex items-center justify-center space-x-1">
-                            <span className={flightTotalsOverall[selectedFlightFilter as FlightName] !== targetFlightTotal ? 'text-red-600 dark:text-red-400 font-black' : ''}>
-                              {flightTotalsOverall[selectedFlightFilter as FlightName]}
+                          <div className="flex items-center justify-center">
+                            <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-mono text-[11px] font-bold shadow-2xs whitespace-nowrap ${
+                              flightTotalsOverall[selectedFlightFilter as FlightName] !== targetFlightTotal
+                                ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 font-black'
+                                : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
+                            }`}>
+                              <span>{flightTotalsOverall[selectedFlightFilter as FlightName]}</span>
+                              <span className="text-[10px] text-slate-400 font-normal">/</span>
+                              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">{targetFlightTotal}</span>
                             </span>
-                            <span className="text-slate-400 font-normal">/</span>
-                            <span className="text-slate-600 dark:text-slate-400">{targetFlightTotal}</span>
                           </div>
                         ) : (
                           flightTotalsOverall[selectedFlightFilter as FlightName]

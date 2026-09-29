@@ -56,7 +56,7 @@ import {
  MultiParadeDayItem,
 } from '../utils/docxExport';
 import { DisposalCategoryDropdown } from './DisposalCategoryDropdown';
-import { saveCustomDisposal, getSavedCustomDisposals } from '../utils/customDisposalStore';
+import { saveCustomDisposal, getSavedCustomDisposals, removeSavedCustomDisposal } from '../utils/customDisposalStore';
 
 interface ParadeStateFormattedViewProps {
  role?: UserRole;
@@ -145,7 +145,36 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  const [isEditingDisposals, setIsEditingDisposals] = useState(false);
  const [historicalCustomCats, setHistoricalCustomCats] = useState<{code: string, label: string, customTitle: string}[]>(() => { try { const saved = localStorage.getItem('parade_historical_custom'); return saved ? JSON.parse(saved) : []; } catch { return []; } });
 
- const ALL_DISPOSAL_OPTIONS = [{"code":"TDY","label":"TDY"},{"code":"DETT","label":"Detachment"},{"code":"LEAVE","label":"Leave"},{"code":"ESSN","label":"Essn"},{"code":"CMH","label":"CMH"},{"code":"BNS","label":"BNS"},{"code":"BSH","label":"BSH"},{"code":"OTHERS","customTitle":"Quarantine","label":"Quarantine"},{"code":"SICK_REPORT","label":"Sick Report"},{"code":"ED","label":"ED"},{"code":"EX_PPGF","label":"Ex PPGF"},{"code":"CANTEEN","label":"Canteen"},{"code":"DUTY_OFF","label":"Guard Duty Off"},{"code":"BAKE_N_BITE","label":"Bake & Bite"},{"code":"RECEPTION","label":"K/O & Reception"},{"code":"ADMIN_ORDER","label":"Admin Order"},{"code":"CLASS_TRG","label":"Class"},{"code":"OTHERS","customTitle":"Exam","label":"Exam"},{"code":"AIRPORT","label":"Airfield Duty"},{"code":"GAMES","label":"Games"},{"code":"GH","label":"Guard of Honor"},{"code":"AWL","label":"AWOL"},{"code":"ABSENT","label":"Detention"},{"code":"OTHERS","label":"✨ Custom..."}];
+  const ALL_DISPOSAL_OPTIONS = [
+    { code: "TDY", label: "TDY (Air HQ)", customTitle: "TDY (Air HQ)" },
+    { code: "TDY_HSIA", label: "TDY (HSIA)", customTitle: "TDY (HSIA)" },
+    { code: "ATT_SAIA", label: "Att (SAIA)", customTitle: "Att (SAIA)" },
+    { code: "DETT", label: "Detachment" },
+    { code: "LEAVE", label: "Leave" },
+    { code: "ESSN", label: "Essn" },
+    { code: "CMH", label: "CMH" },
+    { code: "BNS", label: "BNS" },
+    { code: "BSH", label: "BSH" },
+    { code: "OTHERS", customTitle: "Quarantine", label: "Quarantine" },
+    { code: "SICK_REPORT", label: "Sick Report" },
+    { code: "ED", label: "ED" },
+    { code: "EX_PPGF", label: "Ex PPGF" },
+    { code: "ORDERLY_ROOM", label: "Orderly Room", customTitle: "Orderly Room" },
+    { code: "UWO", label: "UWO", customTitle: "UWO" },
+    { code: "CANTEEN", label: "Canteen" },
+    { code: "DUTY_OFF", label: "Guard Duty Off" },
+    { code: "BAKE_N_BITE", label: "Bake & Bite" },
+    { code: "RECEPTION", label: "K/O & Reception" },
+    { code: "ADMIN_ORDER", label: "Admin Order" },
+    { code: "CLASS_TRG", label: "Class" },
+    { code: "OTHERS", customTitle: "Exam", label: "Exam" },
+    { code: "AIRPORT", label: "Airfield Duty" },
+    { code: "GAMES", label: "Games" },
+    { code: "GH", label: "Guard of Honor" },
+    { code: "AWL", label: "AWOL" },
+    { code: "ABSENT", label: "Detention" },
+    { code: "OTHERS", label: "Others..." }
+  ];
 
  const handleAddDisposalOption = (opt: any) => {
  if (opt.code === 'OTHERS' && !opt.customTitle) {
@@ -167,17 +196,17 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  };
 
  const handleRemoveDisposalOption = (label: string) => {
- const removed = savedDisposals.find(d => d.label === label);
- if (removed && removed.code === 'OTHERS' && removed.customTitle && !historicalCustomCats.some(h => h.customTitle === removed.customTitle)) {
- const newHistory = [...historicalCustomCats, removed];
- setHistoricalCustomCats(newHistory);
- const lsKey = 'parade_historical_custom';
- localStorage.setItem(lsKey, JSON.stringify(newHistory));
- }
- const updated = savedDisposals.filter(d => d.label !== label);
- setSavedDisposals(updated);
- localStorage.setItem('savedDisposalKeys_Parade', JSON.stringify(updated));
- if (updated.length === 0) setIsEditingDisposals(false);
+  const removed = savedDisposals.find(d => d.label === label);
+  if (removed && removed.code === 'OTHERS' && removed.customTitle) {
+    removeSavedCustomDisposal(removed.customTitle);
+    const newHistory = historicalCustomCats.filter(h => h.customTitle !== removed.customTitle && h.label !== removed.label);
+    setHistoricalCustomCats(newHistory);
+    localStorage.setItem('parade_historical_custom', JSON.stringify(newHistory));
+  }
+  const updated = savedDisposals.filter(d => d.label !== label);
+  setSavedDisposals(updated);
+  localStorage.setItem('savedDisposalKeys_Parade', JSON.stringify(updated));
+  if (updated.length === 0) setIsEditingDisposals(false);
  };
 
 

@@ -58,7 +58,7 @@ import {
   MultiParadeDayItem,
 } from '../utils/docxExport';
 import { DisposalCategoryDropdown } from './DisposalCategoryDropdown';
-import { saveCustomDisposal, getSavedCustomDisposals } from '../utils/customDisposalStore';
+import { saveCustomDisposal, getSavedCustomDisposals, removeSavedCustomDisposal } from '../utils/customDisposalStore';
 
 import { exportHtmlToWord } from '../utils/htmlExport';
 
@@ -154,9 +154,53 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
   });
   const [showDisposalDropdown, setShowDisposalDropdown] = useState(false);
   const [isEditingDisposals, setIsEditingDisposals] = useState(false);
-  const [historicalCustomCats, setHistoricalCustomCats] = useState<{code: string, label: string, customTitle: string}[]>(() => { try { const saved = localStorage.getItem('parade_historical_custom'); return saved ? JSON.parse(saved) : []; } catch { return []; } });
+  const [historicalCustomCats, setHistoricalCustomCats] = useState<{code: string, label: string, customTitle: string}[]>(() => { try { const saved = localStorage.getItem('nc_historical_custom') || localStorage.getItem('parade_historical_custom'); return saved ? JSON.parse(saved) : []; } catch { return []; } });
 
-  const ALL_DISPOSAL_OPTIONS = [{"code":"TDY","label":"TDY"},{"code":"DETT","label":"Detachment"},{"code":"LEAVE","label":"Leave"},{"code":"OTHERS","customTitle":"Course","label":"Course"},{"code":"CLASS_TRG","label":"Class"},{"code":"OTHERS","customTitle":"Exam","label":"Exam"},{"code":"AWL","label":"AWOL"},{"code":"ABSENT","label":"Detention"},{"code":"SICK_REPORT","label":"Sick report"},{"code":"ED","label":"ED"},{"code":"EX_PPGF","label":"Ex PPGF"},{"code":"CMH","label":"CMH"},{"code":"BNS","label":"BNS"},{"code":"BSH","label":"BSH"},{"code":"OTHERS","customTitle":"Quarantine","label":"Quarantine"},{"code":"OTHERS","customTitle":"U/C","label":"U/C"},{"code":"OTHERS","customTitle":"U/Board","label":"U/Board"},{"code":"OFFICE","label":"Office Duty"},{"code":"OTHERS","customTitle":"Aft Flg","label":"Aft Flg"},{"code":"OTHERS","customTitle":"Ni Flg","label":"Ni Flg"},{"code":"OTHERS","customTitle":"Ni Duty","label":"Ni Duty"},{"code":"GD","label":"Base Security (GD)"},{"code":"BTF","label":"Base Taskforce (BTF)"},{"code":"AIRPORT","label":"Airfield Duty"},{"code":"OTHERS","customTitle":"Driving","label":"Driving"},{"code":"GAMES","label":"Games"},{"code":"GH","label":"Guard of Honor"},{"code":"OTHERS","label":"✨ Custom..."}];
+  useEffect(() => {
+    const handleUpdate = () => {
+      try {
+        const saved = localStorage.getItem('nc_historical_custom') || localStorage.getItem('parade_historical_custom');
+        setHistoricalCustomCats(saved ? JSON.parse(saved) : []);
+      } catch {
+        setHistoricalCustomCats([]);
+      }
+    };
+    window.addEventListener('baf_custom_disposals_updated', handleUpdate);
+    return () => window.removeEventListener('baf_custom_disposals_updated', handleUpdate);
+  }, []);
+
+  const ALL_DISPOSAL_OPTIONS = [
+    { code: "TDY", label: "TDY (Air HQ)", customTitle: "TDY (Air HQ)" },
+    { code: "TDY_HSIA", label: "TDY (HSIA)", customTitle: "TDY (HSIA)" },
+    { code: "ATT_SAIA", label: "Att (SAIA)", customTitle: "Att (SAIA)" },
+    { code: "DETT", label: "Detachment" },
+    { code: "LEAVE", label: "Leave" },
+    { code: "OTHERS", customTitle: "Course", label: "Course" },
+    { code: "CLASS_TRG", label: "Class" },
+    { code: "OTHERS", customTitle: "Exam", label: "Exam" },
+    { code: "AWL", label: "AWOL" },
+    { code: "ABSENT", label: "Detention" },
+    { code: "SICK_REPORT", label: "Sick report" },
+    { code: "ED", label: "ED" },
+    { code: "EX_PPGF", label: "Ex PPGF" },
+    { code: "CMH", label: "CMH" },
+    { code: "BNS", label: "BNS" },
+    { code: "BSH", label: "BSH" },
+    { code: "OTHERS", customTitle: "Quarantine", label: "Quarantine" },
+    { code: "OTHERS", customTitle: "U/C", label: "U/C" },
+    { code: "OTHERS", customTitle: "U/Board", label: "U/Board" },
+    { code: "OFFICE", label: "Office Duty" },
+    { code: "OTHERS", customTitle: "Aft Flg", label: "Aft Flg" },
+    { code: "OTHERS", customTitle: "Ni Flg", label: "Ni Flg" },
+    { code: "OTHERS", customTitle: "Ni Duty", label: "Ni Duty" },
+    { code: "GD", label: "Base Security (GD)" },
+    { code: "BTF", label: "Base Taskforce (BTF)" },
+    { code: "AIRPORT", label: "Airfield Duty" },
+    { code: "OTHERS", customTitle: "Driving", label: "Driving" },
+    { code: "GAMES", label: "Games" },
+    { code: "GH", label: "Guard of Honor" },
+    { code: "OTHERS", label: "Others..." }
+  ];
 
   const handleAddDisposalOption = (opt: any) => {
     if (opt.code === 'OTHERS' && !opt.customTitle) {
@@ -179,11 +223,11 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
 
   const handleRemoveDisposalOption = (label: string) => {
     const removed = savedDisposals.find(d => d.label === label);
-    if (removed && removed.code === 'OTHERS' && removed.customTitle && !historicalCustomCats.some(h => h.customTitle === removed.customTitle)) {
-      const newHistory = [...historicalCustomCats, removed];
+    if (removed && removed.code === 'OTHERS' && removed.customTitle) {
+      removeSavedCustomDisposal(removed.customTitle);
+      const newHistory = historicalCustomCats.filter(h => h.customTitle !== removed.customTitle && h.label !== removed.label);
       setHistoricalCustomCats(newHistory);
-      const lsKey = 'nc_historical_custom';
-      localStorage.setItem(lsKey, JSON.stringify(newHistory));
+      localStorage.setItem('nc_historical_custom', JSON.stringify(newHistory));
     }
     const updated = savedDisposals.filter(d => d.label !== label);
     setSavedDisposals(updated);

@@ -1,9 +1,21 @@
 import { DUTY_TYPE_MAP } from '../data/dutyTypes';
 import React, { useState, useEffect, useMemo } from 'react';
-import { AlertCircle, Settings, Info, Users, ChevronDown, ChevronUp, Calendar, X, Save, Power, PowerOff, Trash, Filter, Plus, Minus, Printer } from 'lucide-react';
+import { AlertCircle, Settings, Info, Users, ChevronDown, ChevronUp, Calendar, X, Save, Power, PowerOff, Trash, Filter, Plus, Minus, Printer, Edit2 } from 'lucide-react';
 import { localDb } from '../services/localDatabase';
 import { Airman, Rank, FlightName, DutyCategoryCode } from '../types';
 import { addCustomDuty, CustomDutyConfig, removeCustomDuty } from '../utils/customDuties';
+import { getSavedCustomDisposals, saveCustomDisposal, removeSavedCustomDisposal } from '../utils/customDisposalStore';
+
+const STANDARD_DISPOSALS = [
+  '-',
+  'Orderly Room',
+  'UWO',
+  'TDY (Air HQ)',
+  'TDY (HSIA)',
+  'Att (SAIA)',
+  'Bake & Bite',
+  'Canteen',
+];
 
 const DEFAULT_TOTAL_DUTY = {
   syDuty: 88,
@@ -206,6 +218,61 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
   const [newDutyFlights, setNewDutyFlights] = useState<FlightName[]>(['Mechanics', 'Avionics', 'GCS', 'Admin']);
   const [newDutyRanks, setNewDutyRanks] = useState<Rank[]>(['MWO', 'SWO', 'WO', 'Sgt', 'Cpl', 'LAC', 'AC-1', 'AC-2']);
 
+  const [savedCustomList, setSavedCustomList] = useState<string[]>(() => getSavedCustomDisposals());
+  const [openDropdownAirmanId, setOpenDropdownAirmanId] = useState<string | null>(null);
+  const [deletingCustomItem, setDeletingCustomItem] = useState<string | null>(null);
+  const [customModalAirman, setCustomModalAirman] = useState<{ id: string; name: string; rank: string; flightName: string; currentValue: string } | null>(null);
+  const [customInput, setCustomInput] = useState('');
+
+  useEffect(() => {
+    const handleCustomUpdate = () => {
+      setSavedCustomList(getSavedCustomDisposals());
+    };
+    window.addEventListener('baf_custom_disposals_updated', handleCustomUpdate);
+    return () => window.removeEventListener('baf_custom_disposals_updated', handleCustomUpdate);
+  }, []);
+
+  const handleSaveCustomDisposal = () => {
+    if (!customModalAirman) return;
+    const trimmed = customInput.trim();
+    const finalVal = trimmed || '-';
+    
+    if (trimmed && !STANDARD_DISPOSALS.includes(trimmed)) {
+      saveCustomDisposal(trimmed, true);
+      setSavedCustomList(getSavedCustomDisposals());
+    }
+
+    setDisposals(prev => ({
+      ...prev,
+      [customModalAirman.id]: finalVal,
+    }));
+
+    setCustomModalAirman(null);
+    setCustomInput('');
+  };
+
+  const handleConfirmDeleteCustomItem = () => {
+    if (!deletingCustomItem) return;
+    const itemToDelete = deletingCustomItem;
+    const updated = removeSavedCustomDisposal(itemToDelete);
+    setSavedCustomList(updated);
+
+    // Clean from disposals state for all airmen so it does not persist or re-save
+    setDisposals(prev => {
+      const next = { ...prev };
+      let changed = false;
+      Object.keys(next).forEach(id => {
+        if (next[id] && typeof next[id] === 'string' && next[id].trim().toLowerCase() === itemToDelete.trim().toLowerCase()) {
+          next[id] = '-';
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+
+    setDeletingCustomItem(null);
+  };
+
   const [settingsTableIdx, setSettingsTableIdx] = useState<number | null>(null);
   const [airmen, setAirmen] = useState<Airman[]>([]);
   useEffect(() => {
@@ -236,7 +303,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
       } else if (myAssignments.some(assign => assign.dutyCode === 'TDY')) {
         if (a.flightName === 'GCS' && ['Cpl', 'LAC', 'AC-1', 'AC-2'].includes(a.rank)) {
           if (gcsTdyCount < 1) {
-            map[a.id] = 'TDY';
+            map[a.id] = 'TDY (Air HQ)';
             gcsTdyCount++;
           } else {
             map[a.id] = '-';
@@ -274,6 +341,9 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
       // For migration of existing bad data
       if (disp === 'Deployment' || disp === 'Deployment (Bake & Bite)' || disp === 'Deployment (Canteen)') {
          disp = undefined; // Force recalculation if it's the generic word
+      }
+      if (disp === 'TDY') {
+        disp = 'TDY (Air HQ)';
       }
       
       if (disp === undefined || disp === '') {
@@ -792,11 +862,15 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                           if (currentVal === 'Deployment' || currentVal === 'Deployment (Bake & Bite)' || currentVal === 'Deployment (Canteen)') {
                              currentVal = defaultDisp;
                           }
+                          if (currentVal === 'TDY') {
+                             currentVal = 'TDY (Air HQ)';
+                          }
 
                           if (!currentVal || currentVal.trim() === '') {
                              currentVal = '-';
                           }
 
+                          const isCustomVal = currentVal && !STANDARD_DISPOSALS.includes(currentVal);
                           const isEven = idx % 2 === 0;
 
                           return (
@@ -812,21 +886,24 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                               <td className="px-3 py-2 text-left text-slate-600 dark:text-slate-400 whitespace-nowrap">{a.trade}</td>
                               <td className="px-3 py-2 text-left text-slate-600 dark:text-slate-400 whitespace-nowrap">{a.flightName}</td>
                               <td className="px-3 py-2 text-center whitespace-nowrap">
-                                <select
-                                  value={currentVal}
-                                  onChange={(e) => setDisposals({ ...disposals, [a.id]: e.target.value })}
-                                  className="w-full min-w-[120px] px-2 py-1 text-xs text-center bg-transparent border-0 border-b border-transparent hover:border-slate-300 focus:border-indigo-500 text-slate-800 dark:text-slate-200 outline-none focus:ring-0 transition-colors cursor-pointer"
-                                >
-                                  <option value="-" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">-</option>
-                                  <option value="Orderly Room" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">Orderly Room</option>
-                                  <option value="UWO" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">UWO</option>
-                                  <option value="TDY" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">TDY</option>
-                                  <option value="Bake & Bite" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">Bake & Bite</option>
-                                  <option value="Canteen" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">Canteen</option>
-                                  {currentVal && !['-', 'Orderly Room', 'UWO', 'TDY', 'Bake & Bite', 'Canteen'].includes(currentVal) && (
-                                    <option value={currentVal} className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">{currentVal}</option>
-                                  )}
-                                </select>
+                                <div className="flex items-center justify-center">
+                                  <select
+                                    value={currentVal || '-'}
+                                    onChange={(e) => {
+                                      setDisposals({ ...disposals, [a.id]: e.target.value });
+                                    }}
+                                    className="min-w-[130px] max-w-[165px] px-2.5 py-1 text-xs font-semibold rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-xs"
+                                  >
+                                    <option value="-">-</option>
+                                    <option value="Orderly Room">Orderly Room</option>
+                                    <option value="UWO">UWO</option>
+                                    <option value="TDY (Air HQ)">TDY (Air HQ)</option>
+                                    <option value="TDY (HSIA)">TDY (HSIA)</option>
+                                    <option value="Att (SAIA)">Att (SAIA)</option>
+                                    <option value="Bake & Bite">Bake & Bite</option>
+                                    <option value="Canteen">Canteen</option>
+                                  </select>
+                                </div>
                               </td>
                             </tr>
                           );
@@ -1346,6 +1423,141 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                   Save Changes
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Disposal (Others) Modal */}
+      {customModalAirman && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm p-4 animate-fadeIn">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 max-w-sm w-full shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  Disposal (Others)
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  {formatAirmanName(customModalAirman.rank)} {customModalAirman.name} ({customModalAirman.flightName})
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCustomModalAirman(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                Custom Disposal নাম লিখুন:
+              </label>
+              <input
+                autoFocus
+                type="text"
+                value={customInput}
+                onChange={(e) => setCustomInput(e.target.value)}
+                placeholder="যেমন: Hospital, Special Duty, Escort..."
+                className="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSaveCustomDisposal();
+                  }
+                }}
+              />
+            </div>
+
+            {savedCustomList.filter(item => !STANDARD_DISPOSALS.includes(item)).length > 0 && (
+              <div>
+                <div className="text-[11px] font-semibold text-slate-400 mb-1.5">পূর্বের সংরক্ষিত তালিকা:</div>
+                <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                  {savedCustomList
+                    .filter(item => !STANDARD_DISPOSALS.includes(item))
+                    .map(item => (
+                      <div
+                        key={item}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setCustomInput(item)}
+                          className="text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-300 font-medium cursor-pointer"
+                        >
+                          {item}
+                        </button>
+                        <button
+                          type="button"
+                          title={`Remove ${item}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeletingCustomItem(item);
+                          }}
+                          className="text-slate-400 hover:text-red-500 rounded p-0.5 cursor-pointer"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setCustomModalAirman(null)}
+                className="px-3.5 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+              >
+                বাতিল (Cancel)
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveCustomDisposal}
+                className="px-4 py-1.5 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-sm transition-colors cursor-pointer"
+              >
+                সংরক্ষণ করুন (Save)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Custom Disposal Confirmation Modal */}
+      {deletingCustomItem && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/60 backdrop-blur-sm p-4 animate-fadeIn">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 max-w-sm w-full shadow-2xl space-y-4">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-950/50 flex items-center justify-center text-red-600 dark:text-red-400 shrink-0">
+                <Trash className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                  কাস্টম ডিসপোজাল মুছে ফেলতে চান?
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  "{deletingCustomItem}" অপশনটি তালিকা থেকে স্থায়ীভাবে মুছে ফেলা হবে এবং এটি আর ফিরে আসবে না।
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setDeletingCustomItem(null)}
+                className="px-3.5 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+              >
+                বাতিল (Cancel)
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteCustomItem}
+                className="px-4 py-1.5 text-xs font-bold bg-red-600 hover:bg-red-700 text-white rounded-xl shadow-sm transition-colors cursor-pointer"
+              >
+                মুছে ফেলুন (Remove)
+              </button>
             </div>
           </div>
         </div>
