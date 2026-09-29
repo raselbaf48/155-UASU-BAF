@@ -7,6 +7,7 @@ import { exportTableToCSV, exportDutyRatioMatrixExcel, exportManpowerAndNominalR
 import { exportHtmlToWord } from '../utils/htmlExport';
 import { DUTY_TYPE_MAP } from '../data/dutyTypes';
 import { localDb } from '../services/localDatabase';
+import { calculateExactDutyRatios, roundDutyByRule } from '../utils/dutyDistribution';
 
 export function formatDisplayDate(dateStr?: string): string {
   if (!dateStr) {
@@ -311,79 +312,16 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
 
   const calculatedMatrixDistributions = useMemo(() => {
     if (!matrix) return {};
+    const exactRatios = calculateExactDutyRatios(matrix, currentManpower);
     const result: Record<string, Record<string, { autoVal: number, exactVal: number }>> = {};
-    
-    // Tracker to balance pure ties across different duty types
-    const tieBreakerTracker: Record<string, number> = {
-      'Mechanics': 0, 'Avionics': 0, 'GCS': 0, 'Admin': 0
-    };
-    
+    const flights = ['Mechanics', 'Avionics', 'GCS', 'Admin'];
+
     matrix.forEach(t => {
-      const includesSgt = t.eligibleRanks ? t.eligibleRanks.includes('Sgt') : t.id !== 'security_duty';
-      const isCplOnly = !includesSgt;
-      const dutyTotal = t.totalRequiredMonth || 0;
-      
-      const flights = ['Mechanics', 'Avionics', 'GCS', 'Admin'];
-      const flightPools: Record<string, number> = {};
-      
-      let actualPoolSize = 0;
-      flights.forEach(fl => {
-        let fltCpl = 0, fltSgt = 0;
-        if (fl === 'Mechanics') { fltCpl = currentManpower.mechCpl; fltSgt = currentManpower.mechSgt; }
-        if (fl === 'Avionics') { fltCpl = currentManpower.aviCpl; fltSgt = currentManpower.aviSgt; }
-        if (fl === 'GCS') { fltCpl = currentManpower.gcsCpl; fltSgt = currentManpower.gcsSgt; }
-        if (fl === 'Admin') { fltCpl = currentManpower.adminCpl; fltSgt = currentManpower.adminSgt; }
-        
-        let fltPool = isCplOnly ? fltCpl : (fltCpl + fltSgt);
-        if (t.eligibleFlights && !t.eligibleFlights.includes(fl as any)) {
-          fltPool = 0;
-        }
-        flightPools[fl] = fltPool;
-        actualPoolSize += fltPool;
-      });
-
-      if (dutyTotal === 0 || actualPoolSize === 0) {
-        result[t.id] = flights.reduce((acc, fl) => ({ ...acc, [fl]: { autoVal: 0, exactVal: 0 } }), {});
-        return;
-      }
-
-      const exactVals = flights.map(fl => {
-        const exact = (flightPools[fl] / actualPoolSize) * dutyTotal;
-        return {
-          flight: fl,
-          exact: exact,
-          floor: Math.floor(exact),
-          remainder: exact - Math.floor(exact)
-        };
-      });
-
-      const allocated = exactVals.reduce((sum, item) => sum + item.floor, 0);
-      const remaining = dutyTotal - allocated;
-
-      const sortedForDistribution = [...exactVals]
-        .filter(item => flightPools[item.flight] > 0)
-        .sort((a, b) => {
-        const diff = b.remainder - a.remainder;
-        if (Math.abs(diff) > 1e-9) {
-          return diff; // larger remainder first
-        }
-        const floorDiff = a.floor - b.floor;
-        if (floorDiff !== 0) {
-          return floorDiff; // tie breaker 1: lower total duty (floor) first
-        }
-        // tie breaker 2: alternate based on who has received fewer extra tie-breaker duties
-        return tieBreakerTracker[a.flight] - tieBreakerTracker[b.flight];
-      });
-
-      for (let i = 0; i < remaining && i < sortedForDistribution.length; i++) {
-        sortedForDistribution[i].floor += 1;
-        // Record allocation to balance future pure ties
-        tieBreakerTracker[sortedForDistribution[i].flight] += 1;
-      }
-
       result[t.id] = {};
-      exactVals.forEach(item => {
-        result[t.id][item.flight] = { autoVal: item.floor, exactVal: item.exact };
+      flights.forEach(fl => {
+        const exactVal = exactRatios[t.id]?.[fl as FlightName] ?? 0;
+        const autoVal = roundDutyByRule(exactVal);
+        result[t.id][fl] = { autoVal, exactVal };
       });
     });
     
@@ -978,14 +916,19 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
                           const displayFl = fl === 'Mechanics' ? 'MECHANICS FLT' : fl === 'Avionics' ? 'AVIONICS FLT' : fl === 'GCS' ? 'GCS FLT' : 'ADMIN FLT';
                           let flightSum = 0;
                           matrix.filter(t => !t.isDisabled).forEach(t => {
-                            flightSum += (calculatedMatrixDistributions[t.id]?.[fl]?.autoVal || 0);
+                            const val = t.flightTargets?.[fl as keyof typeof t.flightTargets] !== undefined
+                              ? t.flightTargets[fl as keyof typeof t.flightTargets]
+                              : (calculatedMatrixDistributions[t.id]?.[fl]?.autoVal || 0);
+                            flightSum += val;
                           });
                           return (
                             <tr key={fl} className="even:bg-gray-100 print:even:bg-gray-100">
                               <td className="border border-black p-1 text-center px-2 font-bold">{displayFl}</td>
                               {matrix.filter(t => !t.isDisabled).map(t => {
-                                const autoVal = calculatedMatrixDistributions[t.id]?.[fl]?.autoVal || 0;
-                                return <td key={t.id} className="border border-black p-1">{autoVal}</td>;
+                                const val = t.flightTargets?.[fl as keyof typeof t.flightTargets] !== undefined
+                                  ? t.flightTargets[fl as keyof typeof t.flightTargets]
+                                  : (calculatedMatrixDistributions[t.id]?.[fl]?.autoVal || 0);
+                                return <td key={t.id} className="border border-black p-1">{val}</td>;
                               })}
                               <td className="border border-black p-1 font-bold bg-slate-50 print:bg-white">{flightSum}</td>
                             </tr>
@@ -993,15 +936,30 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
                         })}
                         <tr className="font-bold bg-slate-100 print:bg-white">
                           <td className="border border-black p-1.5 text-center px-2 uppercase">Total Duty</td>
-                          {matrix.filter(t => !t.isDisabled).map(t => (
-                            <td key={t.id} className="border border-black p-1.5">{t.totalRequiredMonth}</td>
-                          ))}
+                          {matrix.filter(t => !t.isDisabled).map(t => {
+                            let colTotal = 0;
+                            ['Mechanics', 'Avionics', 'GCS', 'Admin'].forEach(fl => {
+                              const val = t.flightTargets?.[fl as keyof typeof t.flightTargets] !== undefined
+                                ? t.flightTargets[fl as keyof typeof t.flightTargets]
+                                : (calculatedMatrixDistributions[t.id]?.[fl]?.autoVal || 0);
+                              colTotal += val;
+                            });
+                            const isMismatch = colTotal !== t.totalRequiredMonth;
+                            return (
+                              <td key={t.id} className={`border border-black p-1.5 ${isMismatch ? 'text-red-600 font-black' : ''}`}>
+                                {colTotal}
+                              </td>
+                            );
+                          })}
                           <td className="border border-black p-1.5 font-bold">
                             {(() => {
                               let totalAll = 0;
                               matrix.filter(t => !t.isDisabled).forEach(t => {
                                 ['Mechanics', 'Avionics', 'GCS', 'Admin'].forEach(fl => {
-                                  totalAll += (calculatedMatrixDistributions[t.id]?.[fl]?.autoVal || 0);
+                                  const val = t.flightTargets?.[fl as keyof typeof t.flightTargets] !== undefined
+                                    ? t.flightTargets[fl as keyof typeof t.flightTargets]
+                                    : (calculatedMatrixDistributions[t.id]?.[fl]?.autoVal || 0);
+                                  totalAll += val;
                                 });
                               });
                               return totalAll;

@@ -71,14 +71,16 @@ export const OFFICIAL_TARGET_BASELINE: Record<string, Record<FlightName, number>
 
 export function isFixedEqualDuty(table: DutyRatioTable): boolean {
   if (!table || table.isDisabled) return false;
+
+  // 1. Explicit configuration takes highest precedence
+  if (table.allotmentType === 'equal') return true;
+  if (table.allotmentType === 'ratio') return false;
+
+  // 2. Default fallback for legacy duties (Airfield duty defaults to equal)
   const title = (table.title || '').toUpperCase();
   const id = (table.id || '').toLowerCase();
   
   if (id === 'airport_duty' || title.includes('AIRFIELD') || title.includes('AIRPORT')) {
-    return true;
-  }
-  
-  if (table.eligibleFlights && table.eligibleFlights.length > 1 && table.totalRequiredDaily === table.eligibleFlights.length) {
     return true;
   }
 
@@ -95,9 +97,26 @@ export function getFlightStrength(mp: ManpowerState, fl: FlightName, isSecurity:
 }
 
 /**
- * Calculates balanced auto targets.
- * - If default manpower is active: uses OFFICIAL_TARGET_BASELINE.
- * - If manpower or disposal changes: dynamically recalculates each flight's fair share based on current manpower!
+ * Universal Duty Ratio Rounding Rule:
+ * - Point er pore 50 ba tar kom thakle ager full number hbe (round down: floor)
+ * - Point er pore 50 er beshi thakle porer full digit hbe (round up: floor + 1)
+ */
+export function roundDutyByRule(val: number): number {
+  if (val <= 0 || isNaN(val)) return 0;
+  const cleanVal = Number(val.toFixed(4));
+  const floorVal = Math.floor(cleanVal);
+  const frac = Number((cleanVal - floorVal).toFixed(4));
+  
+  if (frac > 0.5000) {
+    return floorVal + 1;
+  }
+  return floorVal;
+}
+
+/**
+ * Calculates auto targets using the user's specific rounding rule:
+ * - Each flight gets roundDutyByRule(exactRatio).
+ * - No automatic +1/-1 manipulation is done to force totals to match (user will adjust manually).
  */
 export function calculateBalancedAutoTargets(
   matrix: DutyRatioTable[],
@@ -111,136 +130,12 @@ export function calculateBalancedAutoTargets(
     Admin: {},
   };
 
-  const mp: ManpowerState = {
-    ...DEFAULT_MANPOWER,
-    ...(manpowerInput || {}),
-  };
+  const exactRatios = calculateExactDutyRatios(matrix, manpowerInput);
 
-  const isDefault = isDefaultManpower(mp);
-  const activeDuties = matrix.filter((t) => !t.isDisabled);
-  const getStrength = (fl: FlightName, isSec: boolean) => getFlightStrength(mp, fl, isSec);
-
-  // 1. Calculate overall base total duty weight across all active duties (Sob Duty miliye)
-  const totalDutyWeight: Record<FlightName, number> = { Mechanics: 0, Avionics: 0, GCS: 0, Admin: 0 };
-  activeDuties.forEach((t) => {
-    const isSecurity = t.id === 'security_duty';
-    const isFixed = isFixedEqualDuty(t);
-    const elig = t.eligibleFlights && t.eligibleFlights.length > 0 ? t.eligibleFlights : flights;
-    const total = (t.dailyRequirements && t.dailyRequirements.length > 0)
-      ? t.dailyRequirements.reduce((sum, v) => sum + (Number(v) || 0), 0)
-      : (t.totalRequiredMonth || 0);
-
-    if (isFixed) {
-      elig.forEach((fl) => {
-        totalDutyWeight[fl] += total / elig.length;
-      });
-      return;
-    }
-
-    const pool = elig.reduce((s, fl) => s + getStrength(fl, isSecurity), 0);
-    elig.forEach((fl) => {
-      const st = getStrength(fl, isSecurity);
-      totalDutyWeight[fl] += pool > 0 ? (st / pool) * total : (total / elig.length);
-    });
-  });
-
-  const cumulativeTotals: Record<FlightName, number> = { Mechanics: 0, Avionics: 0, GCS: 0, Admin: 0 };
-  let mechGcsTurn: FlightName = 'Mechanics';
-
-  activeDuties.forEach((t) => {
-    const isSecurity = t.id === 'security_duty';
-    const isFixed = isFixedEqualDuty(t);
-    const elig = t.eligibleFlights && t.eligibleFlights.length > 0 ? t.eligibleFlights : flights;
-    
-    // Compute total from dailyRequirements if set, otherwise from totalRequiredMonth
-    const calculatedTotal = (t.dailyRequirements && t.dailyRequirements.length > 0)
-      ? t.dailyRequirements.reduce((sum, v) => sum + (Number(v) || 0), 0)
-      : (t.totalRequiredMonth || 0);
-    const total = calculatedTotal;
-
-    // Fixed duties (e.g. Airfield Duty): equal share among capable flights
-    if (isFixed) {
-      const per = elig.length > 0 ? Math.floor(total / elig.length) : 0;
-      let rem = elig.length > 0 ? total % elig.length : 0;
-      flights.forEach((fl) => {
-        if (!elig.includes(fl)) {
-          autoTargets[fl][t.id] = 0;
-        } else {
-          const val = per + (rem > 0 ? 1 : 0);
-          autoTargets[fl][t.id] = val;
-          cumulativeTotals[fl] += val;
-          if (rem > 0) rem--;
-        }
-      });
-      return;
-    }
-
-    // Dynamic calculation based on current manpower ratio
-    const pool = elig.reduce((s, fl) => s + getStrength(fl, isSecurity), 0);
-    const shares = elig.map((fl) => {
-      const st = getStrength(fl, isSecurity);
-      const raw = pool > 0 ? (st / pool) * total : (total / elig.length);
-      const floor = Math.floor(raw);
-      const rem = raw - floor;
-      return { fl, raw, floor, rem, assigned: floor };
-    });
-
-    const floorSum = shares.reduce((s, x) => s + x.floor, 0);
-    let remainingSlots = total - floorSum;
-
-    if (remainingSlots > 0) {
-      // Rank candidate flights for the extra (+1) slots
-      shares.sort((a, b) => {
-        // 1. Remainder comparison (higher remainder gets priority)
-        if (Math.abs(b.rem - a.rem) > 0.0001) {
-          return b.rem - a.rem;
-        }
-
-        // TIE IN REMAINDER!
-        // 2. Rule 1: Overall total duty (সব ডিউটি মিলিয়ে যার ডিউটি কম সে পাবে)
-        // Admin (~12 month total) gets priority over Avionics (~98 month total) when both have 0.5 rem (Sy Duty)
-        const overallDiff = totalDutyWeight[a.fl] - totalDutyWeight[b.fl];
-        if (Math.abs(overallDiff) > 0.5) {
-          return overallDiff; // lower overall duty gets priority
-        }
-
-        // 3. Rule 1.1: Running cumulative total so far
-        const runDiff = cumulativeTotals[a.fl] - cumulativeTotals[b.fl];
-        if (runDiff !== 0) {
-          return runDiff; // lower running total gets priority
-        }
-
-        // 4. Rule 2: Alternation for tied flights with equal running totals (Mech vs GCS)
-        if ((a.fl === 'Mechanics' && b.fl === 'GCS') || (a.fl === 'GCS' && b.fl === 'Mechanics')) {
-          return a.fl === mechGcsTurn ? -1 : 1;
-        }
-
-        return flights.indexOf(a.fl) - flights.indexOf(b.fl);
-      });
-
-      for (let i = 0; i < remainingSlots; i++) {
-        const winner = shares[i];
-        winner.assigned += 1;
-        // If winner was chosen between Mech and GCS on equal running totals, alternate turn
-        if (winner.fl === 'Mechanics' || winner.fl === 'GCS') {
-          const other: FlightName = winner.fl === 'Mechanics' ? 'GCS' : 'Mechanics';
-          const otherCand = shares.find((x) => x.fl === other);
-          if (
-            otherCand &&
-            Math.abs(winner.rem - otherCand.rem) <= 0.0001 &&
-            cumulativeTotals[winner.fl] === cumulativeTotals[other]
-          ) {
-            mechGcsTurn = other;
-          }
-        }
-      }
-    }
-
+  matrix.forEach((t) => {
     flights.forEach((fl) => {
-      const found = shares.find((x) => x.fl === fl);
-      const val = found ? found.assigned : 0;
-      autoTargets[fl][t.id] = val;
-      cumulativeTotals[fl] += val;
+      const exact = exactRatios[t.id]?.[fl] ?? 0;
+      autoTargets[fl][t.id] = roundDutyByRule(exact);
     });
   });
 
@@ -303,9 +198,12 @@ export function calculateExactDutyRatios(
  *   targetDaily = Math.round(flightTotal / 31)
  * - Uses a post-allocation swap smoother to eliminate outliers and clusterings.
  */
+export type AllocationMode = 'SINGLE' | 'PACKAGE';
+
 export function autoAllocateDutyMatrix(
   matrix: DutyRatioTable[],
-  manpowerInput?: Partial<ManpowerState> | null
+  manpowerInput?: Partial<ManpowerState> | null,
+  mode: AllocationMode = 'SINGLE'
 ): DutyRatioTable[] {
   const flights: FlightName[] = ['Mechanics', 'Avionics', 'GCS', 'Admin'];
   const mp: ManpowerState = {
@@ -317,26 +215,26 @@ export function autoAllocateDutyMatrix(
   const isDefault = isDefaultManpower(manpowerInput);
 
   // 1. Clone matrix with cleared data
+  const tableTargets: Record<string, Record<FlightName, number>> = {};
+
   const newMatrix: DutyRatioTable[] = matrix.map((t) => {
     // True month total based on dailyRequirements if set
     const monthTotal = (t.dailyRequirements && t.dailyRequirements.length > 0)
       ? t.dailyRequirements.reduce((sum, v) => sum + (Number(v) || 0), 0)
       : (t.totalRequiredMonth || 0);
 
-    const existing = t.flightTargets;
-    const existingSum = existing ? (existing.Mechanics || 0) + (existing.Avionics || 0) + (existing.GCS || 0) + (existing.Admin || 0) : 0;
-
     const targets: Record<FlightName, number> = {
-      Mechanics: autoTargets['Mechanics']?.[t.id] ?? 0,
-      Avionics: autoTargets['Avionics']?.[t.id] ?? 0,
-      GCS: autoTargets['GCS']?.[t.id] ?? 0,
-      Admin: autoTargets['Admin']?.[t.id] ?? 0,
+      Mechanics: t.flightTargets?.Mechanics ?? (autoTargets['Mechanics']?.[t.id] ?? 0),
+      Avionics: t.flightTargets?.Avionics ?? (autoTargets['Avionics']?.[t.id] ?? 0),
+      GCS: t.flightTargets?.GCS ?? (autoTargets['GCS']?.[t.id] ?? 0),
+      Admin: t.flightTargets?.Admin ?? (autoTargets['Admin']?.[t.id] ?? 0),
     };
+    tableTargets[t.id] = targets;
 
     return {
       ...t,
       totalRequiredMonth: monthTotal,
-      flightTargets: targets,
+      flightTargets: t.flightTargets ? { ...t.flightTargets } : undefined,
       data: {
         Mechanics: new Array(31).fill(0),
         Avionics: new Array(31).fill(0),
@@ -356,10 +254,10 @@ export function autoAllocateDutyMatrix(
 
   // Target daily independent numbers
   const flightMonthTotals: Record<FlightName, number> = {
-    Mechanics: newMatrix.filter((t) => !t.isDisabled).reduce((sum, t) => sum + (t.flightTargets?.Mechanics || 0), 0),
-    Avionics: newMatrix.filter((t) => !t.isDisabled).reduce((sum, t) => sum + (t.flightTargets?.Avionics || 0), 0),
-    GCS: newMatrix.filter((t) => !t.isDisabled).reduce((sum, t) => sum + (t.flightTargets?.GCS || 0), 0),
-    Admin: newMatrix.filter((t) => !t.isDisabled).reduce((sum, t) => sum + (t.flightTargets?.Admin || 0), 0),
+    Mechanics: newMatrix.filter((t) => !t.isDisabled).reduce((sum, t) => sum + (tableTargets[t.id]?.Mechanics || 0), 0),
+    Avionics: newMatrix.filter((t) => !t.isDisabled).reduce((sum, t) => sum + (tableTargets[t.id]?.Avionics || 0), 0),
+    GCS: newMatrix.filter((t) => !t.isDisabled).reduce((sum, t) => sum + (tableTargets[t.id]?.GCS || 0), 0),
+    Admin: newMatrix.filter((t) => !t.isDisabled).reduce((sum, t) => sum + (tableTargets[t.id]?.Admin || 0), 0),
   };
 
   const targetDaily: Record<FlightName, number> = {
@@ -368,6 +266,88 @@ export function autoAllocateDutyMatrix(
     GCS: Math.max(1, Math.round(flightMonthTotals.GCS / 31)),
     Admin: Math.max(1, Math.round(flightMonthTotals.Admin / 31)),
   };
+
+  // User's Golden Rule limits per flight:
+  // e.g. 93 / 31 = 3 -> min: 3, max: 3 (every day gets 3, no day gets 4)
+  // e.g. 97 / 31 = 3 rem 4 -> min: 3, max: 4 (no day gets 2, exactly 4 days get 4, no day gets 5)
+  const flightDailyLimits: Record<FlightName, { min: number; max: number; base: number; rem: number }> = {
+    Mechanics: { min: 0, max: 0, base: 0, rem: 0 },
+    Avionics: { min: 0, max: 0, base: 0, rem: 0 },
+    GCS: { min: 0, max: 0, base: 0, rem: 0 },
+    Admin: { min: 0, max: 0, base: 0, rem: 0 },
+  };
+
+  flights.forEach((fl) => {
+    const total = flightMonthTotals[fl];
+    const base = Math.floor(total / 31);
+    const rem = total % 31;
+    const min = base;
+    const max = rem > 0 ? base + 1 : base;
+    flightDailyLimits[fl] = { min, max, base, rem };
+  });
+
+  function evalDailyLoadCost(load: number, limits: { min: number; max: number }): number {
+    if (load < limits.min) {
+      return Math.pow(limits.min - load, 2) * 50000;
+    }
+    if (load > limits.max) {
+      return Math.pow(load - limits.max, 2) * 50000;
+    }
+    return 0;
+  }
+
+  // Heavy duty (Base Security, Base Taskforce, Nazirpara Taskforce) tracking
+  const dailyFlightHeavyLoad: Record<FlightName, number[]> = {
+    Mechanics: new Array(31).fill(0),
+    Avionics: new Array(31).fill(0),
+    GCS: new Array(31).fill(0),
+    Admin: new Array(31).fill(0),
+  };
+
+  function isHeavyDuty(tableId: string, title?: string): boolean {
+    if (tableId === 'security_duty' || tableId === 'base_tf' || tableId === 'nazirpara_tf') {
+      return true;
+    }
+    const t = (title || '').toUpperCase();
+    if (t.includes('SECURITY') && (t.includes('BASE') || t.includes('GD'))) return true;
+    if (t.includes('BASE TASKFORCE') || t.includes('BASE TF')) return true;
+    if (t.includes('NAJIRPARA') || t.includes('NAZIRPARA')) return true;
+    return false;
+  }
+
+  const flightHeavyMonthTotals: Record<FlightName, number> = {
+    Mechanics: newMatrix.filter((t) => !t.isDisabled && isHeavyDuty(t.id, t.title)).reduce((sum, t) => sum + (tableTargets[t.id]?.Mechanics || 0), 0),
+    Avionics: newMatrix.filter((t) => !t.isDisabled && isHeavyDuty(t.id, t.title)).reduce((sum, t) => sum + (tableTargets[t.id]?.Avionics || 0), 0),
+    GCS: newMatrix.filter((t) => !t.isDisabled && isHeavyDuty(t.id, t.title)).reduce((sum, t) => sum + (tableTargets[t.id]?.GCS || 0), 0),
+    Admin: newMatrix.filter((t) => !t.isDisabled && isHeavyDuty(t.id, t.title)).reduce((sum, t) => sum + (tableTargets[t.id]?.Admin || 0), 0),
+  };
+
+  const flightHeavyDailyLimits: Record<FlightName, { min: number; max: number }> = {
+    Mechanics: { min: 0, max: 0 },
+    Avionics: { min: 0, max: 0 },
+    GCS: { min: 0, max: 0 },
+    Admin: { min: 0, max: 0 },
+  };
+
+  flights.forEach((fl) => {
+    const total = flightHeavyMonthTotals[fl];
+    const base = Math.floor(total / 31);
+    const rem = total % 31;
+    flightHeavyDailyLimits[fl] = {
+      min: base,
+      max: rem > 0 ? base + 1 : base,
+    };
+  });
+
+  function evalHeavyDutyCost(count: number, limits: { min: number; max: number }): number {
+    if (count > limits.max) {
+      return Math.pow(count - limits.max, 2) * 200000;
+    }
+    if (count < limits.min) {
+      return Math.pow(limits.min - count, 2) * 50000;
+    }
+    return 0;
+  }
 
   // Step 2: Fixed Duties (Airfield Duty: equal share among capable flights)
   newMatrix.filter((t) => !t.isDisabled && isFixedEqualDuty(t)).forEach((t) => {
@@ -392,11 +372,20 @@ export function autoAllocateDutyMatrix(
         if (rem > 0) rem--;
         t.data[fl][day] = c;
         dailyFlightLoad[fl][day] += c;
+        if (isHeavyDuty(t.id, t.title)) {
+          dailyFlightHeavyLoad[fl][day] += c;
+        }
       });
     }
 
     flights.forEach((fl) => {
-      t.flightTargets[fl] = t.data[fl].reduce((a, b) => a + b, 0);
+      const assignedCount = t.data[fl].reduce((a, b) => a + b, 0);
+      if (t.flightTargets) {
+        t.flightTargets[fl] = assignedCount;
+      }
+      if (tableTargets[t.id]) {
+        tableTargets[t.id][fl] = assignedCount;
+      }
     });
   });
 
@@ -434,11 +423,45 @@ export function autoAllocateDutyMatrix(
 
   function evalFlightStreakCost(arr: number[], target: number): number {
     if (target <= 0 || target >= 31) return 0;
-    const { maxOnStreak, maxOffStreak, gaps } = getDutyLimits(target);
     let cost = 0;
     let curOn = 0;
     let curOff = 0;
 
+    if (mode === 'PACKAGE') {
+      // PACKAGE MODE:
+      // - Target packages: min 2 consecutive, max 3 consecutive
+      // - Penalize isolated single days (curOn === 1) if target >= 2
+      // - Heavy penalty for streaks > 3
+      for (let d = 0; d < 31; d++) {
+        if (arr[d] > 0) {
+          curOn++;
+          curOff = 0;
+        } else {
+          if (curOn > 0) {
+            if (target >= 2 && curOn === 1) {
+              cost += 2500; // Strong penalty for isolated single day
+            } else if (curOn > 3) {
+              cost += Math.pow(curOn - 3, 2) * 6000; // Heavy penalty for exceeding 3 consecutive days
+            }
+            curOn = 0;
+          }
+          curOff++;
+        }
+      }
+      if (curOn > 0) {
+        if (target >= 2 && curOn === 1) {
+          cost += 2500;
+        } else if (curOn > 3) {
+          cost += Math.pow(curOn - 3, 2) * 6000;
+        }
+      }
+      return cost;
+    }
+
+    // SINGLE MODE:
+    // - Spread out with maximum gaps between duties
+    // - Strong penalty for consecutive duties (curOn > 1)
+    const { maxOnStreak, maxOffStreak, gaps } = getDutyLimits(target);
     for (let d = 0; d < 31; d++) {
       if (arr[d] > 0) {
         curOn++;
@@ -451,11 +474,12 @@ export function autoAllocateDutyMatrix(
           }
           curOff = 0;
         }
+        if (curOn > 1) {
+          cost += Math.pow(curOn - 1, 2) * 1500; // Penalty for consecutive days in Single mode
+        }
         if (curOn > maxOnStreak) {
           cost += Math.pow(curOn - maxOnStreak, 3) * 5000;
         }
-        if (curOn > 1 && target <= 15) cost += 80;
-        if (curOn > 2 && target <= 20) cost += 120;
       } else {
         curOff++;
         if (curOn > 0) {
@@ -467,6 +491,7 @@ export function autoAllocateDutyMatrix(
       }
     }
 
+    if (curOn > 1) cost += Math.pow(curOn - 1, 2) * 1500;
     if (curOn > maxOnStreak) cost += Math.pow(curOn - maxOnStreak, 3) * 5000;
     if (curOff > maxOffStreak) cost += Math.pow(curOff - maxOffStreak, 2) * 500;
     if (gaps <= 5 && curOff > 1) cost += 2000 * Math.pow(curOff - 1, 2);
@@ -492,7 +517,14 @@ export function autoAllocateDutyMatrix(
     }
     table.dailyRequirements = [...reqSlots];
 
-    const q = table.flightTargets;
+    const q = tableTargets[table.id] || table.flightTargets || {
+      Mechanics: autoTargets['Mechanics']?.[table.id] ?? 0,
+      Avionics: autoTargets['Avionics']?.[table.id] ?? 0,
+      GCS: autoTargets['GCS']?.[table.id] ?? 0,
+      Admin: autoTargets['Admin']?.[table.id] ?? 0,
+    };
+
+    const isThisTableHeavy = isHeavyDuty(table.id, table.title);
 
     // Day by day allocation
     for (let d = 0; d < 31; d++) {
@@ -557,24 +589,95 @@ export function autoAllocateDutyMatrix(
         }).filter((x) => totalRem === 0 ? true : x.rem > 0);
 
         if (available.length === 0) {
-          const anyElig = [...elig].sort((f1, f2) => dailyFlightLoad[f1][d] - dailyFlightLoad[f2][d]);
+          const anyElig = [...elig].sort((f1, f2) => {
+            if (isThisTableHeavy) {
+              const h1 = dailyFlightHeavyLoad[f1][d] >= flightHeavyDailyLimits[f1].max ? 1 : 0;
+              const h2 = dailyFlightHeavyLoad[f2][d] >= flightHeavyDailyLimits[f2].max ? 1 : 0;
+              if (h1 !== h2) return h1 - h2;
+              if (dailyFlightHeavyLoad[f1][d] !== dailyFlightHeavyLoad[f2][d]) {
+                return dailyFlightHeavyLoad[f1][d] - dailyFlightHeavyLoad[f2][d];
+              }
+            }
+            return dailyFlightLoad[f1][d] - dailyFlightLoad[f2][d];
+          });
           const chosen = anyElig[0];
           table.data[chosen][d] += 1;
           dailyFlightLoad[chosen][d] += 1;
+          if (isThisTableHeavy) {
+            dailyFlightHeavyLoad[chosen][d] += 1;
+          }
           remainingToAssign--;
           continue;
         }
 
         available.sort((a, b) => {
-          // 1. Prefer flights that have fewer slots today
+          // 0. STRICT HEAVY DUTY CONFLICT AVOIDANCE (Base Security, Base TF, Nazirpara TF):
+          // Enforce flightHeavyDailyLimits (e.g. Avionics max: 1; Mechanics/GCS max: 2; Admin max: 1).
+          // NEVER allocate a second heavy duty to a flight whose max is 1!
+          if (isThisTableHeavy) {
+            const aHeavy = dailyFlightHeavyLoad[a.fl][d];
+            const bHeavy = dailyFlightHeavyLoad[b.fl][d];
+            const aHLimits = flightHeavyDailyLimits[a.fl];
+            const bHLimits = flightHeavyDailyLimits[b.fl];
+
+            const aOverMax = aHeavy >= aHLimits.max ? 1 : 0;
+            const bOverMax = bHeavy >= bHLimits.max ? 1 : 0;
+            if (aOverMax !== bOverMax) return aOverMax - bOverMax;
+
+            const aUnderMin = aHeavy < aHLimits.min ? 1 : 0;
+            const bUnderMin = bHeavy < bHLimits.min ? 1 : 0;
+            if (aUnderMin !== bUnderMin) return bUnderMin - aUnderMin;
+
+            if (aHeavy !== bHeavy) return aHeavy - bHeavy;
+          }
+
+          // 1. STRICT DAILY LOAD CEILING & FLOOR (User's Golden Rule):
+          // No flight gets (base + 1) until all get base; No flight gets (base + 2).
+          const aLimits = flightDailyLimits[a.fl];
+          const bLimits = flightDailyLimits[b.fl];
+
+          const aAtOrOverMax = a.load >= aLimits.max ? 1 : 0;
+          const bAtOrOverMax = b.load >= bLimits.max ? 1 : 0;
+          if (aAtOrOverMax !== bAtOrOverMax) return aAtOrOverMax - bAtOrOverMax;
+
+          const aUnderMin = a.load < aLimits.min ? 1 : 0;
+          const bUnderMin = b.load < bLimits.min ? 1 : 0;
+          if (aUnderMin !== bUnderMin) return bUnderMin - aUnderMin;
+
+          // 2. Prefer flights that have fewer slots today
           if (a.today !== b.today) return a.today - b.today;
 
-          // 2. Urgent: if remaining quota >= daysLeft, this flight must get a slot
+          // 3. Urgent: if remaining quota >= daysLeft, this flight must get a slot
           const aUrgent = a.rem >= a.daysLeft ? 1 : 0;
           const bUrgent = b.rem >= b.daysLeft ? 1 : 0;
           if (aUrgent !== bUrgent) return bUrgent - aUrgent;
 
-          // 3. Streak limits
+          // Mode-specific streak priorities:
+          if (mode === 'PACKAGE') {
+            // In Package Mode:
+            // A. If a flight had 1 duty yesterday (onStreak === 1) and has quota, give TOP PRIORITY to reach min 2 consecutive!
+            const aIs1 = a.onStreak === 1 && a.rem > 0 ? 1 : 0;
+            const bIs1 = b.onStreak === 1 && b.rem > 0 ? 1 : 0;
+            if (aIs1 !== bIs1) return bIs1 - aIs1;
+
+            // B. If a flight had 2 duties yesterday (onStreak === 2) and has quota, high priority to complete 3-day package
+            const aIs2 = a.onStreak === 2 && a.rem > 0 ? 1 : 0;
+            const bIs2 = b.onStreak === 2 && b.rem > 0 ? 1 : 0;
+            if (aIs2 !== bIs2) return bIs2 - aIs2;
+
+            // C. If a flight already had 3 duties (onStreak >= 3), DO NOT assign today (cap at 3 max consecutive)!
+            const aExceed3 = a.onStreak >= 3 ? 1 : 0;
+            const bExceed3 = b.onStreak >= 3 ? 1 : 0;
+            if (aExceed3 !== bExceed3) return aExceed3 - bExceed3;
+          } else {
+            // In Single Mode:
+            // Penalize consecutive duties to encourage gaps between duties!
+            const aHasConsec = a.onStreak > 0 ? 1 : 0;
+            const bHasConsec = b.onStreak > 0 ? 1 : 0;
+            if (aHasConsec !== bHasConsec) return aHasConsec - bHasConsec;
+          }
+
+          // Streak limits
           const aExceed = Math.max(0, a.onStreak - a.maxOnStreak);
           const bExceed = Math.max(0, b.onStreak - b.maxOnStreak);
           if (aExceed !== bExceed) return aExceed - bExceed;
@@ -603,6 +706,9 @@ export function autoAllocateDutyMatrix(
         const chosen = available[0].fl;
         table.data[chosen][d] += 1;
         dailyFlightLoad[chosen][d] += 1;
+        if (isThisTableHeavy) {
+          dailyFlightHeavyLoad[chosen][d] += 1;
+        }
         remainingToAssign--;
       }
     }
@@ -626,9 +732,23 @@ export function autoAllocateDutyMatrix(
               const target1 = q[f1] || 0;
               const target2 = q[f2] || 0;
 
+              const isTableHeavy = isHeavyDuty(table.id, table.title);
+
+              const heavyCostBefore = isTableHeavy
+                ? evalHeavyDutyCost(dailyFlightHeavyLoad[f1][d1], flightHeavyDailyLimits[f1]) +
+                  evalHeavyDutyCost(dailyFlightHeavyLoad[f1][d2], flightHeavyDailyLimits[f1]) +
+                  evalHeavyDutyCost(dailyFlightHeavyLoad[f2][d1], flightHeavyDailyLimits[f2]) +
+                  evalHeavyDutyCost(dailyFlightHeavyLoad[f2][d2], flightHeavyDailyLimits[f2])
+                : 0;
+
               const costBefore =
                 evalFlightStreakCost(table.data[f1], target1) +
                 evalFlightStreakCost(table.data[f2], target2) +
+                evalDailyLoadCost(dailyFlightLoad[f1][d1], flightDailyLimits[f1]) +
+                evalDailyLoadCost(dailyFlightLoad[f1][d2], flightDailyLimits[f1]) +
+                evalDailyLoadCost(dailyFlightLoad[f2][d1], flightDailyLimits[f2]) +
+                evalDailyLoadCost(dailyFlightLoad[f2][d2], flightDailyLimits[f2]) +
+                heavyCostBefore +
                 (Math.pow(dailyFlightLoad[f1][d1] - targetDaily[f1], 2) +
                  Math.pow(dailyFlightLoad[f1][d2] - targetDaily[f1], 2) +
                  Math.pow(dailyFlightLoad[f2][d1] - targetDaily[f2], 2) +
@@ -639,10 +759,26 @@ export function autoAllocateDutyMatrix(
               table.data[f2][d2] -= 1; table.data[f2][d1] += 1;
               dailyFlightLoad[f1][d1] -= 1; dailyFlightLoad[f1][d2] += 1;
               dailyFlightLoad[f2][d2] -= 1; dailyFlightLoad[f2][d1] += 1;
+              if (isTableHeavy) {
+                dailyFlightHeavyLoad[f1][d1] -= 1; dailyFlightHeavyLoad[f1][d2] += 1;
+                dailyFlightHeavyLoad[f2][d2] -= 1; dailyFlightHeavyLoad[f2][d1] += 1;
+              }
+
+              const heavyCostAfter = isTableHeavy
+                ? evalHeavyDutyCost(dailyFlightHeavyLoad[f1][d1], flightHeavyDailyLimits[f1]) +
+                  evalHeavyDutyCost(dailyFlightHeavyLoad[f1][d2], flightHeavyDailyLimits[f1]) +
+                  evalHeavyDutyCost(dailyFlightHeavyLoad[f2][d1], flightHeavyDailyLimits[f2]) +
+                  evalHeavyDutyCost(dailyFlightHeavyLoad[f2][d2], flightHeavyDailyLimits[f2])
+                : 0;
 
               const costAfter =
                 evalFlightStreakCost(table.data[f1], target1) +
                 evalFlightStreakCost(table.data[f2], target2) +
+                evalDailyLoadCost(dailyFlightLoad[f1][d1], flightDailyLimits[f1]) +
+                evalDailyLoadCost(dailyFlightLoad[f1][d2], flightDailyLimits[f1]) +
+                evalDailyLoadCost(dailyFlightLoad[f2][d1], flightDailyLimits[f2]) +
+                evalDailyLoadCost(dailyFlightLoad[f2][d2], flightDailyLimits[f2]) +
+                heavyCostAfter +
                 (Math.pow(dailyFlightLoad[f1][d1] - targetDaily[f1], 2) +
                  Math.pow(dailyFlightLoad[f1][d2] - targetDaily[f1], 2) +
                  Math.pow(dailyFlightLoad[f2][d1] - targetDaily[f2], 2) +
@@ -657,6 +793,10 @@ export function autoAllocateDutyMatrix(
                 table.data[f2][d2] += 1; table.data[f2][d1] -= 1;
                 dailyFlightLoad[f1][d1] += 1; dailyFlightLoad[f1][d2] -= 1;
                 dailyFlightLoad[f2][d2] += 1; dailyFlightLoad[f2][d1] -= 1;
+                if (isTableHeavy) {
+                  dailyFlightHeavyLoad[f1][d1] += 1; dailyFlightHeavyLoad[f1][d2] -= 1;
+                  dailyFlightHeavyLoad[f2][d2] += 1; dailyFlightHeavyLoad[f2][d1] -= 1;
+                }
               }
             }
             if (improved) break;
@@ -669,12 +809,191 @@ export function autoAllocateDutyMatrix(
     }
   });
 
-  // Final verification: ensure table.flightTargets matches exact assigned total
-  newMatrix.forEach((t) => {
-    flights.forEach((fl) => {
-      t.flightTargets[fl] = t.data[fl].reduce((a, b) => a + b, 0);
-    });
-  });
+  // Step 5: Global Multi-Table Daily Load Equalizer (Strict (B, B+1) Enforcement)
+  // Ensures that no day drops below min (floor(Total/31)) and no day exceeds max (floor(Total/31) + (rem > 0 ? 1 : 0))
+  for (let round = 0; round < 150; round++) {
+    let globalChange = false;
 
+    for (const fl of flights) {
+      const limits = flightDailyLimits[fl];
+
+      // Find underloaded days (load < limits.min)
+      for (let dLow = 0; dLow < 31; dLow++) {
+        if (dailyFlightLoad[fl][dLow] >= limits.min) continue;
+
+        // Try to pull 1 duty for fl from some dHigh where dailyFlightLoad[fl][dHigh] > limits.min
+        for (let dHigh = 0; dHigh < 31; dHigh++) {
+          if (dLow === dHigh) continue;
+          if (dailyFlightLoad[fl][dHigh] <= limits.min) continue;
+
+          // Find a table where fl is scheduled on dHigh, and another eligible flight f2 is scheduled on dLow
+          let swapped = false;
+          for (const t of newMatrix.filter((x) => !x.isDisabled)) {
+            if (t.data[fl][dHigh] < 1) continue;
+
+            const elig = t.eligibleFlights && t.eligibleFlights.length > 0
+              ? t.eligibleFlights
+              : flights;
+            if (!elig.includes(fl)) continue;
+
+            const isTHeavy = isHeavyDuty(t.id, t.title);
+            if (isTHeavy && dailyFlightHeavyLoad[fl][dLow] + 1 >= 3) continue;
+
+            for (const f2 of elig) {
+              if (f2 === fl) continue;
+              if (t.data[f2][dLow] < 1) continue;
+              if (isTHeavy && dailyFlightHeavyLoad[f2][dHigh] + 1 >= 3) continue;
+
+              const f2Limits = flightDailyLimits[f2];
+
+              const curF2Penalty =
+                evalDailyLoadCost(dailyFlightLoad[f2][dLow], f2Limits) +
+                evalDailyLoadCost(dailyFlightLoad[f2][dHigh], f2Limits);
+              const nextF2Penalty =
+                evalDailyLoadCost(dailyFlightLoad[f2][dLow] - 1, f2Limits) +
+                evalDailyLoadCost(dailyFlightLoad[f2][dHigh] + 1, f2Limits);
+
+              const curFlPenalty =
+                evalDailyLoadCost(dailyFlightLoad[fl][dLow], limits) +
+                evalDailyLoadCost(dailyFlightLoad[fl][dHigh], limits);
+              const nextFlPenalty =
+                evalDailyLoadCost(dailyFlightLoad[fl][dLow] + 1, limits) +
+                evalDailyLoadCost(dailyFlightLoad[fl][dHigh] - 1, limits);
+
+              if (nextFlPenalty + nextF2Penalty < curFlPenalty + curF2Penalty) {
+                // Execute swap between fl and f2 on table t
+                t.data[fl][dHigh] -= 1;
+                t.data[fl][dLow] += 1;
+                t.data[f2][dLow] -= 1;
+                t.data[f2][dHigh] += 1;
+
+                dailyFlightLoad[fl][dHigh] -= 1;
+                dailyFlightLoad[fl][dLow] += 1;
+                dailyFlightLoad[f2][dLow] -= 1;
+                dailyFlightLoad[f2][dHigh] += 1;
+
+                if (isTHeavy) {
+                  dailyFlightHeavyLoad[fl][dHigh] -= 1;
+                  dailyFlightHeavyLoad[fl][dLow] += 1;
+                  dailyFlightHeavyLoad[f2][dLow] -= 1;
+                  dailyFlightHeavyLoad[f2][dHigh] += 1;
+                }
+
+                swapped = true;
+                globalChange = true;
+                break;
+              }
+            }
+            if (swapped) break;
+          }
+          if (swapped) break;
+        }
+      }
+    }
+    if (!globalChange) break;
+  }
+
+  // Step 6: Heavy Duty Conflict Resolver (Strict Rule: Max 2, Never 3 on Same Date; Respect flightHeavyDailyLimits)
+  // Guarantees that Base Security, Base TF, and Nazirpara TF never exceed flightHeavyDailyLimits[fl].max (e.g. max 1 for Avionics).
+  // Also aggressively reduces any 2-duty collisions down to 1 or 0 whenever possible.
+  for (let round = 0; round < 150; round++) {
+    let resolvedAny = false;
+
+    for (let d = 0; d < 31; d++) {
+      for (const fl of flights) {
+        const heavyCount = dailyFlightHeavyLoad[fl][d];
+        const flHLimits = flightHeavyDailyLimits[fl];
+        if (heavyCount <= flHLimits.max) continue; // within allowable limit!
+
+        // fl exceeds its max heavy duties on day d (e.g. Avionics having 2 when max is 1)
+        const heavyTables = newMatrix.filter(
+          (t) => !t.isDisabled && isHeavyDuty(t.id, t.title) && (t.data[fl]?.[d] || 0) > 0
+        );
+
+        for (const t of heavyTables) {
+          const elig = t.eligibleFlights && t.eligibleFlights.length > 0 ? t.eligibleFlights : flights;
+
+          // Find another eligible flight f2 on day d that has room for a heavy duty
+          for (const f2 of elig) {
+            if (f2 === fl) continue;
+            const f2HLimits = flightHeavyDailyLimits[f2];
+            if (dailyFlightHeavyLoad[f2][d] >= f2HLimits.max) continue;
+
+            // Find another day dOther where t.data[f2][dOther] > 0 and t.data[fl][dOther] === 0
+            for (let dOther = 0; dOther < 31; dOther++) {
+              if (dOther === d) continue;
+              if (t.data[f2][dOther] < 1 || t.data[fl][dOther] > 0) continue;
+
+              // Check if moving fl to dOther would cause fl on dOther to exceed its max
+              if (dailyFlightHeavyLoad[fl][dOther] + 1 > flHLimits.max) continue;
+
+              // Check daily load constraints: ensure this swap doesn't break [min, max] limits
+              const flLimits = flightDailyLimits[fl];
+              const f2Limits = flightDailyLimits[f2];
+              const curLoadPen =
+                evalDailyLoadCost(dailyFlightLoad[fl][d], flLimits) +
+                evalDailyLoadCost(dailyFlightLoad[fl][dOther], flLimits) +
+                evalDailyLoadCost(dailyFlightLoad[f2][d], f2Limits) +
+                evalDailyLoadCost(dailyFlightLoad[f2][dOther], f2Limits);
+
+              const nextLoadPen =
+                evalDailyLoadCost(dailyFlightLoad[fl][d] - 1, flLimits) +
+                evalDailyLoadCost(dailyFlightLoad[fl][dOther] + 1, flLimits) +
+                evalDailyLoadCost(dailyFlightLoad[f2][d] + 1, f2Limits) +
+                evalDailyLoadCost(dailyFlightLoad[f2][dOther] - 1, f2Limits);
+
+              // Check if we can also swap a light duty to keep daily load 100% constant
+              let lightTable: DutyRatioTable | null = null;
+              for (const tLight of newMatrix.filter((x) => !x.isDisabled && !isHeavyDuty(x.id, x.title))) {
+                if ((tLight.data[fl]?.[dOther] || 0) > 0 && (tLight.data[f2]?.[d] || 0) > 0) {
+                  lightTable = tLight;
+                  break;
+                }
+              }
+
+              if (lightTable || heavyCount > flHLimits.max || nextLoadPen <= curLoadPen) {
+                // Execute heavy duty swap
+                t.data[fl][d] -= 1;
+                t.data[fl][dOther] += 1;
+                t.data[f2][d] += 1;
+                t.data[f2][dOther] -= 1;
+
+                dailyFlightLoad[fl][d] -= 1;
+                dailyFlightLoad[fl][dOther] += 1;
+                dailyFlightLoad[f2][d] += 1;
+                dailyFlightLoad[f2][dOther] -= 1;
+
+                dailyFlightHeavyLoad[fl][d] -= 1;
+                dailyFlightHeavyLoad[fl][dOther] += 1;
+                dailyFlightHeavyLoad[f2][d] += 1;
+                dailyFlightHeavyLoad[f2][dOther] -= 1;
+
+                // If light duty table found, swap it to preserve daily load perfectly
+                if (lightTable) {
+                  lightTable.data[fl][dOther] -= 1;
+                  lightTable.data[fl][d] += 1;
+                  lightTable.data[f2][d] -= 1;
+                  lightTable.data[f2][dOther] += 1;
+
+                  dailyFlightLoad[fl][dOther] -= 1;
+                  dailyFlightLoad[fl][d] += 1;
+                  dailyFlightLoad[f2][d] -= 1;
+                  dailyFlightLoad[f2][dOther] += 1;
+                }
+
+                resolvedAny = true;
+                break;
+              }
+            }
+            if (resolvedAny) break;
+          }
+          if (resolvedAny) break;
+        }
+      }
+    }
+    if (!resolvedAny) break;
+  }
+
+  // Keep flightTargets untouched (only holds manual user overrides)
   return newMatrix;
 }

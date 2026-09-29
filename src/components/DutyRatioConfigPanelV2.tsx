@@ -1,10 +1,11 @@
 import { DUTY_TYPE_MAP } from '../data/dutyTypes';
-import React, { useState, useEffect, useMemo } from 'react';
-import { AlertCircle, Settings, Info, Users, ChevronDown, ChevronUp, Calendar, X, Save, Power, PowerOff, Trash, Filter, Plus, Minus, Printer, Edit2 } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { AlertCircle, Settings, Info, Users, ChevronDown, ChevronUp, Calendar, X, Save, Power, PowerOff, Trash, Filter, Plus, Minus, Printer, Edit2, RotateCcw } from 'lucide-react';
 import { localDb } from '../services/localDatabase';
 import { Airman, Rank, FlightName, DutyCategoryCode } from '../types';
 import { addCustomDuty, CustomDutyConfig, removeCustomDuty } from '../utils/customDuties';
 import { getSavedCustomDisposals, saveCustomDisposal, removeSavedCustomDisposal } from '../utils/customDisposalStore';
+import { calculateExactDutyRatios, roundDutyByRule, isFixedEqualDuty } from '../utils/dutyDistribution';
 
 const STANDARD_DISPOSALS = [
   '-',
@@ -39,7 +40,7 @@ const DEFAULT_MANPOWER = {
   adminCpl: 1,
 };
 
-import { DutyRatioTable } from '../data/officialDutyRatioMatrix';
+import { DutyRatioTable, AllotmentType } from '../data/officialDutyRatioMatrix';
 
 
 
@@ -210,6 +211,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
   const [editDutyName, setEditDutyName] = useState('');
   const [editDutyFlights, setEditDutyFlights] = useState<FlightName[]>([]);
   const [editDutyRanks, setEditDutyRanks] = useState<Rank[]>([]);
+  const [editDutyAllotmentType, setEditDutyAllotmentType] = useState<AllotmentType>('ratio');
   
   // New Duty Modal State
   const [isAddingNewDuty, setIsAddingNewDuty] = useState(false);
@@ -217,6 +219,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
   const [newDutyName, setNewDutyName] = useState('');
   const [newDutyFlights, setNewDutyFlights] = useState<FlightName[]>(['Mechanics', 'Avionics', 'GCS', 'Admin']);
   const [newDutyRanks, setNewDutyRanks] = useState<Rank[]>(['MWO', 'SWO', 'WO', 'Sgt', 'Cpl', 'LAC', 'AC-1', 'AC-2']);
+  const [newDutyAllotmentType, setNewDutyAllotmentType] = useState<AllotmentType>('ratio');
 
   const [savedCustomList, setSavedCustomList] = useState<string[]>(() => getSavedCustomDisposals());
   const [openDropdownAirmanId, setOpenDropdownAirmanId] = useState<string | null>(null);
@@ -374,85 +377,55 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
     window.dispatchEvent(new CustomEvent('baf_duty_ratio_updated'));
   }, [JSON.stringify(currentManpower)]);
 
+  const [activeDistributionCell, setActiveDistributionCell] = useState<{ tableId: string; flight: string } | null>(null);
+  const activeCellRef = useRef<HTMLTableCellElement | null>(null);
+
+  useEffect(() => {
+    if (!activeDistributionCell) return;
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (activeCellRef.current && !activeCellRef.current.contains(e.target as Node)) {
+        setActiveDistributionCell(null);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+    };
+  }, [activeDistributionCell]);
+
+  const handleTargetChange = (tableId: string, fl: string, val: number | undefined) => {
+    if (!onMatrixChange || !matrix) return;
+    const newMatrix = [...matrix];
+    const tIdx = newMatrix.findIndex(x => x.id === tableId);
+    if (tIdx >= 0) {
+      const newTargets = { ...(newMatrix[tIdx].flightTargets || {}) };
+      if (val !== undefined && !isNaN(val)) {
+        newTargets[fl] = val;
+      } else {
+        delete newTargets[fl];
+      }
+      newMatrix[tIdx] = { ...newMatrix[tIdx], flightTargets: newTargets };
+      onMatrixChange(newMatrix);
+    }
+  };
+
   const calculatedMatrixDistributions = useMemo(() => {
     if (!matrix) return {};
+    const exactRatios = calculateExactDutyRatios(matrix, currentManpower);
     const result: Record<string, Record<string, { autoVal: number, exactVal: number }>> = {};
-    
-    // Tracker to balance pure ties across different duty types
-    const tieBreakerTracker: Record<string, number> = {
-      'Mechanics': 0, 'Avionics': 0, 'GCS': 0, 'Admin': 0
-    };
-    
+    const flights = ['Mechanics', 'Avionics', 'GCS', 'Admin'];
+
     matrix.forEach(t => {
-      const isSecurity = t.id === 'security_duty';
-      const dutyTotal = t.totalRequiredMonth || 0;
-      
-      const flights = ['Mechanics', 'Avionics', 'GCS', 'Admin'];
-      const flightPools: Record<string, number> = {};
-      
-      let actualPoolSize = 0;
-      flights.forEach(fl => {
-        let fltCpl = 0, fltSgt = 0;
-        if (fl === 'Mechanics') { fltCpl = currentManpower.mechCpl; fltSgt = currentManpower.mechSgt; }
-        if (fl === 'Avionics') { fltCpl = currentManpower.aviCpl; fltSgt = currentManpower.aviSgt; }
-        if (fl === 'GCS') { fltCpl = currentManpower.gcsCpl; fltSgt = currentManpower.gcsSgt; }
-        if (fl === 'Admin') { fltCpl = currentManpower.adminCpl; fltSgt = currentManpower.adminSgt; }
-        
-        let fltPool = isSecurity ? fltCpl : (fltCpl + fltSgt);
-        if (t.eligibleFlights && !t.eligibleFlights.includes(fl as any)) {
-          fltPool = 0;
-        }
-        flightPools[fl] = fltPool;
-        actualPoolSize += fltPool;
-      });
-
-      if (dutyTotal === 0 || actualPoolSize === 0) {
-        result[t.id] = flights.reduce((acc, fl) => ({ ...acc, [fl]: { autoVal: 0, exactVal: 0 } }), {});
-        return;
-      }
-
-      const exactVals = flights.map(fl => {
-        const exact = (flightPools[fl] / actualPoolSize) * dutyTotal;
-        return {
-          flight: fl,
-          exact: exact,
-          floor: Math.floor(exact),
-          remainder: exact - Math.floor(exact)
-        };
-      });
-
-      const allocated = exactVals.reduce((sum, item) => sum + item.floor, 0);
-      const remaining = dutyTotal - allocated;
-
-      const sortedForDistribution = [...exactVals]
-        .filter(item => flightPools[item.flight] > 0)
-        .sort((a, b) => {
-        const diff = b.remainder - a.remainder;
-        if (Math.abs(diff) > 1e-9) {
-          return diff; // larger remainder first
-        }
-        const floorDiff = a.floor - b.floor;
-        if (floorDiff !== 0) {
-          return floorDiff; // tie breaker 1: lower total duty (floor) first
-        }
-        // tie breaker 2: alternate based on who has received fewer extra tie-breaker duties
-        return tieBreakerTracker[a.flight] - tieBreakerTracker[b.flight];
-      });
-
-      for (let i = 0; i < remaining && i < sortedForDistribution.length; i++) {
-        sortedForDistribution[i].floor += 1;
-        // Record allocation to balance future pure ties
-        tieBreakerTracker[sortedForDistribution[i].flight] += 1;
-      }
-
       result[t.id] = {};
-      exactVals.forEach(item => {
-        result[t.id][item.flight] = { autoVal: item.floor, exactVal: item.exact };
+      flights.forEach(fl => {
+        const exactVal = exactRatios[t.id]?.[fl as FlightName] ?? 0;
+        const autoVal = roundDutyByRule(exactVal);
+        result[t.id][fl] = { autoVal, exactVal };
       });
     });
     
     return result;
-  }, [matrix, JSON.stringify(currentManpower), totalCpl, totalSgtAndBelow]);
+  }, [matrix, JSON.stringify(currentManpower)]);
 
   return (
     <div className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 p-4 md:p-8 min-h-max overflow-auto text-sm font-sans relative" style={{ fontFamily: 'Arial, sans-serif' }}>
@@ -513,6 +486,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                           setEditDutySerNo(table.serNo ?? '');
                           setEditDutyFlights(table.eligibleFlights || ['Mechanics', 'Avionics', 'GCS', 'Admin']);
                           setEditDutyRanks(table.eligibleRanks || ['MWO', 'SWO', 'WO', 'Sgt', 'Cpl', 'LAC', 'AC-1', 'AC-2']);
+                          setEditDutyAllotmentType(table.allotmentType || (isFixedEqualDuty(table) ? 'equal' : 'ratio'));
                         }}
                         className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                         title="Duty Settings"
@@ -891,6 +865,15 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                                     value={currentVal || '-'}
                                     onChange={(e) => {
                                       setDisposals({ ...disposals, [a.id]: e.target.value });
+                                      if (matrix && onMatrixChange) {
+                                        const resetMatrix = matrix.map(t => {
+                                          if (!t.flightTargets) return t;
+                                          const copy = { ...t };
+                                          delete copy.flightTargets;
+                                          return copy;
+                                        });
+                                        onMatrixChange(resetMatrix);
+                                      }
                                     }}
                                     className="min-w-[130px] max-w-[165px] px-2.5 py-1 text-xs font-semibold rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-xs"
                                   >
@@ -931,34 +914,46 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
             <table className="border-collapse border border-slate-400 dark:border-slate-700 text-center w-full min-w-[900px] text-[13px] bg-white dark:bg-slate-900">
               <thead>
                 <tr>
-                  {matrix && matrix.map(t => (
+                  {matrix && matrix.filter(t => !t.isDisabled).map(t => (
                     <th key={t.id} className="border border-slate-400 dark:border-slate-700 px-2 py-2 font-bold">{t.title}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 <tr className="text-[10px]">
-                  {matrix && matrix.map(t => {
+                  {matrix && matrix.filter(t => !t.isDisabled).map(t => {
                      const isSecurity = t.id === 'security_duty';
+                     const isEqual = isFixedEqualDuty(t);
                      return (
                        <td key={t.id} className="border border-slate-400 dark:border-slate-700 px-1 py-1">
-                         Total {t.title} ÷ Total<br/>
-                         {(() => {
-                           const ranksToUse = t.eligibleRanks || DUTY_TYPE_MAP.get(t.dutyCode as any)?.eligibleRanks;
-                           if (ranksToUse && ranksToUse.length > 0) {
-                              const RANK_ORDER = ['MWO', 'SWO', 'WO', 'Sgt', 'Cpl', 'LAC', 'AC-1', 'AC-2'];
-                              const sorted = [...ranksToUse].sort((a, b) => RANK_ORDER.indexOf(a) - RANK_ORDER.indexOf(b));
-                              return sorted[0] + ' & Below';
-                           }
-                           return isSecurity ? 'Cpl & Below' : 'Sgt & Below';
-                         })()}
+                         {isEqual ? (
+                           <>
+                             Total {t.title} ÷ Total<br/>
+                             Eligible Flights
+                           </>
+                         ) : (
+                           <>
+                             Total {t.title} ÷ Total<br/>
+                             {(() => {
+                               const ranksToUse = t.eligibleRanks || DUTY_TYPE_MAP.get(t.dutyCode as any)?.eligibleRanks;
+                               if (ranksToUse && ranksToUse.length > 0) {
+                                  const RANK_ORDER = ['MWO', 'SWO', 'WO', 'Sgt', 'Cpl', 'LAC', 'AC-1', 'AC-2'];
+                                  const sorted = [...ranksToUse].sort((a, b) => RANK_ORDER.indexOf(a) - RANK_ORDER.indexOf(b));
+                                  return sorted[0] + ' & Below';
+                               }
+                               return isSecurity ? 'Cpl & Below' : 'Sgt & Below';
+                             })()}
+                           </>
+                         )}
                        </td>
                      );
                   })}
                 </tr>
                 <tr>
-                  {matrix && matrix.map(t => {
+                  {matrix && matrix.filter(t => !t.isDisabled).map(t => {
                      const isSecurity = t.id === 'security_duty';
+                     const isEqual = isFixedEqualDuty(t);
+                     const elig = t.eligibleFlights && t.eligibleFlights.length > 0 ? t.eligibleFlights : ['Mechanics', 'Avionics', 'GCS', 'Admin'];
                      let poolSize = 0;
                      ['Mechanics', 'Avionics', 'GCS', 'Admin'].forEach(fl => {
                        if (t.eligibleFlights && !t.eligibleFlights.includes(fl as any)) return;
@@ -972,7 +967,9 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                        poolSize += isSecurity ? fltCpl : (fltCpl + fltSgt);
                      });
                      
-                     const val = poolSize > 0 ? ((t.totalRequiredMonth || 0) / poolSize) : 0;
+                     const val = isEqual 
+                       ? (elig.length > 0 ? ((t.totalRequiredMonth || 0) / elig.length) : 0)
+                       : (poolSize > 0 ? ((t.totalRequiredMonth || 0) / poolSize) : 0);
                      return (
                        <td key={t.id} className="border border-slate-400 dark:border-slate-700 px-2 py-1 font-mono">
                          {val.toFixed(2)}
@@ -988,7 +985,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
           <div className="overflow-x-auto pb-4">
             <div className="flex flex-col items-center justify-center mb-4 w-full gap-2">
               <div className="font-bold underline text-sm text-center">DISTRIBUTION AS PER FLIGHT</div>
-              <div className="flex justify-center items-center">
+              <div className="flex justify-center items-center gap-2">
                 <button 
                   onClick={() => setShowExactRatio(!showExactRatio)}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold border transition-colors shadow-xs ${showExactRatio ? 'bg-blue-100 text-blue-700 border-blue-300 dark:bg-blue-900/40 dark:text-blue-300 dark:border-blue-700' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700 dark:hover:bg-slate-700'}`}
@@ -996,6 +993,25 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                 >
                   <Info className="w-4 h-4" />
                   <span>{showExactRatio ? 'Hide Exact Ratio' : 'View Exact Ratio'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (matrix && onMatrixChange) {
+                      const resetMatrix = matrix.map(t => {
+                        if (!t.flightTargets) return t;
+                        const copy = { ...t };
+                        delete copy.flightTargets;
+                        return copy;
+                      });
+                      onMatrixChange(resetMatrix);
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold border transition-colors shadow-xs bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700 dark:hover:bg-slate-700 cursor-pointer"
+                  title="Reset all manual targets to latest manpower auto calculations"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Reset to Auto</span>
                 </button>
               </div>
               <div className="text-xs text-slate-500 dark:text-slate-400 text-center max-w-xl">
@@ -1007,7 +1023,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
               <thead>
                 <tr>
                   <th className="border border-slate-400 dark:border-slate-700 px-2 py-2 font-bold bg-slate-100 dark:bg-slate-800 text-center w-32">DUTY PER FLIGHT</th>
-                  {matrix && matrix.map(t => (
+                  {matrix && matrix.filter(t => !t.isDisabled).map(t => (
                     <th key={t.id} className="border border-slate-400 dark:border-slate-700 px-2 py-2 font-bold bg-slate-100 dark:bg-slate-800">{t.title}</th>
                   ))}
                 </tr>
@@ -1019,7 +1035,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                       <td className="border border-slate-400 dark:border-slate-700 px-2 py-1 font-bold text-center bg-slate-50 dark:bg-slate-800">
                         {fl} FLT
                       </td>
-                      {matrix && matrix.map(t => {
+                      {matrix && matrix.filter(t => !t.isDisabled).map(t => {
                         const isSecurity = t.id === 'security_duty';
                         const poolSize = isSecurity ? totalCpl : totalSgtAndBelow;
                         const dutyTotal = t.totalRequiredMonth || 0;
@@ -1037,42 +1053,81 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                         const autoVal = distribution?.autoVal || 0;
                         
                         const manualVal = t.flightTargets?.[fl as keyof typeof t.flightTargets];
-                        
                         const isOverridden = manualVal !== undefined && manualVal !== autoVal;
+                        const currentVal = manualVal !== undefined ? manualVal : autoVal;
+                        const isActive = activeDistributionCell?.tableId === t.id && activeDistributionCell?.flight === fl;
 
                         return (
-                          <td key={t.id} className="border border-slate-400 dark:border-slate-700 px-0 py-0 relative">
+                          <td 
+                            key={t.id} 
+                            ref={isActive ? activeCellRef : undefined}
+                            onClick={() => {
+                              if (t.eligibleFlights && !t.eligibleFlights.includes(fl as any)) return;
+                              setActiveDistributionCell({ tableId: t.id, flight: fl });
+                            }}
+                            className={`border border-slate-400 dark:border-slate-700 px-0 py-0 relative transition-colors ${
+                              t.eligibleFlights && !t.eligibleFlights.includes(fl as any)
+                                ? ''
+                                : isActive
+                                ? 'bg-indigo-50 dark:bg-indigo-950/70 ring-2 ring-indigo-500 z-10'
+                                : 'hover:bg-slate-100 dark:hover:bg-slate-800/60 cursor-pointer'
+                            }`}
+                          >
                             {t.eligibleFlights && !t.eligibleFlights.includes(fl as any) ? (
-                                <div className="w-full text-center text-slate-400 bg-slate-100 dark:bg-slate-800/50 py-1">N/A</div>
+                              <div className="w-full text-center text-slate-400 bg-slate-100 dark:bg-slate-800/50 py-1">N/A</div>
+                            ) : isActive ? (
+                              <div className="w-full h-full min-h-[34px] flex items-center justify-center px-1 py-0.5 gap-1">
+                                {showExactRatio && (
+                                  <span className="text-slate-500 dark:text-slate-400 text-[11px] whitespace-nowrap">
+                                    {exactVal.toFixed(2)} ➤
+                                  </span>
+                                )}
+                                <input
+                                  type="number"
+                                  autoFocus
+                                  className={`w-11 text-center font-bold bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded px-1 py-0.5 text-xs outline-none focus:ring-1 focus:ring-indigo-500 ${
+                                    isOverridden ? 'text-indigo-700 dark:text-indigo-300 font-black' : 'text-slate-800 dark:text-slate-200'
+                                  }`}
+                                  value={currentVal}
+                                  onChange={(e) => {
+                                    const parsed = e.target.value === '' ? undefined : parseInt(e.target.value, 10);
+                                    handleTargetChange(t.id, fl, parsed);
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                                <div className="flex flex-col ml-0.5 -my-0.5" onClick={(e) => e.stopPropagation()}>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleTargetChange(t.id, fl, currentVal + 1)}
+                                    className="p-0.5 hover:bg-indigo-200 dark:hover:bg-indigo-800 rounded text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
+                                    title="Increase (+1)"
+                                  >
+                                    <ChevronUp className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleTargetChange(t.id, fl, Math.max(0, currentVal - 1))}
+                                    className="p-0.5 hover:bg-indigo-200 dark:hover:bg-indigo-800 rounded text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
+                                    title="Decrease (-1)"
+                                  >
+                                    <ChevronDown className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
                             ) : showExactRatio ? (
                               <div className="w-full h-full min-h-[30px] flex items-center justify-center text-xs whitespace-nowrap px-1">
                                 <span className="text-slate-500 dark:text-slate-400">{exactVal.toFixed(2)}</span>
                                 <span className="mx-1 text-slate-300 dark:text-slate-600">➤</span>
                                 <span className={isOverridden ? 'text-indigo-700 dark:text-indigo-400 font-bold' : 'text-slate-700 dark:text-slate-300 font-bold'}>
-                                  {manualVal !== undefined ? manualVal : autoVal}
+                                  {currentVal}
                                 </span>
                               </div>
                             ) : (
-                              <input
-                                type="number"
-                                className={`w-full h-full min-h-[30px] px-1 text-center bg-transparent outline-none focus:bg-indigo-50 dark:focus:bg-indigo-900/30 ${isOverridden ? 'text-indigo-700 dark:text-indigo-400 font-bold' : 'text-slate-700 dark:text-slate-300'}`}
-                                placeholder={autoVal.toString()}
-                                value={manualVal !== undefined ? manualVal : ''}
-                                onChange={(e) => {
-                                  if (onMatrixChange) {
-                                     const val = e.target.value ? parseInt(e.target.value) : undefined;
-                                     const newMatrix = [...matrix];
-                                     const tIdx = newMatrix.findIndex(x => x.id === t.id);
-                                     if (tIdx >= 0) {
-                                        const newTargets = { ...(newMatrix[tIdx].flightTargets || {}) };
-                                        if (val !== undefined) newTargets[fl] = val;
-                                        else delete newTargets[fl];
-                                        newMatrix[tIdx] = { ...newMatrix[tIdx], flightTargets: newTargets };
-                                        onMatrixChange(newMatrix);
-                                     }
-                                  }
-                                }}
-                              />
+                              <div className="w-full h-full min-h-[30px] flex items-center justify-center text-xs px-1">
+                                <span className={isOverridden ? 'text-indigo-700 dark:text-indigo-400 font-bold' : 'text-slate-700 dark:text-slate-300 font-bold'}>
+                                  {currentVal}
+                                </span>
+                              </div>
                             )}
                           </td>
                         );
@@ -1082,7 +1137,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                 })}
                 <tr className="font-bold bg-slate-100 dark:bg-slate-800">
                   <td className="border border-slate-400 dark:border-slate-700 px-2 py-1 text-center">TOTAL</td>
-                  {matrix && matrix.map(t => {
+                  {matrix && matrix.filter(t => !t.isDisabled).map(t => {
                     let totalVal = 0;
                     ['Mechanics', 'Avionics', 'GCS', 'Admin'].forEach(fl => {
                        const manual = t.flightTargets?.[fl as keyof typeof t.flightTargets];
@@ -1095,7 +1150,15 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                     
                     const warning = totalVal !== t.totalRequiredMonth;
                     return (
-                      <td key={t.id} className={`border border-slate-400 dark:border-slate-700 px-2 py-1 ${warning ? 'text-red-600 dark:text-red-400' : ''}`}>
+                      <td 
+                        key={t.id} 
+                        className={`border border-slate-400 dark:border-slate-700 px-2 py-1 text-center font-bold transition-colors ${
+                          warning 
+                            ? 'text-red-600 dark:text-red-400 bg-red-100/60 dark:bg-red-950/50 font-black' 
+                            : 'text-slate-800 dark:text-slate-200'
+                        }`}
+                        title={warning ? `Current total: ${totalVal}, Target: ${t.totalRequiredMonth}` : `Matched: ${totalVal}`}
+                      >
                         {totalVal}
                       </td>
                     );
@@ -1199,6 +1262,64 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                 </div>
               </div>
 
+              {/* Allotment Type (shown when 2 or more flights are eligible) */}
+              {newDutyFlights.length >= 2 && (
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
+                    Allotment Type
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setNewDutyAllotmentType('ratio')}
+                      className={`p-3 rounded-lg border text-left transition-all cursor-pointer ${
+                        newDutyAllotmentType === 'ratio'
+                          ? 'bg-indigo-50 dark:bg-indigo-950/60 border-indigo-500 ring-2 ring-indigo-500'
+                          : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="radio"
+                          name="newAllotmentTypeV2"
+                          checked={newDutyAllotmentType === 'ratio'}
+                          onChange={() => setNewDutyAllotmentType('ratio')}
+                          className="text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span className="text-sm font-bold text-slate-800 dark:text-slate-200">As Per Ratio</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 pl-6 leading-tight">
+                        Total duty ÷ Total eligible personnel of flight
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setNewDutyAllotmentType('equal')}
+                      className={`p-3 rounded-lg border text-left transition-all cursor-pointer ${
+                        newDutyAllotmentType === 'equal'
+                          ? 'bg-indigo-50 dark:bg-indigo-950/60 border-indigo-500 ring-2 ring-indigo-500'
+                          : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="radio"
+                          name="newAllotmentTypeV2"
+                          checked={newDutyAllotmentType === 'equal'}
+                          onChange={() => setNewDutyAllotmentType('equal')}
+                          className="text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span className="text-sm font-bold text-slate-800 dark:text-slate-200">One From Each Flt</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 pl-6 leading-tight">
+                        Total duty ÷ Eligible flights (All flights get same allotment)
+                      </p>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Eligible Ranks</label>
                 <div className="grid grid-cols-4 gap-2">
@@ -1266,6 +1387,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                       totalRequiredDaily: 0,
                       eligibleFlights: newDutyFlights,
                       eligibleRanks: newDutyRanks,
+                      allotmentType: newDutyAllotmentType,
                       data: {
                         Mechanics: Array(31).fill(0),
                         Avionics: Array(31).fill(0),
@@ -1348,6 +1470,64 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                 </div>
               </div>
 
+              {/* Allotment Type (shown when 2 or more flights are eligible) */}
+              {editDutyFlights.length >= 2 && (
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
+                    Allotment Type
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditDutyAllotmentType('ratio')}
+                      className={`p-3 rounded-lg border text-left transition-all cursor-pointer ${
+                        editDutyAllotmentType === 'ratio'
+                          ? 'bg-indigo-50 dark:bg-indigo-950/60 border-indigo-500 ring-2 ring-indigo-500'
+                          : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="radio"
+                          name="editAllotmentTypeV2"
+                          checked={editDutyAllotmentType === 'ratio'}
+                          onChange={() => setEditDutyAllotmentType('ratio')}
+                          className="text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span className="text-sm font-bold text-slate-800 dark:text-slate-200">As Per Ratio</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 pl-6 leading-tight">
+                        Total duty ÷ Total eligible personnel of flight
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setEditDutyAllotmentType('equal')}
+                      className={`p-3 rounded-lg border text-left transition-all cursor-pointer ${
+                        editDutyAllotmentType === 'equal'
+                          ? 'bg-indigo-50 dark:bg-indigo-950/60 border-indigo-500 ring-2 ring-indigo-500'
+                          : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="radio"
+                          name="editAllotmentTypeV2"
+                          checked={editDutyAllotmentType === 'equal'}
+                          onChange={() => setEditDutyAllotmentType('equal')}
+                          className="text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span className="text-sm font-bold text-slate-800 dark:text-slate-200">One From Each Flt</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 pl-6 leading-tight">
+                        Total duty ÷ Eligible flights (All flights get same allotment)
+                      </p>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Eligible Ranks</label>
                 <div className="grid grid-cols-4 gap-2">
@@ -1400,12 +1580,15 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                       const newMatrix = [...matrix];
                       const currentTable = newMatrix[editingDutyIdx];
 
+                      const allotmentTypeChanged = currentTable.allotmentType !== editDutyAllotmentType;
                       const updatedTable = {
                         ...currentTable,
                         title: editDutyName,
                         serNo: newSerNo,
                         eligibleFlights: editDutyFlights,
-                        eligibleRanks: editDutyRanks
+                        eligibleRanks: editDutyRanks,
+                        allotmentType: editDutyAllotmentType,
+                        flightTargets: allotmentTypeChanged ? undefined : currentTable.flightTargets,
                       };
 
                       newMatrix[editingDutyIdx] = updatedTable;

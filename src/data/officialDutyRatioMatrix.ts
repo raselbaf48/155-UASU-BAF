@@ -2,6 +2,8 @@ import { getCustomDuties } from '../utils/customDuties';
 import { FlightName, DutyCategoryCode, IDAShift } from '../types';
 import { FlightDutyQuota } from './dutyRatios';
 
+export type AllotmentType = 'ratio' | 'equal';
+
 export interface DutyRatioTable {
   id: string;
   serNo?: number;
@@ -14,6 +16,7 @@ export interface DutyRatioTable {
   isDisabled?: boolean;
   eligibleFlights?: import('../types').FlightName[];
   eligibleRanks?: import('../types').Rank[];
+  allotmentType?: AllotmentType;
   flightTargets?: {
     Mechanics?: number;
     Avionics?: number;
@@ -36,7 +39,6 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
     dutyCode: 'GD',
     totalRequiredMonth: 88,
     totalRequiredDaily: 3,
-    flightTargets: { Mechanics: 33, Avionics: 16, GCS: 33, Admin: 6 },
     data: {
       Mechanics: [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1,2,1],
       Avionics:  [1,1,1,0,1,1,0,1,1,0,0,1,0,1,1,0,0,1,0,1,1,0,1,0,1,0,1,0,0,0,0],
@@ -221,6 +223,7 @@ export function getStoredDutyMatrix(): DutyRatioTable[] {
             dutyCode: defT?.dutyCode || t.dutyCode,
             eligibleFlights: t.eligibleFlights || defT?.eligibleFlights,
             eligibleRanks: t.eligibleRanks || defT?.eligibleRanks,
+            allotmentType: t.allotmentType || defT?.allotmentType,
           };
         });
         const existingIds = new Set(updatedParsed.map((t: DutyRatioTable) => t.id));
@@ -236,16 +239,13 @@ export function getStoredDutyMatrix(): DutyRatioTable[] {
           finalMatrix = [...finalMatrix, ...missing];
         }
 
-        // Cleanse old corrupted flightTargets so dynamic auto calculation always works
-        finalMatrix.forEach(t => {
-          if (t.flightTargets && (
-            (t.id === 'security_duty' && (t.flightTargets.Admin === 14 || t.flightTargets.Admin === 16 || t.flightTargets.Admin === 13 || t.flightTargets.Admin === 5 || t.flightTargets.Avionics === 17)) ||
-            (t.id === 'base_tf' && t.flightTargets.Admin === 3) ||
-            (t.id === 'idac_nt' && t.flightTargets.Admin === 4)
-          )) {
+        // One-time cleanup for old auto-allocated flightTargets
+        if (typeof window !== 'undefined' && !localStorage.getItem('baf_cleared_auto_flight_targets_v3')) {
+          finalMatrix.forEach(t => {
             delete t.flightTargets;
-          }
-        });
+          });
+          localStorage.setItem('baf_cleared_auto_flight_targets_v3', 'true');
+        }
 
         // Cleanse old corrupted long consecutive streaks in security_duty (e.g. 12+ continuous days without gaps)
         const secTable = finalMatrix.find(t => t.id === 'security_duty');
@@ -368,6 +368,7 @@ export function saveDutyMatrix(matrix: DutyRatioTable[]) {
         shiftLabel: m.shiftLabel,
         eligibleFlights: m.eligibleFlights,
         eligibleRanks: m.eligibleRanks,
+        allotmentType: m.allotmentType,
         flightTargets: m.flightTargets,
         isDisabled: m.isDisabled,
         totalRequiredDaily: m.totalRequiredDaily,

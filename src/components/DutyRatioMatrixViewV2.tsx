@@ -7,7 +7,7 @@ import {
   saveDutyMatrix,
   resetDutyMatrixToDefault,
 } from '../data/officialDutyRatioMatrix';
-import { calculateBalancedAutoTargets, autoAllocateDutyMatrix, DEFAULT_MANPOWER } from '../utils/dutyDistribution';
+import { calculateBalancedAutoTargets, autoAllocateDutyMatrix, DEFAULT_MANPOWER, AllocationMode } from '../utils/dutyDistribution';
 import { FlightName, UserRole } from '../types';
 import { pushDutyListToCloud } from '../utils/dutyCloudSync';
 import {
@@ -33,6 +33,7 @@ import { exportDutyRatioDocx } from '../utils/docxExport';
 import { ImportDutyRatioModal } from './ImportDutyRatioModal';
 import { FlightDutyCalendarModal } from './FlightDutyCalendarModal';
 import { PrintableDutyRatioModal, formatDisplayDate } from "./PrintableDutyRatioModal";
+import { AutoAllocateModal } from './AutoAllocateModal';
 
 interface DutyRatioMatrixViewProps {
   role?: UserRole;
@@ -80,8 +81,13 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
   const [settingsTab, setSettingsTab] = useState<'Overall' | 'Mechanics' | 'Avionics' | 'GCS' | null>(null);
   const [editingCalendar, setEditingCalendar] = useState<{tableIdx: number, flight: FlightName} | null>(null);
   const [autoAllocateToast, setAutoAllocateToast] = useState<boolean>(false);
+  const [isAutoAllocateModalOpen, setIsAutoAllocateModalOpen] = useState<boolean>(false);
+  const [allocatedModeInfo, setAllocatedModeInfo] = useState<{ mode: string, desc: string }>({
+    mode: 'Single',
+    desc: 'Duties distributed with optimal gaps',
+  });
 
-  const handleTriggerAutoAllocate = () => {
+  const handleTriggerAutoAllocate = (allocMode: AllocationMode = 'SINGLE') => {
     const savedManpower = localStorage.getItem('baf_duty_distribution_manpower');
     let activeManpower = DEFAULT_MANPOWER;
     if (savedManpower) {
@@ -89,10 +95,17 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
         activeManpower = JSON.parse(savedManpower);
       } catch (e) {}
     }
-    const allocatedMatrix = autoAllocateDutyMatrix(matrix, activeManpower);
+    const allocatedMatrix = autoAllocateDutyMatrix(matrix, activeManpower, allocMode);
     handleRatioCalculated(allocatedMatrix);
+    setAllocatedModeInfo({
+      mode: allocMode === 'PACKAGE' ? 'Package (2-3 Days Consecutive)' : 'Single (Gap System)',
+      desc: allocMode === 'PACKAGE'
+        ? 'Duties grouped into 2 to 3 consecutive days per block.'
+        : 'Duties spread out with optimal rest gaps between days.',
+    });
+    setIsAutoAllocateModalOpen(false);
     setAutoAllocateToast(true);
-    setTimeout(() => setAutoAllocateToast(false), 3500);
+    setTimeout(() => setAutoAllocateToast(false), 4000);
   };
 
   const daysArray = Array.from({ length: 31 }, (_, i) => i + 1);
@@ -104,6 +117,20 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
     Avionics: 'AVI',
     GCS: 'GCS',
     Admin: 'Admin',
+  };
+
+  const getCompactDutyTitle = (table: DutyRatioTable): string => {
+    const t = (table.title || '').toUpperCase();
+    if (t.includes('SECURITY')) return 'Base Sec';
+    if (t.includes('BASE TASKFORCE') || t.includes('BASE TF')) return 'Base TF';
+    if (t.includes('NAJIRPARA') || t.includes('NAZIRPARA')) return 'Najirpara';
+    if (t.includes('IDAC') && t.includes('MORNING')) return 'IDAC (M)';
+    if (t.includes('IDAC') && t.includes('AFTERNOON')) return 'IDAC (A)';
+    if (t.includes('IDAC') && t.includes('NIGHT')) return 'IDAC (N)';
+    if (t.includes('AIRFIELD') || t.includes('AIRPORT')) return 'Airfield';
+    if (t.includes('RECEPTION') || t.includes('RECEIPTION')) return 'Reception';
+    if (t.includes('HALISHAHAR')) return 'Halishahar';
+    return table.dutyCode || table.title.slice(0, 10);
   };
 
   // Color schemes for each table matching official sheet colors
@@ -265,6 +292,12 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
   }
   const autoTargets = calculateBalancedAutoTargets(matrix, currentManpower);
 
+  const getFlightTarget = (table: DutyRatioTable, fl: FlightName): number => {
+    if (table.flightTargets && typeof table.flightTargets[fl] === 'number') {
+      return table.flightTargets[fl]!;
+    }
+    return autoTargets?.[fl]?.[table.id] ?? 0;
+  };
 
   const flightTotalsOverall: Record<FlightName, number> = {
     Mechanics: 0,
@@ -281,8 +314,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
 
   const targetFlightTotal = selectedFlightFilter !== 'Overall'
     ? matrix.filter(t => !t.isDisabled).reduce((sum, t) => {
-        const tgt = autoTargets?.[selectedFlightFilter]?.[t.id] ?? t.flightTargets?.[selectedFlightFilter as FlightName] ?? 0;
-        return sum + tgt;
+        return sum + getFlightTarget(t, selectedFlightFilter as FlightName);
       }, 0)
     : 0;
 
@@ -332,9 +364,9 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
             <>
               <button
                 type="button"
-                onClick={handleTriggerAutoAllocate}
+                onClick={() => setIsAutoAllocateModalOpen(true)}
                 className="px-3.5 py-2 text-xs font-bold text-white bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 rounded-xl transition-all flex items-center space-x-1.5 shadow-sm cursor-pointer border border-indigo-400/30"
-                title="Auto Allocate Daily Duties with Balanced Target Matching"
+                title="Auto Allocate Daily Duties (Single or Package Mode)"
               >
                 <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
                 <span>Auto Allocate</span>
@@ -451,9 +483,9 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
               {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') && (
                 <button
                   type="button"
-                  onClick={handleTriggerAutoAllocate}
+                  onClick={() => setIsAutoAllocateModalOpen(true)}
                   className="px-3.5 py-1.5 text-xs font-bold text-white bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 rounded-xl transition-all flex items-center space-x-1.5 shadow-sm cursor-pointer border border-indigo-400/30 shrink-0"
-                  title="Auto Allocate Daily Duties with Balanced Target Matching"
+                  title="Auto Allocate Daily Duties (Single or Package Mode)"
                 >
                   <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
                   <span>Auto Allocate</span>
@@ -465,8 +497,8 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
               <div className="fixed top-20 right-4 z-50 bg-emerald-600 text-white px-4 py-3 rounded-2xl shadow-xl flex items-center space-x-3 border border-emerald-400/40 animate-in fade-in slide-in-from-top-4">
                 <Sparkles className="w-5 h-5 text-amber-300 shrink-0" />
                 <div>
-                  <div className="font-bold text-sm">Auto Allocation Complete!</div>
-                  <div className="text-xs text-emerald-100">Daily duties balanced smoothly with minimum color alerts.</div>
+                  <div className="font-bold text-sm">{allocatedModeInfo.mode} Complete!</div>
+                  <div className="text-xs text-emerald-100">{allocatedModeInfo.desc}</div>
                 </div>
               </div>
             )}
@@ -575,7 +607,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                     Month Total: <strong className="font-mono">
                       {selectedFlightFilter === 'Overall' 
                         ? (table.totalRequiredMonth || 0) 
-                        : (table.flightTargets?.[selectedFlightFilter as 'Mechanics' | 'Avionics' | 'GCS' | 'Admin'] || 0)}
+                        : getFlightTarget(table, selectedFlightFilter as FlightName)}
                     </strong>
                   </span>
                   <button
@@ -730,19 +762,24 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                                   isAltRow ? 'bg-slate-100/80 dark:bg-slate-800/80' : 'bg-slate-50/50 dark:bg-slate-800/40'
                                 }`}>
                                   <div className="flex items-center justify-center">
-                                    <div className={`inline-flex items-center justify-center gap-1 px-1.5 py-0.5 rounded-lg font-mono text-xs shadow-xs border transition-all ${
-                                      rowSum > (autoTargets?.[flight]?.[table.id] ?? table.flightTargets?.[flight] ?? 0)
-                                        ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/40 font-black'
-                                        : rowSum < (autoTargets?.[flight]?.[table.id] ?? table.flightTargets?.[flight] ?? 0)
-                                          ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-400/60 font-bold'
-                                          : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/40 font-bold'
-                                    }`}>
-                                      <span className="font-black text-[11px] sm:text-[12px]">{rowSum}</span>
-                                      <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold">/</span>
-                                      <span className="text-[10px] sm:text-[11px] text-slate-600 dark:text-slate-300 font-semibold">
-                                        {(autoTargets?.[flight]?.[table.id] ?? table.flightTargets?.[flight] ?? 0)}
-                                      </span>
-                                    </div>
+                                    {(() => {
+                                      const tgt = getFlightTarget(table, flight);
+                                      return (
+                                        <div className={`inline-flex items-center justify-center gap-1 px-1.5 py-0.5 rounded-lg font-mono text-xs shadow-xs border transition-all ${
+                                          rowSum > tgt
+                                            ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/40 font-black'
+                                            : rowSum < tgt
+                                              ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-400/60 font-bold'
+                                              : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/40 font-bold'
+                                        }`}>
+                                          <span className="font-black text-[11px] sm:text-[12px]">{rowSum}</span>
+                                          <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold">/</span>
+                                          <span className="text-[10px] sm:text-[11px] text-slate-600 dark:text-slate-300 font-semibold">
+                                            {tgt}
+                                          </span>
+                                        </div>
+                                      );
+                                    })()}
                                   </div>
                                 </td>
                               ) : (
@@ -882,7 +919,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {flights.map(fl => {
                       const totalAllocated = flightTotalsOverall[fl];
-                      const totalTarget = matrix.filter(t => !t.isDisabled).reduce((s, t) => s + (autoTargets?.[fl]?.[t.id] ?? t.flightTargets?.[fl] ?? 0), 0);
+                      const totalTarget = matrix.filter(t => !t.isDisabled).reduce((s, t) => s + getFlightTarget(t, fl), 0);
                       return (
                         <tr key={fl} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                           <td className="p-2.5 text-left pl-4 font-bold text-slate-900 dark:text-white">
@@ -890,7 +927,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                           </td>
                           {matrix.filter(t => !t.isDisabled).map(t => {
                             const val = t.data[fl]?.reduce((a, b) => a + b, 0) ?? 0;
-                            const tgt = autoTargets?.[fl]?.[t.id] ?? t.flightTargets?.[fl] ?? 0;
+                            const tgt = getFlightTarget(t, fl);
                             return (
                               <td key={t.id} className="p-2 text-center font-mono font-bold">
                                 {t.eligibleFlights && !t.eligibleFlights.includes(fl) ? (
@@ -951,18 +988,19 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                 </div>
               </div>
               <div className="w-full overflow-x-auto scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-600">
-                <table className="w-full text-xs text-center border-collapse table-auto md:table-fixed min-w-[960px]">
+                <table className="w-full text-xs text-center border-collapse table-fixed min-w-[760px] sm:min-w-[960px]">
                   <colgroup>
-                    <col className="w-28 sm:w-36 min-w-[110px]" />
+                    <col className="w-20 sm:w-36 max-w-[85px] sm:max-w-none" />
                     {daysArray.map((d) => (
-                      <col key={d} className="w-[26px] sm:w-[28px] min-w-[24px]" />
+                      <col key={d} className="w-[22px] sm:w-[26px]" />
                     ))}
-                    <col className={showAllTableInfo ? "w-[84px] sm:w-[92px] min-w-[80px]" : "w-[54px] sm:w-[60px] min-w-[50px]"} />
+                    <col className={showAllTableInfo ? "w-[72px] sm:w-[92px]" : "w-[46px] sm:w-[56px]"} />
                   </colgroup>
                   <thead>
                     <tr className="bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
-                      <th className="p-1.5 sm:p-2 text-center sticky left-0 bg-slate-100 dark:bg-slate-800 z-10 w-28 sm:w-36 min-w-[110px] border-r border-slate-200 dark:border-slate-700 align-middle shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)]">
-                        Duty Name / Date
+                      <th className="p-1 sm:p-2 text-center sticky left-0 bg-slate-100 dark:bg-slate-800 z-10 w-20 sm:w-36 max-w-[85px] sm:max-w-none border-r border-slate-200 dark:border-slate-700 align-middle shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)] overflow-hidden">
+                        <span className="sm:hidden text-[10px] font-black uppercase tracking-tight">Duty</span>
+                        <span className="hidden sm:inline">Duty Name / Date</span>
                       </th>
                       {daysArray.map((d) => (
                         <th key={d} className={`p-0.5 sm:p-1 font-mono text-[11px] align-middle ${d % 2 === 0 ? 'bg-slate-200/70 dark:bg-slate-700/70' : 'bg-slate-100/70 dark:bg-slate-800/70'}`}>
@@ -991,7 +1029,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                     {matrix.filter(t => !t.isDisabled).map((table, tableIdx) => {
                       const rowData = table.data[selectedFlightFilter as FlightName];
                       const rowSum = rowData.reduce((a, b) => a + b, 0);
-                      const target = autoTargets?.[selectedFlightFilter as FlightName]?.[table.id] ?? table.flightTargets?.[selectedFlightFilter as FlightName] ?? 0;
+                      const target = getFlightTarget(table, selectedFlightFilter as FlightName);
                       const isAltRow = tableIdx % 2 === 1;
 
                       const isExceeded = rowSum > target;
@@ -1006,25 +1044,30 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                               : 'bg-white dark:bg-slate-900 hover:bg-slate-50/80 dark:hover:bg-slate-800/40'
                           }`}
                         >
-                          <td className={`p-1.5 sm:p-2 text-center font-bold text-slate-900 dark:text-white sticky left-0 z-10 border-r border-slate-200 dark:border-slate-800 align-middle text-[11px] leading-tight shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)] ${
+                          <td className={`p-1 sm:p-2 text-center font-bold text-slate-900 dark:text-white sticky left-0 z-10 border-r border-slate-200 dark:border-slate-800 align-middle text-[11px] leading-tight shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)] w-20 sm:w-36 max-w-[85px] sm:max-w-none overflow-hidden ${
                             isAltRow
                               ? 'bg-slate-100/95 dark:bg-slate-800/95'
                               : 'bg-white dark:bg-slate-900'
                           }`}>
-                            <div className="flex items-center justify-between gap-1">
-                              <span className={`truncate text-left ${isExceeded ? 'text-red-600 dark:text-red-400 font-bold' : ''}`}>
-                                {table.serNo !== undefined ? `${table.serNo}. ` : ''}{table.title}
+                            <div className="flex items-center justify-between gap-0.5 overflow-hidden" title={table.title}>
+                              <span className={`truncate text-left text-[10px] sm:text-[11px] leading-tight ${isExceeded ? 'text-red-600 dark:text-red-400 font-bold' : ''}`}>
+                                <span className="sm:hidden font-black">
+                                  {table.serNo !== undefined ? `${table.serNo}. ` : ''}{getCompactDutyTitle(table)}
+                                </span>
+                                <span className="hidden sm:inline font-bold">
+                                  {table.serNo !== undefined ? `${table.serNo}. ` : ''}{table.title}
+                                </span>
                               </span>
                               {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') ? (
                                 <button
                                   onClick={() => setEditingCalendar({ tableIdx: matrix.findIndex(x => x.id === table.id), flight: selectedFlightFilter as FlightName })}
-                                  className="p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-indigo-500 transition-colors cursor-pointer shrink-0 ml-1"
+                                  className="p-0.5 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-indigo-500 transition-colors cursor-pointer shrink-0"
                                   title="Edit in Calendar"
                                 >
-                                  <Calendar className="w-3.5 h-3.5" />
+                                  <Calendar className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                                 </button>
                               ) : (
-                                <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0 ml-1" />
+                                <Calendar className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-slate-400 shrink-0" />
                               )}
                             </div>
                           </td>
@@ -1127,13 +1170,13 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                     })}
                     {/* Daily Total Row */}
                     <tr className="bg-slate-100/90 dark:bg-slate-800/90 font-bold border-t-2 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100">
-                      <td className="p-1.5 sm:p-2 text-center font-black sticky left-0 bg-slate-100 dark:bg-slate-800 z-10 w-28 sm:w-36 min-w-[110px] border-r border-slate-300 dark:border-slate-700 align-middle shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)]">
+                      <td className="p-1 sm:p-2 text-center font-black sticky left-0 bg-slate-100 dark:bg-slate-800 z-10 w-20 sm:w-36 max-w-[85px] sm:max-w-none border-r border-slate-300 dark:border-slate-700 align-middle shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)] overflow-hidden">
                         <div className="flex flex-col items-center justify-center leading-tight">
-                          <span className="uppercase text-[10px] sm:text-[11px] font-black tracking-wider text-slate-800 dark:text-slate-200">
-                            {showAllTableInfo ? 'Total / Target' : 'Daily Total'}
+                          <span className="uppercase text-[9px] sm:text-[11px] font-black tracking-tight text-slate-800 dark:text-slate-200">
+                            {showAllTableInfo ? 'Total' : 'Daily'}
                           </span>
-                          <span className="text-[9px] uppercase tracking-wider text-indigo-600 dark:text-indigo-400 font-bold mt-0.5">
-                            Flight Sum
+                          <span className="text-[8px] sm:text-[9px] uppercase tracking-tight text-indigo-600 dark:text-indigo-400 font-bold">
+                            Sum
                           </span>
                         </div>
                       </td>
@@ -1141,41 +1184,49 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                         const activeDuties = matrix.filter(t => !t.isDisabled);
                         const flightTotal = targetFlightTotal > 0 ? targetFlightTotal : (flightTotalsOverall[selectedFlightFilter as FlightName] || 0);
                         const daysCount = daysArray.length || 31;
-                        const rawAverage = flightTotal > 0 ? (flightTotal / daysCount) : 0;
-                        // Rounding rule: < .5 rounds down to integer, >= .5 rounds up to integer
-                        const dailyThreshold = Math.round(rawAverage);
+                        const baseDaily = Math.floor(flightTotal / daysCount);
+                        const extraDays = flightTotal % daysCount;
+                        const minAllowed = baseDaily;
+                        const maxAllowed = extraDays > 0 ? baseDaily + 1 : baseDaily;
 
                         return daysArray.map((dayNum, dayIdx) => {
                           const dailySum = activeDuties.reduce((sum, table) => sum + (table.data[selectedFlightFilter as FlightName]?.[dayIdx] || 0), 0);
                           const isPositive = dailySum > 0;
-                          const diff = dailyThreshold > 0 ? (dailySum - dailyThreshold) : 0;
 
-                          // Color logic as requested:
-                          // - 1 beshi hoy tahole red (diff === 1)
-                          // - 2 Beshi hole Pink/Orange (diff >= 2)
-                          // - 1 kom hole Light Blue (diff === -1)
-                          // - 2 kom hole dark blue hbe (diff <= -2)
-                          // - 0 hole neutral / matched
+                          // Balanced distribution evaluation as per user golden rule:
+                          // - If between minAllowed and maxAllowed: fully balanced!
+                          // - If > maxAllowed: excess (+1 red, +2 pink/orange)
+                          // - If < minAllowed: shortage (-1 light blue, -2 dark blue)
                           let badgeClass = 'bg-slate-200/80 dark:bg-slate-700/80 text-slate-800 dark:text-slate-200 font-bold';
-                          let diffDesc = `Matches daily target (${dailyThreshold})`;
+                          let diffDesc = `Balanced target (${dailySum})`;
 
-                          if (dailyThreshold > 0) {
-                            if (diff >= 2) {
-                              // 2 Beshi hole Pink/Orange
-                              badgeClass = 'bg-gradient-to-br from-pink-500/25 to-orange-500/25 text-pink-700 dark:text-orange-300 border border-pink-500 dark:border-orange-400 font-black ring-1 ring-pink-400/50 shadow-xs';
-                              diffDesc = `+${diff} above target (+2 or more: Pink/Orange)`;
-                            } else if (diff === 1) {
-                              // 1 beshi hoy tahole red
-                              badgeClass = 'bg-rose-500/25 text-rose-600 dark:text-rose-400 border border-rose-500 font-black ring-1 ring-rose-500/50 shadow-xs';
-                              diffDesc = `+1 above target (+1: Red)`;
-                            } else if (diff === -1) {
-                              // 1 kom hole Light Blue
-                              badgeClass = 'bg-sky-400/25 text-sky-700 dark:text-sky-300 border border-sky-400 dark:border-sky-400 font-bold ring-1 ring-sky-400/50 shadow-xs';
-                              diffDesc = `-1 below target (-1: Light Blue)`;
-                            } else if (diff <= -2) {
-                              // 2 kom hole dark blue hbe
-                              badgeClass = 'bg-blue-600/30 text-blue-800 dark:text-blue-200 border border-blue-600 dark:border-blue-400 font-black ring-1 ring-blue-600/50 shadow-xs';
-                              diffDesc = `${diff} below target (-2 or more: Dark Blue)`;
+                          if (flightTotal > 0) {
+                            if (dailySum > maxAllowed) {
+                              const diff = dailySum - maxAllowed;
+                              if (diff >= 2) {
+                                badgeClass = 'bg-gradient-to-br from-pink-500/25 to-orange-500/25 text-pink-700 dark:text-orange-300 border border-pink-500 dark:border-orange-400 font-black ring-1 ring-pink-400/50 shadow-xs';
+                                diffDesc = `+${diff} above max target (${maxAllowed})`;
+                              } else {
+                                badgeClass = 'bg-rose-500/25 text-rose-600 dark:text-rose-400 border border-rose-500 font-black ring-1 ring-rose-500/50 shadow-xs';
+                                diffDesc = `+${diff} above max target (${maxAllowed})`;
+                              }
+                            } else if (dailySum < minAllowed) {
+                              const diff = minAllowed - dailySum;
+                              if (diff >= 2) {
+                                badgeClass = 'bg-blue-600/30 text-blue-800 dark:text-blue-200 border border-blue-600 dark:border-blue-400 font-black ring-1 ring-blue-600/50 shadow-xs';
+                                diffDesc = `-${diff} below min target (${minAllowed})`;
+                              } else {
+                                badgeClass = 'bg-sky-400/25 text-sky-700 dark:text-sky-300 border border-sky-400 dark:border-sky-400 font-bold ring-1 ring-sky-400/50 shadow-xs';
+                                diffDesc = `-${diff} below min target (${minAllowed})`;
+                              }
+                            } else {
+                              if (dailySum === minAllowed) {
+                                badgeClass = 'bg-slate-200/80 dark:bg-slate-700/80 text-slate-800 dark:text-slate-200 font-bold';
+                                diffDesc = `Balanced base target (${minAllowed})`;
+                              } else {
+                                badgeClass = 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-400/40 font-bold';
+                                diffDesc = `Balanced target (+1 remainder day: ${dailySum})`;
+                              }
                             }
                           }
 
@@ -1183,9 +1234,9 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                             <td
                               key={dayNum}
                               className="p-0.5 border border-slate-200/60 dark:border-slate-700/60 text-center align-middle"
-                              title={`Date ${dayNum}: Flight Total ${dailySum} / Daily Target ${dailyThreshold} (Raw avg: ${rawAverage.toFixed(2)}) - ${diffDesc}`}
+                              title={`Date ${dayNum}: Flight Total ${dailySum} (Target range: ${minAllowed} - ${maxAllowed}) - ${diffDesc}`}
                             >
-                              {isPositive || (dailyThreshold > 0 && diff !== 0) ? (
+                              {isPositive ? (
                                 <span className={`inline-flex items-center justify-center w-5.5 h-5.5 sm:w-6 sm:h-6 rounded-md font-mono text-xs transition-all ${badgeClass}`}>
                                   {dailySum}
                                 </span>
@@ -1338,7 +1389,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
           table={matrix[editingCalendar.tableIdx]}
           matrix={matrix}
           flight={editingCalendar.flight}
-          target={autoTargets?.[editingCalendar.flight]?.[matrix[editingCalendar.tableIdx].id] ?? matrix[editingCalendar.tableIdx].flightTargets?.[editingCalendar.flight] ?? 0}
+          target={getFlightTarget(matrix[editingCalendar.tableIdx], editingCalendar.flight)}
           onClose={() => setEditingCalendar(null)}
           onSave={(newData) => {
             const updated = [...matrix];
@@ -1405,6 +1456,13 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Auto Allocate Mode Selection Modal (Single vs Package) */}
+      <AutoAllocateModal
+        isOpen={isAutoAllocateModalOpen}
+        onClose={() => setIsAutoAllocateModalOpen(false)}
+        onSelectMode={(mode) => handleTriggerAutoAllocate(mode)}
+      />
 </div>
   );
 };

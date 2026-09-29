@@ -467,7 +467,7 @@ export class LocalDatabaseEngine {
              const formattedMatrix = Array.from(dutyMap.values()).map(duty => {
                  let flightTotal = 0;
                  ['Mechanics', 'Avionics', 'GCS', 'Admin'].forEach(f => {
-                     flightTotal += duty.data[f].reduce((sum: number, val: number) => sum + val, 0);
+                     flightTotal += (duty.data && Array.isArray(duty.data[f])) ? duty.data[f].reduce((sum: number, val: number) => sum + val, 0) : 0;
                  });
 
                  const existingDuty = currentMatrix.find((d: any) => d.id === duty.id);
@@ -485,6 +485,7 @@ export class LocalDatabaseEngine {
                      if (sourceForPreserve.title !== undefined) duty.title = sourceForPreserve.title;
                      if (sourceForPreserve.eligibleFlights !== undefined) duty.eligibleFlights = sourceForPreserve.eligibleFlights;
                      if (sourceForPreserve.eligibleRanks !== undefined) duty.eligibleRanks = sourceForPreserve.eligibleRanks;
+                     if (sourceForPreserve.allotmentType !== undefined) duty.allotmentType = sourceForPreserve.allotmentType;
                      if (sourceForPreserve.flightTargets !== undefined) duty.flightTargets = sourceForPreserve.flightTargets;
                      if (sourceForPreserve.dutyCode !== undefined) duty.dutyCode = sourceForPreserve.dutyCode;
                      if (sourceForPreserve.dailyRequirements !== undefined) duty.dailyRequirements = sourceForPreserve.dailyRequirements;
@@ -1257,6 +1258,7 @@ export class LocalDatabaseEngine {
           shiftLabel: m.shiftLabel,
           eligibleFlights: m.eligibleFlights,
           eligibleRanks: m.eligibleRanks,
+          allotmentType: m.allotmentType,
           flightTargets: m.flightTargets,
           isDisabled: m.isDisabled,
           totalRequiredDaily: m.totalRequiredDaily,
