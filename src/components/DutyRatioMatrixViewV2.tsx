@@ -34,6 +34,7 @@ import { ImportDutyRatioModal } from './ImportDutyRatioModal';
 import { FlightDutyCalendarModal } from './FlightDutyCalendarModal';
 import { PrintableDutyRatioModal, formatDisplayDate } from "./PrintableDutyRatioModal";
 import { AutoAllocateModal } from './AutoAllocateModal';
+import { DateNavigator } from './DateNavigator';
 
 interface DutyRatioMatrixViewProps {
   role?: UserRole;
@@ -364,16 +365,6 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
             <>
               <button
                 type="button"
-                onClick={() => setIsAutoAllocateModalOpen(true)}
-                className="px-3.5 py-2 text-xs font-bold text-white bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 rounded-xl transition-all flex items-center space-x-1.5 shadow-sm cursor-pointer border border-indigo-400/30"
-                title="Auto Allocate Daily Duties (Single or Package Mode)"
-              >
-                <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
-                <span>Auto Allocate</span>
-              </button>
-
-              <button
-                type="button"
                 onClick={() => setIsImportModalOpen(true)}
                 className="px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-xl transition-colors flex items-center space-x-1.5 shadow-xs cursor-pointer"
                 title="Import Duty Ratio Matrix from CSV / Excel"
@@ -412,16 +403,15 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
     {/* CONTROLS SECTION */}
     <div className="flex flex-col items-center justify-center space-y-4">
       {/* LAST UPDATING DATE */}
-      <div className="flex flex-col items-center justify-center w-56 mx-auto">
+      <div className="flex flex-col items-center justify-center mx-auto">
         <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 flex items-center justify-center gap-1.5">
           <span>Last Updating Date:</span>
-          <span className="text-indigo-600 dark:text-indigo-400 font-mono font-bold">{formatDisplayDate(targetDate)}</span>
         </div>
-        <input 
-          type="date"
+        <DateNavigator
           value={targetDate}
           onChange={(e) => setTargetDate(e.target.value)}
-          className="px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg text-sm font-bold text-indigo-700 dark:text-indigo-400 focus:outline-none focus:border-indigo-500 shadow-sm w-full text-center"
+          format="dd_mm_yy"
+          className="px-3.5 py-1.5 font-bold text-indigo-700 dark:text-indigo-400 text-xs sm:text-sm bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg text-center shadow-xs hover:border-indigo-500 transition-colors flex items-center justify-center gap-2 min-w-[125px]"
         />
       </div>
 
@@ -479,18 +469,6 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                   </button>
                 ))}
               </div>
-
-              {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') && (
-                <button
-                  type="button"
-                  onClick={() => setIsAutoAllocateModalOpen(true)}
-                  className="px-3.5 py-1.5 text-xs font-bold text-white bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 rounded-xl transition-all flex items-center space-x-1.5 shadow-sm cursor-pointer border border-indigo-400/30 shrink-0"
-                  title="Auto Allocate Daily Duties (Single or Package Mode)"
-                >
-                  <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
-                  <span>Auto Allocate</span>
-                </button>
-              )}
             </div>
 
             {autoAllocateToast && (
@@ -504,7 +482,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
             )}
             
             <div className="flex flex-col items-center justify-center gap-2 mb-6">
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center justify-center gap-3">
                 <button
                   onClick={() => setShowAllTableInfo(!showAllTableInfo)}
                   className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-sm font-bold transition-all shadow-sm border ${showAllTableInfo ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
@@ -512,6 +490,28 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                   <Info className="w-4 h-4" />
                   <span>{showAllTableInfo ? 'Hide Info' : 'Show Info'}</span>
                 </button>
+
+                {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsAutoAllocateModalOpen(true)}
+                    className="flex items-center space-x-2 px-4 py-2 rounded-xl text-sm font-bold bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white shadow-sm hover:shadow-md transition-all cursor-pointer"
+                    title="Auto Allocate Daily Duties based on balanced manpower ratio"
+                  >
+                    <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+                    <span>Auto Allocate</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={onRequestAdminAccess}
+                    className="flex items-center space-x-2 px-4 py-2 rounded-xl text-sm font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 cursor-pointer"
+                    title="Admin access required to Auto Allocate"
+                  >
+                    <Lock className="w-4 h-4 text-slate-400" />
+                    <span>Auto Allocate</span>
+                  </button>
+                )}
               </div>
             </div>
 

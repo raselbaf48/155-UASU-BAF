@@ -962,7 +962,8 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
                   <ChevronLeft className="w-4 h-4" />
                 </button>
               <DateNavigator
-                hideArrows={true}                
+                hideArrows={true}
+                format="dd_mm"
                 value={fromDate || ''}
                 onChange={(e) => {
                   const val = e.target.value;
@@ -998,7 +999,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
                 <>
                   <span className="text-xs text-slate-400">to</span>
                   <DateNavigator
-                    
+                    format="dd_mm"
                     value={toDate || ''}
                     min={fromDate}
                     onChange={(e) => {

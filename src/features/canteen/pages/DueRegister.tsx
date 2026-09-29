@@ -108,7 +108,7 @@ export const DueRegister: React.FC = () => {
             </div>
           </div>
           <p className="text-[11px] text-slate-400 mt-2 font-medium">
-            Expenditures-এ পেমেন্ট মেথড Due হিসেবে সংরক্ষিত মোট খরচের পরিমাণ
+            Total unpaid expenditure balance recorded as Due
           </p>
         </div>
 
@@ -127,7 +127,7 @@ export const DueRegister: React.FC = () => {
             </div>
           </div>
           <p className="text-[11px] text-slate-400 mt-2 font-medium">
-            মোট বকেয়া খরচের এন্ট্রি সংখ্যা
+            Total count of pending due expenditure records
           </p>
         </div>
 
@@ -146,7 +146,7 @@ export const DueRegister: React.FC = () => {
             </div>
           </div>
           <p className="text-[11px] text-slate-400 mt-2 font-medium">
-            বকেয়া খরচের সাথে জড়িত দায়িত্বপ্রাপ্ত ব্যাক্তিবর্গ
+            Assigned civilian personnel for due expenses
           </p>
         </div>
       </div>
@@ -222,7 +222,7 @@ export const DueRegister: React.FC = () => {
                         <Banknote className="w-8 h-8 text-slate-600 mb-1" />
                         <span className="text-slate-300 font-black">No due expenditure records found</span>
                         <span className="text-slate-500 text-[10px] normal-case">
-                          Expenditures-এ পেমেন্ট মাধ্যম &quot;Due&quot; সিলেক্ট করে খরচ যোগ করলে এখানে স্বয়ংক্রিয়ভাবে প্রদর্শিত হবে।
+                          Expenses added with payment method "Due" in Expenditures will automatically appear here.
                         </span>
                       </div>
                     ) : (

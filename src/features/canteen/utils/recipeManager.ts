@@ -17,6 +17,8 @@ export interface RawInventoryItem {
   packSize?: number; // e.g. 100 for Tea Bag (1 packet = 100 pcs)
   subUnit?: string;  // e.g. 'pcs'
   hasSubUnits?: boolean;
+  dp?: string;
+  image?: string;
 }
 
 export interface RawStockLog {
@@ -2011,6 +2013,26 @@ export const deductRawStockForSales = (
       remainingStock: newStock
     });
 
+    // Find specific menu items that used this raw item
+    const usedInMenuItems: string[] = [];
+    for (const sold of soldItems) {
+      const soldQty = Number(sold.qty ?? sold.quantity ?? 0);
+      if (soldQty <= 0) continue;
+      const itemName = sold.menuItemName || sold.name || '';
+      const recipe = getRecipeForMenuItem(sold.menuItemId || '', itemName);
+      const hasThisRaw = recipe && recipe.some(ing => 
+        ing.rawItemId === item.id || 
+        (ing.rawItemName && ing.rawItemName.toLowerCase() === item.name.toLowerCase())
+      );
+      if (hasThisRaw) {
+        usedInMenuItems.push(`${itemName} x${soldQty}`);
+      }
+    }
+
+    const menuNote = usedInMenuItems.length > 0 
+      ? usedInMenuItems.join(', ')
+      : soldItems.map(s => `${s.menuItemName} x${s.qty}`).join(', ');
+
     newLogs.push({
       id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
       itemId: item.id,
@@ -2022,7 +2044,7 @@ export const deductRawStockForSales = (
       newStock: newStock,
       cost: Math.round(used * item.unitCost),
       date: today,
-      notes: `[AUTO ISSUE - MENU SALE] ${soldItems.map(s => `${s.menuItemName} x${s.qty}`).join(', ')}`,
+      notes: menuNote,
       recordedBy: 'POS Sale (Auto)'
     });
 
@@ -2386,7 +2408,26 @@ export const restoreRawStockForSaleCancellation = (
       newStock
     });
 
-    const memberDesc = txInfo?.memberName ? ` [${txInfo.memberName}]` : '';
+    // Find specific menu items that used this raw item
+    const usedInMenuItems: string[] = [];
+    for (const sold of soldItems) {
+      const soldQty = Number(sold.qty ?? sold.quantity ?? 0);
+      if (soldQty <= 0) continue;
+      const itemName = sold.menuItemName || sold.name || '';
+      const recipe = getRecipeForMenuItem(sold.menuItemId || '', itemName);
+      const hasThisRaw = recipe && recipe.some(ing => 
+        ing.rawItemId === item.id || 
+        (ing.rawItemName && ing.rawItemName.toLowerCase() === item.name.toLowerCase())
+      );
+      if (hasThisRaw) {
+        usedInMenuItems.push(`${itemName} x${soldQty}`);
+      }
+    }
+
+    const menuNote = usedInMenuItems.length > 0 
+      ? usedInMenuItems.join(', ')
+      : soldItems.map(s => `${s.menuItemName} x${s.qty}`).join(', ');
+
     newLogs.push({
       id: `log-restore-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
       itemId: item.id,
@@ -2398,7 +2439,7 @@ export const restoreRawStockForSaleCancellation = (
       newStock,
       cost: Math.round(restoreQty * item.unitCost),
       date: today,
-      notes: `[RESTOCK - SALE CANCELLED] POS Sale cancelled${memberDesc}. Returned: ${soldItems.map(s => `${s.menuItemName} x${s.qty}`).join(', ')}`,
+      notes: menuNote,
       recordedBy: 'POS Sale Cancellation'
     });
 

@@ -1025,9 +1025,6 @@ export const Expenditures: React.FC = () => {
                   <h3 className="text-base font-black text-white uppercase tracking-wide">
                     EDIT / REMOVE EXPENDITURE
                   </h3>
-                  <p className="text-xs text-slate-400">
-                    খরচের বিবরণ পরিবর্তন করুন অথবা রেকর্ডটি মুছে ফেলুন
-                  </p>
                 </div>
               </div>
 
@@ -1091,7 +1088,7 @@ export const Expenditures: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">
-                    QTY (পরিমাণ)
+                    QTY
                   </label>
                   <input 
                     type="number"
@@ -1124,7 +1121,7 @@ export const Expenditures: React.FC = () => {
 
                 <div>
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">
-                    UNIT PRICE (দর ৳)
+                    UNIT PRICE (৳)
                   </label>
                   <input 
                     type="number"
@@ -1148,16 +1145,16 @@ export const Expenditures: React.FC = () => {
                 {/* Payment Method */}
                 <div>
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">
-                    PAYMENT METHOD (পেমেন্ট মাধ্যম)
+                    PAYMENT METHOD
                   </label>
                   <select 
                     value={editingExpense.paymentMethod || 'Cash'}
                     onChange={(e) => setEditingExpense({ ...editingExpense, paymentMethod: e.target.value })}
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-sm font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   >
-                    <option value="Cash">Cash (নগদ)</option>
+                    <option value="Cash">Cash</option>
                     <option value="UCB">UCB</option>
-                    <option value="Due">Due (বাকি)</option>
+                    <option value="Due">Due</option>
                   </select>
                 </div>
 
@@ -1220,9 +1217,9 @@ export const Expenditures: React.FC = () => {
               <AlertTriangle className="w-6 h-6" />
             </div>
             <div>
-              <h4 className="text-base font-black text-white">রেকর্ডটি মুছে ফেলতে চান?</h4>
+              <h4 className="text-base font-black text-white">Delete this record?</h4>
               <p className="text-xs text-slate-400 mt-1">
-                এই খরচের রেকর্ডটি চিরতরে মুছে যাবে।
+                This expenditure record will be permanently deleted.
               </p>
             </div>
             <div className="flex items-center space-x-3 pt-2">
@@ -1231,14 +1228,14 @@ export const Expenditures: React.FC = () => {
                 onClick={() => setConfirmDeleteId(null)}
                 className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold"
               >
-                বাতিল
+                Cancel
               </button>
               <button
                 type="button"
                 onClick={() => handleDelete(confirmDeleteId)}
                 className="flex-1 py-3 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black uppercase tracking-wider"
               >
-                মুছে ফেলুন
+                Delete
               </button>
             </div>
           </div>

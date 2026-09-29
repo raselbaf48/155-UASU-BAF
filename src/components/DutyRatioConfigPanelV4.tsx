@@ -196,25 +196,47 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
   const [nominalRollFlightFilter, setNominalRollFlightFilter] = useState<FlightName | 'All'>('All');
   const [nominalRollRankFilter, setNominalRollRankFilter] = useState<string>('All');
   const [disposals, setDisposals] = useState<Record<string, string>>(() => {
-    const saved = localStorage.getItem('baf_duty_distribution_disposals_' + (targetDate || 'default'));
-    return saved ? JSON.parse(saved) : {};
+    const master = localStorage.getItem('baf_duty_distribution_disposals_master');
+    if (master) {
+      try { return JSON.parse(master); } catch(e) {}
+    }
+    const current = localStorage.getItem('baf_duty_distribution_disposals_' + (targetDate || 'default'));
+    if (current) {
+      try { return JSON.parse(current); } catch(e) {}
+    }
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('baf_duty_distribution_disposals_')) {
+        const val = localStorage.getItem(k);
+        if (val && val !== '{}') {
+          try { return JSON.parse(val); } catch(e) {}
+        }
+      }
+    }
+    return {};
   });
 
   const saveAndSyncDisposals = (updatedDisposals: Record<string, string>) => {
     setDisposals(updatedDisposals);
+    const valStr = JSON.stringify(updatedDisposals);
+    
+    // Save to master key so it remains persistent and unchanged across dates
+    localStorage.setItem('baf_duty_distribution_disposals_master', valStr);
+
     const dateKey = targetDate || 'default';
     const storageKey = 'baf_duty_distribution_disposals_' + dateKey;
-    const pendingKey = 'baf_pending_disposals_sync_' + storageKey;
-    const valStr = JSON.stringify(updatedDisposals);
     localStorage.setItem(storageKey, valStr);
+    
+    const pendingKey = 'baf_pending_disposals_sync_baf_duty_distribution_disposals_master';
     localStorage.setItem(pendingKey, String(Date.now()));
 
     // Directly and reliably push to Supabase Cloud app_settings
-    localDb.syncSettingToCloud(storageKey, valStr).then(() => {
+    localDb.syncSettingToCloud('baf_duty_distribution_disposals_master', valStr).then(() => {
       setTimeout(() => {
         localStorage.removeItem(pendingKey);
       }, 5000);
     });
+    localDb.syncSettingToCloud(storageKey, valStr);
 
     // When Manpower disposals change, auto-reset manual flightTargets so the new Manpower calculation takes effect immediately
     if (matrix && onMatrixChange) {
@@ -230,21 +252,15 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
     window.dispatchEvent(new CustomEvent('baf_duty_ratio_updated'));
   };
 
-  useEffect(() => {
-    const storageKey = 'baf_duty_distribution_disposals_' + (targetDate || 'default');
-    const saved = localStorage.getItem(storageKey);
-    setDisposals(saved ? JSON.parse(saved) : {});
-  }, [targetDate]);
-
+  // Keep disposals persistent across date changes (Dt change korleo Manpower Er Disposal change hbe na)
   useEffect(() => {
     const handleSettingsUpdated = () => {
-      const storageKey = 'baf_duty_distribution_disposals_' + (targetDate || 'default');
-      const pendingKey = 'baf_pending_disposals_sync_' + storageKey;
+      const pendingKey = 'baf_pending_disposals_sync_baf_duty_distribution_disposals_master';
       const pendingTime = Number(localStorage.getItem(pendingKey) || 0);
       if (Date.now() - pendingTime < 45000) {
         return; // Don't overwrite fresh local edits
       }
-      const saved = localStorage.getItem(storageKey);
+      const saved = localStorage.getItem('baf_duty_distribution_disposals_master') || localStorage.getItem('baf_duty_distribution_disposals_' + (targetDate || 'default'));
       if (saved) {
         try {
           setDisposals(JSON.parse(saved));
@@ -253,7 +269,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
     };
     window.addEventListener('baf_settings_updated', handleSettingsUpdated);
     return () => window.removeEventListener('baf_settings_updated', handleSettingsUpdated);
-  }, [targetDate]);
+  }, []);
 
   const [deleteConfirmIdx, setDeleteConfirmIdx] = useState<number | null>(null);
   
@@ -1176,25 +1192,6 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                   <Info className="w-4 h-4" />
                   <span>{showExactRatio ? 'Hide Exact Ratio' : 'View Exact Ratio'}</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (matrix && onMatrixChange) {
-                      const resetMatrix = matrix.map(t => {
-                        if (!t.flightTargets) return t;
-                        const copy = { ...t };
-                        delete copy.flightTargets;
-                        return copy;
-                      });
-                      onMatrixChange(resetMatrix);
-                    }
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold border transition-colors shadow-xs bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700 dark:hover:bg-slate-700 cursor-pointer"
-                  title="Reset all manual targets to latest manpower auto calculations"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Reset to Auto</span>
-                </button>
               </div>
               <div className="text-xs text-slate-500 dark:text-slate-400 text-center max-w-xl">
                 দশমিকের পর ৫০ বা তার কম থাকলে আগের পূর্ণ সংখ্যা এবং ৫০ এর বেশি থাকলে পরের পূর্ণ সংখ্যা হবে। মোট ম্যাচ না করলে লাল রঙে দেখাবে (ম্যানুয়ালি পরিবর্তনযোগ্য)।
@@ -1267,37 +1264,37 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                             {t.eligibleFlights && !t.eligibleFlights.includes(fl as any) ? (
                               <div className="w-full text-center text-slate-400 bg-slate-100 dark:bg-slate-800/50 py-1">N/A</div>
                             ) : isActive ? (
-                              <div className="w-full h-full min-h-[34px] flex items-center justify-center px-1.5 py-0.5 gap-1.5 select-none" onClick={(e) => e.stopPropagation()}>
+                              <div className="w-full h-full min-h-[30px] flex items-center justify-center px-1 py-0.5 gap-1 select-none" onClick={(e) => e.stopPropagation()}>
                                 {showExactRatio && (
-                                  <span className="text-slate-500 dark:text-slate-400 text-[11px] whitespace-nowrap">
+                                  <span className="text-slate-500 dark:text-slate-400 text-[10px] whitespace-nowrap">
                                     {exactVal.toFixed(2)} ➤
                                   </span>
                                 )}
                                 <div
-                                  className={`min-w-[34px] px-2 py-1 text-center font-bold font-mono text-xs rounded-md border select-none ${
+                                  className={`min-w-[24px] px-1 py-0.5 text-center font-bold font-mono text-xs rounded border select-none ${
                                     isOverridden
-                                      ? 'bg-indigo-100 text-indigo-900 border-indigo-300 dark:bg-indigo-900/60 dark:text-indigo-200 dark:border-indigo-600 font-black shadow-xs ring-1 ring-indigo-400/50'
+                                      ? 'bg-indigo-100 text-indigo-900 border-indigo-300 dark:bg-indigo-900/60 dark:text-indigo-200 dark:border-indigo-600 font-black ring-1 ring-indigo-400/50'
                                       : 'bg-white text-slate-900 border-slate-300 dark:bg-slate-800 dark:text-slate-100 dark:border-slate-600'
                                   }`}
                                 >
                                   {currentVal}
                                 </div>
-                                <div className="flex flex-col ml-0.5 gap-0.5" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex flex-col gap-[1px]" onClick={(e) => e.stopPropagation()}>
                                   <button
                                     type="button"
                                     onClick={() => handleTargetChange(t.id, fl, currentVal + 1)}
-                                    className="p-1 bg-indigo-50 hover:bg-indigo-200 active:bg-indigo-300 dark:bg-indigo-950/60 dark:hover:bg-indigo-800 dark:active:bg-indigo-700 text-indigo-700 dark:text-indigo-300 rounded border border-indigo-200 dark:border-indigo-800 transition-colors cursor-pointer shadow-2xs"
+                                    className="w-3.5 h-3 flex items-center justify-center bg-indigo-50 hover:bg-indigo-200 active:bg-indigo-300 dark:bg-indigo-950/60 dark:hover:bg-indigo-800 text-indigo-700 dark:text-indigo-300 rounded-[2px] border border-indigo-200 dark:border-indigo-800 transition-colors cursor-pointer"
                                     title="Increase (+1)"
                                   >
-                                    <ChevronUp className="w-3.5 h-3.5 stroke-[2.5]" />
+                                    <ChevronUp className="w-2.5 h-2.5 stroke-[3]" />
                                   </button>
                                   <button
                                     type="button"
                                     onClick={() => handleTargetChange(t.id, fl, Math.max(0, currentVal - 1))}
-                                    className="p-1 bg-indigo-50 hover:bg-indigo-200 active:bg-indigo-300 dark:bg-indigo-950/60 dark:hover:bg-indigo-800 dark:active:bg-indigo-700 text-indigo-700 dark:text-indigo-300 rounded border border-indigo-200 dark:border-indigo-800 transition-colors cursor-pointer shadow-2xs"
+                                    className="w-3.5 h-3 flex items-center justify-center bg-indigo-50 hover:bg-indigo-200 active:bg-indigo-300 dark:bg-indigo-950/60 dark:hover:bg-indigo-800 text-indigo-700 dark:text-indigo-300 rounded-[2px] border border-indigo-200 dark:border-indigo-800 transition-colors cursor-pointer"
                                     title="Decrease (-1)"
                                   >
-                                    <ChevronDown className="w-3.5 h-3.5 stroke-[2.5]" />
+                                    <ChevronDown className="w-2.5 h-2.5 stroke-[3]" />
                                   </button>
                                 </div>
                               </div>
@@ -1388,17 +1385,24 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
               </tbody>
             </table>
             
-            <div className="flex justify-end mt-2">
+            <div className="flex justify-end mt-3">
               <button 
+                type="button"
                 onClick={() => {
                   if (onMatrixChange && matrix) {
-                    const newMatrix = matrix.map(t => ({ ...t, flightTargets: {} }));
+                    const newMatrix = matrix.map(t => {
+                      const copy = { ...t };
+                      delete copy.flightTargets;
+                      return copy;
+                    });
                     onMatrixChange(newMatrix);
                   }
                 }}
-                className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors shadow-xs bg-white text-slate-700 border-slate-300 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700 dark:hover:bg-slate-700 cursor-pointer"
+                title="Reset to default auto calculation"
               >
-                Reset All Manual Edits to Auto
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Reset to Default</span>
               </button>
             </div>
           </div>

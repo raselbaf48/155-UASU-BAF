@@ -267,7 +267,7 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
     const sgtAndBelow = allAirmen.filter(a => !['MWO', 'SWO', 'WO'].includes(a.rank));
 
     const effectiveDate = targetDate || localStorage.getItem('baf_duty_distribution_target_date') || '';
-    const savedDisposalsStr = localStorage.getItem('baf_duty_distribution_disposals_' + (effectiveDate || 'default'));
+    const savedDisposalsStr = localStorage.getItem('baf_duty_distribution_disposals_master') || localStorage.getItem('baf_duty_distribution_disposals_' + (effectiveDate || 'default'));
     const savedDisposals = savedDisposalsStr ? JSON.parse(savedDisposalsStr) : {};
 
     const assignments = effectiveDate ? (localDb.getRoster(effectiveDate.substring(0, 7)).assignments || []).filter(a => a.date === effectiveDate) : [];

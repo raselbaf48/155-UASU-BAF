@@ -480,7 +480,7 @@ export const CanteenFund: React.FC = () => {
                     FUND TRANSFER
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Cash এবং UCB ফান্ডের মধ্যে টাকা স্থানান্তর করুন
+                    Transfer balance between Cash and UCB funds
                   </p>
                 </div>
               </div>
@@ -504,7 +504,7 @@ export const CanteenFund: React.FC = () => {
               {/* Transfer Direction Selector */}
               <div>
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">
-                  TRANSFER DIRECTION (কোথা থেকে কোথায়)
+                  TRANSFER DIRECTION
                 </label>
                 <div className="grid grid-cols-2 gap-3">
                   <button
@@ -538,7 +538,7 @@ export const CanteenFund: React.FC = () => {
               {/* Transfer Amount */}
               <div>
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">
-                  TRANSFER AMOUNT (টাকা ৳)
+                  TRANSFER AMOUNT (৳)
                 </label>
                 <input
                   type="number"
@@ -552,7 +552,7 @@ export const CanteenFund: React.FC = () => {
               {/* Optional Note */}
               <div>
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">
-                  NOTE / বিবরণ (ঐচ্ছিক)
+                  NOTE (OPTIONAL)
                 </label>
                 <input
                   type="text"

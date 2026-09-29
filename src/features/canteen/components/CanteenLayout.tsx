@@ -488,7 +488,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
 
   const isEmployee = currentUser.role === 'employee' || currentUser.name === 'Guest';
   const navItems = currentUser.role === 'manager' ? [
-    { id: 'manager_dashboard', name: 'Manager Home', icon: Grid },
+    { id: 'manager_dashboard', name: 'Dashboard', icon: Grid },
     { id: 'pos_sales', name: 'POS Sales', icon: ShoppingCart },
     { id: 'member_db', name: 'Member DB', icon: Users },
     { id: 'due_register', name: 'Due Register', icon: ClipboardList },

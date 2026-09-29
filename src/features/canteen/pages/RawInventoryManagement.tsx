@@ -3,8 +3,10 @@ import {
   Search, Plus, Edit2, Trash2, PackagePlus, AlertTriangle, 
   CheckCircle2, RotateCcw, Layers, ArrowDownRight, ArrowUpRight, 
   History, Filter, ShoppingBag, X, Save, AlertCircle, FileSpreadsheet,
-  Boxes, ChefHat, Sparkles, Percent, LayoutGrid, List
+  Boxes, ChefHat, Sparkles, Percent, LayoutGrid, List,
+  Upload, Image as ImageIcon, Camera
 } from 'lucide-react';
+import { processGalleryImage } from '../utils/imageUpload';
 import { formatMoney, formatNumber } from '../i18n';
 import { supabase } from '../../../supabase';
 import { 
@@ -16,10 +18,12 @@ import {
   saveRawInventoryItems,
   deduplicateRawItems,
   getEffectiveRawUnitCost,
-  getRawItemSubUnitInfo
+  getRawItemSubUnitInfo,
+  getRecipeForMenuItem
 } from '../utils/recipeManager';
 import { queuePushKeyToCloud } from '../utils/canteenCloudSync';
 import { SaveButton } from '../components/SaveButton';
+import { formatCanteenDate } from '../utils/dateUtils';
 
 export type { RawInventoryItem, RawStockLog };
 
@@ -805,6 +809,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
     hasSubUnits?: boolean;
     packSize?: number | string;
     subUnit?: string;
+    dp?: string;
   }>({
     name: '',
     nameBn: '',
@@ -819,7 +824,8 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
     wastagePercentage: 0,
     hasSubUnits: true,
     packSize: 1000,
-    subUnit: 'gm'
+    subUnit: 'gm',
+    dp: ''
   });
 
   // Keep track of serialized state to avoid infinite re-render loops and redundant dispatches
@@ -864,7 +870,9 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
               notes: cleanNotes,
               hasSubUnits: isKg ? true : Boolean(meta.hasSubUnits ?? r.hasSubUnits ?? r.has_sub_units ?? Boolean(rawSubUnit) ?? (Number(r.packSize ?? r.pack_size) > 1)),
               packSize: isKg ? (Number(meta.packSize ?? r.packSize ?? r.pack_size) > 1 ? Number(meta.packSize ?? r.packSize ?? r.pack_size) : 1000) : Number(meta.packSize ?? r.packSize ?? r.pack_size ?? 1),
-              subUnit: rawSubUnit || (isKg ? 'gm' : (isLtr ? 'ml' : (meta.subUnit || r.subUnit || r.sub_unit || 'pcs')))
+              subUnit: rawSubUnit || (isKg ? 'gm' : (isLtr ? 'ml' : (meta.subUnit || r.subUnit || r.sub_unit || 'pcs'))),
+              dp: meta.dp || r.dp || r.image || r.image_url || undefined,
+              image: meta.dp || r.dp || r.image || r.image_url || undefined
             };
           });
           setItems(prev => {
@@ -942,7 +950,8 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
           subCategory: it.subCategory,
           hasSubUnits: it.hasSubUnits,
           packSize: it.packSize,
-          subUnit: it.subUnit
+          subUnit: it.subUnit,
+          dp: it.dp || it.image
         })
       }));
       Promise.resolve(supabase.from('Canteen_Inventory').upsert(payload, { onConflict: 'id' }))
@@ -1310,7 +1319,9 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
             wastagePercentage: parsedWastage,
             hasSubUnits,
             packSize,
-            subUnit
+            subUnit,
+            dp: newItemData.dp?.trim() || undefined,
+            image: newItemData.dp?.trim() || undefined
           };
 
           // Directly sync to Supabase Canteen_Inventory table
@@ -1331,7 +1342,8 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
               subCategory: updated.subCategory,
               hasSubUnits: updated.hasSubUnits,
               packSize: updated.packSize,
-              subUnit: updated.subUnit
+              subUnit: updated.subUnit,
+              dp: updated.dp
             })
           };
           supabase.from('Canteen_Inventory').upsert([dbItem], { onConflict: 'id' })
@@ -1410,7 +1422,9 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
         wastagePercentage: wastagePct,
         hasSubUnits,
         packSize,
-        subUnit
+        subUnit,
+        dp: newItemData.dp?.trim() || undefined,
+        image: newItemData.dp?.trim() || undefined
       };
       setItems(prev => [newItem, ...prev]);
 
@@ -1432,7 +1446,8 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
           subCategory: newItem.subCategory,
           hasSubUnits: newItem.hasSubUnits,
           packSize: newItem.packSize,
-          subUnit: newItem.subUnit
+          subUnit: newItem.subUnit,
+          dp: newItem.dp
         })
       };
       supabase.from('Canteen_Inventory').upsert([newDbItem], { onConflict: 'id' })
@@ -1517,7 +1532,8 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
         : isLtr ? (item.packSize && item.packSize > 1 ? item.packSize : 1000) 
         : isCase ? (item.packSize && item.packSize > 1 ? item.packSize : 30)
         : (item.packSize && item.packSize > 1 ? item.packSize : (isPkt ? 24 : 1)),
-      subUnit: isPcs ? undefined : isKg ? 'gm' : isLtr ? 'ml' : isCase ? 'pcs' : (hasConfiguredSub && item.subUnit && item.subUnit.toLowerCase().trim() !== u ? item.subUnit : (isPkt ? 'pcs' : undefined))
+      subUnit: isPcs ? undefined : isKg ? 'gm' : isLtr ? 'ml' : isCase ? 'pcs' : (hasConfiguredSub && item.subUnit && item.subUnit.toLowerCase().trim() !== u ? item.subUnit : (isPkt ? 'pcs' : undefined)),
+      dp: item.dp || item.image || ''
     });
     setShowAddModal(true);
   };
@@ -1585,7 +1601,8 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                   wastagePercentage: 0,
                   hasSubUnits: true,
                   packSize: 1000,
-                  subUnit: 'gm'
+                  subUnit: 'gm',
+                  dp: ''
                 });
                 setShowAddModal(true);
               }}
@@ -1601,7 +1618,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
               title="View Stock In / Out Log History"
             >
               <History className="w-4 h-4 text-indigo-400" />
-              <span>LOGS / হিস্ট্রি</span>
+              <span>STOCK LOGS</span>
             </button>
           </div>
         )}
@@ -1809,10 +1826,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
         /* Box / Card Grid View (Like Member DB) */
         <div className="space-y-4">
           <div className="flex items-center justify-between text-xs text-slate-400 px-1">
-            <span className="flex items-center gap-1.5 font-medium">
-              <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-              <span>আইটেমের বক্সে ক্লিক করে সরাসরি তথ্য এডিট বা অপচয় % পরিবর্তন করতে পারেন</span>
-            </span>
+            <span className="font-semibold text-slate-300">Raw Items Catalog</span>
             <span className="font-mono text-slate-500">Showing {filteredItems.length} items</span>
           </div>
 
@@ -1861,14 +1875,18 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                     <div>
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-center space-x-3 min-w-0">
-                          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-sm shrink-0 border border-slate-700/70 shadow-[inset_0_2px_5px_rgba(0,0,0,0.8),0_3px_8px_rgba(0,0,0,0.5)] group-hover:scale-105 transition-transform duration-300 ${
+                          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-sm shrink-0 border border-slate-700/70 overflow-hidden shadow-[inset_0_2px_5px_rgba(0,0,0,0.8),0_3px_8px_rgba(0,0,0,0.5)] group-hover:scale-105 transition-transform duration-300 ${
                             isZero 
                               ? 'bg-rose-950/80 text-rose-400 !border-rose-500/40' 
                               : isLow 
                               ? 'bg-amber-950/80 text-amber-400 !border-amber-500/40' 
                               : 'bg-slate-950 text-indigo-400'
                           }`}>
-                            {item.name.slice(0, 2).toUpperCase()}
+                            {(item.dp || item.image) ? (
+                              <img src={item.dp || item.image} alt={item.name} className="w-full h-full object-cover" />
+                            ) : (
+                              item.name.slice(0, 2).toUpperCase()
+                            )}
                           </div>
                           <div className="min-w-0">
                             <h4 className="font-extrabold text-white text-base truncate flex items-center gap-1.5 group-hover:text-indigo-300 transition-colors" title={item.name}>
@@ -1907,9 +1925,9 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                         </span>
 
                         {hasSubUnitDisplay && (
-                          <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 border-t border-indigo-400/30 border-b-2 border-indigo-950 shadow-sm flex items-center gap-1" title={`প্রতি ${item.unit}-এ ${subInfo.packSize} ${subInfo.subUnit} থাকে`}>
+                          <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 border-t border-indigo-400/30 border-b-2 border-indigo-950 shadow-sm flex items-center gap-1">
                             <Boxes className="w-2.5 h-2.5 text-indigo-400" />
-                            <span>১ {item.unit} = {subInfo.packSize} {subInfo.subUnit}</span>
+                            <span>1 {item.unit} = {subInfo.packSize} {subInfo.subUnit}</span>
                           </span>
                         )}
 
@@ -1958,12 +1976,12 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                       {/* Details: Unit Cost & Supplier */}
                       <div className="mt-3.5 space-y-1.5 text-xs">
                         <div className="flex items-center justify-between text-slate-400 bg-slate-950/40 px-2.5 py-1.5 rounded-xl border border-slate-800/60">
-                          <span className="text-slate-500 font-bold text-[11px]">কেনা দর:</span>
+                          <span className="text-slate-500 font-bold text-[11px]">Cost:</span>
                           <span className="font-bold text-slate-200 font-mono">৳{item.unitCost} / {item.unit}</span>
                         </div>
                         {hasSubUnitDisplay && (
                           <div className="flex items-center justify-between text-indigo-300 text-[11px] bg-indigo-950/30 px-2.5 py-1.5 rounded-xl border border-indigo-500/25">
-                            <span className="font-medium">প্রতি {subInfo.subUnit} দর:</span>
+                            <span className="font-medium">Per {subInfo.subUnit}:</span>
                             <span className="font-black text-indigo-200 font-mono">
                               ৳{((item.unitCost) / (subInfo.packSize || 1)).toFixed(2)}
                             </span>
@@ -1971,7 +1989,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                         )}
                         {wastagePct > 0 && (
                           <div className="flex items-center justify-between text-amber-400 text-[11px] bg-amber-950/30 px-2.5 py-1.5 rounded-xl border border-amber-500/25">
-                            <span className="font-medium">কার্যকর দর ({100 - wastagePct}% টিকে):</span>
+                            <span className="font-medium">Effective Cost:</span>
                             <span className="font-black text-amber-300 font-mono">
                               ৳{(Math.round((item.unitCost / (1 - wastagePct / 100)) * 10) / 10).toLocaleString()} / {item.unit}
                             </span>
@@ -1999,8 +2017,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
           <div className="px-5 py-2.5 bg-slate-950/40 border-b border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
             <span className="flex items-center gap-1.5">
               <Edit2 className="w-3 h-3 text-indigo-400" />
-              <span className="font-semibold text-slate-300">তথ্য এডিট বা মুছে ফেলতে যে কোনো আইটেমের রো (Row)-তে ক্লিক করুন</span>
-              <span className="hidden sm:inline text-slate-500">(Click any row to edit or delete item)</span>
+              <span className="font-medium text-slate-300">Click any row to view or edit details</span>
             </span>
             <span className="text-[10px] text-slate-500 font-mono">Total: {filteredItems.length} items</span>
           </div>
@@ -2055,19 +2072,23 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                         className={`hover:bg-slate-800/60 transition-colors ${!readOnly ? 'cursor-pointer' : ''} ${
                           isLow ? 'bg-amber-500/[0.02]' : ''
                         }`}
-                        title={!readOnly ? "Click this row to edit item details / তথ্য এডিট করতে ক্লিক করুন" : undefined}
+                        title={!readOnly ? "Click row to edit details" : undefined}
                       >
                         {/* Item Name & Details */}
                         <td className="px-5 py-3.5">
                           <div className="flex items-center space-x-3">
-                            <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm shrink-0 shadow-inner ${
+                            <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm shrink-0 overflow-hidden shadow-inner ${
                               isZero 
                                 ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' 
                                 : isLow 
                                 ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' 
                                 : 'bg-slate-800 text-indigo-400 border border-slate-700'
                             }`}>
-                              {item.name.slice(0, 2).toUpperCase()}
+                              {(item.dp || item.image) ? (
+                                <img src={item.dp || item.image} alt={item.name} className="w-full h-full object-cover" />
+                              ) : (
+                                item.name.slice(0, 2).toUpperCase()
+                              )}
                             </div>
                             <div>
                               <div className="font-extrabold text-white text-sm flex items-center gap-2">
@@ -2155,8 +2176,8 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                             </div>
                           )}
                           {wastagePct > 0 && (
-                            <div className="text-[10px] text-amber-300 font-bold" title="অপচয় বাদ দিয়ে নিট কার্যকর দর">
-                              নিট: ৳{Math.round((item.unitCost / (1 - wastagePct / 100)) * 10) / 10}
+                            <div className="text-[10px] text-amber-300 font-bold" title="Effective cost after wastage">
+                              Eff: ৳{Math.round((item.unitCost / (1 - wastagePct / 100)) * 10) / 10}
                             </div>
                           )}
                         </td>
@@ -2262,6 +2283,58 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
             {/* TAB CONTENT */}
             {(!editingItem || editModalTab === 'DETAILS') ? (
               <form onSubmit={handleSaveItem} className="space-y-4 pt-4 overflow-y-auto pr-1">
+                {/* Item Display Picture (DP) */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1.5">Item Photo (DP)</label>
+                  <div className="flex items-center gap-3.5 p-3 bg-slate-950/60 border border-slate-800 rounded-2xl">
+                    <div className="relative w-16 h-16 rounded-2xl bg-slate-800 border-2 border-dashed border-slate-700 flex items-center justify-center overflow-hidden shrink-0">
+                      {newItemData.dp ? (
+                        <img src={newItemData.dp} alt="Item DP" className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="flex flex-col items-center justify-center text-slate-500">
+                          <ImageIcon className="w-6 h-6 opacity-60" />
+                          <span className="text-[9px] font-bold uppercase mt-0.5 text-slate-500">No Photo</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex-1 flex flex-wrap items-center gap-2">
+                      <label className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer active:scale-95">
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>Upload DP</span>
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          className="hidden"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              try {
+                                const base64 = await processGalleryImage(file);
+                                setNewItemData(prev => ({ ...prev, dp: base64 }));
+                              } catch (err) {
+                                console.error("Failed to load image from gallery:", err);
+                              }
+                            }
+                          }}
+                        />
+                      </label>
+
+                      {newItemData.dp && (
+                        <button
+                          type="button"
+                          onClick={() => setNewItemData(prev => ({ ...prev, dp: '' }))}
+                          className="inline-flex items-center gap-1 px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                          title="Remove photo"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Remove</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-bold text-slate-400 mb-1">Item Name (English) *</label>
@@ -2281,14 +2354,14 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                       type="text"
                       value={newItemData.nameBn || ''}
                       onChange={(e) => setNewItemData({ ...newItemData, nameBn: e.target.value })}
-                      placeholder="যেমন: মুরগির মাংস, মিনিকেট চাল"
+                      placeholder="বাংলা নাম (ঐচ্ছিক)"
                       className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-1">Unit of Measure (পরিমাপের মূল একক)</label>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">Unit of Measure</label>
                   <select
                     value={newItemData.unit || 'kg'}
                     onChange={(e) => {
@@ -2332,15 +2405,15 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                     }}
                     className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500 font-semibold"
                   >
-                    <option value="kg">kg (Kilogram / কেজি) — সাব-ইউনিট: gm (১ কেজি = ১০০০ গ্রাম)</option>
-                    <option value="liter">liter (Liter / লিটার) — সাব-ইউনিট: ml (১ লিটার = ১০০০ মিলি)</option>
-                    <option value="case">case (Case / কেস / খাঁচি) — সাব-ইউনিট: pcs (১ কেস = ৩০ পিস)</option>
-                    <option value="packet">packet (Packet / প্যাকেট) — সাব-ইউনিট: pcs (পিস / প্যাকেট সাইজ)</option>
-                    <option value="pcs">pcs (Pieces / পিস) — কোনো সাব-ইউনিট নেই (একক গণনা)</option>
-                    <option value="cylinder">cylinder (Cylinder / সিলিন্ডার)</option>
-                    <option value="gm">gm (Gram / গ্রাম)</option>
-                    <option value="box">box (Box / বক্স)</option>
-                    <option value="bag">bag (Sack/Bag / বস্তা)</option>
+                    <option value="kg">kg (Kilogram)</option>
+                    <option value="liter">liter (Liter)</option>
+                    <option value="case">case (Case)</option>
+                    <option value="packet">packet (Packet)</option>
+                    <option value="pcs">pcs (Pieces)</option>
+                    <option value="cylinder">cylinder (Cylinder)</option>
+                    <option value="gm">gm (Gram)</option>
+                    <option value="box">box (Box)</option>
+                    <option value="bag">bag (Bag)</option>
                   </select>
                 </div>
 
@@ -2450,9 +2523,8 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                     <label className="block text-xs font-bold text-amber-400 mb-1 flex items-center justify-between">
                       <span className="flex items-center gap-1">
                         <Percent className="w-3.5 h-3.5 text-amber-400" />
-                        <span>Wastage % (অপচয়)</span>
+                        <span>Wastage %</span>
                       </span>
-                      <span className="text-[10px] text-slate-400 font-normal">যেমন: মুরগি ৩০%</span>
                     </label>
                     <div className="relative">
                       <input
@@ -2487,9 +2559,6 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                       />
                       <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-amber-400/80">%</span>
                     </div>
-                    <p className="text-[10px] text-slate-500 mt-1">
-                      কেনার সময় এই % বাদ দিয়ে নিট স্টক ইনভেন্টরিতে ঢুকবে এবং অপচয় লগে যাবে
-                    </p>
                   </div>
                 </div>
 
@@ -2507,13 +2576,13 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                           </div>
                           <div>
                             <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                              <span>একক গণনা (Pcs Unit)</span>
+                              <span>Standard Unit (Pieces)</span>
                               <span className="text-[10px] font-black px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 uppercase">
                                 {newItemData.unit || 'pcs'}
                               </span>
                             </div>
                             <p className="text-[11px] text-slate-400 mt-0.5">
-                              এটি সাধারণ পিস/সংখ্যা ভিত্তিক পণ্য। এর কোনো সাব-ইউনিট প্রয়োজন নেই (১টি = ১ পিস)।
+                              Count-based item. No sub-units required.
                             </p>
                           </div>
                         </div>
@@ -2522,12 +2591,12 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                   }
 
                   const availableSubUnits = [
-                    { val: 'pcs', label: 'pcs (পিস / ব্যাগ)' },
-                    { val: 'slice', label: 'slice (স্লাইস)' },
-                    { val: 'cup', label: 'cup (কাপ)' },
-                    { val: 'sheet', label: 'sheet (শিট)' },
-                    { val: 'gm', label: 'gm (গ্রাম)' },
-                    { val: 'ml', label: 'ml (মিলি)' }
+                    { val: 'pcs', label: 'pcs (Pieces)' },
+                    { val: 'slice', label: 'slice (Slice)' },
+                    { val: 'cup', label: 'cup (Cup)' },
+                    { val: 'sheet', label: 'sheet (Sheet)' },
+                    { val: 'gm', label: 'gm (Gram)' },
+                    { val: 'ml', label: 'ml (Milli-liter)' }
                   ].filter(opt => opt.val !== currentSelectedUnit);
 
                   const defaultSub = availableSubUnits[0]?.val || 'pcs';
@@ -2541,11 +2610,8 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                         <div>
                           <div className="text-xs font-black text-white flex items-center gap-1.5">
                             <Boxes className="w-3.5 h-3.5 text-indigo-400" />
-                            <span>প্যাকেজিং ও সাব-ইউনিট কনফিগারেশন (Sub-Units)</span>
+                            <span>Sub-Units Configuration</span>
                           </div>
-                          <p className="text-[11px] text-slate-400 mt-0.5">
-                            প্যাকেটের ভেতরে নির্দিষ্ট সাব-ইউনিট থাকলে (যেমন: ১ প্যাকেট = ১০০ PCS, ১ কেজি = ১০০০ GM)
-                          </p>
                         </div>
                         <label className="relative inline-flex items-center cursor-pointer shrink-0">
                           <input
@@ -2571,7 +2637,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                           <div className="grid grid-cols-2 gap-3">
                             <div>
                               <label className="block text-[11px] font-bold text-slate-300 mb-1">
-                                প্রতি {newItemData.unit || 'প্যাকেটে'} মোট সংখ্যা (Pack Size) *
+                                Pack Size ({newItemData.unit || 'pack'}) *
                               </label>
                               <input
                                 type="number"
@@ -2602,12 +2668,11 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                                 placeholder="e.g. 100"
                                 className="w-full px-3 py-2 bg-slate-900 border border-indigo-500/40 rounded-xl text-white font-black text-sm focus:outline-none focus:border-indigo-400"
                               />
-                              <p className="text-[10px] text-slate-500 mt-1">যেমন: ১ বক্সে ১০০ টি টি-ব্যাগ</p>
                             </div>
 
                             <div>
                               <label className="block text-[11px] font-bold text-slate-300 mb-1">
-                                সাব-ইউনিটের নাম (Sub-unit)
+                                Sub-Unit Name
                               </label>
                               <select
                                 value={activeSub}
@@ -2618,27 +2683,23 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                                   <option key={opt.val} value={opt.val}>{opt.label}</option>
                                 ))}
                               </select>
-                              <p className="text-[10px] text-slate-500 mt-1">রেসিপিতে এই এককে ব্যবহার হবে (মূল এককের থেকে ভিন্ন হতে হবে)</p>
                             </div>
                           </div>
 
                           {/* Live Calculation Preview */}
                           <div className="bg-indigo-950/40 border border-indigo-500/30 rounded-xl p-3 text-xs space-y-1">
                             <div className="flex items-center justify-between text-indigo-300 font-bold">
-                              <span>প্যাকেজিং অনুপাত:</span>
+                              <span>Ratio:</span>
                               <span className="font-mono text-white">
-                                ১ {newItemData.unit || 'packet'} = {newItemData.packSize || 100} {activeSub}
+                                1 {newItemData.unit || 'packet'} = {newItemData.packSize || 100} {activeSub}
                               </span>
                             </div>
                             <div className="flex items-center justify-between text-indigo-200">
-                              <span>প্রতি {activeSub} খরচ (Unit Cost):</span>
+                              <span>Unit Cost per {activeSub}:</span>
                               <span className="font-black text-amber-300 text-sm">
                                 ৳{((Number(newItemData.unitCost) || 0) / Math.max(1, (Number(newItemData.packSize) || 1))).toFixed(2)}
                               </span>
                             </div>
-                            <p className="text-[10px] text-slate-400 pt-1">
-                              মেন্যু বিক্রির সময় প্রতি সার্ভিংয়ে ১ {activeSub} খরচ ধরবে এবং ইনভেন্টরি থেকে {(1 / Math.max(1, (Number(newItemData.packSize) || 1))).toFixed(4)} {newItemData.unit || 'packet'} কমে যাবে।
-                            </p>
                           </div>
                         </div>
                       )}
@@ -2647,18 +2708,18 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                 })()}
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-1">Supplier / Vendor</label>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">Supplier</label>
                   <input
                     type="text"
                     value={newItemData.supplier || ''}
                     onChange={(e) => setNewItemData({ ...newItemData, supplier: e.target.value })}
-                    placeholder="e.g. Base Depot, Kawran Bazar, Aarong Dairy"
+                    placeholder="e.g. Local Market / Vendor"
                     className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-1">Notes / Description</label>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">Notes</label>
                   <textarea
                     rows={2}
                     value={newItemData.notes || ''}
@@ -2705,128 +2766,120 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                 </div>
               </form>
             ) : (
-              /* TAB: History (With Restock, Issue & Wastage) */
+              /* TAB: History */
               <div className="pt-4 flex-1 flex flex-col min-h-0">
-                <div className="flex items-center justify-between mb-3 text-xs">
-                  <div className="flex items-center gap-1.5 text-slate-300 font-bold">
-                    <History className="w-4 h-4 text-indigo-400" />
-                    <span>Transaction History (তালিকায় Wastage সহ তারিখ অনুযায়ী)</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowAddModal(false);
-                        handleOpenRestock(editingItem);
-                      }}
-                      className="px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white rounded-lg text-[11px] font-bold transition-colors border border-emerald-500/30 flex items-center gap-1 cursor-pointer"
-                    >
-                      <PackagePlus className="w-3 h-3" />
-                      <span>+ Restock</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowAddModal(false);
-                        handleOpenIssue(editingItem);
-                      }}
-                      className="px-2.5 py-1 bg-amber-600/20 hover:bg-amber-600 text-amber-400 hover:text-white rounded-lg text-[11px] font-bold transition-colors border border-amber-500/30 flex items-center gap-1 cursor-pointer"
-                    >
-                      <ArrowDownRight className="w-3 h-3" />
-                      <span>- Issue</span>
-                    </button>
-                  </div>
+                <div className="flex items-center gap-1.5 mb-3 text-xs text-slate-300 font-bold">
+                  <History className="w-4 h-4 text-indigo-400" />
+                  <span>Transaction History</span>
                 </div>
 
-                {/* History Log List */}
-                <div className="overflow-y-auto flex-1 max-h-[50vh] space-y-2 pr-1 divide-y divide-slate-800/40">
-                  {logs.filter(l => l.itemId === editingItem.id).length === 0 ? (
-                    <div className="p-8 text-center bg-slate-950/40 border border-slate-800 rounded-2xl">
-                      <History className="w-8 h-8 mx-auto text-slate-600 mb-2 opacity-60" />
-                      <p className="text-slate-400 text-xs font-semibold">এই আইটেমের এখনো কোনো হিস্ট্রি (Restock, Issue বা Wastage) নেই</p>
-                      <p className="text-slate-500 text-[11px] mt-1">রেস্টক, ইস্যু বা অপচয় হলে স্বয়ংক্রিয়ভাবে তারিখসহ এখানে হিস্ট্রি যুক্ত হবে।</p>
-                    </div>
-                  ) : (
-                    logs
-                      .filter(l => l.itemId === editingItem.id)
-                      .map(log => {
-                        const isRestock = log.type === 'RESTOCK';
-                        const isIssue = log.type === 'ISSUE';
-                        const isWastage = log.type === 'WASTAGE';
+                {/* History Log Table */}
+                <div className="flex-1 flex flex-col min-h-0 bg-slate-950/60 border border-slate-800 rounded-2xl overflow-hidden shadow-inner">
+                  <div className="overflow-x-auto flex-1 flex flex-col min-h-0">
+                    <div className="min-w-[480px] flex-1 flex flex-col min-h-0">
+                      {/* Fixed Table Heading Row */}
+                      <div className="grid grid-cols-12 gap-3 px-4 py-3 bg-slate-900 border-b border-slate-800 text-[11px] font-black text-slate-300 uppercase tracking-wider shrink-0 select-none items-center">
+                        <div className="col-span-3 text-left">Date</div>
+                        <div className="col-span-4 text-left">Menu</div>
+                        <div className="col-span-2 text-right">Qty</div>
+                        <div className="col-span-3 text-right">Available</div>
+                      </div>
 
-                        return (
-                          <div 
-                            key={log.id} 
-                            className="pt-2 pb-2.5 px-3 rounded-xl bg-slate-950/30 border border-slate-800/60 flex items-start justify-between gap-3 text-xs"
-                          >
-                            <div className="flex items-start gap-2.5 min-w-0">
-                              <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black shrink-0 mt-0.5 ${
-                                isRestock 
-                                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                                  : isIssue
-                                  ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                                  : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                              }`}>
-                                {isRestock && <ArrowUpRight className="w-4 h-4" />}
-                                {isIssue && <ArrowDownRight className="w-4 h-4" />}
-                                {isWastage && <Percent className="w-4 h-4" />}
-                              </div>
-
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <span className={`font-black text-xs uppercase px-2 py-0.5 rounded-md ${
-                                    isRestock 
-                                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' 
-                                      : isIssue
-                                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                                      : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                                  }`}>
-                                    {log.type}
-                                  </span>
-                                  <span className="text-[11px] text-slate-400 font-mono">
-                                    {log.date}
-                                  </span>
-                                </div>
-
-                                <div className="mt-1 text-slate-300 text-xs font-semibold">
-                                  {isRestock && (
-                                    <span className="text-emerald-400 font-black mr-1">+{log.quantity} {log.unit}</span>
-                                  )}
-                                  {isIssue && (
-                                    <span className="text-amber-400 font-black mr-1">-{log.quantity} {log.unit}</span>
-                                  )}
-                                  {isWastage && (
-                                    <span className="text-rose-400 font-black mr-1">-{log.quantity} {log.unit} (Wastage)</span>
-                                  )}
-                                  <span className="text-slate-400 font-normal">
-                                    (Stock: {log.previousStock} → {log.newStock} {log.unit})
-                                  </span>
-                                </div>
-
-                                {log.notes && (
-                                  <p className="text-[11px] text-slate-400 mt-0.5 italic">
-                                    Note: {log.notes}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-
-                            <div className="text-right shrink-0">
-                              {log.cost ? (
-                                <div className="font-mono font-bold text-slate-200 text-xs">
-                                  ৳{Math.round(log.cost).toLocaleString()}
-                                </div>
-                              ) : null}
-                              {log.recordedBy && (
-                                <div className="text-[10px] text-slate-500 font-medium">
-                                  by {log.recordedBy}
-                                </div>
-                              )}
-                            </div>
+                      {/* Scrollable Table Rows (Newest on top) */}
+                      <div className="overflow-y-auto flex-1 divide-y divide-slate-800/60 max-h-[48vh]">
+                        {logs.filter(l => l.itemId === editingItem.id).length === 0 ? (
+                          <div className="p-10 text-center text-slate-500">
+                            <History className="w-8 h-8 mx-auto mb-2 opacity-40 text-slate-600" />
+                            <p className="text-xs font-semibold">No transaction history recorded yet.</p>
                           </div>
-                        );
-                      })
-                  )}
+                        ) : (
+                          logs
+                            .filter(l => l.itemId === editingItem.id)
+                            .slice()
+                            .sort((a, b) => {
+                              const timeA = new Date(a.date).getTime() || 0;
+                              const timeB = new Date(b.date).getTime() || 0;
+                              if (timeA !== timeB) return timeB - timeA;
+                              return (b.id || '').localeCompare(a.id || '');
+                            })
+                            .map(log => {
+                              const isRestock = log.type === 'RESTOCK';
+
+                              // Extract clean Menu / Item description
+                              let menuDesc = '-';
+                              if (log.notes) {
+                                let clean = log.notes
+                                  .replace(/\[AUTO ISSUE - MENU SALE\]/gi, '')
+                                  .replace(/\[AUTO RESTOCK - EXPENDITURE\]/gi, '')
+                                  .replace(/\[AUTO ISSUE - ORDER\]/gi, '')
+                                  .replace(/^Restocked via:?/i, '')
+                                  .replace(/^Restocked from:?/i, '')
+                                  .replace(/^Auto restock from:?/i, '')
+                                  .trim();
+                                if (clean.startsWith(':')) clean = clean.substring(1).trim();
+                                
+                                // If clean contains multiple items separated by comma, filter down to only ones that actually use this raw item
+                                if (clean.includes(',')) {
+                                  const parts = clean.split(',').map(p => p.trim()).filter(Boolean);
+                                  const matchedParts = parts.filter(part => {
+                                    const pureName = part.replace(/\s*x\s*\d+(\.\d+)?$/i, '').trim();
+                                    const recipe = getRecipeForMenuItem('', pureName);
+                                    return recipe && recipe.some(ing => 
+                                      ing.rawItemId === editingItem.id ||
+                                      (ing.rawItemName && ing.rawItemName.toLowerCase() === editingItem.name.toLowerCase())
+                                    );
+                                  });
+                                  if (matchedParts.length > 0) {
+                                    clean = matchedParts.join(', ');
+                                  }
+                                }
+                                if (clean) menuDesc = clean;
+                              }
+                              if (menuDesc === '-' && log.recordedBy) {
+                                menuDesc = log.recordedBy;
+                              }
+
+                              return (
+                                <div 
+                                  key={log.id} 
+                                  className="grid grid-cols-12 gap-3 px-4 py-3 items-center hover:bg-slate-900/40 transition-colors text-xs"
+                                >
+                                  {/* 1. Date */}
+                                  <div className="col-span-3 font-mono font-medium text-slate-300 text-[11px] whitespace-nowrap" title={formatCanteenDate(log.date)}>
+                                    {formatCanteenDate(log.date)}
+                                  </div>
+
+                                  {/* 2. Menu */}
+                                  <div className="col-span-4 font-bold text-white text-xs break-words pr-1 leading-snug" title={menuDesc}>
+                                    {menuDesc}
+                                  </div>
+
+                                  {/* 3. Qty */}
+                                  <div className="col-span-2 text-right whitespace-nowrap">
+                                    <span className={`font-black font-mono text-xs ${isRestock ? 'text-emerald-400' : 'text-amber-400'}`}>
+                                      {isRestock ? '+' : '-'}{log.quantity}
+                                    </span>
+                                    <span className="text-[10px] font-bold text-slate-400 uppercase ml-1">
+                                      {log.unit}
+                                    </span>
+                                  </div>
+
+                                  {/* 4. Available */}
+                                  <div className="col-span-3 text-right whitespace-nowrap">
+                                    <span className="font-mono font-bold text-slate-100 text-xs">
+                                      {log.newStock}
+                                    </span>
+                                    <span className="text-[10px] font-bold text-slate-400 uppercase ml-1">
+                                      {log.unit}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="pt-4 mt-3 border-t border-slate-800 flex justify-end">
@@ -2867,7 +2920,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                   </div>
                   <div>
                     <h3 className="text-lg font-black text-white uppercase tracking-tight">
-                      Restock Raw Item (স্টক যোগ)
+                      Restock Raw Item
                     </h3>
                     {currentItem && (
                       <p className="text-xs text-slate-400">
@@ -2921,7 +2974,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                             restockUnitMode === 'MAIN' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
                           }`}
                         >
-                          {mainUnit} (মূল)
+                          {mainUnit}
                         </button>
                         <button
                           type="button"
@@ -2930,7 +2983,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                             restockUnitMode === 'SUB' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
                           }`}
                         >
-                          {subUnit} (সাব)
+                          {subUnit}
                         </button>
                       </div>
                     )}
@@ -2948,7 +3001,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                   />
                   {hasSub && parsedQty > 0 && (
                     <p className="text-[11px] text-emerald-400 font-semibold mt-1">
-                      ≈ {equivalentInOther} (১ {mainUnit} = {pSize} {subUnit})
+                      ≈ {equivalentInOther} (1 {mainUnit} = {pSize} {subUnit})
                     </p>
                   )}
                 </div>
@@ -2957,7 +3010,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-bold text-slate-400 mb-1">
-                      কেনা দর (৳ per {mainUnit}) *
+                      Purchase Rate (৳ per {mainUnit}) *
                     </label>
                     <input
                       type="number"
@@ -2969,13 +3022,13 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                     />
                     {hasSub && currentItem && (
                       <p className="text-[10px] text-slate-400 mt-1">
-                        প্রতি {subUnit}: ৳{((parseFloat(restockCost) || 0) / pSize).toFixed(2)}
+                        Per {subUnit}: ৳{((parseFloat(restockCost) || 0) / pSize).toFixed(2)}
                       </p>
                     )}
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-400 mb-1">Supplier / সরবরাহকারী</label>
+                    <label className="block text-xs font-bold text-slate-400 mb-1">Supplier</label>
                     <input
                       type="text"
                       value={restockSupplier}
@@ -2988,7 +3041,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
 
                 {/* Notes */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-1">Notes / রেফারেন্স (Optional)</label>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">Notes (Optional)</label>
                   <input
                     type="text"
                     value={restockNotes}
@@ -3047,7 +3100,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                   </div>
                   <div>
                     <h3 className="text-lg font-black text-white uppercase tracking-tight">
-                      Issue / Usage (রান্নাঘরে স্টক প্রদান)
+                      Issue / Usage
                     </h3>
                     {currentItem && (
                       <p className="text-xs text-slate-400">
@@ -3080,7 +3133,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
 
                 {/* Issue Type */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-1">Issue Category / ধরণ</label>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">Issue Category</label>
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
@@ -3092,7 +3145,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                       }`}
                     >
                       <ArrowDownRight className="w-3.5 h-3.5" />
-                      <span>Kitchen Issue (রান্না)</span>
+                      <span>Kitchen Issue</span>
                     </button>
                     <button
                       type="button"
@@ -3104,7 +3157,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                       }`}
                     >
                       <Percent className="w-3.5 h-3.5" />
-                      <span>Wastage (নষ্ট / অপচয়)</span>
+                      <span>Wastage</span>
                     </button>
                   </div>
                 </div>
@@ -3124,7 +3177,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                             issueUnitMode === 'MAIN' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
                           }`}
                         >
-                          {mainUnit} (মূল)
+                          {mainUnit}
                         </button>
                         <button
                           type="button"
@@ -3133,7 +3186,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                             issueUnitMode === 'SUB' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
                           }`}
                         >
-                          {subUnit} (সাব)
+                          {subUnit}
                         </button>
                       </div>
                     )}
@@ -3152,7 +3205,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                   {parsedQty > 0 && currentItem && (
                     <div className="mt-1 text-[11px] flex items-center justify-between text-slate-400">
                       <span>
-                        বাকি স্টক থাকবে: <strong className="text-white">{remainingStock.toFixed(2)} {mainUnit}</strong>
+                        Remaining Stock: <strong className="text-white">{remainingStock.toFixed(2)} {mainUnit}</strong>
                         {hasSub && <span> (≈ {Math.round(remainingStock * pSize)} {subUnit})</span>}
                       </span>
                       {hasSub && issueUnitMode === 'SUB' && (
@@ -3166,7 +3219,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
 
                 {/* Notes */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-1">Notes / বিবরণ</label>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">Notes</label>
                   <input
                     type="text"
                     value={issueNotes}
@@ -3215,12 +3268,9 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                 <div>
                   <h3 className="text-lg font-black text-white uppercase tracking-tight flex items-center gap-2">
                     <span>Raw Stock Movement Logs</span>
-                    <span className="text-xs px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 font-bold border border-indigo-500/30">
-                      স্টক আদান-প্রদান হিস্ট্রি
-                    </span>
                   </h3>
                   <p className="text-xs text-slate-400">
-                    খরচ (Expenditure) থেকে স্বয়ংক্রিয় রিস্টক ও সেল (POS Sales) থেকে স্বয়ংক্রিয় কাঁচামাল ইস্যুর লগ রেকর্ড
+                    Expenditures restock & POS sales item deduction history
                   </p>
                 </div>
               </div>
@@ -3240,7 +3290,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                       : 'bg-slate-800 text-slate-400 hover:text-white'
                   }`}
                 >
-                  সকল লগ ({logs.length})
+                  All Logs ({logs.length})
                 </button>
                 <button
                   onClick={() => setLogFilter('RESTOCK')}
@@ -3277,7 +3327,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
               </div>
 
               <div className="text-[11px] text-slate-400">
-                মোট সংরক্ষিত: <span className="font-bold text-white">{logs.length}</span> টি লেনদেন
+                Total Logs: <span className="font-bold text-white">{logs.length}</span>
               </div>
             </div>
 
@@ -3293,7 +3343,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                   return (
                     <div className="text-center py-12 text-slate-500 font-bold">
                       <Boxes className="w-8 h-8 mx-auto text-slate-600 mb-2 opacity-50" />
-                      <p>কোনো স্টক লগ পাওয়া যায়নি (No logs found)</p>
+                      <p>No movement logs found</p>
                     </div>
                   );
                 }
@@ -3339,17 +3389,17 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                               </div>
 
                               <div className="text-xs text-slate-400 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-                                <span>পূর্ববর্তী: <strong className="text-slate-300">{log.previousStock} {log.unit}</strong></span>
+                                <span>Previous: <strong className="text-slate-300">{log.previousStock} {log.unit}</strong></span>
                                 <span>→</span>
-                                <span>নতুন ব্যালেন্স: <strong className={isRestock ? 'text-emerald-400' : 'text-amber-400'}>{log.newStock} {log.unit}</strong></span>
+                                <span>New Balance: <strong className={isRestock ? 'text-emerald-400' : 'text-amber-400'}>{log.newStock} {log.unit}</strong></span>
                                 {log.cost ? (
-                                  <span>• খরচ: <strong className="text-emerald-400">৳ {Math.round(log.cost).toLocaleString()}</strong></span>
+                                  <span>• Cost: <strong className="text-emerald-400">৳ {Math.round(log.cost).toLocaleString()}</strong></span>
                                 ) : null}
                               </div>
 
                               <div className="text-[11px] text-slate-500 mt-1 flex flex-wrap items-center gap-x-3">
-                                <span>রেফারেন্স: {log.notes || log.type}</span>
-                                <span>• বাই: {log.recordedBy || 'System Auto'}</span>
+                                <span>Ref: {log.notes || log.type}</span>
+                                <span>• By: {log.recordedBy || 'System Auto'}</span>
                                 <span>• {log.date}</span>
                               </div>
                             </div>
@@ -3375,13 +3425,13 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
 
             <div className="pt-3 border-t border-slate-800 shrink-0 flex justify-between items-center">
               <span className="text-xs text-slate-400">
-                স্বয়ংক্রিয় স্টক লগিং সক্রিয়
+                Auto Stock Logging Active
               </span>
               <button
                 onClick={() => setShowLogsModal(false)}
                 className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-colors cursor-pointer"
               >
-                বন্ধ করুন (Close)
+                Close
               </button>
             </div>
           </div>
