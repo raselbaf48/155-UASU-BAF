@@ -1387,7 +1387,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                       totalRequiredDaily: 0,
                       eligibleFlights: newDutyFlights,
                       eligibleRanks: newDutyRanks,
-                      allotmentType: newDutyAllotmentType,
+                      allotmentType: newDutyFlights.length === 1 ? 'equal' : newDutyAllotmentType,
                       data: {
                         Mechanics: Array(31).fill(0),
                         Avionics: Array(31).fill(0),
@@ -1580,14 +1580,15 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                       const newMatrix = [...matrix];
                       const currentTable = newMatrix[editingDutyIdx];
 
-                      const allotmentTypeChanged = currentTable.allotmentType !== editDutyAllotmentType;
+                      const finalAllotmentType = editDutyFlights.length === 1 ? 'equal' : editDutyAllotmentType;
+                      const allotmentTypeChanged = currentTable.allotmentType !== finalAllotmentType;
                       const updatedTable = {
                         ...currentTable,
                         title: editDutyName,
                         serNo: newSerNo,
                         eligibleFlights: editDutyFlights,
                         eligibleRanks: editDutyRanks,
-                        allotmentType: editDutyAllotmentType,
+                        allotmentType: finalAllotmentType,
                         flightTargets: allotmentTypeChanged ? undefined : currentTable.flightTargets,
                       };
 

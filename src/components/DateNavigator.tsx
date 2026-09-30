@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
+import { CalendarPickerModal } from './CalendarPickerModal';
 
 interface DateNavigatorProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'> {
   hideArrows?: boolean;
@@ -17,6 +18,14 @@ export function DateNavigator({
   showCalendarIcon = true,
   ...props 
 }: DateNavigatorProps) {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const openCalendarPicker = () => {
+    if (disabled) return;
+    setIsModalOpen(true);
+  };
+
   const addDays = (days: number) => {
     if (!value || typeof value !== 'string') return;
     const parts = value.split('-');
@@ -74,19 +83,28 @@ export function DateNavigator({
         </button>
       )}
       
-      <div className="relative flex-1 flex items-center justify-center">
-        <div className={className || "px-3 py-1.5 font-bold text-slate-800 dark:text-slate-100 text-xs sm:text-sm whitespace-nowrap bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-center shadow-xs flex items-center justify-center gap-1.5"}>
-          <span>{displayDate || 'Select Date'}</span>
+      <div 
+        onClick={openCalendarPicker}
+        className="relative flex-1 flex items-center justify-center cursor-pointer group"
+      >
+        <div className={`flex flex-row items-center justify-center gap-1.5 whitespace-nowrap flex-nowrap ${className || "px-3 py-1.5 font-bold text-slate-800 dark:text-slate-100 text-xs sm:text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-center shadow-xs"}`}>
+          <span className="whitespace-nowrap">{displayDate || 'Select Date'}</span>
           {showCalendarIcon && (
-            <Calendar className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400 shrink-0 pointer-events-none" />
+            <Calendar className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400 shrink-0 pointer-events-none group-hover:scale-110 transition-transform" />
           )}
         </div>
         <input
+          ref={inputRef}
           type="date"
           value={value}
           disabled={disabled}
           onChange={onChange}
-          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openCalendarPicker();
+          }}
+          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
           {...props}
         />
       </div>
@@ -100,6 +118,19 @@ export function DateNavigator({
         >
           <ChevronRight className="w-4 h-4" />
         </button>
+      )}
+
+      {isModalOpen && (
+        <CalendarPickerModal
+          isOpen={isModalOpen}
+          onClose={() => setIsModalOpen(false)}
+          value={String(value || '')}
+          onChange={(newDateStr) => {
+            if (onChange) {
+              onChange({ target: { value: newDateStr } } as React.ChangeEvent<HTMLInputElement>);
+            }
+          }}
+        />
       )}
     </div>
   );

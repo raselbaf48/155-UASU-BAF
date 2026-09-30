@@ -318,6 +318,12 @@ export async function pushDutyListToCloud(matrixInput?: DutyRatioTable[]): Promi
         setting_value: JSON.stringify(matrix),
         updated_at: new Date().toISOString()
       }, { onConflict: 'setting_key' });
+
+      await supabase.from('app_settings').upsert({
+        setting_key: 'baf_official_duty_matrix_v4',
+        setting_value: JSON.stringify(matrix),
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'setting_key' });
     } catch (e) {}
 
     return {
@@ -403,16 +409,21 @@ export async function pullDutyListFromCloud(): Promise<DutySyncResult> {
       const statusRaw = String(row.Status || row.status || '').trim().toLowerCase();
       const isDisabled = statusRaw === 'disable' || statusRaw === 'disabled';
 
+      const eligFlights = parseEligibleFlights(row.eligible_flt);
+      const isSingleFlt = eligFlights.length === 1;
+
       if (existingIdx !== -1) {
         // Update existing table
+        const prev = updatedMatrix[existingIdx];
         updatedMatrix[existingIdx] = {
-          ...updatedMatrix[existingIdx],
-          title: title || updatedMatrix[existingIdx].title,
+          ...prev,
+          title: title || prev.title,
           serNo,
-          totalRequiredMonth: totalMonth || updatedMatrix[existingIdx].totalRequiredMonth,
-          dailyRequirements: dailyReqs.some(r => r > 0) ? dailyReqs : updatedMatrix[existingIdx].dailyRequirements,
-          eligibleFlights: parseEligibleFlights(row.eligible_flt),
+          totalRequiredMonth: totalMonth || prev.totalRequiredMonth,
+          dailyRequirements: dailyReqs.some(r => r > 0) ? dailyReqs : prev.dailyRequirements,
+          eligibleFlights: eligFlights,
           eligibleRanks: parseEligibleRanks(row.eligible_rank),
+          allotmentType: isSingleFlt ? 'equal' : (prev.allotmentType || 'ratio'),
           isDisabled,
         };
       } else {
@@ -425,8 +436,9 @@ export async function pullDutyListFromCloud(): Promise<DutySyncResult> {
           dutyCode: 'GD',
           totalRequiredMonth: totalMonth,
           dailyRequirements: dailyReqs,
-          eligibleFlights: parseEligibleFlights(row.eligible_flt),
+          eligibleFlights: eligFlights,
           eligibleRanks: parseEligibleRanks(row.eligible_rank),
+          allotmentType: isSingleFlt ? 'equal' : 'ratio',
           isDisabled,
           data: {
             Mechanics: new Array(31).fill(0),

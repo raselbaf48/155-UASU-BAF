@@ -217,13 +217,16 @@ export function getStoredDutyMatrix(): DutyRatioTable[] {
               title = defT.title;
             }
           }
+          const eligFlights = t.eligibleFlights || defT?.eligibleFlights;
+          const isSingleFlt = eligFlights && eligFlights.length === 1;
           return {
             ...t,
             title,
             dutyCode: defT?.dutyCode || t.dutyCode,
-            eligibleFlights: t.eligibleFlights || defT?.eligibleFlights,
+            eligibleFlights: eligFlights,
             eligibleRanks: t.eligibleRanks || defT?.eligibleRanks,
-            allotmentType: t.allotmentType || defT?.allotmentType,
+            allotmentType: isSingleFlt ? 'equal' : (t.allotmentType || defT?.allotmentType),
+            flightTargets: t.flightTargets,
           };
         });
         const existingIds = new Set(updatedParsed.map((t: DutyRatioTable) => t.id));

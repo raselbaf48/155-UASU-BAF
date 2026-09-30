@@ -294,6 +294,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
   const autoTargets = calculateBalancedAutoTargets(matrix, currentManpower);
 
   const getFlightTarget = (table: DutyRatioTable, fl: FlightName): number => {
+    if (table.isDisabled) return 0;
     if (table.flightTargets && typeof table.flightTargets[fl] === 'number') {
       return table.flightTargets[fl]!;
     }
@@ -698,8 +699,6 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                                 if (dutyDayReq === undefined) {
                                   if (table.totalRequiredDaily && (table.totalRequiredDaily * 31 === table.totalRequiredMonth)) {
                                     dutyDayReq = table.totalRequiredDaily;
-                                  } else if (table.totalRequiredDaily) {
-                                    dutyDayReq = table.totalRequiredDaily;
                                   } else {
                                     dutyDayReq = ['Mechanics', 'Avionics', 'GCS', 'Admin'].reduce((acc, fl) => acc + (table.data[fl as FlightName]?.[dayIdx] || 0), 0);
                                   }
@@ -1081,8 +1080,6 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                             let dutyDayReq = table.dailyRequirements?.[dayIdx];
                             if (dutyDayReq === undefined) {
                               if (table.totalRequiredDaily && (table.totalRequiredDaily * 31 === table.totalRequiredMonth)) {
-                                dutyDayReq = table.totalRequiredDaily;
-                              } else if (table.totalRequiredDaily) {
                                 dutyDayReq = table.totalRequiredDaily;
                               } else {
                                 dutyDayReq = ['Mechanics', 'Avionics', 'GCS', 'Admin'].reduce((acc, fl) => acc + (table.data[fl as FlightName]?.[dayIdx] || 0), 0);

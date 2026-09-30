@@ -5,7 +5,7 @@ import { localDb } from '../services/localDatabase';
 import { Airman, Rank, FlightName, DutyCategoryCode } from '../types';
 import { addCustomDuty, CustomDutyConfig, removeCustomDuty } from '../utils/customDuties';
 import { getSavedCustomDisposals, saveCustomDisposal, removeSavedCustomDisposal } from '../utils/customDisposalStore';
-import { calculateBalancedAutoTargets, calculateExactDutyRatios, roundDutyByRule, isFixedEqualDuty } from '../utils/dutyDistribution';
+import { calculateBalancedAutoTargets, calculateExactDutyRatios, roundDutyByRule, isFixedEqualDuty, DEFAULT_MANPOWER } from '../utils/dutyDistribution';
 import { pushDutyListToCloud, pullDutyListFromCloud, DutySyncResult } from '../utils/dutyCloudSync';
 
 const STANDARD_DISPOSALS = [
@@ -28,17 +28,6 @@ const DEFAULT_TOTAL_DUTY = {
   idacNight: 62,
   reception: 31,
   airfieldDuty: 93,
-};
-
-const DEFAULT_MANPOWER = {
-  mechSgt: 5,
-  mechCpl: 6,
-  aviSgt: 4,
-  aviCpl: 3,
-  gcsSgt: 5,
-  gcsCpl: 6,
-  adminSgt: 0,
-  adminCpl: 1,
 };
 
 import { DutyRatioTable, AllotmentType } from '../data/officialDutyRatioMatrix';
@@ -183,6 +172,38 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
   });
 
   const [showExactRatio, setShowExactRatio] = useState(false);
+  const [showResetConfirmModal, setShowResetConfirmModal] = useState(false);
+  const [recentlyResetDutyId, setRecentlyResetDutyId] = useState<string | null>(null);
+
+  const handleResetSingleDuty = (dutyId: string) => {
+    if (onMatrixChange && matrix) {
+      const newMatrix = matrix.map((t) => {
+        if (t.id === dutyId) {
+          const copy = { ...t };
+          delete copy.flightTargets;
+          return copy;
+        }
+        return t;
+      });
+      onMatrixChange(newMatrix);
+      setRecentlyResetDutyId(dutyId);
+      setTimeout(() => {
+        setRecentlyResetDutyId(null);
+      }, 2000);
+    }
+  };
+
+  const handleResetAllDuties = () => {
+    if (onMatrixChange && matrix) {
+      const newMatrix = matrix.map((t) => {
+        const copy = { ...t };
+        delete copy.flightTargets;
+        return copy;
+      });
+      onMatrixChange(newMatrix);
+      setShowResetConfirmModal(false);
+    }
+  };
 
   useEffect(() => {
     localStorage.setItem('baf_duty_distribution_total_duty', JSON.stringify(totalDuty));
@@ -551,7 +572,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
 
   const calculatedMatrixDistributions = useMemo(() => {
     if (!matrix) return {};
-    const balanced = calculateBalancedAutoTargets(matrix, currentManpower);
+    const balanced = calculateBalancedAutoTargets(matrix, currentManpower, false);
     const exactRatios = calculateExactDutyRatios(matrix, currentManpower);
     const result: Record<string, Record<string, { autoVal: number, exactVal: number }>> = {};
     
@@ -658,12 +679,13 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                       </button>
                       <button 
                         onClick={() => {
+                          const elig = table.eligibleFlights || ['Mechanics', 'Avionics', 'GCS', 'Admin'];
                           setEditingDutyIdx(idx);
                           setEditDutyName(table.title);
                           setEditDutySerNo(table.serNo ?? '');
-                          setEditDutyFlights(table.eligibleFlights || ['Mechanics', 'Avionics', 'GCS', 'Admin']);
+                          setEditDutyFlights(elig);
                           setEditDutyRanks(table.eligibleRanks || (table.title.toLowerCase().includes('security') ? ['Cpl', 'LAC', 'AC-1', 'AC-2'] : ['Sgt', 'Cpl', 'LAC', 'AC-1', 'AC-2']));
-                          setEditDutyAllotmentType(table.allotmentType || (isFixedEqualDuty(table) ? 'equal' : 'ratio'));
+                          setEditDutyAllotmentType(elig.length === 1 ? 'equal' : (table.allotmentType || (isFixedEqualDuty(table) ? 'equal' : 'ratio')));
                         }}
                         className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                         title="Duty Settings"
@@ -710,6 +732,23 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                           </span>
                         );
                       })()}
+                    </div>
+
+                    <div className="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-xs">
+                      <span className="text-slate-500 dark:text-slate-400 font-semibold">Allotment:</span>
+                      {table.eligibleFlights && table.eligibleFlights.length === 1 ? (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                          One From Each Flt (Must)
+                        </span>
+                      ) : (table.allotmentType === 'equal' || isFixedEqualDuty(table)) ? (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                          One From Each Flt
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                          As Per Ratio
+                        </span>
+                      )}
                     </div>
 
                   </div>
@@ -1388,16 +1427,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
             <div className="flex justify-end mt-3">
               <button 
                 type="button"
-                onClick={() => {
-                  if (onMatrixChange && matrix) {
-                    const newMatrix = matrix.map(t => {
-                      const copy = { ...t };
-                      delete copy.flightTargets;
-                      return copy;
-                    });
-                    onMatrixChange(newMatrix);
-                  }
-                }}
+                onClick={() => setShowResetConfirmModal(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors shadow-xs bg-white text-slate-700 border-slate-300 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700 dark:hover:bg-slate-700 cursor-pointer"
                 title="Reset to default auto calculation"
               >
@@ -1407,6 +1437,174 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
             </div>
           </div>
         </>
+      )}
+
+      {/* Reset to Default Modal - Select Single Active Duty or Reset All */}
+      {showResetConfirmModal && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn">
+          <div 
+            className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-xl border border-slate-200 dark:border-slate-800 overflow-hidden transform transition-all animate-scaleUp flex flex-col max-h-[90vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-gradient-to-r from-amber-50 to-orange-50/50 dark:from-slate-800 dark:to-amber-950/20 shrink-0">
+              <div className="flex items-center space-x-3">
+                <div className="p-2 bg-amber-500/15 text-amber-600 dark:text-amber-400 rounded-xl">
+                  <RotateCcw className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 dark:text-white">
+                    Reset Duty to Default Quota
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                    যে ডিউটিতে ক্লিক করবেন শুধুমাত্র সেই ডিউটিটি রিসেট হবে
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowResetConfirmModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-700/60 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Instruction Banner */}
+            <div className="p-3.5 bg-amber-50/70 dark:bg-amber-950/20 border-b border-amber-100 dark:border-amber-900/40 text-xs text-amber-800 dark:text-amber-300 flex items-start gap-2 shrink-0">
+              <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                তালিকা থেকে যেকোনো ডিউটিতে ক্লিক করুন—<strong>শুধুমাত্র সেই ডিউটির</strong> ম্যানুয়াল কোটা রিস্টোর হয়ে অটো রেশিওতে ফিরে যাবে।
+              </div>
+            </div>
+
+            {/* Active Duties Scrollable List */}
+            <div className="p-4 overflow-y-auto space-y-2.5 flex-1 divide-y divide-slate-100 dark:divide-slate-800/60">
+              {(() => {
+                const activeDuties = (matrix || []).filter((t) => !t.isDisabled);
+                if (activeDuties.length === 0) {
+                  return (
+                    <div className="text-center py-8 text-slate-400 text-xs font-semibold">
+                      কোনো সক্রিয় ডিউটি পাওয়া যায়নি।
+                    </div>
+                  );
+                }
+                return activeDuties.map((t, idx) => {
+                  const hasManualTargets = !!t.flightTargets && Object.values(t.flightTargets).some((v) => (v ?? 0) > 0);
+                  const isRecentlyReset = recentlyResetDutyId === t.id;
+                  const monthTotal = (t.dailyRequirements && t.dailyRequirements.length > 0)
+                    ? t.dailyRequirements.reduce((sum, v) => sum + (Number(v) || 0), 0)
+                    : (t.totalRequiredMonth || (t.totalRequiredDaily ? t.totalRequiredDaily * 31 : 0));
+                  const isSingleFlt = t.eligibleFlights && t.eligibleFlights.length === 1;
+
+                  return (
+                    <div
+                      key={t.id}
+                      onClick={() => handleResetSingleDuty(t.id)}
+                      className={`pt-2.5 first:pt-0 group flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer ${
+                        isRecentlyReset
+                          ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700'
+                          : hasManualTargets
+                          ? 'bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 hover:border-amber-400 hover:bg-amber-50/40 dark:hover:bg-amber-950/20 shadow-xs'
+                          : 'bg-slate-50/60 dark:bg-slate-800/40 border-slate-200/70 dark:border-slate-700/60 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                      title={`Click to reset ${t.title} to default auto quota`}
+                    >
+                      <div className="flex items-center space-x-3 min-w-0 pr-2">
+                        <div className="w-7 h-7 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 font-bold text-xs flex items-center justify-center shrink-0 border border-indigo-200 dark:border-indigo-800">
+                          {t.serNo !== undefined ? t.serNo : (idx + 1)}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center space-x-2">
+                            <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                              {t.title}
+                            </h4>
+                            {isSingleFlt && (
+                              <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 shrink-0">
+                                1 Flt (Must Equal)
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center space-x-2 mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                            <span>Req: <strong className="font-mono text-slate-700 dark:text-slate-300">{monthTotal}</strong></span>
+                            <span>•</span>
+                            <span className="truncate">
+                              {t.eligibleFlights && t.eligibleFlights.length > 0 ? t.eligibleFlights.join(', ') : 'All Flights'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-2 shrink-0">
+                        {isRecentlyReset ? (
+                          <span className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/60 flex items-center space-x-1 animate-fadeIn">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Reset Done!</span>
+                          </span>
+                        ) : hasManualTargets ? (
+                          <div className="flex items-center space-x-2">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                              Manual Quota
+                            </span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleResetSingleDuty(t.id);
+                              }}
+                              className="px-2.5 py-1 rounded-lg text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-100/70 hover:bg-amber-200/70 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 border border-amber-300 dark:border-amber-700 flex items-center space-x-1 transition-colors cursor-pointer"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                              <span>Reset</span>
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center space-x-2">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+                              Default Auto
+                            </span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleResetSingleDuty(t.id);
+                              }}
+                              className="px-2.5 py-1 rounded-lg text-xs font-bold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 flex items-center space-x-1 transition-colors cursor-pointer"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                              <span>Reset</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+
+            {/* Footer */}
+            <div className="px-5 py-3.5 bg-slate-50 dark:bg-slate-800/60 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2.5 shrink-0">
+              <button
+                type="button"
+                onClick={handleResetAllDuties}
+                className="px-3 py-1.5 text-xs font-bold text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-950/50 rounded-xl transition-colors cursor-pointer flex items-center space-x-1.5"
+                title="Reset all manual adjustments for all duties at once"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Reset All Active Duties</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowResetConfirmModal(false)}
+                className="px-4 py-2 text-xs font-bold text-white bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 rounded-xl transition-colors cursor-pointer shadow-xs"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {deleteConfirmIdx !== null && (
@@ -1476,8 +1674,13 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                         type="checkbox" 
                         checked={newDutyFlights.includes(flt as FlightName)} 
                         onChange={(e) => {
-                          if (e.target.checked) setNewDutyFlights([...newDutyFlights, flt as FlightName]);
-                          else setNewDutyFlights(newDutyFlights.filter(f => f !== flt));
+                          const updated = e.target.checked
+                            ? [...newDutyFlights, flt as FlightName]
+                            : newDutyFlights.filter(f => f !== flt);
+                          setNewDutyFlights(updated);
+                          if (updated.length === 1) {
+                            setNewDutyAllotmentType('equal');
+                          }
                         }}
                         className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" 
                       />
@@ -1487,8 +1690,28 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                 </div>
               </div>
 
-              {/* Allotment Type (shown when 2 or more flights are eligible) */}
-              {newDutyFlights.length >= 2 && (
+              {/* Allotment Type */}
+              {newDutyFlights.length === 1 ? (
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
+                    Allotment Type
+                  </label>
+                  <div className="p-3 rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                        <span className="text-sm font-bold text-slate-900 dark:text-white">One From Each Flt</span>
+                        <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-amber-200 text-amber-900 dark:bg-amber-800 dark:text-amber-200">
+                          Must
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-amber-800 dark:text-amber-300 mt-1 leading-tight">
+                        যেহেতু শুধুমাত্র ১টি ফ্লাইট নির্বাচিত ({newDutyFlights[0]}), তাই Allotment Type অবশ্যই <strong>One From Each Flt</strong> হবে।
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : newDutyFlights.length >= 2 ? (
                 <div>
                   <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
                     Allotment Type
@@ -1543,7 +1766,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                     </button>
                   </div>
                 </div>
-              )}
+              ) : null}
 
               <div>
                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Eligible Ranks</label>
@@ -1612,7 +1835,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                       totalRequiredDaily: 0,
                       eligibleFlights: newDutyFlights,
                       eligibleRanks: newDutyRanks,
-                      allotmentType: newDutyAllotmentType,
+                      allotmentType: newDutyFlights.length === 1 ? 'equal' : newDutyAllotmentType,
                       data: {
                         Mechanics: Array(31).fill(0),
                         Avionics: Array(31).fill(0),
@@ -1685,8 +1908,13 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                         type="checkbox" 
                         checked={editDutyFlights.includes(flt as FlightName)} 
                         onChange={(e) => {
-                          if (e.target.checked) setEditDutyFlights([...editDutyFlights, flt as FlightName]);
-                          else setEditDutyFlights(editDutyFlights.filter(f => f !== flt));
+                          const updated = e.target.checked
+                            ? [...editDutyFlights, flt as FlightName]
+                            : editDutyFlights.filter(f => f !== flt);
+                          setEditDutyFlights(updated);
+                          if (updated.length === 1) {
+                            setEditDutyAllotmentType('equal');
+                          }
                         }}
                         className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" 
                       />
@@ -1696,8 +1924,28 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                 </div>
               </div>
 
-              {/* Allotment Type (shown when 2 or more flights are eligible) */}
-              {editDutyFlights.length >= 2 && (
+              {/* Allotment Type */}
+              {editDutyFlights.length === 1 ? (
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
+                    Allotment Type
+                  </label>
+                  <div className="p-3 rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                        <span className="text-sm font-bold text-slate-900 dark:text-white">One From Each Flt</span>
+                        <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-amber-200 text-amber-900 dark:bg-amber-800 dark:text-amber-200">
+                          Must
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-amber-800 dark:text-amber-300 mt-1 leading-tight">
+                        যেহেতু শুধুমাত্র ১টি ফ্লাইট নির্বাচিত ({editDutyFlights[0]}), তাই Allotment Type অবশ্যই <strong>One From Each Flt</strong> হবে।
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : editDutyFlights.length >= 2 ? (
                 <div>
                   <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
                     Allotment Type
@@ -1752,7 +2000,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                     </button>
                   </div>
                 </div>
-              )}
+              ) : null}
 
               <div>
                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Eligible Ranks</label>
@@ -1806,14 +2054,15 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                       const newMatrix = [...matrix];
                       const currentTable = newMatrix[editingDutyIdx];
 
-                      const allotmentTypeChanged = currentTable.allotmentType !== editDutyAllotmentType;
+                      const finalAllotmentType: AllotmentType = editDutyFlights.length === 1 ? 'equal' : editDutyAllotmentType;
+                      const allotmentTypeChanged = currentTable.allotmentType !== finalAllotmentType;
                       const updatedTable = {
                         ...currentTable,
                         title: editDutyName,
                         serNo: newSerNo,
                         eligibleFlights: editDutyFlights,
                         eligibleRanks: editDutyRanks,
-                        allotmentType: editDutyAllotmentType,
+                        allotmentType: finalAllotmentType,
                         flightTargets: allotmentTypeChanged ? undefined : currentTable.flightTargets,
                       };
 

@@ -145,10 +145,11 @@ export const DashboardParadeState: React.FC<DashboardParadeStateProps> = ({
     };
   }, [selectedDate, selectedFlight]);
 
-  // Compute day of week
+  // Compute day of week and date display with year
   const dateObj = new Date(selectedDate);
   const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
   const dateDisplay = dateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }).replace(/Sept/gi, 'Sep');
+  const yearDisplay = String(dateObj.getFullYear()).slice(-2);
 
   const flightsList: (FlightName | 'Overall')[] = [
     'Overall',
@@ -172,20 +173,19 @@ export const DashboardParadeState: React.FC<DashboardParadeStateProps> = ({
             </span>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            {dayName}, {dateDisplay} • Unit Strength: {data?.summary?.totalStrength || 48} Airmen
+            {dayName}, {dateDisplay} {yearDisplay} • Unit Strength: {data?.summary?.totalStrength || 48} Airmen
           </p>
         </div>
 
         {/* Filters bar */}
         <div className="flex flex-wrap items-center gap-3">
           {/* Date Picker */}
-          <div className="flex items-center space-x-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200">
-            <Calendar className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+          <div className="flex items-center bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200">
             <DateNavigator
-              
               value={selectedDate || ''}
               onChange={(e) => setSelectedDate(e.target.value)}
-              className="bg-transparent border-none outline-none font-semibold cursor-pointer text-slate-900 dark:text-slate-100"
+              format="dd_mm_yy"
+              className="bg-transparent border-none outline-none font-bold cursor-pointer text-slate-900 dark:text-slate-100 px-1"
             />
           </div>
 
