@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { DutyRatioTable } from '../data/officialDutyRatioMatrix';
+import { DutyRatioTable, getStoredDutyMatrix } from '../data/officialDutyRatioMatrix';
 import { FlightName } from '../types';
 import { Printer, X, Download, FileSpreadsheet, CheckSquare, Square, Filter, Layers } from 'lucide-react';
 import { exportTableToCSV, exportDutyRatioMatrixExcel, exportManpowerAndNominalRollExcel, exportFlightDutyScheduleExcel } from '../utils/csvExport';
@@ -106,12 +106,56 @@ interface PrintableDutyRatioModalProps {
 }
 
 export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = ({
-  matrix,
+  matrix: rawMatrix,
   selectedFlightFilter,
   onClose,
   exportMode = 'ALL',
   targetDate,
 }) => {
+  // Completely filter out any disabled duties from Duty List so they never appear in print
+  const matrix = useMemo(() => {
+    const baseList = (rawMatrix && rawMatrix.length > 0) ? rawMatrix : getStoredDutyMatrix();
+    
+    // Cross-check localStorage metadata for any disabled duties
+    const disabledKeys = new Set<string>();
+    try {
+      const metaRaw = localStorage.getItem('baf_duty_matrix_metadata');
+      if (metaRaw) {
+        const parsed = JSON.parse(metaRaw);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((m: any) => {
+            const isDis = m.isDisabled === true || String(m.isDisabled) === 'true' ||
+              m.is_disabled === true || String(m.is_disabled) === 'true' ||
+              String(m.status || '').toLowerCase() === 'disable' ||
+              String(m.status || '').toLowerCase() === 'disabled';
+            if (isDis) {
+              if (m.id) disabledKeys.add(String(m.id).toLowerCase());
+              if (m.dutyCode) disabledKeys.add(String(m.dutyCode).toLowerCase());
+              if (m.title) disabledKeys.add(String(m.title).trim().toLowerCase());
+            }
+          });
+        }
+      }
+    } catch {}
+
+    return baseList.filter(t => {
+      if (!t) return false;
+      if (t.isDisabled === true || String(t.isDisabled) === 'true') return false;
+      if ((t as any).is_disabled === true || String((t as any).is_disabled) === 'true') return false;
+      const status = String((t as any).status || (t as any).Status || '').trim().toLowerCase();
+      if (status === 'disable' || status === 'disabled' || status === 'inactive') return false;
+      if ((t as any).active === false || String((t as any).active) === 'false') return false;
+      
+      const idKey = String(t.id || '').toLowerCase();
+      const codeKey = String(t.dutyCode || '').toLowerCase();
+      const titleKey = String(t.title || '').trim().toLowerCase();
+      if (disabledKeys.has(idKey) || disabledKeys.has(codeKey) || disabledKeys.has(titleKey)) {
+        return false;
+      }
+      return true;
+    });
+  }, [rawMatrix]);
+
   const daysArray = Array.from({ length: 31 }, (_, i) => i + 1);
 
   const [currentFlightFilter, setCurrentFlightFilter] = useState<FlightName | 'Overall'>(
@@ -826,11 +870,11 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
               
               {/* TOP SECTION: Total Duty Table & Effective Manpower Table */}
               {(showTotalDuty || showManpower) && (
-                <div className={`w-full flex flex-col ${showTotalDuty && showManpower ? 'xl:flex-row justify-center items-start gap-8 print-top-summary-container print:gap-4' : 'items-center justify-center my-3 print:my-2 print:w-full'}`}>
+                <div className={`w-full flex flex-col ${showTotalDuty && showManpower ? (pageOrientation === 'landscape' ? 'md:flex-row justify-between items-start gap-6 print-top-summary-container print:gap-4' : 'xl:flex-row justify-center items-start gap-8 print-top-summary-container print:gap-4') : 'items-center justify-center my-3 print:my-2 print:w-full'}`}>
                   
                   {/* TOTAL DUTY Table */}
                   {showTotalDuty && (
-                    <div className={`w-full ${showManpower ? 'max-w-lg print-top-total-duty print:max-w-none' : 'max-w-2xl print:w-full print:max-w-none'} mx-auto`} style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
+                    <div className={`w-full ${showManpower ? (pageOrientation === 'landscape' ? 'flex-[1.4] w-auto print-top-total-duty print:max-w-none' : 'max-w-lg print-top-total-duty print:max-w-none') : 'w-full print:w-full print:max-w-none'}`} style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
                       <h4 className="font-bold underline text-center mb-2 text-sm uppercase">TOTAL DUTY</h4>
                       <table className="no-zebra border-collapse border border-black text-center text-[11px] sm:text-[12px] bg-white text-black w-full print:w-full print:min-w-0">
                         <thead>
@@ -857,7 +901,7 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
 
                   {/* EFFECTIVE MANPOWER Table */}
                   {showManpower && (
-                    <div className={`w-full ${showTotalDuty ? 'max-w-md print-top-manpower print:max-w-none' : 'max-w-2xl print:w-full print:max-w-none'} mx-auto flex flex-col items-center`} style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
+                    <div className={`w-full ${showTotalDuty ? (pageOrientation === 'landscape' ? 'flex-1 w-auto print-top-manpower print:max-w-none' : 'max-w-md print-top-manpower print:max-w-none') : 'w-full print:w-full print:max-w-none'} flex flex-col items-center`} style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
                       <h4 className="font-bold underline text-center mb-2 text-sm uppercase">EFFECTIVE MANPOWER</h4>
                       <table className="no-zebra border-collapse border border-black text-center text-[12px] bg-white text-black w-full print:w-full print:min-w-0 mx-auto">
                         <thead>

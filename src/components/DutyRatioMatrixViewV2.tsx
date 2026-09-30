@@ -291,7 +291,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
       currentManpower = JSON.parse(savedManpower);
     } catch (e) {}
   }
-  const autoTargets = calculateBalancedAutoTargets(matrix, currentManpower, true);
+  const autoTargets = calculateBalancedAutoTargets(matrix, currentManpower, false);
 
   const getFlightTarget = (table: DutyRatioTable, fl: FlightName): number => {
     if (table.isDisabled) return 0;
@@ -621,7 +621,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                 </div>
               </div>
                 {/* Table Body (Days 1 to 31) */}
-                <div className="w-full overflow-x-auto scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-600">
+                <div className="w-full overflow-x-auto">
                   <table className="w-full text-xs text-center border-collapse table-auto md:table-fixed min-w-[940px]">
                     <colgroup>
                       <col className="w-20 sm:w-24 min-w-[80px]" />
@@ -986,7 +986,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                   )}
                 </div>
               </div>
-              <div className="w-full overflow-x-auto scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-600">
+              <div className="w-full overflow-x-auto">
                 <table className="w-full text-xs text-center border-collapse table-fixed min-w-[760px] sm:min-w-[960px]">
                   <colgroup>
                     <col className="w-20 sm:w-36 max-w-[85px] sm:max-w-none" />

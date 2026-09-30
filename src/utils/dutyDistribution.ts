@@ -133,14 +133,13 @@ export function roundDutyByRule(val: number): number {
 /**
  * Calculates auto targets using the user's specific rounding rule:
  * - Each flight gets roundDutyByRule(exactRatio).
- * - When reconcileTotals is true (e.g. for Auto Allocation or display matching):
- *   Ensures sum of targets equals total required duties for the table.
- *   Any fractional remainder (+1/-1) is reconciled based on the highest decimal remainder.
+ * - CRITICAL: Never automatically increase or decrease any flight's duty to reconcile/match table totals.
+ *   Duties remain strictly as per Ratio. Any adjustments to match total required duties are done manually by user.
  */
 export function calculateBalancedAutoTargets(
   matrix: DutyRatioTable[],
   manpowerInput?: Partial<ManpowerState> | null,
-  reconcileTotals: boolean = true
+  reconcileTotals: boolean = false
 ): Record<FlightName, Record<string, number>> {
   const flights: FlightName[] = ['Mechanics', 'Avionics', 'GCS', 'Admin'];
   const autoTargets: Record<FlightName, Record<string, number>> = {
@@ -165,46 +164,9 @@ export function calculateBalancedAutoTargets(
       autoTargets[fl][t.id] = elig.includes(fl) ? roundDutyByRule(exact) : 0;
     });
 
-    if (reconcileTotals) {
-      const monthTotal = (t.dailyRequirements && t.dailyRequirements.length > 0)
-        ? t.dailyRequirements.reduce((sum, v) => sum + (Number(v) || 0), 0)
-        : (t.totalRequiredMonth || 0);
-
-      const curSum = flights.reduce((s, fl) => s + (autoTargets[fl][t.id] || 0), 0);
-      const diff = monthTotal - curSum;
-
-      if (diff > 0) {
-        // Distribute remaining duties to flights with highest fractional part
-        const sorted = [...elig].sort((f1, f2) => {
-          const exact1 = exactRatios[t.id]?.[f1] ?? 0;
-          const exact2 = exactRatios[t.id]?.[f2] ?? 0;
-          const frac1 = exact1 - Math.floor(exact1);
-          const frac2 = exact2 - Math.floor(exact2);
-          if (Math.abs(frac1 - frac2) > 0.0001) return frac2 - frac1;
-          return exact2 - exact1; // then larger overall share
-        });
-        for (let i = 0; i < diff; i++) {
-          const fl = sorted[i % sorted.length];
-          autoTargets[fl][t.id] = (autoTargets[fl][t.id] || 0) + 1;
-        }
-      } else if (diff < 0) {
-        // Subtract excess duties from flights with lowest fractional part
-        const sorted = [...elig].sort((f1, f2) => {
-          const exact1 = exactRatios[t.id]?.[f1] ?? 0;
-          const exact2 = exactRatios[t.id]?.[f2] ?? 0;
-          const frac1 = exact1 - Math.floor(exact1);
-          const frac2 = exact2 - Math.floor(exact2);
-          if (Math.abs(frac1 - frac2) > 0.0001) return frac1 - frac2;
-          return exact1 - exact2;
-        });
-        for (let i = 0; i < Math.abs(diff); i++) {
-          const fl = sorted[i % sorted.length];
-          if ((autoTargets[fl][t.id] || 0) > 0) {
-            autoTargets[fl][t.id] = autoTargets[fl][t.id] - 1;
-          }
-        }
-      }
-    }
+    // NOTE: Strictly no auto-reconciliation of totals!
+    // As per user rule: duties must strictly remain as per Ratio (roundDutyByRule).
+    // If needed, the user will adjust flight quotas manually.
   });
 
   return autoTargets;
@@ -308,8 +270,9 @@ export function autoAllocateDutyMatrix(
       ? t.dailyRequirements.reduce((sum, v) => sum + (Number(v) || 0), 0)
       : (t.totalRequiredMonth || (t.totalRequiredDaily ? t.totalRequiredDaily * 31 : 0));
 
-    // Maintain the exact distribution:
+    // Maintain the exact distribution strictly:
     // If the user manually changed a flight target, use it. Otherwise use the unreconciled auto target (matching Distribution table).
+    // CRITICAL: Never alter targets to match monthTotal!
     const targets: Record<FlightName, number> = {
       Mechanics: (t.flightTargets && typeof t.flightTargets['Mechanics'] === 'number') ? t.flightTargets['Mechanics'] : (autoTargets['Mechanics']?.[t.id] ?? 0),
       Avionics: (t.flightTargets && typeof t.flightTargets['Avionics'] === 'number') ? t.flightTargets['Avionics'] : (autoTargets['Avionics']?.[t.id] ?? 0),
@@ -317,43 +280,6 @@ export function autoAllocateDutyMatrix(
       Admin: (t.flightTargets && typeof t.flightTargets['Admin'] === 'number') ? t.flightTargets['Admin'] : (autoTargets['Admin']?.[t.id] ?? 0),
     };
 
-    // Ensure sum of targets matches monthTotal exactly so quota is never exceeded or short for daily calendar allocation
-    const elig = t.eligibleFlights && t.eligibleFlights.length > 0 ? t.eligibleFlights : flights;
-    const curSum = flights.reduce((s, fl) => s + (targets[fl] || 0), 0);
-    const diff = monthTotal - curSum;
-    if (diff !== 0) {
-      const exactRatios = calculateExactDutyRatios([t], mp);
-      // NEVER alter flight targets that were manually set by the user!
-      const unadjusted = elig.filter((fl) => !t.flightTargets || typeof t.flightTargets[fl] !== 'number');
-      const pool = unadjusted.length > 0 ? unadjusted : elig;
-      if (diff > 0) {
-        const sorted = [...pool].sort((f1, f2) => {
-          const exact1 = exactRatios[t.id]?.[f1] ?? 0;
-          const exact2 = exactRatios[t.id]?.[f2] ?? 0;
-          const frac1 = exact1 - Math.floor(exact1);
-          const frac2 = exact2 - Math.floor(exact2);
-          if (Math.abs(frac1 - frac2) > 0.0001) return frac2 - frac1;
-          return exact2 - exact1;
-        });
-        for (let i = 0; i < diff; i++) {
-          const fl = sorted[i % sorted.length];
-          targets[fl] = (targets[fl] || 0) + 1;
-        }
-      } else if (diff < 0) {
-        const sorted = [...pool].sort((f1, f2) => {
-          const exact1 = exactRatios[t.id]?.[f1] ?? 0;
-          const exact2 = exactRatios[t.id]?.[f2] ?? 0;
-          const frac1 = exact1 - Math.floor(exact1);
-          const frac2 = exact2 - Math.floor(exact2);
-          if (Math.abs(frac1 - frac2) > 0.0001) return frac1 - frac2;
-          return exact1 - exact2;
-        });
-        for (let i = 0; i < Math.abs(diff); i++) {
-          const fl = sorted[i % sorted.length];
-          if ((targets[fl] || 0) > 0) targets[fl] = targets[fl] - 1;
-        }
-      }
-    }
     tableTargets[t.id] = targets;
 
     return {

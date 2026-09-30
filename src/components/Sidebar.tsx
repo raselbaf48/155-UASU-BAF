@@ -151,7 +151,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Scrollable Navigation Items */}
-        <div className="flex-1 overflow-y-auto px-3 py-4 space-y-6 scrollbar-thin scrollbar-thumb-emerald-800 scrollbar-track-transparent">
+        <div className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
           {/* SECTION 1: OVERVIEW */}
           <div>
             {!collapsed && (

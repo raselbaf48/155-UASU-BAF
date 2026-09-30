@@ -35,10 +35,14 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
   // 1. BASE SECURITY DUTY
   {
     id: 'security_duty',
+    serNo: 1,
     title: 'BASE SECURITY DUTY',
     dutyCode: 'GD',
+    allotmentType: 'ratio',
     totalRequiredMonth: 88,
     totalRequiredDaily: 3,
+    eligibleFlights: ['Mechanics', 'Avionics', 'GCS', 'Admin'],
+    eligibleRanks: ['Cpl', 'LAC', 'AC-1', 'AC-2'],
     data: {
       Mechanics: [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,0,1,1,1,0],
       Avionics:  [0,1,0,1,0,1,0,0,1,0,1,0,0,1,0,1,0,1,0,0,1,0,1,0,1,1,1,1,1,1,0],
@@ -49,10 +53,14 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
   // 2. BASE TASKFORCE DUTY
   {
     id: 'base_tf',
+    serNo: 2,
     title: 'BASE TASKFORCE DUTY',
     dutyCode: 'BTF',
+    allotmentType: 'ratio',
     totalRequiredMonth: 22,
     totalRequiredDaily: 1,
+    eligibleFlights: ['Mechanics', 'Avionics', 'GCS', 'Admin'],
+    eligibleRanks: ['Sgt', 'Cpl', 'LAC', 'AC-1', 'AC-2'],
     data: {
       Mechanics: [0,1,1,1,1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
       Avionics:  [0,0,0,0,0,1,1,0,0,1,1,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0],
@@ -63,10 +71,14 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
   // 3. NAJIRPARA TASKFORCE DUTY
   {
     id: 'nazirpara_tf',
+    serNo: 3,
     title: 'NAJIRPARA TASKFORCE DUTY',
     dutyCode: 'NTF',
+    allotmentType: 'ratio',
     totalRequiredMonth: 40,
     totalRequiredDaily: 1,
+    eligibleFlights: ['Mechanics', 'Avionics', 'GCS', 'Admin'],
+    eligibleRanks: ['Sgt', 'Cpl', 'LAC', 'AC-1', 'AC-2'],
     data: {
       Mechanics: [1,0,0,0,1,0,1,1,0,1,1,0,0,0,1,1,0,0,1,1,0,0,0,1,1,0,1,1,0,0,1],
       Avionics:  [0,0,1,0,0,0,0,0,0,0,0,0,0,1,0,0,1,0,1,0,0,1,1,1,0,0,1,0,0,1,0],
@@ -77,11 +89,15 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
   // 4. IDAC MORNING
   {
     id: 'idac_mor',
+    serNo: 4,
     title: 'IDAC  MORNING',
     dutyCode: 'IDAC',
     shiftLabel: 'Morning',
+    allotmentType: 'ratio',
     totalRequiredMonth: 31,
     totalRequiredDaily: 1,
+    eligibleFlights: ['Mechanics', 'Avionics', 'GCS', 'Admin'],
+    eligibleRanks: ['Sgt', 'Cpl', 'LAC', 'AC-1', 'AC-2'],
     data: {
       Mechanics: [0,0,0,0,1,1,0,0,0,1,1,0,1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,0,1,1,0],
       Avionics:  [0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,1,0,0,0,0,1,0,0,0,0,0,0,0],
@@ -92,11 +108,15 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
   // 5. IDAC AFTERNOON
   {
     id: 'idac_an',
+    serNo: 5,
     title: 'IDAC AFTERNOON ',
     dutyCode: 'IDAC',
     shiftLabel: 'Afternoon',
+    allotmentType: 'ratio',
     totalRequiredMonth: 31,
     totalRequiredDaily: 1,
+    eligibleFlights: ['Mechanics', 'Avionics', 'GCS', 'Admin'],
+    eligibleRanks: ['Sgt', 'Cpl', 'LAC', 'AC-1', 'AC-2'],
     data: {
       Mechanics: [0,1,1,1,0,0,1,1,1,0,0,0,0,1,1,1,1,0,0,1,0,1,0,0,1,1,1,0,0,0,0],
       Avionics:  [1,0,0,0,0,1,0,0,0,1,1,0,1,0,0,0,0,1,0,0,1,0,0,0,0,0,0,1,0,1,1],
@@ -107,11 +127,15 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
   // 6. IDAC NIGHT
   {
     id: 'idac_nt',
+    serNo: 6,
     title: 'IDAC NIGHT',
     dutyCode: 'IDAC',
     shiftLabel: 'Night',
+    allotmentType: 'ratio',
     totalRequiredMonth: 62,
     totalRequiredDaily: 2,
+    eligibleFlights: ['Mechanics', 'Avionics', 'GCS', 'Admin'],
+    eligibleRanks: ['Sgt', 'Cpl', 'LAC', 'AC-1', 'AC-2'],
     data: {
       Mechanics: [1,1,1,1,0,1,0,1,0,1,1,1,1,0,1,0,1,1,1,0,1,1,1,1,0,0,1,1,1,1,1],
       Avionics:  [1,0,0,0,1,0,1,1,1,0,0,1,0,1,1,1,0,0,1,1,0,0,0,1,1,1,0,0,0,0,0],
@@ -122,11 +146,14 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
   // 7. AIRFIELD DUTY
   {
     id: 'airport_duty',
+    serNo: 7,
     title: 'AIRFIELD DUTY',
     dutyCode: 'AIRPORT',
+    allotmentType: 'equal',
     totalRequiredMonth: 93,
     totalRequiredDaily: 3,
     eligibleFlights: ['Mechanics', 'Avionics', 'GCS'],
+    eligibleRanks: ['Sgt', 'Cpl', 'LAC', 'AC-1', 'AC-2'],
     data: {
       Mechanics: [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
       Avionics:  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
@@ -136,17 +163,39 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
   },
   // 8. RECEIPTION DUTY
   {
-    id: 'halishahar_duty',
-    title: 'Receiption Duty',
+    id: 'reception_duty',
+    serNo: 8,
+    title: 'RECEIPTION DUTY',
     dutyCode: 'RECEPTION',
+    allotmentType: 'ratio',
     totalRequiredMonth: 31,
     totalRequiredDaily: 1,
     eligibleFlights: ['Mechanics', 'Avionics', 'GCS', 'Admin'],
+    eligibleRanks: ['Sgt', 'Cpl', 'LAC', 'AC-1', 'AC-2'],
     data: {
       Mechanics: [1,0,1,1,0,0,1,0,1,0,0,0,0,1,0,0,1,0,0,0,1,1,0,0,1,1,0,0,0,0,0],
       Avionics:  [0,1,0,0,0,0,0,0,0,0,1,0,1,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,1,1],
       GCS:       [0,0,0,0,1,1,0,1,0,0,0,1,0,0,1,0,0,1,1,0,0,0,1,1,0,0,1,0,1,0,0],
       Admin:     [0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0],
+    },
+  },
+  // 9. HALISHAHAR TASKFORCE DUTY
+  {
+    id: 'halishahar_tf_duty',
+    serNo: 9,
+    title: 'HALISHAHAR TASKFORCE DUTY',
+    dutyCode: 'HALISHAHAR' as DutyCategoryCode,
+    allotmentType: 'equal',
+    totalRequiredMonth: 7,
+    totalRequiredDaily: 1,
+    eligibleFlights: ['Mechanics', 'Avionics', 'GCS', 'Admin'],
+    eligibleRanks: ['Sgt', 'Cpl', 'LAC', 'AC-1', 'AC-2'],
+    dailyRequirements: [1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    data: {
+      Mechanics: [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+      Avionics:  [0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+      GCS:       [0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+      Admin:     [0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
     },
   },
 ];
@@ -242,13 +291,33 @@ export function getStoredDutyMatrix(): DutyRatioTable[] {
           finalMatrix = [...finalMatrix, ...missing];
         }
 
-        // One-time cleanup for old auto-allocated flightTargets
-        if (typeof window !== 'undefined' && !localStorage.getItem('baf_cleared_auto_flight_targets_v3')) {
+        // One-time cleanup for old auto-allocated flightTargets so exact ratio (e.g. 27 instead of auto-bumped 28) takes effect
+        if (typeof window !== 'undefined' && !localStorage.getItem('baf_cleared_auto_flight_targets_v4')) {
           finalMatrix.forEach(t => {
             delete t.flightTargets;
           });
-          localStorage.setItem('baf_cleared_auto_flight_targets_v3', 'true');
+          localStorage.setItem('baf_cleared_auto_flight_targets_v4', 'true');
         }
+
+        // Cross-check metadata for any disabled duties to ensure consistency
+        try {
+          const metaRaw = localStorage.getItem('baf_duty_matrix_metadata');
+          if (metaRaw) {
+            const parsedMeta = JSON.parse(metaRaw);
+            if (Array.isArray(parsedMeta)) {
+              parsedMeta.forEach((m: any) => {
+                const isDis = m.isDisabled === true || String(m.isDisabled) === 'true' ||
+                  m.is_disabled === true || String(m.is_disabled) === 'true' ||
+                  String(m.status || '').toLowerCase() === 'disable' ||
+                  String(m.status || '').toLowerCase() === 'disabled';
+                if (isDis) {
+                  const match = finalMatrix.find(t => t.id === m.id || t.title.toLowerCase().trim() === String(m.title || '').toLowerCase().trim());
+                  if (match) match.isDisabled = true;
+                }
+              });
+            }
+          }
+        } catch (e) {}
 
         // One-time fix for old corrupted 33/6 security_duty distribution in localStorage
         const secTable = finalMatrix.find(t => t.id === 'security_duty');
@@ -297,10 +366,15 @@ export function getStoredDutyMatrix(): DutyRatioTable[] {
         });
 
         finalMatrix.sort((a, b) => {
-          if (a.serNo !== undefined && b.serNo !== undefined) return a.serNo - b.serNo;
+          if (a.serNo !== undefined && b.serNo !== undefined) return Number(a.serNo) - Number(b.serNo);
           if (a.serNo !== undefined) return -1;
           if (b.serNo !== undefined) return 1;
           return 0;
+        });
+
+        // Ensure every duty has a mandatory contiguous Ser No: 1, 2, ..., N (kono ser faka thakbe na)
+        finalMatrix.forEach((d, idx) => {
+          d.serNo = idx + 1;
         });
 
         return finalMatrix;
@@ -335,10 +409,14 @@ export function getStoredDutyMatrix(): DutyRatioTable[] {
   });
 
   baseMatrix.sort((a, b) => {
-    if (a.serNo !== undefined && b.serNo !== undefined) return a.serNo - b.serNo;
+    if (a.serNo !== undefined && b.serNo !== undefined) return Number(a.serNo) - Number(b.serNo);
     if (a.serNo !== undefined) return -1;
     if (b.serNo !== undefined) return 1;
     return 0;
+  });
+
+  baseMatrix.forEach((d, idx) => {
+    d.serNo = idx + 1;
   });
 
   return baseMatrix;
@@ -347,8 +425,9 @@ export function getStoredDutyMatrix(): DutyRatioTable[] {
 export function saveDutyMatrix(matrix: DutyRatioTable[]) {
   try {
     // 1. Sanitize matrix ensuring totalRequiredMonth always matches daily requirements sum
-    const sanitizedMatrix = matrix.map(m => {
+    const sanitizedMatrix = matrix.map((m, idx) => {
       const copy = { ...m };
+      copy.serNo = copy.serNo !== undefined && copy.serNo !== null ? Number(copy.serNo) : (idx + 1);
       if (copy.dailyRequirements && Array.isArray(copy.dailyRequirements) && copy.dailyRequirements.length > 0) {
         copy.totalRequiredMonth = copy.dailyRequirements.reduce((a, b) => a + (Number(b) || 0), 0);
       } else if (!copy.totalRequiredMonth && copy.totalRequiredDaily) {

@@ -572,7 +572,6 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
 
   const calculatedMatrixDistributions = useMemo(() => {
     if (!matrix) return {};
-    const balanced = calculateBalancedAutoTargets(matrix, currentManpower, true);
     const exactRatios = calculateExactDutyRatios(matrix, currentManpower);
     const result: Record<string, Record<string, { autoVal: number, exactVal: number }>> = {};
     
@@ -580,8 +579,8 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
       result[t.id] = {};
       const flights = ['Mechanics', 'Avionics', 'GCS', 'Admin'];
       flights.forEach(fl => {
-        const autoVal = balanced[fl as FlightName]?.[t.id] ?? 0;
-        const exactVal = exactRatios[t.id]?.[fl as FlightName] ?? autoVal;
+        const exactVal = exactRatios[t.id]?.[fl as FlightName] ?? 0;
+        const autoVal = roundDutyByRule(exactVal);
         result[t.id][fl] = { autoVal, exactVal };
       });
     });
@@ -624,6 +623,10 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                 </button>
                 <button
                   onClick={() => {
+                    const currentMaxSer = (matrix && matrix.length > 0)
+                      ? Math.max(...matrix.map(t => Number(t.serNo) || 0), 0)
+                      : 0;
+                    setNewDutySerNo(currentMaxSer + 1);
                     setNewDutyName('');
                     setNewDutyFlights(['Mechanics', 'Avionics', 'GCS', 'Admin']);
                     setNewDutyRanks(['MWO', 'SWO', 'WO', 'Sgt', 'Cpl', 'LAC', 'AC-1', 'AC-2']);
@@ -1620,7 +1623,12 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                     removeCustomDuty(dutyToDelete.dutyCode);
                   }
                   const newMatrix = matrix.filter((_, i) => i !== deleteConfirmIdx);
+                  newMatrix.sort((a, b) => (Number(a.serNo) || 0) - (Number(b.serNo) || 0));
+                  newMatrix.forEach((d, idx) => {
+                    d.serNo = idx + 1;
+                  });
                   onMatrixChange(newMatrix);
+                  pushDutyListToCloud(newMatrix).catch(console.warn);
                 }
                 setDeleteConfirmIdx(null);
               }} className="px-4 py-2 text-sm font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg shadow-sm">Delete</button>
@@ -1642,14 +1650,24 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
             <div className="p-4 overflow-y-auto space-y-5">
               
               <div>
-                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1.5">Ser No (Optional)</label>
-                <input
-                  type="number"
+                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1.5 flex items-center justify-between">
+                  <span>Ser No <span className="text-red-500 font-extrabold">* (Mandatory)</span></span>
+                  <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">ডিফল্ট: সর্বশেষ নম্বর ({(matrix ? matrix.length : 0) + 1})</span>
+                </label>
+                <select
                   value={newDutySerNo}
-                  onChange={e => setNewDutySerNo(e.target.value === '' ? '' : Number(e.target.value))}
-                  className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-slate-900 dark:text-slate-100"
-                  placeholder="e.g. 1"
-                />
+                  onChange={e => setNewDutySerNo(Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-slate-900 dark:text-slate-100 font-bold cursor-pointer"
+                >
+                  {Array.from({ length: (matrix ? matrix.length : 0) + 1 }, (_, i) => i + 1).map(num => (
+                    <option key={num} value={num}>
+                      {num} {num === ((matrix ? matrix.length : 0) + 1) ? '(Last / Default)' : `(Position ${num})`}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                  ডিফল্টভাবে তালিকার সর্বশেষ নম্বর রাখা হয়েছে। অন্য কোনো ক্রমিক দিলে বাকি ডিউটিগুলো ক্রমানুসারে নিচের দিকে শিফট হবে। কোনো ক্রমিক ফাঁকা থাকবে না।
+                </p>
               </div>
 
               <div>
@@ -1815,19 +1833,15 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                   
                   // Add to matrix
                   if (matrix && onMatrixChange) {
-                    const newSerNo = newDutySerNo === '' ? undefined : Number(newDutySerNo);
-                    if (newSerNo !== undefined) {
-                      const isDuplicate = matrix.some((t) => t.serNo === newSerNo);
-                      if (isDuplicate) {
-                        alert('This Ser No is already in use. Please choose a different one.');
-                        return;
-                      }
-                    }
-                    const newMatrix = [...matrix];
-                    newMatrix.push({
+                    const sorted = [...matrix].sort((a, b) => (Number(a.serNo) || 0) - (Number(b.serNo) || 0));
+                    const nextSer = sorted.length + 1;
+                    const reqSer = (newDutySerNo === '' || isNaN(Number(newDutySerNo))) ? nextSer : Math.max(1, Math.min(nextSer, Number(newDutySerNo)));
+                    const insertIdx = reqSer - 1;
+
+                    const newDutyEntry: DutyRatioTable = {
                       id: newCode,
                       title: newDutyName,
-                      serNo: newSerNo,
+                      serNo: reqSer,
                       dutyCode: newCode as DutyCategoryCode,
                       totalRequiredMonth: 0,
                       totalRequiredDaily: 0,
@@ -1840,15 +1854,16 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                         GCS: Array(31).fill(0),
                         Admin: Array(31).fill(0),
                       }
+                    };
+
+                    sorted.splice(insertIdx, 0, newDutyEntry);
+                    // Re-assign contiguous 1..N so kono ser faka thakbe na
+                    sorted.forEach((d, idx) => {
+                      d.serNo = idx + 1;
                     });
-                    newMatrix.sort((a, b) => {
-                      if (a.serNo !== undefined && b.serNo !== undefined) return a.serNo - b.serNo;
-                      if (a.serNo !== undefined) return -1;
-                      if (b.serNo !== undefined) return 1;
-                      return 0;
-                    });
-                    onMatrixChange(newMatrix);
-                    pushDutyListToCloud(newMatrix).catch(console.warn);
+
+                    onMatrixChange(sorted);
+                    pushDutyListToCloud(sorted).catch(console.warn);
                   }
                   
                   setIsAddingNewDuty(false);
@@ -1876,14 +1891,24 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
             <div className="p-4 overflow-y-auto space-y-5">
               
               <div>
-                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1.5">Ser No (Optional)</label>
-                <input
-                  type="number"
+                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1.5 flex items-center justify-between">
+                  <span>Ser No <span className="text-red-500 font-extrabold">* (Mandatory)</span></span>
+                  <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">Total Duties: {matrix ? matrix.length : 1}</span>
+                </label>
+                <select
                   value={editDutySerNo}
-                  onChange={e => setEditDutySerNo(e.target.value === '' ? '' : Number(e.target.value))}
-                  className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-slate-900 dark:text-slate-100"
-                  placeholder="e.g. 1"
-                />
+                  onChange={e => setEditDutySerNo(Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-slate-900 dark:text-slate-100 font-bold cursor-pointer"
+                >
+                  {matrix && matrix.map((t, i) => (
+                    <option key={i + 1} value={i + 1}>
+                      {i + 1} {i + 1 === (matrix[editingDutyIdx]?.serNo ?? (editingDutyIdx + 1)) ? '(Current Position)' : `(Move to ${i + 1})`}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                  যেমন: ১ নম্বর পরিবর্তন করে ৩ দিলে ২ এর ডিউটি ১ এ আসবে এবং ৩ এর ডিউটি ২ এ যাবে, বাকি ডিউটি অপরিবর্তিত থাকবে। কোনো ক্রমিক ফাঁকা থাকবে না।
+                </p>
               </div>
 
               <div>
@@ -2040,43 +2065,50 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                 <button 
                   onClick={() => {
                     if (!editDutyName.trim()) return;
+                    if (editDutySerNo === '' || isNaN(Number(editDutySerNo))) {
+                      alert('Ser No is mandatory. Please choose a valid serial number.');
+                      return;
+                    }
                     if (matrix && editingDutyIdx !== null && onMatrixChange) {
-                      const newSerNo = editDutySerNo === '' ? undefined : Number(editDutySerNo);
-                      if (newSerNo !== undefined) {
-                        const isDuplicate = matrix.some((t, i) => i !== editingDutyIdx && t.serNo === newSerNo);
-                        if (isDuplicate) {
-                          alert('This Ser No is already in use. Please choose a different one.');
-                          return;
-                        }
+                      const currentTable = matrix[editingDutyIdx];
+                      const targetSerNo = Number(editDutySerNo);
+
+                      // Sort current list by serNo to ensure clean 1..N order
+                      const sorted = [...matrix].sort((a, b) => (Number(a.serNo) || 0) - (Number(b.serNo) || 0));
+                      const fromIndex = sorted.findIndex(t => t.id === currentTable.id);
+                      const toIndex = Math.max(0, Math.min(sorted.length - 1, targetSerNo - 1));
+
+                      if (fromIndex !== -1 && fromIndex !== toIndex) {
+                        const [moved] = sorted.splice(fromIndex, 1);
+                        sorted.splice(toIndex, 0, moved);
                       }
-                      const newMatrix = [...matrix];
-                      const currentTable = newMatrix[editingDutyIdx];
 
                       const finalAllotmentType: AllotmentType = editDutyFlights.length === 1 ? 'equal' : editDutyAllotmentType;
                       const allotmentTypeChanged = currentTable.allotmentType !== finalAllotmentType;
-                      const updatedTable = {
-                        ...currentTable,
-                        title: editDutyName,
-                        serNo: newSerNo,
-                        eligibleFlights: editDutyFlights,
-                        eligibleRanks: editDutyRanks,
-                        allotmentType: finalAllotmentType,
-                        flightTargets: allotmentTypeChanged ? undefined : currentTable.flightTargets,
-                      };
 
-                      newMatrix[editingDutyIdx] = updatedTable;
-                      newMatrix.sort((a, b) => {
-                        if (a.serNo !== undefined && b.serNo !== undefined) return a.serNo - b.serNo;
-                        if (a.serNo !== undefined) return -1;
-                        if (b.serNo !== undefined) return 1;
-                        return 0;
+                      // Update the edited duty's details
+                      const targetItem = sorted.find(t => t.id === currentTable.id);
+                      if (targetItem) {
+                        targetItem.title = editDutyName;
+                        targetItem.eligibleFlights = editDutyFlights;
+                        targetItem.eligibleRanks = editDutyRanks;
+                        targetItem.allotmentType = finalAllotmentType;
+                        if (allotmentTypeChanged) {
+                          delete targetItem.flightTargets;
+                        }
+                      }
+
+                      // Re-assign contiguous serNo: 1, 2, ..., N (kono ser faka thakbe na)
+                      sorted.forEach((d, idx) => {
+                        d.serNo = idx + 1;
                       });
-                      onMatrixChange(newMatrix);
-                      pushDutyListToCloud(newMatrix).catch(console.warn);
+
+                      onMatrixChange(sorted);
+                      pushDutyListToCloud(sorted).catch(console.warn);
                     }
                     setEditingDutyIdx(null);
                   }}
-                  disabled={!editDutyName.trim()}
+                  disabled={!editDutyName.trim() || editDutySerNo === ''}
                   className="px-4 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md rounded-xl transition-colors"
                 >
                   Save Changes

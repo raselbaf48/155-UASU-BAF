@@ -1,6 +1,7 @@
 import { supabase, isSupabaseConfigured } from '../supabase';
 import { DutyRatioTable, getStoredDutyMatrix, saveDutyMatrix, INITIAL_OFFICIAL_DUTY_MATRIX } from '../data/officialDutyRatioMatrix';
 import { FlightName, Rank } from '../types';
+import { isFixedEqualDuty } from './dutyDistribution';
 
 export interface DutyCloudRow {
   id?: number | string;
@@ -169,6 +170,12 @@ export function formatTableToCloudRow(table: DutyRatioTable, index: number): Dut
 
   const statusStr = table.isDisabled ? 'Disable' : 'Active';
 
+  const allotmentDisplay = (table.eligibleFlights && table.eligibleFlights.length === 1)
+    ? 'One From Each Flt (Must)'
+    : (table.allotmentType === 'equal' || isFixedEqualDuty(table))
+    ? 'One From Each Flt'
+    : 'Ratio Based';
+
   const row: DutyCloudRow = {
     ser_no: table.serNo !== undefined && table.serNo !== null ? Number(table.serNo) : (index + 1),
     duty_name: table.title || `Duty ${index + 1}`,
@@ -176,6 +183,9 @@ export function formatTableToCloudRow(table: DutyRatioTable, index: number): Dut
     eligible_rank: rankStr,
     total: computedTotal,
     Status: statusStr,
+    is_disabled: !!table.isDisabled,
+    'Allotment Type': allotmentDisplay,
+    allotment_type: allotmentDisplay,
   };
 
   for (let i = 1; i <= 31; i++) {
@@ -243,17 +253,22 @@ export async function pushDutyListToCloud(matrixInput?: DutyRatioTable[]): Promi
       return { success: false, message: selectErr.message };
     }
 
+    const normTitle = (t?: string): string => {
+      if (!t) return '';
+      return t.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+    };
+
     const existingRows = existing || [];
 
-    // Deduplicate existing rows if duplicates exist in database (keep only first row per ser_no)
-    const seenSerNo = new Map<number, any>();
+    // Deduplicate existing rows if duplicates exist in database (keep first row per duty name)
+    const seenTitles = new Map<string, any>();
     const duplicateIdsToDelete: (number | string)[] = [];
     existingRows.forEach(er => {
-      const sNo = Number(er.ser_no);
-      if (seenSerNo.has(sNo)) {
+      const key = normTitle(er.duty_name);
+      if (seenTitles.has(key)) {
         duplicateIdsToDelete.push(er.id);
       } else {
-        seenSerNo.set(sNo, er);
+        seenTitles.set(key, er);
       }
     });
 
@@ -262,30 +277,33 @@ export async function pushDutyListToCloud(matrixInput?: DutyRatioTable[]): Promi
     }
 
     // 2. In-place Update or Insert:
-    // If a row for this duty already exists -> UPDATE in place (NO NEW ROW IS ADDED)
-    // Only if a duty does NOT exist in DB -> INSERT a new row
+    // Match by duty name identity so changing ser_no correctly updates ser_no on that duty
     for (const row of rows) {
-      const sNo = Number(row.ser_no);
-      const existingMatch = seenSerNo.get(sNo) || 
-        existingRows.find(er => er.duty_name?.trim().toLowerCase() === row.duty_name?.trim().toLowerCase());
+      const key = normTitle(row.duty_name);
+      const existingMatch = seenTitles.get(key) || 
+        existingRows.find(er => normTitle(er.duty_name) === key);
 
       const dayFields: Record<string, number> = {};
       for (let i = 1; i <= 31; i++) {
         dayFields[`day_${i}`] = row[`day_${i}`] ?? 0;
       }
 
+      const updatePayload: any = {
+        ser_no: row.ser_no,
+        duty_name: row.duty_name,
+        eligible_flt: row.eligible_flt,
+        eligible_rank: row.eligible_rank,
+        total: row.total,
+        Status: row.Status || 'Active',
+        'Allotment Type': row['Allotment Type'],
+        ...dayFields,
+      };
+
       if (existingMatch) {
         // UPDATE: Replaces the previous values with the new data in place
         const { error: updateErr } = await supabase
           .from(TABLE_NAME)
-          .update({
-            duty_name: row.duty_name,
-            eligible_flt: row.eligible_flt,
-            eligible_rank: row.eligible_rank,
-            total: row.total,
-            Status: row.Status || 'Active',
-            ...dayFields,
-          })
+          .update(updatePayload)
           .eq('id', existingMatch.id);
 
         if (updateErr) {
@@ -304,8 +322,8 @@ export async function pushDutyListToCloud(matrixInput?: DutyRatioTable[]): Promi
     }
 
     // 3. If a duty was removed from the app, delete only that duty's row
-    const currentSerNos = new Set(rows.map(r => Number(r.ser_no)));
-    const dutiesToDelete = existingRows.filter(er => !duplicateIdsToDelete.includes(er.id) && !currentSerNos.has(Number(er.ser_no)));
+    const currentTitles = new Set(rows.map(r => normTitle(r.duty_name)));
+    const dutiesToDelete = existingRows.filter(er => !duplicateIdsToDelete.includes(er.id) && !currentTitles.has(normTitle(er.duty_name)));
     if (dutiesToDelete.length > 0) {
       const idsToDelete = dutiesToDelete.map(d => d.id);
       await supabase.from(TABLE_NAME).delete().in('id', idsToDelete);
@@ -399,18 +417,43 @@ export async function pullDutyListFromCloud(): Promise<DutySyncResult> {
         dailyReqs.push(Number(row[`day_${day}`]) || 0);
       }
 
-      // Check if this duty exists in currentMatrix by title or serNo or id
+      // Check if this duty exists in currentMatrix by title first so serNo changes update the right duty
+      const normCloudTitle = title.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
       let existingIdx = updatedMatrix.findIndex(
-        t => t.title.toLowerCase().trim() === title.toLowerCase().trim() ||
-             (t.serNo !== undefined && t.serNo === serNo)
+        t => (t.title || '').toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim() === normCloudTitle
       );
+      if (existingIdx === -1) {
+        existingIdx = updatedMatrix.findIndex(t => t.serNo !== undefined && t.serNo === serNo);
+      }
 
-      // Check status from cloud
+      // Check status from cloud (supports Status string, is_disabled boolean, or fallback to prev)
       const statusRaw = String(row.Status || row.status || '').trim().toLowerCase();
-      const isDisabled = statusRaw === 'disable' || statusRaw === 'disabled';
+      const isDisabled = (row.is_disabled !== undefined)
+        ? (row.is_disabled === true || String(row.is_disabled) === 'true')
+        : (row.isDisabled !== undefined)
+        ? (row.isDisabled === true || String(row.isDisabled) === 'true')
+        : (statusRaw === 'disable' || statusRaw === 'disabled' || statusRaw === 'inactive')
+        ? true
+        : (statusRaw === 'active' || statusRaw === 'enable' || statusRaw === 'enabled')
+        ? false
+        : (existingIdx !== -1 ? !!updatedMatrix[existingIdx].isDisabled : false);
 
       const eligFlights = parseEligibleFlights(row.eligible_flt);
       const isSingleFlt = eligFlights.length === 1;
+
+      const allotmentRaw = String(row['Allotment Type'] || row.allotment_type || row.allotmentType || '').trim().toLowerCase();
+      let finalAllotment: 'equal' | 'ratio' = 'ratio';
+      if (isSingleFlt) {
+        finalAllotment = 'equal';
+      } else if (allotmentRaw.includes('equal') || allotmentRaw.includes('one from each')) {
+        finalAllotment = 'equal';
+      } else if (allotmentRaw.includes('ratio')) {
+        finalAllotment = 'ratio';
+      } else if (existingIdx !== -1) {
+        finalAllotment = updatedMatrix[existingIdx].allotmentType || (isFixedEqualDuty(updatedMatrix[existingIdx]) ? 'equal' : 'ratio');
+      } else {
+        finalAllotment = (title.includes('AIRFIELD') || title.includes('AIRPORT')) ? 'equal' : 'ratio';
+      }
 
       if (existingIdx !== -1) {
         // Update existing table
@@ -423,7 +466,7 @@ export async function pullDutyListFromCloud(): Promise<DutySyncResult> {
           dailyRequirements: dailyReqs.some(r => r > 0) ? dailyReqs : prev.dailyRequirements,
           eligibleFlights: eligFlights,
           eligibleRanks: parseEligibleRanks(row.eligible_rank),
-          allotmentType: isSingleFlt ? 'equal' : (prev.allotmentType || 'ratio'),
+          allotmentType: finalAllotment,
           isDisabled,
         };
       } else {
@@ -438,7 +481,7 @@ export async function pullDutyListFromCloud(): Promise<DutySyncResult> {
           dailyRequirements: dailyReqs,
           eligibleFlights: eligFlights,
           eligibleRanks: parseEligibleRanks(row.eligible_rank),
-          allotmentType: isSingleFlt ? 'equal' : 'ratio',
+          allotmentType: finalAllotment,
           isDisabled,
           data: {
             Mechanics: new Array(31).fill(0),
@@ -448,6 +491,12 @@ export async function pullDutyListFromCloud(): Promise<DutySyncResult> {
           },
         });
       }
+    });
+
+    // Ensure duties are sorted by serNo and contiguous 1..N
+    updatedMatrix.sort((a, b) => (Number(a.serNo) || 0) - (Number(b.serNo) || 0));
+    updatedMatrix.forEach((d, idx) => {
+      d.serNo = idx + 1;
     });
 
     saveDutyMatrix(updatedMatrix);
