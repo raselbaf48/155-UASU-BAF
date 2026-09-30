@@ -40,10 +40,10 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
     totalRequiredMonth: 88,
     totalRequiredDaily: 3,
     data: {
-      Mechanics: [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1,2,1],
-      Avionics:  [1,1,1,0,1,1,0,1,1,0,0,1,0,1,1,0,0,1,0,1,1,0,1,0,1,0,1,0,0,0,0],
-      GCS:       [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1,2],
-      Admin:     [0,0,0,1,0,0,1,0,0,0,0,0,1,0,0,1,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0],
+      Mechanics: [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,0,1,1,1,0],
+      Avionics:  [0,1,0,1,0,1,0,0,1,0,1,0,0,1,0,1,0,1,0,0,1,0,1,0,1,1,1,1,1,1,0],
+      GCS:       [1,1,1,1,1,1,1,1,1,2,1,1,1,0,1,1,1,0,1,1,1,1,1,1,1,1,1,0,0,0,1],
+      Admin:     [1,0,1,0,1,0,0,1,0,0,0,1,0,1,1,0,1,1,0,1,0,1,0,1,0,0,1,1,1,1,1],
     },
   },
   // 2. BASE TASKFORCE DUTY
@@ -250,15 +250,12 @@ export function getStoredDutyMatrix(): DutyRatioTable[] {
           localStorage.setItem('baf_cleared_auto_flight_targets_v3', 'true');
         }
 
-        // Cleanse old corrupted long consecutive streaks in security_duty (e.g. 12+ continuous days without gaps)
+        // One-time fix for old corrupted 33/6 security_duty distribution in localStorage
         const secTable = finalMatrix.find(t => t.id === 'security_duty');
-        if (secTable && secTable.data?.Mechanics) {
-          let mechStreak = 0, maxMechStreak = 0;
-          secTable.data.Mechanics.forEach((x: number) => {
-            if (x >= 1) { mechStreak++; maxMechStreak = Math.max(maxMechStreak, mechStreak); }
-            else { mechStreak = 0; }
-          });
-          if (maxMechStreak >= 12) {
+        if (secTable && secTable.data?.Mechanics && secTable.data?.Admin) {
+          const mechSum = secTable.data.Mechanics.reduce((a: number, b: number) => a + b, 0);
+          const adminSum = secTable.data.Admin.reduce((a: number, b: number) => a + b, 0);
+          if (mechSum === 33 && adminSum === 6) {
             const defSec = INITIAL_OFFICIAL_DUTY_MATRIX.find(t => t.id === 'security_duty');
             if (defSec) {
               secTable.data = {

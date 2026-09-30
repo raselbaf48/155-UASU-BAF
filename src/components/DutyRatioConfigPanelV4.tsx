@@ -1,6 +1,6 @@
 import { DUTY_TYPE_MAP } from '../data/dutyTypes';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { AlertCircle, Settings, Info, Users, ChevronDown, ChevronUp, Calendar, X, Save, Power, PowerOff, Trash, Filter, Plus, Minus, Printer, Edit2, Shield, Cloud, RefreshCw, CheckCircle2, Copy, Check, UploadCloud, RotateCcw } from 'lucide-react';
+import { AlertCircle, Settings, Info, Users, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Calendar, X, Save, Power, PowerOff, Trash, Filter, Plus, Minus, Printer, Edit2, Shield, Cloud, RefreshCw, CheckCircle2, Copy, Check, UploadCloud, RotateCcw } from 'lucide-react';
 import { localDb } from '../services/localDatabase';
 import { Airman, Rank, FlightName, DutyCategoryCode } from '../types';
 import { addCustomDuty, CustomDutyConfig, removeCustomDuty } from '../utils/customDuties';
@@ -572,7 +572,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
 
   const calculatedMatrixDistributions = useMemo(() => {
     if (!matrix) return {};
-    const balanced = calculateBalancedAutoTargets(matrix, currentManpower, false);
+    const balanced = calculateBalancedAutoTargets(matrix, currentManpower, true);
     const exactRatios = calculateExactDutyRatios(matrix, currentManpower);
     const result: Record<string, Record<string, { autoVal: number, exactVal: number }>> = {};
     
@@ -1305,12 +1305,20 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                             ) : isActive ? (
                               <div className="w-full h-full min-h-[30px] flex items-center justify-center px-1 py-0.5 gap-1 select-none" onClick={(e) => e.stopPropagation()}>
                                 {showExactRatio && (
-                                  <span className="text-slate-500 dark:text-slate-400 text-[10px] whitespace-nowrap">
+                                  <span className="text-slate-500 dark:text-slate-400 text-[10px] whitespace-nowrap mr-0.5">
                                     {exactVal.toFixed(2)} ➤
                                   </span>
                                 )}
+                                <button
+                                  type="button"
+                                  onClick={() => handleTargetChange(t.id, fl, Math.max(0, currentVal - 1))}
+                                  className="w-4 h-5 flex items-center justify-center bg-indigo-50 hover:bg-indigo-200 active:bg-indigo-300 dark:bg-indigo-950/60 dark:hover:bg-indigo-800 text-indigo-700 dark:text-indigo-300 rounded-[3px] border border-indigo-200 dark:border-indigo-800 transition-colors cursor-pointer shrink-0"
+                                  title="কমাবে / Decrease (-1)"
+                                >
+                                  <ChevronLeft className="w-3 h-3 stroke-[2.5]" />
+                                </button>
                                 <div
-                                  className={`min-w-[24px] px-1 py-0.5 text-center font-bold font-mono text-xs rounded border select-none ${
+                                  className={`min-w-[22px] px-1 py-0.5 text-center font-bold font-mono text-xs rounded border select-none ${
                                     isOverridden
                                       ? 'bg-indigo-100 text-indigo-900 border-indigo-300 dark:bg-indigo-900/60 dark:text-indigo-200 dark:border-indigo-600 font-black ring-1 ring-indigo-400/50'
                                       : 'bg-white text-slate-900 border-slate-300 dark:bg-slate-800 dark:text-slate-100 dark:border-slate-600'
@@ -1318,24 +1326,14 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                                 >
                                   {currentVal}
                                 </div>
-                                <div className="flex flex-col gap-[1px]" onClick={(e) => e.stopPropagation()}>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleTargetChange(t.id, fl, currentVal + 1)}
-                                    className="w-3.5 h-3 flex items-center justify-center bg-indigo-50 hover:bg-indigo-200 active:bg-indigo-300 dark:bg-indigo-950/60 dark:hover:bg-indigo-800 text-indigo-700 dark:text-indigo-300 rounded-[2px] border border-indigo-200 dark:border-indigo-800 transition-colors cursor-pointer"
-                                    title="Increase (+1)"
-                                  >
-                                    <ChevronUp className="w-2.5 h-2.5 stroke-[3]" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleTargetChange(t.id, fl, Math.max(0, currentVal - 1))}
-                                    className="w-3.5 h-3 flex items-center justify-center bg-indigo-50 hover:bg-indigo-200 active:bg-indigo-300 dark:bg-indigo-950/60 dark:hover:bg-indigo-800 text-indigo-700 dark:text-indigo-300 rounded-[2px] border border-indigo-200 dark:border-indigo-800 transition-colors cursor-pointer"
-                                    title="Decrease (-1)"
-                                  >
-                                    <ChevronDown className="w-2.5 h-2.5 stroke-[3]" />
-                                  </button>
-                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleTargetChange(t.id, fl, currentVal + 1)}
+                                  className="w-4 h-5 flex items-center justify-center bg-indigo-50 hover:bg-indigo-200 active:bg-indigo-300 dark:bg-indigo-950/60 dark:hover:bg-indigo-800 text-indigo-700 dark:text-indigo-300 rounded-[3px] border border-indigo-200 dark:border-indigo-800 transition-colors cursor-pointer shrink-0"
+                                  title="বাড়াবে / Increase (+1)"
+                                >
+                                  <ChevronRight className="w-3 h-3 stroke-[2.5]" />
+                                </button>
                               </div>
                             ) : showExactRatio ? (
                               <div className="w-full h-full min-h-[30px] flex items-center justify-center text-xs whitespace-nowrap px-1">
@@ -1490,7 +1488,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                   );
                 }
                 return activeDuties.map((t, idx) => {
-                  const hasManualTargets = !!t.flightTargets && Object.values(t.flightTargets).some((v) => (v ?? 0) > 0);
+                  const hasManualTargets = !!t.flightTargets && Object.values(t.flightTargets).some((v) => (Number(v) || 0) > 0);
                   const isRecentlyReset = recentlyResetDutyId === t.id;
                   const monthTotal = (t.dailyRequirements && t.dailyRequirements.length > 0)
                     ? t.dailyRequirements.reduce((sum, v) => sum + (Number(v) || 0), 0)

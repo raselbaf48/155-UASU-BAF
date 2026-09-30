@@ -291,7 +291,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
       currentManpower = JSON.parse(savedManpower);
     } catch (e) {}
   }
-  const autoTargets = calculateBalancedAutoTargets(matrix, currentManpower);
+  const autoTargets = calculateBalancedAutoTargets(matrix, currentManpower, true);
 
   const getFlightTarget = (table: DutyRatioTable, fl: FlightName): number => {
     if (table.isDisabled) return 0;

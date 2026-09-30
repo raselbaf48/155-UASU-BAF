@@ -1,6 +1,6 @@
 import { DUTY_TYPE_MAP } from '../data/dutyTypes';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { AlertCircle, Settings, Info, Users, ChevronDown, ChevronUp, Calendar, X, Save, Power, PowerOff, Trash, Filter, Plus, Minus, Printer, Edit2, RotateCcw } from 'lucide-react';
+import { AlertCircle, Settings, Info, Users, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Calendar, X, Save, Power, PowerOff, Trash, Filter, Plus, Minus, Printer, Edit2, RotateCcw } from 'lucide-react';
 import { localDb } from '../services/localDatabase';
 import { Airman, Rank, FlightName, DutyCategoryCode } from '../types';
 import { addCustomDuty, CustomDutyConfig, removeCustomDuty } from '../utils/customDuties';
@@ -1082,6 +1082,14 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                                     {exactVal.toFixed(2)} ➤
                                   </span>
                                 )}
+                                <button
+                                  type="button"
+                                  onClick={() => handleTargetChange(t.id, fl, Math.max(0, currentVal - 1))}
+                                  className="p-1 hover:bg-indigo-200 dark:hover:bg-indigo-800 rounded text-slate-700 dark:text-slate-200 transition-colors cursor-pointer shrink-0"
+                                  title="কমাবে / Decrease (-1)"
+                                >
+                                  <ChevronLeft className="w-3.5 h-3.5 stroke-[2.5]" />
+                                </button>
                                 <input
                                   type="number"
                                   autoFocus
@@ -1095,24 +1103,14 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                                   }}
                                   onClick={(e) => e.stopPropagation()}
                                 />
-                                <div className="flex flex-col ml-0.5 -my-0.5" onClick={(e) => e.stopPropagation()}>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleTargetChange(t.id, fl, currentVal + 1)}
-                                    className="p-0.5 hover:bg-indigo-200 dark:hover:bg-indigo-800 rounded text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
-                                    title="Increase (+1)"
-                                  >
-                                    <ChevronUp className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleTargetChange(t.id, fl, Math.max(0, currentVal - 1))}
-                                    className="p-0.5 hover:bg-indigo-200 dark:hover:bg-indigo-800 rounded text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
-                                    title="Decrease (-1)"
-                                  >
-                                    <ChevronDown className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleTargetChange(t.id, fl, currentVal + 1)}
+                                  className="p-1 hover:bg-indigo-200 dark:hover:bg-indigo-800 rounded text-slate-700 dark:text-slate-200 transition-colors cursor-pointer shrink-0"
+                                  title="বাড়াবে / Increase (+1)"
+                                >
+                                  <ChevronRight className="w-3.5 h-3.5 stroke-[2.5]" />
+                                </button>
                               </div>
                             ) : showExactRatio ? (
                               <div className="w-full h-full min-h-[30px] flex items-center justify-center text-xs whitespace-nowrap px-1">
