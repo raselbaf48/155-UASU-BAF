@@ -2,7 +2,6 @@
 
 @media print {
   @page {
-    size: portrait;
     margin: 8mm 12mm;
   }
   @page duty-register-page {
@@ -18,6 +17,30 @@
   }
   .duty-register-print th, .duty-register-print td {
     white-space: nowrap !important;
+  }
+  @page duty-ratio-page-landscape {
+    size: A4 landscape;
+    margin: 6mm 8mm;
+  }
+  @page duty-ratio-page-portrait {
+    size: A4 portrait;
+    margin: 8mm 8mm;
+  }
+  .duty-ratio-print-landscape {
+    page: duty-ratio-page-landscape;
+  }
+  .duty-ratio-print-portrait {
+    page: duty-ratio-page-portrait;
+  }
+  .duty-ratio-print-container {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 100% !important;
+  }
+  .duty-ratio-print-container table {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 100% !important;
   }
   html, body {
     background: #ffffff !important;

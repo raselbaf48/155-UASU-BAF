@@ -118,8 +118,8 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
     selectedFlightFilter || 'Overall'
   );
 
-  // Default Page Setup orientation is strictly Portrait
-  const [pageOrientation, setPageOrientation] = useState<'portrait' | 'landscape'>('portrait');
+  // Default Page Setup orientation is Landscape for 31-day Duty Ratio Matrix
+  const [pageOrientation, setPageOrientation] = useState<'portrait' | 'landscape'>('landscape');
 
   useEffect(() => {
     return () => {
@@ -233,7 +233,7 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
 
   const handlePrint = () => {
     document.title = getPdfTitle();
-    // Inject dynamic @page style directly into document.head to ensure browser sets Page Setup to Portrait
+    // Inject dynamic @page style directly into document.head to ensure browser sets Page Setup properly
     const printStyleId = 'baf-duty-ratio-print-page-style';
     let styleEl = document.getElementById(printStyleId) as HTMLStyleElement | null;
     if (!styleEl) {
@@ -241,7 +241,12 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
       styleEl.id = printStyleId;
       document.head.appendChild(styleEl);
     }
-    styleEl.innerHTML = `@media print { @page { size: ${pageOrientation} !important; margin: 8mm; } }`;
+    styleEl.innerHTML = `@media print { 
+      @page { 
+        size: A4 ${pageOrientation} !important; 
+        margin: 6mm 8mm !important; 
+      } 
+    }`;
 
     setTimeout(() => {
       window.print();
@@ -363,7 +368,7 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex flex-col bg-slate-100 print:bg-white animate-fadeIn overflow-hidden print:static print:h-auto print:w-auto print:overflow-visible print:block text-black" style={{ printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }}>
+    <div className={`fixed inset-0 z-[100] flex flex-col bg-slate-100 print:bg-white animate-fadeIn overflow-hidden print:static print:h-auto print:w-full print:overflow-visible print:block text-black ${pageOrientation === 'landscape' ? 'duty-ratio-print-landscape' : 'duty-ratio-print-portrait'}`} style={{ printColorAdjust: 'exact', WebkitPrintColorAdjust: 'exact' }}>
       
       {/* Top Header Controls (Hidden on Print) */}
       <div className="flex-none bg-slate-900 border-b border-slate-700 px-4 py-3 shadow-2xl print:hidden z-10 sticky top-0 space-y-2.5">
@@ -572,19 +577,50 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
       </div>
 
       {/* Printable Content Area */}
-      <div className="flex-1 overflow-y-auto overflow-x-auto print:overflow-visible flex justify-start sm:justify-center print:block">
+      <div className="flex-1 overflow-y-auto overflow-x-auto print:overflow-visible flex justify-start sm:justify-center print:block print:w-full">
         
-        <div id="print-duty-ratio-content" className="w-max sm:w-full max-w-none sm:max-w-[1200px] mx-auto py-4 sm:py-8 px-2 sm:px-8 print:p-0 print:m-0 print:w-full print:max-w-none text-black bg-white">
+        <div 
+          id="print-duty-ratio-content" 
+          className={`duty-ratio-print-container w-full max-w-none mx-auto py-4 sm:py-8 px-2 sm:px-6 print:p-0 print:m-0 print:w-full print:max-w-none text-black bg-white ${pageOrientation === 'landscape' ? 'duty-ratio-print-landscape' : 'duty-ratio-print-portrait'}`}
+        >
           <style>{`
             @media print {
-              @page { size: A4 ${pageOrientation} !important; margin: 8mm; }
-              body { 
+              @page { 
+                size: A4 ${pageOrientation} !important; 
+                margin: 6mm 8mm !important; 
+              }
+              html, body { 
                  background: white !important; 
                  color: black !important; 
+                 width: 100% !important;
+                 max-width: 100% !important;
+                 min-width: 100% !important;
+                 margin: 0 !important;
+                 padding: 0 !important;
+                 overflow: visible !important;
                 -webkit-print-color-adjust: exact !important; 
                  print-color-adjust: exact !important; 
                }
               
+              /* Ensure the print container spans 100% of the page */
+              #print-duty-ratio-content,
+              .duty-ratio-print-container {
+                width: 100% !important;
+                max-width: 100% !important;
+                min-width: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                display: block !important;
+              }
+
+              /* Ensure every table fits 100% width of the page */
+              #print-duty-ratio-content table {
+                width: 100% !important;
+                max-width: 100% !important;
+                min-width: 100% !important;
+                table-layout: auto !important;
+              }
+
               /* Allow multi-page tables like nominal roll to flow naturally while keeping rows intact */
               tr    { page-break-inside: avoid !important; break-inside: avoid !important; }
               thead { display: table-header-group !important; }
@@ -593,6 +629,26 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
               .print\\:break-inside-avoid, .break-inside-avoid {
                 page-break-inside: avoid !important;
                 break-inside: avoid !important;
+              }
+
+              /* Side-by-side Top Summary (Total Duty & Effective Manpower) in print */
+              .print-top-summary-container {
+                display: flex !important;
+                flex-direction: row !important;
+                justify-content: space-between !important;
+                align-items: flex-start !important;
+                gap: 16px !important;
+                width: 100% !important;
+              }
+              .print-top-total-duty {
+                flex: 1 1 58% !important;
+                max-width: 58% !important;
+                width: 58% !important;
+              }
+              .print-top-manpower {
+                flex: 1 1 40% !important;
+                max-width: 40% !important;
+                width: 40% !important;
               }
 
               /* Hide scrollbars during print */
@@ -618,8 +674,8 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
               
               {/* Consolidated Flight Duty Schedule Table */}
               {showDutyRatio && (
-                <div className="mb-4 overflow-x-auto print:overflow-visible" style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
-                  <div className="flex justify-between items-end mb-1">
+                <div className="w-full mb-4 overflow-x-auto print:overflow-visible print:w-full" style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
+                  <div className="flex justify-between items-end mb-1 w-full">
                     <div className="font-bold underline uppercase text-[13px]">{currentFlightFilter} Duty Schedule</div>
                     <div className="flex border border-black text-[12px]">
                       <div className="px-2 py-0.5 border-r border-black" style={{ backgroundColor: '#ffffff' }}>Month Total</div>
@@ -627,7 +683,7 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
                     </div>
                   </div>
 
-                  <table className="no-zebra w-full border-collapse border border-black text-center text-[11px] sm:text-[10px] print:text-[10px] print:min-w-0">
+                  <table className="no-zebra w-full border-collapse border border-black text-center text-[11px] sm:text-[10px] print:text-[10px] print:w-full print:min-w-0">
                     <thead>
                       <tr style={{ backgroundColor: '#ffffff' }}>
                         <th className="border border-black font-bold p-1 w-44 text-center" style={{ backgroundColor: '#f1f5f9' }}>Duty Name / Date</th>
@@ -770,13 +826,13 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
               
               {/* TOP SECTION: Total Duty Table & Effective Manpower Table */}
               {(showTotalDuty || showManpower) && (
-                <div className={`w-full flex flex-col ${showTotalDuty && showManpower ? 'xl:flex-row justify-center items-start gap-8 print:gap-6' : 'items-center justify-center my-3 print:my-2'}`}>
+                <div className={`w-full flex flex-col ${showTotalDuty && showManpower ? 'xl:flex-row justify-center items-start gap-8 print-top-summary-container print:gap-4' : 'items-center justify-center my-3 print:my-2 print:w-full'}`}>
                   
                   {/* TOTAL DUTY Table */}
                   {showTotalDuty && (
-                    <div className="w-full max-w-lg mx-auto" style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
+                    <div className={`w-full ${showManpower ? 'max-w-lg print-top-total-duty print:max-w-none' : 'max-w-2xl print:w-full print:max-w-none'} mx-auto`} style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
                       <h4 className="font-bold underline text-center mb-2 text-sm uppercase">TOTAL DUTY</h4>
-                      <table className="no-zebra border-collapse border border-black text-center text-[11px] sm:text-[12px] bg-white text-black w-full print:min-w-0">
+                      <table className="no-zebra border-collapse border border-black text-center text-[11px] sm:text-[12px] bg-white text-black w-full print:w-full print:min-w-0">
                         <thead>
                           <tr className="bg-slate-100 print:bg-white text-center">
                             <th className="border border-black p-1.5 text-center font-bold">Duty Name</th>
@@ -801,9 +857,9 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
 
                   {/* EFFECTIVE MANPOWER Table */}
                   {showManpower && (
-                    <div className="w-full max-w-md mx-auto flex flex-col items-center" style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
+                    <div className={`w-full ${showTotalDuty ? 'max-w-md print-top-manpower print:max-w-none' : 'max-w-2xl print:w-full print:max-w-none'} mx-auto flex flex-col items-center`} style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
                       <h4 className="font-bold underline text-center mb-2 text-sm uppercase">EFFECTIVE MANPOWER</h4>
-                      <table className="no-zebra border-collapse border border-black text-center text-[12px] bg-white text-black w-full print:min-w-0 mx-auto">
+                      <table className="no-zebra border-collapse border border-black text-center text-[12px] bg-white text-black w-full print:w-full print:min-w-0 mx-auto">
                         <thead>
                           <tr className="bg-slate-100 print:bg-white">
                             <th className="border border-black p-1.5 w-24">Flight</th>
@@ -841,12 +897,12 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
 
               {/* DISTRIBUTION SECTION (Manpower formula & Flight formula) */}
               {showDistribution && (
-                <div className="flex flex-col gap-8 print:gap-4">
+                <div className="flex flex-col gap-8 print:gap-4 w-full print:w-full">
                   {/* DISTRIBUTION AS PER MANPOWER Table */}
-                  <div className="print:mt-2 print:block print:overflow-visible" style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
+                  <div className="w-full print:w-full print:mt-2 print:block print:overflow-visible" style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
                     <h4 className="font-bold underline text-center mb-2">DISTRIBUTION AS PER MANPOWER</h4>
                     <div className="text-center font-bold underline mb-1 text-[11px]">FORMULA</div>
-                    <table className="no-zebra border-collapse border border-black text-center text-[12px] bg-white text-black w-full print:min-w-0">
+                    <table className="no-zebra border-collapse border border-black text-center text-[12px] bg-white text-black w-full print:w-full print:min-w-0">
                       <thead>
                         <tr className="bg-slate-100 print:bg-white">
                           <th className="border border-black p-1.5 w-40" rowSpan={2}>DUTY PER PERSON</th>
@@ -886,10 +942,10 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
                   </div>
 
                   {/* DISTRIBUTION AS PER FLIGHT Table */}
-                  <div className="print:mt-2 print:block print:overflow-visible" style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
+                  <div className="w-full print:w-full print:mt-2 print:block print:overflow-visible" style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
                     <h4 className="font-bold underline text-center mb-2">DISTRIBUTION AS PER FLIGHT</h4>
                     <div className="text-center font-bold underline mb-1 text-[11px]">FORMULA</div>
-                    <table className="no-zebra border-collapse border border-black text-center text-[12px] bg-white text-black w-full print:min-w-0">
+                    <table className="no-zebra border-collapse border border-black text-center text-[12px] bg-white text-black w-full print:w-full print:min-w-0">
                       <thead>
                         <tr className="bg-slate-100 print:bg-white">
                           <th className="border border-black p-1.5 w-40" rowSpan={2}>DUTY PER FLIGHT</th>
@@ -987,8 +1043,8 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
 
                     return daysChunks.map((chunk, chunkIdx) => {
                       return (
-                        <div key={`${table.id}-${chunkIdx}`} className="mb-8 print:mb-4 overflow-x-auto print:overflow-visible" style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
-                          <div className="flex justify-between items-end mb-1">
+                        <div key={`${table.id}-${chunkIdx}`} className="w-full mb-8 print:mb-4 overflow-x-auto print:overflow-visible print:w-full" style={{ pageBreakInside: "avoid", breakInside: "avoid" }}>
+                          <div className="flex justify-between items-end mb-1 w-full">
                             <div className="font-bold underline uppercase text-[13px]">{cleanTitle} {daysChunks.length > 1 ? ` (Part ${chunkIdx + 1})` : ''}</div>
                             <div className="flex border border-black text-[12px]">
                               <div className="px-2 py-0.5 border-r border-black" style={{ backgroundColor: '#ffffff' }}>Total Duty</div>
@@ -996,7 +1052,7 @@ export const PrintableDutyRatioModal: React.FC<PrintableDutyRatioModalProps> = (
                             </div>
                           </div>
                           
-                          <table className="no-zebra w-full border-collapse border border-black text-center text-[11px] sm:text-[10px] print:text-[10px] print:min-w-0">
+                          <table className="no-zebra w-full border-collapse border border-black text-center text-[11px] sm:text-[10px] print:text-[10px] print:w-full print:min-w-0">
                             <thead>
                               <tr style={{ backgroundColor: '#ffffff' }}>
                                 <th colSpan={2} className="border border-black font-bold p-1 w-20" style={{ backgroundColor: '#f1f5f9' }}>Date</th>
