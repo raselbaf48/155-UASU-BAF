@@ -1921,9 +1921,20 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                   {variant === 'biodata' && (
                     <div className="flex items-center justify-between">
                       <span className="text-slate-500 font-semibold text-xs">Seniority</span>
-                      <span className="font-mono font-black text-emerald-600 dark:text-emerald-400 text-sm bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
-                        #{airman.seniority !== undefined ? airman.seniority : 'Auto'}
-                      </span>
+                      <div className="flex items-center space-x-2">
+                        <span className="font-mono font-black text-emerald-600 dark:text-emerald-400 text-sm bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
+                          #{airman.seniority !== undefined ? airman.seniority : 'Auto'}
+                        </span>
+                        {allowEditDelete && onEditAirman && (role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') && (
+                          <button
+                            type="button"
+                            onClick={() => { onClose(); onEditAirman(airman); }}
+                            className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer bg-emerald-100 dark:bg-emerald-950 px-2 py-0.5 rounded border border-emerald-300 dark:border-emerald-800"
+                          >
+                            Change
+                          </button>
+                        )}
+                      </div>
                     </div>
                   )}
                   {variant === 'biodata' && (

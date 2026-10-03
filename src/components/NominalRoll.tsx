@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Airman, FlightName, Rank, UserRole } from '../types';
-import { Search, UserPlus, Edit3, Trash2, Filter, Phone, MapPin, Shield, CheckCircle, RefreshCw, Printer, FileDown, FileSpreadsheet, Upload, KeyRound, UserCheck, AlertTriangle, Calendar } from 'lucide-react';
+import { Search, UserPlus, Edit3, Trash2, Filter, Phone, MapPin, Shield, CheckCircle, RefreshCw, Printer, FileDown, FileSpreadsheet, Upload, KeyRound, UserCheck, AlertTriangle, Calendar, User } from 'lucide-react';
 import { handleSafePrint } from "../utils/printUtils";
 import { sortAirmenBySeniority } from '../utils/seniority';
 import { PrintableNominalRollModal } from './PrintableNominalRollModal';
@@ -180,7 +180,7 @@ export const NominalRoll: React.FC<NominalRollProps> = ({
             <span>History</span>
           </button>
 
-          {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') && (
+          {variant === 'biodata' && onAddAirman && (role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') && (
             <button
               onClick={onAddAirman}
               className="flex items-center space-x-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs px-4 py-2.5 rounded-xl shadow-xs transition-all cursor-pointer"
@@ -270,6 +270,7 @@ export const NominalRoll: React.FC<NominalRollProps> = ({
             <thead>
               <tr className="bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 text-[11px] font-black uppercase tracking-wider border-b border-slate-200 dark:border-slate-700">
                 <th className="py-3 px-4 w-12 text-center">Ser</th>
+                {variant === 'biodata' && <th className="py-3 px-4 text-center">Seniority</th>}
                 <th className="py-3 px-4">BD No</th>
                 <th className="py-3 px-4">Rank</th>
                 <th className="py-3 px-4">Full Name</th>
@@ -287,12 +288,26 @@ export const NominalRoll: React.FC<NominalRollProps> = ({
               {filteredAirmen.map((airman, idx) => (
                 <tr
                   key={airman.id}
-                  onClick={() => onViewProfile(airman)}
-                  className="hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors even:bg-slate-50 odd:bg-white dark:even:bg-slate-800/20 dark:odd:bg-slate-900 cursor-pointer"
+                  onClick={() => {
+                    if (variant === 'biodata') {
+                      onEditAirman(airman);
+                    } else {
+                      onViewProfile(airman);
+                    }
+                  }}
+                  title={variant === 'biodata' ? "Click to Edit Airman Details" : "Click to View Profile"}
+                  className="hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors even:bg-slate-50 odd:bg-white dark:even:bg-slate-800/20 dark:odd:bg-slate-900 cursor-pointer group/row"
                 >
                   <td className="py-3 px-4 font-mono font-bold text-slate-400 text-center">
                     {String(idx + 1).padStart(2, '0')}
                   </td>
+                  {variant === 'biodata' && (
+                    <td className="py-3 px-4 text-center">
+                      <span className="font-mono font-black text-xs px-2 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                        #{airman.seniority !== undefined ? airman.seniority : idx + 1}
+                      </span>
+                    </td>
+                  )}
                   <td className="py-3 px-4 font-mono font-black text-slate-900 dark:text-slate-100">
                     {airman.bdNo}
                   </td>
@@ -302,12 +317,27 @@ export const NominalRoll: React.FC<NominalRollProps> = ({
                     </span>
                   </td>
                   <td className="py-3 px-4">
-                    <div className="flex items-center space-x-2">
-                      <span className="font-black text-slate-900 dark:text-slate-100 text-left">
-                        {airman.fullName || airman.name}
-                      </span>
-                      {(!airman.bdNo?.trim() || !airman.rank?.trim() || !airman.name?.trim() || !airman.trade?.trim() || ['General Tech', '-', 'N/A'].includes(airman.trade) || !airman.addressBlock?.trim() || ['-', 'N/A', 'L/O', 'L/I', "Sgt's Mess", "Airmen's Mess", "Live Out", "Live In"].includes(airman.addressBlock) || !airman.mobileNo?.trim() || ['01', '01700000000', '-'].includes(airman.mobileNo) || !airman.flightName?.trim()) && (
-                        <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" title="Missing or incomplete information (Trade, Address, or Mobile). Click to update." />
+                    <div className="flex items-center justify-between space-x-2">
+                      <div className="flex items-center space-x-2">
+                        <span className="font-black text-slate-900 dark:text-slate-100 text-left">
+                          {airman.fullName || airman.name}
+                        </span>
+                        {(!airman.bdNo?.trim() || !airman.rank?.trim() || !airman.name?.trim() || !airman.trade?.trim() || ['General Tech', '-', 'N/A'].includes(airman.trade) || !airman.addressBlock?.trim() || ['-', 'N/A', 'L/O', 'L/I', "Sgt's Mess", "Airmen's Mess", "Live Out", "Live In"].includes(airman.addressBlock) || !airman.mobileNo?.trim() || ['01', '01700000000', '-'].includes(airman.mobileNo) || !airman.flightName?.trim()) && (
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" title="Missing or incomplete information (Trade, Address, or Mobile). Click to update." />
+                        )}
+                      </div>
+                      {variant === 'biodata' && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onViewProfile(airman);
+                          }}
+                          className="opacity-0 group-hover/row:opacity-100 p-1 hover:bg-emerald-100 dark:hover:bg-slate-700 rounded-md text-slate-400 hover:text-emerald-700 dark:hover:text-emerald-300 transition-all cursor-pointer"
+                          title="View Full Profile & Duty History"
+                        >
+                          <User className="w-3.5 h-3.5" />
+                        </button>
                       )}
                     </div>
                   </td>
@@ -426,7 +456,7 @@ export const NominalRoll: React.FC<NominalRollProps> = ({
                             onBlur={async () => {
                               const prevIso = airman.dateJoined ? normalizeDateToISO(airman.dateJoined) : '';
                               if (editingDateValue !== prevIso) {
-                                localDb.updateAirman(airman.id, { dateJoined: editingDateValue });
+                                await localDb.updateAirman(airman.id, { dateJoined: editingDateValue });
                                 if (onRefresh) await onRefresh();
                               }
                               setEditingDateAirmanId(null);
@@ -435,7 +465,7 @@ export const NominalRoll: React.FC<NominalRollProps> = ({
                               if (e.key === 'Enter') {
                                 const prevIso = airman.dateJoined ? normalizeDateToISO(airman.dateJoined) : '';
                                 if (editingDateValue !== prevIso) {
-                                  localDb.updateAirman(airman.id, { dateJoined: editingDateValue });
+                                  await localDb.updateAirman(airman.id, { dateJoined: editingDateValue });
                                   if (onRefresh) await onRefresh();
                                 }
                                 setEditingDateAirmanId(null);

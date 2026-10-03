@@ -17,7 +17,6 @@ import { LeaveRegisterView } from './components/LeaveRegisterView';
 import { TdyRegisterView } from './components/TdyRegisterView';
 import { DeploymentRegisterView } from './components/DeploymentRegisterView';
 import { IdaCenterDutyView } from './components/IdaCenterDutyView';
-import { AirfieldLayout } from './features/airfield/components/AirfieldLayout';
 import { MonthlyDutyRegister } from './components/MonthlyDutyRegister';
 import { DutyRosterPeriodView } from './components/DutyRosterPeriodView';
 import { DutyRatioMatrixView } from './components/DutyRatioMatrixViewV2';
@@ -610,8 +609,10 @@ return () => mediaQuery.removeEventListener('change', listener);
                 setIsAddEditOpen(true);
               }}
               onEditAirman={(a) => {
-                setAirmanToEdit(a);
-                setIsAddEditOpen(true);
+                if (a) {
+                  setAirmanToEdit(a);
+                  setIsAddEditOpen(true);
+                }
               }}
               onDeleteAirman={handleDeleteAirman}
               onViewProfile={(a, config) => setSelectedAirmanProfile({ airman: a, allowEditDelete: true, ...config })}
@@ -679,19 +680,18 @@ return () => mediaQuery.removeEventListener('change', listener);
           )}
           {activeTab === 'nominal' && (
             <NominalRoll
+              variant="nominal"
               initialFlightFilter={selectedFlight === "Overall" || selectedFlight === "All" ? "All" : selectedFlight}
               airmen={airmen}
               role={role}
               userFlight={userSession?.flightName}
               onRefresh={fetchAirmen}
               onSyncGoogleSheet={handleSyncGoogleSheet}
-              onAddAirman={() => {
-                setAirmanToEdit(null);
-                setIsAddEditOpen(true);
-              }}
               onEditAirman={(a) => {
-                setAirmanToEdit(a);
-                setIsAddEditOpen(true);
+                if (a) {
+                  setAirmanToEdit(a);
+                  setIsAddEditOpen(true);
+                }
               }}
               onDeleteAirman={handleDeleteAirman}
               onViewProfile={(a, config) => setSelectedAirmanProfile({ airman: a, allowEditDelete: false, ...config })}
@@ -745,15 +745,6 @@ return () => mediaQuery.removeEventListener('change', listener);
               selectedDate={selectedDate}
               onViewAirmanProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
             />
-          )}
-
-          {activeTab === 'airfield' && (
-            <div className="flex-1 -m-3 sm:-m-6 lg:-m-8 min-h-[calc(100vh-6rem)]">
-              <AirfieldLayout
-                onBack={() => setActiveTab('ida-center')}
-                initialPostId="post_driveway"
-              />
-            </div>
           )}
 
           {activeTab === 'register' && (
@@ -836,6 +827,7 @@ return () => mediaQuery.removeEventListener('change', listener);
 
       {isAddEditOpen && (
         <AddEditAirmanModal
+          key={airmanToEdit ? `edit-${airmanToEdit.id || airmanToEdit.bdNo}` : 'add-new'}
           variant={activeTab === 'biodata-register' ? 'biodata' : 'nominal'}
           airmanToEdit={airmanToEdit}
           existingAirmen={airmen}

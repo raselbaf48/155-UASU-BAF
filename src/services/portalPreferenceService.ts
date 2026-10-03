@@ -1,11 +1,11 @@
 import { supabase, isSupabaseConfigured } from '../supabase';
 
-export type PortalType = 'Office' | 'Nt Count' | 'Canteen' | 'Airfield';
+export type PortalType = 'Office' | 'Nt Count' | 'Canteen';
 
 export const PORTAL_STORAGE_KEY = 'baf_last_used_login_portal';
 export const DEFAULT_PORTAL: PortalType = 'Office';
 
-const VALID_PORTALS: readonly PortalType[] = ['Office', 'Nt Count', 'Canteen', 'Airfield'];
+const VALID_PORTALS: readonly PortalType[] = ['Office', 'Nt Count', 'Canteen'];
 
 /**
  * Validates if a string is a recognized PortalType

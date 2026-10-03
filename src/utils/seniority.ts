@@ -64,20 +64,17 @@ export function sortAirmenBySeniority(airmen: Airman[]): Airman[] {
       return rankA - rankB;
     }
 
-    // 2. Only JCOs (MWO, SWO, WO) can have custom manual seniority order
-    if (isJcoRank(a.rank)) {
-      const sA = (a.seniority !== undefined && a.seniority !== null && !isNaN(Number(a.seniority))) ? Number(a.seniority) : null;
-      const sB = (b.seniority !== undefined && b.seniority !== null && !isNaN(Number(b.seniority))) ? Number(b.seniority) : null;
+    // 2. Custom manual seniority within the rank
+    const sA = (a.seniority !== undefined && a.seniority !== null && !isNaN(Number(a.seniority))) ? Number(a.seniority) : null;
+    const sB = (b.seniority !== undefined && b.seniority !== null && !isNaN(Number(b.seniority))) ? Number(b.seniority) : null;
 
-      if (sA !== null && sB !== null && sA !== sB) {
-        return sA - sB;
-      }
-      if (sA !== null && sB === null) return -1;
-      if (sA === null && sB !== null) return 1;
+    if (sA !== null && sB !== null && sA !== sB) {
+      return sA - sB;
     }
+    if (sA !== null && sB === null) return -1;
+    if (sA === null && sB !== null) return 1;
 
-    // 3. For non-JCOs (Sgt, Cpl, LAC, AC-1, AC-2) and JCOs with equal/no custom seniority:
-    // Strictly by BD Number (lower BD No = more senior)
+    // 3. Fallback within the same rank: strictly by BD Number (lower BD No = more senior)
     return compareAirmenDefaultSeniority(a, b);
   });
 }
@@ -188,17 +185,15 @@ export function reorderAirmanSeniority(
 ): { updatedAirmen: Airman[]; changedAirmen: Airman[] } {
   // 1. Ensure baseline list has normalized sequential seniorities
   const baseList = normalizeAirmenSeniority(airmen);
-  const targetIndex = baseList.findIndex((a) => a.id === targetAirmanId);
+  const cleanTargetBd = targetAirmanId.replace(/\D/g, '');
+  const targetIndex = baseList.findIndex(
+    (a) => a.id === targetAirmanId || (cleanTargetBd && a.bdNo?.replace(/\D/g, '') === cleanTargetBd)
+  );
   if (targetIndex === -1) {
     return { updatedAirmen: baseList, changedAirmen: [] };
   }
 
   const target = baseList[targetIndex];
-  // Only JCO ranks (MWO, SWO, WO) can have their seniority manually changed
-  if (!isJcoRank(target.rank)) {
-    return { updatedAirmen: baseList, changedAirmen: [] };
-  }
-
   const oldSeniority = target.seniority || (targetIndex + 1);
 
   // 2. Resolve target seniority respecting rank hierarchy
@@ -212,7 +207,8 @@ export function reorderAirmanSeniority(
 
   // 3. Shift intermediate airmen strictly
   let adjustedList = baseList.map((a) => {
-    if (a.id === targetAirmanId) {
+    const isTarget = a.id === target.id || (cleanTargetBd && a.bdNo?.replace(/\D/g, '') === cleanTargetBd);
+    if (isTarget) {
       changedIds.add(a.id);
       return { ...a, seniority: resolvedSeniority };
     }

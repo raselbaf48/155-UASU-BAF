@@ -21,6 +21,14 @@ interface PrintableCanteenBillModalProps {
   selectedMonth: string;
 }
 
+const formatAmountBn = (amount: number, showZero: boolean = false): string => {
+  if (!amount || amount <= 0) {
+    return showZero ? '৳০' : '';
+  }
+  const formattedWithCommas = amount.toLocaleString('en-IN');
+  return `৳${toBengaliNum(formattedWithCommas)}`;
+};
+
 export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps> = ({
   isOpen,
   onClose,
@@ -352,26 +360,26 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
                   ) : (
                     rows.map((row) => (
                       <tr key={row.ser} className="border border-black hover:bg-slate-50 print:hover:bg-transparent">
-                        <td className="p-1.5 border border-black font-mono text-center align-middle">{row.serBn}</td>
+                        <td className="p-1.5 border border-black font-bold text-center align-middle">{row.serBn}</td>
                         <td className="p-1.5 border border-black font-bold text-center align-middle">{row.rank}</td>
                         <td className="p-1.5 border border-black font-bold text-left px-2.5 align-middle">{row.name}</td>
-                        <td className="p-1.5 border border-black font-mono text-right px-2 align-middle">
-                          {row.canteenBill > 0 ? `৳${row.canteenBill.toLocaleString()}` : ''}
+                        <td className="p-1.5 border border-black font-bold text-right px-2 align-middle">
+                          {formatAmountBn(row.canteenBill)}
                         </td>
-                        <td className="p-1.5 border border-black font-mono text-right px-2 align-middle">
-                          {row.previousDue > 0 ? `৳${row.previousDue.toLocaleString()}` : ''}
+                        <td className="p-1.5 border border-black font-bold text-right px-2 align-middle">
+                          {formatAmountBn(row.previousDue)}
                         </td>
-                        <td className="p-1.5 border border-black font-mono font-bold text-right px-2 align-middle">
-                          {row.totalBill > 0 ? `৳${row.totalBill.toLocaleString()}` : ''}
+                        <td className="p-1.5 border border-black font-bold text-right px-2 align-middle">
+                          {formatAmountBn(row.totalBill)}
                         </td>
-                        <td className="p-1.5 border border-black font-mono text-right px-2 text-emerald-800 align-middle">
-                          {row.paidBill > 0 ? `৳${row.paidBill.toLocaleString()}` : ''}
+                        <td className="p-1.5 border border-black font-bold text-right px-2 text-emerald-800 align-middle">
+                          {formatAmountBn(row.paidBill)}
                         </td>
-                        <td className="p-1.5 border border-black font-mono text-right px-2 text-indigo-800 align-middle">
-                          {row.advance > 0 ? `৳${row.advance.toLocaleString()}` : ''}
+                        <td className="p-1.5 border border-black font-bold text-right px-2 text-indigo-800 align-middle">
+                          {formatAmountBn(row.advance)}
                         </td>
-                        <td className="p-1.5 border border-black font-mono font-black text-right px-2 text-rose-700 align-middle">
-                          {row.remainingDue > 0 ? `৳${row.remainingDue.toLocaleString()}` : ''}
+                        <td className="p-1.5 border border-black font-black text-right px-2 text-rose-700 align-middle">
+                          {formatAmountBn(row.remainingDue)}
                         </td>
                       </tr>
                     ))
@@ -382,43 +390,27 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
                     <td colSpan={3} className="p-2 border border-black text-center font-black align-middle">
                       সর্বমোট
                     </td>
-                    <td className="p-2 border border-black font-mono font-black text-right px-2 align-middle">
-                      ৳{totals.canteenBill.toLocaleString()}
+                    <td className="p-2 border border-black font-black text-right px-2 align-middle">
+                      {formatAmountBn(totals.canteenBill, true)}
                     </td>
-                    <td className="p-2 border border-black font-mono font-black text-right px-2 align-middle">
-                      ৳{totals.previousDue.toLocaleString()}
+                    <td className="p-2 border border-black font-black text-right px-2 align-middle">
+                      {formatAmountBn(totals.previousDue, true)}
                     </td>
-                    <td className="p-2 border border-black font-mono font-black text-right px-2 align-middle">
-                      ৳{totals.totalBill.toLocaleString()}
+                    <td className="p-2 border border-black font-black text-right px-2 align-middle">
+                      {formatAmountBn(totals.totalBill, true)}
                     </td>
-                    <td className="p-2 border border-black font-mono font-black text-right px-2 text-emerald-900 align-middle">
-                      ৳{totals.paidBill.toLocaleString()}
+                    <td className="p-2 border border-black font-black text-right px-2 text-emerald-900 align-middle">
+                      {formatAmountBn(totals.paidBill, true)}
                     </td>
-                    <td className="p-2 border border-black font-mono font-black text-right px-2 text-indigo-900 align-middle">
-                      ৳{totals.advance.toLocaleString()}
+                    <td className="p-2 border border-black font-black text-right px-2 text-indigo-900 align-middle">
+                      {formatAmountBn(totals.advance, true)}
                     </td>
-                    <td className="p-2 border border-black font-mono font-black text-right px-2 text-rose-900 align-middle">
-                      ৳{totals.remainingDue.toLocaleString()}
+                    <td className="p-2 border border-black font-black text-right px-2 text-rose-900 align-middle">
+                      {formatAmountBn(totals.remainingDue, true)}
                     </td>
                   </tr>
                 </tbody>
               </table>
-            </div>
-
-            {/* Official Signatures Section */}
-            <div className="flex justify-between items-end pt-16 px-8 text-xs font-bold text-black text-center print:pt-12">
-              <div>
-                <div className="w-36 border-t border-black mb-1.5 mx-auto"></div>
-                <p className="font-bold">গ্রাহকের স্বাক্ষর</p>
-              </div>
-              <div>
-                <div className="w-36 border-t border-black mb-1.5 mx-auto"></div>
-                <p className="font-bold">ক্যান্টিন ম্যানেজার</p>
-              </div>
-              <div>
-                <div className="w-36 border-t border-black mb-1.5 mx-auto"></div>
-                <p className="font-bold">ভারপ্রাপ্ত কর্মকর্তা</p>
-              </div>
             </div>
           </div>
         </div>

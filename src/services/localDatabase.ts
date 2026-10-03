@@ -703,7 +703,8 @@ export class LocalDatabaseEngine {
         // Compute delta for airmen
         const changedAirmen = (dbToSave.airmen || []).filter(a => {
            if (!lastSyncedDb.airmen) return true;
-           const prev = lastSyncedDb.airmen.find((p: any) => p.id === a.id);
+           const cleanBd = String(a.bdNo || '').replace(/\D/g, '');
+           const prev = lastSyncedDb.airmen.find((p: any) => p.id === a.id || (cleanBd && p.bdNo && String(p.bdNo).replace(/\D/g, '') === cleanBd));
            return !prev || JSON.stringify(prev) !== JSON.stringify(a);
         });
         
@@ -801,23 +802,28 @@ export class LocalDatabaseEngine {
           } catch (e) {
             console.warn("Could not save seniority map to app_settings:", e);
           }
-          let staffPayload = changedAirmen.map(a => ({
-            airman_id: a.id,
-            'Seniority': (a.seniority !== undefined && a.seniority !== null && !isNaN(Number(a.seniority))) ? Number(a.seniority) : null,
-            'BD No': a.bdNo || '000000',
-            'Rank': a.rank || 'LAC',
-            'Surname': a.name || 'Unknown',
-            'Full Name': a.fullName || a.name || 'Unknown',
-            'Flight': a.flightName || 'Unknown',
-            'Trade': a.trade || null,
-            'Mobile No': a.mobileNo || null,
-            'Blood Group': a.bloodGroup || null,
-            'Permanent Address': a.permanentAddress || null,
-            'Dt of Posting': toNullableDateString(a.dateJoined),
-            'Present Address': a.addressBlock || null,
-            'Status': a.active === false ? 'SUSPENDED' : 'ACTIVE',
-            'Unit Left date': toNullableDateString(a.dateLeft)
-          }));
+          let staffPayload = changedAirmen.map((a, sIdx) => {
+            const cleanBd = String(a.bdNo || '').replace(/\D/g, '');
+            const canonicalId = (a.id && a.id.startsWith('BD/')) ? a.id : (cleanBd ? `BD/${cleanBd}` : a.id);
+            const assignedSen = (a.seniority !== undefined && a.seniority !== null && !isNaN(Number(a.seniority))) ? Number(a.seniority) : (sIdx + 1);
+            return {
+              airman_id: canonicalId,
+              'Seniority': assignedSen,
+              'BD No': cleanBd || a.bdNo || '000000',
+              'Rank': a.rank || 'LAC',
+              'Surname': a.name || 'Unknown',
+              'Full Name': a.fullName || a.name || 'Unknown',
+              'Flight': a.flightName || 'Unknown',
+              'Trade': a.trade || null,
+              'Mobile No': a.mobileNo || null,
+              'Blood Group': a.bloodGroup || null,
+              'Permanent Address': a.permanentAddress || null,
+              'Dt of Posting': toNullableDateString(a.dateJoined),
+              'Present Address': a.addressBlock || null,
+              'Status': a.active === false ? 'SUSPENDED' : 'ACTIVE',
+              'Unit Left date': toNullableDateString(a.dateLeft)
+            };
+          });
           // Deduplicate
           const uniqueStaffMap = new Map();
           staffPayload.forEach(a => uniqueStaffMap.set(a.airman_id, a));
@@ -827,11 +833,45 @@ export class LocalDatabaseEngine {
           for (let i = 0; i < staffPayload.length; i += staffChunkSize) {
              const chunk = staffPayload.slice(i, i + staffChunkSize);
              emitSyncProgress(Math.round((i / staffPayload.length) * 30), `Uploading staff ${i} of ${staffPayload.length}...`);
+
+             // Try direct upsert first (fastest and conflict-free for non-seniority updates)
              let { error: staffErr } = await supabase.from('Biodata Register').upsert(chunk, { onConflict: 'airman_id' });
              await delay(80);
              if (staffErr) {
-               // Check if the error is caused by a Supabase trigger referencing column "Name" or non-existent relation "Canteen"
-               if (staffErr.code === '42703' || staffErr.code === '42P01' || staffErr.message?.includes('column "Name" of relation "Canteen"') || staffErr.message?.includes('Canteen')) {
+               // If error is duplicate key on Seniority, safely park and upsert individually
+               if (staffErr.code === '23505' || staffErr.message?.includes('Seniority_key') || staffErr.details?.includes('Seniority')) {
+                 console.warn("Seniority constraint conflict during batch upsert, resolving via safe individual parking:", staffErr.details || staffErr.message);
+                 let anySucceeded = false;
+                 let lastErr = staffErr;
+                 for (let si = 0; si < chunk.length; si++) {
+                   const singleStaff = chunk[si];
+                   const safeParkVal = -(100000 + i + si + 1);
+                   if (singleStaff.airman_id) {
+                     await supabase.from('Biodata Register').update({ Seniority: safeParkVal }).eq('airman_id', singleStaff.airman_id);
+                   }
+                   if (singleStaff['Seniority'] !== null && singleStaff['Seniority'] !== undefined) {
+                     await supabase.from('Biodata Register').update({ Seniority: safeParkVal - 50000 }).eq('Seniority', singleStaff['Seniority']);
+                   }
+                   let { error: sErr } = await supabase.from('Biodata Register').upsert([singleStaff], { onConflict: 'airman_id' });
+                   if (sErr && (sErr.code === '23505' || sErr.message?.includes('Seniority'))) {
+                     await supabase.from('Biodata Register').update({ Seniority: -(200000 + Math.floor(Math.random() * 50000)) }).eq('Seniority', singleStaff['Seniority']);
+                     const res = await supabase.from('Biodata Register').upsert([singleStaff], { onConflict: 'airman_id' });
+                     sErr = res.error;
+                   }
+                   if (!sErr || sErr.code === '42703' || sErr.code === '42P01' || sErr.message?.includes('Canteen')) {
+                     anySucceeded = true;
+                   } else {
+                     lastErr = sErr;
+                     console.warn(`Staff ${singleStaff.airman_id} upsert notice:`, sErr);
+                   }
+                 }
+                 if (!anySucceeded) {
+                   console.error("Error syncing staff to Supabase:", lastErr);
+                   hasError = true;
+                   errorMessage = getReadableError(lastErr, 'Staff sync error');
+                   break;
+                 }
+               } else if (staffErr.code === '42703' || staffErr.code === '42P01' || staffErr.message?.includes('column "Name" of relation "Canteen"') || staffErr.message?.includes('Canteen')) {
                  console.warn("Notice: Remote Supabase database has a trigger on 'Biodata Register' referencing 'Canteen'. Syncing airmen directly to Canteen table instead:", staffErr.message);
                  try {
                    const canteenPayload = chunk.map(c => ({
@@ -855,8 +895,21 @@ export class LocalDatabaseEngine {
                  console.warn("Chunk staff upsert error, attempting individual retries:", staffErr);
                  let allChunkFailed = true;
                  let lastErr = staffErr;
-                 for (const singleStaff of chunk) {
-                   const { error: sErr } = await supabase.from('Biodata Register').upsert([singleStaff], { onConflict: 'airman_id' });
+                 for (let si = 0; si < chunk.length; si++) {
+                   const singleStaff = chunk[si];
+                   const tempVal = -(60000 + i + si);
+                   if (singleStaff.airman_id) {
+                     await supabase.from('Biodata Register').update({ Seniority: tempVal }).eq('airman_id', singleStaff.airman_id);
+                   }
+                   if (singleStaff['Seniority'] !== null && singleStaff['Seniority'] !== undefined) {
+                     await supabase.from('Biodata Register').update({ Seniority: tempVal - 5000 }).eq('Seniority', singleStaff['Seniority']);
+                   }
+                   let { error: sErr } = await supabase.from('Biodata Register').upsert([singleStaff], { onConflict: 'airman_id' });
+                   if (sErr && sErr.code === '23505' && singleStaff['Seniority'] !== null && singleStaff['Seniority'] !== undefined) {
+                     await supabase.from('Biodata Register').update({ Seniority: tempVal - 15000 }).eq('Seniority', singleStaff['Seniority']);
+                     const res = await supabase.from('Biodata Register').upsert([singleStaff], { onConflict: 'airman_id' });
+                     sErr = res.error;
+                   }
                    if (!sErr || sErr.code === '42703' || sErr.code === '42P01' || sErr.message?.includes('Canteen')) {
                      allChunkFailed = false;
                    } else {
@@ -878,6 +931,22 @@ export class LocalDatabaseEngine {
                  }
                }
              }
+          }
+
+          // Safety check: clean up any negative parked seniorities that might have been left over
+          try {
+            const { data: negRows } = await supabase.from('Biodata Register').select('airman_id, Seniority').lt('Seniority', 0);
+            if (negRows && negRows.length > 0) {
+              for (const neg of negRows) {
+                const cleanNegBd = neg.airman_id.replace(/\D/g, '');
+                const mAirman = this.db.airmen.find(a => a.id === neg.airman_id || (cleanNegBd && a.bdNo?.replace(/\D/g, '') === cleanNegBd));
+                if (mAirman && mAirman.seniority && Number(mAirman.seniority) > 0) {
+                  await supabase.from('Biodata Register').update({ Seniority: Number(mAirman.seniority) }).eq('airman_id', neg.airman_id);
+                }
+              }
+            }
+          } catch (cleanErr) {
+            console.warn("Cleanup of parked seniorities note:", cleanErr);
           }
         }
         
@@ -1618,8 +1687,16 @@ export class LocalDatabaseEngine {
     return { count: createdAirmen.length, airmen: createdAirmen };
   }
 
-  public updateAirman(id: string, data: Partial<Airman>): Airman | null {
-    const idx = this.db.airmen.findIndex((a) => a.id === id);
+  public async updateAirman(id: string, data: Partial<Airman>): Promise<Airman | null> {
+    const cleanIdBd = id.replace(/\D/g, '');
+    const cleanDataBd = data.bdNo ? String(data.bdNo).replace(/\D/g, '') : '';
+    const idx = this.db.airmen.findIndex((a) => {
+      if (a.id === id) return true;
+      const aBd = a.bdNo ? String(a.bdNo).replace(/\D/g, '') : '';
+      if (cleanIdBd && aBd && aBd === cleanIdBd) return true;
+      if (cleanDataBd && aBd && aBd === cleanDataBd) return true;
+      return false;
+    });
     if (idx === -1) return null;
     const previous = this.db.airmen[idx];
 
@@ -1628,7 +1705,7 @@ export class LocalDatabaseEngine {
       const targetSen = Number(data.seniority);
       const currentSen = previous.seniority ?? (idx + 1);
       if (targetSen !== currentSen) {
-        const { updatedAirmen } = reorderAirmanSeniority(this.db.airmen, id, targetSen);
+        const { updatedAirmen } = reorderAirmanSeniority(this.db.airmen, previous.id, targetSen);
         this.db.airmen = updatedAirmen;
       }
     }
@@ -1638,23 +1715,29 @@ export class LocalDatabaseEngine {
       this.db.airmen = normalizeAirmenSeniority(this.db.airmen);
     }
 
-    const newIdx = this.db.airmen.findIndex((a) => a.id === id);
+    const cleanBd = String(data.bdNo || previous.bdNo || '').replace(/\D/g, '');
+    const canonicalId = previous.id?.startsWith('BD/') ? previous.id : (cleanBd ? `BD/${cleanBd}` : previous.id);
+
+    const newIdx = this.db.airmen.findIndex((a) => a.id === previous.id || (cleanBd && a.bdNo?.replace(/\D/g, '') === cleanBd));
     if (newIdx !== -1) {
       this.db.airmen[newIdx] = {
         ...this.db.airmen[newIdx],
         ...data,
+        id: canonicalId,
         seniority: this.db.airmen[newIdx].seniority,
-        id,
       };
     }
 
     if (previous.active && !data.active) {
-      this.logSystemAction(id, `${previous.rank} ${previous.name}`, 'Posted out / Marked inactive from Nominal Roll');
+      this.logSystemAction(canonicalId, `${previous.rank} ${previous.name}`, 'Posted out / Marked inactive from Nominal Roll');
     } else if (!previous.active && data.active) {
-      this.logSystemAction(id, `${previous.rank} ${previous.name}`, 'Reactivated in Nominal Roll');
+      this.logSystemAction(canonicalId, `${previous.rank} ${previous.name}`, 'Reactivated in Nominal Roll');
     }
 
-    this.saveToStorage();
+    this.saveToStorage(this.db, true, false);
+
+    // Save to Cloud Supabase safely and exclusively via saveToFirebase
+    await this.saveToFirebase(this.db, true);
 
     return this.db.airmen[newIdx !== -1 ? newIdx : idx];
   }

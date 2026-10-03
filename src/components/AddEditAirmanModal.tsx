@@ -83,7 +83,7 @@ export const AddEditAirmanModal: React.FC<AddEditAirmanModalProps> = ({
       if (lower.includes('mess') || lower.match(/block/i) || lower === 'l/i' || lower === 'live in') {
         return 'L_IN';
       }
-      if (lower.trim() !== '' && lower !== '-' && lower !== 'n/a' && lower !== 'l/o') {
+      if (lower.trim() !== '' && lower !== '-' && lower !== 'n/a') {
         return 'L_OUT';
       }
     }
@@ -115,18 +115,29 @@ export const AddEditAirmanModal: React.FC<AddEditAirmanModalProps> = ({
   const [svcQtrNo, setSvcQtrNo] = useState<string>(() => {
     if (airmanToEdit?.addressBlock) {
       if (airmanToEdit.addressBlock.toLowerCase().includes('qtr') || airmanToEdit.addressBlock.toLowerCase().includes('quarter')) {
-        const match = airmanToEdit.addressBlock.match(/Svc\s*Qtr\s*(?:No[:\s]*)?([^,]+)/i) || airmanToEdit.addressBlock.match(/Qtr\s*(?:No[:\s]*)?([^,]+)/i);
-        if (match) return `Svc Qtr No: ${match[1].trim()}`;
-        return airmanToEdit.addressBlock.trim();
+        const cleaned = airmanToEdit.addressBlock
+          .replace(/^Svc\s*Qtr\s*(?:No[:\s]*)?/gi, '')
+          .replace(/^Qtr\s*(?:No[:\s]*)?/gi, '')
+          .replace(/^[:\s-]+/, '')
+          .trim();
+        return cleaned;
       }
     }
-    return 'Svc Qtr No: ';
+    return '';
   });
 
   const [outsideAddress, setOutsideAddress] = useState<string>(() => {
     if (airmanToEdit?.addressBlock) {
       const lower = airmanToEdit.addressBlock.toLowerCase();
-      if (!lower.includes('qtr') && !lower.includes('quarter') && !lower.includes('mess') && !lower.match(/block/i)) {
+      if (
+        !lower.includes('qtr') &&
+        !lower.includes('quarter') &&
+        !lower.includes('mess') &&
+        !lower.match(/block/i) &&
+        lower !== 'l/o' &&
+        lower !== 'live out' &&
+        lower !== 'living out'
+      ) {
         return airmanToEdit.addressBlock.replace(/Outside\s*Base[:\s]*/gi, '').trim();
       }
     }
@@ -146,19 +157,25 @@ export const AddEditAirmanModal: React.FC<AddEditAirmanModalProps> = ({
         return `${messType}, Block No: ${blockNo.trim()}`;
       }
       return messType;
-    } else {
+    } else if (livingType === 'L_OUT') {
       if (livingOutType === 'QUARTER') {
-        if (svcQtrNo.trim()) {
-          return svcQtrNo.trim();
+        const cleanQ = svcQtrNo
+          .replace(/^Svc\s*Qtr\s*(?:No[:\s]*)?/gi, '')
+          .replace(/^Qtr\s*(?:No[:\s]*)?/gi, '')
+          .replace(/^[:\s-]+/, '')
+          .trim();
+        if (cleanQ) {
+          return `Svc Qtr No: ${cleanQ}`;
         }
-        return 'Svc Qtr No: ';
+        return 'L/O';
       } else {
         if (outsideAddress.trim()) {
           return outsideAddress.trim();
         }
-        return '';
+        return 'L/O';
       }
     }
+    return airmanToEdit?.addressBlock?.trim() || 'L/O';
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -220,10 +237,10 @@ export const AddEditAirmanModal: React.FC<AddEditAirmanModalProps> = ({
       dateLeft: dateLeft || '',
       leaveReason: finalLeaveReason || '',
       active: !dateLeft, // Set active to false if dateLeft is provided
-      // Only Warrant Officers (MWO, SWO, WO) can have custom seniority order; others are strictly BD-No sorted
-      seniority: isJcoRank(rank) && seniority !== '' && targetResolved
+      // Custom seniority order for all ranks in Biodata Register
+      seniority: seniority !== '' && targetResolved
         ? targetResolved.resolvedSeniority
-        : (isJcoRank(rank) && seniority !== '' ? Number(seniority) : undefined),
+        : (seniority !== '' ? Number(seniority) : undefined),
     });
     onClose();
   };
@@ -359,12 +376,12 @@ export const AddEditAirmanModal: React.FC<AddEditAirmanModalProps> = ({
             </div>
           </div>
 
-          {/* Seniority Order Setting (Synced with Cloud Biodata Register) - only in Biodata Register for MWO, SWO, WO */}
-          {variant === 'biodata' && isJcoRank(rank) && (
+          {/* Seniority Order Setting (Synced with Cloud Biodata Register) */}
+          {variant === 'biodata' && rank && (
             <div className="p-3.5 bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/80 rounded-xl space-y-2">
               <div className="flex items-center justify-between">
                 <label className="block text-xs font-bold text-emerald-900 dark:text-emerald-200">
-                  Seniority / জ্যেষ্ঠতা নম্বর (MWO, SWO, WO)
+                  Seniority / জ্যেষ্ঠতা নম্বর ({rank})
                 </label>
                 <div className="flex items-center space-x-1.5">
                   <span className="text-[10px] font-mono font-bold bg-indigo-100 dark:bg-indigo-950/80 text-indigo-900 dark:text-indigo-200 px-2 py-0.5 rounded-md border border-indigo-300 dark:border-indigo-700">
@@ -404,18 +421,8 @@ export const AddEditAirmanModal: React.FC<AddEditAirmanModalProps> = ({
               )}
 
               <p className="text-[11px] text-emerald-800 dark:text-emerald-300 leading-tight font-medium">
-                MWO, SWO ও WO-দের ক্ষেত্রে পদোন্নতির তারিখ বা জ্যেষ্ঠতা অনুসারে ম্যানুয়ালি ক্রম পরিবর্তন করা যায়।
+                পদোন্নতির তারিখ বা ব্যাচ জ্যেষ্ঠতা অনুসারে ম্যানুয়ালি ক্রম পরিবর্তন করা যায়। পরিবর্তন সরাসরি ক্লাউড ডাটাবেজে আপডেট হবে।
               </p>
-            </div>
-          )}
-
-          {/* For Non-JCOs (Sgt, Cpl, LAC, AC), show informative banner */}
-          {variant === 'biodata' && rank && !isJcoRank(rank) && (
-            <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-between text-xs">
-              <span className="font-semibold text-slate-600 dark:text-slate-400">জ্যেষ্ঠতা ক্রম (Seniority):</span>
-              <span className="font-mono text-emerald-700 dark:text-emerald-300 font-bold bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
-                {rank} পদবির জ্যেষ্ঠতা স্বয়ংক্রিয়ভাবে BD No অনুযায়ী নির্ধারিত
-              </span>
             </div>
           )}
 
@@ -666,7 +673,7 @@ export const AddEditAirmanModal: React.FC<AddEditAirmanModalProps> = ({
                         setSvcQtrNo(e.target.value);
                         if (validationError) setValidationError('');
                       }}
-                      placeholder=""
+                      placeholder="e.g. 12 or 35/07"
                       className="w-full px-3 py-2 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-xl text-xs font-semibold text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
                     />
                   </div>

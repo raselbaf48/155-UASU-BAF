@@ -1,13 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { CanteenLayout } from '../features/canteen/components/CanteenLayout';
-import { AirfieldLayout } from '../features/airfield/components/AirfieldLayout';
 import { EmployeeDashboard } from '../features/canteen/pages/EmployeeDashboard';
 import { supabase } from '../supabase';
 import { fetchDirectImageUrl, getCanteenConfig } from '../features/canteen/utils/canteenSettings';
 
 import { Airman } from '../types';
 import { Logo155UASU } from './Logo155UASU';
-import { X, Shield, ArrowRight, AlertCircle, CheckCircle2, Lock, LogIn, ChevronRight, ChevronUp, ArrowLeft, Eye, EyeOff, Building2, Moon, Coffee, Plane, Loader2, Sparkles, Check } from 'lucide-react';
+import { X, Shield, ArrowRight, AlertCircle, CheckCircle2, Lock, LogIn, ChevronRight, ChevronUp, ArrowLeft, Eye, EyeOff, Building2, Moon, Coffee, Loader2, Sparkles, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { NightCountStateView } from './NightCountStateView';
 import { getAppConfig, isFeatureActive } from '../utils/appConfig';
@@ -127,7 +126,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
 
     const handlePortalChanged = (e: any) => {
       const p = e.detail?.portal;
-      if (p && (p === 'Office' || p === 'Nt Count' || p === 'Canteen' || p === 'Airfield')) {
+      if (p && (p === 'Office' || p === 'Nt Count' || p === 'Canteen')) {
         setActiveTab(p);
       }
     };
@@ -477,12 +476,12 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
   };
 
   return (
-    <div className={`min-h-screen flex flex-col items-center bg-slate-950 print:bg-white p-4 print:p-0 select-none overflow-x-hidden print:overflow-visible ${(activeTab === 'Nt Count' || activeTab === 'Airfield') ? 'justify-start pt-4 print:pt-0' : 'justify-center'}`}>
+    <div className={`min-h-screen flex flex-col items-center bg-slate-950 print:bg-white p-4 print:p-0 select-none overflow-x-hidden print:overflow-visible ${activeTab === 'Nt Count' ? 'justify-start pt-4 print:pt-0' : 'justify-center'}`}>
       <div className="fixed top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-emerald-600/10 rounded-full blur-3xl pointer-events-none z-0 print:hidden" />
       <div className="fixed bottom-10 right-10 w-72 h-72 bg-sky-600/10 rounded-full blur-3xl pointer-events-none z-0 print:hidden" />
       
       {/* Content Area */}
-      <div className={`w-full ${(activeTab === 'Nt Count' || activeTab === 'Airfield' || (activeTab === 'Canteen' && isCanteenAuth)) ? 'flex-1 z-10 p-0 m-0' : 'max-w-[360px] sm:max-w-[380px] relative z-10'}`}>
+      <div className={`w-full ${(activeTab === 'Nt Count' || (activeTab === 'Canteen' && isCanteenAuth)) ? 'flex-1 z-10 p-0 m-0' : 'max-w-[360px] sm:max-w-[380px] relative z-10'}`}>
         
         {(activeTab === 'Office' || (activeTab === 'Canteen' && !isCanteenAuth)) && (
           <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-800 rounded-2xl p-6 sm:p-7 shadow-2xl space-y-5 text-white text-center mb-16">
@@ -835,14 +834,6 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
              }} 
           />
         )}
-
-        {activeTab === 'Airfield' && (
-          <AirfieldLayout
-            onBack={() => {
-              handlePortalChange('Office');
-            }}
-          />
-        )}
       </div>
 
       {/* Floating Menu Toggle */}
@@ -888,17 +879,6 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
             >
               <Coffee className="w-4 h-4" />
               <span>Canteen</span>
-            </button>
-            <button
-              onClick={() => handlePortalChange('Airfield')}
-              className={`flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all cursor-pointer ${
-                activeTab === 'Airfield' 
-                  ? 'bg-emerald-600 text-white shadow-md' 
-                  : 'text-slate-400 hover:text-white hover:bg-slate-700'
-              }`}
-            >
-              <Plane className="w-4 h-4" />
-              <span>Airfield (SAIA)</span>
             </button>
           </div>
         </div>

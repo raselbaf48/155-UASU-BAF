@@ -394,32 +394,6 @@ export function exportCanteenBillToExcel({
     sumRemainingDue,
   ]);
 
-  // 5. Append Signatures section at bottom
-  aoa.push([]);
-  aoa.push([]);
-  aoa.push([
-    '',
-    '------------------',
-    '',
-    '',
-    '------------------',
-    '',
-    '',
-    '------------------',
-    ''
-  ]);
-  aoa.push([
-    '',
-    'গ্রাহকের স্বাক্ষর',
-    '',
-    '',
-    'ক্যান্টিন ম্যানেজার',
-    '',
-    '',
-    'ভারপ্রাপ্ত কর্মকর্তা',
-    ''
-  ]);
-
   // Convert AOA to Sheet
   const ws = XLSX.utils.aoa_to_sheet(aoa);
 
@@ -442,9 +416,6 @@ export function exportCanteenBillToExcel({
     { hpt: 32 }, // Row 5 (Headers)
     ...Array(sortedMembers.length).fill({ hpt: 20 }), // Data Rows
     { hpt: 24 }, // Total Row
-    { hpt: 15 }, // Gap
-    { hpt: 20 }, // Signature lines
-    { hpt: 20 }, // Signature labels
   ];
 
   // Set Column Widths for 9 columns
@@ -531,26 +502,6 @@ export function exportCanteenBillToExcel({
       border: cellBorder,
       fill: { fgColor: { rgb: 'E5E7EB' } }
     };
-  }
-
-  // Signature Rows styling
-  const sigRowLine = totalRowIndex + 3;
-  const sigRowLabel = totalRowIndex + 4;
-  for (let c = 0; c < 9; c++) {
-    const addrLine = XLSX.utils.encode_cell({ r: sigRowLine, c });
-    if (ws[addrLine]) {
-      ws[addrLine].s = {
-        font: { name: FONT_NAME, sz: 10, bold: true },
-        alignment: { horizontal: 'center', vertical: 'center' }
-      };
-    }
-    const addrLabel = XLSX.utils.encode_cell({ r: sigRowLabel, c });
-    if (ws[addrLabel]) {
-      ws[addrLabel].s = {
-        font: { name: FONT_NAME, sz: 11, bold: true },
-        alignment: { horizontal: 'center', vertical: 'center' }
-      };
-    }
   }
 
   // 7. Create Workbook and Append Sheet

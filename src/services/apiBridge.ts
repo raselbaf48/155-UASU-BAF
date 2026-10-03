@@ -124,7 +124,7 @@ async function handleLocalApiRequest(urlStr: string, init?: RequestInit): Promis
     if (pathname.startsWith('/api/airmen/')) {
       const id = (pathname || "").replace('/api/airmen/', '');
       if (method === 'PUT') {
-        const updated = localDb.updateAirman(id, body);
+        const updated = await localDb.updateAirman(id, body);
         return updated ? jsonResponse(updated) : jsonResponse({ error: 'Airman not found' }, 404);
       }
       if (method === 'DELETE') {
