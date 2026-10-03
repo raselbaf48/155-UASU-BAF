@@ -54,6 +54,7 @@ import {
   publishNewAppVersion,
   AppVersionRecord,
   DEFAULT_CURRENT_APP,
+  isRunningInApk,
 } from '../services/appUpdateService';
 
 
@@ -753,7 +754,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const sections = [
     { id: 'appearance', label: 'Theme & Appearance', icon: <Palette className="w-5 h-5" />, color: 'text-indigo-500 bg-indigo-100 dark:bg-indigo-950 dark:text-indigo-400' },
-    { id: 'appUpdate', label: 'In-App Update (Capacitor)', icon: <Download className="w-5 h-5" />, color: 'text-emerald-500 bg-emerald-100 dark:bg-emerald-950 dark:text-emerald-400' },
+    ...(isRunningInApk() ? [{ id: 'appUpdate', label: 'In-App Update (APK)', icon: <Download className="w-5 h-5" />, color: 'text-emerald-500 bg-emerald-100 dark:bg-emerald-950 dark:text-emerald-400' }] : []),
     ...((role === 'SUPER_ADMIN' || role === 'OWNER' || role === 'ADMIN') ? [{ id: 'cloudsync', label: 'Database Cloud Sync', icon: <Cloud className="w-5 h-5" />, color: 'text-blue-500 bg-blue-100 dark:bg-blue-950 dark:text-blue-400' }] : []),
     ...((role === 'SUPER_ADMIN' || role === 'OWNER' || role === 'ADMIN') ? [
       { id: 'appNotice', label: 'App Notice', icon: <Megaphone className="w-5 h-5" />, color: 'text-orange-500 bg-orange-100 dark:bg-orange-950 dark:text-orange-400' },
@@ -900,8 +901,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </div>
                   )}
 
-                  {/* In-App Software Update Section (Capacitor + Supabase app_versions) */}
-                  {activeSection === 'appUpdate' && (
+                  {/* In-App Software Update Section (Rendered ONLY in APK) */}
+                  {activeSection === 'appUpdate' && isRunningInApk() && (
                     <div className="space-y-6 animate-fadeIn">
                       {/* Top Header Card */}
                       <div className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-6">

@@ -670,6 +670,7 @@ export const PosSales: React.FC = () => {
                   soldItems: basket.map(b => ({
                       menuItemId: b.id,
                       menuItemName: b.name,
+                      price: Number(b.price || 0),
                       qty: b.qty
                   })),
                   amount: memberChargeAmount,

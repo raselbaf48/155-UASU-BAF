@@ -36,30 +36,32 @@ export function isRunningInApk(): boolean {
   try {
     if (typeof window === 'undefined') return false;
 
-    // 1. Capacitor native platform detection (Capacitor.isNativePlatform() is true ONLY inside native app)
-    if (Capacitor.isNativePlatform()) {
+    // 1. Capacitor native platform detection (Capacitor.isNativePlatform() is true ONLY inside native APK/app)
+    if (typeof Capacitor !== 'undefined' && typeof Capacitor.isNativePlatform === 'function' && Capacitor.isNativePlatform()) {
       return true;
     }
 
-    // 2. Platform string check: 'android' or 'ios' (Capacitor returns 'web' when in browser)
-    const platform = Capacitor.getPlatform();
-    if (platform === 'android' || platform === 'ios') {
+    // 2. Global window Capacitor native bridge check
+    if ((window as any).Capacitor && typeof (window as any).Capacitor.isNativePlatform === 'function' && (window as any).Capacitor.isNativePlatform()) {
       return true;
     }
 
-    // 3. Android WebView detection (for standalone APKs or WebView wrappers)
-    const ua = window.navigator.userAgent || '';
-    const isAndroid = /Android/i.test(ua);
-    const isAndroidWebView = isAndroid && (/; wv\b/i.test(ua) || /Version\/[0-9.]+\s+Chrome/i.test(ua));
-    if (isAndroidWebView) {
+    // 3. Native custom scheme (Capacitor Android native app loads from capacitor://localhost)
+    if (window.location.protocol === 'capacitor:' || window.location.protocol === 'ionic:') {
       return true;
     }
 
-    // 4. Manual override for developer testing / previewing APK mode
+    // 4. Android file asset origin
+    if (window.location.protocol === 'file:' && window.location.pathname.includes('android_asset')) {
+      return true;
+    }
+
+    // 5. Manual override for developer testing / previewing APK mode only
     if (window.location.search.includes('force_apk=true') || localStorage.getItem('baf_force_apk_mode') === 'true') {
       return true;
     }
 
+    // Otherwise, this is running in a web browser (Website)
     return false;
   } catch {
     return false;

@@ -228,6 +228,18 @@ export class LocalDatabaseEngine {
       // 1. Pull Airmen (Staff)
       emitSyncProgress(10, "Fetching Nominal Roll / Biodata...");
       let staffData: any[] | null = null;
+      let cloudSeniorityMap: Record<string, number> = {};
+      try {
+        const { data: settingRow } = await supabase
+          .from('app_settings')
+          .select('setting_value')
+          .eq('setting_key', 'baf_airmen_seniority_map')
+          .maybeSingle();
+        if (settingRow && settingRow.setting_value) {
+          cloudSeniorityMap = JSON.parse(settingRow.setting_value);
+        }
+      } catch (err) {}
+
       try {
          staffData = await fetchAll('Biodata Register');
       } catch(e: any) { 
@@ -257,9 +269,10 @@ export class LocalDatabaseEngine {
           const generatedId = (s.airman_id && s.airman_id !== "airman-undefined") ? s.airman_id : 'airman-' + (s['BD No'] && String(s['BD No']) !== "undefined" ? s['BD No'] : Math.random().toString(36).slice(2, 10));
           const localMatch = this.db.airmen.find(a => a.id === generatedId);
           const rawSeniority = s['Seniority'];
+          const bdClean = String(s['BD No'] || '').replace(/\D/g, '');
           const parsedSeniority = (rawSeniority !== null && rawSeniority !== undefined && !isNaN(Number(rawSeniority)))
             ? Number(rawSeniority)
-            : (localMatch?.seniority !== undefined ? localMatch.seniority : undefined);
+            : (cloudSeniorityMap[generatedId] ?? (bdClean ? cloudSeniorityMap[bdClean] : undefined) ?? (localMatch?.seniority !== undefined ? localMatch.seniority : undefined));
           return {
             id: generatedId,
             serNo: (localMatch && localMatch.serNo !== undefined) ? localMatch.serNo : idx + 1,
@@ -770,6 +783,24 @@ export class LocalDatabaseEngine {
         
         // 1. Sync Airmen (Staff)
         if (changedAirmen.length > 0) {
+          // Cloud backup of seniority map in app_settings table
+          try {
+            const seniorityMap: Record<string, number> = {};
+            this.db.airmen.forEach(a => {
+              if (a.seniority !== undefined && a.seniority !== null) {
+                seniorityMap[a.id] = Number(a.seniority);
+                const clean = String(a.bdNo || '').replace(/\D/g, '');
+                if (clean) seniorityMap[clean] = Number(a.seniority);
+              }
+            });
+            await supabase.from('app_settings').upsert({
+              setting_key: 'baf_airmen_seniority_map',
+              setting_value: JSON.stringify(seniorityMap),
+              updated_at: new Date().toISOString()
+            }, { onConflict: 'setting_key' });
+          } catch (e) {
+            console.warn("Could not save seniority map to app_settings:", e);
+          }
           let staffPayload = changedAirmen.map(a => ({
             airman_id: a.id,
             'Seniority': (a.seniority !== undefined && a.seniority !== null && !isNaN(Number(a.seniority))) ? Number(a.seniority) : null,

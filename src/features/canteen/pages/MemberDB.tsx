@@ -27,13 +27,24 @@ import {
   Landmark,
   Layers,
   LayoutGrid,
-  List
+  List,
+  FileSpreadsheet,
+  Coins,
+  Edit3,
+  History,
+  Download
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, fetchDirectImageUrl, getCanteenConfig } from '../utils/canteenSettings';
 import { processGalleryImage } from '../utils/imageUpload';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { SaveButton } from '../components/SaveButton';
+import { BulkImportInitialBillsModal } from '../components/BulkImportInitialBillsModal';
+import { SetInitialBillModal } from '../components/SetInitialBillModal';
+import { PrintableCanteenBillModal } from '../components/PrintableCanteenBillModal';
+import { pushKeyToCloud } from '../utils/canteenCloudSync';
+import { exportCanteenBillToExcel } from '../utils/exportCanteenBillExcel';
+import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
 
 export type BillCategory = 'ALL' | 'CANTEEN' | 'UNIT_FUND' | 'OTHERS';
 
@@ -54,6 +65,178 @@ export const getTxMonthKey = (dateStr: any): string => {
     }
   } catch {}
   return '';
+};
+
+// Extract YYYY-MM of the current running month
+export const getRunningMonthKey = (): string => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  return `${y}-${m}`;
+};
+
+// Official menu catalog prices dictionary
+// Official menu catalog prices dictionary with exact rates
+export const DEFAULT_MENU_PRICES: Record<string, number> = {
+  // Canteen Menu Official Catalog Items
+  'COLD COFFEE': 40,
+  'CHICKEN ONION': 45,
+  'CHICKEN PASTA': 55,
+  'CHICKEN PULAW': 65,
+  'CHOTPOTI': 30,
+  'DRY CAKE': 12,
+  'EGG FRY': 18,
+  'EGG KHICURI': 45,
+  'EGG KHICHURI': 45,
+  'EGG MUMLET': 15,
+  'EGG NOODLES': 50,
+  'GREEN TEA': 8,
+  'HALIM': 50,
+  'HOT COFFEE': 25,
+  'LEMON JUICE': 10,
+  'LIQUOR TEA': 5,
+  'MILK COFFEE': 25,
+  'MILK TEA': 12,
+  'NOODLES': 30,
+  'NORMAL BISCUIT': 5,
+  'ONE TIME BOX': 5,
+  'PASTA': 35,
+  'PORATA': 15,
+  'PORATA (HOTEL)': 10,
+  'PORATA (UNIT)': 15,
+  'RAW TEA': 5,
+  'ROASTED CHICKEN': 80,
+  'BEEF BURGER': 60,
+  'CHICKEN BURGER': 50,
+  'SOSA': 10,
+  'SWARMA': 50,
+  'SHWARMA': 50,
+  'BOILED EGG': 15,
+  'CHICKEN BIRIYANI': 65,
+  'CHICKEN CURRY': 50,
+  'CHICKEN BIRYANI': 65,
+  'CHICKEN KHICHURI': 65,
+  'SINGARA': 10,
+  'SHINGARA': 10,
+  'SAMOSA': 10,
+  'SOMOSA': 10,
+  'TEA': 12,
+  'COFFEE': 25,
+  'PATTIES': 25,
+  'CHICKEN PATTIES': 30,
+  'ROLL': 25,
+  'CHICKEN ROLL': 30,
+  'SWEET': 15,
+  'SANDWICH': 35,
+  'CHICKEN SANDWICH': 40,
+
+  // Bengali transliterations / aliases
+  'কোল্ড কফি': 40,
+  'চিকেন অনিয়ন': 45,
+  'চিকেন পেঁয়াজু': 45,
+  'চিকেন পিয়াজু': 45,
+  'চিকেন পাস্তা': 55,
+  'পাস্তা': 35,
+  'চিকেন পোলাও': 65,
+  'চটপটি': 30,
+  'ড্রাই কেক': 12,
+  'ডিম ফ্রাই': 18,
+  'ডিম খিচুড়ি': 45,
+  'চিকেন খিচুড়ি': 65,
+  'ডিম অমলেট': 15,
+  'ডিম ওমলেট': 15,
+  'ডিম মামলেট': 15,
+  'নুডলস': 30,
+  'ডিম নুডলস': 50,
+  'গ্রিন টি': 8,
+  'সবুজ চা': 8,
+  'হালিম': 50,
+  'হট কফি': 25,
+  'লেবু জুস': 10,
+  'লেবুর শরবত': 10,
+  'লিকুয়ার চা': 5,
+  'রং চা': 5,
+  'লাল চা': 5,
+  'মিল্ক কফি': 25,
+  'দুধ চা': 12,
+  'চা': 12,
+  'বিস্কুট': 5,
+  'নরমাল বিস্কুট': 5,
+  'ওয়ান টাইম বক্স': 5,
+  'ওয়ানটাইম বক্স': 5,
+  'পরোটা': 15,
+  'পরোটা (হোটেল)': 10,
+  'হোটেল পরোটা': 10,
+  'পরোটা (ইউনিট)': 15,
+  'ইউনিট পরোটা': 15,
+  'কাঁচা চা': 5,
+  'রোস্টেড চিকেন': 80,
+  'বিফ বার্গার': 60,
+  'চিকেন বার্গার': 50,
+  'বার্গার': 50,
+  'শসা': 10,
+  'সোয়ার্মা': 50,
+  'শর্মা': 50,
+  'ডিম সিদ্ধ': 15,
+  'সিদ্ধ ডিম': 15,
+  'চিকেন বিরিয়ানি': 65,
+  'চিকেন বিরিয়ানী': 65,
+  'চিকেন কারি': 50,
+  'চিকেন কারী': 50,
+  'সিঙ্গারা': 10,
+  'সমুচা': 10,
+  'কফি': 25,
+  'প্যাটিস': 25,
+  'চিকেন প্যাটিস': 30,
+  'রোল': 25,
+  'চিকেন রোল': 30,
+  'মিষ্টি': 15,
+  'স্যান্ডউইচ': 35,
+  'চিকেন স্যান্ডউইচ': 40
+};
+
+// Robust catalog price resolver
+export const lookupCatalogPrice = (itemName: string, catalog: any[] = []): number => {
+  if (!itemName) return 0;
+  const raw = String(itemName).trim();
+  const clean = raw.toUpperCase().replace(/\s+/g, ' ');
+
+  // 1. Check live catalog from Supabase Canteen_Menu first
+  if (Array.isArray(catalog) && catalog.length > 0) {
+    const direct = catalog.find((c: any) => {
+      const cName = String(c.name || '').toUpperCase().trim().replace(/\s+/g, ' ');
+      return cName === clean;
+    });
+    if (direct && Number(direct.price ?? direct.Price) > 0) {
+      return Number(direct.price ?? direct.Price);
+    }
+  }
+
+  // 2. Direct match in DEFAULT_MENU_PRICES dictionary
+  if (DEFAULT_MENU_PRICES[clean] !== undefined) {
+    return DEFAULT_MENU_PRICES[clean];
+  }
+
+  // 3. Normalized / fuzzy match in Supabase catalog
+  if (Array.isArray(catalog) && catalog.length > 0) {
+    const fuzzy = catalog.find((c: any) => {
+      const cName = String(c.name || '').toUpperCase().trim().replace(/\s+/g, ' ');
+      return cName.includes(clean) || clean.includes(cName);
+    });
+    if (fuzzy && Number(fuzzy.price ?? fuzzy.Price) > 0) {
+      return Number(fuzzy.price ?? fuzzy.Price);
+    }
+  }
+
+  // 4. Substring / alias matching in DEFAULT_MENU_PRICES
+  for (const [key, price] of Object.entries(DEFAULT_MENU_PRICES)) {
+    const kUpper = key.toUpperCase();
+    if (clean.includes(kUpper) || kUpper.includes(clean)) {
+      return price;
+    }
+  }
+
+  return 0;
 };
 
 // Format month key to readable label e.g. "October 2026"
@@ -126,6 +309,13 @@ interface StatementRow {
   total: number;
 }
 
+export interface StatementItemRow {
+  itemName: string;
+  qty: number;
+  rate: number;
+  total: number;
+}
+
 export const MemberDB: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<BillCategory>('ALL');
@@ -135,7 +325,12 @@ export const MemberDB: React.FC = () => {
 
   const [allTxs, setAllTxs] = useState<any[]>(() => {
     try {
-      return JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+      const parsed = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+      const filtered = parsed.filter((t: any) => !String(t.id).startsWith('1791043520536'));
+      if (filtered.length !== parsed.length) {
+        localStorage.setItem('canteen_txs', JSON.stringify(filtered));
+      }
+      return filtered;
     } catch { return []; }
   });
 
@@ -168,14 +363,47 @@ export const MemberDB: React.FC = () => {
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [isSavedProfile, setIsSavedProfile] = useState(false);
-  const [editMemberData, setEditMemberData] = useState({ bdNo: '', rank: '', surname: '', contact: '', dp: '', role: 'Member' });
+  const [editMemberData, setEditMemberData] = useState({ bdNo: '', rank: '', surname: '', contact: '', dp: '', role: 'Member', due: 0 });
   const [profileTx, setProfileTx] = useState<any[]>([]);
+
+  // Initial Bill Modals state
+  const [isImportBillsModalOpen, setIsImportBillsModalOpen] = useState(false);
+  const [importModalInitialTab, setImportModalInitialTab] = useState<'FILE' | 'PASTE' | 'HISTORY'>('FILE');
+  const [initialBillMember, setInitialBillMember] = useState<any | null>(null);
 
   // Statement Modal state
   const [statementMember, setStatementMember] = useState<any | null>(null);
   const [statementTx, setStatementTx] = useState<any[]>([]);
   const [statementCategory, setStatementCategory] = useState<BillCategory>('ALL');
-  const [statementMonth, setStatementMonth] = useState<string>('ALL');
+  const [statementMonth, setStatementMonth] = useState<string>(() => getRunningMonthKey());
+
+  // Menu catalog prices cache for accurate item rate calculations
+  const [menuCatalog, setMenuCatalog] = useState<any[]>(() => {
+    try {
+      const cached = localStorage.getItem('canteen_menu_cache');
+      if (cached) return JSON.parse(cached);
+    } catch {}
+    return [];
+  });
+
+  useEffect(() => {
+    const fetchMenuCatalog = async () => {
+      try {
+        const { data, error } = await supabase.from('Canteen_Menu').select('*');
+        if (!error && data && data.length > 0) {
+          setMenuCatalog(data);
+          localStorage.setItem('canteen_menu_cache', JSON.stringify(data));
+        }
+      } catch (err) {
+        console.warn('Could not fetch Canteen_Menu:', err);
+      }
+    };
+    fetchMenuCatalog();
+  }, []);
+
+  const getMenuItemPrice = (name: string): number => {
+    return lookupCatalogPrice(name, menuCatalog);
+  };
 
   // Pay Bill Modal state
   const [payBillMember, setPayBillMember] = useState<any | null>(null);
@@ -186,6 +414,7 @@ export const MemberDB: React.FC = () => {
   // Deletion modals
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [txDeleteConfirmId, setTxDeleteConfirmId] = useState<any | null>(null);
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
 
   const toEnglishDate = formatCanteenDate;
 
@@ -254,7 +483,15 @@ export const MemberDB: React.FC = () => {
     );
 
     if (category === 'ALL' && month === 'ALL') {
-      return Number(member.Due ?? member.due ?? member.baki ?? 0);
+      const totalMemberDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
+      const allCharges = memberTxs
+        .filter((tx) => tx.type !== 'BILL PAYMENT')
+        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+      const allPayments = memberTxs
+        .filter((tx) => tx.type === 'BILL PAYMENT')
+        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+      const netTxBill = Math.max(0, allCharges - allPayments);
+      return Math.max(totalMemberDue, netTxBill);
     }
 
     const matchingTxs = memberTxs.filter((tx) => {
@@ -336,8 +573,9 @@ export const MemberDB: React.FC = () => {
   const openStatement = (member: any) => {
     const effDp = getMemberEffectiveDp(member);
     setStatementMember({ ...member, DP: effDp || member['DP'] || '' });
-    setStatementCategory(selectedCategory);
-    setStatementMonth(selectedMonth);
+    setStatementCategory('ALL');
+    const runningMonth = getRunningMonthKey();
+    setStatementMonth(selectedMonth !== 'ALL' ? selectedMonth : runningMonth);
     try {
       const txs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
       const memberTxs = txs.filter((tx: any) => tx.airman_id === member.airman_id || (member['BD No'] && tx.bdNo === member['BD No']));
@@ -362,7 +600,8 @@ export const MemberDB: React.FC = () => {
       surname: member['Surname'] || '',
       contact: member['Contact'] || member['Mobile No'] || '',
       role: member['Role'] || member.role || 'Member',
-      dp: effDp || member['DP'] || ''
+      dp: effDp || member['DP'] || '',
+      due: Number(member.Due ?? member.due ?? member.baki ?? 0)
     });
     try {
       const txs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
@@ -373,7 +612,156 @@ export const MemberDB: React.FC = () => {
     }
   };
 
-  // Build Statement rows matching: ক্রমিক নং, তারিখ, বিবরণ, পরিমাণ, দর, মোট
+  // Build Aggregated Statement rows matching: দ্রব্যের নাম, পরিমাণ, দর, মোট
+  const parseStatementAggregatedItems = (txs: any[]): StatementItemRow[] => {
+    const itemMap = new Map<string, { itemName: string; qty: number; total: number; rates: number[] }>();
+
+    txs.forEach((tx) => {
+      if (tx.type === 'BILL PAYMENT') return;
+
+      // 1. If tx has structured soldItems array (from POS)
+      if (Array.isArray(tx.soldItems) && tx.soldItems.length > 0) {
+        tx.soldItems.forEach((si: any) => {
+          const name = String(si.menuItemName || si.name || 'ক্যান্টিন খাদ্যদ্রব্য').trim();
+          const qty = Number(si.qty || si.quantity || 1);
+          let itemRate = Number(si.price || si.rate || 0);
+          if (itemRate <= 0) {
+            itemRate = lookupCatalogPrice(name, menuCatalog);
+          }
+          const itemTotal = itemRate > 0 ? itemRate * qty : (Number(tx.amount || 0) / (tx.soldItems.length || 1));
+
+          if (!itemMap.has(name)) {
+            itemMap.set(name, { itemName: name, qty: 0, total: 0, rates: [] });
+          }
+          const rec = itemMap.get(name)!;
+          rec.qty += qty;
+          rec.total += itemTotal;
+          if (itemRate > 0) rec.rates.push(itemRate);
+        });
+        return;
+      }
+
+      // 2. Parse from tx.items string (e.g. "চা (2), সিঙ্গারা (1)" or "প্যাটিস")
+      const itemsStr = tx.items || 'ক্যান্টিন খরচ';
+      const parts = String(itemsStr).split(',').map((s) => s.trim()).filter(Boolean);
+
+      if (parts.length === 1) {
+        const match = parts[0].match(/^(.+?)\s*\(([0-9]+)\)$/);
+        if (match) {
+          const name = match[1].trim();
+          const qty = parseInt(match[2], 10) || 1;
+          const total = Number(tx.amount || 0);
+          let rate = lookupCatalogPrice(name, menuCatalog);
+          if (rate <= 0) {
+            rate = qty > 0 ? Math.round((total / qty) * 100) / 100 : total;
+          }
+          const finalTotal = (rate > 0 && Math.abs(rate * qty - total) <= 2) ? rate * qty : total;
+
+          if (!itemMap.has(name)) {
+            itemMap.set(name, { itemName: name, qty: 0, total: 0, rates: [] });
+          }
+          const rec = itemMap.get(name)!;
+          rec.qty += qty;
+          rec.total += finalTotal;
+          if (rate > 0) rec.rates.push(rate);
+        } else {
+          const name = parts[0].trim();
+          const total = Number(tx.amount || 0);
+          let rate = lookupCatalogPrice(name, menuCatalog);
+          if (rate <= 0) rate = total;
+
+          if (!itemMap.has(name)) {
+            itemMap.set(name, { itemName: name, qty: 0, total: 0, rates: [] });
+          }
+          const rec = itemMap.get(name)!;
+          rec.qty += 1;
+          rec.total += total;
+          rec.rates.push(rate > 0 ? rate : total);
+        }
+      } else if (parts.length > 1) {
+        let parsed: { name: string; qty: number; rate: number }[] = [];
+        parts.forEach((p) => {
+          const match = p.match(/^(.+?)\s*\(([0-9]+)\)$/);
+          if (match) {
+            const q = parseInt(match[2], 10) || 1;
+            const nm = match[1].trim();
+            const r = lookupCatalogPrice(nm, menuCatalog);
+            parsed.push({ name: nm, qty: q, rate: r });
+          } else {
+            const nm = p.trim();
+            const r = lookupCatalogPrice(nm, menuCatalog);
+            parsed.push({ name: nm, qty: 1, rate: r });
+          }
+        });
+
+        const txAmount = Number(tx.amount || 0);
+        parsed.forEach((item) => {
+          let itemRate = item.rate;
+          let subTotal = 0;
+          if (itemRate > 0) {
+            subTotal = itemRate * item.qty;
+          } else {
+            const totalQty = parsed.reduce((sum, p) => sum + p.qty, 0);
+            itemRate = totalQty > 0 ? Math.round((txAmount / totalQty) * 100) / 100 : txAmount / parts.length;
+            subTotal = Math.round(itemRate * item.qty * 100) / 100;
+          }
+
+          if (!itemMap.has(item.name)) {
+            itemMap.set(item.name, { itemName: item.name, qty: 0, total: 0, rates: [] });
+          }
+          const rec = itemMap.get(item.name)!;
+          rec.qty += item.qty;
+          rec.total += subTotal;
+          if (itemRate > 0) rec.rates.push(itemRate);
+        });
+      } else {
+        const name = itemsStr.trim();
+        const total = Number(tx.amount || 0);
+        let rate = lookupCatalogPrice(name, menuCatalog);
+        if (rate <= 0) rate = total;
+
+        if (!itemMap.has(name)) {
+          itemMap.set(name, { itemName: name, qty: 0, total: 0, rates: [] });
+        }
+        const rec = itemMap.get(name)!;
+        rec.qty += 1;
+        rec.total += total;
+        rec.rates.push(rate > 0 ? rate : total);
+      }
+    });
+
+    const rows: StatementItemRow[] = [];
+    itemMap.forEach((val) => {
+      // 1. Direct catalog lookup for accurate unit price (দর)
+      let finalRate = lookupCatalogPrice(val.itemName, menuCatalog);
+
+      // 2. If not found in catalog, check recorded rates from transactions
+      if (finalRate <= 0 && val.rates.length > 0) {
+        finalRate = Math.round(val.rates[0] * 100) / 100;
+      }
+
+      // 3. Fallback to average unit cost
+      if (finalRate <= 0 && val.qty > 0) {
+        finalRate = Math.round((val.total / val.qty) * 100) / 100;
+      }
+
+      // Calculate accurate total (পরিমাণ × দর)
+      const calculatedTotal = (finalRate > 0 && val.qty > 0)
+        ? Math.round(finalRate * val.qty * 100) / 100
+        : Math.round(val.total * 100) / 100;
+
+      rows.push({
+        itemName: val.itemName,
+        qty: val.qty,
+        rate: finalRate,
+        total: calculatedTotal
+      });
+    });
+
+    return rows.sort((a, b) => b.total - a.total);
+  };
+
+  // Build Statement rows matching legacy breakdown if needed
   const parseStatementRows = (txs: any[]): StatementRow[] => {
     const rows: StatementRow[] = [];
     let sl = 1;
@@ -402,23 +790,30 @@ export const MemberDB: React.FC = () => {
           const itemName = match[1].trim();
           const qty = parseInt(match[2], 10) || 1;
           const total = Number(tx.amount || 0);
-          const rate = qty > 0 ? Math.round((total / qty) * 100) / 100 : total;
+          let rate = lookupCatalogPrice(itemName, menuCatalog);
+          if (rate <= 0) {
+            rate = qty > 0 ? Math.round((total / qty) * 100) / 100 : total;
+          }
+          const finalTotal = (rate > 0 && Math.abs(rate * qty - total) <= 2) ? rate * qty : total;
           rows.push({
             sl: sl++,
             date: txDate,
             item: itemName,
             qty: qty,
             rate: rate,
-            total: total
+            total: finalTotal
           });
         } else {
+          const name = parts[0];
           const total = Number(tx.amount || 0);
+          let rate = lookupCatalogPrice(name, menuCatalog);
+          if (rate <= 0) rate = total;
           rows.push({
             sl: sl++,
             date: txDate,
-            item: parts[0],
+            item: name,
             qty: 1,
-            rate: total,
+            rate: rate,
             total: total
           });
         }
@@ -461,11 +856,11 @@ export const MemberDB: React.FC = () => {
   // WhatsApp send handler with formatted bill breakdown
   const handleSendWhatsApp = (
     member: any, 
-    rows: StatementRow[], 
+    items: StatementItemRow[], 
     totalDue: number, 
-    totalExpenses: number, 
-    monthKey: string = 'ALL',
-    categoryKey: BillCategory = 'ALL'
+    totalMonthBill: number, 
+    previousDue: number,
+    monthKey: string = 'ALL'
   ) => {
     let contact = (member.Contact || member.contact || member['Mobile No'] || '').trim();
     if (!contact) {
@@ -483,35 +878,28 @@ export const MemberDB: React.FC = () => {
     const rank = member.Rank || member.rank || '';
     const surname = member.Surname || member.surname || '';
     const monthTitle = formatMonthName(monthKey);
-    const catName = categoryKey === 'CANTEEN' 
-      ? 'ক্যান্টিন বিল' 
-      : categoryKey === 'UNIT_FUND' 
-      ? 'ইউনিট ফান্ড বিল' 
-      : categoryKey === 'OTHERS' 
-      ? 'অন্যান্য বিল' 
-      : 'সর্বমোট বিল';
 
     let rowsList = '';
-    if (rows.length === 0) {
+    if (items.length === 0) {
       rowsList = 'কোনো রেকর্ড পাওয়া যায়নি।\n';
     } else {
-      rowsList = rows.map(r => 
-        `${r.sl}. ${r.date} | ${r.item} | পরিমাণ: ${r.qty} | দর: ৳${r.rate} | মোট: ৳${r.total}`
+      rowsList = items.map((r, idx) => 
+        `${idx + 1}. ${r.itemName} | পরিমাণ: ${r.qty} | দর: ৳${r.rate} | মোট: ৳${r.total}`
       ).join('\n');
     }
 
     const message = 
-`🍽️ *CAFE UAV - ${catName} বিবরণী*
+`🍽️ *CAFE UAV - মাসিক বিল বিবরণী*
 📅 *মাসের নাম:* ${monthTitle}
 👤 *পদবী ও নাম:* ${rank} ${surname}
 
 ━━━━━━━━━━━━━━━━━━━━━
-*ক্রমিক নং | তারিখ | বিবরণ | পরিমাণ | দর | মোট*
+*দ্রব্যের নাম | পরিমাণ | দর | মোট*
 ━━━━━━━━━━━━━━━━━━━━━
 ${rowsList}
 ━━━━━━━━━━━━━━━━━━━━━
-💰 *${catName}:* ৳${totalExpenses}
-💳 *সর্বমোট প্রদেয় (DUE):* ৳${totalDue}
+💰 *মোট বিল:* ৳${totalMonthBill}
+${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্তী মাস):* ৳${previousDue}\n` : ''}💳 *সর্বমোট প্রদেয় বিল:* ৳${totalDue}
 
 (বিল পরিশোধের জন্য ধন্যবাদ - CAFE UAV)`;
 
@@ -571,10 +959,14 @@ ${rowsList}
 
   // Remove history transaction
   const handleRemoveTx = async (txToRemove: any) => {
+    if (!txToRemove) return;
     const targetMember = profileMember || statementMember;
-    if (!targetMember) return;
+    if (!targetMember) {
+      setTxDeleteConfirmId(null);
+      return;
+    }
 
-    const amountToReverse = txToRemove.amount || 0;
+    const amountToReverse = Number(txToRemove.amount || 0);
     const currentDue = Number(targetMember.Due ?? targetMember.due ?? targetMember.baki ?? 0);
     let newDue = currentDue;
     
@@ -584,37 +976,74 @@ ${rowsList}
       newDue = Math.max(0, currentDue - amountToReverse);
     }
     
-    await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', targetMember.airman_id);
-    
-    if (txToRemove.type !== 'BILL PAYMENT' && txToRemove.items) {
-      const parts = txToRemove.items.split(',');
-      for (const part of parts) {
-        const match = part.trim().match(/(.+?)\s*\((\d+)\)$/);
-        if (match) {
-          const itemName = match[1].trim();
-          const qty = parseInt(match[2], 10);
-          try {
-            await supabase.from('Canteen_Menu').select('*').eq('name', itemName).single();
-          } catch {}
-        }
+    // 1. Update Supabase Canteen_Member table
+    try {
+      if (targetMember['BD No']) {
+        await supabase
+          .from('Canteen_Member')
+          .update({ Due: newDue })
+          .eq('BD No', String(targetMember['BD No']).trim());
+      } else if (targetMember.airman_id) {
+        await supabase
+          .from('Canteen_Member')
+          .update({ Due: newDue })
+          .eq('airman_id', targetMember.airman_id);
       }
+    } catch (e) {
+      console.warn('Error updating member Due in Supabase on remove tx:', e);
+    }
+    
+    // 2. Remove transaction from localStorage and Supabase app_settings cloud sync
+    const txIdStr = String(txToRemove.id);
+    let newTxs: any[] = [];
+    try {
+      const rawTxs = localStorage.getItem('canteen_txs');
+      const txs = rawTxs ? JSON.parse(rawTxs) : [];
+      newTxs = txs.filter((t: any) => String(t.id) !== txIdStr);
+      localStorage.setItem('canteen_txs', JSON.stringify(newTxs));
+      await pushKeyToCloud('canteen_txs', newTxs);
+    } catch (e) {
+      console.warn('Error updating canteen_txs on remove tx:', e);
     }
 
-    const txs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-    const newTxs = txs.filter((t: any) => t.id !== txToRemove.id);
-    localStorage.setItem('canteen_txs', JSON.stringify(newTxs));
+    // 3. Update allTxs React state so all calculations and cards recompute immediately
+    setAllTxs(newTxs);
     
-    const updatedMember = { ...targetMember, Due: newDue, baki: newDue };
-    setMembers(prev => prev.map(m => m.airman_id === updatedMember.airman_id ? updatedMember : m));
+    // 4. Update member object in all states and local cache
+    const updatedMember = { 
+      ...targetMember, 
+      Due: newDue, 
+      due: newDue, 
+      baki: newDue 
+    };
+
+    setMembers(prev => {
+      const next = prev.map(m => 
+        (m.airman_id === updatedMember.airman_id || (m['BD No'] && m['BD No'] === updatedMember['BD No'])) 
+          ? updatedMember 
+          : m
+      );
+      try {
+        localStorage.setItem('canteen_members_cache', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
     
     if (profileMember) {
       setProfileMember(updatedMember);
-      setProfileTx(prev => prev.filter(t => t.id !== txToRemove.id));
+      setProfileTx(prev => prev.filter(t => String(t.id) !== txIdStr));
+      setEditMemberData(prev => ({ ...prev, due: newDue }));
     }
+
     if (statementMember) {
       setStatementMember(updatedMember);
-      setStatementTx(prev => prev.filter(t => t.id !== txToRemove.id));
+      setStatementTx(prev => prev.filter(t => String(t.id) !== txIdStr));
     }
+
+    // 5. Notify all listeners
+    window.dispatchEvent(new Event('canteen_txs_updated'));
+    window.dispatchEvent(new Event('canteen_state_updated'));
+    window.dispatchEvent(new Event('storage'));
 
     setTxDeleteConfirmId(null);
   };
@@ -642,18 +1071,8 @@ ${rowsList}
         };
       });
 
-    // Sort by military Rank Seniority & BD Number
-    formatted.sort((a, b) => {
-      const weightA = getRankSeniorityWeight(a.Rank);
-      const weightB = getRankSeniorityWeight(b.Rank);
-      if (weightA !== weightB) return weightA - weightB;
-
-      const bdA = parseInt(String(a['BD No'] || '').replace(/\D/g, ''), 10) || 9999999;
-      const bdB = parseInt(String(b['BD No'] || '').replace(/\D/g, ''), 10) || 9999999;
-      return bdA - bdB;
-    });
-
-    return formatted;
+    // Sort strictly by Office Nominal Roll Seniority & BAF Hierarchy
+    return sortCanteenMembersByOfficeSeniority(formatted);
   };
 
   // Auto-sync Biodata silently in background if Canteen_Member is empty or missing airmen
@@ -791,12 +1210,14 @@ ${rowsList}
       setResolvingDp(false);
     }
 
+    const newDue = Number(editMemberData.due || 0);
     const updatePayload = {
       "BD No": editMemberData.bdNo.trim(),
       "Rank": editMemberData.rank.trim(),
       "Surname": editMemberData.surname.trim(),
       "Contact": editMemberData.contact?.trim() || '',
       "Role": editMemberData.role || 'Member',
+      Due: newDue,
       DP: finalDp || null
     };
 
@@ -819,12 +1240,23 @@ ${rowsList}
       const updated = { 
         ...profileMember, 
         ...updatePayload, 
+        Due: newDue,
+        due: newDue,
+        baki: newDue,
         role: editMemberData.role || 'Member',
         Role: editMemberData.role || 'Member',
         DP: finalDp 
       };
       setProfileMember(updated);
-      setMembers(prev => prev.map(m => (m.airman_id === profileMember.airman_id || m['BD No'] === editMemberData.bdNo) ? updated : m));
+      setMembers(prev => {
+        const next = prev.map(m => (m.airman_id === profileMember.airman_id || m['BD No'] === editMemberData.bdNo) ? updated : m);
+        try {
+          localStorage.setItem('canteen_members_cache', JSON.stringify(next));
+        } catch {}
+        return next;
+      });
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
       
       // 3. Trigger beautiful animation on button box
       setIsSavedProfile(true);
@@ -838,12 +1270,23 @@ ${rowsList}
       const updated = { 
         ...profileMember, 
         ...updatePayload, 
+        Due: newDue,
+        due: newDue,
+        baki: newDue,
         role: editMemberData.role || 'Member',
         Role: editMemberData.role || 'Member',
         DP: finalDp 
       };
       setProfileMember(updated);
-      setMembers(prev => prev.map(m => (m.airman_id === profileMember.airman_id || m['BD No'] === editMemberData.bdNo) ? updated : m));
+      setMembers(prev => {
+        const next = prev.map(m => (m.airman_id === profileMember.airman_id || m['BD No'] === editMemberData.bdNo) ? updated : m);
+        try {
+          localStorage.setItem('canteen_members_cache', JSON.stringify(next));
+        } catch {}
+        return next;
+      });
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
       setIsSavedProfile(true);
       setTimeout(() => {
         setIsSavedProfile(false);
@@ -891,26 +1334,60 @@ ${rowsList}
   }, [filteredMembers, selectedCategory, selectedMonth, allTxs]);
 
   const displayedMemberList = useMemo(() => {
-    if (!onlyWithBill) return filteredMembers;
-    return filteredMembers.filter((m) => {
+    const list = !onlyWithBill ? filteredMembers : filteredMembers.filter((m) => {
       const b = getMemberFilteredBill(m, selectedCategory, selectedMonth);
       return b > 0;
     });
+    return sortCanteenMembersByOfficeSeniority(list);
   }, [filteredMembers, onlyWithBill, selectedCategory, selectedMonth, allTxs]);
+
+  const handleExportBills = () => {
+    setIsPrintModalOpen(true);
+  };
 
   const resolvedEditDp = resolveImageUrl(editMemberData.dp);
 
   // Statement rows calculation for Statement modal
   const filteredStatementTxs = statementTx.filter((tx) => {
-    const cat = getTxCategory(tx);
-    const catMatch = statementCategory === 'ALL' || cat === statementCategory;
     const txMonth = getTxMonthKey(tx.date);
-    const monthMatch = statementMonth === 'ALL' || txMonth === statementMonth;
-    return catMatch && monthMatch;
+    return statementMonth === 'ALL' || txMonth === statementMonth;
   });
 
-  const statementRows = parseStatementRows(filteredStatementTxs);
-  const totalStatementExpenses = statementRows.reduce((sum, r) => sum + (r.total > 0 ? r.total : 0), 0);
+  const statementAggregatedItems = parseStatementAggregatedItems(filteredStatementTxs);
+  const totalMonthBill = statementAggregatedItems.reduce((sum, r) => sum + r.total, 0);
+
+  const currentMonthPayments = filteredStatementTxs
+    .filter((tx) => tx.type === 'BILL PAYMENT')
+    .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+  const memberTotalDue = Number(statementMember?.Due ?? statementMember?.due ?? statementMember?.baki ?? 0);
+
+  // বকেয়া বিল: আগের মাসে বা তার আগের বকেয়া বিল থাকলে তা দেখাবে
+  let previousDue = 0;
+  if (statementMonth !== 'ALL') {
+    const olderTxs = statementTx.filter((tx) => {
+      const m = getTxMonthKey(tx.date);
+      return m && m < statementMonth;
+    });
+    const olderCharges = olderTxs
+      .filter((tx) => tx.type !== 'BILL PAYMENT')
+      .reduce((s, tx) => s + Number(tx.amount || 0), 0);
+    const olderPayments = olderTxs
+      .filter((tx) => tx.type === 'BILL PAYMENT')
+      .reduce((s, tx) => s + Number(tx.amount || 0), 0);
+    const olderNet = Math.max(0, olderCharges - olderPayments);
+
+    if (olderNet > 0) {
+      previousDue = Math.round(olderNet * 100) / 100;
+    } else {
+      const currentNet = Math.max(0, totalMonthBill - currentMonthPayments);
+      previousDue = Math.max(0, Math.round((memberTotalDue - currentNet) * 100) / 100);
+    }
+  }
+
+  const netPayable = statementMonth === 'ALL'
+    ? (memberTotalDue > 0 ? memberTotalDue : totalMonthBill)
+    : Math.max(0, Math.round((totalMonthBill + previousDue - currentMonthPayments) * 100) / 100);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
@@ -985,66 +1462,48 @@ ${rowsList}
             </button>
           </div>
 
-          {/* Month Selector Dropdown with Prev/Next Controls */}
+          {/* Month Selector: All Month & Month Selector (Displays Month Name, Changeable) */}
           <div className="flex items-center space-x-2 self-start lg:self-auto w-full lg:w-auto">
-            {/* Prev Month Button */}
-            <button
-              type="button"
-              onClick={handlePrevMonth}
-              className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl border border-slate-700 transition-colors cursor-pointer shrink-0"
-              title="Previous Month"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-
-            <div className="relative flex-1 lg:w-56">
-              <Calendar className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400 pointer-events-none" />
-              <select
-                value={selectedMonth}
-                onChange={(e) => setSelectedMonth(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 hover:border-slate-600 text-white rounded-xl pl-10 pr-8 py-2 text-xs font-black font-mono tracking-wider focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer appearance-none"
-              >
-                <option value="ALL">All Months</option>
-                {availableMonths.map((m) => (
-                  <option key={m} value={m}>
-                    {formatMonthName(m)}
-                  </option>
-                ))}
-              </select>
-              <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-xs">
-                ▼
-              </div>
-            </div>
-
-            {/* Next Month Button */}
-            <button
-              type="button"
-              onClick={handleNextMonth}
-              disabled={selectedMonth === 'ALL'}
-              className={`p-2 rounded-xl border border-slate-700 transition-colors shrink-0 ${
-                selectedMonth === 'ALL'
-                  ? 'bg-slate-900 text-slate-600 cursor-not-allowed'
-                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white cursor-pointer'
-              }`}
-              title="Next Month"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-
-            {(selectedCategory !== 'ALL' || selectedMonth !== 'ALL') && (
+            <div className="flex items-center bg-slate-950 rounded-2xl p-1 border border-slate-800 shadow-sm w-full sm:w-auto">
               <button
                 type="button"
-                onClick={() => {
-                  setSelectedCategory('ALL');
-                  setSelectedMonth('ALL');
-                  setOnlyWithBill(false);
-                }}
-                className="px-2.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 border border-slate-700"
-                title="Reset Filters"
+                onClick={() => setSelectedMonth('ALL')}
+                className={`flex-1 sm:flex-initial px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  selectedMonth === 'ALL'
+                    ? 'bg-indigo-600 text-white shadow-md'
+                    : 'text-slate-400 hover:text-white'
+                }`}
               >
-                Reset
+                All Month
               </button>
-            )}
+
+              <div className="relative flex-1 sm:flex-initial">
+                <Calendar className={`w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none transition-colors ${
+                  selectedMonth !== 'ALL' ? 'text-white' : 'text-indigo-400'
+                }`} />
+                <select
+                  value={selectedMonth === 'ALL' ? getRunningMonthKey() : selectedMonth}
+                  onChange={(e) => setSelectedMonth(e.target.value)}
+                  className={`w-full sm:w-auto pl-8 pr-7 py-2 rounded-xl text-xs font-black uppercase tracking-wider font-mono transition-all cursor-pointer appearance-none focus:outline-none border ${
+                    selectedMonth !== 'ALL'
+                      ? 'bg-indigo-600 text-white border-indigo-500 shadow-md'
+                      : 'bg-slate-900/90 text-slate-300 border-slate-700 hover:text-white hover:border-slate-600'
+                  }`}
+                  title="Select Month"
+                >
+                  {availableMonths.map((m) => (
+                    <option key={m} value={m} className="bg-slate-900 text-white font-bold">
+                      {formatMonthName(m)}
+                    </option>
+                  ))}
+                </select>
+                <div className={`absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-[9px] ${
+                  selectedMonth !== 'ALL' ? 'text-white' : 'text-slate-400'
+                }`}>
+                  ▼
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1106,34 +1565,60 @@ ${rowsList}
           />
         </div>
 
-        {/* View Mode Toggle: Box vs Table */}
-        <div className="flex items-center bg-slate-900 rounded-2xl p-1 border border-slate-800 self-end sm:self-auto shrink-0 shadow-sm">
+        {/* Actions: Import Initial Bills Button, Export Bill Button & View Mode Toggle */}
+        <div className="flex items-center space-x-2.5 self-end sm:self-auto shrink-0 flex-wrap gap-y-2">
           <button
             type="button"
-            onClick={() => setViewMode('BOX')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 transition-all cursor-pointer ${
-              viewMode === 'BOX'
-                ? 'bg-indigo-600 text-white shadow-md'
-                : 'text-slate-400 hover:text-white'
-            }`}
-            title="Box / Card View"
+            onClick={() => {
+              setImportModalInitialTab('FILE');
+              setIsImportBillsModalOpen(true);
+            }}
+            className="px-4 py-2.5 bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 shadow-md shadow-emerald-500/25 border-t border-emerald-300/40 active:translate-y-0.5 transition-all cursor-pointer"
+            title="Bulk Import Initial Bills (Excel / CSV / Copy-Paste / History)"
           >
-            <LayoutGrid className="w-3.5 h-3.5" />
-            <span>Box View</span>
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>IMPORT BILLS</span>
           </button>
+
           <button
             type="button"
-            onClick={() => setViewMode('TABLE')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 transition-all cursor-pointer ${
-              viewMode === 'TABLE'
-                ? 'bg-indigo-600 text-white shadow-md'
-                : 'text-slate-400 hover:text-white'
-            }`}
-            title="Table View"
+            onClick={handleExportBills}
+            className="px-4 py-2.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-500 text-white rounded-2xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 shadow-md shadow-indigo-500/25 border-t border-indigo-300/40 active:translate-y-0.5 transition-all cursor-pointer"
+            title="Export Bill (Print Preview, PDF & Excel)"
           >
-            <List className="w-3.5 h-3.5" />
-            <span>Table View</span>
+            <Printer className="w-4 h-4" />
+            <span>EXPORT BILL (PDF)</span>
           </button>
+
+          {/* View Mode Toggle: Box vs Table */}
+          <div className="flex items-center bg-slate-900 rounded-2xl p-1 border border-slate-800 shadow-sm">
+            <button
+              type="button"
+              onClick={() => setViewMode('BOX')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 transition-all cursor-pointer ${
+                viewMode === 'BOX'
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="Box / Card View"
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span>Box View</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('TABLE')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 transition-all cursor-pointer ${
+                viewMode === 'TABLE'
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="Table View"
+            >
+              <List className="w-3.5 h-3.5" />
+              <span>Table View</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1249,9 +1734,18 @@ ${rowsList}
                       ৳{displayedBill}
                     </p>
                     {(selectedCategory !== 'ALL' || selectedMonth !== 'ALL') && (
-                      <span className="text-[9px] font-mono text-slate-400 block mt-0.5">
-                        Total Due: ৳{totalDue}
-                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setInitialBillMember(member);
+                        }}
+                        className="text-[9px] font-mono text-slate-400 hover:text-amber-300 transition-colors mt-0.5 inline-flex items-center space-x-1 cursor-pointer group/carddue"
+                        title="Click to set/edit initial bill"
+                      >
+                        <span>Total Due: ৳{totalDue}</span>
+                        <Coins className="w-2.5 h-2.5 text-slate-500 group-hover/carddue:text-amber-400 transition-colors" />
+                      </button>
                     )}
                   </div>
                 </div>
@@ -1372,8 +1866,16 @@ ${rowsList}
                         </span>
                       </td>
                       {(selectedCategory !== 'ALL' || selectedMonth !== 'ALL') && (
-                        <td className="px-4 py-3 text-right font-mono text-slate-400 text-xs font-bold">
-                          ৳{totalDue}
+                        <td className="px-4 py-3 text-right font-mono text-slate-400 text-xs font-bold" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            onClick={() => setInitialBillMember(member)}
+                            className="hover:text-amber-400 hover:bg-slate-800/80 px-2 py-1 rounded-lg transition-colors cursor-pointer group/due inline-flex items-center space-x-1"
+                            title="Click to set/edit initial bill"
+                          >
+                            <span>৳{totalDue}</span>
+                            <Coins className="w-3 h-3 text-slate-500 group-hover/due:text-amber-400 transition-colors" />
+                          </button>
                         </td>
                       )}
                       <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
@@ -1395,6 +1897,14 @@ ${rowsList}
                           >
                             <Banknote className="w-3 h-3" />
                             <span>Pay</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setInitialBillMember(member)}
+                            className="p-1.5 bg-slate-800 hover:bg-amber-500/20 text-slate-400 hover:text-amber-300 rounded-lg text-[11px] font-black uppercase border border-slate-700 transition-all cursor-pointer"
+                            title="Set Initial Bill / প্রারম্ভিক বকেয়া"
+                          >
+                            <Coins className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </td>
@@ -1543,6 +2053,31 @@ ${rowsList}
                         </select>
                       </div>
                     </div>
+                  </div>
+
+                  {/* Initial Due / Bill input */}
+                  <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-black text-indigo-300 tracking-widest uppercase flex items-center gap-1.5">
+                        <Coins className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Initial Due / Bill (প্রারম্ভিক বকেয়া) ৳</span>
+                      </label>
+                      <span className="text-[10px] text-slate-500 font-mono">
+                        Current: ৳{profileMember.Due ?? profileMember.due ?? 0}
+                      </span>
+                    </div>
+                    <input 
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={editMemberData.due ?? ""}
+                      onChange={(e) => setEditMemberData({ ...editMemberData, due: parseFloat(e.target.value) || 0 })}
+                      placeholder="0.00"
+                      className="w-full bg-slate-900 border border-slate-700 text-white font-mono text-base font-black rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <p className="text-[10px] text-slate-400 font-bold">
+                      সদস্যের পূর্ববর্তী মোট বকেয়া বা ওপেনিং ব্যালেন্স হিসাব
+                    </p>
                   </div>
 
                   {/* Member Photo: Browse from Gallery in Edit Mode */}
@@ -1744,7 +2279,7 @@ ${rowsList}
                 </div>
                 <div>
                   <h2 className="text-lg font-black text-white">{statementMember['Rank']} {statementMember['Surname']}</h2>
-                  <p className="text-[11px] font-bold text-slate-400 font-mono">Monthly Statement • সেপ্টেম্বর ২০২৫</p>
+                  <p className="text-[11px] font-bold text-slate-400 font-mono">Monthly Statement • {formatMonthName(statementMonth)}</p>
                 </div>
               </div>
 
@@ -1752,7 +2287,7 @@ ${rowsList}
               <div className="flex items-center space-x-2.5">
                 {/* Send via WhatsApp Button */}
                 <button 
-                  onClick={() => handleSendWhatsApp(statementMember, statementRows, Number(statementMember.Due ?? 0), totalStatementExpenses, statementMonth, statementCategory)}
+                  onClick={() => handleSendWhatsApp(statementMember, statementAggregatedItems, netPayable, totalMonthBill, previousDue, statementMonth)}
                   className="flex items-center space-x-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md shadow-emerald-500/20 active:translate-y-0.5"
                   title="Send Statement via WhatsApp"
                 >
@@ -1772,7 +2307,7 @@ ${rowsList}
 
                 <button 
                   onClick={() => setStatementMember(null)} 
-                  className="p-2 text-slate-400 hover:bg-slate-800 rounded-xl transition-colors ml-1"
+                  className="p-2 text-slate-400 hover:bg-slate-800 rounded-xl transition-colors ml-1 cursor-pointer"
                   title="Close"
                 >
                   <X className="w-5 h-5" />
@@ -1780,68 +2315,23 @@ ${rowsList}
               </div>
             </div>
 
-            {/* Modal Category & Month Filter Bar (Hidden when printing) */}
+            {/* Modal Month Filter Bar (Hidden when printing - Bill Cat removed as requested) */}
             <div className="px-5 py-3 bg-slate-950/80 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 print:hidden">
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
-                <button
-                  type="button"
-                  onClick={() => setStatementCategory('CANTEEN')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase transition-all flex items-center space-x-1 ${
-                    statementCategory === 'CANTEEN'
-                      ? 'bg-amber-600 text-white shadow-xs'
-                      : 'bg-slate-800/80 text-slate-300 hover:text-white'
-                  }`}
-                >
-                  <Coffee className="w-3 h-3 text-amber-400" />
-                  <span>Canteen Bill</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setStatementCategory('UNIT_FUND')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase transition-all flex items-center space-x-1 ${
-                    statementCategory === 'UNIT_FUND'
-                      ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'bg-slate-800/80 text-slate-300 hover:text-white'
-                  }`}
-                >
-                  <Landmark className="w-3 h-3 text-indigo-400" />
-                  <span>Unit Fund Bill</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setStatementCategory('OTHERS')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase transition-all flex items-center space-x-1 ${
-                    statementCategory === 'OTHERS'
-                      ? 'bg-cyan-600 text-white shadow-xs'
-                      : 'bg-slate-800/80 text-slate-300 hover:text-white'
-                  }`}
-                >
-                  <Layers className="w-3 h-3 text-cyan-400" />
-                  <span>Others Bill</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setStatementCategory('ALL')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase transition-all flex items-center space-x-1 ${
-                    statementCategory === 'ALL'
-                      ? 'bg-slate-700 text-white shadow-xs'
-                      : 'bg-slate-800/80 text-slate-300 hover:text-white'
-                  }`}
-                >
-                  <Receipt className="w-3 h-3 text-slate-300" />
-                  <span>All</span>
-                </button>
+              <div className="flex items-center space-x-2 text-xs font-bold text-slate-300">
+                <Receipt className="w-4 h-4 text-indigo-400" />
+                <span>মাসিক হিসাব বিবরণী (Monthly Itemized Statement)</span>
               </div>
 
               {/* Month selector in statement modal */}
               <div className="flex items-center space-x-2">
                 <Calendar className="w-3.5 h-3.5 text-indigo-400" />
+                <span className="text-xs font-bold text-slate-400">মাস নির্বাচন:</span>
                 <select
                   value={statementMonth}
                   onChange={(e) => setStatementMonth(e.target.value)}
                   className="bg-slate-900 border border-slate-700 text-white rounded-lg px-2.5 py-1 text-xs font-bold font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 >
-                  <option value="ALL">All Months</option>
+                  <option value="ALL">সকল মাস (All Months)</option>
                   {availableMonths.map((m) => (
                     <option key={m} value={m}>
                       {formatMonthName(m)}
@@ -1859,13 +2349,7 @@ ${rowsList}
                 <div className="text-center mb-6 border-b-2 border-black pb-4">
                   <h2 className="text-2xl font-black text-black tracking-wider">🍽️ CAFE UAV 🍽️</h2>
                   <p className="text-xs font-bold text-slate-700 mt-0.5">
-                    {statementCategory === 'CANTEEN' 
-                      ? 'মাসিক ক্যান্টিন বিল বিবরণী' 
-                      : statementCategory === 'UNIT_FUND' 
-                      ? 'ইউনিট ফান্ড বিল বিবরণী' 
-                      : statementCategory === 'OTHERS' 
-                      ? 'অন্যান্য বিল বিবরণী' 
-                      : 'মাসিক সমন্বিত বিল বিবরণী'}
+                    মাসিক বিল বিবরণী
                   </p>
                 </div>
 
@@ -1874,58 +2358,42 @@ ${rowsList}
                   <tbody>
                     <tr>
                       <td className="border border-black p-2.5 text-left w-1/4 bg-slate-50 font-black">মাসের নাম</td>
-                      <td className="border border-black p-2.5 text-left font-black" colSpan={5}>
+                      <td className="border border-black p-2.5 text-left font-black" colSpan={3}>
                         {formatMonthName(statementMonth)}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="border border-black p-2.5 text-left bg-slate-50 font-black">বিল ক্যাটাগরি</td>
-                      <td className="border border-black p-2.5 text-left font-bold" colSpan={5}>
-                        {statementCategory === 'CANTEEN' 
-                          ? 'Canteen Bill (ক্যান্টিন বিল)' 
-                          : statementCategory === 'UNIT_FUND' 
-                          ? 'Unit Fund Bill (ইউনিট ফান্ড বিল)' 
-                          : statementCategory === 'OTHERS' 
-                          ? 'Others Bill (অন্যান্য বিল)' 
-                          : 'All Bills (সর্বমোট বিল)'}
                       </td>
                     </tr>
                     <tr>
                       <td className="border border-black p-2.5 text-left bg-slate-50 font-black">পদবী ও নাম</td>
                       {/* Statement er Namer Pase Bd No lagbe na */}
-                      <td className="border border-black p-2.5 text-left font-black" colSpan={5}>
+                      <td className="border border-black p-2.5 text-left font-black" colSpan={3}>
                         {statementMember['Rank']} {statementMember['Surname']}
                       </td>
                     </tr>
                     
-                    {/* Heading Row: ক্রমিক নং, তারিখ, বিবরণ, পরিমাণ, দর, মোট */}
+                    {/* Heading Row: দ্রব্যের নাম , পরিমাণ , দর, মোট */}
                     <tr className="bg-slate-100 text-center font-black">
-                      <td className="border border-black p-2 w-14">ক্রমিক নং</td>
-                      <td className="border border-black p-2 w-28">তারিখ</td>
-                      <td className="border border-black p-2 text-left">বিবরণ</td>
-                      <td className="border border-black p-2 w-16">পরিমাণ</td>
-                      <td className="border border-black p-2 w-20 text-right">দর</td>
-                      <td className="border border-black p-2 w-24 text-right">মোট</td>
+                      <td className="border border-black p-2.5 text-left">দ্রব্যের নাম</td>
+                      <td className="border border-black p-2.5 w-24 text-center">পরিমাণ</td>
+                      <td className="border border-black p-2.5 w-24 text-right">দর</td>
+                      <td className="border border-black p-2.5 w-28 text-right">মোট</td>
                     </tr>
 
-                    {statementRows.length === 0 ? (
+                    {statementAggregatedItems.length === 0 ? (
                       <tr>
-                        <td className="border border-black p-4 text-center font-normal" colSpan={6}>
-                          কোনো ক্যান্টিন খরচ রেকর্ড নেই
+                        <td className="border border-black p-4 text-center font-normal" colSpan={4}>
+                          কোনো খাদ্যদ্রব্য খরচের রেকর্ড নেই
                         </td>
                       </tr>
                     ) : (
-                      statementRows.map(row => (
-                        <tr key={row.sl} className="text-center">
-                          <td className="border border-black p-2 font-mono">{row.sl}</td>
-                          <td className="border border-black p-2 font-mono">{row.date}</td>
-                          <td className="border border-black p-2 text-left font-semibold">{row.item}</td>
-                          <td className="border border-black p-2 font-mono">{row.qty}</td>
-                          <td className="border border-black p-2 text-right font-mono">
-                            {row.rate !== '-' ? `৳${row.rate}` : '-'}
+                      statementAggregatedItems.map((item, idx) => (
+                        <tr key={idx} className="text-center">
+                          <td className="border border-black p-2.5 text-left font-semibold">{item.itemName}</td>
+                          <td className="border border-black p-2.5 font-mono text-center">{item.qty}</td>
+                          <td className="border border-black p-2.5 text-right font-mono">
+                            ৳{item.rate}
                           </td>
-                          <td className="border border-black p-2 text-right font-mono font-black">
-                            {row.total < 0 ? `-৳${Math.abs(row.total)}` : `৳${row.total}`}
+                          <td className="border border-black p-2.5 text-right font-mono font-black">
+                            ৳{item.total}
                           </td>
                         </tr>
                       ))
@@ -1933,25 +2401,37 @@ ${rowsList}
 
                     {/* Summary Rows */}
                     <tr>
-                      <td className="border border-black p-2.5 text-right font-black bg-slate-50" colSpan={5}>
-                        {statementCategory === 'CANTEEN' 
-                          ? 'মোট ক্যান্টিন বিল' 
-                          : statementCategory === 'UNIT_FUND' 
-                          ? 'মোট ইউনিট ফান্ড বিল' 
-                          : statementCategory === 'OTHERS' 
-                          ? 'মোট অন্যান্য বিল' 
-                          : 'মোট বিল'}
+                      <td className="border border-black p-2.5 text-right font-black bg-slate-50" colSpan={3}>
+                        মোট বিল
                       </td>
                       <td className="border border-black p-2.5 text-right font-black font-mono text-sm">
-                        ৳{totalStatementExpenses}
+                        ৳{totalMonthBill}
                       </td>
                     </tr>
                     <tr>
-                      <td className="border border-black p-2.5 text-right font-black bg-slate-100" colSpan={5}>
-                        সর্বমোট প্রদেয় (DUE)
+                      <td className="border border-black p-2.5 text-right font-black bg-amber-50/60" colSpan={3}>
+                        বকেয়া বিল {previousDue > 0 ? '(পূর্ববর্তী বকেয়া)' : ''}
+                      </td>
+                      <td className="border border-black p-2.5 text-right font-black font-mono text-sm text-amber-900">
+                        ৳{previousDue}
+                      </td>
+                    </tr>
+                    {currentMonthPayments > 0 && (
+                      <tr>
+                        <td className="border border-black p-2.5 text-right font-bold text-emerald-800 bg-emerald-50/60" colSpan={3}>
+                          পরিশোধিত বিল
+                        </td>
+                        <td className="border border-black p-2.5 text-right font-bold font-mono text-sm text-emerald-700">
+                          -৳{currentMonthPayments}
+                        </td>
+                      </tr>
+                    )}
+                    <tr>
+                      <td className="border border-black p-2.5 text-right font-black bg-slate-100" colSpan={3}>
+                        সর্বমোট প্রদেয় বিল
                       </td>
                       <td className="border border-black p-2.5 text-right font-black font-mono text-base text-rose-700 bg-slate-100">
-                        ৳{statementMember.Due ?? statementMember.baki ?? '0.00'}
+                        ৳{netPayable}
                       </td>
                     </tr>
                   </tbody>
@@ -2085,6 +2565,49 @@ ${rowsList}
             </div>
           </div>
         </div>
+      )}
+      {/* Bulk Import Initial Bills Modal */}
+      {isImportBillsModalOpen && (
+        <BulkImportInitialBillsModal
+          isOpen={isImportBillsModalOpen}
+          onClose={() => setIsImportBillsModalOpen(false)}
+          members={members}
+          selectedMonth={selectedMonth}
+          initialTab={importModalInitialTab}
+          onSuccess={(updatedList) => {
+            setMembers(updatedList);
+          }}
+        />
+      )}
+
+      {/* Set Initial Bill Modal (Single Member) */}
+      {initialBillMember && (
+        <SetInitialBillModal
+          isOpen={!!initialBillMember}
+          onClose={() => setInitialBillMember(null)}
+          member={initialBillMember}
+          onSuccess={(updatedMember) => {
+            setMembers((prev) =>
+              prev.map((m) =>
+                m.airman_id === updatedMember.airman_id || m['BD No'] === updatedMember['BD No']
+                  ? updatedMember
+                  : m
+              )
+            );
+          }}
+        />
+      )}
+
+      {/* Printable Canteen Bill Modal (Office App Style Print Preview, PDF & Excel) */}
+      {isPrintModalOpen && (
+        <PrintableCanteenBillModal
+          isOpen={isPrintModalOpen}
+          onClose={() => setIsPrintModalOpen(false)}
+          members={members}
+          allTxs={allTxs}
+          selectedCategory={selectedCategory}
+          selectedMonth={selectedMonth}
+        />
       )}
     </div>
   );

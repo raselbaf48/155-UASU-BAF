@@ -19,6 +19,7 @@ import {
   AppVersionRecord,
   getCurrentAppVersion,
   DEFAULT_CURRENT_APP,
+  isRunningInApk,
 } from '../services/appUpdateService';
 import {
   getLastUsedPortal,
@@ -81,6 +82,9 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
   const [appVersionInfo, setAppVersionInfo] = useState<{ versionCode: number; versionName: string }>(DEFAULT_CURRENT_APP);
 
   useEffect(() => {
+    // Strictly do NOT check or show update modal on Website (only in installed APK)
+    if (!isRunningInApk()) return;
+
     let isMounted = true;
     const checkUpdates = async () => {
       try {
@@ -900,14 +904,16 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
         </div>
       )}
 
-      {/* In-App Software Update Modal on Login Screen */}
-      <AppUpdateModal
-        isOpen={isUpdateModalOpen}
-        onClose={() => setIsUpdateModalOpen(false)}
-        latestVersion={updateAvailable}
-        currentVersionCode={appVersionInfo.versionCode}
-        currentVersionName={appVersionInfo.versionName}
-      />
+      {/* In-App Software Update Modal on Login Screen - ONLY in APK */}
+      {isRunningInApk() && (
+        <AppUpdateModal
+          isOpen={isUpdateModalOpen}
+          onClose={() => setIsUpdateModalOpen(false)}
+          latestVersion={updateAvailable}
+          currentVersionCode={appVersionInfo.versionCode}
+          currentVersionName={appVersionInfo.versionName}
+        />
+      )}
 
     </div>
   );
