@@ -30,6 +30,9 @@ export interface BillImportBatchItem {
   rank: string;
   surname: string;
   previousDue: number;
+  previousAdvance?: number;
+  thisMonthBill?: number;
+  paidBill?: number;
   importedAmount: number;
   resultingDue: number;
 }
@@ -58,6 +61,12 @@ interface BulkImportInitialBillsModalProps {
 interface ParsedBillRow {
   rawBd: string;
   bdNo: string;
+  previousDue: number;
+  previousAdvance: number;
+  thisMonthBill: number;
+  paidBill: number;
+  totalDue: number;
+  finalAdvance: number;
   amount: number;
   member: any | null;
   currentDue: number;
@@ -131,7 +140,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
     return map;
   }, [members]);
 
-  // Parse raw matrix / text data into structured rows
+  // Parse raw matrix / text data into structured rows with multi-month / multi-column intelligence
   const processRawData = (rows: any[][]) => {
     setErrorMessage(null);
     setSuccessMessage(null);
@@ -148,8 +157,12 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
     let headerRowIdx = -1;
     let slColIdx = -1;
     let bdColIdx = -1;
-    let initialBillColIdx = -1;
-    let currentDueColIdx = -1;
+    let prevDueColIdx = -1;
+    let prevAdvColIdx = -1;
+    let thisMonthColIdx = -1;
+    let paidColIdx = -1;
+    let totalDueColIdx = -1;
+    let genericAmountColIdx = -1;
 
     for (let r = 0; r < Math.min(rows.length, 5); r++) {
       const row = rows[r];
@@ -157,7 +170,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
       const lowerCells = row.map((c) => String(c ?? '').trim().toLowerCase());
 
       const hasBd = lowerCells.some((c) => c.includes('bd') || c.includes('airman') || c.includes('বিডি'));
-      const hasBillOrDue = lowerCells.some((c) => c.includes('bill') || c.includes('due') || c.includes('বকেয়া') || c.includes('amount') || c.includes('টাকা'));
+      const hasBillOrDue = lowerCells.some((c) => c.includes('bill') || c.includes('due') || c.includes('বকেয়া') || c.includes('amount') || c.includes('টাকা') || c.includes('অগ্রীম'));
       const hasName = lowerCells.some((c) => c.includes('name') || c.includes('surname') || c.includes('নাম'));
 
       if (hasBd || (hasBillOrDue && (hasName || lowerCells.some(c => c === 'sl' || c === 'ser')))) {
@@ -167,15 +180,44 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
             slColIdx = idx;
           } else if (c.includes('bd') || c.includes('airman') || c.includes('বিডি')) {
             bdColIdx = idx;
-          } else if (c.includes('initial') || c.includes('প্রারম্ভিক') || c.includes('new')) {
-            initialBillColIdx = idx;
-          } else if (c.includes('due') || c.includes('bill') || c.includes('amount') || c.includes('বকেয়া') || c.includes('টাকা') || c.includes('মোট')) {
-            currentDueColIdx = idx;
+          } else if (
+            (c.includes('prev') || c.includes('last month') || c.includes('পূর্ব') || c.includes('আগের') || c.includes('আগের মাস')) &&
+            (c.includes('due') || c.includes('বকেয়া') || c.includes('bill') || c.includes('বিল'))
+          ) {
+            prevDueColIdx = idx;
+          } else if (
+            (c.includes('prev') || c.includes('last month') || c.includes('পূর্ব') || c.includes('আগের') || c.includes('আগের মাস')) &&
+            (c.includes('adv') || c.includes('অগ্রীম'))
+          ) {
+            prevAdvColIdx = idx;
+          } else if (
+            (c.includes('this') || c.includes('curr') || c.includes('চলতি') || c.includes('এই মাস') || c.includes('এই মাসের') || c.includes('canteen')) &&
+            (c.includes('bill') || c.includes('বিল') || c.includes('amount') || c.includes('টাকা'))
+          ) {
+            thisMonthColIdx = idx;
+          } else if (
+            c.includes('paid') || c.includes('পরিশোধ') || c.includes('জমা') || c.includes('payment')
+          ) {
+            paidColIdx = idx;
+          } else if (
+            c.includes('total') || c.includes('সর্বমোট') || c.includes('মোট বকেয়া') || c.includes('initial') || c.includes('প্রারম্ভিক')
+          ) {
+            totalDueColIdx = idx;
+          } else if (
+            c.includes('due') || c.includes('bill') || c.includes('amount') || c.includes('বকেয়া') || c.includes('টাকা')
+          ) {
+            if (genericAmountColIdx === -1) genericAmountColIdx = idx;
           }
         });
         break;
       }
     }
+
+    const parseNum = (val: any): number => {
+      if (val === null || val === undefined || val === '') return 0;
+      const parsed = parseFloat(String(val).replace(/[^0-9.-]/g, ''));
+      return isNaN(parsed) ? 0 : Math.abs(parsed);
+    };
 
     const startRow = headerRowIdx >= 0 ? headerRowIdx + 1 : 0;
 
@@ -188,17 +230,21 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
       // Skip completely empty rows
       if (strRow.every((c) => !c)) continue;
 
-      // Skip header repeated rows
+      // Skip repeated header rows
       const joined = strRow.join(' ').toLowerCase();
       if (
         (joined.includes('bd no') || joined.includes('rank') || joined.includes('surname')) &&
-        (joined.includes('due') || joined.includes('bill'))
+        (joined.includes('due') || joined.includes('bill') || joined.includes('আগের'))
       ) {
         continue;
       }
 
       let detectedBd = '';
-      let detectedAmount = 0;
+      let previousDue = 0;
+      let previousAdvance = 0;
+      let thisMonthBill = 0;
+      let paidBill = 0;
+      let explicitTotalDue = 0;
 
       // PATH A: If header columns were identified
       if (bdColIdx >= 0) {
@@ -208,32 +254,31 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
           detectedBd = numOnly;
         }
 
-        // Priority 1: Check Initial Bill column
-        if (initialBillColIdx >= 0 && initialBillColIdx < strRow.length) {
-          const val = strRow[initialBillColIdx];
-          if (val !== '' && val !== undefined) {
-            const parsed = parseFloat(val.replace(/[^0-9.-]/g, ''));
-            if (!isNaN(parsed)) {
-              detectedAmount = Math.abs(parsed);
-            }
-          }
+        if (prevDueColIdx >= 0 && prevDueColIdx < strRow.length) {
+          previousDue = parseNum(strRow[prevDueColIdx]);
+        }
+        if (prevAdvColIdx >= 0 && prevAdvColIdx < strRow.length) {
+          previousAdvance = parseNum(strRow[prevAdvColIdx]);
+        }
+        if (thisMonthColIdx >= 0 && thisMonthColIdx < strRow.length) {
+          thisMonthBill = parseNum(strRow[thisMonthColIdx]);
+        }
+        if (paidColIdx >= 0 && paidColIdx < strRow.length) {
+          paidBill = parseNum(strRow[paidColIdx]);
+        }
+        if (totalDueColIdx >= 0 && totalDueColIdx < strRow.length) {
+          explicitTotalDue = parseNum(strRow[totalDueColIdx]);
         }
 
-        // Priority 2: If Initial Bill was empty or 0, check Current Due column
-        if (detectedAmount === 0 && currentDueColIdx >= 0 && currentDueColIdx < strRow.length) {
-          const val = strRow[currentDueColIdx];
-          if (val !== '' && val !== undefined) {
-            const parsed = parseFloat(val.replace(/[^0-9.-]/g, ''));
-            if (!isNaN(parsed)) {
-              detectedAmount = Math.abs(parsed);
-            }
-          }
+        // Fallback for single amount column
+        if (previousDue === 0 && thisMonthBill === 0 && explicitTotalDue === 0 && genericAmountColIdx >= 0 && genericAmountColIdx < strRow.length) {
+          explicitTotalDue = parseNum(strRow[genericAmountColIdx]);
         }
 
-        // If BD was not found at specified column, search elsewhere in this row (excluding SL)
+        // If BD was not found at specified column, search row (excluding SL)
         if (!detectedBd) {
           for (let i = 0; i < strRow.length; i++) {
-            if (i === slColIdx) continue; // NEVER take SL as BD No
+            if (i === slColIdx) continue;
             const n = strRow[i].replace(/\D/g, '');
             if (n.length >= 4 && n.length <= 7) {
               detectedBd = n;
@@ -243,9 +288,8 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
         }
       }
 
-      // PATH B: Fallback if no headers or if BD not found via header
+      // PATH B: Fallback if no headers identified (e.g. raw copy paste of 2, 3, 4, 5, 6 columns)
       if (!detectedBd) {
-        // Find which column contains BD No (4-7 digits)
         let foundBdIdx = -1;
         for (let i = 0; i < strRow.length; i++) {
           const n = strRow[i].replace(/\D/g, '');
@@ -257,14 +301,37 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
         }
 
         if (detectedBd && foundBdIdx >= 0) {
-          // Look for amount ONLY in columns AFTER foundBdIdx
-          // This strictly prevents column 0 (SL 1, 2, 3...) from ever being taken as amount!
-          for (let i = strRow.length - 1; i > foundBdIdx; i--) {
+          const numericColsAfterBd: number[] = [];
+          for (let i = foundBdIdx + 1; i < strRow.length; i++) {
             const val = strRow[i];
-            const parsed = parseFloat(val.replace(/[^0-9.-]/g, ''));
-            if (!isNaN(parsed) && val !== '') {
-              detectedAmount = Math.abs(parsed);
-              break;
+            if (val !== '' && val !== undefined) {
+              const p = parseFloat(val.replace(/[^0-9.-]/g, ''));
+              if (!isNaN(p)) {
+                numericColsAfterBd.push(Math.abs(p));
+              }
+            }
+          }
+
+          if (numericColsAfterBd.length === 1) {
+            // Single amount (Total Due / Initial Bill)
+            explicitTotalDue = numericColsAfterBd[0];
+          } else if (numericColsAfterBd.length === 2) {
+            // Previous Due, This Month Bill
+            previousDue = numericColsAfterBd[0];
+            thisMonthBill = numericColsAfterBd[1];
+          } else if (numericColsAfterBd.length === 3) {
+            // Previous Due, Previous Advance, This Month Bill
+            previousDue = numericColsAfterBd[0];
+            previousAdvance = numericColsAfterBd[1];
+            thisMonthBill = numericColsAfterBd[2];
+          } else if (numericColsAfterBd.length >= 4) {
+            // Previous Due, Previous Advance, This Month Bill, Paid Bill
+            previousDue = numericColsAfterBd[0];
+            previousAdvance = numericColsAfterBd[1];
+            thisMonthBill = numericColsAfterBd[2];
+            paidBill = numericColsAfterBd[3];
+            if (numericColsAfterBd.length >= 5) {
+              explicitTotalDue = numericColsAfterBd[4];
             }
           }
         }
@@ -279,10 +346,35 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
         ? Number(matchedMember.Due ?? matchedMember.due ?? matchedMember.baki ?? 0)
         : 0;
 
+      // Calculate Total Due and Final Advance
+      let calculatedDue = 0;
+      let finalAdvance = 0;
+
+      if (previousDue > 0 || thisMonthBill > 0 || previousAdvance > 0 || paidBill > 0) {
+        const totalDebits = previousDue + thisMonthBill;
+        const totalCredits = previousAdvance + paidBill;
+        if (totalDebits >= totalCredits) {
+          calculatedDue = totalDebits - totalCredits;
+          finalAdvance = 0;
+        } else {
+          calculatedDue = 0;
+          finalAdvance = totalCredits - totalDebits;
+        }
+      }
+
+      const resultingTotalDue = explicitTotalDue > 0 ? explicitTotalDue : calculatedDue;
+      const effectiveAmount = resultingTotalDue > 0 ? resultingTotalDue : (thisMonthBill > 0 ? thisMonthBill : previousDue);
+
       result.push({
         rawBd: detectedBd,
         bdNo: detectedBd,
-        amount: detectedAmount,
+        previousDue,
+        previousAdvance,
+        thisMonthBill,
+        paidBill,
+        totalDue: resultingTotalDue,
+        finalAdvance,
+        amount: effectiveAmount,
         member: matchedMember,
         currentDue: currentDue,
         status: matchedMember ? 'matched' : 'unmatched'
@@ -357,15 +449,19 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
     processRawData(rows);
   };
 
-  // Download pre-formatted Excel template with current members
+  // Download pre-formatted Excel template with current members and multi-month columns
   const handleDownloadTemplate = () => {
     const templateData = members.map((m, idx) => ({
       'SL': idx + 1,
       'BD No': String(m['BD No'] || '').trim(),
       'Rank': String(m['Rank'] || '').trim(),
       'Surname': String(m['Surname'] || '').trim(),
-      'Current Due (৳)': Number(m.Due ?? m.due ?? m.baki ?? 0),
-      'Initial Bill (৳)': '' // User fills this
+      'Previous Due (Last Month ৳)': Number(m.Due ?? m.due ?? m.baki ?? 0) > 0 ? Number(m.Due ?? m.due ?? m.baki ?? 0) : '',
+      'Previous Advance (Last Month ৳)': Number(m.Advance ?? m.advance ?? m.ogrim ?? 0) > 0 ? Number(m.Advance ?? m.advance ?? m.ogrim ?? 0) : '',
+      'This Month Bill (৳)': '',
+      'Paid Bill (৳)': '',
+      'Total Due (৳)': '', // Optional: Blank leaves it to auto-calculate
+      'Remarks': 'Last Month & This Month Canteen Bill'
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(templateData);
@@ -375,13 +471,17 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
       { wch: 12 },
       { wch: 12 },
       { wch: 22 },
+      { wch: 26 },
+      { wch: 28 },
+      { wch: 22 },
       { wch: 16 },
-      { wch: 18 }
+      { wch: 16 },
+      { wch: 32 }
     ];
 
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Initial_Bills');
-    XLSX.writeFile(workbook, 'Cafe_UAV_Initial_Bills_Template.xlsx');
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'MultiMonth_Bills');
+    XLSX.writeFile(workbook, 'Cafe_UAV_MultiMonth_Bills_Import_Template.xlsx');
   };
 
   // Filter preview rows
@@ -401,8 +501,11 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
     const total = parsedRows.length;
     const matched = parsedRows.filter((r) => r.status === 'matched').length;
     const unmatched = total - matched;
-    const totalAmount = parsedRows.reduce((sum, r) => sum + (r.amount || 0), 0);
-    return { total, matched, unmatched, totalAmount };
+    const totalPreviousDue = parsedRows.reduce((sum, r) => sum + (r.previousDue || 0), 0);
+    const totalThisMonth = parsedRows.reduce((sum, r) => sum + (r.thisMonthBill || 0), 0);
+    const totalPaid = parsedRows.reduce((sum, r) => sum + (r.paidBill || 0), 0);
+    const totalAmount = parsedRows.reduce((sum, r) => sum + (r.totalDue || r.amount || 0), 0);
+    return { total, matched, unmatched, totalPreviousDue, totalThisMonth, totalPaid, totalAmount };
   }, [parsedRows]);
 
   // Filter history rows
@@ -417,7 +520,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
     );
   }, [importHistory, historySearch]);
 
-  // Execute Batch Import
+  // Execute Batch Import with Cloud Persistence
   const handleExecuteImport = async () => {
     const matchedRows = parsedRows.filter((r) => r.status === 'matched' && r.member);
     if (matchedRows.length === 0) {
@@ -441,15 +544,42 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
       const now = new Date();
       const txDate = formatCanteenDate(now);
 
+      // Create prior month date string for previous due transaction
+      const priorDate = new Date(now.getFullYear(), now.getMonth(), 0);
+      const prevTxDate = formatCanteenDate(priorDate);
+
       // 1. Process each member update and construct batch record
       for (const row of matchedRows) {
         const targetMember = updatedMembersMap.get(row.bdNo);
         if (!targetMember) continue;
 
         const oldDue = Number(targetMember.Due ?? targetMember.due ?? targetMember.baki ?? 0);
+        const prevDue = row.previousDue || 0;
+        const prevAdv = row.previousAdvance || 0;
+        const thisMonth = row.thisMonthBill || 0;
+        const paid = row.paidBill || 0;
+        const explicitDue = row.totalDue || 0;
+
+        let calcDue = explicitDue;
+        let calcAdv = row.finalAdvance || 0;
+
+        if (explicitDue === 0 && (prevDue > 0 || thisMonth > 0 || prevAdv > 0 || paid > 0)) {
+          const debits = prevDue + thisMonth;
+          const credits = prevAdv + paid;
+          if (debits >= credits) {
+            calcDue = debits - credits;
+            calcAdv = 0;
+          } else {
+            calcDue = 0;
+            calcAdv = credits - debits;
+          }
+        } else if (explicitDue === 0) {
+          calcDue = row.amount;
+        }
+
         const finalDue = importMode === 'SET' 
-          ? row.amount 
-          : Math.max(0, oldDue + row.amount);
+          ? calcDue 
+          : Math.max(0, oldDue + calcDue);
 
         batchItems.push({
           airman_id: targetMember.airman_id,
@@ -457,7 +587,10 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
           rank: targetMember['Rank'] || '',
           surname: targetMember['Surname'] || '',
           previousDue: oldDue,
-          importedAmount: row.amount,
+          previousAdvance: prevAdv,
+          thisMonthBill: thisMonth,
+          paidBill: paid,
+          importedAmount: calcDue,
           resultingDue: finalDue
         });
 
@@ -465,41 +598,112 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
         targetMember.Due = finalDue;
         targetMember.due = finalDue;
         targetMember.baki = finalDue;
+        if (calcAdv > 0) {
+          targetMember.Advance = calcAdv;
+          targetMember.advance = calcAdv;
+          targetMember.ogrim = calcAdv;
+        }
 
-        // 2. Create Opening Balance / Initial Bill transaction if requested
-        if (createTransaction && row.amount > 0) {
-          const txId = Date.now() + Math.random();
-          newTxIds.push(txId);
-          newTxs.push({
-            id: txId,
-            date: txDate,
-            airman_id: targetMember.airman_id,
-            bdNo: targetMember['BD No'] || targetMember.bdNo,
-            memberName: `${targetMember['Rank'] || ''} ${targetMember['Surname'] || ''}`.trim(),
-            rank: targetMember['Rank'] || targetMember.rank || '',
-            items: `প্রারম্ভিক বকেয়া বিল (${importMode === 'SET' ? 'Initial Due' : 'Added Due'})`,
-            soldItems: [],
-            amount: row.amount,
-            type: 'INITIAL_BILL',
-            gateway: 'DUE',
-            billType: 'CANTEEN'
-          });
+        // 2. Create Audit-Trail Transactions in canteen_txs for Cloud Sync
+        if (createTransaction) {
+          // If Previous Due imported
+          if (prevDue > 0) {
+            const txId = Date.now() + Math.random();
+            newTxIds.push(txId);
+            newTxs.push({
+              id: txId,
+              date: prevTxDate,
+              airman_id: targetMember.airman_id,
+              bdNo: targetMember['BD No'] || targetMember.bdNo,
+              memberName: `${targetMember['Rank'] || ''} ${targetMember['Surname'] || ''}`.trim(),
+              rank: targetMember['Rank'] || targetMember.rank || '',
+              items: `বকেয়া বিল (আগের মাস) / Previous Month Due`,
+              soldItems: [],
+              amount: prevDue,
+              type: 'INITIAL_BILL',
+              gateway: 'DUE',
+              billType: 'CANTEEN'
+            });
+          }
+
+          // If This Month Canteen Bill imported
+          if (thisMonth > 0) {
+            const txId = Date.now() + Math.random();
+            newTxIds.push(txId);
+            newTxs.push({
+              id: txId,
+              date: txDate,
+              airman_id: targetMember.airman_id,
+              bdNo: targetMember['BD No'] || targetMember.bdNo,
+              memberName: `${targetMember['Rank'] || ''} ${targetMember['Surname'] || ''}`.trim(),
+              rank: targetMember['Rank'] || targetMember.rank || '',
+              items: `ক্যান্টিন বিল (এই মাস) / Current Month Canteen Bill`,
+              soldItems: [],
+              amount: thisMonth,
+              type: 'MEMBER_ORDER',
+              gateway: 'DUE',
+              billType: 'CANTEEN'
+            });
+          }
+
+          // If Paid Bill entered
+          if (paid > 0) {
+            const txId = Date.now() + Math.random();
+            newTxIds.push(txId);
+            newTxs.push({
+              id: txId,
+              date: txDate,
+              airman_id: targetMember.airman_id,
+              bdNo: targetMember['BD No'] || targetMember.bdNo,
+              memberName: `${targetMember['Rank'] || ''} ${targetMember['Surname'] || ''}`.trim(),
+              rank: targetMember['Rank'] || targetMember.rank || '',
+              items: `বিল পরিশোধ (Payment)`,
+              soldItems: [],
+              amount: paid,
+              type: 'BILL PAYMENT',
+              gateway: 'CASH',
+              billType: 'CANTEEN'
+            });
+          }
+
+          // Legacy single amount fallback
+          if (prevDue === 0 && thisMonth === 0 && paid === 0 && row.amount > 0) {
+            const txId = Date.now() + Math.random();
+            newTxIds.push(txId);
+            newTxs.push({
+              id: txId,
+              date: txDate,
+              airman_id: targetMember.airman_id,
+              bdNo: targetMember['BD No'] || targetMember.bdNo,
+              memberName: `${targetMember['Rank'] || ''} ${targetMember['Surname'] || ''}`.trim(),
+              rank: targetMember['Rank'] || targetMember.rank || '',
+              items: `প্রারম্ভিক বকেয়া বিল (${importMode === 'SET' ? 'Initial Due' : 'Added Due'})`,
+              soldItems: [],
+              amount: row.amount,
+              type: 'INITIAL_BILL',
+              gateway: 'DUE',
+              billType: 'CANTEEN'
+            });
+          }
         }
       }
 
-      // 3. Batch update Supabase Canteen_Member table
-      const updatePromises = matchedRows.map(async (row) => {
-        const targetMember = updatedMembersMap.get(row.bdNo);
-        if (!targetMember) return;
-        return supabase
-          .from('Canteen_Member')
-          .update({ Due: targetMember.Due })
-          .eq('airman_id', targetMember.airman_id);
-      });
+      // 3. Batch update Supabase Canteen_Member table in parallel chunks of 15
+      for (let i = 0; i < matchedRows.length; i += 15) {
+        const chunk = matchedRows.slice(i, i + 15);
+        await Promise.all(
+          chunk.map((row) => {
+            const targetMember = updatedMembersMap.get(row.bdNo);
+            if (!targetMember) return Promise.resolve();
+            return supabase
+              .from('Canteen_Member')
+              .update({ Due: targetMember.Due })
+              .eq('airman_id', targetMember.airman_id);
+          })
+        );
+      }
 
-      await Promise.all(updatePromises);
-
-      // 4. Save transactions if created
+      // 4. Save transactions to Cloud (canteen_txs)
       if (newTxs.length > 0) {
         try {
           const existingTxs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
@@ -507,7 +711,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
           localStorage.setItem('canteen_txs', JSON.stringify(mergedTxs));
           await pushKeyToCloud('canteen_txs', mergedTxs);
         } catch (e) {
-          console.warn('Failed to append initial bill transactions:', e);
+          console.warn('Failed to append initial bill transactions to cloud:', e);
         }
       }
 
@@ -935,8 +1139,8 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
                             <h6 className="text-[11px] font-black text-indigo-400 uppercase tracking-wider mb-2">
                               এই ব্যাচে অন্তর্ভুক্ত সদস্যদের তালিকা ({batch.items.length}):
                             </h6>
-                            <div className="border border-slate-800 rounded-xl overflow-hidden max-h-48 overflow-y-auto">
-                              <table className="w-full text-left text-xs text-slate-300">
+                            <div className="border border-slate-800 rounded-xl overflow-hidden max-h-48 overflow-y-auto overflow-x-auto">
+                              <table className="w-full text-left text-xs text-slate-300 min-w-[480px]">
                                 <thead className="bg-slate-950 text-slate-400 text-[10px] font-black uppercase tracking-wider sticky top-0 border-b border-slate-800">
                                   <tr>
                                     <th className="px-3 py-2">#</th>
@@ -1033,22 +1237,26 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
               </label>
 
               {/* Statistics Chips */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 pt-1">
                 <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3 text-center">
                   <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Total Parsed</span>
-                  <span className="text-lg font-black text-white font-mono">{stats.total}</span>
+                  <span className="text-base sm:text-lg font-black text-white font-mono">{stats.total}</span>
                 </div>
                 <div className="bg-emerald-950/30 border border-emerald-500/20 rounded-xl p-3 text-center">
                   <span className="text-[10px] font-black text-emerald-400 uppercase tracking-wider block">Matched</span>
-                  <span className="text-lg font-black text-emerald-400 font-mono">{stats.matched}</span>
+                  <span className="text-base sm:text-lg font-black text-emerald-400 font-mono">{stats.matched}</span>
                 </div>
                 <div className="bg-amber-950/30 border border-amber-500/20 rounded-xl p-3 text-center">
-                  <span className="text-[10px] font-black text-amber-400 uppercase tracking-wider block">Unmatched</span>
-                  <span className="text-lg font-black text-amber-400 font-mono">{stats.unmatched}</span>
+                  <span className="text-[10px] font-black text-amber-400 uppercase tracking-wider block">আগের বকেয়া (Prev Due)</span>
+                  <span className="text-base sm:text-lg font-black text-amber-300 font-mono">৳{stats.totalPreviousDue.toLocaleString()}</span>
                 </div>
-                <div className="bg-indigo-950/30 border border-indigo-500/20 rounded-xl p-3 text-center">
-                  <span className="text-[10px] font-black text-indigo-300 uppercase tracking-wider block">Total Amount</span>
-                  <span className="text-lg font-black text-indigo-300 font-mono">৳{stats.totalAmount.toLocaleString()}</span>
+                <div className="bg-sky-950/30 border border-sky-500/20 rounded-xl p-3 text-center">
+                  <span className="text-[10px] font-black text-sky-400 uppercase tracking-wider block">এই মাসের বিল (This Month)</span>
+                  <span className="text-base sm:text-lg font-black text-sky-300 font-mono">৳{stats.totalThisMonth.toLocaleString()}</span>
+                </div>
+                <div className="bg-indigo-950/30 border border-indigo-500/20 rounded-xl p-3 text-center col-span-2 sm:col-span-1">
+                  <span className="text-[10px] font-black text-indigo-300 uppercase tracking-wider block">সর্বমোট বকেয়া (Total Due)</span>
+                  <span className="text-base sm:text-lg font-black text-indigo-300 font-mono">৳{stats.totalAmount.toLocaleString()}</span>
                 </div>
               </div>
             </div>
@@ -1074,30 +1282,32 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
                 </div>
               </div>
 
-              <div className="border border-slate-800 rounded-2xl overflow-hidden max-h-60 overflow-y-auto">
+              <div className="border border-slate-800 rounded-2xl overflow-hidden max-h-64 overflow-y-auto">
                 <table className="w-full text-left text-xs text-slate-300">
                   <thead className="bg-slate-950 text-slate-400 uppercase font-black text-[10px] tracking-wider sticky top-0 z-10 border-b border-slate-800">
                     <tr>
-                      <th className="px-4 py-2.5">#</th>
-                      <th className="px-4 py-2.5">BD No</th>
-                      <th className="px-4 py-2.5">Member</th>
-                      <th className="px-4 py-2.5 text-right font-mono">Current Due</th>
-                      <th className="px-4 py-2.5 text-right font-mono">Import Amount</th>
-                      <th className="px-4 py-2.5 text-right font-mono">Resulting Due</th>
-                      <th className="px-4 py-2.5 text-center">Status</th>
+                      <th className="px-3 py-2.5">#</th>
+                      <th className="px-3 py-2.5">BD No</th>
+                      <th className="px-3 py-2.5">Member</th>
+                      <th className="px-3 py-2.5 text-right font-mono">আগের বকেয়া</th>
+                      <th className="px-3 py-2.5 text-right font-mono">আগের অগ্রীম</th>
+                      <th className="px-3 py-2.5 text-right font-mono">এই মাসের বিল</th>
+                      <th className="px-3 py-2.5 text-right font-mono">পরিশোধ</th>
+                      <th className="px-3 py-2.5 text-right font-mono">সর্বমোট বকেয়া</th>
+                      <th className="px-3 py-2.5 text-center">Status</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60 font-sans">
                     {filteredPreview.map((row, idx) => {
                       const resultingDue = importMode === 'SET'
-                        ? row.amount
-                        : row.currentDue + row.amount;
+                        ? (row.totalDue || row.amount)
+                        : (row.currentDue + (row.totalDue || row.amount));
 
                       return (
                         <tr key={idx} className="hover:bg-slate-800/40">
-                          <td className="px-4 py-2 text-slate-500 font-mono">{idx + 1}</td>
-                          <td className="px-4 py-2 font-mono font-bold text-white">#{row.bdNo}</td>
-                          <td className="px-4 py-2">
+                          <td className="px-3 py-2 text-slate-500 font-mono">{idx + 1}</td>
+                          <td className="px-3 py-2 font-mono font-bold text-white">#{row.bdNo}</td>
+                          <td className="px-3 py-2">
                             {row.member ? (
                               <span className="font-bold text-white">
                                 {row.member['Rank']} {row.member['Surname']}
@@ -1106,16 +1316,24 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
                               <span className="text-amber-400 font-bold italic">সদস্য পাওয়া যায়নি</span>
                             )}
                           </td>
-                          <td className="px-4 py-2 text-right font-mono text-slate-400">
-                            ৳{row.currentDue}
+                          <td className="px-3 py-2 text-right font-mono text-amber-300">
+                            ৳{row.previousDue || 0}
                           </td>
-                          <td className="px-4 py-2 text-right font-mono font-black text-indigo-400">
-                            ৳{row.amount}
+                          <td className="px-3 py-2 text-right font-mono text-emerald-400">
+                            ৳{row.previousAdvance || 0}
                           </td>
-                          <td className="px-4 py-2 text-right font-mono font-black text-emerald-400">
-                            ৳{resultingDue}
+                          <td className="px-3 py-2 text-right font-mono text-sky-300">
+                            ৳{row.thisMonthBill || 0}
                           </td>
-                          <td className="px-4 py-2 text-center">
+                          <td className="px-3 py-2 text-right font-mono text-slate-300">
+                            ৳{row.paidBill || 0}
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono font-black text-rose-300">
+                            <span className="px-2 py-0.5 rounded-lg bg-rose-950/60 border border-rose-500/40 text-rose-200">
+                              ৳{resultingDue}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-center">
                             {row.status === 'matched' ? (
                               <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                                 <Check className="w-3 h-3 mr-1" />

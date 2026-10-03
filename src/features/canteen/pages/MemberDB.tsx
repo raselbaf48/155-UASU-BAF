@@ -32,7 +32,8 @@ import {
   Coins,
   Edit3,
   History,
-  Download
+  Download,
+  Users
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, fetchDirectImageUrl, getCanteenConfig } from '../utils/canteenSettings';
@@ -42,6 +43,7 @@ import { SaveButton } from '../components/SaveButton';
 import { BulkImportInitialBillsModal } from '../components/BulkImportInitialBillsModal';
 import { SetInitialBillModal } from '../components/SetInitialBillModal';
 import { PrintableCanteenBillModal } from '../components/PrintableCanteenBillModal';
+import { restoreRawStockForSaleCancellation } from '../utils/recipeManager';
 import { pushKeyToCloud } from '../utils/canteenCloudSync';
 import { exportCanteenBillToExcel } from '../utils/exportCanteenBillExcel';
 import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
@@ -457,22 +459,35 @@ export const MemberDB: React.FC = () => {
 
   const handlePrevMonth = () => {
     if (selectedMonth === 'ALL') {
-      if (availableMonths.length > 0) setSelectedMonth(availableMonths[0]);
+      const curKey = getRunningMonthKey();
+      setSelectedMonth(curKey);
       return;
     }
     const idx = availableMonths.indexOf(selectedMonth);
     if (idx !== -1 && idx < availableMonths.length - 1) {
       setSelectedMonth(availableMonths[idx + 1]);
+    } else {
+      const [y, m] = selectedMonth.split('-').map(Number);
+      const d = new Date(y, m - 2, 1);
+      const prevKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      setSelectedMonth(prevKey);
     }
   };
 
   const handleNextMonth = () => {
-    if (selectedMonth === 'ALL') return;
+    if (selectedMonth === 'ALL') {
+      const curKey = getRunningMonthKey();
+      setSelectedMonth(curKey);
+      return;
+    }
     const idx = availableMonths.indexOf(selectedMonth);
     if (idx > 0) {
       setSelectedMonth(availableMonths[idx - 1]);
-    } else if (idx === 0) {
-      setSelectedMonth('ALL');
+    } else {
+      const [y, m] = selectedMonth.split('-').map(Number);
+      const d = new Date(y, m, 1);
+      const nextKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      setSelectedMonth(nextKey);
     }
   };
 
@@ -992,6 +1007,58 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
     } catch (e) {
       console.warn('Error updating member Due in Supabase on remove tx:', e);
     }
+
+    // 1b. Restore raw stock back to inventory if this was a sale/item order
+    if (txToRemove.type !== 'BILL PAYMENT') {
+      const itemsToRestore: Array<{ menuItemId?: string; menuItemName: string; qty: number }> = [];
+
+      if (txToRemove.soldItems && Array.isArray(txToRemove.soldItems) && txToRemove.soldItems.length > 0) {
+        for (const item of txToRemove.soldItems) {
+          const qty = Number(item.qty || item.quantity) || 0;
+          if (qty > 0) {
+            itemsToRestore.push({
+              menuItemId: item.menuItemId || item.id,
+              menuItemName: item.menuItemName || item.name || '',
+              qty
+            });
+          }
+        }
+      } else if (txToRemove.items) {
+        const itemsArray = String(txToRemove.items).split(/[,+;|\n]+/).map((s: string) => s.trim()).filter(Boolean);
+        for (const itemStr of itemsArray) {
+          const parenMatch = itemStr.match(/^(.+?)\s*\(\s*(\d+)\s*\)$/);
+          const xMatchEnd = itemStr.match(/^(.+?)\s*[xX*]\s*(\d+)$/);
+          const xMatchStart = itemStr.match(/^(\d+)\s*[xX*]\s*(.+)$/);
+          const colonMatch = itemStr.match(/^(.+?)\s*[:\-]\s*(\d+)$/);
+
+          if (parenMatch) {
+            itemsToRestore.push({ menuItemName: parenMatch[1].trim(), qty: parseInt(parenMatch[2], 10) });
+          } else if (xMatchEnd) {
+            itemsToRestore.push({ menuItemName: xMatchEnd[1].trim(), qty: parseInt(xMatchEnd[2], 10) });
+          } else if (xMatchStart) {
+            itemsToRestore.push({ menuItemName: xMatchStart[2].trim(), qty: parseInt(xMatchStart[1], 10) });
+          } else if (colonMatch) {
+            itemsToRestore.push({ menuItemName: colonMatch[1].trim(), qty: parseInt(colonMatch[2], 10) });
+          } else {
+            itemsToRestore.push({ menuItemName: itemStr.trim(), qty: 1 });
+          }
+        }
+      }
+
+      if (itemsToRestore.length > 0) {
+        try {
+          restoreRawStockForSaleCancellation(itemsToRestore, {
+            id: txToRemove.id,
+            memberName: targetMember ? `${targetMember['Rank'] || ''} ${targetMember['Surname'] || ''}` : '',
+            date: txToRemove.date
+          });
+          window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+          window.dispatchEvent(new Event('canteen_inventory_updated'));
+        } catch (err) {
+          console.warn('Failed to restore raw stock in MemberDB handleRemoveTx:', err);
+        }
+      }
+    }
     
     // 2. Remove transaction from localStorage and Supabase app_settings cloud sync
     const txIdStr = String(txToRemove.id);
@@ -1389,6 +1456,14 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
     ? (memberTotalDue > 0 ? memberTotalDue : totalMonthBill)
     : Math.max(0, Math.round((totalMonthBill + previousDue - currentMonthPayments) * 100) / 100);
 
+  const grandTotalDue = useMemo(() => {
+    return members.reduce((sum, m) => sum + Number(m.Due ?? m.due ?? m.baki ?? 0), 0);
+  }, [members]);
+
+  const membersWithDueCount = useMemo(() => {
+    return members.filter((m) => Number(m.Due ?? m.due ?? m.baki ?? 0) > 0).length;
+  }, [members]);
+
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
       {/* Top Controls */}
@@ -1401,6 +1476,58 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
           <p className="text-xs text-slate-400 mt-0.5">
             Canteen Bill, Unit Fund Bill & Others Bill Administration
           </p>
+        </div>
+      </div>
+
+      {/* Prominent High-Visibility KPI Summary Banner */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 flex items-center space-x-3.5 shadow-sm">
+          <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0">
+            <Users className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total Members</p>
+            <p className="text-2xl font-black text-white font-mono">{members.length}</p>
+            <p className="text-[11px] text-slate-500 font-bold mt-0.5">অ্যাক্টিভ মেম্বার ডাটাবেজ</p>
+          </div>
+        </div>
+
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 flex items-center space-x-3.5 shadow-sm">
+          <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+            <Receipt className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Current View Billed</p>
+            <p className="text-2xl font-black text-emerald-400 font-mono">৳{totalFilteredBill.toLocaleString()}</p>
+            <p className="text-[11px] text-indigo-300 font-bold mt-0.5">{formatMonthName(selectedMonth)}</p>
+          </div>
+        </div>
+
+        <div 
+          onClick={() => setOnlyWithBill(!onlyWithBill)}
+          className="bg-gradient-to-br from-rose-950/90 via-red-950/70 to-slate-900 border border-rose-500/50 hover:border-rose-400 rounded-2xl p-4 flex items-center justify-between shadow-lg shadow-rose-950/40 transition-all cursor-pointer group"
+          title="সকল সদস্যের সর্বমোট প্রদেয় বকেয়া (Click to filter members with due)"
+        >
+          <div className="flex items-center space-x-3.5">
+            <div className="w-12 h-12 rounded-xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-300 shrink-0 group-hover:scale-105 transition-transform">
+              <Coins className="w-6 h-6 text-amber-400 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <p className="text-[11px] font-black uppercase tracking-widest text-rose-300">TOTAL DUE (সর্বমোট বকেয়া)</p>
+                <span className="text-[10px] font-bold px-2 py-0.2 rounded-full bg-rose-500/20 text-rose-200 border border-rose-500/30">
+                  {membersWithDueCount} জন
+                </span>
+              </div>
+              <p className="text-2xl sm:text-3xl font-black text-white font-mono tracking-tight drop-shadow-sm">
+                ৳{grandTotalDue.toLocaleString()}
+              </p>
+              <p className="text-[11px] text-rose-300/90 font-bold mt-0.5">
+                বকেয়া সদস্য ফিল্টার করতে ক্লিক করুন
+              </p>
+            </div>
+          </div>
+          <ChevronRight className="w-5 h-5 text-rose-400 group-hover:translate-x-1 transition-transform" />
         </div>
       </div>
 
@@ -1462,46 +1589,49 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
             </button>
           </div>
 
-          {/* Month Selector: All Month & Month Selector (Displays Month Name, Changeable) */}
+          {/* Month Selector: Left & Right Arrow Navigation (No Dropdown List) */}
           <div className="flex items-center space-x-2 self-start lg:self-auto w-full lg:w-auto">
             <div className="flex items-center bg-slate-950 rounded-2xl p-1 border border-slate-800 shadow-sm w-full sm:w-auto">
               <button
                 type="button"
                 onClick={() => setSelectedMonth('ALL')}
-                className={`flex-1 sm:flex-initial px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                className={`px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer shrink-0 ${
                   selectedMonth === 'ALL'
                     ? 'bg-indigo-600 text-white shadow-md'
                     : 'text-slate-400 hover:text-white'
                 }`}
+                title="All Months (সকল মাস)"
               >
-                All Month
+                All
               </button>
 
-              <div className="relative flex-1 sm:flex-initial">
-                <Calendar className={`w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none transition-colors ${
-                  selectedMonth !== 'ALL' ? 'text-white' : 'text-indigo-400'
-                }`} />
-                <select
-                  value={selectedMonth === 'ALL' ? getRunningMonthKey() : selectedMonth}
-                  onChange={(e) => setSelectedMonth(e.target.value)}
-                  className={`w-full sm:w-auto pl-8 pr-7 py-2 rounded-xl text-xs font-black uppercase tracking-wider font-mono transition-all cursor-pointer appearance-none focus:outline-none border ${
-                    selectedMonth !== 'ALL'
-                      ? 'bg-indigo-600 text-white border-indigo-500 shadow-md'
-                      : 'bg-slate-900/90 text-slate-300 border-slate-700 hover:text-white hover:border-slate-600'
-                  }`}
-                  title="Select Month"
+              <div className="flex items-center bg-slate-900/90 rounded-xl px-1.5 py-0.5 border border-slate-700/60 ml-1.5 flex-1 sm:flex-initial justify-between">
+                <button
+                  type="button"
+                  onClick={handlePrevMonth}
+                  className="p-1.5 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg transition-colors cursor-pointer shrink-0 active:scale-95"
+                  title="পূর্ববর্তী মাস (Previous Month)"
                 >
-                  {availableMonths.map((m) => (
-                    <option key={m} value={m} className="bg-slate-900 text-white font-bold">
-                      {formatMonthName(m)}
-                    </option>
-                  ))}
-                </select>
-                <div className={`absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-[9px] ${
-                  selectedMonth !== 'ALL' ? 'text-white' : 'text-slate-400'
-                }`}>
-                  ▼
+                  <ChevronLeft className="w-4 h-4 text-indigo-400 hover:text-white" />
+                </button>
+
+                <div className="px-3 py-1 text-center min-w-[120px] sm:min-w-[140px] select-none">
+                  <span className={`text-xs font-black uppercase tracking-wider flex items-center justify-center space-x-1.5 ${
+                    selectedMonth !== 'ALL' ? 'text-white' : 'text-indigo-300'
+                  }`}>
+                    <Calendar className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                    <span>{selectedMonth === 'ALL' ? 'সকল মাস' : formatMonthName(selectedMonth)}</span>
+                  </span>
                 </div>
+
+                <button
+                  type="button"
+                  onClick={handleNextMonth}
+                  className="p-1.5 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg transition-colors cursor-pointer shrink-0 active:scale-95"
+                  title="পরবর্তী মাস (Next Month)"
+                >
+                  <ChevronRight className="w-4 h-4 text-indigo-400 hover:text-white" />
+                </button>
               </div>
             </div>
           </div>
@@ -1728,25 +1858,38 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
                   </div>
 
                   {/* Due / Bill amount */}
-                  <div className="text-right">
-                    <p className="text-[9px] font-black text-slate-400 tracking-widest uppercase mb-0.5">{billLabel}</p>
-                    <p className={`text-2xl font-black font-mono tracking-tighter leading-none ${displayedBill === 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
-                      ৳{displayedBill}
+                  <div className="text-right flex flex-col items-end shrink-0 pl-2">
+                    <p className="text-[10px] font-black text-slate-400 tracking-wider uppercase mb-0.5">
+                      {billLabel}
                     </p>
-                    {(selectedCategory !== 'ALL' || selectedMonth !== 'ALL') && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setInitialBillMember(member);
-                        }}
-                        className="text-[9px] font-mono text-slate-400 hover:text-amber-300 transition-colors mt-0.5 inline-flex items-center space-x-1 cursor-pointer group/carddue"
-                        title="Click to set/edit initial bill"
-                      >
-                        <span>Total Due: ৳{totalDue}</span>
-                        <Coins className="w-2.5 h-2.5 text-slate-500 group-hover/carddue:text-amber-400 transition-colors" />
-                      </button>
-                    )}
+                    <p className={`text-2xl sm:text-3xl font-black font-mono tracking-tight leading-none ${displayedBill === 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
+                      ৳{displayedBill.toLocaleString()}
+                    </p>
+
+                    {/* High-Visibility Large & Beautiful Total Due Badge */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setInitialBillMember(member);
+                      }}
+                      className={`mt-2.5 px-3.5 py-2 rounded-2xl border shadow-md transition-all cursor-pointer inline-flex items-center justify-between space-x-2.5 active:scale-95 group/carddue w-full max-w-[210px] ${
+                        totalDue > 0
+                          ? 'bg-gradient-to-r from-rose-950/95 via-red-950/90 to-rose-900/90 border-rose-500/70 text-rose-200 hover:border-rose-400 shadow-rose-950/40 ring-1 ring-rose-500/30'
+                          : 'bg-gradient-to-r from-slate-950/90 to-slate-900/90 border-slate-700/80 text-slate-300 hover:bg-slate-800 hover:border-slate-500 shadow-black/40'
+                      }`}
+                      title="Click to set/edit Total Due"
+                    >
+                      <div className="flex items-center space-x-1.5 shrink-0">
+                        <Coins className={`w-4 h-4 ${totalDue > 0 ? 'text-amber-400 animate-pulse' : 'text-slate-400'} group-hover/carddue:rotate-12 transition-transform`} />
+                        <span className="text-[11px] font-black uppercase tracking-wider text-slate-300 font-sans">
+                          TOTAL DUE:
+                        </span>
+                      </div>
+                      <span className={`text-base sm:text-lg font-black font-mono tracking-tight shrink-0 ${totalDue > 0 ? 'text-rose-300' : 'text-emerald-400'}`}>
+                        ৳{totalDue.toLocaleString()}
+                      </span>
+                    </button>
                   </div>
                 </div>
 
@@ -1807,9 +1950,9 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
                       ? 'Others Bill'
                       : 'Monthly Bill'}
                   </th>
-                  {(selectedCategory !== 'ALL' || selectedMonth !== 'ALL') && (
-                    <th className="px-4 py-3.5 text-right font-mono">Total Due</th>
-                  )}
+                  <th className="px-4 py-3.5 text-right font-mono text-xs font-black uppercase tracking-wider text-rose-300">
+                    Total Due
+                  </th>
                   <th className="px-4 py-3.5 text-center w-52">Actions</th>
                 </tr>
               </thead>
@@ -1865,19 +2008,23 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
                           ৳{displayedBill}
                         </span>
                       </td>
-                      {(selectedCategory !== 'ALL' || selectedMonth !== 'ALL') && (
-                        <td className="px-4 py-3 text-right font-mono text-slate-400 text-xs font-bold" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            type="button"
-                            onClick={() => setInitialBillMember(member)}
-                            className="hover:text-amber-400 hover:bg-slate-800/80 px-2 py-1 rounded-lg transition-colors cursor-pointer group/due inline-flex items-center space-x-1"
-                            title="Click to set/edit initial bill"
-                          >
-                            <span>৳{totalDue}</span>
-                            <Coins className="w-3 h-3 text-slate-500 group-hover/due:text-amber-400 transition-colors" />
-                          </button>
-                        </td>
-                      )}
+                      <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={() => setInitialBillMember(member)}
+                          className={`px-3 py-1.5 rounded-xl border text-sm font-black font-mono transition-all cursor-pointer inline-flex items-center space-x-2 shadow-sm ${
+                            totalDue > 0
+                              ? 'bg-rose-950/80 border-rose-500/70 text-rose-200 hover:bg-rose-900/90 hover:border-rose-400 ring-1 ring-rose-500/30'
+                              : 'bg-slate-950/80 border-slate-700/80 text-emerald-400 hover:bg-slate-800'
+                          }`}
+                          title="Click to set/edit Total Due"
+                        >
+                          <Coins className={`w-3.5 h-3.5 ${totalDue > 0 ? 'text-amber-400' : 'text-emerald-400'}`} />
+                          <span className={totalDue > 0 ? 'text-rose-200 text-sm font-black' : 'text-emerald-400 text-sm font-bold'}>
+                            ৳{totalDue.toLocaleString()}
+                          </span>
+                        </button>
+                      </td>
                       <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-center space-x-1.5">
                           <button
@@ -2185,67 +2332,150 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
 
                   {/* Transaction History Section */}
                   <div className="space-y-3">
-                    <h3 className="text-xs font-black text-slate-300 uppercase tracking-widest">Transaction History</h3>
-                    
-                    <div className="bg-slate-800/80 rounded-2xl overflow-hidden border border-slate-700">
-                      <table className="w-full text-left text-xs text-slate-300">
-                        <thead className="bg-slate-900/80 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-700">
-                          <tr>
-                            <th className="px-4 py-3">Ser</th>
-                            <th className="px-4 py-3">Date</th>
-                            <th className="px-4 py-3">Description</th>
-                            <th className="px-4 py-3 text-center">Qty</th>
-                            <th className="px-4 py-3 text-right">Amount</th>
-                            <th className="px-4 py-3 text-center">Action</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {profileTx.length === 0 ? (
-                            <tr>
-                              <td colSpan={6} className="px-4 py-8 text-center text-slate-400 font-bold">No transactions found</td>
-                            </tr>
-                          ) : (
-                            profileTx.map((tx, idx) => {
-                              let qtyText = "-";
-                              let descText = tx.items;
-                              
-                              if (tx.items && tx.items.includes('(')) {
-                                const itemsList = tx.items.split(', ');
-                                let totalQty = 0;
-                                itemsList.forEach((it: string) => {
-                                  const match = it.match(/\((\d+)\)/);
-                                  if (match) totalQty += parseInt(match[1]);
-                                });
-                                if (totalQty > 0) qtyText = totalQty.toString();
-                              }
-                              if (tx.type === 'BILL PAYMENT') {
-                                qtyText = "-";
-                                descText = 'Payment Received - ' + (tx.gateway || 'CASH');
-                              }
-
-                              return (
-                                <tr key={tx.id} className="border-b border-slate-700/50 last:border-0 hover:bg-slate-700/20">
-                                  <td className="px-4 py-2.5 font-mono">{idx + 1}</td>
-                                  <td className="px-4 py-2.5 font-mono">{toEnglishDate(tx.date)}</td>
-                                  <td className="px-4 py-2.5 font-bold">{descText}</td>
-                                  <td className="px-4 py-2.5 text-center font-bold">{qtyText}</td>
-                                  <td className="px-4 py-2.5 text-right font-black text-rose-400">৳{tx.amount}</td>
-                                  <td className="px-4 py-2.5 text-center">
-                                    <button 
-                                      onClick={() => setTxDeleteConfirmId(tx)} 
-                                      className="p-1 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors" 
-                                      title="Remove Record"
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                  </td>
-                                </tr>
-                              );
-                            })
-                          )}
-                        </tbody>
-                      </table>
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center space-x-2">
+                        <History className="w-3.5 h-3.5 text-indigo-400" />
+                        <span>Transaction History</span>
+                      </h3>
+                      <span className="text-[10px] font-bold text-slate-400 font-mono">
+                        Total {profileTx.length} records
+                      </span>
                     </div>
+
+                    {profileTx.length === 0 ? (
+                      <div className="bg-slate-800/80 rounded-2xl p-8 text-center text-slate-400 font-bold border border-slate-700 text-xs">
+                        No transactions found
+                      </div>
+                    ) : (
+                      <>
+                        {/* Mobile Card View (sm:hidden) */}
+                        <div className="sm:hidden space-y-2.5">
+                          {profileTx.map((tx, idx) => {
+                            let qtyText = "-";
+                            let descText = tx.items;
+                            
+                            if (tx.items && tx.items.includes('(')) {
+                              const itemsList = tx.items.split(', ');
+                              let totalQty = 0;
+                              itemsList.forEach((it: string) => {
+                                const match = it.match(/\((\d+)\)/);
+                                if (match) totalQty += parseInt(match[1]);
+                              });
+                              if (totalQty > 0) qtyText = `${totalQty} pcs`;
+                            }
+                            if (tx.type === 'BILL PAYMENT') {
+                              qtyText = "-";
+                              descText = 'Payment Received - ' + (tx.gateway || 'CASH');
+                            }
+
+                            return (
+                              <div key={tx.id || idx} className="bg-slate-800/90 p-3.5 rounded-2xl border border-slate-700/80 space-y-2.5">
+                                <div className="flex items-center justify-between text-[11px] font-mono">
+                                  <span className="px-2 py-0.5 rounded-md bg-slate-900 text-indigo-300 font-bold border border-slate-700">
+                                    #{idx + 1}
+                                  </span>
+                                  <span className="text-slate-400 font-bold">
+                                    {toEnglishDate(tx.date)}
+                                  </span>
+                                  <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase border ${
+                                    tx.type === 'BILL PAYMENT'
+                                      ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                      : 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
+                                  }`}>
+                                    {tx.type || 'SALE'}
+                                  </span>
+                                </div>
+
+                                <div className="text-xs font-bold text-white break-words">
+                                  {descText}
+                                </div>
+
+                                <div className="flex items-center justify-between pt-2 border-t border-slate-700/60">
+                                  <div className="flex items-center space-x-2">
+                                    {qtyText !== '-' && (
+                                      <span className="text-[11px] font-mono font-bold text-slate-400 bg-slate-900/60 px-2 py-0.5 rounded-md border border-slate-700/50">
+                                        Qty: {qtyText}
+                                      </span>
+                                    )}
+                                    <span className="text-sm font-black font-mono text-rose-400">
+                                      ৳{tx.amount}
+                                    </span>
+                                  </div>
+
+                                  <button 
+                                    type="button"
+                                    onClick={() => setTxDeleteConfirmId(tx)} 
+                                    className="px-2.5 py-1 text-rose-400 hover:text-white bg-rose-500/10 hover:bg-rose-600 rounded-lg border border-rose-500/20 text-[11px] font-bold transition-colors flex items-center space-x-1"
+                                    title="Remove Record"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                    <span>Delete</span>
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Desktop Table View (hidden sm:block) */}
+                        <div className="hidden sm:block bg-slate-800/80 rounded-2xl overflow-hidden border border-slate-700">
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left text-xs text-slate-300 min-w-[500px]">
+                              <thead className="bg-slate-900/80 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-700">
+                                <tr>
+                                  <th className="px-4 py-3">Ser</th>
+                                  <th className="px-4 py-3">Date</th>
+                                  <th className="px-4 py-3">Description</th>
+                                  <th className="px-4 py-3 text-center">Qty</th>
+                                  <th className="px-4 py-3 text-right">Amount</th>
+                                  <th className="px-4 py-3 text-center">Action</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {profileTx.map((tx, idx) => {
+                                  let qtyText = "-";
+                                  let descText = tx.items;
+                                  
+                                  if (tx.items && tx.items.includes('(')) {
+                                    const itemsList = tx.items.split(', ');
+                                    let totalQty = 0;
+                                    itemsList.forEach((it: string) => {
+                                      const match = it.match(/\((\d+)\)/);
+                                      if (match) totalQty += parseInt(match[1]);
+                                    });
+                                    if (totalQty > 0) qtyText = totalQty.toString();
+                                  }
+                                  if (tx.type === 'BILL PAYMENT') {
+                                    qtyText = "-";
+                                    descText = 'Payment Received - ' + (tx.gateway || 'CASH');
+                                  }
+
+                                  return (
+                                    <tr key={tx.id || idx} className="border-b border-slate-700/50 last:border-0 hover:bg-slate-700/20">
+                                      <td className="px-4 py-2.5 font-mono">{idx + 1}</td>
+                                      <td className="px-4 py-2.5 font-mono">{toEnglishDate(tx.date)}</td>
+                                      <td className="px-4 py-2.5 font-bold">{descText}</td>
+                                      <td className="px-4 py-2.5 text-center font-bold">{qtyText}</td>
+                                      <td className="px-4 py-2.5 text-right font-black text-rose-400">৳{tx.amount}</td>
+                                      <td className="px-4 py-2.5 text-center">
+                                        <button 
+                                          type="button"
+                                          onClick={() => setTxDeleteConfirmId(tx)} 
+                                          className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer" 
+                                          title="Remove Record"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               )}
@@ -2607,6 +2837,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
           allTxs={allTxs}
           selectedCategory={selectedCategory}
           selectedMonth={selectedMonth}
+          onMonthChange={setSelectedMonth}
         />
       )}
     </div>

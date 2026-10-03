@@ -255,13 +255,14 @@ export function exportCanteenBillToExcel({
   // Row 4: Empty separator
   aoa.push([]);
 
-  // Row 5: Exact 9 Table Column Headers (Last 3 columns removed per user instruction)
+  // Row 5: Exact 10 Table Column Headers
   const headers = [
     'ক্রমিক\nনং',
     'পদবী',
     'নাম',
-    `${categoryTitle}\n(${currMonthBn})`,
     `বকেয়া বিল\n(${prevMonthBn})`,
+    `অগ্রীম বিল\n(${prevMonthBn})`,
+    `${categoryTitle}\n(${currMonthBn})`,
     'সর্বমোট\nবিল',
     'পরিশোধিত\nবিল',
     'অগ্রিম',
@@ -270,8 +271,9 @@ export function exportCanteenBillToExcel({
   aoa.push(headers);
 
   // Totals accumulators
-  let sumCanteenBill = 0;
   let sumPreviousDue = 0;
+  let sumPreviousAdvance = 0;
+  let sumCanteenBill = 0;
   let sumTotalBill = 0;
   let sumPaidBill = 0;
   let sumAdvance = 0;
@@ -290,9 +292,11 @@ export function exportCanteenBillToExcel({
     let currentPeriodCharges = 0;
     let currentPeriodPayments = 0;
     let previousDue = 0;
+    let previousAdvance = 0;
 
     if (selectedMonth === 'ALL') {
       const memberTotalDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
+      const memberTotalAdvance = Number(member.Advance ?? member.advance ?? member.ogrim ?? 0);
       const charges = memberTxs
         .filter((tx) => {
           const cat = getTxCategory(tx);
@@ -312,6 +316,7 @@ export function exportCanteenBillToExcel({
       currentPeriodCharges = Math.max(memberTotalDue, charges - payments);
       currentPeriodPayments = payments;
       previousDue = 0;
+      previousAdvance = memberTotalAdvance;
     } else {
       // Specific Month Selected
       const currentMonthTxs = memberTxs.filter((tx) => {
@@ -329,7 +334,7 @@ export function exportCanteenBillToExcel({
         .filter((tx) => tx.type === 'BILL PAYMENT')
         .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
 
-      // Calculate previous due before this month
+      // Calculate previous due and advance before this month
       const olderTxs = memberTxs.filter((tx) => {
         const cat = getTxCategory(tx);
         const catMatch = selectedCategory === 'ALL' || cat === selectedCategory;
@@ -345,24 +350,50 @@ export function exportCanteenBillToExcel({
         .filter((tx) => tx.type === 'BILL PAYMENT')
         .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
 
-      const olderNet = Math.max(0, olderCharges - olderPayments);
+      const olderNet = olderCharges - olderPayments;
       if (olderNet > 0) {
         previousDue = olderNet;
+        previousAdvance = 0;
+      } else if (olderNet < 0) {
+        previousDue = 0;
+        previousAdvance = Math.abs(olderNet);
       } else {
         const memberTotalDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
+        const memberTotalAdvance = Number(member.Advance ?? member.advance ?? member.ogrim ?? 0);
         const netThisMonth = Math.max(0, currentPeriodCharges - currentPeriodPayments);
-        previousDue = Math.max(0, memberTotalDue - netThisMonth);
+        const diff = memberTotalDue - netThisMonth;
+        if (diff > 0) {
+          previousDue = diff;
+          previousAdvance = 0;
+        } else if (memberTotalAdvance > 0) {
+          previousAdvance = memberTotalAdvance;
+          previousDue = 0;
+        } else {
+          previousDue = 0;
+          previousAdvance = 0;
+        }
       }
     }
 
     const totalBill = currentPeriodCharges + previousDue;
     const paidBill = currentPeriodPayments;
-    const advance = paidBill > totalBill ? paidBill - totalBill : 0;
-    const remainingDue = Math.max(0, totalBill - paidBill);
+    const totalCredits = previousAdvance + paidBill;
+
+    let advance = 0;
+    let remainingDue = 0;
+
+    if (totalCredits >= totalBill) {
+      advance = totalCredits - totalBill;
+      remainingDue = 0;
+    } else {
+      remainingDue = totalBill - totalCredits;
+      advance = 0;
+    }
 
     // Accumulate sums
-    sumCanteenBill += currentPeriodCharges;
     sumPreviousDue += previousDue;
+    sumPreviousAdvance += previousAdvance;
+    sumCanteenBill += currentPeriodCharges;
     sumTotalBill += totalBill;
     sumPaidBill += paidBill;
     sumAdvance += advance;
@@ -372,8 +403,9 @@ export function exportCanteenBillToExcel({
       toBengaliNum(index + 1),                              // ক্রমিক নং
       rankFormatted,                                        // পদবী
       nameFormatted,                                        // নাম (বাংলায়)
-      currentPeriodCharges > 0 ? currentPeriodCharges : '', // ক্যান্টিন বিল
-      previousDue > 0 ? previousDue : '',                   // বকেয়া বিল
+      previousDue > 0 ? previousDue : '',                   // বকেয়া বিল (আগের মাস)
+      previousAdvance > 0 ? previousAdvance : '',           // অগ্রীম বিল (আগের মাস)
+      currentPeriodCharges > 0 ? currentPeriodCharges : '', // ক্যান্টিন বিল (এই মাস)
       totalBill > 0 ? totalBill : '',                       // সর্বমোট বিল
       paidBill > 0 ? paidBill : '',                         // পরিশোধিত বিল
       advance > 0 ? advance : '',                           // অগ্রিম
@@ -381,17 +413,18 @@ export function exportCanteenBillToExcel({
     ]);
   });
 
-  // 4. Append Total Summary Row (for 9 columns)
+  // 4. Append Total Summary Row (for 10 columns)
   aoa.push([
     'সর্বমোট',
     '',
     '',
-    sumCanteenBill,
-    sumPreviousDue,
-    sumTotalBill,
-    sumPaidBill,
+    sumPreviousDue > 0 ? sumPreviousDue : '',
+    sumPreviousAdvance > 0 ? sumPreviousAdvance : '',
+    sumCanteenBill > 0 ? sumCanteenBill : '',
+    sumTotalBill > 0 ? sumTotalBill : '',
+    sumPaidBill > 0 ? sumPaidBill : '',
     sumAdvance > 0 ? sumAdvance : '',
-    sumRemainingDue,
+    sumRemainingDue > 0 ? sumRemainingDue : '',
   ]);
 
   // Convert AOA to Sheet
@@ -399,10 +432,10 @@ export function exportCanteenBillToExcel({
 
   // Set Merges for Title and Totals
   ws['!merges'] = [
-    // Title row (Row index 1: Row 2 in Excel) merged from col 2 to col 6
-    { s: { r: 1, c: 2 }, e: { r: 1, c: 6 } },
-    // Subtitle row (Row index 2: Row 3 in Excel) merged from col 2 to col 6
-    { s: { r: 2, c: 2 }, e: { r: 2, c: 6 } },
+    // Title row (Row index 1: Row 2 in Excel) merged from col 2 to col 7
+    { s: { r: 1, c: 2 }, e: { r: 1, c: 7 } },
+    // Subtitle row (Row index 2: Row 3 in Excel) merged from col 2 to col 7
+    { s: { r: 2, c: 2 }, e: { r: 2, c: 7 } },
     // Total row 'সর্বমোট' merged from col 0 to col 2
     { s: { r: 5 + sortedMembers.length, c: 0 }, e: { r: 5 + sortedMembers.length, c: 2 } },
   ];
@@ -418,13 +451,14 @@ export function exportCanteenBillToExcel({
     { hpt: 24 }, // Total Row
   ];
 
-  // Set Column Widths for 9 columns
+  // Set Column Widths for 10 columns
   ws['!cols'] = [
     { wch: 8 },  // ক্রমিক নং
     { wch: 14 }, // পদবী
     { wch: 20 }, // নাম
-    { wch: 16 }, // ক্যান্টিন বিল
-    { wch: 16 }, // বকেয়া বিল
+    { wch: 16 }, // বকেয়া বিল (আগের মাস)
+    { wch: 16 }, // অগ্রীম বিল (আগের মাস)
+    { wch: 16 }, // ক্যান্টিন বিল (এই মাস)
     { wch: 14 }, // সর্বমোট বিল
     { wch: 14 }, // পরিশোধিত বিল
     { wch: 12 }, // অগ্রিম
@@ -454,7 +488,7 @@ export function exportCanteenBillToExcel({
   }
 
   // Header Row (r = 4): ALL CELLS CENTER ALIGNED
-  for (let c = 0; c < 9; c++) {
+  for (let c = 0; c < 10; c++) {
     const addr = XLSX.utils.encode_cell({ r: 4, c });
     if (ws[addr]) {
       ws[addr].s = {
@@ -469,7 +503,7 @@ export function exportCanteenBillToExcel({
   // Data Rows (r = 5 to 5 + sortedMembers.length - 1)
   for (let i = 0; i < sortedMembers.length; i++) {
     const r = 5 + i;
-    for (let c = 0; c < 9; c++) {
+    for (let c = 0; c < 10; c++) {
       const addr = XLSX.utils.encode_cell({ r, c });
       if (!ws[addr]) {
         ws[addr] = { t: 's', v: '' };
@@ -487,7 +521,7 @@ export function exportCanteenBillToExcel({
   }
 
   // Total Row Style (r = totalRowIndex)
-  for (let c = 0; c < 9; c++) {
+  for (let c = 0; c < 10; c++) {
     const addr = XLSX.utils.encode_cell({ r: totalRowIndex, c });
     if (!ws[addr]) {
       ws[addr] = { t: 's', v: '' };

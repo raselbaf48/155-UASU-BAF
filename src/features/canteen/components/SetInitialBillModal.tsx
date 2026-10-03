@@ -192,11 +192,11 @@ export const SetInitialBillModal: React.FC<SetInitialBillModalProps> = ({
               </p>
             </div>
             <div className="text-right">
-              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">
-                Current Due
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">
+                TOTAL DUE
               </span>
-              <span className="text-sm font-black font-mono text-rose-400">
-                ৳{currentDue}
+              <span className="text-base font-black font-mono text-rose-400">
+                ৳{currentDue.toLocaleString()}
               </span>
             </div>
           </div>
@@ -264,10 +264,10 @@ export const SetInitialBillModal: React.FC<SetInitialBillModalProps> = ({
           </div>
 
           {/* Resulting Due preview */}
-          <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
+          <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 flex items-center justify-between">
             <span className="text-xs font-black text-slate-300">আপডেটের পর মোট বকেয়া:</span>
-            <span className="text-lg font-black font-mono text-emerald-400">
-              ৳{resultingDue}
+            <span className="text-xl font-black font-mono text-emerald-400">
+              ৳{resultingDue.toLocaleString()}
             </span>
           </div>
 

@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, ShoppingCart, Minus, Trash2, CheckCircle2, X, History, Calendar, Package as PackageIcon, AlertTriangle, ChefHat } from 'lucide-react';
+import { Search, Plus, ShoppingCart, Minus, Trash2, CheckCircle2, X, History, Calendar, Package as PackageIcon, AlertTriangle, ChefHat, Filter } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl } from '../utils/canteenSettings';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { deductRawStockForSales, restoreRawStockForSaleCancellation, getRecipeForMenuItem, getRawInventoryItems } from '../utils/recipeManager';
+import { pushKeyToCloud } from '../utils/canteenCloudSync';
 
 export const PosSales: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -259,6 +260,8 @@ export const PosSales: React.FC = () => {
 
   // History Modal State
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [historySearchTerm, setHistorySearchTerm] = useState('');
+  const [historyFilterType, setHistoryFilterType] = useState<'ALL' | 'TODAY'>('ALL');
   const [toastMessage, setToastMessage] = useState('');
   const [salesHistory, setSalesHistory] = useState<any[]>([]);
   const [txDeleteConfirmId, setTxDeleteConfirmId] = useState<string | null>(null);
@@ -286,6 +289,30 @@ export const PosSales: React.FC = () => {
       setShowHistoryModal(true);
   };
 
+  const filteredSalesHistory = useMemo(() => {
+    let list = salesHistory;
+    if (historyFilterType === 'TODAY') {
+      const todayStr = formatCanteenDate(new Date());
+      list = list.filter(tx => {
+        const txDate = formatCanteenDate(tx.date);
+        return txDate === todayStr;
+      });
+    }
+    if (!historySearchTerm.trim()) return list;
+    const term = historySearchTerm.toLowerCase().trim();
+    return list.filter(tx => {
+      const m = members.find(mem => mem.airman_id === tx.airman_id);
+      const memberName = m ? `${m['Rank'] || ''} ${m['Surname'] || ''} ${m['BD No'] || ''}` : String(tx.memberName || tx.airman_id || '');
+      const itemsStr = String(tx.items || '');
+      const dateStr = String(tx.date || '');
+      const bdStr = String(tx.bdNo || (m ? m['BD No'] : '') || '');
+      return memberName.toLowerCase().includes(term) ||
+             itemsStr.toLowerCase().includes(term) ||
+             dateStr.toLowerCase().includes(term) ||
+             bdStr.toLowerCase().includes(term);
+    });
+  }, [salesHistory, historyFilterType, historySearchTerm, members]);
+
   const removeHistoryItem = async (txId: string) => {
       const txToRemove = salesHistory.find(tx => tx.id === txId);
       if (!txToRemove) return;
@@ -299,38 +326,45 @@ export const PosSales: React.FC = () => {
           setMembers(members.map(member => member.airman_id === txToRemove.airman_id ? {...member, Due: newDue, baki: newDue} : member));
       }
 
-      // Prepare items for restoration
+      // Robust item parsing for raw inventory restoration
       const itemsToRestore: Array<{ menuItemId?: string; menuItemName: string; qty: number }> = [];
 
-      // Restore Catalog (Menu item) Stock
       if (txToRemove.soldItems && Array.isArray(txToRemove.soldItems) && txToRemove.soldItems.length > 0) {
           for (const item of txToRemove.soldItems) {
-              const qty = Number(item.qty) || 0;
+              const qty = Number(item.qty || item.quantity) || 0;
               if (qty > 0) {
                   itemsToRestore.push({
-                      menuItemId: item.menuItemId,
-                      menuItemName: item.menuItemName,
+                      menuItemId: item.menuItemId || item.id,
+                      menuItemName: item.menuItemName || item.name || '',
                       qty
                   });
               }
           }
       } else if (txToRemove.items) {
-          const itemsArray = txToRemove.items.split(',').map((s: string) => s.trim());
+          const itemsArray = String(txToRemove.items).split(/[,+;|\n]+/).map((s: string) => s.trim()).filter(Boolean);
           for (const itemStr of itemsArray) {
-              const match = itemStr.match(/(.+?)\s+\((\d+)\)/);
-              if (match) {
-                  const itemName = match[1];
-                  const qty = parseInt(match[2]);
-                  itemsToRestore.push({
-                      menuItemName: itemName,
-                      qty
-                  });
+              const parenMatch = itemStr.match(/^(.+?)\s*\(\s*(\d+)\s*\)$/);
+              const xMatchEnd = itemStr.match(/^(.+?)\s*[xX*]\s*(\d+)$/);
+              const xMatchStart = itemStr.match(/^(\d+)\s*[xX*]\s*(.+)$/);
+              const colonMatch = itemStr.match(/^(.+?)\s*[:\-]\s*(\d+)$/);
+
+              if (parenMatch) {
+                  itemsToRestore.push({ menuItemName: parenMatch[1].trim(), qty: parseInt(parenMatch[2], 10) });
+              } else if (xMatchEnd) {
+                  itemsToRestore.push({ menuItemName: xMatchEnd[1].trim(), qty: parseInt(xMatchEnd[2], 10) });
+              } else if (xMatchStart) {
+                  itemsToRestore.push({ menuItemName: xMatchStart[2].trim(), qty: parseInt(xMatchStart[1], 10) });
+              } else if (colonMatch) {
+                  itemsToRestore.push({ menuItemName: colonMatch[1].trim(), qty: parseInt(colonMatch[2], 10) });
+              } else {
+                  itemsToRestore.push({ menuItemName: itemStr.trim(), qty: 1 });
               }
           }
       }
 
       // Restore Raw Materials Stock (কাঁচামালের স্টক ফেরত আনা)
       let restoredCount = 0;
+      let restoredDetails: string[] = [];
       if (itemsToRestore.length > 0) {
           const rawRestoreResult = restoreRawStockForSaleCancellation(itemsToRestore, {
               id: txToRemove.id,
@@ -338,6 +372,7 @@ export const PosSales: React.FC = () => {
               date: txToRemove.date
           });
           restoredCount = rawRestoreResult.restored.length;
+          restoredDetails = rawRestoreResult.restored.map(r => `${r.rawItemName} (+${r.qtyRestored} ${r.unit})`);
       }
 
       fetchCatalog(); // Refresh catalog after stock restoration
@@ -345,13 +380,24 @@ export const PosSales: React.FC = () => {
       const updatedHistory = salesHistory.filter(tx => tx.id !== txId);
       setSalesHistory(updatedHistory);
       localStorage.setItem('canteen_txs', JSON.stringify(updatedHistory));
+      try {
+        await pushKeyToCloud('canteen_txs', updatedHistory);
+      } catch (e) {
+        console.warn('Cloud sync error for canteen_txs:', e);
+      }
+
+      window.dispatchEvent(new Event('canteen_txs_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+      window.dispatchEvent(new Event('canteen_inventory_updated'));
+      window.dispatchEvent(new Event('storage'));
       setTxDeleteConfirmId(null);
 
       const rawMsg = restoredCount > 0 
-          ? ` এবং ${restoredCount}টি কাঁচামালের স্টক স্টোরে ফেরত এসেছে!` 
+          ? ` এবং ${restoredCount}টি কাঁচামালের স্টক ইনভেন্টরিতে ফেরত যোগ করা হয়েছে (${restoredDetails.slice(0, 3).join(', ')}${restoredDetails.length > 3 ? '...' : ''})!` 
           : '!';
       setToastMessage(`✅ সেল রেকর্ড ডিলিট করা হয়েছে, বকেয়া সমন্বয় করা হয়েছে${rawMsg}`);
-      setTimeout(() => setToastMessage(''), 4000);
+      setTimeout(() => setToastMessage(''), 5000);
   };
 
   const fetchMembers = async () => {
@@ -678,7 +724,11 @@ export const PosSales: React.FC = () => {
                   gateway: 'DUE'
               };
               const existingTx = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-              localStorage.setItem('canteen_txs', JSON.stringify([tx, ...existingTx]));
+              const mergedTxs = [tx, ...existingTx];
+              localStorage.setItem('canteen_txs', JSON.stringify(mergedTxs));
+              try {
+                pushKeyToCloud('canteen_txs', mergedTxs);
+              } catch (e) {}
               window.dispatchEvent(new Event('canteen_txs_updated'));
               window.dispatchEvent(new Event('canteen_state_updated'));
               window.dispatchEvent(new Event('storage'));
@@ -1059,50 +1109,204 @@ export const PosSales: React.FC = () => {
           </div>
       )}
 
-    {/* History Modal */}
+    {/* History Modal - Mobile-First & High Visibility */}
     {showHistoryModal && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-slate-900 rounded-[2rem] p-6 w-full max-w-2xl shadow-xl animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
-                <div className="flex items-center justify-between mb-6">
-                    <div className="flex items-center space-x-2">
-                        <div className="p-2 bg-indigo-900/30 text-indigo-500 rounded-lg">
-                            <History className="w-5 h-5" />
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-2 sm:p-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl sm:rounded-[2rem] w-full max-w-2xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden animate-in zoom-in-95">
+                
+                {/* Header (Sticky) */}
+                <div className="p-4 sm:p-5 border-b border-slate-800 bg-slate-900/95 space-y-3 shrink-0">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2.5">
+                            <div className="p-2 bg-indigo-500/15 border border-indigo-500/30 text-indigo-400 rounded-xl">
+                                <History className="w-5 h-5" />
+                            </div>
+                            <div>
+                                <div className="flex items-center space-x-2">
+                                    <h3 className="text-sm font-black text-white uppercase tracking-wider">SALES HISTORY</h3>
+                                    <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-mono text-[10px] font-black">
+                                        {filteredSalesHistory.length}
+                                    </span>
+                                </div>
+                                <p className="text-[10px] font-bold text-slate-400">সর্বশেষ বিক্রয় বিবরণী ও কাঁচামাল সমন্বয়</p>
+                            </div>
                         </div>
-                        <div>
-                            <h3 className="text-xs font-black text-white uppercase tracking-widest">SALES HISTORY</h3>
-                            <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">RECENT TRANSACTIONS</p>
+                        <button 
+                            onClick={() => setShowHistoryModal(false)} 
+                            className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                            title="Close"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+                    </div>
+
+                    {/* Filter & Search Bar for Mobile & Desktop */}
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                        {/* Search Input */}
+                        <div className="relative flex-1">
+                            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                            <input 
+                                type="text"
+                                value={historySearchTerm}
+                                onChange={(e) => setHistorySearchTerm(e.target.value)}
+                                placeholder="সদস্য, BD No, আইটেম বা তারিখ খুঁজুন..."
+                                className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl text-xs font-semibold text-white placeholder:text-slate-500 outline-none"
+                            />
+                            {historySearchTerm && (
+                                <button 
+                                    onClick={() => setHistorySearchTerm('')} 
+                                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs font-bold p-1"
+                                >
+                                    ✕
+                                </button>
+                            )}
+                        </div>
+
+                        {/* Filter Tabs: ALL / TODAY */}
+                        <div className="flex items-center space-x-1 bg-slate-950 p-1 rounded-xl border border-slate-800 shrink-0 self-end sm:self-auto">
+                            <button
+                                type="button"
+                                onClick={() => setHistoryFilterType('ALL')}
+                                className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                                    historyFilterType === 'ALL'
+                                        ? 'bg-indigo-600 text-white shadow-sm'
+                                        : 'text-slate-400 hover:text-slate-200'
+                                }`}
+                            >
+                                ALL ({salesHistory.length})
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setHistoryFilterType('TODAY')}
+                                className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                                    historyFilterType === 'TODAY'
+                                        ? 'bg-emerald-600 text-white shadow-sm'
+                                        : 'text-slate-400 hover:text-slate-200'
+                                }`}
+                            >
+                                TODAY
+                            </button>
                         </div>
                     </div>
-                    <button onClick={() => setShowHistoryModal(false)} className="p-2 text-slate-400 hover:bg-slate-800 rounded-full transition-colors">
-                        <X className="w-5 h-5" />
-                    </button>
                 </div>
                 
-                <div className="space-y-3">
-                    {salesHistory.length === 0 ? (
-                        <div className="text-center py-10 text-slate-400">
+                {/* Scrollable List Body */}
+                <div className="p-3 sm:p-5 overflow-y-auto space-y-3 flex-1">
+                    {filteredSalesHistory.length === 0 ? (
+                        <div className="text-center py-12 text-slate-400 bg-slate-950/40 rounded-2xl border border-slate-800/80 p-6">
                             <History className="w-12 h-12 mx-auto opacity-20 mb-3" />
-                            <p className="text-xs font-bold uppercase tracking-widest">No Sales History Found</p>
+                            <p className="text-xs font-bold uppercase tracking-widest text-slate-300">কোনো হিস্টোরি রেকর্ড পাওয়া যায়নি</p>
+                            <p className="text-[11px] text-slate-500 mt-1">
+                                {historySearchTerm ? 'সার্চ ফিল্টারে কোনো ম্যাচ মেলেনি।' : 'নতুন কোনো সেল সম্পন্ন হলে এখানে তালিকা দেখা যাবে।'}
+                            </p>
                         </div>
                     ) : (
-                        salesHistory.map(tx => {
-                            const m = members.find(m => m.airman_id === tx.airman_id);
-                            const memberName = m ? `${m['Rank']} ${m['Surname']}` : tx.airman_id;
+                        filteredSalesHistory.map(tx => {
+                            const m = members.find(mem => mem.airman_id === tx.airman_id);
+                            const memberRank = tx.rank || (m ? m['Rank'] : '') || '';
+                            const memberSurname = (m ? m['Surname'] : '') || tx.memberName || tx.airman_id;
+                            const memberBdNo = tx.bdNo || (m ? m['BD No'] : '') || '';
                             
+                            // Parse items for beautiful tag presentation
+                            let parsedItemsList: Array<{ name: string; qty: number; price?: number }> = [];
+                            if (tx.soldItems && Array.isArray(tx.soldItems) && tx.soldItems.length > 0) {
+                                parsedItemsList = tx.soldItems.map((si: any) => ({
+                                    name: si.menuItemName || si.name || 'Item',
+                                    qty: Number(si.qty || si.quantity || 1),
+                                    price: si.price
+                                }));
+                            } else if (tx.items) {
+                                const parts = String(tx.items).split(/[,+;|\n]+/).map(s => s.trim()).filter(Boolean);
+                                parsedItemsList = parts.map(part => {
+                                    const parenMatch = part.match(/^(.+?)\s*\(\s*(\d+)\s*\)$/);
+                                    if (parenMatch) {
+                                        return { name: parenMatch[1].trim(), qty: parseInt(parenMatch[2], 10) };
+                                    }
+                                    const xMatch = part.match(/^(.+?)\s*[xX]\s*(\d+)$/);
+                                    if (xMatch) {
+                                        return { name: xMatch[1].trim(), qty: parseInt(xMatch[2], 10) };
+                                    }
+                                    return { name: part, qty: 1 };
+                                });
+                            }
+
                             return (
-                                <div key={tx.id} className="bg-slate-800 p-4 rounded-xl flex items-center justify-between border border-slate-700">
-                                    <div>
-                                        <p className="text-xs font-black text-white">{memberName}</p>
-                                        <p className="text-[10px] text-slate-400 mt-1">{formatCanteenDate(tx.date)} • {tx.items}</p>
+                                <div 
+                                    key={tx.id} 
+                                    className="bg-slate-800/85 hover:bg-slate-800 p-3.5 sm:p-4 rounded-2xl border border-slate-700/80 hover:border-slate-600 transition-all shadow-sm flex flex-col gap-2.5"
+                                >
+                                    {/* Top Line: Member Info & Date */}
+                                    <div className="flex items-start justify-between gap-2">
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                                                <span className="text-xs sm:text-sm font-black text-white">
+                                                    {memberRank ? `${memberRank} ` : ''}{memberSurname}
+                                                </span>
+                                                {memberBdNo && (
+                                                    <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-700 text-indigo-300 font-mono text-[10px] font-bold">
+                                                        BD: {memberBdNo}
+                                                    </span>
+                                                )}
+                                                <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider border ${
+                                                    tx.type === 'BILL PAYMENT'
+                                                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                                        : 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
+                                                }`}>
+                                                    {tx.type || 'SALE'}
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        {/* Date & Time Badge */}
+                                        <div className="text-right shrink-0">
+                                            <span className="text-[10px] sm:text-[11px] font-mono font-bold text-slate-400 bg-slate-900/60 px-2 py-1 rounded-lg border border-slate-800">
+                                                {formatCanteenDate(tx.date)}
+                                            </span>
+                                        </div>
                                     </div>
-                                    <div className="flex items-center space-x-4">
-                                        <p className="text-sm font-black text-white">৳{tx.amount}</p>
+
+                                    {/* Middle: Items List (Fully responsive chips, no overflow!) */}
+                                    <div className="flex flex-wrap gap-1.5 py-1">
+                                        {parsedItemsList.length > 0 ? (
+                                            parsedItemsList.map((item, i) => (
+                                                <span 
+                                                    key={i} 
+                                                    className="inline-flex items-center px-2.5 py-1 rounded-lg bg-slate-900/90 border border-slate-700/70 text-slate-200 text-[11px] font-semibold"
+                                                >
+                                                    <span className="truncate max-w-[200px] sm:max-w-xs">{item.name}</span>
+                                                    <span className="ml-1.5 px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300 font-mono font-black text-[10px]">
+                                                        x{item.qty}
+                                                    </span>
+                                                </span>
+                                            ))
+                                        ) : (
+                                            <span className="text-slate-400 text-xs font-semibold">
+                                                {tx.items || 'No item details'}
+                                            </span>
+                                        )}
+                                    </div>
+
+                                    {/* Bottom Line: Total Amount & Remove / Cancel Action */}
+                                    <div className="flex items-center justify-between pt-2 border-t border-slate-700/60">
+                                        <div className="flex items-baseline space-x-1.5">
+                                            <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">মোট:</span>
+                                            <span className="text-base sm:text-lg font-black text-rose-400 font-mono tracking-tight">
+                                                ৳{tx.amount}
+                                            </span>
+                                            <span className="text-[10px] text-slate-500 font-mono">
+                                                ({tx.gateway || 'DUE'})
+                                            </span>
+                                        </div>
+
+                                        {/* Delete Button - Touch Friendly & Clear */}
                                         <button 
+                                            type="button"
                                             onClick={() => setTxDeleteConfirmId(tx.id)}
-                                            className="p-2 text-rose-400 hover:text-rose-600 hover:bg-rose-900/30 rounded-lg transition-colors"
-                                            title="Remove Entry & Reverse Due"
+                                            className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/30 rounded-xl text-xs font-black tracking-wider uppercase flex items-center space-x-1.5 transition-all shadow-sm active:translate-y-0.5 cursor-pointer"
+                                            title="রেকর্ড ডিলিট করুন এবং কাঁচামাল স্টকে ফেরত দিন"
                                         >
-                                            <Trash2 className="w-4 h-4" />
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                            <span>ডিলিট (Delete)</span>
                                         </button>
                                     </div>
                                 </div>
@@ -1110,6 +1314,14 @@ export const PosSales: React.FC = () => {
                         })
                     )}
                 </div>
+
+                {/* Footer Summary Bar */}
+                {filteredSalesHistory.length > 0 && (
+                    <div className="p-3 sm:p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-between text-xs font-mono font-bold text-slate-400 shrink-0">
+                        <span>মোট রেকর্ড: <strong className="text-white">{filteredSalesHistory.length}টি</strong></span>
+                        <span>সর্বমোট মূল্য: <strong className="text-emerald-400 text-sm">৳{filteredSalesHistory.reduce((sum, t) => sum + Number(t.amount || 0), 0).toLocaleString()}</strong></span>
+                    </div>
+                )}
             </div>
         
       

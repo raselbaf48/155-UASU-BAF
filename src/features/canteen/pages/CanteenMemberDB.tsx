@@ -727,11 +727,15 @@ export const CanteenMemberDB: React.FC = () => {
                   </div>
 
                   {/* Due amount tag */}
-                  <div className="text-right">
-                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Due</p>
-                    <p className={`text-base font-black font-mono leading-none mt-0.5 ${totalDue === 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      ৳{totalDue}
-                    </p>
+                  <div className="text-right flex flex-col items-end">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">TOTAL DUE</p>
+                    <span className={`px-2.5 py-1 rounded-xl border text-base font-black font-mono leading-none ${
+                      totalDue === 0 
+                        ? 'bg-slate-950/80 border-slate-700/80 text-emerald-400' 
+                        : 'bg-rose-950/80 border-rose-500/60 text-rose-300 shadow-sm shadow-rose-950/30'
+                    }`}>
+                      ৳{totalDue.toLocaleString()}
+                    </span>
                   </div>
                 </div>
 
@@ -826,8 +830,12 @@ export const CanteenMemberDB: React.FC = () => {
                         {member['Contact'] || '-'}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <span className={`text-base font-black font-mono ${totalDue === 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          ৳{totalDue}
+                        <span className={`px-2.5 py-1 rounded-xl border text-sm font-black font-mono inline-block ${
+                          totalDue === 0 
+                            ? 'bg-slate-950/80 border-slate-700/80 text-emerald-400' 
+                            : 'bg-rose-950/80 border-rose-500/60 text-rose-300'
+                        }`}>
+                          ৳{totalDue.toLocaleString()}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center">

@@ -1653,6 +1653,15 @@ export const saveRawInventoryItems = (items: RawInventoryItem[]): void => {
     window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
     window.dispatchEvent(new Event('storage'));
 
+    // Push to Supabase app_settings cloud table for multi-device sync
+    const payloadSetting = {
+      setting_key: RAW_ITEMS_STORAGE_KEY,
+      setting_value: JSON.stringify(deduplicated),
+      updated_at: new Date().toISOString()
+    };
+    Promise.resolve(supabase.from('app_settings').upsert(payloadSetting, { onConflict: 'setting_key' }))
+      .catch(err => console.warn('Supabase app_settings raw items push error:', err));
+
     if (deduplicated && deduplicated.length > 0) {
       const payload = deduplicated.map(it => ({
         id: it.id,
@@ -1938,47 +1947,79 @@ export interface RawStockDeductionResult {
   warnings: string[];
 }
 
-export const deductRawStockForSales = (
-  soldItems: Array<{ menuItemId?: string; menuItemName?: string; name?: string; qty?: number; quantity?: number }>
-): RawStockDeductionResult => {
-  const rawItems = getRawInventoryItems();
-  const rawItemsMap = new Map<string, RawInventoryItem>();
-  rawItems.forEach(item => {
-    rawItemsMap.set(item.id, { ...item });
-    rawItemsMap.set(item.name.toLowerCase().trim(), item);
-  });
+/**
+ * Resolves raw ingredients or direct raw inventory items used for a sold item
+ */
+export const getRawIngredientsOrDirectForSoldItem = (
+  sold: { menuItemId?: string; menuItemName?: string; name?: string; qty?: number; quantity?: number },
+  rawItems: RawInventoryItem[]
+): Array<{ rawItem: RawInventoryItem; amountUsed: number }> => {
+  const soldQty = Number(sold.qty ?? sold.quantity ?? 0);
+  if (soldQty <= 0) return [];
 
-  const deductionsMap = new Map<string, { item: RawInventoryItem; totalUsed: number }>();
-  const warnings: string[] = [];
+  const itemName = (sold.menuItemName || sold.name || '').trim();
+  const menuItemId = sold.menuItemId || '';
 
-  for (const sold of soldItems) {
-    const soldQty = Number(sold.qty ?? sold.quantity ?? 0);
-    if (soldQty <= 0) continue;
-    
-    // Find recipe
-    const itemName = sold.menuItemName || sold.name || '';
-    const recipe = getRecipeForMenuItem(sold.menuItemId || '', itemName);
+  // 1. Try to get recipe
+  const recipe = getRecipeForMenuItem(menuItemId, itemName);
+  const results: Array<{ rawItem: RawInventoryItem; amountUsed: number }> = [];
 
-    if (!recipe || recipe.length === 0) {
-      continue;
-    }
-
+  if (recipe && recipe.length > 0) {
     for (const ing of recipe) {
-      let rawItem = rawItemsMap.get(ing.rawItemId);
+      let rawItem = rawItems.find(r => r.id === ing.rawItemId);
       if (!rawItem && ing.rawItemName) {
-        rawItem = rawItems.find(r => r.name.toLowerCase() === ing.rawItemName.toLowerCase());
+        const ingNorm = normalizeRawItemName(ing.rawItemName);
+        rawItem = rawItems.find(r => 
+          r.name.toLowerCase() === ing.rawItemName.toLowerCase() ||
+          normalizeRawItemName(r.name) === ingNorm ||
+          (r.nameBn && normalizeRawItemName(r.nameBn) === ingNorm)
+        );
       }
 
       if (rawItem) {
         const ratio = getIngredientToInventoryRatio(rawItem, ing.unit);
         const amount = (ing.quantity / ratio) * soldQty;
+        results.push({ rawItem, amountUsed: amount });
+      }
+    }
+  }
 
-        const current = deductionsMap.get(rawItem.id);
-        if (current) {
-          current.totalUsed += amount;
-        } else {
-          deductionsMap.set(rawItem.id, { item: rawItem, totalUsed: amount });
-        }
+  // 2. If no recipe ingredients found, check if this sold item itself is directly a raw inventory item
+  if (results.length === 0 && itemName) {
+    const itemNorm = normalizeRawItemName(itemName);
+    const directRaw = rawItems.find(r => 
+      r.id === menuItemId ||
+      r.name.toLowerCase() === itemName.toLowerCase() ||
+      normalizeRawItemName(r.name) === itemNorm ||
+      (r.nameBn && (normalizeRawItemName(r.nameBn) === itemNorm || r.nameBn.toLowerCase().includes(itemName.toLowerCase()) || itemName.toLowerCase().includes(r.nameBn.toLowerCase())))
+    );
+
+    if (directRaw) {
+      const isCase = (directRaw.unit || '').toLowerCase() === 'case';
+      const packSize = (directRaw.packSize && directRaw.packSize > 1) ? directRaw.packSize : 1;
+      const amount = isCase ? (soldQty / packSize) : soldQty;
+      results.push({ rawItem: directRaw, amountUsed: amount });
+    }
+  }
+
+  return results;
+};
+
+export const deductRawStockForSales = (
+  soldItems: Array<{ menuItemId?: string; menuItemName?: string; name?: string; qty?: number; quantity?: number }>
+): RawStockDeductionResult => {
+  const rawItems = getRawInventoryItems();
+  const deductionsMap = new Map<string, { item: RawInventoryItem; totalUsed: number }>();
+  const warnings: string[] = [];
+
+  for (const sold of soldItems) {
+    const rawMatches = getRawIngredientsOrDirectForSoldItem(sold, rawItems);
+    for (const match of rawMatches) {
+      const current = deductionsMap.get(match.rawItem.id);
+      if (current) {
+        current.totalUsed += match.amountUsed;
+      } else {
+        deductionsMap.set(match.rawItem.id, { item: match.rawItem, totalUsed: match.amountUsed });
       }
     }
   }
@@ -2019,19 +2060,15 @@ export const deductRawStockForSales = (
       const soldQty = Number(sold.qty ?? sold.quantity ?? 0);
       if (soldQty <= 0) continue;
       const itemName = sold.menuItemName || sold.name || '';
-      const recipe = getRecipeForMenuItem(sold.menuItemId || '', itemName);
-      const hasThisRaw = recipe && recipe.some(ing => 
-        ing.rawItemId === item.id || 
-        (ing.rawItemName && ing.rawItemName.toLowerCase() === item.name.toLowerCase())
-      );
-      if (hasThisRaw) {
+      const matches = getRawIngredientsOrDirectForSoldItem(sold, rawItems);
+      if (matches.some(m => m.rawItem.id === item.id)) {
         usedInMenuItems.push(`${itemName} x${soldQty}`);
       }
     }
 
     const menuNote = usedInMenuItems.length > 0 
       ? usedInMenuItems.join(', ')
-      : soldItems.map(s => `${s.menuItemName} x${s.qty}`).join(', ');
+      : soldItems.map(s => `${s.menuItemName || s.name} x${s.qty ?? s.quantity ?? 1}`).join(', ');
 
     newLogs.push({
       id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
@@ -2068,6 +2105,7 @@ export const deductRawStockForSales = (
     localStorage.setItem(RAW_LOGS_STORAGE_KEY, JSON.stringify(mergedLogs));
     window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
     window.dispatchEvent(new Event('canteen_raw_stock_logs_updated'));
+    window.dispatchEvent(new Event('canteen_raw_logs_updated'));
     window.dispatchEvent(new Event('canteen_state_updated'));
     window.dispatchEvent(new Event('storage'));
   } catch (e) {
@@ -2343,42 +2381,16 @@ export const restoreRawStockForSaleCancellation = (
   txInfo?: { id?: string | number; memberName?: string; date?: string }
 ): RawStockRestorationResult => {
   const rawItems = getRawInventoryItems();
-  const rawItemsMap = new Map<string, RawInventoryItem>();
-  rawItems.forEach(item => {
-    rawItemsMap.set(item.id, { ...item });
-    rawItemsMap.set(item.name.toLowerCase().trim(), item);
-  });
-
   const restorationsMap = new Map<string, { item: RawInventoryItem; totalToRestore: number }>();
 
   for (const sold of soldItems) {
-    const soldQty = Number(sold.qty ?? sold.quantity ?? 0);
-    if (soldQty <= 0) continue;
-
-    // Find recipe
-    const itemName = sold.menuItemName || sold.name || '';
-    const recipe = getRecipeForMenuItem(sold.menuItemId || '', itemName);
-
-    if (!recipe || recipe.length === 0) {
-      continue;
-    }
-
-    for (const ing of recipe) {
-      let rawItem = rawItemsMap.get(ing.rawItemId);
-      if (!rawItem && ing.rawItemName) {
-        rawItem = rawItems.find(r => r.name.toLowerCase() === ing.rawItemName.toLowerCase());
-      }
-
-      if (rawItem) {
-        const ratio = getIngredientToInventoryRatio(rawItem, ing.unit);
-        const amount = (ing.quantity / ratio) * soldQty;
-
-        const current = restorationsMap.get(rawItem.id);
-        if (current) {
-          current.totalToRestore += amount;
-        } else {
-          restorationsMap.set(rawItem.id, { item: rawItem, totalToRestore: amount });
-        }
+    const rawMatches = getRawIngredientsOrDirectForSoldItem(sold, rawItems);
+    for (const match of rawMatches) {
+      const current = restorationsMap.get(match.rawItem.id);
+      if (current) {
+        current.totalToRestore += match.amountUsed;
+      } else {
+        restorationsMap.set(match.rawItem.id, { item: match.rawItem, totalToRestore: match.amountUsed });
       }
     }
   }
@@ -2414,19 +2426,15 @@ export const restoreRawStockForSaleCancellation = (
       const soldQty = Number(sold.qty ?? sold.quantity ?? 0);
       if (soldQty <= 0) continue;
       const itemName = sold.menuItemName || sold.name || '';
-      const recipe = getRecipeForMenuItem(sold.menuItemId || '', itemName);
-      const hasThisRaw = recipe && recipe.some(ing => 
-        ing.rawItemId === item.id || 
-        (ing.rawItemName && ing.rawItemName.toLowerCase() === item.name.toLowerCase())
-      );
-      if (hasThisRaw) {
+      const matches = getRawIngredientsOrDirectForSoldItem(sold, rawItems);
+      if (matches.some(m => m.rawItem.id === item.id)) {
         usedInMenuItems.push(`${itemName} x${soldQty}`);
       }
     }
 
     const menuNote = usedInMenuItems.length > 0 
-      ? usedInMenuItems.join(', ')
-      : soldItems.map(s => `${s.menuItemName} x${s.qty}`).join(', ');
+      ? `Cancel/Return: ${usedInMenuItems.join(', ')}`
+      : `Cancel/Return: ${soldItems.map(s => `${s.menuItemName || s.name} x${s.qty ?? s.quantity ?? 1}`).join(', ')}`;
 
     newLogs.push({
       id: `log-restore-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
@@ -2463,6 +2471,7 @@ export const restoreRawStockForSaleCancellation = (
     localStorage.setItem(RAW_LOGS_STORAGE_KEY, JSON.stringify(mergedLogs));
     window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
     window.dispatchEvent(new Event('canteen_raw_stock_logs_updated'));
+    window.dispatchEvent(new Event('canteen_raw_logs_updated'));
     window.dispatchEvent(new Event('canteen_state_updated'));
     window.dispatchEvent(new Event('storage'));
   } catch (e) {
