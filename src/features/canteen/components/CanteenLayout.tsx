@@ -29,7 +29,7 @@ import { CanteenFund } from '../pages/CanteenFund';
 import { DueRegister } from '../pages/DueRegister';
 import { AirmanProfileModal } from '../../../components/AirmanProfileModal';
 
-import { Wallet, LayoutDashboard, Coffee, Search, List, CreditCard, ArrowLeft, Utensils, Wifi, HelpCircle, LogIn, Grid, Package as Pkg, ShoppingCart, Users, Banknote, BarChart2, Settings as SettingsIcon, PieChart, Package, UserCircle, X, Menu, User, Eye, EyeOff, Lock, Phone, UtensilsCrossed, Boxes, ClipboardList, Cloud, RefreshCw } from 'lucide-react';
+import { Wallet, LayoutDashboard, Coffee, Search, List, CreditCard, ArrowLeft, Utensils, Wifi, HelpCircle, LogIn, Grid, Package as Pkg, ShoppingCart, Users, Banknote, BarChart2, Settings as SettingsIcon, PieChart, Package, UserCircle, X, Menu, User, Eye, EyeOff, Lock, Phone, UtensilsCrossed, Boxes, ClipboardList, Cloud, RefreshCw, Receipt } from 'lucide-react';
 
 interface CanteenLayoutProps {
   initialMember?: { name: string, bdNo: string, role?: 'employee'|'manager', photoUrl?: string, due?: number };
@@ -490,7 +490,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
   const navItems = currentUser.role === 'manager' ? [
     { id: 'manager_dashboard', name: 'Dashboard', icon: Grid },
     { id: 'pos_sales', name: 'POS Sales', icon: ShoppingCart },
-    { id: 'member_db', name: 'Member DB', icon: Users },
+    { id: 'member_db', name: 'Bill', icon: Receipt },
     { id: 'due_register', name: 'Due Register', icon: ClipboardList },
     { id: 'menu', name: 'Menu', icon: UtensilsCrossed },
     { id: 'inventory', name: 'Inventory', icon: Boxes },
@@ -537,10 +537,12 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
       case 'expenditures': return <Expenditures />;
       case 'reports': return <CanteenReports />;
       case 'fund': return <CanteenFund />;
-      case 'settings': return <CanteenSettings />;
+      case 'settings': return <CanteenSettings onClose={() => setActiveTab('manager_dashboard')} />;
       default: return <div className="text-center p-10 font-bold text-slate-400 animate-pulse">Under Construction ({activeTab})</div>;
     }
   };
+
+  const isSettingsActive = activeTab === 'settings';
 
   return (
     <div className={`fixed inset-0 z-[100] bg-slate-800 dark:bg-slate-950 overflow-hidden flex flex-col md:flex-row transition-all duration-300 ${i18n.language === 'bn' ? 'font-hind-siliguri text-[105%] leading-relaxed' : 'font-sans'}`}>
@@ -552,7 +554,8 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
         }
       `}</style>
 
-      {/* Sidebar - Desktop */}
+      {/* Sidebar - Desktop (Hidden when in Settings) */}
+      {!isSettingsActive && (
       <div className={`w-64 border-r flex-col shrink-0 h-full overflow-y-auto hidden md:flex rounded-br-[40px] ${"bg-slate-950 border-slate-800"}`}>
         <div className="p-6 pb-4">
           <div className="flex items-center space-x-3">
@@ -680,6 +683,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
           </div>
         </div>
       </div>
+      )}
 
       {/* Sidebar - Mobile Overlay */}
       {mobileMenuOpen && (
@@ -790,7 +794,8 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col h-full overflow-hidden relative">
          
-         {/* Top Header for Mobile only */}
+         {/* Top Header for Mobile only (Hidden when in Settings) */}
+         {!isSettingsActive && (
          <div className={`md:hidden h-16 border-b flex items-center justify-between px-4 z-10 sticky top-0 ${"bg-slate-950 border-slate-800"}`}>
             <div className="flex items-center space-x-3">
               <button onClick={() => setMobileMenuOpen(true)} className={`p-2 rounded-lg ${"text-slate-400 bg-slate-800"}`}>
@@ -846,6 +851,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
               </div>
             </div>
          </div>
+         )}
 
          {/* Content View */}
          <div className={`flex-1 overflow-y-auto p-4 sm:p-8 ${"bg-slate-950"}`}>

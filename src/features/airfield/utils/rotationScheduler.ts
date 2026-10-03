@@ -229,15 +229,28 @@ export function generateFairRotationSchedule(
 
     // Sort eligible active candidates:
     // 1. Least total active minutes so far (fair equal time)
-    // 2. Tie-break: Prefer someone who did standby near end of previous block:
-    //    "abr amn o hote pare Rest kore Stby kore erpor active korbe"
+    // 2. Strict preference: Did NOT do active in previous block ("Akjoner tana 2 shift lagbe na")
+    // 3. Priority for transition: Person who did standby in the very last sub-slot of previous block
+    //    ("abr amn o hote pare Rest kore Stby kore erpor active korbe")
+    // 4. Longest continuous rest before this block (e.g. 60+ minutes rest over 30 minutes rest)
     eligibleActiveCandidates.sort((a, b) => {
       const actDiff = (personActiveMinutes[a.id] || 0) - (personActiveMinutes[b.id] || 0);
       if (actDiff !== 0) return actDiff;
-      // If tied, prioritize someone who did NOT do active in previous block
+
       const aPrev = prevBlockActiveIds.includes(a.id) ? 1 : 0;
       const bPrev = prevBlockActiveIds.includes(b.id) ? 1 : 0;
       if (aPrev !== bPrev) return aPrev - bPrev;
+
+      // Prioritize person who was on Standby in the last sub-slot right before this block
+      const aWasLastStby = a.id === lastStandbyPersonId ? 1 : 0;
+      const bWasLastStby = b.id === lastStandbyPersonId ? 1 : 0;
+      if (aWasLastStby !== bWasLastStby) return bWasLastStby - aWasLastStby;
+
+      // Prefer person who had rest at the end of the previous block
+      const aRested = personRestSlots[a.id]?.length || 0;
+      const bRested = personRestSlots[b.id]?.length || 0;
+      if (aRested !== bRested) return bRested - aRested;
+
       return 0;
     });
 
@@ -284,6 +297,21 @@ export function generateFairRotationSchedule(
       // 3. Lowest total standby minutes
       return (personStandbyMinutes[a.id] || 0) - (personStandbyMinutes[b.id] || 0);
     });
+
+    // When there are 3 sub-slots and 2 persons just finished Active (e.g. A & B, with D resting):
+    // Put Person 1 at Slot 0 (Active -> Standby -> 60m Rest)
+    // Put D at Slot 1 (Middle)
+    // Put Person 2 at Slot 2 (60m Rest -> Standby -> next Active)
+    // Exactly matches user sample: A (0730-0800), D (0800-0830), B (0830-0900)
+    if (numSubSlots === 3 && standbyOrderPool.length === 3) {
+      const justActiveCrew = standbyOrderPool.filter((p) => prevBlockActiveIds.includes(p.id));
+      const notJustActiveCrew = standbyOrderPool.filter((p) => !prevBlockActiveIds.includes(p.id));
+      if (justActiveCrew.length === 2 && notJustActiveCrew.length === 1) {
+        standbyOrderPool[0] = justActiveCrew[0];
+        standbyOrderPool[1] = notJustActiveCrew[0];
+        standbyOrderPool[2] = justActiveCrew[1];
+      }
+    }
 
     const blockSubSlots: RotationSlot[] = [];
 

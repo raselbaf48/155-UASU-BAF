@@ -1,6 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { DutyPost } from '../types';
-import { X, Shield, Trash2, Check, Phone, FileText, Clock, Users, UserCheck } from 'lucide-react';
+import { DutyPost, DutyPerson, DutyStatusType } from '../types';
+import {
+  X,
+  Shield,
+  Trash2,
+  Check,
+  Phone,
+  FileText,
+  Clock,
+  Users,
+  UserCheck,
+  UserPlus,
+  Edit2,
+  Sparkles,
+} from 'lucide-react';
+import { AddEditPersonModal } from './AddEditPersonModal';
 
 interface PostSettingsModalProps {
   isOpen: boolean;
@@ -25,6 +39,9 @@ export const PostSettingsModal: React.FC<PostSettingsModalProps> = ({
   const [breakdownNote, setBreakdownNote] = useState('');
   const [mobileNo, setMobileNo] = useState('');
   const [remarks, setRemarks] = useState('');
+  const [personnelList, setPersonnelList] = useState<DutyPerson[]>([]);
+  const [isPersonModalOpen, setIsPersonModalOpen] = useState<boolean>(false);
+  const [editingPerson, setEditingPerson] = useState<DutyPerson | null>(null);
 
   const commonTimes = ['0600F - 1400F', '1400F - 2200F', '2200F - 0600F', '24 Hours', 'Day Duty (0800 - 1600)'];
 
@@ -38,6 +55,7 @@ export const PostSettingsModal: React.FC<PostSettingsModalProps> = ({
       setBreakdownNote(post.breakdownNote || '');
       setMobileNo(post.mobileNo || '');
       setRemarks(post.remarks || '');
+      setPersonnelList(post.personnel ? [...post.personnel] : []);
     } else {
       setName('');
       setCategory('Security');
@@ -47,8 +65,60 @@ export const PostSettingsModal: React.FC<PostSettingsModalProps> = ({
       setBreakdownNote('');
       setMobileNo('');
       setRemarks('');
+      setPersonnelList([]);
     }
   }, [post, isOpen]);
+
+  // Quick Preset Handlers for Personnel
+  const handleLoadSampleTeam = () => {
+    const samplePersons: DutyPerson[] = [
+      { id: 'p_a', rank: 'LAC', name: 'A', type: 'Permanent', dutyStatus: 'Active', dutyTime: dutyTime || '0600F - 1400F', armsCount: 1, mobileNo: '01700-000001' },
+      { id: 'p_b', rank: 'LAC', name: 'B', type: 'Permanent', dutyStatus: 'Active', dutyTime: dutyTime || '0600F - 1400F', armsCount: 1, mobileNo: '01700-000002' },
+      { id: 'p_c', rank: 'Cpl', name: 'C', type: 'Permanent', dutyStatus: 'Standby', dutyTime: dutyTime || '0600F - 1400F', armsCount: 1, mobileNo: '01700-000003' },
+      { id: 'p_d', rank: 'LAC', name: 'D', type: 'Additional', dutyStatus: 'Rest', dutyTime: dutyTime || '0600F - 1400F', rtCount: 1, mobileNo: '01700-000004' },
+      { id: 'p_e', rank: 'LAC', name: 'E', type: 'Additional', dutyStatus: 'Rest', dutyTime: dutyTime || '0600F - 1400F', mobileNo: '01700-000005' },
+    ];
+    setPersonnelList(samplePersons);
+    setTargetActiveStrength(2);
+    setTargetStandbyStrength(1);
+  };
+
+  const handleLoadOfficialDriveway = () => {
+    const officialPersons: DutyPerson[] = [
+      { id: 'p_8', rank: 'LAC', name: 'Ashraf', type: 'Permanent', dutyStatus: 'Active', dutyTime: dutyTime || '0600F - 1400F', armsCount: 1, mobileNo: '01712-345678' },
+      { id: 'p_9', rank: 'LAC', name: 'Rifat', type: 'Permanent', dutyStatus: 'Active', dutyTime: dutyTime || '0600F - 1400F', armsCount: 1, mobileNo: '01812-345678' },
+      { id: 'p_10', rank: 'Cpl', name: 'Tamjid', type: 'Permanent', dutyStatus: 'Standby', dutyTime: dutyTime || '0600F - 1400F', armsCount: 1, mobileNo: '01912-345678' },
+      { id: 'p_11', rank: 'LAC', name: 'Sarwer', type: 'Additional', dutyStatus: 'Rest', dutyTime: dutyTime || '0600F - 1400F', rtCount: 1, mobileNo: '01612-345678' },
+      { id: 'p_12', rank: 'LAC', name: 'Saiful', type: 'Additional', dutyStatus: 'Rest', dutyTime: dutyTime || '0600F - 1400F', mobileNo: '01512-345678' },
+    ];
+    setPersonnelList(officialPersons);
+    setTargetActiveStrength(2);
+    setTargetStandbyStrength(1);
+  };
+
+  const handleSavePerson = (person: DutyPerson) => {
+    setPersonnelList((prev) => {
+      const idx = prev.findIndex((p) => p.id === person.id);
+      if (idx !== -1) {
+        const next = [...prev];
+        next[idx] = person;
+        return next;
+      }
+      return [...prev, person];
+    });
+    setEditingPerson(null);
+    setIsPersonModalOpen(false);
+  };
+
+  const handleRemovePerson = (personId: string) => {
+    setPersonnelList((prev) => prev.filter((p) => p.id !== personId));
+  };
+
+  const handleChangePersonStatus = (personId: string, newStatus: DutyStatusType) => {
+    setPersonnelList((prev) =>
+      prev.map((p) => (p.id === personId ? { ...p, dutyStatus: newStatus } : p))
+    );
+  };
 
   if (!isOpen) return null;
 
@@ -69,7 +139,7 @@ export const PostSettingsModal: React.FC<PostSettingsModalProps> = ({
       breakdownNote: breakdownNote.trim() || undefined,
       mobileNo: mobileNo.trim() || undefined,
       remarks: remarks.trim() || undefined,
-      personnel: post ? post.personnel : [],
+      personnel: personnelList,
     };
 
     onSavePost(updatedPost);
@@ -77,8 +147,8 @@ export const PostSettingsModal: React.FC<PostSettingsModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-fadeIn">
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-[250] flex items-center justify-center p-3 sm:p-4 bg-slate-950/70 backdrop-blur-sm animate-fadeIn">
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/80">
           <h3 className="text-base font-black text-white flex items-center gap-2">
@@ -241,6 +311,186 @@ export const PostSettingsModal: React.FC<PostSettingsModalProps> = ({
             </div>
           </div>
 
+          {/* PERSONNEL MANAGEMENT SECTION (এই পোস্টে নিয়োজিত সকল ডিউটি পার্সনদের তালিকা) */}
+          <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-2.5">
+              <div>
+                <div className="flex items-center space-x-2">
+                  <Users className="w-4 h-4 text-indigo-400" />
+                  <span className="text-xs font-black uppercase tracking-wider text-white">
+                    Assigned Duty Personnel ({personnelList.length} জন)
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  এই পোস্টের এয়ারম্যানদের তালিকা ও ডিউটি স্ট্যাটাস (Active / Standby / Rest) পরিবর্তন বা রিমুভ করুন
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingPerson(null);
+                  setIsPersonModalOpen(true);
+                }}
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md transition-all cursor-pointer self-start sm:self-auto shrink-0"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span>+ এয়ারম্যান যোগ করুন</span>
+              </button>
+            </div>
+
+            {/* Quick Presets for Driveway / Terminal */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              <span className="text-[10px] uppercase font-bold text-slate-500 mr-1">কুইক প্রিসেট:</span>
+              <button
+                type="button"
+                onClick={handleLoadSampleTeam}
+                className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-emerald-950/60 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-900/60 transition-colors flex items-center gap-1 cursor-pointer"
+              >
+                <Sparkles className="w-3 h-3 text-emerald-400" />
+                <span>স্যাম্পল টিম (A, B, C, D, E)</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleLoadOfficialDriveway}
+                className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 transition-colors flex items-center gap-1 cursor-pointer"
+              >
+                <Shield className="w-3 h-3 text-indigo-400" />
+                <span>155 UASU ড্রাইভওয়ে স্কোয়াড</span>
+              </button>
+            </div>
+
+            {/* Personnel List Items */}
+            {personnelList.length === 0 ? (
+              <div className="text-center py-6 px-4 rounded-xl bg-slate-900/60 border border-dashed border-slate-800 text-xs text-slate-400">
+                <Users className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-50" />
+                <p>এই পোস্টে বর্তমানে কোনো এয়ারম্যান যুক্ত নেই।</p>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  উপরে &apos;+ এয়ারম্যান যোগ করুন&apos; অথবা প্রিসেট বাটনে চাপুন।
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                {personnelList.map((person, idx) => {
+                  const status = person.dutyStatus || 'Active';
+                  return (
+                    <div
+                      key={person.id || idx}
+                      className="p-3 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-2.5"
+                    >
+                      {/* Left: Info */}
+                      <div className="flex items-center space-x-3 min-w-0">
+                        <div className="w-8 h-8 rounded-lg bg-indigo-500/20 border border-indigo-400/30 text-indigo-300 font-black text-xs flex items-center justify-center shrink-0">
+                          {person.rank || 'LAC'}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center space-x-2">
+                            <span className="font-black text-white text-xs truncate">
+                              {person.name}
+                            </span>
+                            {person.bdNo && (
+                              <span className="text-[10px] font-mono text-slate-400">
+                                ({person.bdNo})
+                              </span>
+                            )}
+                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 font-mono">
+                              {person.type || 'Permanent'}
+                            </span>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2 mt-0.5 text-[10px] text-slate-400">
+                            {person.mobileNo && (
+                              <span className="flex items-center gap-1 font-mono text-slate-300">
+                                <Phone className="w-2.5 h-2.5 text-indigo-400" />
+                                {person.mobileNo}
+                              </span>
+                            )}
+                            {person.armsCount ? (
+                              <span className="text-amber-400/90 font-mono">
+                                Arms: {person.armsCount}
+                              </span>
+                            ) : null}
+                            {person.rtCount ? (
+                              <span className="text-sky-400/90 font-mono">
+                                RT: {person.rtCount}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right: Status Switcher & Actions */}
+                      <div className="flex items-center space-x-1.5 shrink-0 self-end sm:self-center">
+                        {/* Status Switcher Buttons */}
+                        <div className="flex items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800 text-[10px] font-bold">
+                          <button
+                            type="button"
+                            onClick={() => handleChangePersonStatus(person.id, 'Active')}
+                            className={`px-2 py-0.5 rounded transition-all cursor-pointer ${
+                              status === 'Active'
+                                ? 'bg-emerald-600 text-white font-black'
+                                : 'text-slate-400 hover:text-white'
+                            }`}
+                            title="Set to Active Duty"
+                          >
+                            Active
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleChangePersonStatus(person.id, 'Standby')}
+                            className={`px-2 py-0.5 rounded transition-all cursor-pointer ${
+                              status === 'Standby'
+                                ? 'bg-amber-600 text-white font-black'
+                                : 'text-slate-400 hover:text-white'
+                            }`}
+                            title="Set to Standby Duty"
+                          >
+                            Standby
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleChangePersonStatus(person.id, 'Rest')}
+                            className={`px-2 py-0.5 rounded transition-all cursor-pointer ${
+                              status === 'Rest'
+                                ? 'bg-sky-600 text-white font-black'
+                                : 'text-slate-400 hover:text-white'
+                            }`}
+                            title="Set to Rest / Relief"
+                          >
+                            Rest
+                          </button>
+                        </div>
+
+                        {/* Edit Button */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingPerson(person);
+                            setIsPersonModalOpen(true);
+                          }}
+                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                          title="Edit Person Details"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+
+                        {/* Remove / Delete Button */}
+                        <button
+                          type="button"
+                          onClick={() => handleRemovePerson(person.id)}
+                          className="p-1.5 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 hover:text-rose-200 transition-colors cursor-pointer"
+                          title="Remove Person from Post"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           {/* Breakdown Note (Arms, RT) */}
           <div>
             <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">
@@ -321,6 +571,20 @@ export const PostSettingsModal: React.FC<PostSettingsModalProps> = ({
           </div>
         </form>
       </div>
+
+      {/* Add / Edit Person Sub-Modal */}
+      <AddEditPersonModal
+        isOpen={isPersonModalOpen}
+        onClose={() => {
+          setIsPersonModalOpen(false);
+          setEditingPerson(null);
+        }}
+        onSave={handleSavePerson}
+        initialPerson={editingPerson}
+        postName={name || 'Duty Post'}
+        defaultDutyTime={dutyTime || '0600F - 1400F'}
+        defaultDutyStatus="Active"
+      />
     </div>
   );
 };

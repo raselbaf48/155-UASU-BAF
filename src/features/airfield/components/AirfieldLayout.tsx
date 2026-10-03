@@ -35,12 +35,13 @@ import {
 
 interface AirfieldLayoutProps {
   onBack: () => void;
+  initialPostId?: string;
 }
 
-export const AirfieldLayout: React.FC<AirfieldLayoutProps> = ({ onBack }) => {
+export const AirfieldLayout: React.FC<AirfieldLayoutProps> = ({ onBack, initialPostId = 'post_driveway' }) => {
   const [roster, setRoster] = useState<AirfieldShiftRoster>(() => getStoredAirfieldRoster());
   // 'dashboard' | 'sheet' | postId
-  const [selectedView, setSelectedView] = useState<string>('dashboard');
+  const [selectedView, setSelectedView] = useState<string>(initialPostId || 'post_driveway');
   const [searchQuery, setSearchQuery] = useState('');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isCloudSyncing, setIsCloudSyncing] = useState(false);

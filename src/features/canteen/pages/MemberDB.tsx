@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Search, 
   Trash2, 
@@ -14,13 +14,70 @@ import {
   Banknote, 
   ArrowLeft,
   Upload,
-  RefreshCw
+  RefreshCw,
+  Calendar,
+  CalendarDays,
+  PlusCircle,
+  Receipt,
+  Filter,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Coffee,
+  Landmark,
+  Layers,
+  LayoutGrid,
+  List
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, fetchDirectImageUrl, getCanteenConfig } from '../utils/canteenSettings';
 import { processGalleryImage } from '../utils/imageUpload';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { SaveButton } from '../components/SaveButton';
+
+export type BillCategory = 'ALL' | 'CANTEEN' | 'UNIT_FUND' | 'OTHERS';
+
+// Extract YYYY-MM from date string
+export const getTxMonthKey = (dateStr: any): string => {
+  if (!dateStr) return '';
+  try {
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      return `${y}-${m}`;
+    }
+    const parts = String(dateStr).split(/[\/\-\s]/);
+    if (parts.length >= 3) {
+      if (parts[0].length === 4) return `${parts[0]}-${parts[1].padStart(2, '0')}`;
+      if (parts[2].length === 4) return `${parts[2]}-${parts[1].padStart(2, '0')}`;
+    }
+  } catch {}
+  return '';
+};
+
+// Format month key to readable label e.g. "October 2026"
+export const formatMonthName = (monthKey: string): string => {
+  if (!monthKey || monthKey === 'ALL') return 'All Months';
+  const parts = monthKey.split('-');
+  if (parts.length < 2) return monthKey;
+  const date = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, 1);
+  return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+};
+
+// Categorize transaction into CANTEEN, UNIT_FUND, or OTHERS
+export const getTxCategory = (tx: any): 'CANTEEN' | 'UNIT_FUND' | 'OTHERS' => {
+  if (tx.billType) {
+    const b = String(tx.billType).toUpperCase();
+    if (b === 'UNIT_FUND' || b.includes('UNIT')) return 'UNIT_FUND';
+    if (b === 'OTHERS' || b.includes('OTHER')) return 'OTHERS';
+    return 'CANTEEN';
+  }
+  const desc = String(tx.items || tx.type || '').toLowerCase();
+  if (desc.includes('unit fund') || desc.includes('unit_fund')) return 'UNIT_FUND';
+  if (desc.includes('others') || desc.includes('other bill')) return 'OTHERS';
+  return 'CANTEEN';
+};
 
 // Military rank seniority weight calculation
 export const getRankSeniorityWeight = (rankStr?: string): number => {
@@ -62,6 +119,7 @@ export const getRankSeniorityWeight = (rankStr?: string): number => {
 interface StatementRow {
   sl: number;
   date: string;
+  category?: string;
   item: string;
   qty: string | number;
   rate: string | number;
@@ -70,6 +128,17 @@ interface StatementRow {
 
 export const MemberDB: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<BillCategory>('ALL');
+  const [selectedMonth, setSelectedMonth] = useState<string>('ALL');
+  const [onlyWithBill, setOnlyWithBill] = useState<boolean>(false);
+  const [viewMode, setViewMode] = useState<'BOX' | 'TABLE'>('BOX');
+
+  const [allTxs, setAllTxs] = useState<any[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+    } catch { return []; }
+  });
+
   const [members, setMembers] = useState<any[]>(() => {
     try {
       const cached = localStorage.getItem('canteen_members_cache');
@@ -91,11 +160,7 @@ export const MemberDB: React.FC = () => {
     return true;
   });
 
-  // Add Member Modal state
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [isSavingAdd, setIsSavingAdd] = useState(false);
-  const [isSavedAdd, setIsSavedAdd] = useState(false);
-  const [newMember, setNewMember] = useState({ bdNo: '', rank: '', surname: '', contact: '', dp: '', role: 'Member' });
+  // Member DP resolution state for profile edit
   const [resolvingDp, setResolvingDp] = useState(false);
 
   // Profile Modal state
@@ -109,9 +174,12 @@ export const MemberDB: React.FC = () => {
   // Statement Modal state
   const [statementMember, setStatementMember] = useState<any | null>(null);
   const [statementTx, setStatementTx] = useState<any[]>([]);
+  const [statementCategory, setStatementCategory] = useState<BillCategory>('ALL');
+  const [statementMonth, setStatementMonth] = useState<string>('ALL');
 
   // Pay Bill Modal state
   const [payBillMember, setPayBillMember] = useState<any | null>(null);
+  const [payBillCategory, setPayBillCategory] = useState<'ALL' | 'CANTEEN' | 'UNIT_FUND' | 'OTHERS'>('ALL');
   const [payAmount, setPayAmount] = useState('');
   const [payMethod, setPayMethod] = useState<'CASH' | 'UCB'>('CASH');
 
@@ -121,11 +189,118 @@ export const MemberDB: React.FC = () => {
 
   const toEnglishDate = formatCanteenDate;
 
-  // Direct Pay Bill opener with default amount equal to Total Due
+  // Listen to transaction updates
+  useEffect(() => {
+    const handleTxsSync = () => {
+      try {
+        setAllTxs(JSON.parse(localStorage.getItem('canteen_txs') || '[]'));
+      } catch {}
+    };
+    window.addEventListener('canteen_txs_updated', handleTxsSync);
+    window.addEventListener('canteen_state_updated', handleTxsSync);
+    window.addEventListener('storage', handleTxsSync);
+    return () => {
+      window.removeEventListener('canteen_txs_updated', handleTxsSync);
+      window.removeEventListener('canteen_state_updated', handleTxsSync);
+      window.removeEventListener('storage', handleTxsSync);
+    };
+  }, []);
+
+  // Available months list derived from current date + past 12 months + transactions
+  const availableMonths = useMemo(() => {
+    const set = new Set<string>();
+    const now = new Date();
+    const curKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    set.add(curKey);
+
+    for (let i = 1; i <= 12; i++) {
+      const prev = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      set.add(`${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`);
+    }
+
+    allTxs.forEach((tx) => {
+      const m = getTxMonthKey(tx.date);
+      if (m) set.add(m);
+    });
+
+    return Array.from(set).sort().reverse();
+  }, [allTxs]);
+
+  const handlePrevMonth = () => {
+    if (selectedMonth === 'ALL') {
+      if (availableMonths.length > 0) setSelectedMonth(availableMonths[0]);
+      return;
+    }
+    const idx = availableMonths.indexOf(selectedMonth);
+    if (idx !== -1 && idx < availableMonths.length - 1) {
+      setSelectedMonth(availableMonths[idx + 1]);
+    }
+  };
+
+  const handleNextMonth = () => {
+    if (selectedMonth === 'ALL') return;
+    const idx = availableMonths.indexOf(selectedMonth);
+    if (idx > 0) {
+      setSelectedMonth(availableMonths[idx - 1]);
+    } else if (idx === 0) {
+      setSelectedMonth('ALL');
+    }
+  };
+
+  // Calculate bill for a member given selected category and month
+  const getMemberFilteredBill = (member: any, category: BillCategory, month: string) => {
+    const memberTxs = allTxs.filter(
+      (tx) => tx.airman_id === member.airman_id || (member['BD No'] && tx.bdNo === member['BD No'])
+    );
+
+    if (category === 'ALL' && month === 'ALL') {
+      return Number(member.Due ?? member.due ?? member.baki ?? 0);
+    }
+
+    const matchingTxs = memberTxs.filter((tx) => {
+      const cat = getTxCategory(tx);
+      const catMatch = category === 'ALL' || cat === category;
+      const txMonth = getTxMonthKey(tx.date);
+      const monthMatch = month === 'ALL' || txMonth === month;
+      return catMatch && monthMatch;
+    });
+
+    const charges = matchingTxs
+      .filter((tx) => tx.type !== 'BILL PAYMENT')
+      .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+    const payments = matchingTxs
+      .filter((tx) => tx.type === 'BILL PAYMENT')
+      .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+    const txBill = Math.max(0, charges - payments);
+
+    if (month === 'ALL') {
+      if (category === 'CANTEEN') {
+        const unitFundDue = memberTxs
+          .filter((tx) => getTxCategory(tx) === 'UNIT_FUND')
+          .reduce((sum, tx) => sum + (tx.type === 'BILL PAYMENT' ? -Number(tx.amount || 0) : Number(tx.amount || 0)), 0);
+        const othersDue = memberTxs
+          .filter((tx) => getTxCategory(tx) === 'OTHERS')
+          .reduce((sum, tx) => sum + (tx.type === 'BILL PAYMENT' ? -Number(tx.amount || 0) : Number(tx.amount || 0)), 0);
+        const totalMemberDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
+        const baseCanteenDue = Math.max(0, totalMemberDue - Math.max(0, unitFundDue) - Math.max(0, othersDue));
+        return Math.max(txBill, baseCanteenDue);
+      }
+      return txBill;
+    }
+
+    return txBill;
+  };
+
+  // Direct Pay Bill opener
   const openPayBill = (member: any) => {
     setPayBillMember(member);
+    setPayBillCategory(selectedCategory);
+    const displayed = getMemberFilteredBill(member, selectedCategory, selectedMonth);
     const totalDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
-    setPayAmount(totalDue > 0 ? String(totalDue) : '');
+    const initialAmt = displayed > 0 ? displayed : totalDue;
+    setPayAmount(initialAmt > 0 ? String(initialAmt) : '');
     setPayMethod('CASH');
   };
 
@@ -161,9 +336,11 @@ export const MemberDB: React.FC = () => {
   const openStatement = (member: any) => {
     const effDp = getMemberEffectiveDp(member);
     setStatementMember({ ...member, DP: effDp || member['DP'] || '' });
+    setStatementCategory(selectedCategory);
+    setStatementMonth(selectedMonth);
     try {
       const txs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-      const memberTxs = txs.filter((tx: any) => tx.airman_id === member.airman_id);
+      const memberTxs = txs.filter((tx: any) => tx.airman_id === member.airman_id || (member['BD No'] && tx.bdNo === member['BD No']));
       setStatementTx(memberTxs);
     } catch (e) {
       setStatementTx([]);
@@ -282,7 +459,14 @@ export const MemberDB: React.FC = () => {
   };
 
   // WhatsApp send handler with formatted bill breakdown
-  const handleSendWhatsApp = (member: any, rows: StatementRow[], totalDue: number, totalExpenses: number) => {
+  const handleSendWhatsApp = (
+    member: any, 
+    rows: StatementRow[], 
+    totalDue: number, 
+    totalExpenses: number, 
+    monthKey: string = 'ALL',
+    categoryKey: BillCategory = 'ALL'
+  ) => {
     let contact = (member.Contact || member.contact || member['Mobile No'] || '').trim();
     if (!contact) {
       contact = prompt('সদস্যের WhatsApp নম্বর লিখুন (e.g. 017XXXXXXXX):') || '';
@@ -298,6 +482,14 @@ export const MemberDB: React.FC = () => {
 
     const rank = member.Rank || member.rank || '';
     const surname = member.Surname || member.surname || '';
+    const monthTitle = formatMonthName(monthKey);
+    const catName = categoryKey === 'CANTEEN' 
+      ? 'ক্যান্টিন বিল' 
+      : categoryKey === 'UNIT_FUND' 
+      ? 'ইউনিট ফান্ড বিল' 
+      : categoryKey === 'OTHERS' 
+      ? 'অন্যান্য বিল' 
+      : 'সর্বমোট বিল';
 
     let rowsList = '';
     if (rows.length === 0) {
@@ -309,8 +501,8 @@ export const MemberDB: React.FC = () => {
     }
 
     const message = 
-`🍽️ *CAFE UAV - মাসিক ক্যান্টিন বিল বিবরণী*
-📅 *মাসের নাম:* সেপ্টেম্বর ২০২৫
+`🍽️ *CAFE UAV - ${catName} বিবরণী*
+📅 *মাসের নাম:* ${monthTitle}
 👤 *পদবী ও নাম:* ${rank} ${surname}
 
 ━━━━━━━━━━━━━━━━━━━━━
@@ -318,10 +510,10 @@ export const MemberDB: React.FC = () => {
 ━━━━━━━━━━━━━━━━━━━━━
 ${rowsList}
 ━━━━━━━━━━━━━━━━━━━━━
-💰 *মোট ক্যান্টিন বিল (খাবার):* ৳${totalExpenses}
+💰 *${catName}:* ৳${totalExpenses}
 💳 *সর্বমোট প্রদেয় (DUE):* ৳${totalDue}
 
-(ক্যান্টিন বিল পরিশোধের জন্য ধন্যবাদ - CAFE UAV)`;
+(বিল পরিশোধের জন্য ধন্যবাদ - CAFE UAV)`;
 
     const whatsappUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
     window.open(whatsappUrl, '_blank');
@@ -339,7 +531,8 @@ ${rowsList}
     // Update Supabase Canteen table 'Due' column
     await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', payBillMember.airman_id);
     
-    const payeeName = [payBillMember.Rank || payBillMember.rank, payBillMember.Surname || payBillMember.surname || payBillMember.Name || payBillMember.name].filter(Boolean).join(' ') || payBillMember['BD No'] || payBillMember.airman_id;
+    const catLabel = payBillCategory === 'ALL' ? 'ALL BILLS' : payBillCategory.replace('_', ' ');
+    const payeeName = `${payBillMember.Rank || payBillMember.rank || ''} ${payBillMember.Surname || payBillMember['Surname'] || payBillMember.name || ''}`.trim();
     const tx = {
       id: 'tx-pay-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
       date: formatCanteenDate(new Date()),
@@ -347,9 +540,10 @@ ${rowsList}
       bdNo: payBillMember['BD No'] || payBillMember.airman_id,
       memberName: payeeName,
       rank: payBillMember.Rank || payBillMember.rank || '',
-      items: `BILL PAYMENT (${payMethod})`,
+      items: `BILL PAYMENT - ${catLabel} (${payMethod})`,
       amount: amount,
       type: 'BILL PAYMENT',
+      billType: payBillCategory,
       gateway: payMethod
     };
     const txs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
@@ -563,7 +757,7 @@ ${rowsList}
     };
   }, []);
 
-  const handleAutoResolveMemberDp = async (url: string, isForEdit = false) => {
+  const handleAutoResolveMemberDp = async (url: string) => {
     const trimmed = url.trim();
     if (!trimmed) return;
     if (trimmed.includes('photos.app.goo.gl') || trimmed.includes('photos.google.com/share') || trimmed.includes('drive.google.com')) {
@@ -571,62 +765,13 @@ ${rowsList}
       try {
         const direct = await fetchDirectImageUrl(trimmed);
         if (direct && direct !== trimmed) {
-          if (isForEdit) {
-            setEditMemberData(prev => ({ ...prev, dp: direct }));
-          } else {
-            setNewMember(prev => ({ ...prev, dp: direct }));
-          }
+          setEditMemberData(prev => ({ ...prev, dp: direct }));
         }
       } catch (e) {
         console.warn('DP resolution failed:', e);
       } finally {
         setResolvingDp(false);
       }
-    }
-  };
-
-  // Add new member
-  const handleAddMember = async () => {
-    if (!newMember.bdNo || !newMember.rank || !newMember.surname) return;
-    
-    setIsSavingAdd(true);
-
-    let finalDp = (newMember.dp || '').trim();
-    if (finalDp.includes('photos.app.goo.gl') || finalDp.includes('photos.google.com/share')) {
-      setResolvingDp(true);
-      finalDp = await fetchDirectImageUrl(finalDp);
-      setResolvingDp(false);
-    }
-
-    const payload = {
-      airman_id: `airman-${newMember.bdNo}`,
-      "BD No": newMember.bdNo.trim(),
-      "Rank": newMember.rank.trim(),
-      "Surname": newMember.surname.trim(),
-      "Contact": newMember.contact?.trim() || '',
-      "Role": newMember.role || 'Member',
-      DP: finalDp || null,
-      Due: 0
-    };
-
-    try {
-      await supabase.from('Canteen_Member').insert([payload]);
-      setIsSavedAdd(true);
-      fetchMembers();
-      setTimeout(() => {
-        setIsSavedAdd(false);
-        setIsSavingAdd(false);
-        setShowAddModal(false);
-        setNewMember({ bdNo: '', rank: '', surname: '', contact: '', dp: '', role: 'Member' });
-      }, 1000);
-    } catch (err) {
-      console.warn("Exception adding member:", err);
-      setIsSavedAdd(true);
-      setTimeout(() => {
-        setIsSavedAdd(false);
-        setIsSavingAdd(false);
-        setShowAddModal(false);
-      }, 1000);
     }
   };
 
@@ -731,11 +876,40 @@ ${rowsList}
     (m['Role'] || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const resolvedAddDp = resolveImageUrl(newMember.dp);
+  // Summary statistics for active filter
+  const { totalFilteredBill, countWithBills } = useMemo(() => {
+    let sum = 0;
+    let count = 0;
+    filteredMembers.forEach((m) => {
+      const b = getMemberFilteredBill(m, selectedCategory, selectedMonth);
+      if (b > 0) {
+        sum += b;
+        count++;
+      }
+    });
+    return { totalFilteredBill: sum, countWithBills: count };
+  }, [filteredMembers, selectedCategory, selectedMonth, allTxs]);
+
+  const displayedMemberList = useMemo(() => {
+    if (!onlyWithBill) return filteredMembers;
+    return filteredMembers.filter((m) => {
+      const b = getMemberFilteredBill(m, selectedCategory, selectedMonth);
+      return b > 0;
+    });
+  }, [filteredMembers, onlyWithBill, selectedCategory, selectedMonth, allTxs]);
+
   const resolvedEditDp = resolveImageUrl(editMemberData.dp);
 
   // Statement rows calculation for Statement modal
-  const statementRows = parseStatementRows(statementTx);
+  const filteredStatementTxs = statementTx.filter((tx) => {
+    const cat = getTxCategory(tx);
+    const catMatch = statementCategory === 'ALL' || cat === statementCategory;
+    const txMonth = getTxMonthKey(tx.date);
+    const monthMatch = statementMonth === 'ALL' || txMonth === statementMonth;
+    return catMatch && monthMatch;
+  });
+
+  const statementRows = parseStatementRows(filteredStatementTxs);
   const totalStatementExpenses = statementRows.reduce((sum, r) => sum + (r.total > 0 ? r.total : 0), 0);
 
   return (
@@ -743,33 +917,224 @@ ${rowsList}
       {/* Top Controls */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-black text-white uppercase tracking-tighter">MEMBER DATABASE</h2>
-          
-        </div>
-        <div className="flex items-center space-x-3 w-full sm:w-auto">
-          <button 
-            onClick={() => {
-              setNewMember({ bdNo: '', rank: '', surname: '', contact: '', dp: '' });
-              setShowAddModal(true);
-            }} 
-            className="flex-1 sm:flex-none flex items-center justify-center space-x-2 px-5 py-3 bg-[#4f46e5] hover:bg-[#4338ca] text-white rounded-xl text-xs font-black tracking-widest uppercase transition-colors shadow-md shadow-indigo-500/20"
-          >
-            <UserPlus className="w-4 h-4" />
-            <span>ADD MEMBER</span>
-          </button>
+          <h2 className="text-2xl font-black text-white uppercase tracking-tighter flex items-center gap-2.5">
+            <Receipt className="w-7 h-7 text-indigo-400" />
+            <span>BILL MANAGEMENT</span>
+          </h2>
+          <p className="text-xs text-slate-400 mt-0.5">
+            Canteen Bill, Unit Fund Bill & Others Bill Administration
+          </p>
         </div>
       </div>
 
-      {/* Search Input */}
-      <div className="relative">
-        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-        <input 
-          type="text" 
-          placeholder="Search members..." 
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full bg-slate-900 border border-slate-700 rounded-2xl pl-12 pr-4 py-3.5 text-sm font-bold text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#4f46e5]/20 focus:border-[#4f46e5] transition-all shadow-sm"
-        />
+      {/* Bill Category Tabs & Month Selector */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 md:p-4 space-y-3 shadow-md">
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+          {/* Bill Category Filter Pills: Canteen Bill, Unit Fund Bill, Others Bill, All */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 lg:pb-0 scrollbar-none">
+            <button
+              type="button"
+              onClick={() => setSelectedCategory('CANTEEN')}
+              className={`px-3.5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer flex items-center space-x-1.5 ${
+                selectedCategory === 'CANTEEN'
+                  ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30 ring-1 ring-amber-400/50'
+                  : 'bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700/60'
+              }`}
+            >
+              <Coffee className="w-3.5 h-3.5 text-amber-400" />
+              <span>Canteen Bill</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSelectedCategory('UNIT_FUND')}
+              className={`px-3.5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer flex items-center space-x-1.5 ${
+                selectedCategory === 'UNIT_FUND'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 ring-1 ring-indigo-400/50'
+                  : 'bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700/60'
+              }`}
+            >
+              <Landmark className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Unit Fund Bill</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSelectedCategory('OTHERS')}
+              className={`px-3.5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer flex items-center space-x-1.5 ${
+                selectedCategory === 'OTHERS'
+                  ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30 ring-1 ring-cyan-400/50'
+                  : 'bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700/60'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Others Bill</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSelectedCategory('ALL')}
+              className={`px-3.5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer flex items-center space-x-1.5 ${
+                selectedCategory === 'ALL'
+                  ? 'bg-slate-700 text-white shadow-md ring-1 ring-slate-400/50'
+                  : 'bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700/60'
+              }`}
+            >
+              <Receipt className="w-3.5 h-3.5 text-slate-300" />
+              <span>All</span>
+            </button>
+          </div>
+
+          {/* Month Selector Dropdown with Prev/Next Controls */}
+          <div className="flex items-center space-x-2 self-start lg:self-auto w-full lg:w-auto">
+            {/* Prev Month Button */}
+            <button
+              type="button"
+              onClick={handlePrevMonth}
+              className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl border border-slate-700 transition-colors cursor-pointer shrink-0"
+              title="Previous Month"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+
+            <div className="relative flex-1 lg:w-56">
+              <Calendar className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-400 pointer-events-none" />
+              <select
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 hover:border-slate-600 text-white rounded-xl pl-10 pr-8 py-2 text-xs font-black font-mono tracking-wider focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer appearance-none"
+              >
+                <option value="ALL">All Months</option>
+                {availableMonths.map((m) => (
+                  <option key={m} value={m}>
+                    {formatMonthName(m)}
+                  </option>
+                ))}
+              </select>
+              <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-xs">
+                ▼
+              </div>
+            </div>
+
+            {/* Next Month Button */}
+            <button
+              type="button"
+              onClick={handleNextMonth}
+              disabled={selectedMonth === 'ALL'}
+              className={`p-2 rounded-xl border border-slate-700 transition-colors shrink-0 ${
+                selectedMonth === 'ALL'
+                  ? 'bg-slate-900 text-slate-600 cursor-not-allowed'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white cursor-pointer'
+              }`}
+              title="Next Month"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+
+            {(selectedCategory !== 'ALL' || selectedMonth !== 'ALL') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedCategory('ALL');
+                  setSelectedMonth('ALL');
+                  setOnlyWithBill(false);
+                }}
+                className="px-2.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 border border-slate-700"
+                title="Reset Filters"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Filter Info Strip with Total Billed & Quick Filter Switch */}
+        <div className="flex items-center justify-between text-[11px] font-bold text-slate-400 pt-2 border-t border-slate-800/60 flex-wrap gap-2">
+          <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span>
+              Showing: <strong className="text-white">{selectedCategory === 'CANTEEN' ? 'Canteen Bill' : selectedCategory === 'UNIT_FUND' ? 'Unit Fund Bill' : selectedCategory === 'OTHERS' ? 'Others Bill' : 'All Bills'}</strong>
+              {' • '}
+              <strong className="text-indigo-300">{formatMonthName(selectedMonth)}</strong>
+            </span>
+            <span className="text-slate-500 hidden sm:inline">|</span>
+            <span className="text-emerald-400 font-mono font-black">
+              Total Billed: ৳{totalFilteredBill.toLocaleString()}
+            </span>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            {/* Quick Toggle: All vs Only with Bills */}
+            <div className="flex items-center bg-slate-950 rounded-xl p-0.5 border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setOnlyWithBill(false)}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer ${
+                  !onlyWithBill
+                    ? 'bg-slate-800 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                All ({filteredMembers.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setOnlyWithBill(true)}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer ${
+                  onlyWithBill
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                With Bills ({countWithBills})
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Search Input & View Switcher (Box View vs Table View) */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+          <input 
+            type="text" 
+            placeholder="Search members by BD No, Rank, or Surname..." 
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full bg-slate-900 border border-slate-700 rounded-2xl pl-12 pr-4 py-3 text-sm font-bold text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#4f46e5]/20 focus:border-[#4f46e5] transition-all shadow-sm"
+          />
+        </div>
+
+        {/* View Mode Toggle: Box vs Table */}
+        <div className="flex items-center bg-slate-900 rounded-2xl p-1 border border-slate-800 self-end sm:self-auto shrink-0 shadow-sm">
+          <button
+            type="button"
+            onClick={() => setViewMode('BOX')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 transition-all cursor-pointer ${
+              viewMode === 'BOX'
+                ? 'bg-indigo-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white'
+            }`}
+            title="Box / Card View"
+          >
+            <LayoutGrid className="w-3.5 h-3.5" />
+            <span>Box View</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('TABLE')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 transition-all cursor-pointer ${
+              viewMode === 'TABLE'
+                ? 'bg-indigo-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white'
+            }`}
+            title="Table View"
+          >
+            <List className="w-3.5 h-3.5" />
+            <span>Table View</span>
+          </button>
+        </div>
       </div>
 
       {loading && members.length === 0 ? (
@@ -785,22 +1150,46 @@ ${rowsList}
             </div>
           ))}
         </div>
-      ) : filteredMembers.length === 0 ? (
-        <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-12 text-center">
-          <p className="text-slate-400 font-bold text-sm mb-4">No member records found</p>
-          <button
-            onClick={() => fetchMembers(true)}
-            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-black uppercase tracking-wider inline-flex items-center space-x-2 cursor-pointer shadow-md shadow-indigo-600/30 transition-all"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>Reload Members</span>
-          </button>
+      ) : displayedMemberList.length === 0 ? (
+        <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-12 text-center space-y-3">
+          <p className="text-slate-400 font-bold text-sm">
+            {onlyWithBill 
+              ? 'No members found with bills in this category/month' 
+              : 'No member records found'}
+          </p>
+          {onlyWithBill ? (
+            <button
+              onClick={() => setOnlyWithBill(false)}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-black uppercase tracking-wider inline-flex items-center space-x-2 cursor-pointer shadow-md shadow-indigo-600/30 transition-all"
+            >
+              <span>Show All Members ({filteredMembers.length})</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => fetchMembers(true)}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-black uppercase tracking-wider inline-flex items-center space-x-2 cursor-pointer shadow-md shadow-indigo-600/30 transition-all"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Reload Members</span>
+            </button>
+          )}
         </div>
-      ) : (
+      ) : viewMode === 'BOX' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredMembers.map((member, i) => {
+          {displayedMemberList.map((member, i) => {
             const memberDp = resolveImageUrl(member.DP);
             const totalDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
+            const displayedBill = getMemberFilteredBill(member, selectedCategory, selectedMonth);
+
+            const billLabel = selectedCategory === 'ALL' && selectedMonth === 'ALL'
+              ? 'TOTAL DUE'
+              : selectedCategory === 'CANTEEN'
+              ? 'CANTEEN BILL'
+              : selectedCategory === 'UNIT_FUND'
+              ? 'UNIT FUND BILL'
+              : selectedCategory === 'OTHERS'
+              ? 'OTHERS BILL'
+              : 'MONTHLY BILL';
 
             return (
               <div 
@@ -853,12 +1242,17 @@ ${rowsList}
                     </div>
                   </div>
 
-                  {/* Due amount */}
+                  {/* Due / Bill amount */}
                   <div className="text-right">
-                    <p className="text-[9px] font-black text-slate-400 tracking-widest uppercase mb-0.5">TOTAL DUE</p>
-                    <p className={`text-2xl font-black font-mono tracking-tighter leading-none ${totalDue === 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
-                      ৳{totalDue}
+                    <p className="text-[9px] font-black text-slate-400 tracking-widest uppercase mb-0.5">{billLabel}</p>
+                    <p className={`text-2xl font-black font-mono tracking-tighter leading-none ${displayedBill === 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
+                      ৳{displayedBill}
                     </p>
+                    {(selectedCategory !== 'ALL' || selectedMonth !== 'ALL') && (
+                      <span className="text-[9px] font-mono text-slate-400 block mt-0.5">
+                        Total Due: ৳{totalDue}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -889,159 +1283,126 @@ ${rowsList}
                     title="Direct Pay Bill"
                   >
                     <Banknote className="w-3.5 h-3.5 group-hover/btn:scale-110 transition-transform" />
-                    <span className="truncate">PAY BILL {totalDue > 0 ? `(৳${totalDue})` : ''}</span>
+                    <span className="truncate">PAY BILL {displayedBill > 0 ? `(৳${displayedBill})` : totalDue > 0 ? `(৳${totalDue})` : ''}</span>
                   </button>
                 </div>
               </div>
             );
           })}
         </div>
-      )}
+      ) : (
+        /* Table View */
+        <div className="bg-slate-900/90 border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs text-slate-300">
+              <thead className="bg-slate-950/90 text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-800">
+                <tr>
+                  <th className="px-4 py-3.5 text-center w-12">#</th>
+                  <th className="px-4 py-3.5">Member</th>
+                  <th className="px-4 py-3.5">Rank & BD No</th>
+                  <th className="px-4 py-3.5">Role</th>
+                  <th className="px-4 py-3.5">Contact</th>
+                  <th className="px-4 py-3.5 text-right font-mono">
+                    {selectedCategory === 'ALL' && selectedMonth === 'ALL'
+                      ? 'Total Due'
+                      : selectedCategory === 'CANTEEN'
+                      ? 'Canteen Bill'
+                      : selectedCategory === 'UNIT_FUND'
+                      ? 'Unit Fund Bill'
+                      : selectedCategory === 'OTHERS'
+                      ? 'Others Bill'
+                      : 'Monthly Bill'}
+                  </th>
+                  {(selectedCategory !== 'ALL' || selectedMonth !== 'ALL') && (
+                    <th className="px-4 py-3.5 text-right font-mono">Total Due</th>
+                  )}
+                  <th className="px-4 py-3.5 text-center w-52">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60 font-sans">
+                {displayedMemberList.map((member, i) => {
+                  const memberDp = resolveImageUrl(member.DP);
+                  const totalDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
+                  const displayedBill = getMemberFilteredBill(member, selectedCategory, selectedMonth);
 
-      {/* Add New Member Modal */}
-      {showAddModal && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 rounded-3xl p-6 w-full max-w-md shadow-xl border border-slate-800 animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-black text-white uppercase tracking-tighter">ADD NEW MEMBER</h3>
-              <button onClick={() => setShowAddModal(false)} className="p-2 text-slate-400 hover:bg-slate-800 rounded-full">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">BD No</label>
-                <input 
-                  type="text" 
-                  value={newMember.bdNo ?? ""}
-                  onChange={(e) => setNewMember({...newMember, bdNo: e.target.value})}
-                  className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="e.g. 102341"
-                />
-              </div>
-              <div>
-                <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Rank</label>
-                <input 
-                  type="text" 
-                  value={newMember.rank ?? ""}
-                  onChange={(e) => setNewMember({...newMember, rank: e.target.value})}
-                  className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="e.g. LAC"
-                />
-              </div>
-              <div>
-                <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Surname</label>
-                <input 
-                  type="text" 
-                  value={newMember.surname ?? ""}
-                  onChange={(e) => setNewMember({...newMember, surname: e.target.value})}
-                  className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="e.g. Jahid"
-                />
-              </div>
-              <div>
-                <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Contact</label>
-                <input 
-                  type="text" 
-                  value={newMember.contact ?? ""}
-                  onChange={(e) => setNewMember({...newMember, contact: e.target.value})}
-                  className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="e.g. 017XXXXXXXX"
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-1 block">Role</label>
-                <div className="flex gap-2">
-                  <input 
-                    type="text" 
-                    value={newMember.role ?? "Member"}
-                    onChange={(e) => setNewMember({...newMember, role: e.target.value})}
-                    className="flex-1 bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    placeholder="e.g. Member, Manager, Staff, Cook"
-                  />
-                  <select
-                    value={newMember.role ?? "Member"}
-                    onChange={(e) => setNewMember({...newMember, role: e.target.value})}
-                    className="bg-slate-800 border border-slate-700 text-slate-200 rounded-xl px-3 py-3 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  >
-                    <option value="Member">Member</option>
-                    <option value="Manager">Manager</option>
-                    <option value="Staff">Staff</option>
-                    <option value="Cook">Cook</option>
-                    <option value="Cashier">Cashier</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Member Photo: Browse from Gallery */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase block">
-                    Photo
-                  </label>
-                  
-                </div>
-
-                <div className="bg-slate-900/80 border border-slate-700/80 rounded-2xl p-3 space-y-2.5">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-14 h-14 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center overflow-hidden shrink-0 shadow-inner">
-                      {newMember.dp ? (
-                        <img src={resolvedAddDp || newMember.dp} alt="Preview" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
-                      ) : (
-                        <ImageIcon className="w-6 h-6 text-slate-500" />
+                  return (
+                    <tr 
+                      key={member.airman_id || i}
+                      onClick={() => openProfile(member)}
+                      className="hover:bg-slate-800/50 transition-colors cursor-pointer group"
+                    >
+                      <td className="px-4 py-3 text-center text-slate-500 font-mono font-bold">{i + 1}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center space-x-3">
+                          <div className="w-9 h-9 rounded-xl bg-slate-950 border border-slate-700/80 flex items-center justify-center font-black text-xs text-indigo-400 overflow-hidden shrink-0 shadow-inner">
+                            {memberDp ? (
+                              <img src={memberDp} alt={member['Surname']} referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                            ) : (
+                              <span>{(member['Surname'] || 'U').charAt(0)}</span>
+                            )}
+                          </div>
+                          <div>
+                            <span className="font-black text-white group-hover:text-indigo-300 transition-colors text-sm block">
+                              {member['Surname']}
+                            </span>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center space-x-1.5">
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-indigo-500/15 border border-indigo-400/30 text-indigo-300">
+                            {member['Rank']}
+                          </span>
+                          <span className="font-mono text-slate-400 font-bold text-xs">
+                            #{member['BD No']}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-[11px] font-bold text-slate-300">
+                          {member.Role || 'Member'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-slate-400 text-xs">
+                        {member['Contact'] || '-'}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <span className={`text-base font-black font-mono ${displayedBill === 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
+                          ৳{displayedBill}
+                        </span>
+                      </td>
+                      {(selectedCategory !== 'ALL' || selectedMonth !== 'ALL') && (
+                        <td className="px-4 py-3 text-right font-mono text-slate-400 text-xs font-bold">
+                          ৳{totalDue}
+                        </td>
                       )}
-                    </div>
-
-                    <div className="flex-1 flex flex-wrap items-center gap-2">
-                      <label className="flex items-center space-x-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer">
-                        <Upload className="w-3.5 h-3.5" />
-                        <span>Browse from Gallery</span>
-                        <input 
-                          type="file" 
-                          accept="image/*" 
-                          className="hidden"
-                          onChange={async (e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              try {
-                                const base64 = await processGalleryImage(file);
-                                setNewMember(prev => ({ ...prev, dp: base64 }));
-                              } catch (err) {
-                                console.error('Failed to load image from gallery:', err);
-                              }
-                            }
-                          }}
-                        />
-                      </label>
-
-                      {newMember.dp && (
-                        <button
-                          type="button"
-                          onClick={() => setNewMember(prev => ({ ...prev, dp: '' }))}
-                          className="flex items-center space-x-1 px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                          title="Remove photo"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>Remove</span>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <SaveButton 
-              onClick={handleAddMember}
-              isSaving={isSavingAdd}
-              isSaved={isSavedAdd}
-              idleText="SAVE TO DATABASE"
-              savingText="SAVING..."
-              savedText="SAVED TO DATABASE! ✓"
-              className="w-full mt-6 py-3.5"
-            />
+                      <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-center space-x-1.5">
+                          <button
+                            type="button"
+                            onClick={() => openStatement(member)}
+                            className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-white rounded-lg text-[11px] font-black uppercase flex items-center space-x-1 border border-slate-700 transition-all cursor-pointer"
+                            title="Statement"
+                          >
+                            <FileText className="w-3 h-3 text-indigo-400" />
+                            <span>Statement</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openPayBill(member)}
+                            className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-[11px] font-black uppercase flex items-center space-x-1 shadow-xs transition-all cursor-pointer"
+                            title="Pay Bill"
+                          >
+                            <Banknote className="w-3 h-3" />
+                            <span>Pay</span>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
@@ -1391,7 +1752,7 @@ ${rowsList}
               <div className="flex items-center space-x-2.5">
                 {/* Send via WhatsApp Button */}
                 <button 
-                  onClick={() => handleSendWhatsApp(statementMember, statementRows, Number(statementMember.Due ?? 0), totalStatementExpenses)}
+                  onClick={() => handleSendWhatsApp(statementMember, statementRows, Number(statementMember.Due ?? 0), totalStatementExpenses, statementMonth, statementCategory)}
                   className="flex items-center space-x-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md shadow-emerald-500/20 active:translate-y-0.5"
                   title="Send Statement via WhatsApp"
                 >
@@ -1419,6 +1780,77 @@ ${rowsList}
               </div>
             </div>
 
+            {/* Modal Category & Month Filter Bar (Hidden when printing) */}
+            <div className="px-5 py-3 bg-slate-950/80 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 print:hidden">
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
+                <button
+                  type="button"
+                  onClick={() => setStatementCategory('CANTEEN')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase transition-all flex items-center space-x-1 ${
+                    statementCategory === 'CANTEEN'
+                      ? 'bg-amber-600 text-white shadow-xs'
+                      : 'bg-slate-800/80 text-slate-300 hover:text-white'
+                  }`}
+                >
+                  <Coffee className="w-3 h-3 text-amber-400" />
+                  <span>Canteen Bill</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStatementCategory('UNIT_FUND')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase transition-all flex items-center space-x-1 ${
+                    statementCategory === 'UNIT_FUND'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-slate-800/80 text-slate-300 hover:text-white'
+                  }`}
+                >
+                  <Landmark className="w-3 h-3 text-indigo-400" />
+                  <span>Unit Fund Bill</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStatementCategory('OTHERS')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase transition-all flex items-center space-x-1 ${
+                    statementCategory === 'OTHERS'
+                      ? 'bg-cyan-600 text-white shadow-xs'
+                      : 'bg-slate-800/80 text-slate-300 hover:text-white'
+                  }`}
+                >
+                  <Layers className="w-3 h-3 text-cyan-400" />
+                  <span>Others Bill</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStatementCategory('ALL')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase transition-all flex items-center space-x-1 ${
+                    statementCategory === 'ALL'
+                      ? 'bg-slate-700 text-white shadow-xs'
+                      : 'bg-slate-800/80 text-slate-300 hover:text-white'
+                  }`}
+                >
+                  <Receipt className="w-3 h-3 text-slate-300" />
+                  <span>All</span>
+                </button>
+              </div>
+
+              {/* Month selector in statement modal */}
+              <div className="flex items-center space-x-2">
+                <Calendar className="w-3.5 h-3.5 text-indigo-400" />
+                <select
+                  value={statementMonth}
+                  onChange={(e) => setStatementMonth(e.target.value)}
+                  className="bg-slate-900 border border-slate-700 text-white rounded-lg px-2.5 py-1 text-xs font-bold font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                >
+                  <option value="ALL">All Months</option>
+                  {availableMonths.map((m) => (
+                    <option key={m} value={m}>
+                      {formatMonthName(m)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
             {/* Statement Content Area */}
             <div className="p-6 overflow-y-auto bg-slate-950/40 flex-1 print:p-0 print:bg-white print:overflow-visible">
               <div className="bg-white rounded-2xl p-8 border border-slate-300 text-black max-w-3xl mx-auto shadow-sm">
@@ -1426,7 +1858,15 @@ ${rowsList}
                 {/* Header Banner */}
                 <div className="text-center mb-6 border-b-2 border-black pb-4">
                   <h2 className="text-2xl font-black text-black tracking-wider">🍽️ CAFE UAV 🍽️</h2>
-                  <p className="text-xs font-bold text-slate-700 mt-0.5">মাসিক ক্যান্টিন বিল বিবরণী</p>
+                  <p className="text-xs font-bold text-slate-700 mt-0.5">
+                    {statementCategory === 'CANTEEN' 
+                      ? 'মাসিক ক্যান্টিন বিল বিবরণী' 
+                      : statementCategory === 'UNIT_FUND' 
+                      ? 'ইউনিট ফান্ড বিল বিবরণী' 
+                      : statementCategory === 'OTHERS' 
+                      ? 'অন্যান্য বিল বিবরণী' 
+                      : 'মাসিক সমন্বিত বিল বিবরণী'}
+                  </p>
                 </div>
 
                 {/* Statement Paper Table */}
@@ -1434,7 +1874,21 @@ ${rowsList}
                   <tbody>
                     <tr>
                       <td className="border border-black p-2.5 text-left w-1/4 bg-slate-50 font-black">মাসের নাম</td>
-                      <td className="border border-black p-2.5 text-left font-black" colSpan={5}>সেপ্টেম্বর ২০২৫</td>
+                      <td className="border border-black p-2.5 text-left font-black" colSpan={5}>
+                        {formatMonthName(statementMonth)}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="border border-black p-2.5 text-left bg-slate-50 font-black">বিল ক্যাটাগরি</td>
+                      <td className="border border-black p-2.5 text-left font-bold" colSpan={5}>
+                        {statementCategory === 'CANTEEN' 
+                          ? 'Canteen Bill (ক্যান্টিন বিল)' 
+                          : statementCategory === 'UNIT_FUND' 
+                          ? 'Unit Fund Bill (ইউনিট ফান্ড বিল)' 
+                          : statementCategory === 'OTHERS' 
+                          ? 'Others Bill (অন্যান্য বিল)' 
+                          : 'All Bills (সর্বমোট বিল)'}
+                      </td>
                     </tr>
                     <tr>
                       <td className="border border-black p-2.5 text-left bg-slate-50 font-black">পদবী ও নাম</td>
@@ -1480,7 +1934,13 @@ ${rowsList}
                     {/* Summary Rows */}
                     <tr>
                       <td className="border border-black p-2.5 text-right font-black bg-slate-50" colSpan={5}>
-                        মোট ক্যান্টিন বিল (খাবার)
+                        {statementCategory === 'CANTEEN' 
+                          ? 'মোট ক্যান্টিন বিল' 
+                          : statementCategory === 'UNIT_FUND' 
+                          ? 'মোট ইউনিট ফান্ড বিল' 
+                          : statementCategory === 'OTHERS' 
+                          ? 'মোট অন্যান্য বিল' 
+                          : 'মোট বিল'}
                       </td>
                       <td className="border border-black p-2.5 text-right font-black font-mono text-sm">
                         ৳{totalStatementExpenses}

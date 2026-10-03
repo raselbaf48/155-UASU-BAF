@@ -17,6 +17,7 @@ import { LeaveRegisterView } from './components/LeaveRegisterView';
 import { TdyRegisterView } from './components/TdyRegisterView';
 import { DeploymentRegisterView } from './components/DeploymentRegisterView';
 import { IdaCenterDutyView } from './components/IdaCenterDutyView';
+import { AirfieldLayout } from './features/airfield/components/AirfieldLayout';
 import { MonthlyDutyRegister } from './components/MonthlyDutyRegister';
 import { DutyRosterPeriodView } from './components/DutyRosterPeriodView';
 import { DutyRatioMatrixView } from './components/DutyRatioMatrixViewV2';
@@ -29,6 +30,14 @@ import { PdfDutyImportModal } from './components/PdfDutyImportModal';
 import { SettingsModal } from './components/SettingsModal';
 import { AdminPasscodeModal } from './components/AdminPasscodeModal';
 import { UserLoginGate } from './components/UserLoginGate';
+import { AppUpdateModal } from './components/AppUpdateModal';
+import {
+  checkForAppUpdate,
+  AppVersionRecord,
+  getCurrentAppVersion,
+  DEFAULT_CURRENT_APP,
+  isRunningInApk,
+} from './services/appUpdateService';
 import { Airman, FlightName, ParadeShift, UserRole, ThemePreference } from './types';
 import { INITIAL_AIRMEN } from './data/initialAirmen';
 import { Logo155UASU } from './components/Logo155UASU';
@@ -36,6 +45,7 @@ import { Shield, AlertCircle, X } from 'lucide-react';
 import { getCurrentUserSession, clearUserSession, UserSession } from './utils/authSession';
 import { localDb } from './services/localDatabase';
 import { supabase, isSupabaseConfigured } from './supabase';
+import { setLastUsedPortal } from './services/portalPreferenceService';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<SidebarTab>('overview');
@@ -49,6 +59,44 @@ export default function App() {
 
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
   const [hasSeenNotice, setHasSeenNotice] = useState<boolean>(false);
+
+  // In-App Software Update (Capacitor + Supabase)
+  const [updateAvailable, setUpdateAvailable] = useState<AppVersionRecord | null>(null);
+  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState<boolean>(false);
+  const [appVersionInfo, setAppVersionInfo] = useState<{ versionCode: number; versionName: string }>(DEFAULT_CURRENT_APP);
+
+  useEffect(() => {
+    // Check for in-app updates via Supabase and Capacitor on app open (ONLY in APK)
+    if (!isRunningInApk()) return;
+
+    const checkUpdates = async () => {
+      const current = await getCurrentAppVersion();
+      setAppVersionInfo(current);
+      const res = await checkForAppUpdate();
+      if (res.hasUpdate && res.latestVersion) {
+        setUpdateAvailable(res.latestVersion);
+        setIsUpdateModalOpen(true);
+      }
+    };
+
+    const timer = setTimeout(checkUpdates, 400);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const handleManualCheck = async () => {
+      if (!isRunningInApk()) return;
+      const current = await getCurrentAppVersion();
+      setAppVersionInfo(current);
+      const res = await checkForAppUpdate({ ignoreSkipped: true });
+      if (res.hasUpdate && res.latestVersion) {
+        setUpdateAvailable(res.latestVersion);
+        setIsUpdateModalOpen(true);
+      }
+    };
+    window.addEventListener('baf_check_app_update', handleManualCheck);
+    return () => window.removeEventListener('baf_check_app_update', handleManualCheck);
+  }, []);
   
   useEffect(() => {
     // One-time cleanup for old test notice "Gg" or empty notices
@@ -188,6 +236,7 @@ return () => mediaQuery.removeEventListener('change', listener);
     clearUserSession();
     setUserSession(null);
     handleRoleChange('USER');
+    setLastUsedPortal('Office');
   };
 
   
@@ -479,6 +528,17 @@ return () => mediaQuery.removeEventListener('change', listener);
             localDb.syncFromFirebase();
           }}
         />
+
+        {/* Capacitor In-App Update Modal on Login Screen (Rendered ONLY in APK) */}
+        {isRunningInApk() && (
+          <AppUpdateModal
+            isOpen={isUpdateModalOpen}
+            onClose={() => setIsUpdateModalOpen(false)}
+            latestVersion={updateAvailable}
+            currentVersionCode={appVersionInfo.versionCode}
+            currentVersionName={appVersionInfo.versionName}
+          />
+        )}
       </div>
     );
   }
@@ -687,6 +747,15 @@ return () => mediaQuery.removeEventListener('change', listener);
             />
           )}
 
+          {activeTab === 'airfield' && (
+            <div className="flex-1 -m-3 sm:-m-6 lg:-m-8 min-h-[calc(100vh-6rem)]">
+              <AirfieldLayout
+                onBack={() => setActiveTab('ida-center')}
+                initialPostId="post_driveway"
+              />
+            </div>
+          )}
+
           {activeTab === 'register' && (
             <MonthlyDutyRegister
               airmen={airmen}
@@ -831,6 +900,17 @@ return () => mediaQuery.removeEventListener('change', listener);
           window.dispatchEvent(new CustomEvent('baf_state_updated'));
         }}
       />
+
+      {/* Capacitor In-App Update Modal (Rendered ONLY in APK) */}
+      {isRunningInApk() && (
+        <AppUpdateModal
+          isOpen={isUpdateModalOpen}
+          onClose={() => setIsUpdateModalOpen(false)}
+          latestVersion={updateAvailable}
+          currentVersionCode={appVersionInfo.versionCode}
+          currentVersionName={appVersionInfo.versionName}
+        />
+      )}
     </div>
   );
 }

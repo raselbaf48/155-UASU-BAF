@@ -31,7 +31,8 @@ import {
   ClipboardList,
   Activity,
   UserCircle,
-  User
+  User,
+  Plane
 } from 'lucide-react';
 import { UserRole } from '../types';
 import { UserSession } from '../utils/authSession';
@@ -48,6 +49,7 @@ export type SidebarTab =
   | 'tdy-register'
   | 'attachment-register'
   | 'ida-center'
+  | 'airfield'
   | 'register'
   | 'duty-roster'
   | 'duty-ratio'
@@ -444,6 +446,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     >
                       <Shield className={`w-4 h-4 shrink-0 ${activeTab === 'ida-center' ? 'text-white' : 'text-emerald-300'}`} />
                       {!collapsed && <span className="ml-3 truncate">IDA Center Duty</span>}
+                    </button>
+
+                    {/* Airfield Duty - Driveway (Visible to all) */}
+                    <button
+                      onClick={() => handleSelectTab('airfield')}
+                      className={`w-full flex items-center ${
+                        collapsed ? 'justify-center px-0 py-3' : 'justify-start px-3 py-3 sm:py-2.5'
+                      } rounded-xl text-xs font-bold transition-all duration-150 ${
+                        activeTab === 'airfield'
+                          ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-900/50 scale-[1.02] border border-emerald-400/30'
+                          : 'bg-[#084228]/50 text-emerald-100 hover:bg-[#0b4a2d] hover:text-white border border-[#0d5635]/50'
+                      }`}
+                      title="Airfield Duty - Driveway (Terminal)"
+                    >
+                      <Plane className={`w-4 h-4 shrink-0 ${activeTab === 'airfield' ? 'text-white' : 'text-emerald-300'}`} />
+                      {!collapsed && <span className="ml-3 truncate">Airfield Duty (Driveway)</span>}
                     </button>
 
                     {/* Duty Roster Period (Visible to all) */}

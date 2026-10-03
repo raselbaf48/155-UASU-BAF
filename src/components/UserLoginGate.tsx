@@ -13,6 +13,23 @@ import { NightCountStateView } from './NightCountStateView';
 import { getAppConfig, isFeatureActive } from '../utils/appConfig';
 
 import { setUserSession, validateUserLogin, getDetailedUsers, saveDetailedUsers } from '../utils/authSession';
+import { AppUpdateModal } from './AppUpdateModal';
+import {
+  checkForAppUpdate,
+  AppVersionRecord,
+  getCurrentAppVersion,
+  DEFAULT_CURRENT_APP,
+} from '../services/appUpdateService';
+import {
+  getLastUsedPortal,
+  setLastUsedPortal,
+  syncPortalFromCloud,
+  hasSavedPortalPreference,
+  PortalType,
+  getLastUsedIdForPortal,
+  saveLastUsedIdForPortal,
+  syncLastUsedIdsFromCloud,
+} from '../services/portalPreferenceService';
 
 interface UserLoginGateProps {
   airmen: Airman[];
@@ -23,9 +40,12 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
   airmen,
   onAuthenticated,
 }) => {
+  const [activeTab, setActiveTab] = useState<PortalType>(() => getLastUsedPortal());
+
   const [bdInput, setBdInput] = useState(() => {
     try {
-      return localStorage.getItem('baf_last_used_id') || '';
+      const initialPortal = getLastUsedPortal();
+      return getLastUsedIdForPortal(initialPortal);
     } catch { return ''; }
   });
   const [passwordInput, setPasswordInput] = useState('');
@@ -37,9 +57,6 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
   const [isUserIdFocused, setIsUserIdFocused] = useState<boolean>(false);
   const [isPasswordFocused, setIsPasswordFocused] = useState<boolean>(false);
   const [isConfirmFocused, setIsConfirmFocused] = useState<boolean>(false);
-
-  const [activeTab, setActiveTab] = useState<'Office' | 'Nt Count' | 'Canteen' | 'Airfield'>('Office');
-  
 
   const [isCanteenAuth, setIsCanteenAuth] = useState<boolean>(false);
   const [isCanteenManagerMode, setIsCanteenManagerMode] = useState<boolean>(false);
@@ -57,14 +74,78 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
       return saved ? JSON.parse(saved) : [];
     } catch { return []; }
   });
-  useEffect(() => {
-      // Auto-fill only when switching tabs, not when the user manually clears the input
-      if (activeTab === 'Canteen' && canteenRecentLogins.length > 0 && bdInput === '') {
-          setBdInput(canteenRecentLogins[0]);
-      }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab]);
 
+  // In-App Software Update Check right on Login Screen
+  const [updateAvailable, setUpdateAvailable] = useState<AppVersionRecord | null>(null);
+  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState<boolean>(false);
+  const [appVersionInfo, setAppVersionInfo] = useState<{ versionCode: number; versionName: string }>(DEFAULT_CURRENT_APP);
+
+  useEffect(() => {
+    let isMounted = true;
+    const checkUpdates = async () => {
+      try {
+        const cur = await getCurrentAppVersion();
+        if (isMounted) setAppVersionInfo(cur);
+        const res = await checkForAppUpdate();
+        if (isMounted && res.hasUpdate && res.latestVersion) {
+          setUpdateAvailable(res.latestVersion);
+          setIsUpdateModalOpen(true);
+        }
+      } catch (err) {
+        console.warn('[UserLoginGate] Update check failed:', err);
+      }
+    };
+
+    const t = setTimeout(checkUpdates, 400);
+    return () => {
+      isMounted = false;
+      clearTimeout(t);
+    };
+  }, []);
+
+  useEffect(() => {
+    // Cloud sync check for portal preference (applies cloud preference if user has not set a local preference yet)
+    syncPortalFromCloud().then((cloudPortal) => {
+      if (cloudPortal && !hasSavedPortalPreference()) {
+        setActiveTab(cloudPortal);
+        const lastId = getLastUsedIdForPortal(cloudPortal);
+        if (lastId) setBdInput(lastId);
+      }
+    });
+
+    syncLastUsedIdsFromCloud().then((ids) => {
+      if (activeTab === 'Canteen' && ids.canteenId && !bdInput) {
+        setBdInput(ids.canteenId);
+      } else if (activeTab === 'Office' && ids.officeId && !bdInput) {
+        setBdInput(ids.officeId);
+      }
+    });
+
+    const handlePortalChanged = (e: any) => {
+      const p = e.detail?.portal;
+      if (p && (p === 'Office' || p === 'Nt Count' || p === 'Canteen' || p === 'Airfield')) {
+        setActiveTab(p);
+      }
+    };
+    window.addEventListener('baf_portal_preference_changed', handlePortalChanged);
+    return () => window.removeEventListener('baf_portal_preference_changed', handlePortalChanged);
+  }, [activeTab, bdInput]);
+
+  const handlePortalChange = (newPortal: PortalType) => {
+    setActiveTab(newPortal);
+    setLastUsedPortal(newPortal);
+    setTargetAirman(null);
+    setPasswordInput('');
+    setErrorMsg('');
+    setIsMenuOpen(false);
+
+    if (newPortal === 'Canteen' || newPortal === 'Office') {
+      const lastId = getLastUsedIdForPortal(newPortal);
+      setBdInput(lastId);
+    } else {
+      setBdInput('');
+    }
+  };
 
   const recentLogins = activeTab === 'Canteen' ? canteenRecentLogins : officeRecentLogins;
 
@@ -198,6 +279,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
       const updatedRecents = [cleanInput, ...canteenRecentLogins.filter(x => x !== cleanInput)].slice(0, 4);
       setCanteenRecentLogins(updatedRecents);
       localStorage.setItem('baf_canteen_recent_logins', JSON.stringify(updatedRecents));
+      saveLastUsedIdForPortal('Canteen', cleanInput);
 
       let canteenData: any = null;
       if (!isMasterManager) {
@@ -247,6 +329,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
       setSuccessAirman(enrichedAirman);
       setIsCanteenAuth(true);
       setIsCanteenManagerMode(isManager);
+      setLastUsedPortal('Canteen');
       return;
     }
 
@@ -281,6 +364,8 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
       setOfficeRecentLogins(updatedRecents);
       localStorage.setItem('baf_recent_logins', JSON.stringify(updatedRecents));
       localStorage.setItem('baf_last_used_id', cleanInput);
+      saveLastUsedIdForPortal('Office', cleanInput);
+      setLastUsedPortal('Office');
       
       setIsLoading(false);
       setIsSuccessAnimation(true);
@@ -408,8 +493,18 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                   <span>{isResetMode ? 'PASSWORD RECOVERY' : (activeTab === 'Canteen' ? 'CANTEEN LOGIN PORTAL' : 'USER LOGIN PORTAL')}</span>
                 </div>
                 <h1 className="text-xl sm:text-2xl font-black tracking-tight text-white flex items-center justify-center space-x-2">
-            <span>{activeTab === 'Canteen' ? 'Canteen Management' : '155 UASU BAF'}</span>
-          </h1>
+                  <span>{activeTab === 'Canteen' ? 'Canteen Management' : '155 UASU BAF'}</span>
+                </h1>
+                {updateAvailable && (
+                  <button
+                    type="button"
+                    onClick={() => setIsUpdateModalOpen(true)}
+                    className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/30 transition-all cursor-pointer animate-pulse mt-1"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>নতুন আপডেট v{updateAvailable.version_name} উপলব্ধ (ক্লিক করুন)</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -477,16 +572,27 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                       type="text"
                       inputMode="numeric" pattern="[0-9]*" value={bdInput}
                       onChange={(e) => {
-                        setBdInput(e.target.value);
+                        const val = e.target.value;
+                        setBdInput(val);
                         setErrorMsg('');
                         if (targetAirman) setTargetAirman(null);
+                        if (activeTab === 'Canteen') {
+                          saveLastUsedIdForPortal('Canteen', val);
+                        } else if (activeTab === 'Office') {
+                          saveLastUsedIdForPortal('Office', val);
+                        }
                       }}
                       onFocus={() => { setIsUserIdFocused(true); setIsPasswordFocused(false); }}
                       onBlur={() => {
                         const cleanInput = bdInput.replace(/^BD\/?/i, '').trim();
                         if (cleanInput) {
-                           const found = airmen.find(a => a.bdNo === cleanInput);
-                           setTargetAirman(found || null);
+                           if (activeTab === 'Canteen') {
+                             saveLastUsedIdForPortal('Canteen', cleanInput);
+                           } else if (activeTab === 'Office') {
+                             saveLastUsedIdForPortal('Office', cleanInput);
+                             const found = airmen.find(a => a.bdNo === cleanInput);
+                             setTargetAirman(found || null);
+                           }
                         }
                       }}
                       className="w-full bg-slate-800/90 border border-slate-700 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-xl px-3.5 py-2.5 text-sm font-mono font-bold text-white outline-none transition-all"
@@ -506,8 +612,13 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                                setBdInput(id);
                                setIsUserIdFocused(false);
                                setIsPasswordFocused(true);
-                               const found = airmen.find(a => a.bdNo === id);
-                               setTargetAirman(found || null);
+                               if (activeTab === 'Canteen') {
+                                 saveLastUsedIdForPortal('Canteen', id);
+                               } else {
+                                 saveLastUsedIdForPortal('Office', id);
+                                 const found = airmen.find(a => a.bdNo === id);
+                                 setTargetAirman(found || null);
+                               }
                             }}
                             className="flex-1 text-left font-mono text-xs text-slate-300 group-hover:text-white flex items-center space-x-2"
                           >
@@ -681,7 +792,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
           <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto animate-fadeIn flex flex-col print:static print:bg-white print:text-black print:overflow-visible">
             <div className="sticky top-0 z-50 bg-slate-950/80 backdrop-blur-md border-b border-slate-800 p-4 flex items-center print:hidden">
               <button 
-                onClick={() => { setActiveTab('Office'); setTargetAirman(null); setBdInput(officeRecentLogins[0] || ''); setPasswordInput(''); }}
+                onClick={() => handlePortalChange('Office')}
                 className="flex items-center space-x-2 text-slate-400 hover:text-white transition-colors bg-slate-900/80 px-4 py-2 rounded-xl border border-slate-700 shadow-lg cursor-pointer"
               >
                 <ArrowLeft className="w-5 h-5" />
@@ -709,15 +820,22 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                photoUrl: successAirman.photoUrl,
                due: (successAirman as any)?.due
              } : undefined}
-             onBack={() => { setIsCanteenAuth(false); setIsCanteenManagerMode(false); setBdInput(canteenRecentLogins[0] || ''); setPasswordInput(''); setSuccessAirman(null); setTargetAirman(null); }} 
+             onBack={() => { 
+               setIsCanteenAuth(false); 
+               setIsCanteenManagerMode(false); 
+               setBdInput(getLastUsedIdForPortal('Canteen') || canteenRecentLogins[0] || ''); 
+               setPasswordInput(''); 
+               setSuccessAirman(null); 
+               setTargetAirman(null); 
+               setLastUsedPortal('Canteen');
+             }} 
           />
         )}
 
         {activeTab === 'Airfield' && (
           <AirfieldLayout
             onBack={() => {
-              setActiveTab('Office');
-              setTargetAirman(null);
+              handlePortalChange('Office');
             }}
           />
         )}
@@ -735,7 +853,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
           
           <div className={`bg-slate-800/80 backdrop-blur-md border border-slate-700 p-1.5 rounded-2xl flex items-center space-x-1 shadow-2xl transition-all duration-300 origin-bottom ${isMenuOpen ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'}`}>
             <button
-              onClick={() => { setActiveTab('Office'); setTargetAirman(null); setBdInput(officeRecentLogins[0] || ''); setPasswordInput(''); setIsMenuOpen(false); }}
+              onClick={() => handlePortalChange('Office')}
               className={`flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all cursor-pointer ${
                 activeTab === 'Office' 
                   ? 'bg-emerald-600 text-white shadow-md' 
@@ -746,7 +864,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
               <span>Office</span>
             </button>
             <button
-              onClick={() => { setActiveTab('Nt Count'); setTargetAirman(null); setBdInput(''); setPasswordInput(''); setIsMenuOpen(false); }}
+              onClick={() => handlePortalChange('Nt Count')}
               className={`flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all cursor-pointer ${
                 activeTab === 'Nt Count' 
                   ? 'bg-emerald-600 text-white shadow-md' 
@@ -757,7 +875,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
               <span>Nt Count</span>
             </button>
             <button
-              onClick={() => { setActiveTab('Canteen'); setTargetAirman(null); setBdInput(canteenRecentLogins[0] || ''); setPasswordInput(''); setIsMenuOpen(false); }}
+              onClick={() => handlePortalChange('Canteen')}
               className={`flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all cursor-pointer ${
                 activeTab === 'Canteen' 
                   ? 'bg-emerald-600 text-white shadow-md' 
@@ -768,7 +886,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
               <span>Canteen</span>
             </button>
             <button
-              onClick={() => { setActiveTab('Airfield'); setTargetAirman(null); setIsMenuOpen(false); }}
+              onClick={() => handlePortalChange('Airfield')}
               className={`flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all cursor-pointer ${
                 activeTab === 'Airfield' 
                   ? 'bg-emerald-600 text-white shadow-md' 
@@ -781,6 +899,15 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
           </div>
         </div>
       )}
+
+      {/* In-App Software Update Modal on Login Screen */}
+      <AppUpdateModal
+        isOpen={isUpdateModalOpen}
+        onClose={() => setIsUpdateModalOpen(false)}
+        latestVersion={updateAvailable}
+        currentVersionCode={appVersionInfo.versionCode}
+        currentVersionName={appVersionInfo.versionName}
+      />
 
     </div>
   );

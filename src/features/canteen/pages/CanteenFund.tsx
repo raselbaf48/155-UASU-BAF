@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Wallet, Landmark, CreditCard, Receipt, ArrowRightLeft, 
-  X, RefreshCw, CheckCircle2, AlertCircle
+  X, RefreshCw, CheckCircle2, AlertCircle, Building2, Briefcase, PieChart, Layers
 } from 'lucide-react';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { ExpenseRecord } from './Expenditures';
+import { UnitFundSection } from './UnitFundSection';
+import { OthersFundSection } from './OthersFundSection';
+import { AllFundsOverviewSection } from './AllFundsOverviewSection';
 
 export interface FundTransfer {
   id: string;
@@ -19,7 +22,14 @@ const TRANSFERS_KEY = 'canteen_fund_transfers';
 const TXS_KEY = 'canteen_txs';
 const EXPENSES_KEY = 'canteen_expenses';
 
+export type ActiveFundType = 'CANTEEN' | 'UNIT' | 'OTHERS' | 'OVERVIEW';
+
 export const CanteenFund: React.FC = () => {
+  // Top-level Fund Selector
+  const [activeFundCategory, setActiveFundCategory] = useState<ActiveFundType>('CANTEEN');
+  const [unitFundNet, setUnitFundNet] = useState<number>(0);
+  const [othersFundNet, setOthersFundNet] = useState<number>(0);
+
   const [reports, setReports] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
   const [transfers, setTransfers] = useState<FundTransfer[]>([]);
@@ -58,6 +68,26 @@ export const CanteenFund: React.FC = () => {
     } catch (_err) {
       setTransfers([]);
     }
+
+    try {
+      const uInflows = JSON.parse(localStorage.getItem('baf_unit_fund_inflows') || '[]');
+      const uExpenses = JSON.parse(localStorage.getItem('baf_unit_fund_expenses') || '[]');
+      const inSum = uInflows.reduce((s: number, i: any) => s + (Number(i.amount) || 0), 0);
+      const exSum = uExpenses.reduce((s: number, e: any) => s + (Number(e.amount) || 0), 0);
+      setUnitFundNet(inSum - exSum);
+    } catch {
+      setUnitFundNet(0);
+    }
+
+    try {
+      const oInflows = JSON.parse(localStorage.getItem('baf_others_fund_inflows') || '[]');
+      const oExpenses = JSON.parse(localStorage.getItem('baf_others_fund_expenses') || '[]');
+      const inSum = oInflows.reduce((s: number, i: any) => s + (Number(i.amount) || 0), 0);
+      const exSum = oExpenses.reduce((s: number, e: any) => s + (Number(e.amount) || 0), 0);
+      setOthersFundNet(inSum - exSum);
+    } catch {
+      setOthersFundNet(0);
+    }
   };
 
   useEffect(() => {
@@ -68,6 +98,8 @@ export const CanteenFund: React.FC = () => {
     window.addEventListener('canteen_expenses_updated', handleSync);
     window.addEventListener('canteen_transfers_updated', handleSync);
     window.addEventListener('canteen_state_updated', handleSync);
+    window.addEventListener('unit_fund_updated', handleSync);
+    window.addEventListener('others_fund_updated', handleSync);
     window.addEventListener('storage', handleSync);
 
     return () => {
@@ -75,6 +107,8 @@ export const CanteenFund: React.FC = () => {
       window.removeEventListener('canteen_expenses_updated', handleSync);
       window.removeEventListener('canteen_transfers_updated', handleSync);
       window.removeEventListener('canteen_state_updated', handleSync);
+      window.removeEventListener('unit_fund_updated', handleSync);
+      window.removeEventListener('others_fund_updated', handleSync);
       window.removeEventListener('storage', handleSync);
     };
   }, []);
@@ -179,45 +213,130 @@ export const CanteenFund: React.FC = () => {
         </div>
       )}
 
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-black text-white uppercase tracking-tighter flex items-center gap-2">
-            <Wallet className="w-6 h-6 text-indigo-500" />
-            CANTEEN FUND
-          </h2>
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-            PAYMENT COLLECTIONS, EXPENDITURE DEDUCTIONS & FUND TRANSFERS
-          </p>
-        </div>
+      {/* Top Fund Hub Selector Tabs */}
+      <div className="bg-slate-900/95 backdrop-blur-xl p-2 rounded-2xl border border-slate-800 flex items-center gap-2 overflow-x-auto scrollbar-hide shadow-xl">
+        <button
+          type="button"
+          onClick={() => setActiveFundCategory('CANTEEN')}
+          className={`flex-1 min-w-[170px] py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer ${
+            activeFundCategory === 'CANTEEN'
+              ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-lg shadow-indigo-600/30 scale-[1.01]'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+          }`}
+        >
+          <Wallet className="w-4 h-4 text-indigo-400" />
+          <span>CANTEEN FUND</span>
+          <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold ${
+            activeFundCategory === 'CANTEEN' ? 'bg-white/20 text-white' : 'bg-slate-800 text-indigo-400'
+          }`}>
+            ৳{totalFund.toLocaleString('en-US')}
+          </span>
+        </button>
 
-        <div className="flex items-center space-x-3">
-          {/* Transfer Button */}
-          <button
-            type="button"
-            onClick={() => {
-              setTransferError('');
-              setTransferAmount('');
-              setTransferNote('');
-              setShowTransferModal(true);
-            }}
-            className="px-5 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all flex items-center space-x-2 shadow-lg shadow-indigo-500/25 active:translate-y-0.5 cursor-pointer"
-          >
-            <ArrowRightLeft className="w-4 h-4" />
-            <span>TRANSFER FUND</span>
-          </button>
+        <button
+          type="button"
+          onClick={() => setActiveFundCategory('UNIT')}
+          className={`flex-1 min-w-[170px] py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer ${
+            activeFundCategory === 'UNIT'
+              ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-600/30 scale-[1.01]'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+          }`}
+        >
+          <Building2 className="w-4 h-4 text-emerald-400" />
+          <span>UNIT FUND</span>
+          <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold ${
+            activeFundCategory === 'UNIT' ? 'bg-white/20 text-white' : 'bg-slate-800 text-emerald-400'
+          }`}>
+            ৳{unitFundNet.toLocaleString('en-US')}
+          </span>
+        </button>
 
-          <button
-            type="button"
-            onClick={loadData}
-            className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-black tracking-wider uppercase transition-colors flex items-center space-x-1.5 border border-slate-700"
-            title="Refresh Fund Data"
-          >
-            <RefreshCw className="w-4 h-4" />
-            <span className="hidden sm:inline">SYNC</span>
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => setActiveFundCategory('OTHERS')}
+          className={`flex-1 min-w-[170px] py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer ${
+            activeFundCategory === 'OTHERS'
+              ? 'bg-gradient-to-r from-amber-600 to-orange-600 text-white shadow-lg shadow-amber-600/30 scale-[1.01]'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+          }`}
+        >
+          <Briefcase className="w-4 h-4 text-amber-400" />
+          <span>OTHERS FUND</span>
+          <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold ${
+            activeFundCategory === 'OTHERS' ? 'bg-white/20 text-white' : 'bg-slate-800 text-amber-400'
+          }`}>
+            ৳{othersFundNet.toLocaleString('en-US')}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveFundCategory('OVERVIEW')}
+          className={`py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer shrink-0 ${
+            activeFundCategory === 'OVERVIEW'
+              ? 'bg-slate-700 text-white shadow-md'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+          }`}
+          title="All Funds Overview"
+        >
+          <PieChart className="w-4 h-4 text-sky-400" />
+          <span className="hidden sm:inline">OVERVIEW</span>
+        </button>
       </div>
+
+      {/* 1. UNIT FUND SECTION */}
+      {activeFundCategory === 'UNIT' && <UnitFundSection />}
+
+      {/* 2. OTHERS FUND SECTION */}
+      {activeFundCategory === 'OTHERS' && <OthersFundSection />}
+
+      {/* 3. ALL FUNDS OVERVIEW */}
+      {activeFundCategory === 'OVERVIEW' && (
+        <AllFundsOverviewSection onSelectFund={(fund) => setActiveFundCategory(fund)} />
+      )}
+
+      {/* 4. CANTEEN FUND SECTION (Original) */}
+      {activeFundCategory === 'CANTEEN' && (
+        <>
+          {/* Header */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-2xl font-black text-white uppercase tracking-tighter flex items-center gap-2">
+                <Wallet className="w-6 h-6 text-indigo-500" />
+                CANTEEN FUND (ক্যান্টিন তহবিল)
+              </h2>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                PAYMENT COLLECTIONS, EXPENDITURE DEDUCTIONS & FUND TRANSFERS
+              </p>
+            </div>
+
+            <div className="flex items-center space-x-3">
+              {/* Transfer Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  setTransferError('');
+                  setTransferAmount('');
+                  setTransferNote('');
+                  setShowTransferModal(true);
+                }}
+                className="px-5 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all flex items-center space-x-2 shadow-lg shadow-indigo-500/25 active:translate-y-0.5 cursor-pointer"
+              >
+                <ArrowRightLeft className="w-4 h-4" />
+                <span>TRANSFER FUND</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={loadData}
+                className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-black tracking-wider uppercase transition-colors flex items-center space-x-1.5 border border-slate-700 cursor-pointer"
+                title="Refresh Fund Data"
+              >
+                <RefreshCw className="w-4 h-4" />
+                <span className="hidden sm:inline">SYNC</span>
+              </button>
+            </div>
+          </div>
 
       {/* Metrics Cards (Reflecting real balance = Collections - Expenditures +/- Transfers) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -584,6 +703,8 @@ export const CanteenFund: React.FC = () => {
 
           </div>
         </div>
+      )}
+        </>
       )}
 
     </div>

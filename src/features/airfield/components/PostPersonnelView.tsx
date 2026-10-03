@@ -28,6 +28,7 @@ import {
 import { AddEditPersonModal } from './AddEditPersonModal';
 import { PostSettingsModal } from './PostSettingsModal';
 import { generateFairRotationSchedule, formatDurationHoursMins } from '../utils/rotationScheduler';
+import { DrivewayIdaSystemView } from './DrivewayIdaSystemView';
 
 interface PostPersonnelViewProps {
   post: DutyPost;
@@ -40,6 +41,8 @@ export const PostPersonnelView: React.FC<PostPersonnelViewProps> = ({
   onUpdatePost,
   onDeletePost,
 }) => {
+  const isDrivewayPost = post.id === 'post_driveway' || post.name.toLowerCase().includes('drive');
+  const [viewMode, setViewMode] = useState<'ida_system' | 'management'>('ida_system');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [addModalStatus, setAddModalStatus] = useState<DutyStatusType>('Active');
   const [editingPerson, setEditingPerson] = useState<DutyPerson | null>(null);
@@ -321,8 +324,45 @@ export const PostPersonnelView: React.FC<PostPersonnelViewProps> = ({
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto bg-slate-900 text-slate-100 p-3 sm:p-6 lg:p-8 space-y-5 pb-36">
-      
-      {/* Top Banner Card */}
+      {/* Top View Mode Switcher for Driveway Post */}
+      {isDrivewayPost && (
+        <div className="flex flex-wrap items-center gap-2 p-1.5 bg-slate-950 border border-slate-800 rounded-2xl shadow-md shrink-0">
+          <button
+            onClick={() => setViewMode('ida_system')}
+            className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+              viewMode === 'ida_system'
+                ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40 border border-emerald-400/40'
+                : 'text-slate-400 hover:text-white hover:bg-slate-900'
+            }`}
+          >
+            <Shield className="w-4 h-4 text-emerald-300" />
+            <span>🛡️ Driveway Live Rotation (IDA Center System)</span>
+          </button>
+
+          <button
+            onClick={() => setViewMode('management')}
+            className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+              viewMode === 'management'
+                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/40 border border-indigo-400/40'
+                : 'text-slate-400 hover:text-white hover:bg-slate-900'
+            }`}
+          >
+            <UserCheck className="w-4 h-4 text-indigo-300" />
+            <span>👥 Personnel Management & Post Settings</span>
+          </button>
+        </div>
+      )}
+
+      {isDrivewayPost && viewMode === 'ida_system' ? (
+        <DrivewayIdaSystemView
+          post={post}
+          onUpdatePost={onUpdatePost}
+          onDeletePost={onDeletePost}
+          onOpenSettings={() => setIsSettingsOpen(true)}
+        />
+      ) : (
+        <>
+          {/* Top Banner Card */}
       <div className="rounded-3xl bg-slate-950 border border-slate-800 p-4 sm:p-6 shadow-xl relative shrink-0">
         <div className="absolute top-0 right-0 w-80 h-80 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none" />
 
@@ -725,6 +765,34 @@ export const PostPersonnelView: React.FC<PostPersonnelViewProps> = ({
                     </span>
                   </div>
                 </div>
+
+                {/* 6 Rules Verification Strip */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 pt-2 border-t border-indigo-500/20 text-[10px] text-slate-300">
+                  <div className="flex items-center space-x-1">
+                    <span className="text-emerald-400 font-bold">✓</span>
+                    <span>টানা ২ শিফট Active হবে না</span>
+                  </div>
+                  <div className="flex items-center space-x-1">
+                    <span className="text-emerald-400 font-bold">✓</span>
+                    <span>টানা Standby হবে না</span>
+                  </div>
+                  <div className="flex items-center space-x-1">
+                    <span className="text-emerald-400 font-bold">✓</span>
+                    <span>Active/Stby ছাড়া Auto Rest</span>
+                  </div>
+                  <div className="flex items-center space-x-1">
+                    <span className="text-emerald-400 font-bold">✓</span>
+                    <span>রেস্ট অন্তত ১ ঘণ্টা (৬০ মিনিট)</span>
+                  </div>
+                  <div className="flex items-center space-x-1">
+                    <span className="text-emerald-400 font-bold">✓</span>
+                    <span>Active → Standby → Rest</span>
+                  </div>
+                  <div className="flex items-center space-x-1">
+                    <span className="text-emerald-400 font-bold">✓</span>
+                    <span>Rest → Standby → Active</span>
+                  </div>
+                </div>
               </div>
 
               {/* Slot by Slot Rotation Schedule Table */}
@@ -810,6 +878,8 @@ export const PostPersonnelView: React.FC<PostPersonnelViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+      </>
       )}
 
       {/* Add / Edit Person Modal */}

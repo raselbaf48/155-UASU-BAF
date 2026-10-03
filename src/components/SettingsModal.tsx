@@ -46,6 +46,15 @@ import {   getLoginHistory, clearLoginHistory, recordLoginLog, UserLoginLog, get
 import {   localDb, getSyncLogs, SyncLog } from '../services/localDatabase';
 
 import { CustomDutiesTab } from './CustomDutiesTab';
+import {
+  checkForAppUpdate,
+  fetchLatestAppVersion,
+  getCurrentAppVersion,
+  downloadAppUpdate,
+  publishNewAppVersion,
+  AppVersionRecord,
+  DEFAULT_CURRENT_APP,
+} from '../services/appUpdateService';
 
 
 const formatAirmanName = (name: string) => {
@@ -70,7 +79,7 @@ interface SettingsModalProps {
   onRosterUpdated?: () => void;
 }
 
-type SettingSection = 'appearance' | 'cloudsync' | 'users' | 'security' | 'database' | 'history' | 'appManagement';
+type SettingSection = 'appearance' | 'appUpdate' | 'cloudsync' | 'users' | 'security' | 'database' | 'history' | 'appManagement';
 
 export 
 const Countdown = ({ endTime }: { endTime: string }) => {
@@ -319,6 +328,82 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [isBackingUp, setIsBackingUp] = useState<boolean>(false);
   const [editingPasswordType, setEditingPasswordType] = useState<'portal' | 'admin' | null>(null);
   const [pendingRestoreFile, setPendingRestoreFile] = useState<File | null>(null);
+
+  // In-App Software Update State (Capacitor + Supabase)
+  const [currentAppVersion, setCurrentAppVersion] = useState<{ versionCode: number; versionName: string }>(DEFAULT_CURRENT_APP);
+  const [latestRemoteVersion, setLatestRemoteVersion] = useState<AppVersionRecord | null>(null);
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState<boolean>(false);
+  const [updateStatusMessage, setUpdateStatusMessage] = useState<string>('');
+  
+  // Publish new version draft (Admin)
+  const [publishDraft, setPublishDraft] = useState({
+    version_code: '',
+    version_name: '',
+    apk_url: '',
+    release_notes: '',
+  });
+  const [isPublishingVersion, setIsPublishingVersion] = useState(false);
+  const [publishMessage, setPublishMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const loadAppUpdateInfo = async () => {
+    setIsCheckingUpdate(true);
+    setUpdateStatusMessage('Supabase app_versions টেবিল থেকে চেক করা হচ্ছে...');
+    try {
+      const cur = await getCurrentAppVersion();
+      setCurrentAppVersion(cur);
+      const res = await checkForAppUpdate({ ignoreSkipped: true });
+      setLatestRemoteVersion(res.latestVersion);
+      if (res.hasUpdate && res.latestVersion) {
+        setUpdateStatusMessage(`নতুন আপডেট উপলব্ধ: v${res.latestVersion.version_name} (Build ${res.latestVersion.version_code})`);
+      } else {
+        setUpdateStatusMessage(`আপনার অ্যাপটি আপ-টু-ডেট আছে (v${cur.versionName}, Build ${cur.versionCode})`);
+      }
+    } catch (err: any) {
+      setUpdateStatusMessage('আপডেট চেক ব্যর্থ হয়েছে: ' + (err.message || 'ত্রুটি'));
+    } finally {
+      setIsCheckingUpdate(false);
+    }
+  };
+
+  const handlePublishVersion = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPublishMessage(null);
+    const vCode = parseInt(publishDraft.version_code, 10);
+    if (isNaN(vCode) || vCode <= 0) {
+      setPublishMessage({ type: 'error', text: 'একটি সঠিক সংখ্যার Version Code লিখুন (যেমন: 2)' });
+      return;
+    }
+    if (!publishDraft.version_name.trim()) {
+      setPublishMessage({ type: 'error', text: 'Version Name লিখুন (যেমন: 1.0.1)' });
+      return;
+    }
+    if (!publishDraft.apk_url.trim()) {
+      setPublishMessage({ type: 'error', text: 'APK Download URL প্রদান করুন' });
+      return;
+    }
+
+    setIsPublishingVersion(true);
+    try {
+      const res = await publishNewAppVersion({
+        version_code: vCode,
+        version_name: publishDraft.version_name.trim(),
+        apk_url: publishDraft.apk_url.trim(),
+        release_notes: publishDraft.release_notes.trim() || undefined,
+      });
+
+      if (res.success) {
+        setPublishMessage({ type: 'success', text: `সাফল্যের সাথে v${publishDraft.version_name} (Code ${vCode}) প্রকাশ করা হয়েছে!` });
+        setPublishDraft({ version_code: '', version_name: '', apk_url: '', release_notes: '' });
+        await loadAppUpdateInfo();
+      } else {
+        setPublishMessage({ type: 'error', text: res.error || 'পাবলিশ ব্যর্থ হয়েছে' });
+      }
+    } catch (err: any) {
+      setPublishMessage({ type: 'error', text: err?.message || 'ত্রুটি হয়েছে' });
+    } finally {
+      setIsPublishingVersion(false);
+    }
+  };
 
   useEffect(() => {
     if (true) {
@@ -668,6 +753,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const sections = [
     { id: 'appearance', label: 'Theme & Appearance', icon: <Palette className="w-5 h-5" />, color: 'text-indigo-500 bg-indigo-100 dark:bg-indigo-950 dark:text-indigo-400' },
+    { id: 'appUpdate', label: 'In-App Update (Capacitor)', icon: <Download className="w-5 h-5" />, color: 'text-emerald-500 bg-emerald-100 dark:bg-emerald-950 dark:text-emerald-400' },
     ...((role === 'SUPER_ADMIN' || role === 'OWNER' || role === 'ADMIN') ? [{ id: 'cloudsync', label: 'Database Cloud Sync', icon: <Cloud className="w-5 h-5" />, color: 'text-blue-500 bg-blue-100 dark:bg-blue-950 dark:text-blue-400' }] : []),
     ...((role === 'SUPER_ADMIN' || role === 'OWNER' || role === 'ADMIN') ? [
       { id: 'appNotice', label: 'App Notice', icon: <Megaphone className="w-5 h-5" />, color: 'text-orange-500 bg-orange-100 dark:bg-orange-950 dark:text-orange-400' },
@@ -810,8 +896,228 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             </button>
                           ))}
                         </div>
-</div>
-</div>)}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* In-App Software Update Section (Capacitor + Supabase app_versions) */}
+                  {activeSection === 'appUpdate' && (
+                    <div className="space-y-6 animate-fadeIn">
+                      {/* Top Header Card */}
+                      <div className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-6">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                          <div className="flex items-center space-x-3.5">
+                            <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0">
+                              <Download className="w-6 h-6" />
+                            </div>
+                            <div>
+                              <h4 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                                <span>ইন-অ্যাপ সফটওয়্যার আপডেট</span>
+                                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                                  Capacitor + Supabase
+                                </span>
+                              </h4>
+                              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                                Supabase-এর <code className="text-emerald-500 font-mono">app_versions</code> টেবিল থেকে ভার্সন কোড ফেচ করে সরাসরি APK ডাউনলোড।
+                              </p>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={isCheckingUpdate}
+                            onClick={loadAppUpdateInfo}
+                            className="flex items-center space-x-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md shadow-emerald-900/30 transition-all cursor-pointer self-start sm:self-auto disabled:opacity-50"
+                          >
+                            <RefreshCw className={`w-4 h-4 ${isCheckingUpdate ? 'animate-spin' : ''}`} />
+                            <span>{isCheckingUpdate ? 'চেক হচ্ছে...' : 'আপডেট চেক করুন'}</span>
+                          </button>
+                        </div>
+
+                        {/* Current Status Box */}
+                        <div className="mt-5 p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                          <div>
+                            <span className="text-[10px] uppercase font-bold text-slate-400 block">বর্তমান অ্যাপ ভার্সন:</span>
+                            <span className="font-mono font-bold text-slate-800 dark:text-slate-100 text-sm">
+                              v{currentAppVersion.versionName} <span className="text-slate-400 font-normal">(version_code: {currentAppVersion.versionCode})</span>
+                            </span>
+                          </div>
+
+                          <div className="text-left sm:text-right">
+                            <span className="text-[10px] uppercase font-bold text-slate-400 block">লেটেস্ট রিলিজ:</span>
+                            {latestRemoteVersion ? (
+                              <span className="font-mono font-bold text-emerald-500 dark:text-emerald-400 text-sm">
+                                v{latestRemoteVersion.version_name} (code: {latestRemoteVersion.version_code})
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 font-mono">চেক করা হয়নি</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {updateStatusMessage && (
+                          <div className="mt-3 text-xs font-medium text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+                            <Info className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                            <span>{updateStatusMessage}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Latest Available APK Card */}
+                      {latestRemoteVersion && (
+                        <div className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 space-y-4">
+                          <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-3">
+                            <div className="flex items-center space-x-2">
+                              <ShieldCheck className="w-5 h-5 text-emerald-500" />
+                              <h5 className="font-bold text-sm text-slate-900 dark:text-white">
+                                Supabase রিলিজ রেকর্ড (app_versions)
+                              </h5>
+                            </div>
+                            <span className="text-[10px] font-mono text-slate-400">
+                              ID: #{latestRemoteVersion.id || 1}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                            <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                              <span className="text-[10px] text-slate-400 uppercase font-bold block">Version Code</span>
+                              <span className="font-mono font-black text-slate-800 dark:text-slate-100 text-sm">
+                                {latestRemoteVersion.version_code}
+                              </span>
+                            </div>
+                            <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                              <span className="text-[10px] text-slate-400 uppercase font-bold block">Version Name</span>
+                              <span className="font-mono font-black text-slate-800 dark:text-slate-100 text-sm">
+                                v{latestRemoteVersion.version_name}
+                              </span>
+                            </div>
+                          </div>
+
+                          {latestRemoteVersion.release_notes && (
+                            <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-1">
+                              <span className="text-[10px] text-slate-400 uppercase font-bold block">রিলিজ নোটস:</span>
+                              <p className="text-xs text-slate-600 dark:text-slate-300 whitespace-pre-line">
+                                {latestRemoteVersion.release_notes}
+                              </p>
+                            </div>
+                          )}
+
+                          <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <span className="text-[10px] text-slate-400 uppercase font-bold block">APK Download URL:</span>
+                              <p className="font-mono text-xs text-indigo-500 truncate" title={latestRemoteVersion.apk_url}>
+                                {latestRemoteVersion.apk_url}
+                              </p>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => downloadAppUpdate(latestRemoteVersion.apk_url)}
+                              className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md transition-all cursor-pointer shrink-0"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              <span>Capacitor Browser দিয়ে ওপেন</span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Admin Form: Publish New Version */}
+                      {(role === 'SUPER_ADMIN' || role === 'OWNER' || role === 'ADMIN') && (
+                        <div className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 space-y-4">
+                          <div className="border-b border-slate-200 dark:border-slate-700 pb-3">
+                            <h5 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                              <Upload className="w-4 h-4 text-emerald-500" />
+                              <span>নতুন ভার্সন প্রকাশ করুন (Publish to app_versions)</span>
+                            </h5>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                              নতুন APK তৈরি করার পর এখানে version_code ও apk_url দিয়ে সাবমিট করলেই সকল ইউজার আপডেট নোটিফিকেশন পাবে।
+                            </p>
+                          </div>
+
+                          {publishMessage && (
+                            <div className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 ${
+                              publishMessage.type === 'success'
+                                ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800'
+                                : 'bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-800'
+                            }`}>
+                              {publishMessage.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
+                              <span>{publishMessage.text}</span>
+                            </div>
+                          )}
+
+                          <form onSubmit={handlePublishVersion} className="space-y-3 text-xs">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
+                                  Version Code * (সংখ্যা)
+                                </label>
+                                <input
+                                  type="number"
+                                  required
+                                  min="1"
+                                  value={publishDraft.version_code}
+                                  onChange={(e) => setPublishDraft({ ...publishDraft, version_code: e.target.value })}
+                                  placeholder="e.g. 2"
+                                  className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-mono font-bold outline-none focus:ring-2 focus:ring-emerald-500"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
+                                  Version Name * (নাম)
+                                </label>
+                                <input
+                                  type="text"
+                                  required
+                                  value={publishDraft.version_name}
+                                  onChange={(e) => setPublishDraft({ ...publishDraft, version_name: e.target.value })}
+                                  placeholder="e.g. 1.0.1"
+                                  className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-mono font-bold outline-none focus:ring-2 focus:ring-emerald-500"
+                                />
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
+                                APK Download URL *
+                              </label>
+                              <input
+                                type="url"
+                                required
+                                value={publishDraft.apk_url}
+                                onChange={(e) => setPublishDraft({ ...publishDraft, apk_url: e.target.value })}
+                                placeholder="https://example.com/app-release.apk"
+                                className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-mono outline-none focus:ring-2 focus:ring-emerald-500"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
+                                রিলিজ নোটস / পরিবর্তনসমূহ (ঐচ্ছিক)
+                              </label>
+                              <textarea
+                                rows={3}
+                                value={publishDraft.release_notes}
+                                onChange={(e) => setPublishDraft({ ...publishDraft, release_notes: e.target.value })}
+                                placeholder="• নতুন ডিউটি রোটেশন ফিচার যুক্ত করা হয়েছে&#10;• নিরাপত্তা ত্রুটি সমাধান করা হয়েছে"
+                                className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
+                              />
+                            </div>
+
+                            <button
+                              type="submit"
+                              disabled={isPublishingVersion}
+                              className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition-all cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                            >
+                              <Upload className="w-4 h-4" />
+                              <span>{isPublishingVersion ? 'পাবলিশ হচ্ছে...' : 'Supabase-এ প্রকাশ করুন'}</span>
+                            </button>
+                          </form>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Cloud Sync */}
                   {activeSection === 'cloudsync' && (role === 'SUPER_ADMIN' || role === 'OWNER' || role === 'ADMIN') && (
