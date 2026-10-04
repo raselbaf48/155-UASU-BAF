@@ -3,6 +3,7 @@ import { CanteenLayout } from '../features/canteen/components/CanteenLayout';
 import { EmployeeDashboard } from '../features/canteen/pages/EmployeeDashboard';
 import { supabase } from '../supabase';
 import { fetchDirectImageUrl, getCanteenConfig } from '../features/canteen/utils/canteenSettings';
+import { syncCanteenMembersFromCloud, pullAllCanteenDataFromCloud } from '../features/canteen/utils/canteenCloudSync';
 
 import { Airman } from '../types';
 import { Logo155UASU } from './Logo155UASU';
@@ -107,32 +108,40 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
   }, []);
 
   useEffect(() => {
-    // Cloud sync check for portal preference (applies cloud preference if user has not set a local preference yet)
-    syncPortalFromCloud().then((cloudPortal) => {
-      if (cloudPortal && !hasSavedPortalPreference()) {
-        setActiveTab(cloudPortal);
-        const lastId = getLastUsedIdForPortal(cloudPortal);
-        if (lastId) setBdInput(lastId);
-      }
-    });
+    // Cloud sync check for portal preference (only applies if user has not set a local preference yet)
+    if (!hasSavedPortalPreference()) {
+      syncPortalFromCloud().then((cloudPortal) => {
+        if (cloudPortal) {
+          setActiveTab(cloudPortal);
+          const lastId = getLastUsedIdForPortal(cloudPortal);
+          if (lastId) setBdInput(lastId);
+        }
+      });
+    }
 
     syncLastUsedIdsFromCloud().then((ids) => {
-      if (activeTab === 'Canteen' && ids.canteenId && !bdInput) {
-        setBdInput(ids.canteenId);
-      } else if (activeTab === 'Office' && ids.officeId && !bdInput) {
-        setBdInput(ids.officeId);
+      const currentPortal = getLastUsedPortal();
+      if (currentPortal === 'Canteen' && ids.canteenId) {
+        setBdInput((prev) => prev || ids.canteenId || '');
+      } else if (currentPortal === 'Office' && ids.officeId) {
+        setBdInput((prev) => prev || ids.officeId || '');
       }
     });
 
     const handlePortalChanged = (e: any) => {
       const p = e.detail?.portal;
       if (p && (p === 'Office' || p === 'Nt Count' || p === 'Canteen')) {
-        setActiveTab(p);
+        setActiveTab((prev) => (prev === p ? prev : p));
       }
     };
     window.addEventListener('baf_portal_preference_changed', handlePortalChanged);
+
+    // Warm up Canteen data and member DPs in the background
+    syncCanteenMembersFromCloud(false);
+    pullAllCanteenDataFromCloud();
+
     return () => window.removeEventListener('baf_portal_preference_changed', handlePortalChanged);
-  }, [activeTab, bdInput]);
+  }, []);
 
   const handlePortalChange = (newPortal: PortalType) => {
     setActiveTab(newPortal);
@@ -147,6 +156,12 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
       setBdInput(lastId);
     } else {
       setBdInput('');
+    }
+
+    // When switching to Canteen, immediately ensure everything is downloaded and DPs cached
+    if (newPortal === 'Canteen') {
+      syncCanteenMembersFromCloud(true);
+      pullAllCanteenDataFromCloud();
     }
   };
 
@@ -849,36 +864,57 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
           <div className={`bg-slate-800/80 backdrop-blur-md border border-slate-700 p-1.5 rounded-2xl flex items-center space-x-1 shadow-2xl transition-all duration-300 origin-bottom ${isMenuOpen ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'}`}>
             <button
               onClick={() => handlePortalChange('Office')}
-              className={`flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all cursor-pointer ${
+              className={`relative flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-colors cursor-pointer overflow-hidden ${
                 activeTab === 'Office' 
-                  ? 'bg-emerald-600 text-white shadow-md' 
+                  ? 'text-white' 
                   : 'text-slate-400 hover:text-white hover:bg-slate-700'
               }`}
             >
-              <Building2 className="w-4 h-4" />
-              <span>Office</span>
+              {activeTab === 'Office' && (
+                <motion.span
+                  layoutId="loginPortalActivePill"
+                  className="absolute inset-0 bg-emerald-600 rounded-xl shadow-md z-0"
+                  transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                />
+              )}
+              <Building2 className="w-4 h-4 relative z-10" />
+              <span className="relative z-10">Office</span>
             </button>
             <button
               onClick={() => handlePortalChange('Nt Count')}
-              className={`flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all cursor-pointer ${
+              className={`relative flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-colors cursor-pointer overflow-hidden ${
                 activeTab === 'Nt Count' 
-                  ? 'bg-emerald-600 text-white shadow-md' 
+                  ? 'text-white' 
                   : 'text-slate-400 hover:text-white hover:bg-slate-700'
               }`}
             >
-              <Moon className="w-4 h-4" />
-              <span>Nt Count</span>
+              {activeTab === 'Nt Count' && (
+                <motion.span
+                  layoutId="loginPortalActivePill"
+                  className="absolute inset-0 bg-emerald-600 rounded-xl shadow-md z-0"
+                  transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                />
+              )}
+              <Moon className="w-4 h-4 relative z-10" />
+              <span className="relative z-10">Nt Count</span>
             </button>
             <button
               onClick={() => handlePortalChange('Canteen')}
-              className={`flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all cursor-pointer ${
+              className={`relative flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-colors cursor-pointer overflow-hidden ${
                 activeTab === 'Canteen' 
-                  ? 'bg-emerald-600 text-white shadow-md' 
+                  ? 'text-white' 
                   : 'text-slate-400 hover:text-white hover:bg-slate-700'
               }`}
             >
-              <Coffee className="w-4 h-4" />
-              <span>Canteen</span>
+              {activeTab === 'Canteen' && (
+                <motion.span
+                  layoutId="loginPortalActivePill"
+                  className="absolute inset-0 bg-emerald-600 rounded-xl shadow-md z-0"
+                  transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                />
+              )}
+              <Coffee className="w-4 h-4 relative z-10" />
+              <span className="relative z-10">Canteen</span>
             </button>
           </div>
         </div>

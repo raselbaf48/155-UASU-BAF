@@ -325,9 +325,10 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
             hasSubUnits: r.hasSubUnits ?? meta.hasSubUnits ?? Boolean(sub && sub !== r.unit)
           };
         });
-        setAvailableRawItems(parsedRaw);
+        const sortedRaw = parsedRaw.sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
+        setAvailableRawItems(sortedRaw);
         try {
-          localStorage.setItem(RAW_ITEMS_STORAGE_KEY, JSON.stringify(parsedRaw));
+          localStorage.setItem(RAW_ITEMS_STORAGE_KEY, JSON.stringify(sortedRaw));
         } catch {}
       }
     } catch (e) {
@@ -365,7 +366,8 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                 'Raw Item': resolvedRawItem
               };
             });
-            setItems(formatted);
+            const sorted = formatted.sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
+            setItems(sorted);
         } else {
             console.error('Failed or empty fetch:', error);
         }
@@ -925,13 +927,17 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     return Array.from(cats);
   }, [items]);
 
-  const filteredItems = items.filter(item => {
-      const matchesSearch = (item.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
-                            (item.category || '').toLowerCase().includes(searchTerm.toLowerCase());
-      const itemCategory = (item.category || 'SNACKS').toUpperCase();
-      const matchesCategory = selectedCategory === 'ALL' || itemCategory === selectedCategory;
-      return matchesSearch && matchesCategory;
-  });
+  const filteredItems = useMemo(() => {
+    return items
+      .filter(item => {
+        const matchesSearch = (item.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+                              (item.category || '').toLowerCase().includes(searchTerm.toLowerCase());
+        const itemCategory = (item.category || 'SNACKS').toUpperCase();
+        const matchesCategory = selectedCategory === 'ALL' || itemCategory === selectedCategory;
+        return matchesSearch && matchesCategory;
+      })
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, [items, searchTerm, selectedCategory]);
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300 pb-10">

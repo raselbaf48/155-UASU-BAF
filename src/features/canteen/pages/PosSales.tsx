@@ -779,13 +779,17 @@ export const PosSales: React.FC = () => {
     return Array.from(cats);
   }, [catalog]);
 
-  const filteredCatalog = catalog.filter(item => {
-      const matchesSearch = (item.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
-                            (item.category || '').toLowerCase().includes(searchTerm.toLowerCase());
-      const itemCat = (item.category || 'SNACKS').toUpperCase();
-      const matchesCat = selectedCategory === 'ALL' || itemCat === selectedCategory;
-      return matchesSearch && matchesCat;
-  });
+  const filteredCatalog = useMemo(() => {
+    return catalog
+      .filter(item => {
+        const matchesSearch = (item.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+                              (item.category || '').toLowerCase().includes(searchTerm.toLowerCase());
+        const itemCat = (item.category || 'SNACKS').toUpperCase();
+        const matchesCat = selectedCategory === 'ALL' || itemCat === selectedCategory;
+        return matchesSearch && matchesCat;
+      })
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, [catalog, searchTerm, selectedCategory]);
 
   const basketTotal = basket.reduce((sum, item) => sum + (item.price * item.qty), 0);
 

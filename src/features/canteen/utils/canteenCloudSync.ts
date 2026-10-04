@@ -1,5 +1,6 @@
 import { supabase } from '../../../supabase';
 import { deduplicateRawItems } from './recipeManager';
+import { resolveImageUrl, getCanteenConfig } from './canteenSettings';
 
 /**
  * Canteen Cloud Sync Engine
@@ -348,12 +349,212 @@ export async function pushAllLocalDataToCloud(): Promise<void> {
   notifyStatus({ status: 'synced', lastSyncTime: new Date().toLocaleTimeString() });
 }
 
+const preloadedImageUrls = new Set<string>();
+
+export function preloadImage(url: string | undefined | null) {
+  if (!url || typeof window === 'undefined') return;
+  const resolved = resolveImageUrl(url);
+  if (!resolved || resolved.startsWith('data:') || preloadedImageUrls.has(resolved)) return;
+  preloadedImageUrls.add(resolved);
+  try {
+    const img = new Image();
+    img.src = resolved;
+  } catch {}
+}
+
+/**
+ * Pre-cache all canteen member DPs, manager image, logo, and menu item photos into browser image cache
+ */
+export function preloadAllCanteenMedia() {
+  if (typeof window === 'undefined') return;
+  
+  // 1. Manager Image & Logo
+  try {
+    const cfg = getCanteenConfig();
+    if (cfg.adminImage) preloadImage(cfg.adminImage);
+    if (cfg.logoUrl) preloadImage(cfg.logoUrl);
+  } catch {}
+
+  // 2. Member DPs from local member cache
+  try {
+    const cached = localStorage.getItem('canteen_members_cache');
+    if (cached) {
+      const members = JSON.parse(cached);
+      if (Array.isArray(members)) {
+        members.forEach((m: any) => {
+          if (m?.DP) preloadImage(m.DP);
+        });
+      }
+    }
+  } catch {}
+
+  // 3. Menu items
+  try {
+    const menuRaw = localStorage.getItem('canteen_daily_menu');
+    if (menuRaw) {
+      const items = JSON.parse(menuRaw);
+      if (Array.isArray(items)) {
+        items.forEach((item: any) => {
+          if (item?.DP || item?.img || item?.image) preloadImage(item.DP || item.img || item.image);
+        });
+      }
+    }
+  } catch {}
+}
+
+/**
+ * Intelligent Canteen Member Cloud Sync:
+ * - On first entry / empty cache: Downloads ALL members, saves to local storage, and preloads all DPs.
+ * - On subsequent visits: Performs smart delta check with Cloud, ONLY downloading and updating the exact records that changed.
+ */
+let lastMemberSyncTime = 0;
+
+export async function syncCanteenMembersFromCloud(forceFull = false): Promise<void> {
+  if (typeof window === 'undefined') return;
+
+  const now = Date.now();
+  // Throttle delta checks to once every 15 seconds unless forced
+  if (!forceFull && now - lastMemberSyncTime < 15000) {
+    return;
+  }
+  lastMemberSyncTime = now;
+
+  try {
+    const localCacheRaw = localStorage.getItem('canteen_members_cache');
+    const hasLocalCache = Boolean(localCacheRaw && localCacheRaw.length > 50);
+
+    // If no local cache yet: download everything and warm up cache
+    if (!hasLocalCache || forceFull) {
+      const { data, error } = await supabase.from('Canteen_Member').select('*');
+      if (error || !data) return;
+
+      localStorage.setItem('canteen_members_cache', JSON.stringify(data));
+      data.forEach((m: any) => {
+        const cleanBd = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '').toLowerCase();
+        if (cleanBd) {
+          localStorage.setItem(`canteen_member_${cleanBd}`, JSON.stringify({
+            dp: m.DP || '',
+            due: Number(m.Due) || 0,
+            rank: m.Rank || '',
+            surname: m.Surname || '',
+            contact: m.Contact || m['Mobile No'] || '',
+            bdNo: cleanBd
+          }));
+        }
+        if (m.DP) preloadImage(m.DP);
+      });
+
+      preloadAllCanteenMedia();
+      window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: data }));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      return;
+    }
+
+    // Smart Delta-Sync: Fetch cloud members and ONLY apply the changed records
+    const { data: cloudData, error } = await supabase
+      .from('Canteen_Member')
+      .select('airman_id, "BD No", DP, Due, Rank, Surname, Contact, Role');
+
+    if (error || !cloudData) return;
+
+    let localMembers: any[] = [];
+    try {
+      localMembers = JSON.parse(localCacheRaw!);
+    } catch {
+      localMembers = [];
+    }
+
+    const localMap = new Map<string, any>();
+    localMembers.forEach((m: any) => {
+      const key = String(m.airman_id || m['BD No'] || '').trim();
+      if (key) localMap.set(key, m);
+    });
+
+    let hasDelta = false;
+    const mergedList: any[] = [];
+
+    for (const cloudM of cloudData) {
+      const key = String(cloudM.airman_id || cloudM['BD No'] || '').trim();
+      if (!key) continue;
+      const cleanBd = String(cloudM['BD No'] || cloudM.airman_id || '').replace(/\D/g, '').toLowerCase();
+
+      const localM = localMap.get(key);
+
+      if (!localM) {
+        // Brand new member from cloud
+        hasDelta = true;
+        mergedList.push(cloudM);
+        if (cleanBd) {
+          localStorage.setItem(`canteen_member_${cleanBd}`, JSON.stringify({
+            dp: cloudM.DP || '',
+            due: Number(cloudM.Due) || 0,
+            rank: cloudM.Rank || '',
+            surname: cloudM.Surname || '',
+            contact: cloudM.Contact || '',
+            bdNo: cleanBd
+          }));
+        }
+        if (cloudM.DP) preloadImage(cloudM.DP);
+      } else {
+        // Compare values
+        const cloudDue = Number(cloudM.Due || 0);
+        const localDue = Number(localM.Due || 0);
+        const cloudDp = String(cloudM.DP || '').trim();
+        const localDp = String(localM.DP || '').trim();
+        const cloudRole = String(cloudM.Role || '').trim();
+        const localRole = String(localM.Role || '').trim();
+        const cloudRank = String(cloudM.Rank || '').trim();
+        const localRank = String(localM.Rank || '').trim();
+        const cloudSurname = String(cloudM.Surname || '').trim();
+        const localSurname = String(localM.Surname || '').trim();
+
+        const isChanged = (
+          Math.abs(cloudDue - localDue) > 0.01 ||
+          cloudDp !== localDp ||
+          cloudRole !== localRole ||
+          cloudRank !== localRank ||
+          cloudSurname !== localSurname
+        );
+
+        if (isChanged) {
+          hasDelta = true;
+          const updated = { ...localM, ...cloudM };
+          mergedList.push(updated);
+          if (cleanBd) {
+            localStorage.setItem(`canteen_member_${cleanBd}`, JSON.stringify({
+              dp: updated.DP || '',
+              due: Number(updated.Due) || 0,
+              rank: updated.Rank || '',
+              surname: updated.Surname || '',
+              contact: updated.Contact || '',
+              bdNo: cleanBd
+            }));
+          }
+          if (cloudDp && cloudDp !== localDp) {
+            preloadImage(cloudDp);
+          }
+        } else {
+          mergedList.push(localM);
+        }
+      }
+    }
+
+    if (hasDelta) {
+      localStorage.setItem('canteen_members_cache', JSON.stringify(mergedList));
+      window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: mergedList }));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+    }
+  } catch (err) {
+    console.warn('[CanteenCloudSync] Member sync exception:', err);
+  }
+}
+
 let isInitialized = false;
 
 /**
  * Initialize automated Canteen Cloud Synchronization:
  * 1. Pulls initial cloud data and merges with local storage.
- * 2. Sets up Realtime listener on Supabase 'app_settings'.
+ * 2. Sets up Realtime listener on Supabase 'app_settings' and 'Canteen_Member'.
  * 3. Listens to local canteen update events to push changes to cloud automatically.
  */
 export function initCanteenCloudSync(): () => void {
@@ -362,8 +563,10 @@ export function initCanteenCloudSync(): () => void {
   }
   isInitialized = true;
 
-  // 1. Initial Pull from Cloud
+  // 1. Initial Pull from Cloud: Settings + Members + Preload all DPs and media
   pullAllCanteenDataFromCloud();
+  syncCanteenMembersFromCloud();
+  preloadAllCanteenMedia();
 
   // 2. Setup Realtime subscription on app_settings
   const channel = supabase
@@ -421,7 +624,71 @@ export function initCanteenCloudSync(): () => void {
     )
     .subscribe();
 
-  // 3. Listen to local DOM events to auto-queue pushes to cloud
+  // 3. Setup Realtime subscription on Canteen_Member (Instant Delta Update for DPs & Member Info)
+  const memberChannel = supabase
+    .channel('canteen_members_realtime_sync_channel')
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'Canteen_Member'
+      },
+      (payload: any) => {
+        if (payload.eventType === 'DELETE') {
+          const oldRecord = payload.old;
+          const airmanId = oldRecord?.airman_id;
+          if (airmanId) {
+            try {
+              const cached = localStorage.getItem('canteen_members_cache');
+              if (cached) {
+                const list = JSON.parse(cached);
+                const filtered = list.filter((m: any) => m.airman_id !== airmanId);
+                localStorage.setItem('canteen_members_cache', JSON.stringify(filtered));
+                window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: filtered }));
+              }
+            } catch {}
+          }
+          return;
+        }
+
+        const newRow = payload.new;
+        if (!newRow) return;
+
+        const cleanBd = String(newRow['BD No'] || newRow.airman_id || '').replace(/\D/g, '').toLowerCase();
+
+        // Update single member in local storage instantly
+        if (cleanBd) {
+          localStorage.setItem(`canteen_member_${cleanBd}`, JSON.stringify({
+            dp: newRow.DP || '',
+            due: Number(newRow.Due) || 0,
+            rank: newRow.Rank || '',
+            surname: newRow.Surname || '',
+            contact: newRow.Contact || '',
+            bdNo: cleanBd
+          }));
+        }
+
+        if (newRow.DP) preloadImage(newRow.DP);
+
+        try {
+          const cached = localStorage.getItem('canteen_members_cache');
+          let list: any[] = cached ? JSON.parse(cached) : [];
+          const idx = list.findIndex((m: any) => m.airman_id === newRow.airman_id || (cleanBd && String(m['BD No'] || '').replace(/\D/g, '') === cleanBd));
+          if (idx !== -1) {
+            list[idx] = { ...list[idx], ...newRow };
+          } else {
+            list.push(newRow);
+          }
+          localStorage.setItem('canteen_members_cache', JSON.stringify(list));
+          window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: list }));
+          window.dispatchEvent(new Event('canteen_state_updated'));
+        } catch {}
+      }
+    )
+    .subscribe();
+
+  // 4. Listen to local DOM events to auto-queue pushes to cloud
   const handleLocalTxs = () => queuePushKeyToCloud('canteen_txs');
   const handleLocalOrders = () => queuePushKeyToCloud('canteen_pre_orders');
   const handleLocalExpenses = () => queuePushKeyToCloud('canteen_expenses');
@@ -454,6 +721,7 @@ export function initCanteenCloudSync(): () => void {
 
   return () => {
     supabase.removeChannel(channel);
+    supabase.removeChannel(memberChannel);
     window.removeEventListener('canteen_txs_updated', handleLocalTxs);
     window.removeEventListener('canteen_pre_orders_updated', handleLocalOrders);
     window.removeEventListener('canteen_expenses_updated', handleLocalExpenses);

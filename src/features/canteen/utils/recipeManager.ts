@@ -1,11 +1,14 @@
 import { supabase } from '../../../supabase';
 
+export type InventoryItemType = 'RAW' | 'READY_MADE';
+
 export interface RawInventoryItem {
   id: string;
   name: string;
   nameBn: string;
   category?: string;
   subCategory?: string;
+  itemType?: InventoryItemType; // 'RAW' (রান্নার কাঁচামাল) | 'READY_MADE' (রেডিমেট পণ্য)
   unit: string;
   currentStock: number;
   minStockAlert: number;
@@ -20,6 +23,28 @@ export interface RawInventoryItem {
   dp?: string;
   image?: string;
 }
+
+/**
+ * Checks if an item is a ready-made item (direct purchase & resale without cooking/process)
+ * Examples: Butter Ban, Sandwich, Swarma, Singara, Puri, Hotel Porota, Biscuit, Dry Cake, etc.
+ */
+export const isReadymadeItem = (item: RawInventoryItem | any): boolean => {
+  if (!item) return false;
+  if (item.itemType === 'READY_MADE') return true;
+  if (item.itemType === 'RAW') return false;
+
+  // Smart fallback keyword matching for existing items without explicit itemType
+  const text = `${item.name || ''} ${item.nameBn || ''} ${item.category || ''} ${item.notes || ''}`.toLowerCase();
+  const readymadeKeywords = [
+    'butter ban', 'butter bun', 'sandwich', 'swarma', 'shawarma', 
+    'singara', 'shingara', 'puri', 'poori', 'hotel porota', 'porota hotel',
+    'biscuit', 'dry cake', 'burger bun', 'toast', 'chips', 'chanachur', 
+    'cake', 'pastry', 'patties', 'patis', 'samosa', 'somosa', 'roll', 
+    'muffin', 'readymate', 'ready-made', 'ready made'
+  ];
+
+  return readymadeKeywords.some(kw => text.includes(kw));
+};
 
 export interface RawStockLog {
   id: string;
@@ -1639,11 +1664,13 @@ export const getRawInventoryItems = (): RawInventoryItem[] => {
       } catch {}
     }
 
+    // Always sort A to Z by item name for synchronization
+    deduplicated.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     return deduplicated;
   } catch (e) {
     console.warn('Failed to load raw items from localStorage:', e);
   }
-  return INITIAL_RAW_ITEMS;
+  return INITIAL_RAW_ITEMS.slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 };
 
 export const saveRawInventoryItems = (items: RawInventoryItem[]): void => {

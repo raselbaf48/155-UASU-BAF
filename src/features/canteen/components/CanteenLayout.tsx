@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from '../../../supabase';
 import { localDb } from '../../../services/localDatabase';
 import { useTranslation } from 'react-i18next';
 import { formatMoney } from '../i18n';
 import { getCanteenConfig, resolveImageUrl, fetchCanteenConfigFromCloud, CanteenConfig } from '../utils/canteenSettings';
 import { autoCheckInitialCleanSlate } from '../utils/resetCanteenData';
-import { initCanteenCloudSync, pullAllCanteenDataFromCloud, getCanteenCloudSyncStatus, CloudSyncStatus } from '../utils/canteenCloudSync';
+import { initCanteenCloudSync, pullAllCanteenDataFromCloud, getCanteenCloudSyncStatus, CloudSyncStatus, preloadImage } from '../utils/canteenCloudSync';
 import { EmployeeDashboard } from '../pages/EmployeeDashboard';
 import { PersonalPortal } from '../pages/PersonalPortal';
 import { PlaceDemand } from '../pages/PlaceDemand';
@@ -53,8 +54,27 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
     if (!cleanBdInitial || isMasterManager) return null;
     try {
       const raw = localStorage.getItem(`canteen_member_${cleanBdInitial.toLowerCase()}`);
-      return raw ? JSON.parse(raw) : null;
+      if (raw) return JSON.parse(raw);
+      // Secondary check: look up in full members cache
+      const rawAll = localStorage.getItem('canteen_members_cache');
+      if (rawAll) {
+        const list = JSON.parse(rawAll);
+        if (Array.isArray(list)) {
+          const found = list.find((m: any) => String(m['BD No'] || m.airman_id || '').replace(/\D/g, '') === cleanBdInitial);
+          if (found) {
+            return {
+              dp: found.DP || '',
+              due: Number(found.Due) || 0,
+              rank: found.Rank || '',
+              surname: found.Surname || '',
+              contact: found.Contact || found['Mobile No'] || '',
+              bdNo: cleanBdInitial
+            };
+          }
+        }
+      }
     } catch { return null; }
+    return null;
   })();
 
   const initialDp = isMasterManager 
@@ -145,11 +165,26 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
   useEffect(() => {
     let isMounted = true;
     if (currentUser.role !== 'manager') {
+      const cleanBd = currentUser.bdNo ? currentUser.bdNo.replace(/^BD\/?/i, '').trim() : '';
+      
+      // 0. Instant synchronous display from local cache (0ms delay)
+      if (cleanBd) {
+        try {
+          const rawMember = localStorage.getItem(`canteen_member_${cleanBd.toLowerCase()}`);
+          if (rawMember) {
+            const parsed = JSON.parse(rawMember);
+            if (parsed.dp) {
+              setCustomerDp(parsed.dp);
+              setCurrentUser((prev: any) => ({ ...prev, DP: parsed.dp }));
+              preloadImage(parsed.dp);
+            }
+          }
+        } catch {}
+      }
+
       const fetchCustomerPhoto = async () => {
         try {
-          const cleanBd = currentUser.bdNo ? currentUser.bdNo.replace(/^BD\/?/i, '').trim() : '';
-          
-          // 1. Check Supabase Canteen table first (where DP update happens in MemberDB)
+          // 1. Background delta check with Supabase Canteen table
           if (cleanBd) {
             const { data, error } = await supabase
               .from('Canteen_Member')
@@ -653,18 +688,27 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
           {navItems.map((item) => {
             const isActive = activeTab === item.id;
             return (
-              <button 
+              <motion.button 
                 key={item.id}
+                whileHover={{ x: 2 }}
+                whileTap={{ scale: 0.97 }}
                 onClick={() => setActiveTab(item.id)}
-                className={`w-full flex items-center space-x-3 px-5 py-3.5 rounded-2xl transition-all font-bold ${
+                className={`relative w-full flex items-center space-x-3 px-5 py-3.5 rounded-2xl transition-colors font-bold overflow-hidden cursor-pointer ${
                   isActive 
-                  ? 'bg-[#4f46e5] text-white shadow-lg shadow-indigo-500/30' 
+                  ? 'text-white shadow-lg shadow-indigo-500/30' 
                   : 'text-slate-400 hover:bg-slate-800 dark:hover:bg-slate-800 hover:text-slate-300'
                 }`}
               >
-                <item.icon className="w-5 h-5" />
-                <span>{item.name}</span>
-              </button>
+                {isActive && (
+                  <motion.span
+                    layoutId="canteenActiveTabIndicator"
+                    className="absolute inset-0 bg-[#4f46e5] rounded-2xl z-0"
+                    transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                  />
+                )}
+                <item.icon className="w-5 h-5 relative z-10" />
+                <span className="relative z-10">{item.name}</span>
+              </motion.button>
             )
           })}
         </div>
@@ -723,111 +767,130 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
       </div>
       )}
 
-      {/* Sidebar - Mobile Overlay */}
-      {mobileMenuOpen && (
-          <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[200] md:hidden flex" onClick={() => setMobileMenuOpen(false)}>
-              <div className={`w-64 h-full flex flex-col shadow-2xl animate-in slide-in-from-left-4 ${"bg-slate-900"}`} onClick={e => e.stopPropagation()}>
-                  <div className="p-6 pb-4 flex justify-between items-center border-b border-slate-800">
-                      <div className="flex items-center space-x-2.5 min-w-0">
-                          <div className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center p-1 overflow-hidden shrink-0">
-                            {canteenConfig.logoUrl ? (
-                              <img 
-                                src={resolveImageUrl(canteenConfig.logoUrl)} 
-                                alt="Logo" 
-                                referrerPolicy="no-referrer"
-                                className="w-full h-full object-contain"
-                                onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                              />
-                            ) : (
-                              <Utensils className="w-4 h-4 text-[#4f46e5]" />
-                            )}
-                          </div>
-                          <h1 className="font-black text-base tracking-wider truncate text-white">
-                              {canteenConfig.name.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'CAFEUAV'}
-                          </h1>
-                      </div>
-                      <button onClick={() => setMobileMenuOpen(false)} className="text-slate-400">
-                          <X className="w-5 h-5" />
-                      </button>
-                  </div>
-                  
-                  <div className="flex-1 overflow-y-auto py-2 px-4 space-y-2">
-                      {navItems.map((item) => {
-                          const isActive = activeTab === item.id;
-                          return (
-                              <button 
-                                  key={item.id}
-                                  onClick={() => {
-                                      setActiveTab(item.id as any);
-                                      setMobileMenuOpen(false);
-                                  }}
-                                  className={`w-full flex items-center space-x-3 px-4 py-3 rounded-2xl transition-all font-bold ${
-                                    isActive 
-                                    ? 'bg-[#4f46e5] text-white shadow-lg' 
-                                    : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-                                  }`}
-                              >
-                                  <item.icon className="w-4 h-4" />
-                                  <span>{item.name}</span>
-                              </button>
-                          )
-                      })}
-                  </div>
-                  <div className={`p-4 border-t space-y-3 ${isEmployee ? "border-slate-800" : "border-slate-800"}`}>
-                      <div 
-                         className="flex items-center space-x-3 p-2.5 rounded-2xl bg-slate-800/80 cursor-pointer hover:bg-slate-800 transition-colors"
-                         onClick={() => {
-                           setMobileMenuOpen(false);
-                           handleCustomerProfileClick();
-                         }}
-                      >
-                         <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0 shadow-md text-indigo-400 overflow-hidden">
-                           {currentUser.role === 'manager' ? (
-                             canteenConfig.adminImage ? (
-                               <img 
-                                 src={resolveImageUrl(canteenConfig.adminImage)} 
-                                 alt="Admin" 
-                                 referrerPolicy="no-referrer"
-                                 className="w-full h-full object-cover"
-                                 onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                               />
-                             ) : (
-                               <User className="w-5 h-5" />
-                             )
-                           ) : (
-                             (customerDp || currentUser.DP) ? (
-                               <img 
-                                 src={resolveImageUrl(customerDp || currentUser.DP)} 
-                                 alt={currentUser.name} 
-                                 referrerPolicy="no-referrer"
-                                 className="w-full h-full object-cover"
-                                 onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                               />
-                             ) : (
-                               <User className="w-5 h-5" />
-                             )
-                           )}
-                         </div>
-                         <div className="text-left flex-1 min-w-0">
-                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">
-                              {currentUser.role === 'manager' ? 'MANAGER MODE' : (currentUser.name === 'Guest' ? 'GUEST MODE' : 'CUSTOMER MODE')}
-                            </p>
-                            <p className="text-sm font-bold leading-none truncate text-white">
-                              {currentUser.role === 'manager' ? (canteenConfig.managerName || 'LAC Nishad') : currentUser.name}
-                            </p>
-                         </div>
-                      </div>
-                      <button
-                          onClick={handleLogout}
-                          className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl text-rose-600 bg-rose-900/30 font-bold text-xs uppercase"
-                      >
-                          <LogIn className="w-4 h-4 rotate-180" />
-                          <span>LOGOUT</span>
-                      </button>
-                  </div>
-              </div>
-          </div>
-      )}
+      {/* Sidebar - Mobile Overlay (Visible, slow and smooth slide-in from left when hamburger clicked) */}
+      <AnimatePresence>
+        {mobileMenuOpen && (
+          <motion.div
+            key="canteen-mobile-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.4, ease: "easeInOut" }}
+            className="fixed inset-0 bg-black/40 backdrop-blur-[2px] z-[200] md:hidden"
+            onClick={() => setMobileMenuOpen(false)}
+          />
+        )}
+        {mobileMenuOpen && (
+          <motion.aside
+            key="canteen-mobile-drawer"
+            initial={{ x: '-100%' }}
+            animate={{ x: 0 }}
+            exit={{ x: '-100%' }}
+            transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
+            className="fixed top-0 bottom-0 left-0 w-72 max-w-[85vw] h-full flex flex-col shadow-[12px_0_40px_rgba(0,0,0,0.65)] bg-slate-900 border-r border-slate-800 z-[210] select-none md:hidden"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="p-6 pb-4 flex justify-between items-center border-b border-slate-800 shrink-0">
+                <div className="flex items-center space-x-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center p-1 overflow-hidden shrink-0">
+                      {canteenConfig.logoUrl ? (
+                        <img 
+                          src={resolveImageUrl(canteenConfig.logoUrl)} 
+                          alt="Logo" 
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-contain"
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                        />
+                      ) : (
+                        <Utensils className="w-4 h-4 text-[#4f46e5]" />
+                      )}
+                    </div>
+                    <h1 className="font-black text-base tracking-wider truncate text-white">
+                        {canteenConfig.name.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'CAFEUAV'}
+                    </h1>
+                </div>
+                <button onClick={() => setMobileMenuOpen(false)} className="text-slate-400 p-1 hover:text-white rounded-lg transition-colors cursor-pointer">
+                    <X className="w-5 h-5" />
+                </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto py-2 px-4 space-y-2">
+                {navItems.map((item) => {
+                    const isActive = activeTab === item.id;
+                    return (
+                        <button 
+                            key={item.id}
+                            onClick={() => {
+                                setActiveTab(item.id as any);
+                                setMobileMenuOpen(false);
+                            }}
+                            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-2xl transition-all font-bold cursor-pointer ${
+                              isActive 
+                              ? 'bg-[#4f46e5] text-white shadow-lg' 
+                              : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                            }`}
+                        >
+                            <item.icon className="w-4 h-4" />
+                            <span>{item.name}</span>
+                        </button>
+                    )
+                })}
+            </div>
+            <div className={`p-4 border-t space-y-3 shrink-0 ${isEmployee ? "border-slate-800" : "border-slate-800"}`}>
+                <div 
+                   className="flex items-center space-x-3 p-2.5 rounded-2xl bg-slate-800/80 cursor-pointer hover:bg-slate-800 transition-colors"
+                   onClick={() => {
+                     setMobileMenuOpen(false);
+                     handleCustomerProfileClick();
+                   }}
+                >
+                   <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0 shadow-md text-indigo-400 overflow-hidden">
+                     {currentUser.role === 'manager' ? (
+                       canteenConfig.adminImage ? (
+                         <img 
+                           src={resolveImageUrl(canteenConfig.adminImage)} 
+                           alt="Admin" 
+                           referrerPolicy="no-referrer"
+                           className="w-full h-full object-cover"
+                           onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                         />
+                       ) : (
+                         <User className="w-5 h-5" />
+                       )
+                     ) : (
+                       (customerDp || currentUser.DP) ? (
+                         <img 
+                           src={resolveImageUrl(customerDp || currentUser.DP)} 
+                           alt={currentUser.name} 
+                           referrerPolicy="no-referrer"
+                           className="w-full h-full object-cover"
+                           onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                         />
+                       ) : (
+                         <User className="w-5 h-5" />
+                       )
+                     )}
+                   </div>
+                   <div className="text-left flex-1 min-w-0">
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">
+                        {currentUser.role === 'manager' ? 'MANAGER MODE' : (currentUser.name === 'Guest' ? 'GUEST MODE' : 'CUSTOMER MODE')}
+                      </p>
+                      <p className="text-sm font-bold leading-none truncate text-white">
+                        {currentUser.role === 'manager' ? (canteenConfig.managerName || 'LAC Nishad') : currentUser.name}
+                      </p>
+                   </div>
+                </div>
+                <button
+                    onClick={handleLogout}
+                    className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl text-rose-600 bg-rose-900/30 font-bold text-xs uppercase cursor-pointer"
+                >
+                    <LogIn className="w-4 h-4 rotate-180" />
+                    <span>LOGOUT</span>
+                </button>
+            </div>
+          </motion.aside>
+        )}
+      </AnimatePresence>
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col h-full overflow-hidden relative">
@@ -891,9 +954,11 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
          </div>
          )}
 
-         {/* Content View */}
-         <div className={`flex-1 overflow-y-auto p-4 sm:p-8 ${"bg-slate-950"}`}>
-            {renderContent()}
+         {/* Content View - Zero Black Screen, Instant Tab Display */}
+         <div className="flex-1 overflow-y-auto p-4 sm:p-8 bg-slate-900">
+           <div className="w-full">
+             {renderContent()}
+           </div>
          </div>
       
       {showLogin && (

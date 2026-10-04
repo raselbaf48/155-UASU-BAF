@@ -40,7 +40,8 @@ import {
   Check,
   Sparkles,
   ShieldCheck,
-  ArrowRight
+  ArrowRight,
+  AlertCircle
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, fetchDirectImageUrl, getCanteenConfig } from '../utils/canteenSettings';
@@ -301,6 +302,18 @@ export const formatShortMonth = (monthKey: string): string => {
   if (parts.length < 2) return monthKey;
   const date = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, 1);
   return date.toLocaleDateString('en-US', { month: 'short' }).toUpperCase();
+};
+
+// Format month key to compact readable label e.g. "Oct 2026"
+export const formatCompactMonth = (monthKey: string): string => {
+  if (!monthKey || monthKey === 'ALL') {
+    const now = new Date();
+    return `${now.toLocaleDateString('en-US', { month: 'short' })} ${now.getFullYear()}`;
+  }
+  const parts = monthKey.split('-');
+  if (parts.length < 2) return monthKey;
+  const date = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, 1);
+  return `${date.toLocaleDateString('en-US', { month: 'short' })} ${date.getFullYear()}`;
 };
 
 // Categorize transaction into CANTEEN, UNIT_FUND, or OTHERS
@@ -621,6 +634,14 @@ export const MemberDB: React.FC = () => {
     breakdownNote?: string;
   } | null>(null);
 
+  // Dedicated Payment History State & Filters
+  const [isPaymentHistoryOpen, setIsPaymentHistoryOpen] = useState(false);
+  const [paymentSearch, setPaymentSearch] = useState('');
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState<'ALL' | 'CASH' | 'UCB'>('ALL');
+  const [paymentToDelete, setPaymentToDelete] = useState<any | null>(null);
+  const [isDeletingPayment, setIsDeletingPayment] = useState(false);
+  const [paymentDeleteSuccessMsg, setPaymentDeleteSuccessMsg] = useState<string | null>(null);
+
   // Soft harmonic celebration chime via Web Audio API
   const playPaymentSuccessSound = () => {
     try {
@@ -656,6 +677,41 @@ export const MemberDB: React.FC = () => {
   const [contactActionMember, setContactActionMember] = useState<any | null>(null);
   const [copiedPhone, setCopiedPhone] = useState(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+
+  // All Payment Transactions sorted newest first
+  const allPaymentTxs = useMemo(() => {
+    return allTxs
+      .filter((t: any) => t && t.type === 'BILL PAYMENT')
+      .sort((a: any, b: any) => {
+        const idA = String(a.id || '');
+        const idB = String(b.id || '');
+        return idB.localeCompare(idA);
+      });
+  }, [allTxs]);
+
+  const filteredPaymentTxs = useMemo(() => {
+    return allPaymentTxs.filter((tx: any) => {
+      if (paymentMethodFilter !== 'ALL') {
+        const gateway = String(tx.gateway || tx.items || '').toUpperCase();
+        if (paymentMethodFilter === 'CASH' && !gateway.includes('CASH')) return false;
+        if (paymentMethodFilter === 'UCB' && !gateway.includes('UCB')) return false;
+      }
+      if (paymentSearch.trim()) {
+        const q = paymentSearch.toLowerCase().trim();
+        const mName = String(tx.memberName || '').toLowerCase();
+        const mRank = String(tx.rank || '').toLowerCase();
+        const mBd = String(tx.bdNo || tx.airman_id || '').toLowerCase();
+        const mItems = String(tx.items || '').toLowerCase();
+        const mDate = String(tx.date || '').toLowerCase();
+        return mName.includes(q) || mRank.includes(q) || mBd.includes(q) || mItems.includes(q) || mDate.includes(q);
+      }
+      return true;
+    });
+  }, [allPaymentTxs, paymentMethodFilter, paymentSearch]);
+
+  const totalPaymentsAmount = useMemo(() => {
+    return allPaymentTxs.reduce((sum: number, tx: any) => sum + Number(tx.amount || 0), 0);
+  }, [allPaymentTxs]);
 
   const getTelHref = (raw: any): string => {
     const clean = String(raw || '').replace(/[^\d+]/g, '');
@@ -1348,10 +1404,14 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
     }
   };
 
-  // Remove history transaction
-  const handleRemoveTx = async (txToRemove: any) => {
+  // Remove history transaction (reversing due automatically)
+  const handleRemoveTx = async (txToRemove: any, explicitMember?: any) => {
     if (!txToRemove) return;
-    const targetMember = profileMember || statementMember;
+    const targetMember = explicitMember || profileMember || statementMember || members.find((m: any) => {
+      const txBdClean = String(txToRemove.bdNo || txToRemove.airman_id || '').replace(/\D/g, '');
+      const mBdClean = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
+      return (txToRemove.airman_id && m.airman_id === txToRemove.airman_id) || (txBdClean && mBdClean === txBdClean);
+    });
     if (!targetMember) {
       setTxDeleteConfirmId(null);
       return;
@@ -1369,16 +1429,17 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
     
     // 1. Update Supabase Canteen_Member table
     try {
+      if (targetMember.airman_id) {
+        await supabase
+          .from('Canteen_Member')
+          .update({ Due: newDue })
+          .eq('airman_id', targetMember.airman_id);
+      }
       if (targetMember['BD No']) {
         await supabase
           .from('Canteen_Member')
           .update({ Due: newDue })
           .eq('BD No', String(targetMember['BD No']).trim());
-      } else if (targetMember.airman_id) {
-        await supabase
-          .from('Canteen_Member')
-          .update({ Due: newDue })
-          .eq('airman_id', targetMember.airman_id);
       }
     } catch (e) {
       console.warn('Error updating member Due in Supabase on remove tx:', e);
@@ -1484,12 +1545,45 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
       setStatementTx(prev => prev.filter(t => String(t.id) !== txIdStr));
     }
 
+    // Update individual member local cache
+    const cleanBd = String(targetMember['BD No'] || targetMember.airman_id || '').replace(/\D/g, '').toLowerCase();
+    if (cleanBd) {
+      try {
+        const rawStored = localStorage.getItem(`canteen_member_${cleanBd}`);
+        const stored = rawStored ? JSON.parse(rawStored) : {};
+        localStorage.setItem(`canteen_member_${cleanBd}`, JSON.stringify({ ...stored, Due: newDue, due: newDue, baki: newDue }));
+      } catch {}
+    }
+
     // 5. Notify all listeners
     window.dispatchEvent(new Event('canteen_txs_updated'));
     window.dispatchEvent(new Event('canteen_state_updated'));
     window.dispatchEvent(new Event('storage'));
 
     setTxDeleteConfirmId(null);
+  };
+
+  const handleConfirmDeletePayment = async () => {
+    if (!paymentToDelete) return;
+    setIsDeletingPayment(true);
+    try {
+      const targetMember = members.find((m: any) => {
+        const txBdClean = String(paymentToDelete.bdNo || paymentToDelete.airman_id || '').replace(/\D/g, '');
+        const mBdClean = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
+        return (paymentToDelete.airman_id && m.airman_id === paymentToDelete.airman_id) || (txBdClean && mBdClean === txBdClean);
+      });
+
+      await handleRemoveTx(paymentToDelete, targetMember);
+
+      const memName = targetMember ? `${targetMember.Rank || targetMember.rank || ''} ${targetMember.Surname || targetMember.surname || ''}`.trim() : (paymentToDelete.memberName || 'সদস্য');
+      setPaymentDeleteSuccessMsg(`৳${Number(paymentToDelete.amount || 0).toLocaleString()} টাকার পেমেন্ট বাতিল করা হয়েছে এবং ${memName}-এর বকেয়া আগের অবস্থায় ফিরিয়ে দেওয়া হয়েছে।`);
+      setPaymentToDelete(null);
+      setTimeout(() => setPaymentDeleteSuccessMsg(null), 5000);
+    } catch (err) {
+      console.warn('Error deleting payment:', err);
+    } finally {
+      setIsDeletingPayment(false);
+    }
   };
 
   // Helper to format and sort members by rank seniority
@@ -1943,86 +2037,109 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
       {/* Top Controls */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <div>
-          <h2 className="text-2xl font-black text-white uppercase tracking-tighter flex items-center gap-2.5">
-            <Receipt className="w-7 h-7 text-indigo-400" />
+          <h2 className="text-xl sm:text-2xl font-black text-white uppercase tracking-tighter flex items-center gap-2.5">
+            <Receipt className="w-6 h-6 sm:w-7 sm:h-7 text-indigo-400" />
             <span>BILL MANAGEMENT</span>
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
             Canteen Bill, Unit Fund Bill & Others Bill Administration
           </p>
         </div>
+
+        {/* Payment History Action Button */}
+        <div className="flex items-center space-x-2 w-full sm:w-auto">
+          <button
+            type="button"
+            onClick={() => setIsPaymentHistoryOpen(true)}
+            className="w-full sm:w-auto flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-indigo-900/40 transition-all cursor-pointer active:scale-95 border border-indigo-400/30 group"
+          >
+            <History className="w-4 h-4 text-indigo-200 group-hover:rotate-[-45deg] transition-transform" />
+            <span>Payment History</span>
+            <span className="px-1.5 py-0.5 rounded-full bg-black/30 text-[10px] font-mono font-black text-indigo-200 border border-indigo-400/20">
+              {allPaymentTxs.length}
+            </span>
+          </button>
+        </div>
       </div>
 
-      {/* Prominent High-Visibility KPI Summary Banner */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 flex items-center space-x-3.5 shadow-sm">
-          <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0">
-            <Users className="w-6 h-6" />
+      {/* Delete / Success Notification Banner */}
+      {paymentDeleteSuccessMsg && (
+        <div className="p-3 bg-emerald-950/80 border border-emerald-500/40 rounded-xl flex items-center justify-between text-xs text-emerald-200 animate-fadeIn">
+          <div className="flex items-center space-x-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{paymentDeleteSuccessMsg}</span>
           </div>
-          <div>
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total Members</p>
-            <p className="text-2xl font-black text-white font-mono">{members.length}</p>
-            <p className="text-[11px] text-slate-500 font-bold mt-0.5">অ্যাক্টিভ মেম্বার ডাটাবেজ</p>
+          <button onClick={() => setPaymentDeleteSuccessMsg(null)} className="text-emerald-400 hover:text-white p-1">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* KPI Summary Banner (Compact 2-Column Row: Monthly Total Due & Overall Total Due - No Total Member) */}
+      <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+        {/* Card 1: Monthly Total Due */}
+        <div className="bg-slate-900/90 border border-slate-800/90 hover:border-slate-700/80 rounded-xl p-2.5 sm:p-3 flex items-center space-x-2.5 shadow-sm min-w-0 transition-colors">
+          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+            <Receipt className="w-4 h-4 sm:w-5 sm:h-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-slate-400 truncate">
+              Monthly Total Due
+            </p>
+            <p className="text-base sm:text-xl font-black text-emerald-400 font-mono tracking-tight truncate leading-tight mt-0.5">
+              ৳{totalFilteredBill.toLocaleString()}
+            </p>
+            <p className="text-[9px] sm:text-[10px] text-indigo-300 font-bold truncate mt-0.5">
+              {formatCompactMonth(selectedMonth)} এর মোট অর্জিত বিল
+            </p>
           </div>
         </div>
 
-        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 flex items-center space-x-3.5 shadow-sm">
-          <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
-            <Receipt className="w-6 h-6" />
-          </div>
-          <div>
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-              {formatMonthName(selectedMonth)} Billed
-            </p>
-            <p className="text-2xl font-black text-emerald-400 font-mono">৳{totalFilteredBill.toLocaleString()}</p>
-            <p className="text-[11px] text-indigo-300 font-bold mt-0.5">
-              এই মাসের মোট অর্জিত বিল
-            </p>
-          </div>
-        </div>
-
+        {/* Card 2: Overall Total Due */}
         <div 
           onClick={() => setFilterMode(isDueFilterActive ? 'ALL' : 'DUE')}
-          className="bg-gradient-to-br from-rose-950/90 via-red-950/70 to-slate-900 border border-rose-500/50 hover:border-rose-400 rounded-2xl p-4 flex items-center justify-between shadow-lg shadow-rose-950/40 transition-all cursor-pointer group"
+          className="bg-gradient-to-br from-rose-950/70 via-red-950/40 to-slate-900 border border-rose-500/40 hover:border-rose-400/80 rounded-xl p-2.5 sm:p-3 flex items-center justify-between shadow-md shadow-rose-950/20 transition-all cursor-pointer group min-w-0"
           title="সকল সদস্যের সর্বমোট প্রদেয় বকেয়া (Click to filter members with due)"
         >
-          <div className="flex items-center space-x-3.5">
-            <div className="w-12 h-12 rounded-xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-300 shrink-0 group-hover:scale-105 transition-transform">
-              <Coins className="w-6 h-6 text-amber-400 animate-pulse" />
+          <div className="flex items-center space-x-2.5 min-w-0 flex-1">
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-rose-500/20 border border-rose-500/30 flex items-center justify-center text-rose-300 shrink-0 group-hover:scale-105 transition-transform">
+              <Coins className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400" />
             </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <p className="text-[11px] font-black uppercase tracking-widest text-rose-300">TOTAL DUE (সর্বমোট বকেয়া)</p>
-                <span className="text-[10px] font-bold px-2 py-0.2 rounded-full bg-rose-500/20 text-rose-200 border border-rose-500/30">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center space-x-1.5 flex-wrap">
+                <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-rose-300 truncate">
+                  Overall Total Due
+                </p>
+                <span className="text-[8px] sm:text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-200 border border-rose-500/30">
                   {membersWithDueCount} জন
                 </span>
               </div>
-              <p className="text-2xl sm:text-3xl font-black text-white font-mono tracking-tight drop-shadow-sm">
+              <p className="text-base sm:text-xl font-black text-white font-mono tracking-tight drop-shadow-sm truncate leading-tight mt-0.5">
                 ৳{grandTotalDue.toLocaleString()}
               </p>
-              <p className="text-[11px] text-rose-300/90 font-bold mt-0.5">
-                আগের সব বকেয়া সহ মোট বকেয়া
+              <p className="text-[9px] sm:text-[10px] text-rose-300/90 font-bold truncate mt-0.5">
+                পূর্ববর্তী সব সহ সর্বমোট বকেয়া
               </p>
             </div>
           </div>
-          <ChevronRight className="w-5 h-5 text-rose-400 group-hover:translate-x-1 transition-transform" />
+          <ChevronRight className="w-3.5 h-3.5 text-rose-400 group-hover:translate-x-0.5 transition-transform shrink-0 ml-1" />
         </div>
       </div>
 
-      {/* Bill Category Tabs & Month Selector */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 md:p-4 space-y-3 shadow-md">
-        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+      {/* Bill Category Tabs & Compact Month Selector */}
+      <div className="bg-slate-900/85 border border-slate-800 rounded-xl p-2.5 sm:p-3 space-y-2.5 shadow-sm">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
           {/* Bill Category Filter Pills: Canteen Bill, Unit Fund Bill, Others Bill, All */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 lg:pb-0 scrollbar-none">
+          <div className="flex items-center gap-1 overflow-x-auto pb-0.5 scrollbar-none">
             <button
               type="button"
               onClick={() => setSelectedCategory('CANTEEN')}
-              className={`px-3.5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer flex items-center space-x-1.5 ${
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer flex items-center space-x-1.5 ${
                 selectedCategory === 'CANTEEN'
-                  ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30 ring-1 ring-amber-400/50'
-                  : 'bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700/60'
+                  ? 'bg-amber-600 text-white shadow-xs ring-1 ring-amber-400/50'
+                  : 'bg-slate-800/70 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700/50'
               }`}
             >
               <Coffee className="w-3.5 h-3.5 text-amber-400" />
@@ -2032,10 +2149,10 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
             <button
               type="button"
               onClick={() => setSelectedCategory('UNIT_FUND')}
-              className={`px-3.5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer flex items-center space-x-1.5 ${
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer flex items-center space-x-1.5 ${
                 selectedCategory === 'UNIT_FUND'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 ring-1 ring-indigo-400/50'
-                  : 'bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700/60'
+                  ? 'bg-indigo-600 text-white shadow-xs ring-1 ring-indigo-400/50'
+                  : 'bg-slate-800/70 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700/50'
               }`}
             >
               <Landmark className="w-3.5 h-3.5 text-indigo-400" />
@@ -2045,10 +2162,10 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
             <button
               type="button"
               onClick={() => setSelectedCategory('OTHERS')}
-              className={`px-3.5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer flex items-center space-x-1.5 ${
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer flex items-center space-x-1.5 ${
                 selectedCategory === 'OTHERS'
-                  ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30 ring-1 ring-cyan-400/50'
-                  : 'bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700/60'
+                  ? 'bg-cyan-600 text-white shadow-xs ring-1 ring-cyan-400/50'
+                  : 'bg-slate-800/70 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700/50'
               }`}
             >
               <Layers className="w-3.5 h-3.5 text-cyan-400" />
@@ -2058,10 +2175,10 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
             <button
               type="button"
               onClick={() => setSelectedCategory('ALL')}
-              className={`px-3.5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer flex items-center space-x-1.5 ${
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer flex items-center space-x-1.5 ${
                 selectedCategory === 'ALL'
-                  ? 'bg-slate-700 text-white shadow-md ring-1 ring-slate-400/50'
-                  : 'bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700/60'
+                  ? 'bg-slate-700 text-white shadow-xs ring-1 ring-slate-400/50'
+                  : 'bg-slate-800/70 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700/50'
               }`}
             >
               <Receipt className="w-3.5 h-3.5 text-slate-300" />
@@ -2069,32 +2186,32 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
             </button>
           </div>
 
-          {/* Month Selector: Left & Right Arrow Navigation (Specific Month only, no All month) */}
-          <div className="flex items-center space-x-2 self-start lg:self-auto w-full sm:w-auto">
-            <div className="flex items-center bg-slate-950 rounded-2xl p-1 border border-slate-800 shadow-sm w-full sm:w-auto justify-between">
+          {/* Ultra-compact Month Selector (Clean, small, tight pill) */}
+          <div className="flex items-center justify-start sm:justify-end shrink-0">
+            <div className="inline-flex items-center bg-slate-950/90 rounded-lg p-0.5 border border-slate-800 shadow-xs">
               <button
                 type="button"
                 onClick={handlePrevMonth}
-                className="p-2 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl transition-colors cursor-pointer shrink-0 active:scale-95"
-                title="পূর্ববর্তী মাস (Previous Month)"
+                className="w-6 h-6 flex items-center justify-center hover:bg-slate-800 text-slate-400 hover:text-white rounded transition-colors cursor-pointer active:scale-90"
+                title="পূর্ববর্তী মাস"
               >
-                <ChevronLeft className="w-4 h-4 text-indigo-400 hover:text-white" />
+                <ChevronLeft className="w-3.5 h-3.5 text-indigo-400" />
               </button>
 
-              <div className="px-4 py-1 text-center min-w-[140px] sm:min-w-[160px] select-none">
-                <span className="text-xs font-black uppercase tracking-wider flex items-center justify-center space-x-2 text-white">
-                  <Calendar className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                  <span>{formatMonthName(selectedMonth)}</span>
+              <div className="px-2 text-center select-none">
+                <span className="text-[11px] font-black uppercase tracking-wider flex items-center justify-center space-x-1 text-slate-200">
+                  <Calendar className="w-3 h-3 text-indigo-400 shrink-0" />
+                  <span className="font-mono">{formatCompactMonth(selectedMonth)}</span>
                 </span>
               </div>
 
               <button
                 type="button"
                 onClick={handleNextMonth}
-                className="p-2 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl transition-colors cursor-pointer shrink-0 active:scale-95"
-                title="পরবর্তী মাস (Next Month)"
+                className="w-6 h-6 flex items-center justify-center hover:bg-slate-800 text-slate-400 hover:text-white rounded transition-colors cursor-pointer active:scale-90"
+                title="পরবর্তী মাস"
               >
-                <ChevronRight className="w-4 h-4 text-indigo-400 hover:text-white" />
+                <ChevronRight className="w-3.5 h-3.5 text-indigo-400" />
               </button>
             </div>
           </div>
@@ -2107,7 +2224,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
             <span>
               Showing: <strong className="text-white">{selectedCategory === 'CANTEEN' ? 'Canteen Bill' : selectedCategory === 'UNIT_FUND' ? 'Unit Fund Bill' : selectedCategory === 'OTHERS' ? 'Others Bill' : 'All Bills'}</strong>
               {' • '}
-              <strong className="text-indigo-300">{formatMonthName(selectedMonth)}</strong>
+              <strong className="text-indigo-300 font-mono">{formatCompactMonth(selectedMonth)}</strong>
             </span>
             <span className="text-slate-500 hidden sm:inline">|</span>
             <span className="text-emerald-400 font-mono font-black">
@@ -2127,7 +2244,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                All ({filteredMembers.length})
+                All
               </button>
               <button
                 type="button"
@@ -3652,6 +3769,286 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
           selectedMonth={selectedMonth}
           onMonthChange={setSelectedMonth}
         />
+      )}
+
+      {/* Payment History Modal */}
+      {isPaymentHistoryOpen && (
+        <div className="fixed inset-0 z-[200] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 overflow-y-auto animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl w-full max-w-4xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-800 bg-slate-950/60 flex items-center justify-between shrink-0">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0">
+                  <History className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-white uppercase tracking-tight flex items-center gap-2">
+                    <span>Payment History</span>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-mono border border-indigo-500/30">
+                      {allPaymentTxs.length}
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    সকল সদস্যের বিল পরিশোধের তালিকা এবং পেমেন্ট বাতিল ব্যবস্থা
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPaymentHistoryOpen(false)}
+                className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+                title="বন্ধ করুন"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Filter and Stats Bar */}
+            <div className="p-3.5 sm:p-4 bg-slate-900/90 border-b border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shrink-0">
+              {/* Search Box */}
+              <div className="relative flex-1">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="সদস্যের নাম, বিডি নম্বর, তারিখ দিয়ে খুঁজুন..."
+                  value={paymentSearch}
+                  onChange={(e) => setPaymentSearch(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2 text-xs font-bold text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-all"
+                />
+              </div>
+
+              {/* Quick Method Filters & Total Summary */}
+              <div className="flex items-center space-x-2 shrink-0 justify-between sm:justify-end">
+                <div className="flex items-center bg-slate-950 rounded-xl p-0.5 border border-slate-800">
+                  {(['ALL', 'CASH', 'UCB'] as const).map((method) => (
+                    <button
+                      key={method}
+                      type="button"
+                      onClick={() => setPaymentMethodFilter(method)}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer ${
+                        paymentMethodFilter === method
+                          ? 'bg-indigo-600 text-white shadow-xs'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {method}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="px-3 py-1 bg-emerald-950/60 border border-emerald-500/30 rounded-xl flex items-center space-x-1.5 text-xs">
+                  <span className="text-slate-400 text-[10px] uppercase font-bold">মোট আদায়:</span>
+                  <span className="text-emerald-400 font-mono font-black">৳{totalPaymentsAmount.toLocaleString()}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Payments List Area */}
+            <div className="flex-1 overflow-y-auto p-3.5 sm:p-5 space-y-2.5 divide-y divide-slate-800/60">
+              {filteredPaymentTxs.length === 0 ? (
+                <div className="py-12 text-center text-slate-500 space-y-2">
+                  <Receipt className="w-10 h-10 mx-auto text-slate-600 opacity-60" />
+                  <p className="text-sm font-bold text-slate-400">কোনো পেমেন্ট হিস্ট্রি পাওয়া যায়নি</p>
+                  <p className="text-xs text-slate-500">
+                    {paymentSearch ? 'অনুসন্ধানের সাথে কোনো রেকর্ড মিলছে না।' : 'এখনও পর্যন্ত কোনো বিল পেমেন্ট জমা হয়নি।'}
+                  </p>
+                </div>
+              ) : (
+                filteredPaymentTxs.map((tx: any, idx: number) => {
+                  const targetMember = members.find((m: any) => {
+                    const txBdClean = String(tx.bdNo || tx.airman_id || '').replace(/\D/g, '');
+                    const mBdClean = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
+                    return (tx.airman_id && m.airman_id === tx.airman_id) || (txBdClean && mBdClean === txBdClean);
+                  });
+                  const memberEffectiveDp = targetMember ? getMemberEffectiveDp(targetMember) : '';
+                  const rank = tx.rank || targetMember?.Rank || targetMember?.rank || '';
+                  const name = tx.memberName || (targetMember ? `${targetMember.Rank || ''} ${targetMember.Surname || ''}` : 'সদস্য');
+                  const cleanBd = String(tx.bdNo || targetMember?.['BD No'] || tx.airman_id || '').replace(/\D/g, '');
+                  const currentMemberDue = Number(targetMember?.Due ?? targetMember?.due ?? targetMember?.baki ?? 0);
+
+                  return (
+                    <div
+                      key={tx.id || idx}
+                      className="pt-2.5 first:pt-0 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 bg-slate-950/40 hover:bg-slate-800/40 border border-slate-800/60 rounded-2xl transition-colors"
+                    >
+                      {/* Left: Member Info & Avatar */}
+                      <div className="flex items-center space-x-3 min-w-0 flex-1">
+                        <span className="text-[10px] font-mono text-slate-500 font-bold shrink-0 w-6 text-center">
+                          #{idx + 1}
+                        </span>
+
+                        <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0 overflow-hidden text-indigo-400">
+                          {memberEffectiveDp ? (
+                            <img
+                              src={resolveImageUrl(memberEffectiveDp)}
+                              alt={name}
+                              referrerPolicy="no-referrer"
+                              className="w-full h-full object-cover"
+                              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                            />
+                          ) : (
+                            <Users className="w-5 h-5 text-indigo-300" />
+                          )}
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center space-x-2">
+                            <h4 className="text-xs sm:text-sm font-bold text-white truncate">
+                              {rank} {name}
+                            </h4>
+                            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-md bg-slate-800 text-slate-400 font-bold">
+                              BD/{cleanBd}
+                            </span>
+                          </div>
+                          <div className="flex items-center space-x-2 text-[10px] text-slate-400 mt-0.5 flex-wrap">
+                            <span className="font-mono text-indigo-300 flex items-center gap-1">
+                              <Calendar className="w-3 h-3" />
+                              {toEnglishDate(tx.date)}
+                            </span>
+                            <span>•</span>
+                            <span className="text-slate-400 truncate max-w-[240px]">
+                              {tx.items || 'বিল পরিশোধ'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right: Paid Amount, Gateway & Delete Action */}
+                      <div className="flex items-center space-x-3 w-full sm:w-auto justify-between sm:justify-end shrink-0 pl-9 sm:pl-0">
+                        <div className="text-right">
+                          <p className="text-sm sm:text-base font-black text-emerald-400 font-mono leading-tight">
+                            +৳{Number(tx.amount || 0).toLocaleString()}
+                          </p>
+                          <div className="flex items-center space-x-1.5 justify-end mt-0.5">
+                            <span className="px-2 py-0.2 rounded-full text-[9px] font-black uppercase bg-slate-800 text-slate-300 border border-slate-700 font-mono">
+                              {tx.gateway || 'CASH'}
+                            </span>
+                            <span className="text-[9px] text-slate-500 font-mono">
+                              বর্তমান বকেয়া: ৳{currentMemberDue.toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Delete Payment Button */}
+                        <button
+                          type="button"
+                          onClick={() => setPaymentToDelete({ ...tx, targetMember })}
+                          className="px-2.5 py-1.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 hover:text-white border border-rose-900/50 flex items-center space-x-1 text-xs font-bold transition-all cursor-pointer active:scale-95 shadow-xs"
+                          title="এই পেমেন্ট বাতিল করুন (সদস্যের বকেয়া আগের অবস্থায় ফিরে যাবে)"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                          <span className="text-[11px]">Delete</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3.5 border-t border-slate-800 bg-slate-950/60 flex items-center justify-between text-xs text-slate-400 shrink-0">
+              <span className="text-[11px]">
+                পেমেন্ট মুছে দিলে সংশ্লিষ্ট সদস্যের বকেয়া (Due) স্বয়ংক্রিয়ভাবে আগের অবস্থায় ফিরে যায়।
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsPaymentHistoryOpen(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
+              >
+                বন্ধ করুন
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Payment Delete Confirmation Dialog */}
+      {paymentToDelete && (
+        <div className="fixed inset-0 z-[220] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-slate-900 border border-rose-500/50 rounded-3xl w-full max-w-md p-6 shadow-2xl space-y-4 animate-scaleUp">
+            <div className="w-14 h-14 rounded-2xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 mx-auto">
+              <AlertCircle className="w-7 h-7 animate-pulse" />
+            </div>
+
+            <div className="text-center space-y-1.5">
+              <h3 className="text-lg font-black text-white uppercase tracking-tight">
+                পেমেন্ট বাতিল নিশ্চিত করুন
+              </h3>
+              <p className="text-xs text-slate-400">
+                আপনি কি নিশ্চিত যে আপনি এই পেমেন্ট রেকর্ডটি মুছে ফেলতে চান?
+              </p>
+            </div>
+
+            {/* Transaction Summary Card */}
+            <div className="p-4 bg-slate-950/80 rounded-2xl border border-slate-800 space-y-2 text-xs">
+              <div className="flex justify-between items-center text-slate-300">
+                <span className="text-slate-400">সদস্যের নাম:</span>
+                <span className="font-bold text-white">{paymentToDelete.memberName || 'সদস্য'}</span>
+              </div>
+              <div className="flex justify-between items-center text-slate-300">
+                <span className="text-slate-400">বিডি নম্বর (BD No):</span>
+                <span className="font-mono font-bold text-white">BD/{String(paymentToDelete.bdNo || '').replace(/\D/g, '')}</span>
+              </div>
+              <div className="flex justify-between items-center text-slate-300">
+                <span className="text-slate-400">পরিশোধের তারিখ:</span>
+                <span className="font-mono text-indigo-300">{toEnglishDate(paymentToDelete.date)}</span>
+              </div>
+              <div className="flex justify-between items-center text-slate-300">
+                <span className="text-slate-400">পরিশোধের মাধ্যম:</span>
+                <span className="font-bold text-slate-200">{paymentToDelete.gateway || 'CASH'}</span>
+              </div>
+              <div className="flex justify-between items-center pt-2 border-t border-slate-800 text-sm">
+                <span className="font-bold text-slate-300">পরিশোধিত অর্থ (Amount):</span>
+                <span className="font-mono font-black text-emerald-400 text-base">
+                  ৳{Number(paymentToDelete.amount || 0).toLocaleString()}
+                </span>
+              </div>
+            </div>
+
+            {/* Consequence Notice */}
+            <div className="p-3 bg-rose-950/50 border border-rose-800/60 rounded-xl text-[11px] text-rose-200 space-y-1 leading-relaxed">
+              <p className="font-bold flex items-center gap-1.5 text-rose-300">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                <span>বকেয়া পুনর্বহাল বিজ্ঞপ্তি:</span>
+              </p>
+              <p>
+                পেমেন্ট মুছে দিলে সদস্যের বকেয়া (Due) অবিলম্বে <strong>৳{Number(paymentToDelete.amount || 0).toLocaleString()} বৃদ্ধি পেয়ে পূর্বের অবস্থায় ফিরে যাবে</strong> এবং ক্লাউডেও স্বয়ংক্রিয়ভাবে আপডেট হবে।
+              </p>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center space-x-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingPayment}
+                onClick={() => setPaymentToDelete(null)}
+                className="flex-1 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50"
+              >
+                ফিরে যান (Cancel)
+              </button>
+
+              <button
+                type="button"
+                disabled={isDeletingPayment}
+                onClick={handleConfirmDeletePayment}
+                className="flex-1 py-3 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1.5 shadow-lg shadow-rose-900/50 disabled:opacity-50"
+              >
+                {isDeletingPayment ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <span>মুছে ফেলা হচ্ছে...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>হ্যাঁ, বাতিল করুন</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

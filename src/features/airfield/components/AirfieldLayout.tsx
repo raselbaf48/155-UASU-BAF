@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   AirfieldShiftRoster, 
   DutyPost, 
@@ -394,13 +395,26 @@ export const AirfieldLayout: React.FC<AirfieldLayoutProps> = ({ onBack, initialP
       </div>
 
       {/* Mobile Slide-Over Drawer */}
-      {mobileMenuOpen && (
-        <div
-          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[200] md:hidden flex"
-          onClick={() => setMobileMenuOpen(false)}
-        >
-          <div
-            className="w-72 max-w-[85vw] h-full flex flex-col bg-slate-950 border-r border-slate-800 shadow-2xl animate-in slide-in-from-left-4"
+      <AnimatePresence>
+        {mobileMenuOpen && (
+          <motion.div
+            key="airfield-mobile-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.4, ease: "easeInOut" }}
+            className="fixed inset-0 bg-black/40 backdrop-blur-[2px] z-[200] md:hidden"
+            onClick={() => setMobileMenuOpen(false)}
+          />
+        )}
+        {mobileMenuOpen && (
+          <motion.aside
+            key="airfield-mobile-drawer"
+            initial={{ x: '-100%' }}
+            animate={{ x: 0 }}
+            exit={{ x: '-100%' }}
+            transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
+            className="fixed top-0 bottom-0 left-0 w-72 max-w-[85vw] h-full flex flex-col bg-slate-950 border-r border-slate-800 shadow-[12px_0_40px_rgba(0,0,0,0.65)] z-[210] md:hidden"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-4 border-b border-slate-800 flex items-center justify-between">
@@ -408,7 +422,7 @@ export const AirfieldLayout: React.FC<AirfieldLayoutProps> = ({ onBack, initialP
                 <Plane className="w-5 h-5 text-indigo-400 -rotate-45" />
                 <span className="font-black text-white text-sm">AIRFIELD SAIA</span>
               </div>
-              <button onClick={() => setMobileMenuOpen(false)} className="text-slate-400">
+              <button onClick={() => setMobileMenuOpen(false)} className="text-slate-400 p-1 hover:text-white rounded-lg transition-colors cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -419,7 +433,7 @@ export const AirfieldLayout: React.FC<AirfieldLayoutProps> = ({ onBack, initialP
                   setSelectedView('dashboard');
                   setMobileMenuOpen(false);
                 }}
-                className={`w-full flex items-center justify-between p-2.5 rounded-xl font-bold text-xs ${
+                className={`w-full flex items-center justify-between p-2.5 rounded-xl font-bold text-xs cursor-pointer ${
                   selectedView === 'dashboard' ? 'bg-indigo-600 text-white' : 'bg-slate-900 text-slate-300'
                 }`}
               >
@@ -432,7 +446,7 @@ export const AirfieldLayout: React.FC<AirfieldLayoutProps> = ({ onBack, initialP
                   setSelectedView('sheet');
                   setMobileMenuOpen(false);
                 }}
-                className={`w-full flex items-center justify-between p-2.5 rounded-xl font-bold text-xs ${
+                className={`w-full flex items-center justify-between p-2.5 rounded-xl font-bold text-xs cursor-pointer ${
                   selectedView === 'sheet' ? 'bg-indigo-600 text-white' : 'bg-slate-900 text-slate-300'
                 }`}
               >
@@ -452,7 +466,7 @@ export const AirfieldLayout: React.FC<AirfieldLayoutProps> = ({ onBack, initialP
                     setSelectedView(post.id);
                     setMobileMenuOpen(false);
                   }}
-                  className={`w-full text-left p-2.5 rounded-xl text-xs flex items-center justify-between ${
+                  className={`w-full text-left p-2.5 rounded-xl text-xs flex items-center justify-between cursor-pointer ${
                     selectedView === post.id
                       ? 'bg-indigo-600 text-white font-bold'
                       : 'text-slate-300 hover:bg-slate-900'
@@ -474,46 +488,60 @@ export const AirfieldLayout: React.FC<AirfieldLayoutProps> = ({ onBack, initialP
                   setMobileMenuOpen(false);
                   onBack();
                 }}
-                className="w-full py-2.5 bg-slate-900 text-slate-300 rounded-xl text-xs font-bold"
+                className="w-full py-2.5 bg-slate-900 text-slate-300 rounded-xl text-xs font-bold cursor-pointer hover:bg-slate-800 hover:text-white transition-colors"
               >
                 Exit Airfield (SAIA)
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </motion.aside>
+        )}
+      </AnimatePresence>
 
       {/* Main Content Area */}
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden bg-slate-900">
-        {selectedView === 'dashboard' ? (
-          <AirfieldDashboardView
-            roster={roster}
-            onUpdateRoster={handleUpdateRoster}
-            onSelectPost={(pId) => setSelectedView(pId)}
-            onOpenNewPostModal={() => setIsNewPostModalOpen(true)}
-            onOpenSheetView={() => setSelectedView('sheet')}
-          />
-        ) : selectedView === 'sheet' ? (
-          <FullRosterSheetView
-            roster={roster}
-            onUpdateRoster={handleUpdateRoster}
-            onSelectPost={(pId) => setSelectedView(pId)}
-          />
-        ) : selectedPost ? (
-          <PostPersonnelView
-            post={selectedPost}
-            onUpdatePost={handleUpdatePost}
-            onDeletePost={handleDeletePost}
-          />
-        ) : (
-          <AirfieldDashboardView
-            roster={roster}
-            onUpdateRoster={handleUpdateRoster}
-            onSelectPost={(pId) => setSelectedView(pId)}
-            onOpenNewPostModal={() => setIsNewPostModalOpen(true)}
-            onOpenSheetView={() => setSelectedView('sheet')}
-          />
-        )}
+        <div className="flex-1 overflow-y-auto grid grid-cols-1 grid-rows-1 relative items-start">
+          <AnimatePresence initial={false}>
+            <motion.div
+              key={selectedView}
+              style={{ gridArea: '1 / 1 / 2 / 2' }}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0, zIndex: 2 }}
+              exit={{ opacity: 0, zIndex: 1, pointerEvents: 'none', transition: { duration: 0.16, delay: 0.05 } }}
+              transition={{ duration: 0.22, ease: "easeOut" }}
+              className="w-full h-full flex flex-col min-h-0"
+            >
+            {selectedView === 'dashboard' ? (
+              <AirfieldDashboardView
+                roster={roster}
+                onUpdateRoster={handleUpdateRoster}
+                onSelectPost={(pId) => setSelectedView(pId)}
+                onOpenNewPostModal={() => setIsNewPostModalOpen(true)}
+                onOpenSheetView={() => setSelectedView('sheet')}
+              />
+            ) : selectedView === 'sheet' ? (
+              <FullRosterSheetView
+                roster={roster}
+                onUpdateRoster={handleUpdateRoster}
+                onSelectPost={(pId) => setSelectedView(pId)}
+              />
+            ) : selectedPost ? (
+              <PostPersonnelView
+                post={selectedPost}
+                onUpdatePost={handleUpdatePost}
+                onDeletePost={handleDeletePost}
+              />
+            ) : (
+              <AirfieldDashboardView
+                roster={roster}
+                onUpdateRoster={handleUpdateRoster}
+                onSelectPost={(pId) => setSelectedView(pId)}
+                onOpenNewPostModal={() => setIsNewPostModalOpen(true)}
+                onOpenSheetView={() => setSelectedView('sheet')}
+              />
+            )}
+          </motion.div>
+        </AnimatePresence>
+        </div>
       </div>
 
       {/* Create New Post Modal */}

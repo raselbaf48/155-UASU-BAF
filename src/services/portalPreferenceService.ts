@@ -95,6 +95,11 @@ export function setLastUsedPortal(portal: PortalType): void {
  */
 export async function syncPortalFromCloud(): Promise<PortalType | null> {
   try {
+    // If the device already has a saved portal preference locally, preserve it and do not overwrite from cloud
+    if (hasSavedPortalPreference()) {
+      return getLastUsedPortal();
+    }
+
     if (!isSupabaseConfigured || !supabase) return null;
 
     const { data, error } = await supabase
@@ -111,8 +116,7 @@ export async function syncPortalFromCloud(): Promise<PortalType | null> {
     if (data && isValidPortal(data.setting_value)) {
       const cloudPortal = data.setting_value as PortalType;
       if (typeof window !== 'undefined' && window.localStorage) {
-        const localCurrent = localStorage.getItem(PORTAL_STORAGE_KEY);
-        if (localCurrent !== cloudPortal) {
+        if (!hasSavedPortalPreference()) {
           localStorage.setItem(PORTAL_STORAGE_KEY, cloudPortal);
           window.dispatchEvent(
             new CustomEvent('baf_portal_preference_changed', { detail: { portal: cloudPortal } })

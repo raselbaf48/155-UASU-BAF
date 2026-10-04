@@ -12,6 +12,7 @@ import { supabase } from '../../../supabase';
 import { 
   RawInventoryItem, 
   RawStockLog, 
+  InventoryItemType,
   RAW_ITEMS_STORAGE_KEY, 
   RAW_LOGS_STORAGE_KEY,
   getRawInventoryItems,
@@ -19,13 +20,14 @@ import {
   deduplicateRawItems,
   getEffectiveRawUnitCost,
   getRawItemSubUnitInfo,
-  getRecipeForMenuItem
+  getRecipeForMenuItem,
+  isReadymadeItem
 } from '../utils/recipeManager';
 import { queuePushKeyToCloud } from '../utils/canteenCloudSync';
 import { SaveButton } from '../components/SaveButton';
 import { formatCanteenDate } from '../utils/dateUtils';
 
-export type { RawInventoryItem, RawStockLog };
+export type { RawInventoryItem, RawStockLog, InventoryItemType };
 
 const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
@@ -763,6 +765,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
   });
 
   const [searchTerm, setSearchTerm] = useState('');
+  const [inventoryTypeFilter, setInventoryTypeFilter] = useState<'ALL' | 'RAW' | 'READY_MADE'>('ALL');
   const [stockStatusFilter, setStockStatusFilter] = useState<'ALL' | 'LOW' | 'NORMAL'>('ALL');
   const [logFilter, setLogFilter] = useState<'ALL' | 'RESTOCK' | 'ISSUE' | 'WASTAGE'>('ALL');
   const [viewMode, setViewMode] = useState<'BOX' | 'TABLE'>('BOX');
@@ -799,6 +802,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
     nameBn?: string;
     category?: string;
     subCategory?: string;
+    itemType?: InventoryItemType;
     unit?: string;
     currentStock?: number | string;
     minStockAlert?: number | string;
@@ -815,6 +819,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
     nameBn: '',
     category: 'Fuel & Utilities',
     subCategory: '',
+    itemType: 'RAW',
     unit: 'kg',
     currentStock: 10,
     minStockAlert: 5,
@@ -1032,41 +1037,54 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
     const outOfStockItems = list.filter(item => item.currentStock <= 0);
     const healthyCount = list.filter(item => item.currentStock > item.minStockAlert).length;
     const healthPercent = totalItems > 0 ? Math.round((healthyCount / totalItems) * 100) : 100;
+    const rawItemsCount = list.filter(item => !isReadymadeItem(item)).length;
+    const readymadeItemsCount = list.filter(item => isReadymadeItem(item)).length;
 
     return {
       totalItems,
       totalValue,
       lowStockCount: lowStockItems.length,
       outOfStockCount: outOfStockItems.length,
-      healthPercent
+      healthPercent,
+      rawItemsCount,
+      readymadeItemsCount
     };
   }, [items]);
 
-  // Filtered items
+  // Filtered items (A-Z sorted & inventory type categorized)
   const filteredItems = useMemo(() => {
     const list = Array.isArray(items) ? items : [];
-    return list.filter(item => {
-      // Search
-      const q = searchTerm.trim().toLowerCase();
-      if (q) {
-        const matchesName = item.name.toLowerCase().includes(q);
-        const matchesNameBn = item.nameBn.toLowerCase().includes(q);
-        const matchesSupplier = item.supplier?.toLowerCase().includes(q) || false;
-        if (!matchesName && !matchesNameBn && !matchesSupplier) {
-          return false;
+    return list
+      .filter(item => {
+        // Inventory Type Filter: Raw Item vs Readymate Item
+        if (inventoryTypeFilter === 'RAW') {
+          if (isReadymadeItem(item)) return false;
+        } else if (inventoryTypeFilter === 'READY_MADE') {
+          if (!isReadymadeItem(item)) return false;
         }
-      }
 
-      // Stock status filter
-      if (stockStatusFilter === 'LOW') {
-        if (item.currentStock > item.minStockAlert) return false;
-      } else if (stockStatusFilter === 'NORMAL') {
-        if (item.currentStock <= item.minStockAlert) return false;
-      }
+        // Search
+        const q = searchTerm.trim().toLowerCase();
+        if (q) {
+          const matchesName = item.name.toLowerCase().includes(q);
+          const matchesNameBn = item.nameBn.toLowerCase().includes(q);
+          const matchesSupplier = item.supplier?.toLowerCase().includes(q) || false;
+          if (!matchesName && !matchesNameBn && !matchesSupplier) {
+            return false;
+          }
+        }
 
-      return true;
-    });
-  }, [items, searchTerm, stockStatusFilter]);
+        // Stock status filter
+        if (stockStatusFilter === 'LOW') {
+          if (item.currentStock > item.minStockAlert) return false;
+        } else if (stockStatusFilter === 'NORMAL') {
+          if (item.currentStock <= item.minStockAlert) return false;
+        }
+
+        return true;
+      })
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, [items, inventoryTypeFilter, searchTerm, stockStatusFilter]);
 
   // Open Restock Modal for specific item
   const handleOpenRestock = (item?: RawInventoryItem) => {

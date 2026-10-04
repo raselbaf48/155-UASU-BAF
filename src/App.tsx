@@ -38,6 +38,7 @@ import {
   isRunningInApk,
 } from './services/appUpdateService';
 import { Airman, FlightName, ParadeShift, UserRole, ThemePreference } from './types';
+import { motion, AnimatePresence } from 'motion/react';
 import { INITIAL_AIRMEN } from './data/initialAirmen';
 import { Logo155UASU } from './components/Logo155UASU';
 import { Shield, AlertCircle, X } from 'lucide-react';
@@ -542,6 +543,213 @@ return () => mediaQuery.removeEventListener('change', listener);
     );
   }
 
+  const renderActiveTabContent = (tab: SidebarTab) => {
+    switch (tab) {
+      case "biodata-register":
+        return (
+          <NominalRoll
+            variant="biodata"
+            role={role}
+            initialFlightFilter={selectedFlight === "Overall" || selectedFlight === "All" ? "All" : selectedFlight}
+            airmen={airmen}
+            userFlight={userSession?.flightName}
+            onRefresh={fetchAirmen}
+            onSyncGoogleSheet={handleSyncGoogleSheet}
+            onAddAirman={() => {
+              setAirmanToEdit(null);
+              setIsAddEditOpen(true);
+            }}
+            onEditAirman={(a) => {
+              if (a) {
+                setAirmanToEdit(a);
+                setIsAddEditOpen(true);
+              }
+            }}
+            onDeleteAirman={handleDeleteAirman}
+            onViewProfile={(a, config) => setSelectedAirmanProfile({ airman: a, allowEditDelete: true, ...config })}
+          />
+        );
+      case "overview":
+        return (
+          <DashboardParadeState
+            role={role}
+            userFlight={userSession?.flightName}
+            airmen={airmen}
+            selectedDate={selectedDate}
+            setSelectedDate={setSelectedDate}
+            selectedShift={selectedShift}
+            setSelectedShift={setSelectedShift}
+            selectedFlight={selectedFlight}
+            setSelectedFlight={setSelectedFlight}
+            onOpenPrintModal={() => setIsPrintModalOpen(true)}
+            isPrintMode={isPrintModalOpen}
+            onClosePrintMode={() => setIsPrintModalOpen(false)}
+            onViewAirmanProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
+            onOpenImportModal={() => setIsPdfImportModalOpen(true)}
+          />
+        );
+      case "parade-state":
+        return (
+          <ParadeStateFormattedView
+            role={role}
+            userFlight={userSession?.flightName}
+            airmen={airmen}
+            selectedDate={selectedDate}
+            setSelectedDate={setSelectedDate}
+            initialDocumentType="PARADE"
+            onOpenPrintModal={() => setIsPrintModalOpen(true)}
+            isPrintMode={isPrintModalOpen}
+            onClosePrintMode={() => setIsPrintModalOpen(false)}
+            onViewAirmanProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
+            onOpenImportModal={() => setIsPdfImportModalOpen(true)}
+          />
+        );
+      case "pt-state":
+        return (
+          <ParadeStateFormattedView
+            role={role}
+            userFlight={userSession?.flightName}
+            airmen={airmen}
+            selectedDate={selectedDate}
+            setSelectedDate={setSelectedDate}
+            initialDocumentType="PT"
+            onOpenPrintModal={() => setIsPrintModalOpen(true)}
+            onViewAirmanProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
+            onOpenImportModal={() => setIsPdfImportModalOpen(true)}
+          />
+        );
+      case "night-count-state":
+        return (
+          <NightCountStateView
+            role={role}
+            userFlight={userSession?.flightName}
+            airmen={airmen}
+            selectedDate={selectedDate}
+            setSelectedDate={setSelectedDate}
+            onViewAirmanProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
+          />
+        );
+      case "nominal":
+        return (
+          <NominalRoll
+            variant="nominal"
+            initialFlightFilter={selectedFlight === "Overall" || selectedFlight === "All" ? "All" : selectedFlight}
+            airmen={airmen}
+            role={role}
+            userFlight={userSession?.flightName}
+            onRefresh={fetchAirmen}
+            onSyncGoogleSheet={handleSyncGoogleSheet}
+            onEditAirman={(a) => {
+              if (a) {
+                setAirmanToEdit(a);
+                setIsAddEditOpen(true);
+              }
+            }}
+            onDeleteAirman={handleDeleteAirman}
+            onViewProfile={(a, config) => setSelectedAirmanProfile({ airman: a, allowEditDelete: false, ...config })}
+          />
+        );
+      case "flights":
+        return (
+          <FlightsMiniView
+            role={role}
+            userFlight={userSession?.flightName}
+            airmen={airmen}
+            onSelectFlight={(fl) => {
+              setSelectedFlight(fl);
+              setActiveTab("nominal");
+            }}
+            onViewAirmanHistory={(a) => setSelectedAirmanProfile(a)}
+          />
+        );
+      case "leave-register":
+        return (
+          <LeaveRegisterView
+            role={role}
+            userFlight={userSession?.flightName}
+            airmen={airmen}
+            onViewProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
+          />
+        );
+      case "tdy-register":
+        return (
+          <TdyRegisterView
+            role={role}
+            userFlight={userSession?.flightName}
+            airmen={airmen}
+            onViewProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
+          />
+        );
+      case "attachment-register":
+        return (
+          <DeploymentRegisterView
+            role={role}
+            userFlight={userSession?.flightName}
+            airmen={airmen}
+            onViewProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
+          />
+        );
+      case "ida-center":
+        return (
+          <IdaCenterDutyView
+            role={role}
+            userFlight={userSession?.flightName}
+            airmen={airmen}
+            selectedDate={selectedDate}
+            onViewAirmanProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
+          />
+        );
+      case "register":
+        return (
+          <MonthlyDutyRegister
+            airmen={airmen}
+            role={role}
+            userFlight={userSession?.flightName}
+            conflictCount={conflictCount}
+            setConflictCount={setConflictCount}
+            onViewProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
+          />
+        );
+      case "duty-roster":
+        return (
+          <DutyRosterPeriodView
+            role={role}
+            userFlight={userSession?.flightName}
+            airmen={airmen}
+            onViewProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
+          />
+        );
+      case "duty-ratio":
+        return (
+          <DutyRatioMatrixView
+            role={role}
+            userFlight={userSession?.flightName}
+          />
+        );
+      case "analytics":
+        return (
+          <DutyAnalytics
+            airmen={airmen}
+            onViewProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
+          />
+        );
+      case "conflicts":
+        return (
+          <DutyConflictMonitor
+            airmen={airmen}
+            onViewProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
+            onNavigateToRegister={() => setActiveTab("register")}
+          />
+        );
+      default:
+        return null;
+    }
+  };
+
+  const ActiveTabView: React.FC<{ tab: SidebarTab }> = React.memo(({ tab }) => {
+    return <>{renderActiveTabContent(tab)}</>;
+  });
+
   return (
     <div className={`min-h-screen transition-colors duration-200 ${darkMode ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
       {renderNoticeModal()}
@@ -595,199 +803,21 @@ return () => mediaQuery.removeEventListener('change', listener);
 
         {/* Main View Area (Opens on Right Side based on clicked tab) */}
         <main className={`flex-1 ${activeTab === 'duty-ratio' ? 'px-1 sm:px-2 md:px-3 py-3 max-w-none' : activeTab === 'register' ? 'px-2 sm:px-4 lg:px-6 max-w-none' : 'px-4 sm:px-6 lg:px-8 max-w-[1600px]'} py-6 w-full mx-auto print:p-0 print:m-0 print:max-w-none print:w-full`}>
-          {activeTab === 'biodata-register' && (
-            <NominalRoll
-              variant="biodata"
-              role={role}
-              initialFlightFilter={selectedFlight === "Overall" || selectedFlight === "All" ? "All" : selectedFlight}
-              airmen={airmen}
-              userFlight={userSession?.flightName}
-              onRefresh={fetchAirmen}
-              onSyncGoogleSheet={handleSyncGoogleSheet}
-              onAddAirman={() => {
-                setAirmanToEdit(null);
-                setIsAddEditOpen(true);
-              }}
-              onEditAirman={(a) => {
-                if (a) {
-                  setAirmanToEdit(a);
-                  setIsAddEditOpen(true);
-                }
-              }}
-              onDeleteAirman={handleDeleteAirman}
-              onViewProfile={(a, config) => setSelectedAirmanProfile({ airman: a, allowEditDelete: true, ...config })}
-            />
-          )}
-          {activeTab === 'overview' && (
-            <DashboardParadeState
-              role={role}
-              userFlight={userSession?.flightName}
-              airmen={airmen}
-              selectedDate={selectedDate}
-              setSelectedDate={setSelectedDate}
-              selectedShift={selectedShift}
-              setSelectedShift={setSelectedShift}
-              selectedFlight={selectedFlight}
-              setSelectedFlight={setSelectedFlight}
-              onOpenPrintModal={() => setIsPrintModalOpen(true)}
-              isPrintMode={isPrintModalOpen}
-              onClosePrintMode={() => setIsPrintModalOpen(false)}
-              onViewAirmanProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
-              onOpenImportModal={() => setIsPdfImportModalOpen(true)}
-            />
-          )}
-
-          {activeTab === 'parade-state' && (
-            <ParadeStateFormattedView
-              role={role}
-              userFlight={userSession?.flightName}
-              airmen={airmen}
-              selectedDate={selectedDate}
-              setSelectedDate={setSelectedDate}
-              initialDocumentType="PARADE"
-              onOpenPrintModal={() => setIsPrintModalOpen(true)}
-              isPrintMode={isPrintModalOpen}
-              onClosePrintMode={() => setIsPrintModalOpen(false)}
-              onViewAirmanProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
-              onOpenImportModal={() => setIsPdfImportModalOpen(true)}
-            />
-          )}
-
-          {activeTab === 'pt-state' && (
-            <ParadeStateFormattedView
-              role={role}
-              userFlight={userSession?.flightName}
-              airmen={airmen}
-              selectedDate={selectedDate}
-              setSelectedDate={setSelectedDate}
-              initialDocumentType="PT"
-              onOpenPrintModal={() => setIsPrintModalOpen(true)}
-              onViewAirmanProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
-              onOpenImportModal={() => setIsPdfImportModalOpen(true)}
-            />
-          )}
-
-          
-          {activeTab === 'night-count-state' && (
-            <NightCountStateView
-              role={role}
-              userFlight={userSession?.flightName}
-              airmen={airmen}
-              selectedDate={selectedDate}
-              setSelectedDate={setSelectedDate}
-              onViewAirmanProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
-            />
-          )}
-          {activeTab === 'nominal' && (
-            <NominalRoll
-              variant="nominal"
-              initialFlightFilter={selectedFlight === "Overall" || selectedFlight === "All" ? "All" : selectedFlight}
-              airmen={airmen}
-              role={role}
-              userFlight={userSession?.flightName}
-              onRefresh={fetchAirmen}
-              onSyncGoogleSheet={handleSyncGoogleSheet}
-              onEditAirman={(a) => {
-                if (a) {
-                  setAirmanToEdit(a);
-                  setIsAddEditOpen(true);
-                }
-              }}
-              onDeleteAirman={handleDeleteAirman}
-              onViewProfile={(a, config) => setSelectedAirmanProfile({ airman: a, allowEditDelete: false, ...config })}
-            />
-          )}
-
-          {activeTab === 'flights' && (
-            <FlightsMiniView
-              role={role}
-              userFlight={userSession?.flightName}
-              airmen={airmen}
-              onSelectFlight={(fl) => {
-                setSelectedFlight(fl);
-                setActiveTab('nominal');
-              }}
-              onViewAirmanHistory={(a) => setSelectedAirmanProfile(a)}
-            />
-          )}
-
-          {activeTab === 'leave-register' && (
-            <LeaveRegisterView
-              role={role}
-              userFlight={userSession?.flightName}
-              airmen={airmen}
-              onViewProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
-            />
-          )}
-
-          {activeTab === 'tdy-register' && (
-            <TdyRegisterView
-              role={role}
-              userFlight={userSession?.flightName}
-              airmen={airmen}
-              onViewProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
-            />
-          )}
-          {activeTab === 'attachment-register' && (
-            <DeploymentRegisterView
-              role={role}
-              userFlight={userSession?.flightName}
-              airmen={airmen}
-              onViewProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
-            />
-          )}
-
-          {activeTab === 'ida-center' && (
-            <IdaCenterDutyView
-              role={role}
-              userFlight={userSession?.flightName}
-              airmen={airmen}
-              selectedDate={selectedDate}
-              onViewAirmanProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
-            />
-          )}
-
-          {activeTab === 'register' && (
-            <MonthlyDutyRegister
-              airmen={airmen}
-              role={role}
-              userFlight={userSession?.flightName}
-              conflictCount={conflictCount}
-              setConflictCount={setConflictCount}
-              onViewProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
-            />
-          )}
-
-          {activeTab === 'duty-roster' && (
-            <DutyRosterPeriodView
-              role={role}
-              userFlight={userSession?.flightName}
-              airmen={airmen}
-              onViewProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
-            />
-          )}
-
-          {activeTab === 'duty-ratio' && (
-            <DutyRatioMatrixView
-              role={role}
-              userFlight={userSession?.flightName}
-                          />
-          )}
-
-          {activeTab === 'analytics' && (
-            <DutyAnalytics
-              airmen={airmen}
-              onViewProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
-            />
-          )}
-
-          {activeTab === 'conflicts' && (
-            <DutyConflictMonitor
-              airmen={airmen}
-              onViewProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
-              onNavigateToRegister={() => setActiveTab('register')}
-            />
-          )}
+          <div className="grid grid-cols-1 grid-rows-1 w-full relative items-start">
+            <AnimatePresence initial={false}>
+              <motion.div
+                key={activeTab}
+                style={{ gridArea: '1 / 1 / 2 / 2' }}
+                initial={{ opacity: 0.6, y: 3 }}
+                animate={{ opacity: 1, y: 0, zIndex: 2 }}
+                exit={{ opacity: 0, zIndex: 1, pointerEvents: 'none', transition: { duration: 0.12, delay: 0.1 } }}
+                transition={{ duration: 0.18, ease: "easeOut" }}
+                className="w-full print:filter-none print:opacity-100 print:transform-none"
+              >
+                <ActiveTabView tab={activeTab} />
+              </motion.div>
+            </AnimatePresence>
+          </div>
         </main>
 
         {/* Footer */}

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { Logo155UASU } from './Logo155UASU';
 import {
   LayoutDashboard,
@@ -31,7 +32,8 @@ import {
   ClipboardList,
   Activity,
   UserCircle,
-  User
+  User,
+  X
 } from 'lucide-react';
 import { UserRole } from '../types';
 import { UserSession } from '../utils/authSession';
@@ -106,29 +108,65 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setMobileOpen(false);
   };
 
-  return (
-    <>
-      {/* Mobile Backdrop Overlay */}
-      {mobileOpen && (
-        <div
-          className="fixed inset-0 bg-slate-950/70 z-40 lg:hidden backdrop-blur-xs transition-opacity"
-          onClick={() => setMobileOpen(false)}
-        />
-      )}
-
-      {/* Sidebar Container */}
-      <aside
-        className={`fixed top-0 bottom-0 left-0 z-50 flex flex-col bg-[#083822] text-white border-r border-[#0d4f31] transition-all duration-300 ease-in-out select-none shadow-2xl print:hidden ${
-          collapsed ? 'w-20' : 'w-64'
-        } ${mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
+  const renderNavButton = (
+    tab: SidebarTab,
+    icon: React.ReactNode,
+    label: string,
+    title?: string,
+    badge?: React.ReactNode,
+    forceExpanded: boolean = false
+  ) => {
+    const isCollapsed = forceExpanded ? false : collapsed;
+    const isActive = activeTab === tab;
+    return (
+      <motion.button
+        type="button"
+        key={tab}
+        whileHover={{ x: isCollapsed ? 0 : 2 }}
+        whileTap={{ scale: 0.97 }}
+        onClick={() => handleSelectTab(tab)}
+        className={`relative w-full flex items-center ${
+          isCollapsed ? 'justify-center px-0 py-3' : 'justify-between px-3 py-2.5'
+        } rounded-xl text-xs font-bold transition-colors duration-150 cursor-pointer overflow-hidden ${
+          isActive
+            ? 'text-white'
+            : 'bg-[#084228]/50 text-emerald-100 hover:bg-[#0b4a2d] hover:text-white border border-[#0d5635]/50'
+        }`}
+        title={title || label}
       >
+        {isActive && (
+          <motion.span
+            layoutId={isCollapsed ? "activeSidebarIndicatorCollapsed" : "activeSidebarIndicator"}
+            className="absolute inset-0 bg-gradient-to-r from-emerald-500 to-teal-600 rounded-xl shadow-lg shadow-emerald-900/50 border border-emerald-400/30 z-0"
+            transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+          />
+        )}
+        <div className="relative z-10 flex items-center justify-between w-full">
+          <div className="flex items-center truncate">
+            <span className={`shrink-0 ${isActive ? 'text-white drop-shadow-sm' : 'text-emerald-300'}`}>
+              {icon}
+            </span>
+            {!isCollapsed && <span className="ml-3 truncate">{label}</span>}
+          </div>
+          {!isCollapsed && badge && (
+            <div className="shrink-0 ml-2">{badge}</div>
+          )}
+        </div>
+      </motion.button>
+    );
+  };
+
+  const renderSidebarContent = (isMobileDrawer: boolean) => {
+    const isCollapsed = isMobileDrawer ? false : collapsed;
+    return (
+      <div className="flex flex-col h-full overflow-hidden">
         {/* Brand Header */}
         <div className="flex items-center justify-between h-16 px-3.5 bg-[#052818] border-b border-[#0d4f31] shrink-0">
           <div className="flex items-center space-x-2.5 overflow-hidden">
             <div className="shrink-0 drop-shadow-md">
               <Logo155UASU className="h-11 w-11" />
             </div>
-            {!collapsed && (
+            {!isCollapsed && (
               <div className="leading-tight truncate">
                 <div className="font-black text-sm tracking-wide text-white truncate">
                   155 UASU BAF
@@ -141,23 +179,36 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
 
           {/* Desktop Collapse Toggle */}
-          <button
-            onClick={() => setCollapsed(!collapsed)}
-            className="hidden lg:flex items-center justify-center w-8 h-8 rounded-lg text-emerald-200/70 hover:text-white hover:bg-[#0c4e2f] transition-colors"
-            title={collapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
-          >
-            {collapsed ? <PanelLeft className="w-5 h-5" /> : <PanelLeftClose className="w-5 h-5" />}
-          </button>
+          {!isMobileDrawer && (
+            <button
+              onClick={() => setCollapsed(!collapsed)}
+              className="hidden lg:flex items-center justify-center w-8 h-8 rounded-lg text-emerald-200/70 hover:text-white hover:bg-[#0c4e2f] transition-colors cursor-pointer"
+              title={collapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
+            >
+              {collapsed ? <PanelLeft className="w-5 h-5" /> : <PanelLeftClose className="w-5 h-5" />}
+            </button>
+          )}
+
+          {/* Mobile Close Button (X) */}
+          {isMobileDrawer && (
+            <button
+              onClick={() => setMobileOpen(false)}
+              className="flex items-center justify-center w-8 h-8 rounded-lg text-emerald-200 hover:text-white hover:bg-[#0c4e2f] transition-colors cursor-pointer"
+              title="Close Menu"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
 
         {/* Scrollable Navigation Items */}
         <div className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
           {/* SECTION 1: OVERVIEW */}
           <div>
-            {!collapsed && (
+            {!isCollapsed && (
               <button
                 onClick={() => toggleSection('overview')}
-                className="w-full flex items-center justify-between px-2 py-1 text-[11px] font-black uppercase tracking-widest text-emerald-200/50 hover:text-emerald-100 transition-colors"
+                className="w-full flex items-center justify-between px-2 py-1 text-[11px] font-black uppercase tracking-widest text-emerald-200/50 hover:text-emerald-100 transition-colors cursor-pointer"
               >
                 <span>OVERVIEW</span>
                 {openSections.overview ? (
@@ -168,361 +219,149 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </button>
             )}
 
-            {(collapsed || openSections.overview) && (
+            {(isCollapsed || openSections.overview) && (
               <div className="mt-2 space-y-2 sm:space-y-1">
-                {/* Dashboard */}
-                <button
-                  onClick={() => handleSelectTab('overview')}
-                  className={`w-full flex items-center ${
-                    collapsed ? 'justify-center px-0 py-3' : 'justify-start px-3 py-3 sm:py-2.5'
-                  } rounded-xl text-xs font-bold transition-all duration-150 ${
-                    activeTab === 'overview'
-                      ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-900/50 scale-[1.02] border border-emerald-400/30'
-                      : 'bg-[#084228]/50 text-emerald-100 hover:bg-[#0b4a2d] hover:text-white border border-[#0d5635]/50'
-                  }`}
-                  title="Dashboard & Strength Overview"
-                >
-                  <LayoutDashboard className={`w-4 h-4 shrink-0 ${activeTab === 'overview' ? 'text-white' : 'text-emerald-300'}`} />
-                  {!collapsed && <span className="ml-3 truncate">Dashboard</span>}
-                </button>
-
-                {/* Parade State (Daily Official Format) */}
-                <button
-                  onClick={() => handleSelectTab('parade-state')}
-                  className={`w-full flex items-center ${
-                    collapsed ? 'justify-center px-0 py-3' : 'justify-start px-3 py-3 sm:py-2.5'
-                  } rounded-xl text-xs font-bold transition-all duration-150 ${
-                    activeTab === 'parade-state'
-                      ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-900/50 scale-[1.02] border border-emerald-400/30'
-                      : 'bg-[#084228]/50 text-emerald-100 hover:bg-[#0b4a2d] hover:text-white border border-[#0d5635]/50'
-                  }`}
-                  title="Daily Parade State (Official BAF Format)"
-                >
-                  <ClipboardList className={`w-4 h-4 shrink-0 ${activeTab === 'parade-state' ? 'text-white' : 'text-emerald-300'}`} />
-                  {!collapsed && <span className="ml-3 truncate">Parade State</span>}
-                </button>
-
-                {/* PT State (Physical Training Report) */}
-                <button
-                  onClick={() => handleSelectTab('pt-state')}
-                  className={`w-full flex items-center ${
-                    collapsed ? 'justify-center px-0 py-3' : 'justify-start px-3 py-3 sm:py-2.5'
-                  } rounded-xl text-xs font-bold transition-all duration-150 ${
-                    activeTab === 'pt-state'
-                      ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-900/50 scale-[1.02] border border-emerald-400/30'
-                      : 'bg-[#084228]/50 text-emerald-100 hover:bg-[#0b4a2d] hover:text-white border border-[#0d5635]/50'
-                  }`}
-                  title="Daily PT State"
-                >
-                  <Activity className={`w-4 h-4 shrink-0 ${activeTab === 'pt-state' ? 'text-white' : 'text-emerald-300'}`} />
-                  {!collapsed && <span className="ml-3 truncate">PT State</span>}
-                </button>
+                {renderNavButton('overview', <LayoutDashboard className="w-4 h-4 shrink-0" />, 'Dashboard', 'Dashboard & Strength Overview', undefined, isMobileDrawer)}
+                {renderNavButton('parade-state', <ClipboardList className="w-4 h-4 shrink-0" />, 'Parade State', 'Daily Parade State (Official BAF Format)', undefined, isMobileDrawer)}
+                {renderNavButton('pt-state', <Activity className="w-4 h-4 shrink-0" />, 'PT State', 'Daily PT State', undefined, isMobileDrawer)}
               </div>
             )}
           </div>
 
-          {/* ADMIN-ONLY SECTIONS: ORG STRUCTURE, WORKFORCE, SCHEDULE MANAGEMENT */}
-          {true && (
-            <>
-              {/* SECTION 2: ORG STRUCTURE */}
-              <div>
-                {!collapsed && (
-                  <button
-                    onClick={() => toggleSection('orgStructure')}
-                    className="w-full flex items-center justify-between px-2 py-1 text-[11px] font-black uppercase tracking-widest text-emerald-200/50 hover:text-emerald-100 transition-colors"
-                  >
-                    <span>ORG STRUCTURE</span>
-                    {openSections.orgStructure ? (
-                      <ChevronDown className="w-3.5 h-3.5" />
-                    ) : (
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    )}
-                  </button>
-                )}
-
-                {(collapsed || openSections.orgStructure) && (
-                  <div className="mt-2 space-y-2 sm:space-y-1">
-                    {/* Nominal Roll */}
-                    <button
-                      onClick={() => handleSelectTab('nominal')}
-                      className={`w-full flex items-center ${
-                        collapsed ? 'justify-center px-0 py-3' : 'justify-between px-3 py-2.5'
-                      } rounded-xl text-xs font-bold transition-all duration-150 ${
-                        activeTab === 'nominal'
-                          ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-900/50 scale-[1.02] border border-emerald-400/30'
-                          : 'bg-[#084228]/50 text-emerald-100 hover:bg-[#0b4a2d] hover:text-white border border-[#0d5635]/50'
-                      }`}
-                      title={`Nominal Roll (${airmenCount} Airmen)`}
-                    >
-                      <div className="flex items-center truncate">
-                        <Layers className={`w-4 h-4 shrink-0 ${activeTab === 'nominal' ? 'text-white' : 'text-emerald-300'}`} />
-                        {!collapsed && <span className="ml-3 truncate">Nominal Roll (Airmen)</span>}
-                      </div>
-                      {!collapsed && (
-                        <span className={`px-2 py-0.5 text-[10px] rounded-full font-black ${
-                          activeTab === 'nominal' ? 'bg-emerald-100 text-emerald-900' : 'bg-emerald-900/80 text-emerald-200'
-                        }`}>
-                          {airmenCount}
-                        </span>
-                      )}
-                    </button>
-
-                    {/* Flights & Sections */}
-                    <button
-                      onClick={() => handleSelectTab('flights')}
-                      className={`w-full flex items-center ${
-                        collapsed ? 'justify-center px-0 py-3' : 'justify-start px-3 py-3 sm:py-2.5'
-                      } rounded-xl text-xs font-bold transition-all duration-150 ${
-                        activeTab === 'flights'
-                          ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-900/50 scale-[1.02] border border-emerald-400/30'
-                          : 'bg-[#084228]/50 text-emerald-100 hover:bg-[#0b4a2d] hover:text-white border border-[#0d5635]/50'
-                      }`}
-                      title="Flight Structure (Avionics, Mechanics, GCS, Admin)"
-                    >
-                      <Building2 className={`w-4 h-4 shrink-0 ${activeTab === 'flights' ? 'text-white' : 'text-emerald-300'}`} />
-                      {!collapsed && <span className="ml-3 truncate">Flights & Sections</span>}
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* SECTION 3: REGISTERS */}
-              <div>
-                {!collapsed && (
-                  <button
-                    onClick={() => toggleSection('workforce')}
-                    className="w-full flex items-center justify-between px-2 py-1 text-[11px] font-black uppercase tracking-widest text-emerald-200/50 hover:text-emerald-100 transition-colors"
-                  >
-                    <span>REGISTERS</span>
-                    {openSections.workforce ? (
-                      <ChevronDown className="w-3.5 h-3.5" />
-                    ) : (
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    )}
-                  </button>
-                )}
-
-                {(collapsed || openSections.workforce) && (
-                  <div className="mt-2 space-y-2 sm:space-y-1">
-                    {/* Biodata Register */}
-                    <button
-                      onClick={() => handleSelectTab('biodata-register')}
-                      className={`w-full flex items-center ${
-                        collapsed ? 'justify-center px-0 py-3' : 'justify-start px-3 py-3 sm:py-2.5'
-                      } rounded-xl text-xs font-bold transition-all duration-150 ${
-                        activeTab === 'biodata-register'
-                          ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-900/50 scale-[1.02] border border-emerald-400/30'
-                          : 'bg-[#084228]/50 text-emerald-100 hover:bg-[#0b4a2d] hover:text-white border border-[#0d5635]/50'
-                      }`}
-                      title="Biodata Register"
-                    >
-                      <UserCircle className={`w-4 h-4 shrink-0 ${activeTab === 'biodata-register' ? 'text-white' : 'text-emerald-300'}`} />
-                      {!collapsed && <span className="ml-3 truncate">Biodata Register</span>}
-                    </button>
-
-                    {/* Leave Register */}
-                    <button
-                      onClick={() => handleSelectTab('leave-register')}
-                      className={`w-full flex items-center ${
-                        collapsed ? 'justify-center px-0 py-3' : 'justify-start px-3 py-3 sm:py-2.5'
-                      } rounded-xl text-xs font-bold transition-all duration-150 ${
-                        activeTab === 'leave-register'
-                          ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-900/50 scale-[1.02] border border-emerald-400/30'
-                          : 'bg-[#084228]/50 text-emerald-100 hover:bg-[#0b4a2d] hover:text-white border border-[#0d5635]/50'
-                      }`}
-                      title="Leave Register (Casual & Annual Leave)"
-                    >
-                      <Users className={`w-4 h-4 shrink-0 ${activeTab === 'leave-register' ? 'text-white' : 'text-emerald-300'}`} />
-                      {!collapsed && <span className="ml-3 truncate">Leave Register</span>}
-                    </button>
-
-                    {/* TDY Register */}
-                    <button
-                      onClick={() => handleSelectTab('tdy-register')}
-                      className={`w-full flex items-center ${
-                        collapsed ? 'justify-center px-0 py-3' : 'justify-start px-3 py-3 sm:py-2.5'
-                      } rounded-xl text-xs font-bold transition-all duration-150 ${
-                        activeTab === 'tdy-register'
-                          ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-900/50 scale-[1.02] border border-emerald-400/30'
-                          : 'bg-[#084228]/50 text-emerald-100 hover:bg-[#0b4a2d] hover:text-white border border-[#0d5635]/50'
-                      }`}
-                      title="TDY Register (Temporary Duty Outstation)"
-                    >
-                      <FileText className={`w-4 h-4 shrink-0 ${activeTab === 'tdy-register' ? 'text-white' : 'text-emerald-300'}`} />
-                      {!collapsed && <span className="ml-3 truncate">TDY Register</span>}
-                    </button>
-                    {/* Deployment Register */}
-                    <button
-                      onClick={() => handleSelectTab('attachment-register')}
-                      className={`w-full flex items-center ${
-                        collapsed ? 'justify-center px-0 py-3' : 'justify-start px-3 py-3 sm:py-2.5'
-                      } rounded-xl text-xs font-bold transition-all duration-150 ${
-                        activeTab === 'attachment-register'
-                          ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-900/50 scale-[1.02] border border-emerald-400/30'
-                          : 'bg-[#084228]/50 text-emerald-100 hover:bg-[#0b4a2d] hover:text-white border border-[#0d5635]/50'
-                      }`}
-                      title="Deployment Register (Bake & Bite, Canteen, Custom)"
-                    >
-                      <FileText className={`w-4 h-4 shrink-0 ${activeTab === 'attachment-register' ? 'text-white' : 'text-emerald-300'}`} />
-                      {!collapsed && <span className="ml-3 truncate">Deployment Register</span>}
-                    </button>
-{/* Monthly Duty Register */}
-                        <button
-                          onClick={() => handleSelectTab('register')}
-                          className={`w-full flex items-center ${
-                            collapsed ? 'justify-center px-0 py-3' : 'justify-between px-3 py-2.5'
-                          } rounded-xl text-xs font-bold transition-all duration-150 ${
-                            activeTab === 'register'
-                              ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-900/50 scale-[1.02] border border-emerald-400/30'
-                              : 'bg-[#084228]/50 text-emerald-100 hover:bg-[#0b4a2d] hover:text-white border border-[#0d5635]/50'
-                          }`}
-                          title="Duty Register"
-                        >
-                          <div className="flex items-center truncate">
-                            <Calendar className={`w-4 h-4 shrink-0 ${activeTab === 'register' ? 'text-white' : 'text-emerald-300'}`} />
-                            {!collapsed && <span className="ml-3 truncate">Duty Register</span>}
-                          </div>
-                          {conflictCount > 0 && (
-                            <span className="w-5 h-5 bg-amber-500 text-slate-950 text-[10px] font-black rounded-full flex items-center justify-center shadow-xs animate-pulse">
-                              {conflictCount}
-                            </span>
-                          )}
-                        </button>
-
-                        {/* Duty Ratio (BAF 155 Scale) */}
-                        <button
-                          onClick={() => handleSelectTab('duty-ratio')}
-                          className={`w-full flex items-center ${
-                            collapsed ? 'justify-center px-0 py-3' : 'justify-start px-3 py-3 sm:py-2.5'
-                          } rounded-xl text-xs font-bold transition-all duration-150 ${
-                            activeTab === 'duty-ratio'
-                              ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-900/50 scale-[1.02] border border-emerald-400/30'
-                              : 'bg-[#084228]/50 text-emerald-100 hover:bg-[#0b4a2d] hover:text-white border border-[#0d5635]/50'
-                          }`}
-                          title="Duty Ratio Matrix"
-                        >
-                          <Sliders className={`w-4 h-4 shrink-0 ${activeTab === 'duty-ratio' ? 'text-white' : 'text-emerald-300'}`} />
-                          {!collapsed && <span className="ml-3 truncate">Duty Ratio Matrix</span>}
-                        </button>
-
-                        
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-
-          {/* SECTION 4: ROSTER (Visible to all, some items restricted) */}
+          {/* SECTION 2: ORG STRUCTURE */}
           <div>
-            {!collapsed && (
-                  <button
-                    onClick={() => toggleSection('schedule')}
-                    className="w-full flex items-center justify-between px-2 py-1 text-[11px] font-black uppercase tracking-widest text-emerald-200/50 hover:text-emerald-100 transition-colors"
-                  >
-                    <span>ROSTER</span>
-                    {openSections.schedule ? (
-                      <ChevronDown className="w-3.5 h-3.5" />
-                    ) : (
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    )}
-                  </button>
+            {!isCollapsed && (
+              <button
+                onClick={() => toggleSection('orgStructure')}
+                className="w-full flex items-center justify-between px-2 py-1 text-[11px] font-black uppercase tracking-widest text-emerald-200/50 hover:text-emerald-100 transition-colors cursor-pointer"
+              >
+                <span>ORG STRUCTURE</span>
+                {openSections.orgStructure ? (
+                  <ChevronDown className="w-3.5 h-3.5" />
+                ) : (
+                  <ChevronRight className="w-3.5 h-3.5" />
+                )}
+              </button>
+            )}
+
+            {(isCollapsed || openSections.orgStructure) && (
+              <div className="mt-2 space-y-2 sm:space-y-1">
+                {renderNavButton(
+                  'nominal',
+                  <Layers className="w-4 h-4 shrink-0" />,
+                  'Nominal Roll (Airmen)',
+                  `Nominal Roll (${airmenCount} Airmen)`,
+                  <span className={`px-2 py-0.5 text-[10px] rounded-full font-black ${
+                    activeTab === 'nominal' ? 'bg-emerald-100 text-emerald-900' : 'bg-emerald-900/80 text-emerald-200'
+                  }`}>
+                    {airmenCount}
+                  </span>,
+                  isMobileDrawer
                 )}
 
-                {(collapsed || openSections.schedule) && (
-                  <div className="mt-2 space-y-2 sm:space-y-1">
-                    {/* IDA Center Duty (Visible to all) */}
-                    <button
-                      onClick={() => handleSelectTab('ida-center')}
-                      className={`w-full flex items-center ${
-                        collapsed ? 'justify-center px-0 py-3' : 'justify-start px-3 py-3 sm:py-2.5'
-                      } rounded-xl text-xs font-bold transition-all duration-150 ${
-                        activeTab === 'ida-center'
-                          ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-900/50 scale-[1.02] border border-emerald-400/30'
-                          : 'bg-[#084228]/50 text-emerald-100 hover:bg-[#0b4a2d] hover:text-white border border-[#0d5635]/50'
-                      }`}
-                      title="IDA Center Duty (Standby & Shifts)"
-                    >
-                      <Shield className={`w-4 h-4 shrink-0 ${activeTab === 'ida-center' ? 'text-white' : 'text-emerald-300'}`} />
-                      {!collapsed && <span className="ml-3 truncate">IDA Center Duty</span>}
-                    </button>
-
-                    {/* Duty Roster Period (Visible to all) */}
-                    <button
-                      onClick={() => handleSelectTab('duty-roster')}
-                      className={`w-full flex items-center ${
-                        collapsed ? 'justify-center px-0 py-3' : 'justify-start px-3 py-3 sm:py-2.5'
-                      } rounded-xl text-xs font-bold transition-all duration-150 ${
-                        activeTab === 'duty-roster'
-                          ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-900/50 scale-[1.02] border border-emerald-400/30'
-                          : 'bg-[#084228]/50 text-emerald-100 hover:bg-[#0b4a2d] hover:text-white border border-[#0d5635]/50'
-                      }`}
-                      title="Duty Roster Period & Export"
-                    >
-                      <FileText className={`w-4 h-4 shrink-0 ${activeTab === 'duty-roster' ? 'text-white' : 'text-emerald-300'}`} />
-                      {!collapsed && <span className="ml-3 truncate">Duty Roster</span>}
-                    </button>
-
-                    {/* Admin only items */}
-                    {true && (
-                      <></>
-                    )}
-                  </div>
+                {renderNavButton(
+                  'flights',
+                  <Building2 className="w-4 h-4 shrink-0" />,
+                  'Flights & Sections',
+                  'Flight Structure (Avionics, Mechanics, GCS, Admin)',
+                  undefined,
+                  isMobileDrawer
                 )}
               </div>
+            )}
+          </div>
+
+          {/* SECTION 3: REGISTERS */}
+          <div>
+            {!isCollapsed && (
+              <button
+                onClick={() => toggleSection('workforce')}
+                className="w-full flex items-center justify-between px-2 py-1 text-[11px] font-black uppercase tracking-widest text-emerald-200/50 hover:text-emerald-100 transition-colors cursor-pointer"
+              >
+                <span>REGISTERS</span>
+                {openSections.workforce ? (
+                  <ChevronDown className="w-3.5 h-3.5" />
+                ) : (
+                  <ChevronRight className="w-3.5 h-3.5" />
+                )}
+              </button>
+            )}
+
+            {(isCollapsed || openSections.workforce) && (
+              <div className="mt-2 space-y-2 sm:space-y-1">
+                {renderNavButton('biodata-register', <UserCircle className="w-4 h-4 shrink-0" />, 'Biodata Register', 'Biodata Register', undefined, isMobileDrawer)}
+                {renderNavButton('leave-register', <Users className="w-4 h-4 shrink-0" />, 'Leave Register', 'Leave Register (Casual & Annual Leave)', undefined, isMobileDrawer)}
+                {renderNavButton('tdy-register', <FileText className="w-4 h-4 shrink-0" />, 'TDY Register', 'TDY Register (Temporary Duty Outstation)', undefined, isMobileDrawer)}
+                {renderNavButton('attachment-register', <FileText className="w-4 h-4 shrink-0" />, 'Deployment Register', 'Deployment Register (Bake & Bite, Canteen, Custom)', undefined, isMobileDrawer)}
+                {renderNavButton(
+                  'register',
+                  <Calendar className="w-4 h-4 shrink-0" />,
+                  'Duty Register',
+                  'Duty Register',
+                  conflictCount > 0 ? (
+                    <span className="w-5 h-5 bg-amber-500 text-slate-950 text-[10px] font-black rounded-full flex items-center justify-center shadow-xs animate-pulse">
+                      {conflictCount}
+                    </span>
+                  ) : undefined,
+                  isMobileDrawer
+                )}
+                {renderNavButton('duty-ratio', <Sliders className="w-4 h-4 shrink-0" />, 'Duty Ratio Matrix', 'Duty Ratio Matrix', undefined, isMobileDrawer)}
+              </div>
+            )}
+          </div>
+
+          {/* SECTION 4: ROSTER */}
+          <div>
+            {!isCollapsed && (
+              <button
+                onClick={() => toggleSection('schedule')}
+                className="w-full flex items-center justify-between px-2 py-1 text-[11px] font-black uppercase tracking-widest text-emerald-200/50 hover:text-emerald-100 transition-colors cursor-pointer"
+              >
+                <span>ROSTER</span>
+                {openSections.schedule ? (
+                  <ChevronDown className="w-3.5 h-3.5" />
+                ) : (
+                  <ChevronRight className="w-3.5 h-3.5" />
+                )}
+              </button>
+            )}
+
+            {(isCollapsed || openSections.schedule) && (
+              <div className="mt-2 space-y-2 sm:space-y-1">
+                {renderNavButton('ida-center', <Shield className="w-4 h-4 shrink-0" />, 'IDA Center Duty', 'IDA Center Duty (Standby & Shifts)', undefined, isMobileDrawer)}
+                {renderNavButton('night-count-state', <Moon className="w-4 h-4 shrink-0" />, 'Night Count State', 'Night Count State & Quotas', undefined, isMobileDrawer)}
+                {renderNavButton('duty-roster', <FileText className="w-4 h-4 shrink-0" />, 'Duty Roster', 'Duty Roster Period & Export', undefined, isMobileDrawer)}
+              </div>
+            )}
+          </div>
+
           {/* SECTION 5: ANALYSIS & CONFLICTS */}
           <div>
-            {!collapsed && (
+            {!isCollapsed && (
               <div className="w-full flex items-center justify-between px-2 py-1 text-[11px] font-black uppercase tracking-widest text-emerald-200/50 mt-4">
                 <span>ANALYSIS</span>
               </div>
             )}
             <div className="mt-2 space-y-2 sm:space-y-1">
-              {/* Duty Analytics & Working Hours */}
-                        <button
-                          onClick={() => handleSelectTab('analytics')}
-                          className={`w-full flex items-center ${
-                            collapsed ? 'justify-center px-0 py-3' : 'justify-start px-3 py-3 sm:py-2.5'
-                          } rounded-xl text-xs font-bold transition-all duration-150 ${
-                            activeTab === 'analytics'
-                              ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-900/50 scale-[1.02] border border-emerald-400/30'
-                              : 'bg-[#084228]/50 text-emerald-100 hover:bg-[#0b4a2d] hover:text-white border border-[#0d5635]/50'
-                          }`}
-                          title="Duty Analytics & Load Balance"
-                        >
-                          <BarChart3 className={`w-4 h-4 shrink-0 ${activeTab === 'analytics' ? 'text-white' : 'text-emerald-300'}`} />
-                          {!collapsed && <span className="ml-3 truncate">Duty Analysis</span>}
-                        </button>
-
-                        
-              {/* Duty Conflicts */}
-                        <button
-                          onClick={() => handleSelectTab('conflicts')}
-                          className={`w-full flex items-center ${
-                            collapsed ? 'justify-center px-0 py-3' : 'justify-between px-3 py-2.5'
-                          } rounded-xl text-xs font-bold transition-all duration-150 ${
-                            activeTab === 'conflicts'
-                              ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-900/50 scale-[1.02] border border-emerald-400/30'
-                              : 'bg-[#084228]/50 text-emerald-100 hover:bg-[#0b4a2d] hover:text-white border border-[#0d5635]/50'
-                          }`}
-                          title="Conflict Monitor & Rules"
-                        >
-                          <div className="flex items-center truncate">
-                            <ShieldAlert className={`w-4 h-4 shrink-0 ${activeTab === 'conflicts' ? 'text-white' : 'text-emerald-300'}`} />
-                            {!collapsed && <span className="ml-3 truncate">Conflict Monitor</span>}
-                          </div>
-                          {conflictCount > 0 && !collapsed && (
-                            <span className="px-1.5 py-0.5 text-[9px] bg-red-600 text-white rounded-md font-bold">
-                              {conflictCount} Alert
-                            </span>
-                          )}
-                        </button>
+              {renderNavButton('analytics', <BarChart3 className="w-4 h-4 shrink-0" />, 'Duty Analysis', 'Duty Analytics & Load Balance', undefined, isMobileDrawer)}
+              {renderNavButton(
+                'conflicts',
+                <ShieldAlert className="w-4 h-4 shrink-0" />,
+                'Conflict Monitor',
+                'Conflict Monitor & Rules',
+                conflictCount > 0 && !isCollapsed ? (
+                  <span className="px-1.5 py-0.5 text-[9px] bg-red-600 text-white rounded-md font-bold">
+                    {conflictCount} Alert
+                  </span>
+                ) : undefined,
+                isMobileDrawer
+              )}
             </div>
           </div>
         </div>
 
-        {/* User Session Profile & Admin Mode Toggle */}
-
-        {userSession && !collapsed && (
+        {/* User Session Profile */}
+        {userSession && !isCollapsed && (
           <div className="px-3 py-2.5 bg-[#052818] border-t border-[#0d4f31] shrink-0 space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2 truncate">
@@ -550,10 +389,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </button>
               )}
             </div>
-
-
-
-            
           </div>
         )}
 
@@ -564,19 +399,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
               type="button"
               onClick={onOpenSettings}
               className={`w-full flex items-center ${
-                collapsed ? 'justify-center p-2' : 'justify-start px-3 py-2 space-x-2.5'
+                isCollapsed ? 'justify-center p-2' : 'justify-start px-3 py-2 space-x-2.5'
               } rounded-xl text-emerald-100/90 hover:text-white hover:bg-[#0c4e2f] text-xs font-bold transition-all cursor-pointer`}
               title="Settings"
             >
               <Settings className="w-4 h-4 text-emerald-300 shrink-0" />
-              {!collapsed && <span>Settings</span>}
+              {!isCollapsed && <span>Settings</span>}
             </button>
           </div>
         )}
 
         {/* Footer Role & Unit Info */}
         <div className="px-3 py-2 bg-[#042013] border-t border-[#093c24] shrink-0">
-          {!collapsed ? (
+          {!isCollapsed ? (
             <div className="flex items-center justify-between text-[11px] text-emerald-300/60">
               <span className="font-semibold truncate">155 UASU BAF • BAF BASE ZHR</span>
               <span className="text-[10px] text-emerald-400/50 font-mono">v2.5</span>
@@ -587,7 +422,47 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           )}
         </div>
+      </div>
+    );
+  };
+
+  return (
+    <>
+      {/* Desktop Sidebar (Permanent left sidebar for large screens) */}
+      <aside
+        className={`fixed top-0 bottom-0 left-0 z-40 hidden lg:flex flex-col bg-[#083822] text-white border-r border-[#0d4f31] transition-all duration-300 select-none print:hidden ${
+          collapsed ? 'w-20' : 'w-64'
+        }`}
+      >
+        {renderSidebarContent(false)}
       </aside>
+
+      {/* Mobile Drawer (Visible, slow and smooth slide-in from left when hamburger clicked) */}
+      <AnimatePresence>
+        {mobileOpen && (
+          <motion.div
+            key="mobile-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.4, ease: "easeInOut" }}
+            className="fixed inset-0 bg-black/40 backdrop-blur-[2px] z-50 lg:hidden"
+            onClick={() => setMobileOpen(false)}
+          />
+        )}
+        {mobileOpen && (
+          <motion.aside
+            key="mobile-drawer"
+            initial={{ x: '-100%' }}
+            animate={{ x: 0 }}
+            exit={{ x: '-100%' }}
+            transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
+            className="fixed top-0 bottom-0 left-0 z-[60] flex flex-col w-72 max-w-[85vw] bg-[#083822] text-white border-r border-[#0d4f31] shadow-[12px_0_40px_rgba(0,0,0,0.65)] select-none lg:hidden"
+          >
+            {renderSidebarContent(true)}
+          </motion.aside>
+        )}
+      </AnimatePresence>
     </>
   );
 };
