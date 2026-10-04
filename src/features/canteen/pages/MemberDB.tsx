@@ -41,7 +41,8 @@ import {
   Sparkles,
   ShieldCheck,
   ArrowRight,
-  AlertCircle
+  AlertCircle,
+  Sliders
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, fetchDirectImageUrl, getCanteenConfig } from '../utils/canteenSettings';
@@ -50,9 +51,12 @@ import { formatCanteenDate } from '../utils/dateUtils';
 import { SaveButton } from '../components/SaveButton';
 import { BulkImportInitialBillsModal } from '../components/BulkImportInitialBillsModal';
 import { SetInitialBillModal } from '../components/SetInitialBillModal';
+import { MonthBillSplitModal } from '../components/MonthBillSplitModal';
+import { BatchMonthBillSplitModal } from '../components/BatchMonthBillSplitModal';
 import { PrintableCanteenBillModal } from '../components/PrintableCanteenBillModal';
 import { restoreRawStockForSaleCancellation } from '../utils/recipeManager';
 import { pushKeyToCloud, pullKeyFromCloud, recordDeletedTxId } from '../utils/canteenCloudSync';
+import { syncImportHistoryToTransactions } from '../utils/importHistoryTxs';
 import {
   exportCanteenBillToExcel,
   formatRankBn,
@@ -63,10 +67,20 @@ import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
 
 export type BillCategory = 'ALL' | 'CANTEEN' | 'UNIT_FUND' | 'OTHERS';
 
-// Extract YYYY-MM from date string with robust support for "DD Mon YY" (e.g. "28 Sep 26"), "YYYY-MM-DD", etc.
+// Extract YYYY-MM from date string with robust support for "DD Mon YY", "DD-Mon-YY", Bengali, "YYYY-MM", etc.
 export const getTxMonthKey = (dateStr: any): string => {
   if (!dateStr) return '';
-  const str = String(dateStr).trim();
+  if (typeof dateStr === 'object' && dateStr.monthKey) return String(dateStr.monthKey).trim();
+
+  let str = String(dateStr).trim();
+  if (!str || str === '-') return '';
+
+  // 0. Bengali numerals conversion
+  const bnDigits: Record<string, string> = {
+    '০': '0', '১': '1', '২': '2', '৩': '3', '৪': '4',
+    '৫': '5', '৬': '6', '৭': '7', '৮': '8', '৯': '9'
+  };
+  str = str.replace(/[০-৯]/g, ch => bnDigits[ch] || ch);
 
   // 1. Direct YYYY-MM prefix (e.g. "2026-10", "2026-10-28", "2026/10/28")
   const ymdMatch = str.match(/^(\d{4})[-\/](\d{1,2})/);
@@ -74,12 +88,13 @@ export const getTxMonthKey = (dateStr: any): string => {
     return `${ymdMatch[1]}-${ymdMatch[2].padStart(2, '0')}`;
   }
 
-  // 2. Format "DD Mon YY" or "DD Mon YYYY" (e.g. "28 Sep 26", "28 Oct 2026")
+  // 2. Format "DD Mon YY" or "DD-Mon-YY" or "DD Mon YYYY" (e.g. "28 Sep 26", "28-Aug-26", "28 Oct 2026")
   const MONTH_MAP: Record<string, string> = {
     jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
     jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12'
   };
-  const dmyAlphaMatch = str.match(/^(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{2,4})/);
+
+  const dmyAlphaMatch = str.match(/^(\d{1,2})[\s\-\/\.]+([A-Za-z]{3,9})[\s\-\/\.]+(\d{2,4})/);
   if (dmyAlphaMatch) {
     const monStr = dmyAlphaMatch[2].slice(0, 3).toLowerCase();
     const mon = MONTH_MAP[monStr];
@@ -87,6 +102,20 @@ export const getTxMonthKey = (dateStr: any): string => {
     if (yr < 100) yr += 2000;
     if (mon) {
       return `${yr}-${mon}`;
+    }
+  }
+
+  // 2b. Bengali month string (e.g. "আগস্ট ২০২৬", "সেপ্টেম্বর ২০২৬", "২৮ আগস্ট ২৬")
+  const BN_MONTH_MAP: Record<string, string> = {
+    'জানু': '01', 'ফেব্রু': '02', 'মার্চ': '03', 'এপ্রি': '04', 'মে': '05', 'জুন': '06',
+    'জুলা': '07', 'আগস্ট': '08', 'সেপ্টে': '09', 'অক্টো': '10', 'নভে': '11', 'ডিসে': '12'
+  };
+  for (const [bnPrefix, mNum] of Object.entries(BN_MONTH_MAP)) {
+    if (str.includes(bnPrefix)) {
+      const yrMatch = str.match(/(\d{4}|\d{2})/);
+      let yr = yrMatch ? parseInt(yrMatch[1], 10) : new Date().getFullYear();
+      if (yr < 100) yr += 2000;
+      return `${yr}-${mNum}`;
     }
   }
 
@@ -99,7 +128,13 @@ export const getTxMonthKey = (dateStr: any): string => {
     return `${yr}-${mon}`;
   }
 
-  // 4. Timestamp or ISO date fallback
+  // 4. Format MM-YYYY or MM/YYYY (e.g. "09/2026", "08-2026")
+  const myNumMatch = str.match(/^(\d{1,2})[-\/](\d{4})/);
+  if (myNumMatch) {
+    return `${myNumMatch[2]}-${myNumMatch[1].padStart(2, '0')}`;
+  }
+
+  // 5. Timestamp or ISO date fallback
   try {
     const d = new Date(str);
     if (!isNaN(d.getTime())) {
@@ -455,6 +490,11 @@ export const MemberDB: React.FC = () => {
   const [importModalInitialTab, setImportModalInitialTab] = useState<'FILE' | 'PASTE' | 'HISTORY'>('FILE');
   const [initialBillMember, setInitialBillMember] = useState<any | null>(null);
 
+  // Split Month Bill Modal state (Aug & Sep allocation)
+  const [splitBillMember, setSplitBillMember] = useState<any | null>(null);
+  const [isBatchSplitModalOpen, setIsBatchSplitModalOpen] = useState(false);
+  const [profileMonthFilter, setProfileMonthFilter] = useState<string>('ALL');
+
   // Statement Modal state
   const [statementMember, setStatementMember] = useState<any | null>(null);
   const [statementTx, setStatementTx] = useState<any[]>([]);
@@ -614,8 +654,97 @@ export const MemberDB: React.FC = () => {
       });
     });
 
+    if (rows.length === 0 && profileMember) {
+      const memDue = Number(profileMember.Due ?? profileMember.due ?? profileMember.baki ?? 0);
+      if (memDue > 0) {
+        rows.push({
+          rowId: `init_due_fallback_${profileMember.airman_id || profileMember['BD No'] || 'mem'}`,
+          ser: 1,
+          tx: { id: 'fallback-init', type: 'INITIAL_BILL', amount: memDue, monthKey: '2026-09' },
+          txId: 'fallback-init',
+          date: '28 Sep 26',
+          description: 'বকেয়া বিল / প্রারম্ভিক হিসাব (Initial / Imported Due Bill)',
+          qty: '-',
+          amount: memDue,
+          type: 'INITIAL_BILL'
+        });
+      }
+    }
+
     return rows;
-  }, [profileTx, menuCatalog]);
+  }, [profileTx, menuCatalog, profileMember]);
+
+  // Available months present in this member's profile transactions
+  const profileAvailableMonths = useMemo(() => {
+    const set = new Set<string>();
+    profileTx.forEach((tx) => {
+      const m = tx?.monthKey || getTxMonthKey(tx?.date);
+      if (m && m !== 'ALL') set.add(m);
+    });
+    // Ensure August and September are visible if relevant
+    if (!set.has('2026-08') && profileTx.some((t: any) => String(t.items || '').includes('আগস্ট') || (t.date && t.date.includes('Aug')))) {
+      set.add('2026-08');
+    }
+    if (!set.has('2026-09') && profileTx.some((t: any) => String(t.items || '').includes('সেপ্টেম্বর') || (t.date && t.date.includes('Sep')))) {
+      set.add('2026-09');
+    }
+    return Array.from(set).sort().reverse();
+  }, [profileTx]);
+
+  // Filtered rows for the selected month in Member Profile
+  const filteredProfileHistoryRows = useMemo(() => {
+    let rows = displayHistoryRows;
+    if (profileMonthFilter !== 'ALL') {
+      rows = rows.filter((r) => {
+        const m = r.tx?.monthKey || getTxMonthKey(r.date);
+        if (m === profileMonthFilter) return true;
+        if (profileMonthFilter === '2026-08' && (String(r.description || '').includes('আগস্ট') || r.date.includes('Aug'))) return true;
+        if (profileMonthFilter === '2026-09' && (String(r.description || '').includes('সেপ্টেম্বর') || r.date.includes('Sep'))) return true;
+        return false;
+      });
+    }
+    // Re-index continuous serials: #1, #2, #3...
+    return rows.map((r, idx) => ({ ...r, ser: idx + 1 }));
+  }, [displayHistoryRows, profileMonthFilter]);
+
+  // Profile Month-wise Sales, Paid & Due KPI summary
+  const profileMonthSummary = useMemo(() => {
+    if (!profileMember) return { totalCharges: 0, totalPayments: 0, netDue: 0 };
+    
+    const txsForMonth = profileMonthFilter === 'ALL'
+      ? profileTx
+      : profileTx.filter((t: any) => {
+          const m = t?.monthKey || getTxMonthKey(t?.date);
+          if (m === profileMonthFilter) return true;
+          if (profileMonthFilter === '2026-08' && (String(t?.items || '').includes('আগস্ট') || (t.date && t.date.includes('Aug')))) return true;
+          if (profileMonthFilter === '2026-09' && (String(t?.items || '').includes('সেপ্টেম্বর') || (t.date && t.date.includes('Sep')))) return true;
+          return false;
+        });
+
+    const totalCharges = txsForMonth
+      .filter((t: any) => t.type !== 'BILL PAYMENT')
+      .reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0);
+
+    const totalPayments = txsForMonth
+      .filter((t: any) => t.type === 'BILL PAYMENT')
+      .reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0);
+
+    let netDue = 0;
+    if (profileMonthFilter === 'ALL') {
+      netDue = Number(profileMember.Due ?? profileMember.due ?? profileMember.baki ?? 0);
+      if (netDue === 0 && (totalCharges - totalPayments) > 0) {
+        netDue = Math.max(0, totalCharges - totalPayments);
+      }
+    } else {
+      netDue = Math.max(0, totalCharges - totalPayments);
+    }
+
+    return {
+      totalCharges: Math.round(totalCharges * 100) / 100,
+      totalPayments: Math.round(totalPayments * 100) / 100,
+      netDue: Math.round(netDue * 100) / 100
+    };
+  }, [profileMember, profileTx, profileMonthFilter]);
 
   // Pay Bill Modal state
   const [payBillMember, setPayBillMember] = useState<any | null>(null);
@@ -750,11 +879,18 @@ export const MemberDB: React.FC = () => {
     let isMounted = true;
     (async () => {
       try {
+        // 1. Automatically reconcile transactions from import history (Aug, Sep, etc.)
+        const reconciled = await syncImportHistoryToTransactions();
+        if (isMounted && Array.isArray(reconciled) && reconciled.length > 0) {
+          setAllTxs(reconciled);
+        }
+
+        // 2. Sync from cloud
         const cloudTxs = await pullKeyFromCloud('canteen_txs');
         if (isMounted && Array.isArray(cloudTxs) && cloudTxs.length > 0) {
           const localTxs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
           const txMap = new Map();
-          [...localTxs, ...cloudTxs].forEach((t) => {
+          [...localTxs, ...cloudTxs, ...(reconciled || [])].forEach((t) => {
             if (t && t.id) txMap.set(String(t.id), t);
           });
           const merged = Array.from(txMap.values());
@@ -776,10 +912,12 @@ export const MemberDB: React.FC = () => {
       } catch {}
     };
     window.addEventListener('canteen_txs_updated', handleTxsSync);
+    window.addEventListener('canteen_bill_import_history_updated', handleTxsSync);
     window.addEventListener('canteen_state_updated', handleTxsSync);
     window.addEventListener('storage', handleTxsSync);
     return () => {
       window.removeEventListener('canteen_txs_updated', handleTxsSync);
+      window.removeEventListener('canteen_bill_import_history_updated', handleTxsSync);
       window.removeEventListener('canteen_state_updated', handleTxsSync);
       window.removeEventListener('storage', handleTxsSync);
     };
@@ -828,7 +966,7 @@ export const MemberDB: React.FC = () => {
     }
 
     allTxs.forEach((tx) => {
-      const m = getTxMonthKey(tx.date);
+      const m = tx?.monthKey || getTxMonthKey(tx?.date);
       if (m) set.add(m);
     });
 
@@ -874,6 +1012,7 @@ export const MemberDB: React.FC = () => {
     if (!member || !Array.isArray(txs)) return [];
     const mAirman = String(member.airman_id || member.airmanId || '').trim().toLowerCase();
     const mBdClean = String(member['BD No'] || member.bdNo || member.bd_no || member.airman_id || '').replace(/\D/g, '');
+    const mBdCleanNoZero = mBdClean.replace(/^0+/, '');
     const mSurname = String(member['Surname'] || member.surname || '').trim().toLowerCase();
     const mRank = String(member['Rank'] || member.rank || '').trim().toLowerCase();
 
@@ -883,7 +1022,8 @@ export const MemberDB: React.FC = () => {
       if (mAirman && txAirman && mAirman === txAirman) return true;
 
       const txBdClean = String(tx.bdNo || tx['BD No'] || tx.bd_no || tx.airman_id || '').replace(/\D/g, '');
-      if (mBdClean && txBdClean && mBdClean === txBdClean) return true;
+      const txBdCleanNoZero = txBdClean.replace(/^0+/, '');
+      if (mBdClean && txBdClean && (mBdClean === txBdClean || (mBdCleanNoZero && mBdCleanNoZero === txBdCleanNoZero))) return true;
 
       if (mSurname && tx.memberName) {
         const txName = String(tx.memberName).toLowerCase();
@@ -915,7 +1055,7 @@ export const MemberDB: React.FC = () => {
     const matchingTxs = memberTxs.filter((tx) => {
       const cat = getTxCategory(tx);
       const catMatch = category === 'ALL' || cat === category;
-      const txMonth = getTxMonthKey(tx.date);
+      const txMonth = tx?.monthKey || getTxMonthKey(tx.date);
       const monthMatch = month === 'ALL' || txMonth === month;
       return catMatch && monthMatch;
     });
@@ -960,7 +1100,7 @@ export const MemberDB: React.FC = () => {
       .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
 
     const chargesBefore = categoryTxs
-      .filter((tx) => tx.type !== 'BILL PAYMENT' && getTxMonthKey(tx.date) < month)
+      .filter((tx) => tx.type !== 'BILL PAYMENT' && (tx?.monthKey || getTxMonthKey(tx.date)) < month)
       .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
 
     const paymentsAvailableForThisMonth = Math.max(0, allPaymentsTotal - chargesBefore);
@@ -1064,6 +1204,7 @@ export const MemberDB: React.FC = () => {
     };
     setProfileMember(fullMember);
     setIsEditingProfile(false);
+    setProfileMonthFilter('ALL');
     setEditMemberData({
       bdNo: member['BD No'] || '',
       rank: member['Rank'] || '',
@@ -2115,7 +2256,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
 
   // Statement rows calculation for Statement modal
   const filteredStatementTxs = statementTx.filter((tx) => {
-    const txMonth = getTxMonthKey(tx.date);
+    const txMonth = tx?.monthKey || getTxMonthKey(tx.date);
     return statementMonth === 'ALL' || txMonth === statementMonth;
   });
 
@@ -2143,7 +2284,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
     previousDue = Math.max(0, Math.round((memberTotalDue - currentMonthCharges) * 100) / 100);
   } else {
     const prevDueTxs = statementTx.filter(tx => {
-      const txMonth = getTxMonthKey(tx.date);
+      const txMonth = tx?.monthKey || getTxMonthKey(tx.date);
       const isBefore = statementMonth !== 'ALL' && txMonth && txMonth < statementMonth;
       return isBefore && (String(tx.items || '').includes('বকেয়া বিল') || tx.type === 'INITIAL_BILL');
     });
@@ -2441,6 +2582,16 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
           >
             <FileSpreadsheet className="w-4 h-4" />
             <span>IMPORT BILLS</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsBatchSplitModalOpen(true)}
+            className="px-3.5 py-2.5 bg-gradient-to-r from-indigo-600 via-indigo-500 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white rounded-2xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 shadow-md shadow-indigo-500/25 border-t border-indigo-300/40 active:translate-y-0.5 transition-all cursor-pointer"
+            title="সকল সদস্যের আগস্ট ও সেপ্টেম্বর বিল বণ্টন ও সমন্বয় করুন"
+          >
+            <Sliders className="w-4 h-4" />
+            <span>AUG & SEP SPLIT</span>
           </button>
 
           <button
@@ -3078,35 +3229,129 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Contact</p>
                       <p className="text-sm font-bold text-white font-mono">{profileMember['Contact'] || 'Not Provided'}</p>
                     </div>
-                    <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Due</p>
-                      <p className={`text-xl font-black font-mono ${(profileMember.Due ?? profileMember.baki) === 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
-                        ৳{profileMember.Due ?? profileMember.baki ?? 0}
-                      </p>
+                    <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700 flex flex-col justify-between">
+                      <div>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Due</p>
+                        <p className={`text-xl font-black font-mono ${(profileMember.Due ?? profileMember.baki) === 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
+                          ৳{profileMember.Due ?? profileMember.baki ?? 0}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSplitBillMember(profileMember)}
+                        className="mt-2 px-2.5 py-1 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white rounded-lg border border-indigo-500/30 text-[10px] font-bold transition-all flex items-center justify-center gap-1 active:scale-95 cursor-pointer"
+                        title="আগস্ট ও সেপ্টেম্বর বিল বণ্টন / সমন্বয় করুন"
+                      >
+                        <Sliders className="w-3 h-3" />
+                        <span>মাসভিত্তিক বিল বণ্টন</span>
+                      </button>
                     </div>
                   </div>
 
                   {/* Transaction History Section */}
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center space-x-2">
-                        <History className="w-3.5 h-3.5 text-indigo-400" />
-                        <span>Transaction History</span>
-                      </h3>
-                      <span className="text-[10px] font-bold text-slate-400 font-mono">
-                        Total {displayHistoryRows.length} records
-                      </span>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                      <div className="flex items-center space-x-2">
+                        <History className="w-4 h-4 text-indigo-400" />
+                        <h3 className="text-xs font-black text-slate-300 uppercase tracking-widest">
+                          Transaction History
+                        </h3>
+                        <span className="text-[10px] font-bold text-slate-400 font-mono px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700">
+                          {filteredProfileHistoryRows.length} records
+                        </span>
+                      </div>
+
+                      {/* Month Filter Tabs inside Profile Modal */}
+                      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
+                        <button
+                          type="button"
+                          onClick={() => setProfileMonthFilter('ALL')}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer whitespace-nowrap ${
+                            profileMonthFilter === 'ALL'
+                              ? 'bg-indigo-600 text-white shadow-sm'
+                              : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-750'
+                          }`}
+                        >
+                          সকল মাস (All)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setProfileMonthFilter('2026-08')}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer whitespace-nowrap ${
+                            profileMonthFilter === '2026-08'
+                              ? 'bg-blue-600 text-white shadow-sm'
+                              : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-750'
+                          }`}
+                        >
+                          আগস্ট ২০২৬
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setProfileMonthFilter('2026-09')}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer whitespace-nowrap ${
+                            profileMonthFilter === '2026-09'
+                              ? 'bg-emerald-600 text-white shadow-sm'
+                              : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-750'
+                          }`}
+                        >
+                          সেপ্টেম্বর ২০২৬
+                        </button>
+                        {profileAvailableMonths.filter(m => m !== '2026-08' && m !== '2026-09').map(m => (
+                          <button
+                            key={m}
+                            type="button"
+                            onClick={() => setProfileMonthFilter(m)}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer whitespace-nowrap ${
+                              profileMonthFilter === m
+                                ? 'bg-purple-600 text-white shadow-sm'
+                                : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-750'
+                            }`}
+                          >
+                            {formatBengaliMonthYear(m)}
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
-                    {displayHistoryRows.length === 0 ? (
+                    {/* Month-wise Sales, Paid & Due KPI Card */}
+                    <div className="grid grid-cols-3 gap-2.5 bg-slate-950/70 p-3 rounded-2xl border border-slate-800 text-xs">
+                      <div className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800/80">
+                        <span className="text-[10px] text-slate-400 font-bold block uppercase">
+                          {profileMonthFilter === 'ALL' ? 'মোট বিক্রয়/বিল (Total)' : `${formatBengaliMonthYear(profileMonthFilter)} বিক্রয়/বিল`}
+                        </span>
+                        <span className="text-sm font-black font-mono text-white">
+                          ৳{profileMonthSummary.totalCharges}
+                        </span>
+                      </div>
+                      <div className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800/80">
+                        <span className="text-[10px] text-emerald-400 font-bold block uppercase">
+                          পরিশোধ (Paid)
+                        </span>
+                        <span className="text-sm font-black font-mono text-emerald-400">
+                          ৳{profileMonthSummary.totalPayments}
+                        </span>
+                      </div>
+                      <div className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800/80">
+                        <span className="text-[10px] text-rose-400 font-bold block uppercase">
+                          বকেয়া (Due)
+                        </span>
+                        <span className="text-sm font-black font-mono text-rose-400">
+                          ৳{profileMonthSummary.netDue}
+                        </span>
+                      </div>
+                    </div>
+
+                    {filteredProfileHistoryRows.length === 0 ? (
                       <div className="bg-slate-800/80 rounded-2xl p-8 text-center text-slate-400 font-bold border border-slate-700 text-xs">
-                        No transactions found
+                        {profileMonthFilter === 'ALL' 
+                          ? 'No transactions found' 
+                          : `${formatBengaliMonthYear(profileMonthFilter)} মাসের কোনো ট্রানজ্যাকশন পাওয়া যায়নি`}
                       </div>
                     ) : (
                       <>
                         {/* Mobile Card View (sm:hidden) */}
                         <div className="sm:hidden space-y-2.5">
-                          {displayHistoryRows.map((row) => (
+                          {filteredProfileHistoryRows.map((row) => (
                             <div key={row.rowId} className="bg-slate-800/90 p-3.5 rounded-2xl border border-slate-700/80 space-y-2.5">
                               <div className="flex items-center justify-between text-[11px] font-mono">
                                 <span className="px-2 py-0.5 rounded-md bg-slate-900 text-indigo-300 font-bold border border-slate-700">
@@ -3169,7 +3414,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                                 </tr>
                               </thead>
                               <tbody>
-                                {displayHistoryRows.map((row) => (
+                                {filteredProfileHistoryRows.map((row) => (
                                   <tr key={row.rowId} className="border-b border-slate-700/50 last:border-0 hover:bg-slate-700/20">
                                     <td className="px-4 py-2.5 font-mono">{row.ser}</td>
                                     <td className="px-4 py-2.5 font-mono">{toEnglishDate(row.date)}</td>
@@ -3939,6 +4184,51 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                   : m
               )
             );
+            try {
+              const freshTxs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+              setAllTxs(freshTxs);
+            } catch {}
+          }}
+        />
+      )}
+
+      {/* Single Member Month Bill Split Modal (August & September Bill Allocation) */}
+      {splitBillMember && (
+        <MonthBillSplitModal
+          isOpen={!!splitBillMember}
+          onClose={() => setSplitBillMember(null)}
+          member={splitBillMember}
+          allTxs={allTxs}
+          onSuccess={(updatedMember, updatedTxs) => {
+            setMembers((prev) =>
+              prev.map((m) =>
+                m.airman_id === updatedMember.airman_id || m['BD No'] === updatedMember['BD No']
+                  ? updatedMember
+                  : m
+              )
+            );
+            setAllTxs(updatedTxs);
+            if (profileMember && (profileMember.airman_id === updatedMember.airman_id || profileMember['BD No'] === updatedMember['BD No'])) {
+              setProfileMember(updatedMember);
+              setProfileTx(filterMemberTxs(updatedMember, updatedTxs));
+            }
+          }}
+        />
+      )}
+
+      {/* Batch Month Bill Split Modal (Bulk August & September Allocation for All Members) */}
+      {isBatchSplitModalOpen && (
+        <BatchMonthBillSplitModal
+          isOpen={isBatchSplitModalOpen}
+          onClose={() => setIsBatchSplitModalOpen(false)}
+          members={members}
+          allTxs={allTxs}
+          onSuccess={(updatedList) => {
+            setMembers(formatAndSortMembers(updatedList));
+            try {
+              const freshTxs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+              setAllTxs(freshTxs);
+            } catch {}
           }}
         />
       )}

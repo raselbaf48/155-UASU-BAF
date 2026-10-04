@@ -21,12 +21,13 @@ export interface RawInventoryItem {
   subUnit?: string;  // e.g. 'pcs'
   hasSubUnits?: boolean;
   dp?: string;
+  DP?: string;
   image?: string;
 }
 
 /**
  * Checks if an item is a ready-made item (direct purchase & resale without cooking/process)
- * Examples: Butter Ban, Sandwich, Swarma, Singara, Puri, Hotel Porota, Biscuit, Dry Cake, etc.
+ * Examples: Butter Ban, Sandwich, Swarma, Singara, Puri, Hotel Porota, Biscuit, Dry Cake, Hotel Banana, etc.
  */
 export const isReadymadeItem = (item: RawInventoryItem | any): boolean => {
   if (!item) return false;
@@ -36,11 +37,11 @@ export const isReadymadeItem = (item: RawInventoryItem | any): boolean => {
   // Smart fallback keyword matching for existing items without explicit itemType
   const text = `${item.name || ''} ${item.nameBn || ''} ${item.category || ''} ${item.notes || ''}`.toLowerCase();
   const readymadeKeywords = [
-    'butter ban', 'butter bun', 'sandwich', 'swarma', 'shawarma', 
-    'singara', 'shingara', 'puri', 'poori', 'hotel porota', 'porota hotel',
-    'biscuit', 'dry cake', 'burger bun', 'toast', 'chips', 'chanachur', 
+    'butter ban', 'butter bun', 'sandwich', 'sanwitch', 'swarma', 'shawarma', 
+    'singara', 'shingara', 'puri', 'poori', 'hotel porota', 'porota hotel', 'porota',
+    'biscuit', 'normal biscuit', 'dry cake', 'burger bun', 'toast', 'chips', 'chanachur', 
     'cake', 'pastry', 'patties', 'patis', 'samosa', 'somosa', 'roll', 
-    'muffin', 'readymate', 'ready-made', 'ready made'
+    'muffin', 'hotel banana', 'banana', 'kola', 'readymate', 'ready-made', 'ready made'
   ];
 
   return readymadeKeywords.some(kw => text.includes(kw));
@@ -650,13 +651,98 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
     name: 'Hotel Porota',
     nameBn: 'হোটেল পরোটা (Hotel Porota)',
     category: 'Frozen Foods',
+    itemType: 'READY_MADE',
     unit: 'pcs',
     currentStock: 160,
     minStockAlert: 40,
     unitCost: 10,
     lastRestockedDate: '2026-09-22',
     supplier: 'Hotel Paratha Supply',
-    notes: 'হাতে তৈরি সুস্বাদু হোটেল পরোটা'
+    notes: 'হাতে তৈরি সুস্বাদু হোটেল পরোটা (সরাসরি বিক্রয়যোগ্য)'
+  },
+  {
+    id: 'raw-singara',
+    name: 'Singara',
+    nameBn: 'গরম সিঙ্গারা (Singara)',
+    category: 'Dry Food & Snacks',
+    itemType: 'READY_MADE',
+    unit: 'pcs',
+    currentStock: 120,
+    minStockAlert: 30,
+    unitCost: 8,
+    lastRestockedDate: '2026-09-22',
+    supplier: 'Local Sweet & Snacks',
+    notes: 'মচমচে গরম সিঙ্গারা (সরাসরি বিক্রয়যোগ্য রেডিমেট আইটেম)'
+  },
+  {
+    id: 'raw-puri',
+    name: 'Puri',
+    nameBn: 'ডাল পুরি / আলু পুরি (Puri)',
+    category: 'Dry Food & Snacks',
+    itemType: 'READY_MADE',
+    unit: 'pcs',
+    currentStock: 100,
+    minStockAlert: 25,
+    unitCost: 8,
+    lastRestockedDate: '2026-09-22',
+    supplier: 'Local Sweet & Snacks',
+    notes: 'মচমচে ডাল পুরি (সরাসরি কাউন্টারে বিক্রয়যোগ্য)'
+  },
+  {
+    id: 'raw-hotel-banana',
+    name: 'Hotel Banana',
+    nameBn: 'হোটেল কলা / পাকা কলা (Banana)',
+    category: 'Vegetables',
+    itemType: 'READY_MADE',
+    unit: 'pcs',
+    currentStock: 90,
+    minStockAlert: 20,
+    unitCost: 10,
+    lastRestockedDate: '2026-09-22',
+    supplier: 'Local Fruit Market',
+    notes: 'পাকা সাগর কলা / সবরি কলা (সরাসরি বিক্রয়যোগ্য)'
+  },
+  {
+    id: 'raw-swarma-ready',
+    name: 'Swarma',
+    nameBn: 'চিকেন শর্মা (Chicken Swarma)',
+    category: 'Frozen Foods',
+    itemType: 'READY_MADE',
+    unit: 'pcs',
+    currentStock: 40,
+    minStockAlert: 15,
+    unitCost: 55,
+    lastRestockedDate: '2026-09-22',
+    supplier: 'Fast Food Supplier',
+    notes: 'রেডিমেট চিকেন শর্মা (বাহির থেকে এনে সরাসরি বিক্রয়যোগ্য)'
+  },
+  {
+    id: 'raw-sandwich-ready',
+    name: 'Sanwitch',
+    nameBn: 'চিকেন স্যান্ডউইচ (Sandwich)',
+    category: 'Dry Food & Snacks',
+    itemType: 'READY_MADE',
+    unit: 'pcs',
+    currentStock: 50,
+    minStockAlert: 15,
+    unitCost: 30,
+    lastRestockedDate: '2026-09-22',
+    supplier: 'City Bakery',
+    notes: 'রেডিমেট ফ্রেশ স্যান্ডউইচ'
+  },
+  {
+    id: 'raw-normal-biscuit',
+    name: 'Normal Biscuit',
+    nameBn: 'নরমাল বিস্কুট (Normal Biscuit)',
+    category: 'Dry Food & Snacks',
+    itemType: 'READY_MADE',
+    unit: 'packet',
+    currentStock: 80,
+    minStockAlert: 25,
+    unitCost: 15,
+    lastRestockedDate: '2026-09-22',
+    supplier: 'Olympic / Haque',
+    notes: 'চা বিস্কুট / টোস্ট প্যাকেট'
   },
   {
     id: 'raw-27',
@@ -1702,12 +1788,15 @@ export const saveRawInventoryItems = (items: RawInventoryItem[]): void => {
         wastagePercentage: it.wastagePercentage ?? 0,
         lastRestockedDate: it.lastRestockedDate || '',
         supplier: it.supplier || '',
+        DP: it.dp || it.DP || it.image || null,
         notes: encodeNotesWithMeta(it.notes, {
           category: it.category,
           subCategory: it.subCategory,
           hasSubUnits: it.hasSubUnits,
           packSize: it.packSize,
-          subUnit: it.subUnit
+          subUnit: it.subUnit,
+          dp: it.dp || it.DP || it.image,
+          itemType: it.itemType || (isReadymadeItem(it) ? 'READY_MADE' : 'RAW')
         })
       }));
       Promise.resolve(supabase.from('Canteen_Inventory').upsert(payload, { onConflict: 'id' }))

@@ -18,7 +18,8 @@ export const CANTEEN_CLOUD_KEYS = [
   'canteen_raw_stock_logs_v2',
   'canteen_expense_last_unit_prices',
   'canteen_recent_members',
-  'canteen_raw_inventory_items_v2'
+  'canteen_raw_inventory_items_v2',
+  'canteen_bill_import_history'
 ] as const;
 
 export type CanteenCloudKey = typeof CANTEEN_CLOUD_KEYS[number];
@@ -225,6 +226,9 @@ function dispatchKeyUpdateEvent(key: string) {
       break;
     case 'canteen_daily_menu':
       window.dispatchEvent(new Event('canteen_daily_menu_updated'));
+      break;
+    case 'canteen_bill_import_history':
+      window.dispatchEvent(new Event('canteen_bill_import_history_updated'));
       break;
   }
   window.dispatchEvent(new Event('canteen_state_updated'));

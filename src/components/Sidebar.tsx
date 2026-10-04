@@ -397,7 +397,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="px-3 py-2 border-t border-[#0d4f31] shrink-0">
             <button
               type="button"
-              onClick={onOpenSettings}
+              onClick={() => {
+                setMobileOpen(false);
+                onOpenSettings();
+              }}
               className={`w-full flex items-center ${
                 isCollapsed ? 'justify-center p-2' : 'justify-start px-3 py-2 space-x-2.5'
               } rounded-xl text-emerald-100/90 hover:text-white hover:bg-[#0c4e2f] text-xs font-bold transition-all cursor-pointer`}

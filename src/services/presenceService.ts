@@ -119,8 +119,10 @@ export const subscribeToLoginHistory = (callback: (logs: any[]) => void) => {
               const timeA = new Date(a.timestamp || 0).getTime();
               const timeB = new Date(b.timestamp || 0).getTime();
               return timeB - timeA;
-            });
-            localStorage.setItem('baf_user_login_history', JSON.stringify(merged));
+            }).slice(0, 30);
+            try {
+              localStorage.setItem('baf_user_login_history', JSON.stringify(merged));
+            } catch {}
             callback(merged);
           }
         } catch {}

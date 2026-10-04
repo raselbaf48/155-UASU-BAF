@@ -6,12 +6,15 @@ import {
   AlertCircle, 
   Coins, 
   Layers, 
-  RefreshCw 
+  RefreshCw,
+  Calendar
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { pushKeyToCloud } from '../utils/canteenCloudSync';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { resolveImageUrl } from '../utils/canteenSettings';
+import { getFormattedDateForMonth } from '../utils/importHistoryTxs';
+import { formatBengaliMonthYear } from '../utils/exportCanteenBillExcel';
 
 interface SetInitialBillModalProps {
   isOpen: boolean;
@@ -29,7 +32,8 @@ export const SetInitialBillModal: React.FC<SetInitialBillModalProps> = ({
   const currentDue = Number(member?.Due ?? member?.due ?? member?.baki ?? 0);
   const [billAmount, setBillAmount] = useState<string>(currentDue > 0 ? String(currentDue) : '');
   const [billMode, setBillMode] = useState<'SET' | 'ADD'>('SET');
-  const [billNote, setBillNote] = useState<string>('প্রারম্ভিক বকেয়া (Initial Bill)');
+  const [billMonth, setBillMonth] = useState<string>('2026-09');
+  const [billNote, setBillNote] = useState<string>('');
   const [createTransaction, setCreateTransaction] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -39,6 +43,8 @@ export const SetInitialBillModal: React.FC<SetInitialBillModalProps> = ({
       const due = Number(member?.Due ?? member?.due ?? member?.baki ?? 0);
       setBillAmount(due > 0 ? String(due) : '');
       setBillMode('SET');
+      setBillMonth('2026-09');
+      setBillNote('');
       setErrorMessage(null);
     }
   }, [member]);
@@ -72,19 +78,26 @@ export const SetInitialBillModal: React.FC<SetInitialBillModalProps> = ({
           .eq('BD No', member['BD No']);
       }
 
-      // 2. Optionally append to canteen_txs
+      // 2. Optionally append to canteen_txs with accurate monthKey and date
       if (createTransaction && numAmount > 0) {
         try {
-          const now = new Date();
-          const txDate = formatCanteenDate(now);
+          const cleanBdNo = String(member['BD No'] || member.bdNo || member.airman_id || '').replace(/\D/g, '');
+          const txDate = getFormattedDateForMonth(billMonth, 28);
+          const defaultLabel = billMonth === '2026-08' 
+            ? 'বকেয়া বিল (আগস্ট ২০২৬)' 
+            : billMonth === '2026-09' 
+            ? 'ক্যান্টিন বিল (সেপ্টেম্বর ২০২৬)' 
+            : `বিল (${formatBengaliMonthYear(billMonth)})`;
+
           const newTx = {
-            id: Date.now() + Math.random(),
+            id: `tx-init-${cleanBdNo}-${billMonth}-${Date.now()}`,
             date: txDate,
+            monthKey: billMonth,
             airman_id: member.airman_id,
             bdNo: member['BD No'] || member.bdNo,
             memberName: `${member['Rank'] || ''} ${member['Surname'] || ''}`.trim(),
             rank: member['Rank'] || member.rank || '',
-            items: billNote.trim() || 'প্রারম্ভিক বকেয়া (Initial Bill)',
+            items: billNote.trim() || defaultLabel,
             soldItems: [],
             amount: numAmount,
             type: 'INITIAL_BILL',
@@ -92,7 +105,15 @@ export const SetInitialBillModal: React.FC<SetInitialBillModalProps> = ({
             billType: 'CANTEEN'
           };
           const existingTxs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-          const updatedTxs = [newTx, ...existingTxs];
+          // Remove old generic init-auto-due for this member if resetting
+          const filteredExisting = billMode === 'SET' 
+            ? existingTxs.filter((t: any) => {
+                const tBd = String(t.bdNo || t.airman_id || '').replace(/\D/g, '');
+                return !(tBd === cleanBdNo && (t.id.startsWith('init-auto-due-') || (t.type === 'INITIAL_BILL' && t.monthKey === billMonth)));
+              })
+            : existingTxs;
+
+          const updatedTxs = [newTx, ...filteredExisting];
           localStorage.setItem('canteen_txs', JSON.stringify(updatedTxs));
           await pushKeyToCloud('canteen_txs', updatedTxs);
         } catch (e) {
@@ -228,6 +249,48 @@ export const SetInitialBillModal: React.FC<SetInitialBillModalProps> = ({
                 }`}
               >
                 বকেয়া যোগ (Add Due)
+              </button>
+            </div>
+          </div>
+
+          {/* Month Selector */}
+          <div>
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+              টার্গেট মাস (Bill Month)
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => setBillMonth('2026-08')}
+                className={`py-2 px-2.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                  billMonth === '2026-08'
+                    ? 'bg-blue-600 text-white shadow-md border border-blue-400'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-750'
+                }`}
+              >
+                আগস্ট ২০২৬
+              </button>
+              <button
+                type="button"
+                onClick={() => setBillMonth('2026-09')}
+                className={`py-2 px-2.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                  billMonth === '2026-09'
+                    ? 'bg-emerald-600 text-white shadow-md border border-emerald-400'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-750'
+                }`}
+              >
+                সেপ্টেম্বর ২০২৬
+              </button>
+              <button
+                type="button"
+                onClick={() => setBillMonth('2026-10')}
+                className={`py-2 px-2.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                  billMonth === '2026-10'
+                    ? 'bg-purple-600 text-white shadow-md border border-purple-400'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-750'
+                }`}
+              >
+                অক্টোবর ২০২৬
               </button>
             </div>
           </div>

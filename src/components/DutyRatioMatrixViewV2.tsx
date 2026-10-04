@@ -57,7 +57,22 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
   const [resetConfirmTableIdx, setResetConfirmTableIdx] = useState<number | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [flightViewMode, setFlightViewMode] = useState<'SCHEDULE' | 'DUTY_CARDS'>('SCHEDULE');
-  const [viewMode, setViewMode] = useState<'DUTY_DISTRIBUTION' | 'DUTY_RATIO' | 'MANPOWER' | 'DUTY_LIST'>('DUTY_RATIO');
+  const [viewMode, setViewMode] = useState<'DUTY_DISTRIBUTION' | 'DUTY_RATIO' | 'MANPOWER' | 'DUTY_LIST'>(() => {
+    try {
+      const saved = sessionStorage.getItem('baf_duty_matrix_view_mode');
+      if (saved === 'DUTY_DISTRIBUTION' || saved === 'DUTY_RATIO' || saved === 'MANPOWER' || saved === 'DUTY_LIST') {
+        return saved;
+      }
+    } catch {}
+    return 'DUTY_RATIO';
+  });
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('baf_duty_matrix_view_mode', viewMode);
+    } catch {}
+  }, [viewMode]);
+
   const [targetDate, setTargetDate] = useState(() => {
     const saved = localStorage.getItem('baf_duty_distribution_target_date');
     if (saved) return saved;

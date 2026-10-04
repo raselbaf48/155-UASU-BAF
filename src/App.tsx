@@ -746,10 +746,6 @@ return () => mediaQuery.removeEventListener('change', listener);
     }
   };
 
-  const ActiveTabView: React.FC<{ tab: SidebarTab }> = React.memo(({ tab }) => {
-    return <>{renderActiveTabContent(tab)}</>;
-  });
-
   return (
     <div className={`min-h-screen transition-colors duration-200 ${darkMode ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
       {renderNoticeModal()}
@@ -766,10 +762,19 @@ return () => mediaQuery.removeEventListener('change', listener);
         setMobileOpen={setMobileSidebarOpen}
         airmenCount={airmen.filter(a => a.active).length}
         userSession={userSession}
-        onOpenImportModal={() => setIsPdfImportModalOpen(true)}
-                        onLogoutUser={handleUserLogout}
-        onOpenSettings={() => setIsSettingsModalOpen(true)}
-        onOpenAdminLogin={() => setIsAdminLoginModalOpen(true)}
+        onOpenImportModal={() => {
+          setMobileSidebarOpen(false);
+          setIsPdfImportModalOpen(true);
+        }}
+        onLogoutUser={handleUserLogout}
+        onOpenSettings={() => {
+          setMobileSidebarOpen(false);
+          setIsSettingsModalOpen(true);
+        }}
+        onOpenAdminLogin={() => {
+          setMobileSidebarOpen(false);
+          setIsAdminLoginModalOpen(true);
+        }}
                 onLogoutAdmin={() => {
             handleRoleChange('USER');
             if (userSession) {
@@ -814,7 +819,7 @@ return () => mediaQuery.removeEventListener('change', listener);
                 transition={{ duration: 0.18, ease: "easeOut" }}
                 className="w-full print:filter-none print:opacity-100 print:transform-none"
               >
-                <ActiveTabView tab={activeTab} />
+                {renderActiveTabContent(activeTab)}
               </motion.div>
             </AnimatePresence>
           </div>

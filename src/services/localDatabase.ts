@@ -48,7 +48,15 @@ export interface FirebaseSyncStatusState {
 
 let firebaseConnected: boolean = false;
 let firebaseLastSyncTime: string | null = null;
-let syncLogs: SyncLog[] = JSON.parse(typeof window !== "undefined" ? window.localStorage.getItem("baf_sync_logs") || "[]" : "[]");
+let syncLogs: SyncLog[] = (() => {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.sessionStorage.getItem("baf_sync_logs") || window.localStorage.getItem("baf_sync_logs");
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+})();
 
 export const getSyncLogs = () => syncLogs;
 
@@ -62,7 +70,17 @@ export const addSyncLog = (log: Omit<SyncLog, "id">) => {
   const newLog = { ...log, id: "sync-" + Date.now() + Math.random() };
   syncLogs = [newLog, ...syncLogs].slice(0, 10);
   if (typeof window !== "undefined") {
-    window.localStorage.setItem("baf_sync_logs", JSON.stringify(syncLogs));
+    try {
+      window.sessionStorage.setItem("baf_sync_logs", JSON.stringify(syncLogs));
+    } catch {
+      // Ignore sessionStorage errors
+    }
+    try {
+      // Remove from localStorage if present to free up quota
+      window.localStorage.removeItem("baf_sync_logs");
+    } catch {
+      // Ignore removal errors
+    }
     window.dispatchEvent(new CustomEvent("baf_sync_logs_updated", { detail: syncLogs }));
   }
 };

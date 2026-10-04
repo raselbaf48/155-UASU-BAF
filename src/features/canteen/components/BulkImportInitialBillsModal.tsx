@@ -27,6 +27,7 @@ import { formatCanteenDate } from '../utils/dateUtils';
 import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
 import { formatBengaliMonthYear } from '../utils/exportCanteenBillExcel';
 import { getTxMonthKey } from '../pages/MemberDB';
+import { syncImportHistoryToTransactions, getFormattedDateForMonth } from '../utils/importHistoryTxs';
 import JSZip from 'jszip';
 
 export const getMonthShortName = (monthKey: string): string => {
@@ -170,7 +171,8 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
 }) => {
   const [activeTab, setActiveTab] = useState<'FILE' | 'PASTE' | 'HISTORY'>(initialTab);
   const [targetMonth, setTargetMonth] = useState<string>(() => {
-    return selectedMonth && selectedMonth !== 'ALL' ? selectedMonth : getRunningMonthKey();
+    // Default import month is ALWAYS the month prior to the current running month (e.g. Sep if running month is Oct)
+    return formatPrevMonthKey(getRunningMonthKey());
   });
 
   const lastMonth = useMemo(() => formatPrevMonthKey(targetMonth), [targetMonth]);
@@ -213,11 +215,12 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
     return Array.from(set).sort().reverse();
   }, []);
 
+  // Default import month is ALWAYS running month's previous month (e.g. Sep if running month is Oct)
   useEffect(() => {
-    if (selectedMonth && selectedMonth !== 'ALL') {
-      setTargetMonth(selectedMonth);
+    if (isOpen) {
+      setTargetMonth(formatPrevMonthKey(getRunningMonthKey()));
     }
-  }, [selectedMonth]);
+  }, [isOpen]);
 
   // History state
   const [importHistory, setImportHistory] = useState<BillImportBatch[]>(() => {
@@ -244,8 +247,9 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
     }
   }, [initialTab, isOpen]);
 
-  // Load cloud history on mount
+  // Load cloud history on mount or when modal opens
   useEffect(() => {
+    if (!isOpen) return;
     const loadCloudHistory = async () => {
       try {
         const cloudData = await pullKeyFromCloud('canteen_bill_import_history');
@@ -258,7 +262,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
       }
     };
     loadCloudHistory();
-  }, []);
+  }, [isOpen]);
 
   // Build member lookup maps by cleaned BD No, raw BD, airman_id, Rank + Surname, and Surname
   const { memberMap, memberByNameMap } = useMemo(() => {
@@ -1129,16 +1133,21 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
 
         // Create transactions in canteen_txs
         if (createTransaction) {
+          const cleanBdNo = String(targetMember['BD No'] || targetMember.bdNo || row.bdNo || '').replace(/\D/g, '');
+          const cleanAirmanId = targetMember.airman_id || (cleanBdNo ? `airman-${cleanBdNo}` : undefined);
+          const fullMemberName = `${targetMember['Rank'] || ''} ${targetMember['Surname'] || ''}`.trim() || `BD-${cleanBdNo}`;
+
           // 1. Due (Last Month) Transaction
           if (row.dueLastMonth > 0) {
-            const txId = Date.now() + Math.random();
+            const txId = `tx-import-${Date.now()}-${cleanBdNo}-dueLast-${Math.floor(Math.random() * 1000)}`;
             newTxIds.push(txId);
             newTxs.push({
               id: txId,
-              date: getDateForMonthKey(lastMonth, 28),
-              airman_id: targetMember.airman_id,
-              bdNo: targetMember['BD No'] || targetMember.bdNo,
-              memberName: `${targetMember['Rank'] || ''} ${targetMember['Surname'] || ''}`.trim(),
+              date: getFormattedDateForMonth(lastMonth, 28),
+              monthKey: lastMonth,
+              airman_id: cleanAirmanId,
+              bdNo: targetMember['BD No'] || targetMember.bdNo || (cleanBdNo ? `BD/${cleanBdNo}` : ''),
+              memberName: fullMemberName,
               rank: targetMember['Rank'] || targetMember.rank || '',
               items: `বকেয়া বিল (${formatBengaliMonthYear(lastMonth)})`,
               soldItems: [],
@@ -1151,14 +1160,15 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
 
           // 2. Advance (Last Month) Transaction
           if (row.advanceLastMonth > 0) {
-            const txId = Date.now() + Math.random();
+            const txId = `tx-import-${Date.now()}-${cleanBdNo}-advLast-${Math.floor(Math.random() * 1000)}`;
             newTxIds.push(txId);
             newTxs.push({
               id: txId,
-              date: getDateForMonthKey(lastMonth, 25),
-              airman_id: targetMember.airman_id,
-              bdNo: targetMember['BD No'] || targetMember.bdNo,
-              memberName: `${targetMember['Rank'] || ''} ${targetMember['Surname'] || ''}`.trim(),
+              date: getFormattedDateForMonth(lastMonth, 25),
+              monthKey: lastMonth,
+              airman_id: cleanAirmanId,
+              bdNo: targetMember['BD No'] || targetMember.bdNo || (cleanBdNo ? `BD/${cleanBdNo}` : ''),
+              memberName: fullMemberName,
               rank: targetMember['Rank'] || targetMember.rank || '',
               items: `অগ্রীম জমা / Advance (${formatBengaliMonthYear(lastMonth)})`,
               soldItems: [],
@@ -1171,14 +1181,15 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
 
           // 3. Due (This Month) Transaction
           if (row.dueThisMonth > 0) {
-            const txId = Date.now() + Math.random();
+            const txId = `tx-import-${Date.now()}-${cleanBdNo}-dueThis-${Math.floor(Math.random() * 1000)}`;
             newTxIds.push(txId);
             newTxs.push({
               id: txId,
-              date: getDateForMonthKey(targetMonth, 28),
-              airman_id: targetMember.airman_id,
-              bdNo: targetMember['BD No'] || targetMember.bdNo,
-              memberName: `${targetMember['Rank'] || ''} ${targetMember['Surname'] || ''}`.trim(),
+              date: getFormattedDateForMonth(targetMonth, 28),
+              monthKey: targetMonth,
+              airman_id: cleanAirmanId,
+              bdNo: targetMember['BD No'] || targetMember.bdNo || (cleanBdNo ? `BD/${cleanBdNo}` : ''),
+              memberName: fullMemberName,
               rank: targetMember['Rank'] || targetMember.rank || '',
               items: `ক্যান্টিন বিল (${formatBengaliMonthYear(targetMonth)})`,
               soldItems: [],
@@ -1189,16 +1200,39 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
             });
           }
 
-          // 4. Unit Fund Transaction
-          if ((row.unitFund || 0) > 0) {
-            const txId = Date.now() + Math.random();
+          // 3b. Fallback Single / Direct Bill Transaction (If separate Due This Month column was not present)
+          if (row.dueThisMonth === 0 && row.dueLastMonth === 0 && (row.totalDue > 0 || row.amount > 0)) {
+            const fallbackAmount = row.totalDue > 0 ? row.totalDue : row.amount;
+            const txId = `tx-import-${Date.now()}-${cleanBdNo}-fallback-${Math.floor(Math.random() * 1000)}`;
             newTxIds.push(txId);
             newTxs.push({
               id: txId,
-              date: getDateForMonthKey(targetMonth, 28),
-              airman_id: targetMember.airman_id,
-              bdNo: targetMember['BD No'] || targetMember.bdNo,
-              memberName: `${targetMember['Rank'] || ''} ${targetMember['Surname'] || ''}`.trim(),
+              date: getFormattedDateForMonth(targetMonth, 28),
+              monthKey: targetMonth,
+              airman_id: cleanAirmanId,
+              bdNo: targetMember['BD No'] || targetMember.bdNo || (cleanBdNo ? `BD/${cleanBdNo}` : ''),
+              memberName: fullMemberName,
+              rank: targetMember['Rank'] || targetMember.rank || '',
+              items: `ক্যান্টিন বিল (${formatBengaliMonthYear(targetMonth)})`,
+              soldItems: [],
+              amount: fallbackAmount,
+              type: 'INITIAL_BILL',
+              gateway: 'DUE',
+              billType: 'CANTEEN'
+            });
+          }
+
+          // 4. Unit Fund Transaction
+          if ((row.unitFund || 0) > 0) {
+            const txId = `tx-import-${Date.now()}-${cleanBdNo}-unitFund-${Math.floor(Math.random() * 1000)}`;
+            newTxIds.push(txId);
+            newTxs.push({
+              id: txId,
+              date: getFormattedDateForMonth(targetMonth, 28),
+              monthKey: targetMonth,
+              airman_id: cleanAirmanId,
+              bdNo: targetMember['BD No'] || targetMember.bdNo || (cleanBdNo ? `BD/${cleanBdNo}` : ''),
+              memberName: fullMemberName,
               rank: targetMember['Rank'] || targetMember.rank || '',
               items: `ইউনিট ফান্ড (${formatBengaliMonthYear(targetMonth)})`,
               soldItems: [],
@@ -1211,14 +1245,15 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
 
           // 5. Others Fund Transaction
           if ((row.othersFund || 0) > 0) {
-            const txId = Date.now() + Math.random();
+            const txId = `tx-import-${Date.now()}-${cleanBdNo}-othersFund-${Math.floor(Math.random() * 1000)}`;
             newTxIds.push(txId);
             newTxs.push({
               id: txId,
-              date: getDateForMonthKey(targetMonth, 28),
-              airman_id: targetMember.airman_id,
-              bdNo: targetMember['BD No'] || targetMember.bdNo,
-              memberName: `${targetMember['Rank'] || ''} ${targetMember['Surname'] || ''}`.trim(),
+              date: getFormattedDateForMonth(targetMonth, 28),
+              monthKey: targetMonth,
+              airman_id: cleanAirmanId,
+              bdNo: targetMember['BD No'] || targetMember.bdNo || (cleanBdNo ? `BD/${cleanBdNo}` : ''),
+              memberName: fullMemberName,
               rank: targetMember['Rank'] || targetMember.rank || '',
               items: `অন্যান্য ফান্ড (${formatBengaliMonthYear(targetMonth)})`,
               soldItems: [],
@@ -1252,7 +1287,20 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
       if (newTxs.length > 0) {
         try {
           const existingTxs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-          const mergedTxs = [...newTxs, ...existingTxs];
+          const txMap = new Map<string, any>();
+          const affectedCleanBds = new Set(newTxs.map(t => String(t.bdNo || t.airman_id || '').replace(/\D/g, '')));
+          
+          existingTxs.forEach((t: any) => { 
+            if (!t || !t.id) return;
+            const tBd = String(t.bdNo || t.airman_id || '').replace(/\D/g, '');
+            // If this is an old lumped auto-due transaction and we are now importing specific month bills, drop it
+            if (tBd && affectedCleanBds.has(tBd) && String(t.id).startsWith('init-auto-due-')) {
+              return;
+            }
+            txMap.set(String(t.id), t); 
+          });
+          newTxs.forEach((t: any) => { if (t && t.id) txMap.set(String(t.id), t); });
+          const mergedTxs = Array.from(txMap.values());
           localStorage.setItem('canteen_txs', JSON.stringify(mergedTxs));
           await pushKeyToCloud('canteen_txs', mergedTxs);
         } catch (e) {
@@ -1298,6 +1346,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
       } catch {}
 
       window.dispatchEvent(new Event('canteen_txs_updated'));
+      window.dispatchEvent(new Event('canteen_bill_import_history_updated'));
       window.dispatchEvent(new Event('canteen_state_updated'));
       window.dispatchEvent(new Event('storage'));
 
@@ -1604,42 +1653,44 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
 
         {/* Modal Body */}
         <div className="p-5 sm:p-6 overflow-y-auto space-y-4 flex-1">
-          {/* Target Month Selector Banner */}
-          <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-inner">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0">
-                <Calendar className="w-5 h-5" />
+          {/* Target Month Selector Banner - Only show on Upload and Paste tabs */}
+          {activeTab !== 'HISTORY' && (
+            <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-inner">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0">
+                  <Calendar className="w-5 h-5" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-indigo-400 block">
+                    টার্গেট বিলের মাস (Target Month)
+                  </span>
+                  <p className="text-xs text-slate-300 font-bold">
+                    যেই মাস সিলেক্ট করবেন, টেমপ্লেটে সেই মাসের এবং তার আগের মাসের হিসাব আসবে
+                  </p>
+                </div>
               </div>
-              <div>
-                <span className="text-[10px] font-black uppercase tracking-wider text-indigo-400 block">
-                  টার্গেট বিলের মাস (Target Month)
-                </span>
-                <p className="text-xs text-slate-300 font-bold">
-                  যেই মাস সিলেক্ট করবেন, টেমপ্লেটে সেই মাসের এবং তার আগের মাসের হিসাব আসবে
-                </p>
-              </div>
-            </div>
 
-            <div className="flex items-center space-x-2">
-              <select
-                value={targetMonth}
-                onChange={(e) => {
-                  const newMonth = e.target.value;
-                  setTargetMonth(newMonth);
-                  if (rawDataRef.current && rawDataRef.current.length > 0) {
-                    processRawData(rawDataRef.current, newMonth);
-                  }
-                }}
-                className="bg-slate-900 border border-slate-700 hover:border-indigo-500/50 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer min-w-[200px]"
-              >
-                {availableMonths.map((m) => (
-                  <option key={m} value={m}>
-                    {formatMonthName(m)} {m === getRunningMonthKey() ? '(চলতি মাস)' : ''}
-                  </option>
-                ))}
-              </select>
+              <div className="flex items-center space-x-2">
+                <select
+                  value={targetMonth}
+                  onChange={(e) => {
+                    const newMonth = e.target.value;
+                    setTargetMonth(newMonth);
+                    if (rawDataRef.current && rawDataRef.current.length > 0) {
+                      processRawData(rawDataRef.current, newMonth);
+                    }
+                  }}
+                  className="bg-slate-900 border border-slate-700 hover:border-indigo-500/50 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer min-w-[200px]"
+                >
+                  {availableMonths.map((m) => (
+                    <option key={m} value={m}>
+                      {formatMonthName(m)} {m === getRunningMonthKey() ? '(চলতি মাস)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Explanation Strip */}
           <div className="p-3 bg-indigo-950/30 border border-indigo-500/20 rounded-2xl flex items-start space-x-2.5 text-xs text-indigo-200">

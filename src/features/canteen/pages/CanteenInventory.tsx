@@ -318,8 +318,12 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
           const meta = decodeNotesMeta(r.notes);
           const sub = r['Sub Unit'] ?? r.subUnit ?? r.sub_unit ?? meta.subUnit;
           const pSize = Number(r.packSize) || Number(meta.packSize) || (['kg', 'কেজি'].includes((r.unit || '').toLowerCase()) ? 1000 : (['liter', 'ltr', 'লিটার'].includes((r.unit || '').toLowerCase()) ? 1000 : 1));
+          const dpUrl = r.DP || r.dp || meta.dp || r.image || undefined;
           return {
             ...r,
+            dp: dpUrl,
+            DP: dpUrl,
+            image: dpUrl,
             subUnit: sub,
             packSize: pSize,
             hasSubUnits: r.hasSubUnits ?? meta.hasSubUnits ?? Boolean(sub && sub !== r.unit)

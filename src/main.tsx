@@ -3,13 +3,14 @@ import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 import { installApiInterceptor } from './services/apiBridge';
+import { installSafeStorageProtection } from './utils/safeStorage';
 
-// Initialize Universal Data Engine & API Bridge for Cloudflare Pages and offline resilience
+// Protect localStorage against quota errors and initialize Universal API Bridge
 try {
+  installSafeStorageProtection();
   installApiInterceptor();
-  
 } catch (err) {
-  console.warn('API Interceptor initialization skipped:', err);
+  console.warn('Initialization skipped:', err);
 }
 
 interface ErrorBoundaryProps {

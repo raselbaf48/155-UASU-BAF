@@ -4,7 +4,7 @@ import {
   CheckCircle2, RotateCcw, Layers, ArrowDownRight, ArrowUpRight, 
   History, Filter, ShoppingBag, X, Save, AlertCircle, FileSpreadsheet,
   Boxes, ChefHat, Sparkles, Percent, LayoutGrid, List,
-  Upload, Image as ImageIcon, Camera
+  Upload, Image as ImageIcon, Camera, Loader2
 } from 'lucide-react';
 import { processGalleryImage } from '../utils/imageUpload';
 import { formatMoney, formatNumber } from '../i18n';
@@ -797,6 +797,12 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
   const [isSavingIssue, setIsSavingIssue] = useState(false);
   const [isSavedIssue, setIsSavedIssue] = useState(false);
 
+  // Quick DP Photo Edit modal state
+  const [quickDpItem, setQuickDpItem] = useState<RawInventoryItem | null>(null);
+  const [quickDpInput, setQuickDpInput] = useState('');
+  const [isUpdatingDp, setIsUpdatingDp] = useState(false);
+  const [quickDpToast, setQuickDpToast] = useState<string | null>(null);
+
   const [newItemData, setNewItemData] = useState<{
     name?: string;
     nameBn?: string;
@@ -859,12 +865,17 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
             const isKg = unit.toLowerCase().trim() === 'kg';
             const isLtr = unit.toLowerCase().trim() === 'liter';
             const rawSubUnit = r['Sub Unit'] ?? r.subUnit ?? r.sub_unit ?? meta.subUnit;
+            const itemDp = r.DP || r.dp || meta.dp || r.image || r.image_url || undefined;
+            const rawType = r.itemType || r.item_type || meta.itemType;
+            const itemType: InventoryItemType = (rawType || (isReadymadeItem({ ...r, notes: cleanNotes }) ? 'READY_MADE' : 'RAW')) as InventoryItemType;
+
             return {
               id: String(r.id),
               name: r.name || '',
               nameBn: r.nameBn || r.name_bn || r.name || '',
               category: meta.category || r.category || 'Packaging & Disposables',
               subCategory: meta.subCategory || r.subCategory || r.sub_category || '',
+              itemType,
               unit: unit,
               currentStock: Number(r.currentStock ?? r.current_stock ?? 0),
               minStockAlert: Number(r.minStockAlert ?? r.min_stock_alert ?? 5),
@@ -876,8 +887,9 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
               hasSubUnits: isKg ? true : Boolean(meta.hasSubUnits ?? r.hasSubUnits ?? r.has_sub_units ?? Boolean(rawSubUnit) ?? (Number(r.packSize ?? r.pack_size) > 1)),
               packSize: isKg ? (Number(meta.packSize ?? r.packSize ?? r.pack_size) > 1 ? Number(meta.packSize ?? r.packSize ?? r.pack_size) : 1000) : Number(meta.packSize ?? r.packSize ?? r.pack_size ?? 1),
               subUnit: rawSubUnit || (isKg ? 'gm' : (isLtr ? 'ml' : (meta.subUnit || r.subUnit || r.sub_unit || 'pcs'))),
-              dp: meta.dp || r.dp || r.image || r.image_url || undefined,
-              image: meta.dp || r.dp || r.image || r.image_url || undefined
+              dp: itemDp,
+              DP: itemDp,
+              image: itemDp
             };
           });
           setItems(prev => {
@@ -951,13 +963,15 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
         wastagePercentage: it.wastagePercentage ?? 0,
         lastRestockedDate: it.lastRestockedDate || '',
         supplier: it.supplier || '',
+        DP: it.dp || it.DP || it.image || null,
         notes: encodeNotesWithMeta(it.notes, {
           category: it.category,
           subCategory: it.subCategory,
           hasSubUnits: it.hasSubUnits,
           packSize: it.packSize,
           subUnit: it.subUnit,
-          dp: it.dp || it.image
+          dp: it.dp || it.DP || it.image,
+          itemType: it.itemType || (isReadymadeItem(it) ? 'READY_MADE' : 'RAW')
         })
       }));
       Promise.resolve(supabase.from('Canteen_Inventory').upsert(payload, { onConflict: 'id' }))
@@ -1325,10 +1339,14 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
             ? Number(newItemData.wastagePercentage)
             : 0;
 
+          const effectiveDp = newItemData.dp?.trim() || undefined;
+          const resolvedItemType: InventoryItemType = newItemData.itemType || (isReadymadeItem(i) ? 'READY_MADE' : 'RAW');
+
           const updated: RawInventoryItem = {
             ...i,
             name: newItemData.name!.trim(),
             nameBn: newItemData.nameBn?.trim() || newItemData.name!.trim(),
+            itemType: resolvedItemType,
             unit: unit,
             currentStock: parsedStock,
             minStockAlert: parsedMinAlert,
@@ -1339,8 +1357,9 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
             hasSubUnits,
             packSize,
             subUnit,
-            dp: newItemData.dp?.trim() || undefined,
-            image: newItemData.dp?.trim() || undefined
+            dp: effectiveDp,
+            DP: effectiveDp,
+            image: effectiveDp
           };
 
           // Directly sync to Supabase Canteen_Inventory table
@@ -1356,13 +1375,15 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
             wastagePercentage: updated.wastagePercentage ?? 0,
             lastRestockedDate: updated.lastRestockedDate || '',
             supplier: updated.supplier || '',
+            DP: effectiveDp || null,
             notes: encodeNotesWithMeta(updated.notes, {
               category: updated.category,
               subCategory: updated.subCategory,
               hasSubUnits: updated.hasSubUnits,
               packSize: updated.packSize,
               subUnit: updated.subUnit,
-              dp: updated.dp
+              dp: effectiveDp,
+              itemType: resolvedItemType
             })
           };
           supabase.from('Canteen_Inventory').upsert([dbItem], { onConflict: 'id' })
@@ -1427,10 +1448,14 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
         ? undefined
         : isKg ? 'gm' : isLtr ? 'ml' : isCase ? 'pcs' : (newItemData.subUnit ? newItemData.subUnit.trim() : undefined);
 
+      const effectiveDp = newItemData.dp?.trim() || undefined;
+      const resolvedItemType: InventoryItemType = newItemData.itemType || (inventoryTypeFilter === 'READY_MADE' ? 'READY_MADE' : 'RAW');
+
       const newItem: RawInventoryItem = {
         id: `raw-${Date.now()}`,
         name: newItemData.name!.trim(),
         nameBn: newItemData.nameBn?.trim() || newItemData.name!.trim(),
+        itemType: resolvedItemType,
         unit: unit,
         currentStock: effectiveStock,
         minStockAlert: parsedMinAlert,
@@ -1442,8 +1467,9 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
         hasSubUnits,
         packSize,
         subUnit,
-        dp: newItemData.dp?.trim() || undefined,
-        image: newItemData.dp?.trim() || undefined
+        dp: effectiveDp,
+        DP: effectiveDp,
+        image: effectiveDp
       };
       setItems(prev => [newItem, ...prev]);
 
@@ -1460,13 +1486,15 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
         wastagePercentage: newItem.wastagePercentage ?? 0,
         lastRestockedDate: newItem.lastRestockedDate || '',
         supplier: newItem.supplier || '',
+        DP: effectiveDp || null,
         notes: encodeNotesWithMeta(newItem.notes, {
           category: newItem.category,
           subCategory: newItem.subCategory,
           hasSubUnits: newItem.hasSubUnits,
           packSize: newItem.packSize,
           subUnit: newItem.subUnit,
-          dp: newItem.dp
+          dp: effectiveDp,
+          itemType: resolvedItemType
         })
       };
       supabase.from('Canteen_Inventory').upsert([newDbItem], { onConflict: 'id' })
@@ -1552,7 +1580,8 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
         : isCase ? (item.packSize && item.packSize > 1 ? item.packSize : 30)
         : (item.packSize && item.packSize > 1 ? item.packSize : (isPkt ? 24 : 1)),
       subUnit: isPcs ? undefined : isKg ? 'gm' : isLtr ? 'ml' : isCase ? 'pcs' : (hasConfiguredSub && item.subUnit && item.subUnit.toLowerCase().trim() !== u ? item.subUnit : (isPkt ? 'pcs' : undefined)),
-      dp: item.dp || item.image || ''
+      itemType: item.itemType || (isReadymadeItem(item) ? 'READY_MADE' : 'RAW'),
+      dp: item.dp || item.DP || item.image || ''
     });
     setShowAddModal(true);
   };
@@ -1578,9 +1607,57 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
     }
   };
 
+  // Quick DP Photo Update Handler (Instantly syncs to Supabase Canteen_Inventory DP column)
+  const handleQuickUpdateDp = async (itemId: string, newDp: string) => {
+    try {
+      setIsUpdatingDp(true);
+      const cleanDp = newDp.trim();
+      // Optimistic local state update
+      setItems(prev => prev.map(it => {
+        if (it.id === itemId) {
+          return {
+            ...it,
+            dp: cleanDp || undefined,
+            DP: cleanDp || undefined,
+            image: cleanDp || undefined
+          };
+        }
+        return it;
+      }));
+
+      // Directly update Supabase Canteen_Inventory table DP column
+      const { error } = await supabase
+        .from('Canteen_Inventory')
+        .update({ 'DP': cleanDp || null })
+        .eq('id', itemId);
+
+      if (error) {
+        console.warn('Direct DP update to Supabase Canteen_Inventory failed:', error);
+      }
+
+      setQuickDpToast('আইটেমের ছবি (DP) ক্লাউডে সফলভাবে সংরক্ষিত হয়েছে!');
+      setTimeout(() => setQuickDpToast(null), 3500);
+      window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+    } catch (e) {
+      console.error('Failed to quick update DP:', e);
+    } finally {
+      setIsUpdatingDp(false);
+      setQuickDpItem(null);
+      setQuickDpInput('');
+    }
+  };
+
   return (
     <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300 pb-12">
       
+      {/* Toast Notification for DP / Cloud Updates */}
+      {quickDpToast && (
+        <div className="fixed bottom-6 right-6 z-50 bg-emerald-600 text-white px-5 py-3 rounded-2xl shadow-2xl border border-emerald-400 flex items-center gap-3 animate-in slide-in-from-bottom duration-300 font-bold text-sm">
+          <CheckCircle2 className="w-5 h-5 text-emerald-100" />
+          <span>{quickDpToast}</span>
+        </div>
+      )}
+
       {/* Top Banner & Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/60 border border-slate-800 rounded-3xl p-6 backdrop-blur-sm">
         <div>
@@ -1590,13 +1667,13 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
             </div>
             <div>
               <h2 className="text-2xl md:text-3xl font-black text-white uppercase tracking-tight flex items-center gap-2">
-                <span>RAW INVENTORY</span>
+                <span>CANTEEN INVENTORY</span>
                 <span className="text-xs px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-bold uppercase tracking-wider">
-                  কাঁচামাল স্টক
+                  ইনভেন্টরি ও স্টক
                 </span>
               </h2>
               <p className="text-xs font-semibold text-slate-400 mt-0.5">
-                Kitchen ingredients, packaging & essential canteen raw stock management
+                Kitchen raw materials, readymade resale items & Cloud DP synchronization
               </p>
             </div>
           </div>
@@ -1606,21 +1683,26 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
           <div className="flex flex-wrap items-center gap-2.5">
             <button
               onClick={() => {
+                const defaultType: InventoryItemType = inventoryTypeFilter === 'READY_MADE' ? 'READY_MADE' : 'RAW';
+                const isReady = defaultType === 'READY_MADE';
                 setEditingItem(null);
                 setEditModalTab('DETAILS');
                 setNewItemData({
                   name: '',
                   nameBn: '',
-                  unit: 'kg',
-                  currentStock: 10,
-                  minStockAlert: 5,
-                  unitCost: 100,
+                  category: isReady ? 'Dry Food & Snacks' : 'Fuel & Utilities',
+                  subCategory: '',
+                  itemType: defaultType,
+                  unit: isReady ? 'pcs' : 'kg',
+                  currentStock: isReady ? 50 : 10,
+                  minStockAlert: isReady ? 15 : 5,
+                  unitCost: isReady ? 20 : 100,
                   supplier: '',
                   notes: '',
                   wastagePercentage: 0,
-                  hasSubUnits: true,
-                  packSize: 1000,
-                  subUnit: 'gm',
+                  hasSubUnits: !isReady,
+                  packSize: isReady ? 1 : 1000,
+                  subUnit: isReady ? undefined : 'gm',
                   dp: ''
                 });
                 setShowAddModal(true);
@@ -1628,7 +1710,9 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
               className="flex items-center space-x-2 px-4 py-2.5 bg-[#4f46e5] hover:bg-[#4338ca] text-white rounded-xl text-xs font-black tracking-wider transition-all shadow-md shadow-indigo-500/20 active:scale-95 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              <span>NEW RAW ITEM</span>
+              <span>
+                {inventoryTypeFilter === 'READY_MADE' ? 'NEW READYMADE ITEM' : inventoryTypeFilter === 'RAW' ? 'NEW RAW ITEM' : 'NEW INVENTORY ITEM'}
+              </span>
             </button>
 
             <button
@@ -1643,28 +1727,138 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
         )}
       </div>
 
-      {/* Automated Sync Information Banner */}
-      <div className="bg-gradient-to-r from-indigo-950/40 via-slate-900 to-indigo-950/30 border border-indigo-500/25 rounded-2xl p-4 flex items-start gap-3.5 text-xs shadow-sm">
-        <div className="w-8 h-8 rounded-xl bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 flex items-center justify-center shrink-0 mt-0.5">
-          <Sparkles className="w-4 h-4" />
+      {/* 2-Option Main Inventory Switcher: 1. RAW Item vs 2. Readymate Items */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-3.5 shadow-md">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {/* Option 1: RAW Item */}
+          <button
+            type="button"
+            onClick={() => setInventoryTypeFilter('RAW')}
+            className={`flex items-start gap-3.5 p-4 rounded-2xl border-2 transition-all text-left cursor-pointer ${
+              inventoryTypeFilter === 'RAW'
+                ? 'bg-gradient-to-r from-blue-950/80 via-indigo-950/70 to-slate-900 border-blue-500 shadow-lg shadow-blue-500/20 ring-1 ring-blue-400/40'
+                : 'bg-slate-950/50 border-slate-800 hover:bg-slate-800/50 hover:border-slate-700'
+            }`}
+          >
+            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl shrink-0 ${
+              inventoryTypeFilter === 'RAW'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'bg-slate-800 text-blue-400'
+            }`}>
+              🌾
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-1">
+                <span className="font-black text-white text-sm tracking-wide">1. RAW Item (কাঁচামাল)</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-blue-500/20 text-blue-300 border border-blue-500/40">
+                  {stats.rawItemsCount} টি
+                </span>
+              </div>
+              <p className="text-xs text-blue-200/90 font-medium mt-1">
+                যা দিয়ে প্রসেস করে Menu Ready করা হয়
+              </p>
+              <p className="text-[11px] text-slate-400 mt-0.5 truncate">
+                চাল, ডাল, তেল, মুরগি, গুঁড়া দুধ, মসলা ইত্যাদি
+              </p>
+            </div>
+          </button>
+
+          {/* Option 2: Readymate Items */}
+          <button
+            type="button"
+            onClick={() => setInventoryTypeFilter('READY_MADE')}
+            className={`flex items-start gap-3.5 p-4 rounded-2xl border-2 transition-all text-left cursor-pointer ${
+              inventoryTypeFilter === 'READY_MADE'
+                ? 'bg-gradient-to-r from-emerald-950/80 via-teal-950/70 to-slate-900 border-emerald-500 shadow-lg shadow-emerald-500/20 ring-1 ring-emerald-400/40'
+                : 'bg-slate-950/50 border-slate-800 hover:bg-slate-800/50 hover:border-slate-700'
+            }`}
+          >
+            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl shrink-0 ${
+              inventoryTypeFilter === 'READY_MADE'
+                ? 'bg-emerald-600 text-white shadow-md'
+                : 'bg-slate-800 text-emerald-400'
+            }`}>
+              🥐
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-1">
+                <span className="font-black text-white text-sm tracking-wide">2. Readymate Items (রেডিমেট)</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                  {stats.readymadeItemsCount} টি
+                </span>
+              </div>
+              <p className="text-xs text-emerald-200/90 font-medium mt-1">
+                সরাসরি কিনে এনে প্রসেস ছাড়াই Sell দেওয়া যায়
+              </p>
+              <p className="text-[11px] text-slate-400 mt-0.5 truncate">
+                Butter Ban, Sandwich, Swarma, Biscuit, Singara, Porota, Banana
+              </p>
+            </div>
+          </button>
+
+          {/* Option 3: All Items */}
+          <button
+            type="button"
+            onClick={() => setInventoryTypeFilter('ALL')}
+            className={`flex items-start gap-3.5 p-4 rounded-2xl border-2 transition-all text-left cursor-pointer ${
+              inventoryTypeFilter === 'ALL'
+                ? 'bg-gradient-to-r from-indigo-950/80 via-purple-950/70 to-slate-900 border-indigo-500 shadow-lg shadow-indigo-500/20 ring-1 ring-indigo-400/40'
+                : 'bg-slate-950/50 border-slate-800 hover:bg-slate-800/50 hover:border-slate-700'
+            }`}
+          >
+            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl shrink-0 ${
+              inventoryTypeFilter === 'ALL'
+                ? 'bg-indigo-600 text-white shadow-md'
+                : 'bg-slate-800 text-indigo-400'
+            }`}>
+              📦
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-1">
+                <span className="font-black text-white text-sm tracking-wide">All Inventory (সব আইটেম)</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
+                  {stats.totalItems} টি
+                </span>
+              </div>
+              <p className="text-xs text-indigo-200/90 font-medium mt-1">
+                সম্পূর্ণ স্টক তালিকা (কাঁচামাল + রেডিমেট)
+              </p>
+              <p className="text-[11px] text-slate-400 mt-0.5 truncate">
+                ক্যান্টিনের সকল আইটেম এক নজরে
+              </p>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {/* Selected Option Clarification Banner */}
+      <div className={`rounded-2xl p-4 border flex items-start gap-3.5 text-xs transition-all ${
+        inventoryTypeFilter === 'RAW'
+          ? 'bg-blue-950/30 border-blue-500/30 text-blue-200'
+          : inventoryTypeFilter === 'READY_MADE'
+          ? 'bg-emerald-950/30 border-emerald-500/30 text-emerald-200'
+          : 'bg-slate-900 border-slate-800 text-slate-300'
+      }`}>
+        <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 text-sm font-black ${
+          inventoryTypeFilter === 'RAW'
+            ? 'bg-blue-500/20 text-blue-400 border border-blue-500/40'
+            : inventoryTypeFilter === 'READY_MADE'
+            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+            : 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/40'
+        }`}>
+          {inventoryTypeFilter === 'RAW' ? '🌾' : inventoryTypeFilter === 'READY_MADE' ? '🥐' : '📦'}
         </div>
         <div className="space-y-1">
-          <div className="font-extrabold text-white flex items-center gap-2">
-            <span>স্বয়ংক্রিয় কাঁচামাল স্টক সিস্টেম সক্রিয়</span>
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">
-              Automated Restock & Issue Active
-            </span>
+          <div className="font-extrabold text-white text-sm">
+            {inventoryTypeFilter === 'RAW' && '১. RAW Items (কাঁচামাল) — যা দিয়ে প্রসেস করে Menu Ready করা হয়'}
+            {inventoryTypeFilter === 'READY_MADE' && '২. Readymate Items (রেডিমেট পণ্য) — যা সরাসরি কিনে এনে কোনো প্রসেস ছাড়াই Sell দেওয়া যায়'}
+            {inventoryTypeFilter === 'ALL' && 'ক্যান্টিনের সম্পূর্ণ ইনভেন্টরি স্টক তালিকা (RAW ও Readymate উভয় পণ্য)'}
           </div>
-          <div className="text-slate-300 leading-relaxed grid grid-cols-1 sm:grid-cols-2 gap-2 pt-0.5">
-            <div className="flex items-center gap-2 bg-slate-800/40 px-2.5 py-1.5 rounded-lg border border-slate-700/40">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0"></span>
-              <span><strong>Auto-Restock:</strong> Expenditures এ কেনাকাটার সাথে সাথে স্টক স্বয়ংক্রিয়ভাবে বৃদ্ধি পায়।</span>
-            </div>
-            <div className="flex items-center gap-2 bg-slate-800/40 px-2.5 py-1.5 rounded-lg border border-slate-700/40">
-              <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0"></span>
-              <span><strong>Auto-Issue:</strong> POS Sales এ মেনু বিক্রি হলে প্রয়োজনীয় কাঁচামাল স্বয়ংক্রিয়ভাবে বিয়োগ হয়।</span>
-            </div>
-          </div>
+          <p className="leading-relaxed text-slate-300">
+            {inventoryTypeFilter === 'RAW' && 'এই আইটেমগুলো রান্নার কাঁচামাল। যা কিচেনে প্রসেসিং/রান্না করে মেনু তৈরি করতে ব্যবহার করা হয় (যেমন: চাল, ডাল, তেল, মুরগি, গুঁড়া দুধ, ডিম, মসলা ইত্যাদি)। POS বিক্রির সাথে সাথে স্বয়ংক্রিয়ভাবে স্টক বিয়োগ হয়।'}
+            {inventoryTypeFilter === 'READY_MADE' && 'এই পণ্যগুলো সরাসরি বাহিরে কোনো দোকান বা বেকারি থেকে এনে কোনো রূপ রান্না বা প্রসেসিং ছাড়াই কাস্টমারকে Sell দেওয়া যায় (যেমন: Butter Ban, Sandwich, Swarma, Normal Biscuit, Dry Cake, Singara, Puri, Hotel Porota, Hotel Banana ইত্যাদি)।'}
+            {inventoryTypeFilter === 'ALL' && 'এখানে রান্নার কাঁচামাল এবং সরাসরি বিক্রয়যোগ্য রেডিমেট সকল আইটেম প্রদর্শিত হচ্ছে। ফিল্টার করতে উপরের কাঁচামাল বা রেডিমেট অপশনে ক্লিক করুন।'}
+          </p>
         </div>
       </div>
 
@@ -1673,14 +1867,15 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
         {/* Card 1: Total Items */}
         <div className="relative bg-gradient-to-b from-slate-800/90 via-slate-900 to-slate-950 rounded-3xl p-5 border-t border-t-slate-600/60 border-x border-x-slate-700/60 border-b-4 border-b-slate-950 shadow-[0_12px_24px_-4px_rgba(0,0,0,0.65),0_4px_8px_-2px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.12),inset_0_-2px_4px_0_rgba(0,0,0,0.4)] overflow-hidden">
           <div className="text-[11px] font-black uppercase text-slate-400 tracking-wider">
-            Total Raw Items
+            Total Inventory Items
           </div>
           <div className="text-3xl font-black text-white mt-1">
             {stats.totalItems} <span className="text-xs font-bold text-slate-500 uppercase">Items</span>
           </div>
-          <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
-            <span>Kitchen raw stock items</span>
+          <div className="text-[11px] text-slate-400 mt-2 flex items-center gap-1.5 flex-wrap">
+            <span className="text-blue-400 font-bold">🌾 {stats.rawItemsCount} RAW</span>
+            <span>•</span>
+            <span className="text-emerald-400 font-bold">🥐 {stats.readymadeItemsCount} Readymade</span>
           </div>
         </div>
 
@@ -1894,17 +2089,33 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                     <div>
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-center space-x-3 min-w-0">
-                          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-sm shrink-0 border border-slate-700/70 overflow-hidden shadow-[inset_0_2px_5px_rgba(0,0,0,0.8),0_3px_8px_rgba(0,0,0,0.5)] group-hover:scale-105 transition-transform duration-300 ${
-                            isZero 
-                              ? 'bg-rose-950/80 text-rose-400 !border-rose-500/40' 
-                              : isLow 
-                              ? 'bg-amber-950/80 text-amber-400 !border-amber-500/40' 
-                              : 'bg-slate-950 text-indigo-400'
-                          }`}>
-                            {(item.dp || item.image) ? (
-                              <img src={item.dp || item.image} alt={item.name} className="w-full h-full object-cover" />
-                            ) : (
-                              item.name.slice(0, 2).toUpperCase()
+                          <div className="relative group/dp shrink-0">
+                            <div className={`w-13 h-13 rounded-2xl flex items-center justify-center font-black text-sm shrink-0 border border-slate-700/70 overflow-hidden shadow-[inset_0_2px_5px_rgba(0,0,0,0.8),0_3px_8px_rgba(0,0,0,0.5)] group-hover:scale-105 transition-transform duration-300 ${
+                              isZero 
+                                ? 'bg-rose-950/80 text-rose-400 !border-rose-500/40' 
+                                : isLow 
+                                ? 'bg-amber-950/80 text-amber-400 !border-amber-500/40' 
+                                : 'bg-slate-950 text-indigo-400'
+                            }`}>
+                              {(item.dp || item.DP || item.image) ? (
+                                <img src={item.dp || item.DP || item.image} alt={item.name} className="w-full h-full object-cover" />
+                              ) : (
+                                <span className="text-base font-black tracking-wider">{item.name.slice(0, 2).toUpperCase()}</span>
+                              )}
+                            </div>
+                            {!readOnly && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setQuickDpItem(item);
+                                  setQuickDpInput(item.dp || item.DP || item.image || '');
+                                }}
+                                className="absolute -bottom-1 -right-1 p-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg shadow-md border border-slate-900 transition-all opacity-85 group-hover/dp:opacity-100 hover:scale-110 active:scale-95 cursor-pointer"
+                                title="Set / Change DP (ছবি যুক্ত বা পরিবর্তন করুন)"
+                              >
+                                <Camera className="w-3 h-3" />
+                              </button>
                             )}
                           </div>
                           <div className="min-w-0">
@@ -1937,8 +2148,19 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                         </div>
                       </div>
 
-                      {/* Unit & Wastage Tag Pills */}
+                      {/* Unit, Type & Wastage Tag Pills */}
                       <div className="flex flex-wrap items-center gap-1.5 mt-3">
+                        {/* RAW vs Readymate Badge */}
+                        {(item.itemType === 'READY_MADE' || isReadymadeItem(item)) ? (
+                          <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border-t border-emerald-400/30 border-b-2 border-emerald-950 shadow-sm flex items-center gap-1">
+                            <span>🥐 রেডিমেট</span>
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-blue-500/20 text-blue-300 border-t border-blue-400/30 border-b-2 border-blue-950 shadow-sm flex items-center gap-1">
+                            <span>🌾 কাঁচামাল</span>
+                          </span>
+                        )}
+
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-800/90 text-indigo-300 border-t border-slate-600/40 border-b-2 border-slate-950 shadow-sm uppercase">
                           {item.unit}
                         </span>
@@ -2096,22 +2318,47 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                         {/* Item Name & Details */}
                         <td className="px-5 py-3.5">
                           <div className="flex items-center space-x-3">
-                            <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm shrink-0 overflow-hidden shadow-inner ${
-                              isZero 
-                                ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' 
-                                : isLow 
-                                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' 
-                                : 'bg-slate-800 text-indigo-400 border border-slate-700'
-                            }`}>
-                              {(item.dp || item.image) ? (
-                                <img src={item.dp || item.image} alt={item.name} className="w-full h-full object-cover" />
-                              ) : (
-                                item.name.slice(0, 2).toUpperCase()
+                            <div className="relative group/dp shrink-0">
+                              <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-xs shrink-0 overflow-hidden shadow-inner ${
+                                isZero 
+                                  ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' 
+                                  : isLow 
+                                  ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' 
+                                  : 'bg-slate-800 text-indigo-400 border border-slate-700'
+                              }`}>
+                                {(item.dp || item.DP || item.image) ? (
+                                  <img src={item.dp || item.DP || item.image} alt={item.name} className="w-full h-full object-cover" />
+                                ) : (
+                                  item.name.slice(0, 2).toUpperCase()
+                                )}
+                              </div>
+                              {!readOnly && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setQuickDpItem(item);
+                                    setQuickDpInput(item.dp || item.DP || item.image || '');
+                                  }}
+                                  className="absolute -bottom-1 -right-1 p-0.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md shadow border border-slate-900 opacity-80 group-hover/dp:opacity-100 hover:scale-110 active:scale-95 cursor-pointer"
+                                  title="Set / Change DP (ছবি যুক্ত বা পরিবর্তন করুন)"
+                                >
+                                  <Camera className="w-2.5 h-2.5" />
+                                </button>
                               )}
                             </div>
                             <div>
                               <div className="font-extrabold text-white text-sm flex items-center gap-2">
                                 <span>{item.name}</span>
+                                {(item.itemType === 'READY_MADE' || isReadymadeItem(item)) ? (
+                                  <span className="text-[10px] font-black px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                    🥐 রেডিমেট
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] font-black px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                                    🌾 কাঁচামাল
+                                  </span>
+                                )}
                                 {isLow && (
                                   <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-300 font-bold">
                                     <AlertTriangle className="w-2.5 h-2.5" /> Low
@@ -2304,52 +2551,138 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
               <form onSubmit={handleSaveItem} className="space-y-4 pt-4 overflow-y-auto pr-1">
                 {/* Item Display Picture (DP) */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-1.5">Item Photo (DP)</label>
-                  <div className="flex items-center gap-3.5 p-3 bg-slate-950/60 border border-slate-800 rounded-2xl">
-                    <div className="relative w-16 h-16 rounded-2xl bg-slate-800 border-2 border-dashed border-slate-700 flex items-center justify-center overflow-hidden shrink-0">
+                  <label className="block text-xs font-bold text-slate-400 mb-1.5">Item Photo (DP) — Cloud Sync</label>
+                  <div className="flex items-center gap-3.5 p-3.5 bg-slate-950/60 border border-slate-800 rounded-2xl">
+                    <div className="relative w-18 h-18 rounded-2xl bg-slate-800 border-2 border-dashed border-slate-700 flex items-center justify-center overflow-hidden shrink-0 shadow-inner">
                       {newItemData.dp ? (
                         <img src={newItemData.dp} alt="Item DP" className="w-full h-full object-cover" />
                       ) : (
-                        <div className="flex flex-col items-center justify-center text-slate-500">
+                        <div className="flex flex-col items-center justify-center text-slate-500 p-2 text-center">
                           <ImageIcon className="w-6 h-6 opacity-60" />
                           <span className="text-[9px] font-bold uppercase mt-0.5 text-slate-500">No Photo</span>
                         </div>
                       )}
                     </div>
 
-                    <div className="flex-1 flex flex-wrap items-center gap-2">
-                      <label className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer active:scale-95">
-                        <Upload className="w-3.5 h-3.5" />
-                        <span>Upload DP</span>
-                        <input 
-                          type="file" 
-                          accept="image/*" 
-                          className="hidden"
-                          onChange={async (e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              try {
-                                const base64 = await processGalleryImage(file);
-                                setNewItemData(prev => ({ ...prev, dp: base64 }));
-                              } catch (err) {
-                                console.error("Failed to load image from gallery:", err);
+                    <div className="flex-1 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <label className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer active:scale-95">
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>Upload File / Camera</span>
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            className="hidden"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                try {
+                                  const base64 = await processGalleryImage(file);
+                                  setNewItemData(prev => ({ ...prev, dp: base64 }));
+                                } catch (err) {
+                                  console.error("Failed to load image from gallery:", err);
+                                }
                               }
-                            }
-                          }}
-                        />
-                      </label>
+                            }}
+                          />
+                        </label>
 
-                      {newItemData.dp && (
-                        <button
-                          type="button"
-                          onClick={() => setNewItemData(prev => ({ ...prev, dp: '' }))}
-                          className="inline-flex items-center gap-1 px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-                          title="Remove photo"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>Remove</span>
-                        </button>
-                      )}
+                        {newItemData.dp && (
+                          <button
+                            type="button"
+                            onClick={() => setNewItemData(prev => ({ ...prev, dp: '' }))}
+                            className="inline-flex items-center gap-1 px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                            title="Remove photo"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Remove</span>
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder="Or paste image URL (https://...)"
+                          value={newItemData.dp?.startsWith('data:') ? '' : (newItemData.dp || '')}
+                          onChange={(e) => setNewItemData(prev => ({ ...prev, dp: e.target.value }))}
+                          className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700/80 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2 Options for Inventory Items */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-300">
+                    আইটেমের ধরণ / Inventory Classification *
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* Option 1: RAW Item */}
+                    <div
+                      onClick={() => setNewItemData(prev => ({ ...prev, itemType: 'RAW' }))}
+                      className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-3 ${
+                        (newItemData.itemType || 'RAW') === 'RAW'
+                          ? 'bg-blue-950/40 border-blue-500 shadow-md shadow-blue-500/10 ring-1 ring-blue-400/40'
+                          : 'bg-slate-950/40 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="itemTypeOption"
+                        checked={(newItemData.itemType || 'RAW') === 'RAW'}
+                        onChange={() => setNewItemData(prev => ({ ...prev, itemType: 'RAW' }))}
+                        className="mt-1 text-blue-600 focus:ring-blue-500"
+                      />
+                      <div className="min-w-0">
+                        <div className="font-black text-sm text-white flex items-center gap-1.5">
+                          <span>🌾 1. RAW Item</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 font-bold">কাঁচামাল</span>
+                        </div>
+                        <p className="text-[11px] text-slate-300 mt-1 leading-snug">
+                          যা দিয়ে প্রসেস করে Menu Ready করা হয় (রান্নার উপাদান: চাল, ডাল, তেল, মুরগি, গুঁড়া দুধ, মসলা ইত্যাদি)
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Option 2: Readymate Items */}
+                    <div
+                      onClick={() => setNewItemData(prev => ({ 
+                        ...prev, 
+                        itemType: 'READY_MADE',
+                        unit: (prev.unit === 'kg' || prev.unit === 'liter') ? 'pcs' : (prev.unit || 'pcs'),
+                        wastagePercentage: 0,
+                        hasSubUnits: false
+                      }))}
+                      className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-3 ${
+                        newItemData.itemType === 'READY_MADE'
+                          ? 'bg-emerald-950/40 border-emerald-500 shadow-md shadow-emerald-500/10 ring-1 ring-emerald-400/40'
+                          : 'bg-slate-950/40 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="itemTypeOption"
+                        checked={newItemData.itemType === 'READY_MADE'}
+                        onChange={() => setNewItemData(prev => ({ 
+                          ...prev, 
+                          itemType: 'READY_MADE',
+                          unit: (prev.unit === 'kg' || prev.unit === 'liter') ? 'pcs' : (prev.unit || 'pcs'),
+                          wastagePercentage: 0,
+                          hasSubUnits: false
+                        }))}
+                        className="mt-1 text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <div className="min-w-0">
+                        <div className="font-black text-sm text-white flex items-center gap-1.5">
+                          <span>🥐 2. Readymate Items</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold">রেডিমেট পণ্য</span>
+                        </div>
+                        <p className="text-[11px] text-slate-300 mt-1 leading-snug">
+                          যা সরাসরি বাহিরে কোথাও থেকে কিনে এনে কোনো প্রসেস ছাড়াই Sell দেওয়া যায় (যেমন: Butter Ban, Sandwich, Swarma, Normal Biscuit, Dry Cake, Singara, Puri, Hotel Porota, Hotel Banana)
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -3451,6 +3784,136 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                 className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-colors cursor-pointer"
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* QUICK DP PHOTO MODAL: Instantly set or upload image synced to Supabase DP column */}
+      {quickDpItem && (
+        <div className="fixed inset-0 z-[300] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 w-full max-w-md shadow-2xl animate-in zoom-in-95 space-y-5">
+            <div className="flex justify-between items-center pb-3 border-b border-slate-800">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-9 h-9 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center">
+                  <Camera className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-white text-base">
+                    Set Item Photo (DP)
+                  </h3>
+                  <p className="text-xs text-slate-400 font-medium truncate max-w-[220px]">
+                    {quickDpItem.name} {quickDpItem.nameBn ? `(${quickDpItem.nameBn})` : ''}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setQuickDpItem(null);
+                  setQuickDpInput('');
+                }}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Preview Box */}
+            <div className="flex flex-col items-center justify-center gap-3 p-4 bg-slate-950/70 border border-slate-800 rounded-2xl">
+              <div className="relative w-28 h-28 rounded-2xl bg-slate-800 border-2 border-slate-700 overflow-hidden shadow-inner flex items-center justify-center">
+                {quickDpInput ? (
+                  <img src={quickDpInput} alt="Preview" className="w-full h-full object-cover" />
+                ) : (
+                  <div className="flex flex-col items-center justify-center text-slate-500 p-2 text-center">
+                    <ImageIcon className="w-10 h-10 opacity-50" />
+                    <span className="text-[10px] font-bold uppercase mt-1">No Image</span>
+                  </div>
+                )}
+              </div>
+              <span className="text-[11px] text-slate-400">
+                {quickDpInput ? 'Photo ready to save to Supabase Cloud' : 'Select a picture or paste image link'}
+              </span>
+            </div>
+
+            {/* Action buttons: Upload File & URL */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <label className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer active:scale-95">
+                  <Upload className="w-4 h-4" />
+                  <span>Choose from Gallery / Camera</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        try {
+                          const base64 = await processGalleryImage(file);
+                          setQuickDpInput(base64);
+                        } catch (err) {
+                          console.error("Failed to process image:", err);
+                        }
+                      }
+                    }}
+                  />
+                </label>
+
+                {quickDpInput && (
+                  <button
+                    type="button"
+                    onClick={() => setQuickDpInput('')}
+                    className="px-3 py-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                    title="Clear Image"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-400 mb-1">Or Paste Image URL (https://...)</label>
+                <input
+                  type="text"
+                  placeholder="https://images.unsplash.com/..."
+                  value={quickDpInput.startsWith('data:') ? '' : quickDpInput}
+                  onChange={(e) => setQuickDpInput(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+            </div>
+
+            {/* Footer buttons */}
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setQuickDpItem(null);
+                  setQuickDpInput('');
+                }}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isUpdatingDp}
+                onClick={() => handleQuickUpdateDp(quickDpItem.id, quickDpInput)}
+                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-500/20 active:scale-95 flex items-center gap-1.5 cursor-pointer"
+              >
+                {isUpdatingDp ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Saving to Cloud...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-3.5 h-3.5" />
+                    <span>Save DP to Cloud</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
