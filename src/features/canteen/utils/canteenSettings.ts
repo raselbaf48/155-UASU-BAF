@@ -9,6 +9,9 @@ export interface CanteenConfig {
   password: string;
   managerBdNo?: string;
   footer?: string;
+  preOrderEnabled?: boolean;
+  preOrderStartTime?: string; // HH:mm (24-hour format) e.g. "08:00"
+  preOrderEndTime?: string;   // HH:mm (24-hour format) e.g. "16:00"
 }
 
 export const DEFAULT_CANTEEN_CONFIG: CanteenConfig = {
@@ -19,8 +22,91 @@ export const DEFAULT_CANTEEN_CONFIG: CanteenConfig = {
   phone: '+880 1601-676760',
   password: '0000',
   managerBdNo: '',
-  footer: 'Official Canteen of UAV | Integrity and Service'
+  footer: 'Official Canteen of UAV | Integrity and Service',
+  preOrderEnabled: true,
+  preOrderStartTime: '08:00',
+  preOrderEndTime: '16:00'
 };
+
+export interface PreOrderTimeStatus {
+  isOpen: boolean;
+  isEnabled: boolean;
+  startTime: string;
+  endTime: string;
+  message: string;
+  timeRemainingText?: string;
+}
+
+export function checkPreOrderWindow(config?: CanteenConfig): PreOrderTimeStatus {
+  const cfg = config || getCanteenConfig();
+  const isEnabled = cfg.preOrderEnabled !== false;
+  const startTime = cfg.preOrderStartTime || '08:00';
+  const endTime = cfg.preOrderEndTime || '16:00';
+
+  if (!isEnabled) {
+    return {
+      isOpen: false,
+      isEnabled: false,
+      startTime,
+      endTime,
+      message: 'Pre-Order service is currently disabled by Manager'
+    };
+  }
+
+  const now = new Date();
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+  const [startH, startM] = startTime.split(':').map(Number);
+  const [endH, endM] = endTime.split(':').map(Number);
+
+  const startMinutes = (isNaN(startH) ? 8 : startH) * 60 + (isNaN(startM) ? 0 : startM);
+  const endMinutes = (isNaN(endH) ? 16 : endH) * 60 + (isNaN(endM) ? 0 : endM);
+
+  let isOpen = false;
+  let timeRemainingText = '';
+
+  if (startMinutes <= endMinutes) {
+    // Normal window within same day (e.g. 08:00 to 16:00)
+    isOpen = currentMinutes >= startMinutes && currentMinutes < endMinutes;
+    if (isOpen) {
+      const diff = endMinutes - currentMinutes;
+      const h = Math.floor(diff / 60);
+      const m = diff % 60;
+      timeRemainingText = h > 0 ? `${h}h ${m}m remaining` : `${m} minutes remaining`;
+    }
+  } else {
+    // Overnight window (e.g. 20:00 to 02:00)
+    isOpen = currentMinutes >= startMinutes || currentMinutes < endMinutes;
+    if (isOpen) {
+      const diff = currentMinutes >= startMinutes 
+        ? (24 * 60 - currentMinutes + endMinutes)
+        : (endMinutes - currentMinutes);
+      const h = Math.floor(diff / 60);
+      const m = diff % 60;
+      timeRemainingText = h > 0 ? `${h}h ${m}m remaining` : `${m} minutes remaining`;
+    }
+  }
+
+  let message = '';
+  if (isOpen) {
+    message = `Pre-Order is OPEN (${startTime} - ${endTime})`;
+  } else {
+    if (currentMinutes < startMinutes && startMinutes <= endMinutes) {
+      message = `Pre-Order will appear & open at ${startTime}`;
+    } else {
+      message = `Pre-Order closed at ${endTime}`;
+    }
+  }
+
+  return {
+    isOpen,
+    isEnabled,
+    startTime,
+    endTime,
+    message,
+    timeRemainingText
+  };
+}
 
 const STORAGE_KEY = 'canteen_settings';
 const RESOLVED_CACHE_KEY = 'canteen_image_resolutions';

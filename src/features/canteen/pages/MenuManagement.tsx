@@ -1,17 +1,52 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { formatMoney } from '../i18n';
-import { Coffee, Plus, Calendar, X } from 'lucide-react';
+import { Coffee, Plus, Calendar, X, Utensils } from 'lucide-react';
+import { supabase } from '../../../supabase';
+import { resolveImageUrl } from '../utils/canteenSettings';
+import { queuePushKeyToCloud } from '../utils/canteenCloudSync';
 
 export const MenuManagement: React.FC = () => {
   const { t, i18n } = useTranslation();
   
-  const [items, setItems] = useState([
-    { id: '1', meal: 'Snacks', name_bn: 'সিঙ্গারা ও চা', name_en: 'Singara & Tea', price: 20, max: 50 },
-    { id: '2', meal: 'Snacks', name_bn: 'সমুচা ও কফি', name_en: 'Samoosa & Coffee', price: 30, max: 40 },
-  ]);
+  const [items, setItems] = useState<any[]>(() => {
+    try {
+      const raw = localStorage.getItem('canteen_menu_items_list');
+      return raw ? JSON.parse(raw) : [
+        { id: '1', meal: 'Snacks', name_bn: 'সিঙ্গারা ও চা', name_en: 'Singara & Tea', price: 20, max: 50, DP: '' },
+        { id: '2', meal: 'Snacks', name_bn: 'সমুচা ও কফি', name_en: 'Samoosa & Coffee', price: 30, max: 40, DP: '' },
+      ];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    const fetchCloudMenu = async () => {
+      try {
+        const { data, error } = await supabase.from('Canteen_Menu').select('*');
+        if (!error && data && data.length > 0) {
+          const mapped = data.map((d: any) => ({
+            id: d.id,
+            meal: d.category || 'Snacks',
+            name_bn: d.name,
+            name_en: d.name,
+            price: d.price || 0,
+            max: d.stock || 50,
+            DP: d.DP || d.img || ''
+          }));
+          setItems(mapped);
+          localStorage.setItem('canteen_menu_items_list', JSON.stringify(mapped));
+        }
+      } catch (e) {
+        console.warn('Could not fetch cloud menu in MenuManagement:', e);
+      }
+    };
+    fetchCloudMenu();
+  }, []);
+
   const [showAdd, setShowAdd] = useState(false);
-  const [formData, setFormData] = useState({ name_bn: '', name_en: '', price: '', max: '' });
+  const [formData, setFormData] = useState({ name_bn: '', name_en: '', price: '', max: '', DP: '' });
 
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
@@ -21,15 +56,21 @@ export const MenuManagement: React.FC = () => {
         name_bn: formData.name_bn,
         name_en: formData.name_en,
         price: Number(formData.price),
-        max: Number(formData.max)
+        max: Number(formData.max),
+        DP: formData.DP.trim()
     };
-    setItems([...items, newItem]);
+    const updated = [...items, newItem];
+    setItems(updated);
+    localStorage.setItem('canteen_menu_items_list', JSON.stringify(updated));
+    queuePushKeyToCloud('canteen_daily_menu');
     setShowAdd(false);
-    setFormData({ name_bn: '', name_en: '', price: '', max: '' });
+    setFormData({ name_bn: '', name_en: '', price: '', max: '', DP: '' });
   };
 
   const handleDelete = (id: string) => {
-    setItems(items.filter(item => item.id !== id));
+    const updated = items.filter(item => item.id !== id);
+    setItems(updated);
+    localStorage.setItem('canteen_menu_items_list', JSON.stringify(updated));
   };
 
   return (
@@ -63,6 +104,7 @@ export const MenuManagement: React.FC = () => {
           <table className="w-full text-left text-sm whitespace-nowrap">
             <thead className="bg-slate-800 dark:bg-slate-800/50 text-slate-400 font-medium border-b border-slate-800 dark:border-slate-800">
               <tr>
+                <th className="px-6 py-4">DP</th>
                 <th className="px-6 py-4">Meal Type</th>
                 <th className="px-6 py-4">{t('item')}</th>
                 <th className="px-6 py-4 text-right">{t('price')}</th>
@@ -71,21 +113,33 @@ export const MenuManagement: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50 text-slate-200 dark:text-slate-300">
-              {items.map((row) => (
+              {items.map((row) => {
+                  const itemDp = resolveImageUrl(row.DP || row.img || row.image);
+                  return (
                   <tr key={row.id} className="hover:bg-slate-800 dark:hover:bg-slate-800/20 transition-colors">
+                     <td className="px-6 py-3">
+                        <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 overflow-hidden flex items-center justify-center">
+                          {itemDp ? (
+                            <img src={itemDp} alt="" className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                          ) : (
+                            <Utensils className="w-4 h-4 text-slate-400" />
+                          )}
+                        </div>
+                     </td>
                      <td className="px-6 py-4 font-bold text-slate-400 text-xs uppercase tracking-wider">{row.meal}</td>
                      <td className="px-6 py-4 font-bold">{i18n.language === 'bn' ? row.name_bn : row.name_en}</td>
                      <td className="px-6 py-4 text-right font-bold text-emerald-600">{formatMoney(row.price, i18n.language)}</td>
                      <td className="px-6 py-4 text-center font-bold">{row.max}</td>
                      <td className="px-6 py-4 text-right">
-                        <button onClick={() => handleDelete(row.id)} className="text-rose-500 hover:text-rose-400 font-bold text-xs bg-rose-900/30 px-3 py-1.5 rounded-lg transition-colors">
+                        <button onClick={() => handleDelete(row.id)} className="text-rose-500 hover:text-rose-400 font-bold text-xs bg-rose-900/30 px-3 py-1.5 rounded-lg transition-colors cursor-pointer">
                             {t('cancel')}
                         </button>
                      </td>
                   </tr>
-              ))}
+                  );
+              })}
               {items.length === 0 && (
-                  <tr><td colSpan={5} className="px-6 py-8 text-center text-slate-400">No items found</td></tr>
+                  <tr><td colSpan={6} className="px-6 py-8 text-center text-slate-400">No items found</td></tr>
               )}
             </tbody>
           </table>
@@ -117,6 +171,10 @@ export const MenuManagement: React.FC = () => {
                             <label className="block text-sm font-bold text-slate-200 dark:text-slate-300 mb-1">Max Qty</label>
                             <input required type="number" value={formData.max ?? ""} onChange={e => setFormData({...formData, max: e.target.value})} className="w-full px-4 py-2 border border-slate-700 dark:border-slate-700 bg-slate-800 dark:bg-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500" />
                         </div>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-slate-200 dark:text-slate-300 mb-1">Photo / DP URL (Google Drive / Direct link)</label>
+                        <input type="text" value={formData.DP ?? ""} onChange={e => setFormData({...formData, DP: e.target.value})} className="w-full px-4 py-2 border border-slate-700 dark:border-slate-700 bg-slate-800 dark:bg-slate-800 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500" placeholder="https://..." />
                     </div>
                     <div className="pt-4">
                         <button type="submit" className="w-full bg-emerald-600 text-white font-bold py-3 rounded-xl hover:bg-emerald-700 transition-colors">Save Item</button>

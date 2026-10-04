@@ -243,11 +243,26 @@ export const lookupCatalogPrice = (itemName: string, catalog: any[] = []): numbe
 
 // Format month key to readable label e.g. "October 2026"
 export const formatMonthName = (monthKey: string): string => {
-  if (!monthKey || monthKey === 'ALL') return 'All Months';
+  if (!monthKey || monthKey === 'ALL') {
+    const now = new Date();
+    return now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  }
   const parts = monthKey.split('-');
   if (parts.length < 2) return monthKey;
   const date = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, 1);
   return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+};
+
+// Format month key to short label e.g. "OCT"
+export const formatShortMonth = (monthKey: string): string => {
+  if (!monthKey || monthKey === 'ALL') {
+    const now = new Date();
+    return now.toLocaleDateString('en-US', { month: 'short' }).toUpperCase();
+  }
+  const parts = monthKey.split('-');
+  if (parts.length < 2) return monthKey;
+  const date = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, 1);
+  return date.toLocaleDateString('en-US', { month: 'short' }).toUpperCase();
 };
 
 // Categorize transaction into CANTEEN, UNIT_FUND, or OTHERS
@@ -321,7 +336,7 @@ export interface StatementItemRow {
 export const MemberDB: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<BillCategory>('ALL');
-  const [selectedMonth, setSelectedMonth] = useState<string>('ALL');
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => getRunningMonthKey());
   const [onlyWithBill, setOnlyWithBill] = useState<boolean>(false);
   const [viewMode, setViewMode] = useState<'BOX' | 'TABLE'>('BOX');
 
@@ -506,7 +521,8 @@ export const MemberDB: React.FC = () => {
         .filter((tx) => tx.type === 'BILL PAYMENT')
         .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
       const netTxBill = Math.max(0, allCharges - allPayments);
-      return Math.max(totalMemberDue, netTxBill);
+      // Return transaction-based net bill across all months, or fallback to profile total due if no tx logs exist yet
+      return memberTxs.length > 0 ? netTxBill : totalMemberDue;
     }
 
     const matchingTxs = memberTxs.filter((tx) => {
@@ -545,14 +561,12 @@ export const MemberDB: React.FC = () => {
     return txBill;
   };
 
-  // Direct Pay Bill opener
+  // Direct Pay Bill opener - Always defaults to Total Due (আগের সব বকেয়া + বর্তমান বিল)
   const openPayBill = (member: any) => {
     setPayBillMember(member);
     setPayBillCategory(selectedCategory);
-    const displayed = getMemberFilteredBill(member, selectedCategory, selectedMonth);
     const totalDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
-    const initialAmt = displayed > 0 ? displayed : totalDue;
-    setPayAmount(initialAmt > 0 ? String(initialAmt) : '');
+    setPayAmount(totalDue > 0 ? String(totalDue) : '');
     setPayMethod('CASH');
   };
 
@@ -936,6 +950,22 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
     
     const catLabel = payBillCategory === 'ALL' ? 'ALL BILLS' : payBillCategory.replace('_', ' ');
     const payeeName = `${payBillMember.Rank || payBillMember.rank || ''} ${payBillMember.Surname || payBillMember['Surname'] || payBillMember.name || ''}`.trim();
+
+    // Priority: First clear old due, then new/current month bill
+    const thisMonthBill = getMemberFilteredBill(payBillMember, payBillCategory, selectedMonth);
+    const oldDue = Math.max(0, currentDue - thisMonthBill);
+    const clearedOld = Math.min(amount, oldDue);
+    const clearedNew = Math.max(0, amount - clearedOld);
+
+    let breakdownNote = '';
+    if (clearedOld > 0 && clearedNew > 0) {
+      breakdownNote = ` (পুরনো বকেয়া পরিশোধ: ৳${clearedOld} + বর্তমান বিল: ৳${clearedNew})`;
+    } else if (clearedOld > 0) {
+      breakdownNote = ` (পুরনো বকেয়া পরিশোধ: ৳${clearedOld})`;
+    } else if (clearedNew > 0) {
+      breakdownNote = ` (বর্তমান বিল পরিশোধ: ৳${clearedNew})`;
+    }
+
     const tx = {
       id: 'tx-pay-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
       date: formatCanteenDate(new Date()),
@@ -943,7 +973,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
       bdNo: payBillMember['BD No'] || payBillMember.airman_id,
       memberName: payeeName,
       rank: payBillMember.Rank || payBillMember.rank || '',
-      items: `BILL PAYMENT - ${catLabel} (${payMethod})`,
+      items: `BILL PAYMENT - ${catLabel} (${payMethod})${breakdownNote}`,
       amount: amount,
       type: 'BILL PAYMENT',
       billType: payBillCategory,
@@ -1429,32 +1459,18 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
 
   const memberTotalDue = Number(statementMember?.Due ?? statementMember?.due ?? statementMember?.baki ?? 0);
 
-  // বকেয়া বিল: আগের মাসে বা তার আগের বকেয়া বিল থাকলে তা দেখাবে
+  // বকেয়া বিল হিসাব: "Age old due clear hbe erpor New gula"
+  // memberTotalDue হলো সদস্যের সার্বিক বর্তমান বকেয়া (আগের সব বকেয়া + বর্তমান মাসের বিল)
+  // totalMonthBill হলো এই মাসের মোট হিসাব
   let previousDue = 0;
-  if (statementMonth !== 'ALL') {
-    const olderTxs = statementTx.filter((tx) => {
-      const m = getTxMonthKey(tx.date);
-      return m && m < statementMonth;
-    });
-    const olderCharges = olderTxs
-      .filter((tx) => tx.type !== 'BILL PAYMENT')
-      .reduce((s, tx) => s + Number(tx.amount || 0), 0);
-    const olderPayments = olderTxs
-      .filter((tx) => tx.type === 'BILL PAYMENT')
-      .reduce((s, tx) => s + Number(tx.amount || 0), 0);
-    const olderNet = Math.max(0, olderCharges - olderPayments);
-
-    if (olderNet > 0) {
-      previousDue = Math.round(olderNet * 100) / 100;
-    } else {
-      const currentNet = Math.max(0, totalMonthBill - currentMonthPayments);
-      previousDue = Math.max(0, Math.round((memberTotalDue - currentNet) * 100) / 100);
-    }
+  if (memberTotalDue >= totalMonthBill) {
+    previousDue = Math.max(0, Math.round((memberTotalDue - totalMonthBill) * 100) / 100);
+  } else {
+    // পুরানো সব বকেয়া ইতিমধ্যে পরিশোধিত হয়ে গেছে
+    previousDue = 0;
   }
 
-  const netPayable = statementMonth === 'ALL'
-    ? (memberTotalDue > 0 ? memberTotalDue : totalMonthBill)
-    : Math.max(0, Math.round((totalMonthBill + previousDue - currentMonthPayments) * 100) / 100);
+  const netPayable = memberTotalDue;
 
   const grandTotalDue = useMemo(() => {
     return members.reduce((sum, m) => sum + Number(m.Due ?? m.due ?? m.baki ?? 0), 0);
@@ -1497,9 +1513,13 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
             <Receipt className="w-6 h-6" />
           </div>
           <div>
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Current View Billed</p>
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+              {formatMonthName(selectedMonth)} Billed
+            </p>
             <p className="text-2xl font-black text-emerald-400 font-mono">৳{totalFilteredBill.toLocaleString()}</p>
-            <p className="text-[11px] text-indigo-300 font-bold mt-0.5">{formatMonthName(selectedMonth)}</p>
+            <p className="text-[11px] text-indigo-300 font-bold mt-0.5">
+              এই মাসের মোট অর্জিত বিল
+            </p>
           </div>
         </div>
 
@@ -1523,7 +1543,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
                 ৳{grandTotalDue.toLocaleString()}
               </p>
               <p className="text-[11px] text-rose-300/90 font-bold mt-0.5">
-                বকেয়া সদস্য ফিল্টার করতে ক্লিক করুন
+                আগের সব বকেয়া সহ মোট বকেয়া
               </p>
             </div>
           </div>
@@ -1589,50 +1609,33 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
             </button>
           </div>
 
-          {/* Month Selector: Left & Right Arrow Navigation (No Dropdown List) */}
-          <div className="flex items-center space-x-2 self-start lg:self-auto w-full lg:w-auto">
-            <div className="flex items-center bg-slate-950 rounded-2xl p-1 border border-slate-800 shadow-sm w-full sm:w-auto">
+          {/* Month Selector: Left & Right Arrow Navigation (Specific Month only, no All month) */}
+          <div className="flex items-center space-x-2 self-start lg:self-auto w-full sm:w-auto">
+            <div className="flex items-center bg-slate-950 rounded-2xl p-1 border border-slate-800 shadow-sm w-full sm:w-auto justify-between">
               <button
                 type="button"
-                onClick={() => setSelectedMonth('ALL')}
-                className={`px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer shrink-0 ${
-                  selectedMonth === 'ALL'
-                    ? 'bg-indigo-600 text-white shadow-md'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-                title="All Months (সকল মাস)"
+                onClick={handlePrevMonth}
+                className="p-2 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl transition-colors cursor-pointer shrink-0 active:scale-95"
+                title="পূর্ববর্তী মাস (Previous Month)"
               >
-                All
+                <ChevronLeft className="w-4 h-4 text-indigo-400 hover:text-white" />
               </button>
 
-              <div className="flex items-center bg-slate-900/90 rounded-xl px-1.5 py-0.5 border border-slate-700/60 ml-1.5 flex-1 sm:flex-initial justify-between">
-                <button
-                  type="button"
-                  onClick={handlePrevMonth}
-                  className="p-1.5 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg transition-colors cursor-pointer shrink-0 active:scale-95"
-                  title="পূর্ববর্তী মাস (Previous Month)"
-                >
-                  <ChevronLeft className="w-4 h-4 text-indigo-400 hover:text-white" />
-                </button>
-
-                <div className="px-3 py-1 text-center min-w-[120px] sm:min-w-[140px] select-none">
-                  <span className={`text-xs font-black uppercase tracking-wider flex items-center justify-center space-x-1.5 ${
-                    selectedMonth !== 'ALL' ? 'text-white' : 'text-indigo-300'
-                  }`}>
-                    <Calendar className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                    <span>{selectedMonth === 'ALL' ? 'সকল মাস' : formatMonthName(selectedMonth)}</span>
-                  </span>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleNextMonth}
-                  className="p-1.5 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg transition-colors cursor-pointer shrink-0 active:scale-95"
-                  title="পরবর্তী মাস (Next Month)"
-                >
-                  <ChevronRight className="w-4 h-4 text-indigo-400 hover:text-white" />
-                </button>
+              <div className="px-4 py-1 text-center min-w-[140px] sm:min-w-[160px] select-none">
+                <span className="text-xs font-black uppercase tracking-wider flex items-center justify-center space-x-2 text-white">
+                  <Calendar className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                  <span>{formatMonthName(selectedMonth)}</span>
+                </span>
               </div>
+
+              <button
+                type="button"
+                onClick={handleNextMonth}
+                className="p-2 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl transition-colors cursor-pointer shrink-0 active:scale-95"
+                title="পরবর্তী মাস (Next Month)"
+              >
+                <ChevronRight className="w-4 h-4 text-indigo-400 hover:text-white" />
+              </button>
             </div>
           </div>
         </div>
@@ -1796,16 +1799,6 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
             const totalDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
             const displayedBill = getMemberFilteredBill(member, selectedCategory, selectedMonth);
 
-            const billLabel = selectedCategory === 'ALL' && selectedMonth === 'ALL'
-              ? 'TOTAL DUE'
-              : selectedCategory === 'CANTEEN'
-              ? 'CANTEEN BILL'
-              : selectedCategory === 'UNIT_FUND'
-              ? 'UNIT FUND BILL'
-              : selectedCategory === 'OTHERS'
-              ? 'OTHERS BILL'
-              : 'MONTHLY BILL';
-
             return (
               <div 
                 key={member.airman_id || i} 
@@ -1857,37 +1850,49 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
                     </div>
                   </div>
 
-                  {/* Due / Bill amount */}
+                  {/* Due / Bill amount: Top = TOTAL DUE (আগের বকেয়া সহ মোট বকেয়া), Below = THIS MONTH BILL */}
                   <div className="text-right flex flex-col items-end shrink-0 pl-2">
-                    <p className="text-[10px] font-black text-slate-400 tracking-wider uppercase mb-0.5">
-                      {billLabel}
-                    </p>
-                    <p className={`text-2xl sm:text-3xl font-black font-mono tracking-tight leading-none ${displayedBill === 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
-                      ৳{displayedBill.toLocaleString()}
-                    </p>
-
-                    {/* High-Visibility Large & Beautiful Total Due Badge */}
-                    <button
-                      type="button"
+                    <div
                       onClick={(e) => {
                         e.stopPropagation();
                         setInitialBillMember(member);
                       }}
-                      className={`mt-2.5 px-3.5 py-2 rounded-2xl border shadow-md transition-all cursor-pointer inline-flex items-center justify-between space-x-2.5 active:scale-95 group/carddue w-full max-w-[210px] ${
-                        totalDue > 0
-                          ? 'bg-gradient-to-r from-rose-950/95 via-red-950/90 to-rose-900/90 border-rose-500/70 text-rose-200 hover:border-rose-400 shadow-rose-950/40 ring-1 ring-rose-500/30'
-                          : 'bg-gradient-to-r from-slate-950/90 to-slate-900/90 border-slate-700/80 text-slate-300 hover:bg-slate-800 hover:border-slate-500 shadow-black/40'
+                      className="group/duetop cursor-pointer flex flex-col items-end"
+                      title="Click to set/edit Total Due (সর্বমোট বকেয়া সম্পাদন করুন)"
+                    >
+                      <div className="flex items-center space-x-1">
+                        <p className="text-[10px] font-black text-slate-400 tracking-wider uppercase mb-0.5 group-hover/duetop:text-indigo-300 transition-colors">
+                          TOTAL DUE
+                        </p>
+                        <Edit3 className="w-2.5 h-2.5 text-slate-500 group-hover/duetop:text-indigo-400 opacity-0 group-hover/duetop:opacity-100 transition-opacity" />
+                      </div>
+                      <p className={`text-2xl sm:text-3xl font-black font-mono tracking-tight leading-none ${totalDue === 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
+                        ৳{totalDue.toLocaleString()}
+                      </p>
+                    </div>
+
+                    {/* High-Visibility Selected Month Bill Badge */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openStatement(member);
+                      }}
+                      className={`mt-2.5 px-3 py-1.5 rounded-2xl border shadow-sm transition-all cursor-pointer inline-flex items-center justify-between space-x-2 active:scale-95 group/carddue w-full max-w-[210px] ${
+                        displayedBill > 0
+                          ? 'bg-gradient-to-r from-amber-950/70 via-slate-900 to-amber-950/50 border-amber-500/50 text-amber-200 hover:border-amber-400 shadow-amber-950/30 ring-1 ring-amber-500/20'
+                          : 'bg-slate-950/80 border-slate-700/80 text-slate-400 hover:bg-slate-800 hover:border-slate-500 shadow-black/40'
                       }`}
-                      title="Click to set/edit Total Due"
+                      title={`${formatMonthName(selectedMonth)} এর হিসাব বিবরণী দেখুন (Click to view Statement)`}
                     >
                       <div className="flex items-center space-x-1.5 shrink-0">
-                        <Coins className={`w-4 h-4 ${totalDue > 0 ? 'text-amber-400 animate-pulse' : 'text-slate-400'} group-hover/carddue:rotate-12 transition-transform`} />
-                        <span className="text-[11px] font-black uppercase tracking-wider text-slate-300 font-sans">
-                          TOTAL DUE:
+                        <Calendar className={`w-3.5 h-3.5 ${displayedBill > 0 ? 'text-amber-400' : 'text-slate-500'} group-hover/carddue:rotate-6 transition-transform`} />
+                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-300 font-sans">
+                          {formatShortMonth(selectedMonth)} BILL:
                         </span>
                       </div>
-                      <span className={`text-base sm:text-lg font-black font-mono tracking-tight shrink-0 ${totalDue > 0 ? 'text-rose-300' : 'text-emerald-400'}`}>
-                        ৳{totalDue.toLocaleString()}
+                      <span className={`text-xs sm:text-sm font-black font-mono tracking-tight shrink-0 ${displayedBill > 0 ? 'text-amber-300' : 'text-slate-400'}`}>
+                        ৳{displayedBill.toLocaleString()}
                       </span>
                     </button>
                   </div>
@@ -1920,7 +1925,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
                     title="Direct Pay Bill"
                   >
                     <Banknote className="w-3.5 h-3.5 group-hover/btn:scale-110 transition-transform" />
-                    <span className="truncate">PAY BILL {displayedBill > 0 ? `(৳${displayedBill})` : totalDue > 0 ? `(৳${totalDue})` : ''}</span>
+                    <span className="truncate">PAY BILL {totalDue > 0 ? `(৳${totalDue})` : ''}</span>
                   </button>
                 </div>
               </div>
@@ -1939,18 +1944,16 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
                   <th className="px-4 py-3.5">Rank & BD No</th>
                   <th className="px-4 py-3.5">Role</th>
                   <th className="px-4 py-3.5">Contact</th>
-                  <th className="px-4 py-3.5 text-right font-mono">
-                    {selectedCategory === 'ALL' && selectedMonth === 'ALL'
-                      ? 'Total Due'
+                  <th className="px-4 py-3.5 text-right font-mono" title="নির্বাচিত মাসের অর্জিত বিল (অর্ডার/চার্জ - পেমেন্ট)">
+                    {selectedCategory === 'ALL'
+                      ? `${formatMonthName(selectedMonth)} Bill`
                       : selectedCategory === 'CANTEEN'
-                      ? 'Canteen Bill'
+                      ? `${formatShortMonth(selectedMonth)} Canteen Bill`
                       : selectedCategory === 'UNIT_FUND'
-                      ? 'Unit Fund Bill'
-                      : selectedCategory === 'OTHERS'
-                      ? 'Others Bill'
-                      : 'Monthly Bill'}
+                      ? `${formatShortMonth(selectedMonth)} Unit Fund Bill`
+                      : `${formatShortMonth(selectedMonth)} Others Bill`}
                   </th>
-                  <th className="px-4 py-3.5 text-right font-mono text-xs font-black uppercase tracking-wider text-rose-300">
+                  <th className="px-4 py-3.5 text-right font-mono text-xs font-black uppercase tracking-wider text-rose-300" title="আগের সব বকেয়া সহ মোট বকেয়া (লেজার ব্যালেন্স)">
                     Total Due
                   </th>
                   <th className="px-4 py-3.5 text-center w-52">Actions</th>
@@ -2004,8 +2007,8 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
                         {member['Contact'] || '-'}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <span className={`text-base font-black font-mono ${displayedBill === 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
-                          ৳{displayedBill}
+                        <span className={`text-base font-black font-mono ${displayedBill === 0 ? 'text-slate-400' : 'text-amber-400'}`}>
+                          ৳{displayedBill.toLocaleString()}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
@@ -2043,7 +2046,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
                             title="Pay Bill"
                           >
                             <Banknote className="w-3 h-3" />
-                            <span>Pay</span>
+                            <span>Pay {totalDue > 0 ? `(৳${totalDue})` : ''}</span>
                           </button>
                           <button
                             type="button"
@@ -2559,9 +2562,8 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
                 <select
                   value={statementMonth}
                   onChange={(e) => setStatementMonth(e.target.value)}
-                  className="bg-slate-900 border border-slate-700 text-white rounded-lg px-2.5 py-1 text-xs font-bold font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  className="bg-slate-900 border border-slate-700 text-white rounded-lg px-2.5 py-1 text-xs font-bold font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
                 >
-                  <option value="ALL">সকল মাস (All Months)</option>
                   {availableMonths.map((m) => (
                     <option key={m} value={m}>
                       {formatMonthName(m)}

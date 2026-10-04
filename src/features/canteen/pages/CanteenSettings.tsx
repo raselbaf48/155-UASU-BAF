@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { 
   getCanteenConfig, saveCanteenConfig, resolveImageUrl, 
-  fetchCanteenConfigFromCloud, CanteenConfig 
+  fetchCanteenConfigFromCloud, checkPreOrderWindow, CanteenConfig 
 } from '../utils/canteenSettings';
 import { resetAllCanteenData } from '../utils/resetCanteenData';
 import { pullAllCanteenDataFromCloud } from '../utils/canteenCloudSync';
@@ -16,7 +16,7 @@ import { supabase } from '../../../supabase';
 import { SaveButton } from '../components/SaveButton';
 import { CanteenMemberDB } from './CanteenMemberDB';
 
-export type CanteenSettingSection = 'identity' | 'manager' | 'member_db' | 'cloudsync' | 'dangerZone';
+export type CanteenSettingSection = 'identity' | 'timing' | 'manager' | 'member_db' | 'cloudsync' | 'dangerZone';
 
 interface SectionMeta {
   id: CanteenSettingSection;
@@ -320,6 +320,14 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
       badge: settings.name || 'CAFE UAV'
     },
     {
+      id: 'timing',
+      label: 'Pre-Order Timing & Schedule',
+      description: 'Configure active hours for menu appearance & automatic pre-order cutoff',
+      icon: <Clock className="w-5 h-5" />,
+      color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30',
+      badge: `${settings.preOrderStartTime || '08:00'} - ${settings.preOrderEndTime || '16:00'}`
+    },
+    {
       id: 'manager',
       label: 'Manager & Credentials',
       description: 'Manager assignment, photo, and access PIN / password',
@@ -558,6 +566,174 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
                     className="w-full py-4 text-xs font-black tracking-widest cursor-pointer"
                   />
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* OPTION: PRE-ORDER TIMING & SCHEDULE */}
+          {activeSection === 'timing' && (
+            <div className="bg-slate-900 rounded-[2.5rem] p-6 md:p-10 shadow-sm border border-slate-800 space-y-7 animate-in fade-in">
+              <div className="border-b border-slate-800 pb-4">
+                <h3 className="text-xl font-black text-white flex items-center gap-2">
+                  <Clock className="w-6 h-6 text-emerald-400" />
+                  <span>PRE-ORDER TIMING & SERVICE SCHEDULE</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  Configure active order hours. Menu automatically appears at Start Time and disappears / cuts off at End Time.
+                </p>
+              </div>
+
+              {/* Real-time Status Card */}
+              {(() => {
+                const status = checkPreOrderWindow(settings);
+                return (
+                  <div className={`p-6 rounded-3xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                    status.isOpen 
+                      ? 'bg-emerald-950/40 border-emerald-500/40' 
+                      : 'bg-rose-950/30 border-rose-500/30'
+                  }`}>
+                    <div className="flex items-center space-x-4">
+                      <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 border ${
+                        status.isOpen ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' : 'bg-rose-500/20 text-rose-400 border-rose-500/40'
+                      }`}>
+                        <Clock className="w-7 h-7" />
+                      </div>
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider flex items-center space-x-1.5 ${
+                            status.isOpen ? 'bg-emerald-500 text-slate-950' : 'bg-rose-500 text-white'
+                          }`}>
+                            <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+                            <span>{status.isOpen ? 'ACTIVE / OPEN NOW' : 'CLOSED / CUTOFF'}</span>
+                          </span>
+                          <span className="text-xs font-mono font-bold text-slate-300">
+                            {status.startTime} - {status.endTime}
+                          </span>
+                        </div>
+                        <p className="text-sm font-bold text-white mt-1">
+                          {status.message}
+                        </p>
+                        {status.timeRemainingText && (
+                          <p className="text-xs text-emerald-300 font-medium">
+                            ⏱️ {status.timeRemainingText}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center sm:self-center">
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={settings.preOrderEnabled !== false}
+                          onChange={(e) => {
+                            const updated = { ...settings, preOrderEnabled: e.target.checked };
+                            setSettings(updated);
+                            saveCanteenConfig(updated);
+                          }}
+                          className="sr-only peer"
+                        />
+                        <div className="w-14 h-8 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-1 after:left-1 after:bg-white after:border-slate-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-emerald-600"></div>
+                        <span className="ml-3 text-xs font-black uppercase tracking-wider text-slate-300">
+                          {settings.preOrderEnabled !== false ? 'Service Enabled' : 'Disabled'}
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Time Configuration Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-950/60 p-6 rounded-3xl border border-slate-800">
+                <div className="space-y-2">
+                  <label className="text-xs font-black text-emerald-400 uppercase tracking-wider flex items-center space-x-1.5">
+                    <Clock className="w-4 h-4" />
+                    <span>PRE-ORDER START TIME (APPEAR)</span>
+                  </label>
+                  <p className="text-[11px] text-slate-400 font-medium">
+                    Menu items will automatically appear for airmen & members starting at this time.
+                  </p>
+                  <input
+                    type="time"
+                    value={settings.preOrderStartTime || '08:00'}
+                    onChange={(e) => {
+                      const updated = { ...settings, preOrderStartTime: e.target.value };
+                      setSettings(updated);
+                      saveCanteenConfig(updated);
+                    }}
+                    className="w-full bg-slate-900 border border-slate-700 focus:border-emerald-500 rounded-2xl px-5 py-3.5 text-base font-bold text-white outline-none transition-all shadow-inner"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-black text-rose-400 uppercase tracking-wider flex items-center space-x-1.5">
+                    <Clock className="w-4 h-4" />
+                    <span>PRE-ORDER END TIME (AUTO CUTOFF)</span>
+                  </label>
+                  <p className="text-[11px] text-slate-400 font-medium">
+                    Menu automatically disappears and locks. Outside this time, no pre-orders are taken.
+                  </p>
+                  <input
+                    type="time"
+                    value={settings.preOrderEndTime || '16:00'}
+                    onChange={(e) => {
+                      const updated = { ...settings, preOrderEndTime: e.target.value };
+                      setSettings(updated);
+                      saveCanteenConfig(updated);
+                    }}
+                    className="w-full bg-slate-900 border border-slate-700 focus:border-rose-500 rounded-2xl px-5 py-3.5 text-base font-bold text-white outline-none transition-all shadow-inner"
+                  />
+                </div>
+              </div>
+
+              {/* Quick Presets */}
+              <div className="space-y-3">
+                <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest block">
+                  QUICK PRESETS (কুইক শিফট টাইমিং)
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  {[
+                    { label: 'Morning & Lunch', start: '08:00', end: '14:00' },
+                    { label: 'Full Day Regular', start: '08:00', end: '16:00' },
+                    { label: 'Extended Daytime', start: '08:00', end: '18:00' },
+                    { label: 'Evening Snacks', start: '16:00', end: '21:00' }
+                  ].map((p, idx) => {
+                    const isSelected = (settings.preOrderStartTime || '08:00') === p.start && (settings.preOrderEndTime || '16:00') === p.end;
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => {
+                          const updated = { ...settings, preOrderStartTime: p.start, preOrderEndTime: p.end, preOrderEnabled: true };
+                          setSettings(updated);
+                          saveCanteenConfig(updated);
+                          showSavedFeedback();
+                        }}
+                        className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer ${
+                          isSelected 
+                            ? 'bg-emerald-950/60 border-emerald-500 text-emerald-300 shadow-md shadow-emerald-950/50' 
+                            : 'bg-slate-950/50 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-850'
+                        }`}
+                      >
+                        <p className="text-xs font-bold truncate">{p.label}</p>
+                        <p className="text-[10px] font-mono text-slate-400 mt-0.5">{p.start} - {p.end}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Save Button */}
+              <div className="pt-4 border-t border-slate-800">
+                <SaveButton
+                  onClick={handleSaveAll}
+                  isSaving={isSaving}
+                  isSaved={saveSuccess}
+                  idleText="Save Pre-Order Timing to Cloud"
+                  savingText="Saving Schedule..."
+                  savedText="Timing Saved & Synced Successfully! ✓"
+                  className="w-full py-4 text-xs font-black tracking-widest cursor-pointer"
+                />
               </div>
             </div>
           )}

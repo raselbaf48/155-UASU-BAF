@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Utensils, Search, X, Check, ChefHat, Clock, Plus, XCircle, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { supabase } from '../../../supabase';
-import { getCanteenConfig, resolveImageUrl, CanteenConfig } from '../utils/canteenSettings';
+import { getCanteenConfig, resolveImageUrl, checkPreOrderWindow, CanteenConfig } from '../utils/canteenSettings';
+import { queuePushKeyToCloud } from '../utils/canteenCloudSync';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { deductRawStockForSales, restoreRawStockForSaleCancellation } from '../utils/recipeManager';
 import {
@@ -590,6 +591,7 @@ export const ManagerDashboard: React.FC = () => {
       setSelectedItems(prev => {
           const next = prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id];
           localStorage.setItem('canteen_daily_menu', JSON.stringify(next));
+          queuePushKeyToCloud('canteen_daily_menu', next, 50);
           window.dispatchEvent(new Event('canteen_menu_updated'));
           window.dispatchEvent(new Event('canteen_daily_menu_updated'));
           window.dispatchEvent(new Event('canteen_state_updated'));
@@ -825,23 +827,35 @@ export const ManagerDashboard: React.FC = () => {
                               return (a.name || '').localeCompare(b.name || '');
                           }).filter(i => (i.name || '').toLowerCase().includes(searchCatalog.toLowerCase())).map(item => {
                               const isSelected = Array.isArray(selectedItems) && selectedItems.includes(item.id);
+                              const itemDp = resolveImageUrl(item.DP || item.img || item.image || item.photo);
                           return (
                               <div 
                                   key={item.id} 
                                   onClick={() => toggleSelection(item.id)}
-                                  className={`flex items-center justify-between p-4 rounded-2xl border-2 cursor-pointer transition-all ${isSelected ? 'border-[#4f46e5] bg-[#4f46e5]/5' : 'border-slate-800 hover:border-slate-800'}`}
+                                  className={`flex items-center justify-between p-3.5 sm:p-4 rounded-2xl border-2 cursor-pointer transition-all ${isSelected ? 'border-[#4f46e5] bg-[#4f46e5]/10 shadow-lg shadow-indigo-950/40' : 'border-slate-800 hover:border-slate-700 bg-slate-950/60'}`}
                               >
-                                  <div className="flex items-center space-x-4">
-                                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${isSelected ? 'bg-[#4f46e5] text-white' : 'bg-slate-800 text-slate-400'}`}>
-                                          <Utensils className="w-5 h-5" />
+                                  <div className="flex items-center space-x-3.5 min-w-0">
+                                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all overflow-hidden shrink-0 border ${isSelected ? 'border-indigo-500/50 bg-indigo-950/50' : 'border-slate-800 bg-slate-900'}`}>
+                                          {itemDp ? (
+                                              <img 
+                                                  src={itemDp} 
+                                                  alt={item.name} 
+                                                  referrerPolicy="no-referrer"
+                                                  className="w-full h-full object-cover" 
+                                                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                              />
+                                          ) : (
+                                              <Utensils className={`w-5 h-5 ${isSelected ? 'text-indigo-400' : 'text-slate-400'}`} />
+                                          )}
                                       </div>
-                                      <div>
+                                      <div className="min-w-0">
                                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{item.category || 'Snacks'}</p>
-                                          <p className="text-sm font-bold text-white">{item.name}</p>
+                                          <p className="text-sm font-bold text-white truncate">{item.name}</p>
+                                          <p className="text-xs font-black text-emerald-400">৳{item.price}</p>
                                       </div>
                                   </div>
-                                  <div className={`w-6 h-6 rounded-full flex items-center justify-center transition-colors ${isSelected ? 'bg-[#4f46e5] text-white' : 'bg-slate-800 text-slate-400'}`}>
-                                      {isSelected ? <Check className="w-4 h-4" /> : <span className="text-lg leading-none">+</span>}
+                                  <div className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors shrink-0 ${isSelected ? 'bg-[#4f46e5] text-white shadow-md' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>
+                                      {isSelected ? <Check className="w-4 h-4 stroke-[3]" /> : <span className="text-lg leading-none">+</span>}
                                   </div>
                               </div>
                           )
@@ -899,9 +913,24 @@ export const ManagerDashboard: React.FC = () => {
                      <h3 className="text-sm font-black text-white tracking-widest uppercase">
                         TODAY'S MENU
                      </h3>
-                     <p className="text-[11px] text-slate-400 font-medium">
-                        Items curated and available for order today
-                     </p>
+                     <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                        <p className="text-[11px] text-slate-400 font-medium">
+                           Items curated and available for order today
+                        </p>
+                        {(() => {
+                           const timeStatus = checkPreOrderWindow(canteenConfig);
+                           return (
+                              <span className={`px-2 py-0.5 rounded-full text-[9px] font-black tracking-wider uppercase inline-flex items-center space-x-1 ${
+                                 timeStatus.isOpen 
+                                    ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/40' 
+                                    : 'bg-rose-950 text-rose-400 border border-rose-500/40'
+                              }`}>
+                                 <span className={`w-1.5 h-1.5 rounded-full ${timeStatus.isOpen ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
+                                 <span>{timeStatus.isOpen ? `Active (${timeStatus.startTime} - ${timeStatus.endTime})` : `Closed (${timeStatus.startTime} - ${timeStatus.endTime})`}</span>
+                              </span>
+                           );
+                        })()}
+                     </div>
                   </div>
                </div>
                <button 
@@ -909,7 +938,7 @@ export const ManagerDashboard: React.FC = () => {
                   className="self-start sm:self-auto px-5 py-2.5 bg-[#4f46e5] hover:bg-[#4338ca] text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md shadow-indigo-500/20 flex items-center space-x-2 active:scale-95 cursor-pointer"
                >
                   <ChefHat className="w-4 h-4" />
-                  <span>CURATE MENU</span>
+                  <span>CURATE MENU ({selectedItems.length})</span>
                </button>
             </div>
 
@@ -926,17 +955,37 @@ export const ManagerDashboard: React.FC = () => {
                   </button>
                </div>
             ) : (
-               <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-4 w-full py-2">
-                  {catalog.filter(i => selectedItems.includes(i.id)).map(item => (
-                     <div 
-                        key={item.id} 
-                        className="bg-slate-950/90 border border-slate-800 hover:border-indigo-500/50 shadow-md px-6 py-4 rounded-2xl text-center min-w-[200px] sm:min-w-[240px] flex items-center justify-center transition-all hover:scale-[1.02]"
-                     >
-                        <span className="text-white font-black text-base sm:text-lg tracking-wide uppercase">
-                           {item.name}
-                        </span>
-                     </div>
-                  ))}
+               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5 w-full py-2">
+                  {catalog.filter(i => selectedItems.includes(i.id)).map(item => {
+                     const itemDp = resolveImageUrl(item.DP || item.img || item.image || item.photo);
+                     return (
+                        <div 
+                           key={item.id} 
+                           className="bg-slate-950/90 border border-slate-800 hover:border-indigo-500/50 shadow-md p-3.5 rounded-2xl flex items-center space-x-3.5 transition-all hover:scale-[1.01]"
+                        >
+                           <div className="w-12 h-12 rounded-xl bg-slate-900 border border-slate-700/80 flex items-center justify-center overflow-hidden shrink-0">
+                              {itemDp ? (
+                                 <img 
+                                    src={itemDp} 
+                                    alt={item.name} 
+                                    referrerPolicy="no-referrer"
+                                    className="w-full h-full object-cover" 
+                                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                 />
+                              ) : (
+                                 <Utensils className="w-5 h-5 text-indigo-400" />
+                              )}
+                           </div>
+                           <div className="min-w-0 flex-1">
+                              <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest truncate">{item.category || 'SNACKS'}</p>
+                              <span className="text-white font-black text-sm tracking-wide uppercase truncate block">
+                                 {item.name}
+                              </span>
+                              <p className="text-xs font-black text-emerald-400">৳{item.price}</p>
+                           </div>
+                        </div>
+                     );
+                  })}
                </div>
             )}
          </div>

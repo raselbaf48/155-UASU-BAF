@@ -5,7 +5,7 @@ import {
   ArrowUpRight, ArrowDownLeft, Filter, Layers 
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
-import { resolveImageUrl } from '../utils/canteenSettings';
+import { resolveImageUrl, getCanteenConfig, checkPreOrderWindow, CanteenConfig, PreOrderTimeStatus } from '../utils/canteenSettings';
 import { formatCanteenDate } from '../utils/dateUtils';
 
 interface EmployeeDashboardProps { 
@@ -24,6 +24,9 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
   
   const [dailyMenu, setDailyMenu] = useState<any[]>([]);
   const [searchMenu, setSearchMenu] = useState('');
+  const [canteenConfig, setCanteenConfig] = useState<CanteenConfig>(() => getCanteenConfig());
+  const [preOrderWindow, setPreOrderWindow] = useState<PreOrderTimeStatus>(() => checkPreOrderWindow());
+  const [closedToast, setClosedToast] = useState<string | null>(null);
   
   const [activities, setActivities] = useState<any[]>([]);
   const [orderedItems, setOrderedItems] = useState<Record<string, boolean>>({});
@@ -329,6 +332,26 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
   }, [currentUser, memberDetails]);
 
   useEffect(() => {
+      const refreshStatus = () => {
+          const cfg = getCanteenConfig();
+          setCanteenConfig(cfg);
+          setPreOrderWindow(checkPreOrderWindow(cfg));
+      };
+      refreshStatus();
+      const timer = setInterval(refreshStatus, 10000);
+      const handleConfigUpdate = (e: any) => {
+          const cfg = e.detail || getCanteenConfig();
+          setCanteenConfig(cfg);
+          setPreOrderWindow(checkPreOrderWindow(cfg));
+      };
+      window.addEventListener('canteen_settings_updated', handleConfigUpdate);
+      return () => {
+          clearInterval(timer);
+          window.removeEventListener('canteen_settings_updated', handleConfigUpdate);
+      };
+  }, []);
+
+  useEffect(() => {
       fetchMenu();
       fetchActivities();
       
@@ -623,6 +646,13 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
 
   const handlePreOrder = (item: any, deltaQty: number = 1) => {
       try {
+          const windowStatus = checkPreOrderWindow(canteenConfig);
+          if (!windowStatus.isOpen) {
+              setClosedToast(`Pre-Order is currently closed (${windowStatus.startTime} - ${windowStatus.endTime}). Pre-orders can only be placed during active hours.`);
+              setTimeout(() => setClosedToast(null), 4000);
+              return;
+          }
+
           const existingStr = localStorage.getItem('canteen_pre_orders') || '[]';
           let existing: any[] = [];
           try { existing = JSON.parse(existingStr); } catch(e) {}
@@ -780,96 +810,151 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
           </div>
       </div>
 
+      {/* Toast Feedback when closed */}
+      {closedToast && (
+        <div className="fixed top-6 right-6 z-[200] bg-rose-600 text-white font-bold px-5 py-3.5 rounded-2xl shadow-2xl border border-rose-400/40 flex items-center space-x-2.5 animate-in slide-in-from-top-4 max-w-md">
+          <Clock className="w-5 h-5 text-white shrink-0" />
+          <span className="text-xs leading-relaxed">{closedToast}</span>
+        </div>
+      )}
+
       {/* Active Service Section */}
       <div className="bg-slate-900 rounded-[2rem] p-6 md:p-8 shadow-sm border border-slate-800">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
               <div>
                   <h3 className="text-sm font-black text-white tracking-widest uppercase flex items-center space-x-2 mb-1">
                       <span className="text-[#4f46e5]"><Utensils className="w-4 h-4" /></span>
-                      <span>Active Service</span>
+                      <span>Active Service (Daily Pre-Order)</span>
                   </h3>
-                  <div className="flex items-center space-x-2">
-                      <span className="bg-emerald-900/300/10 text-emerald-400 text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full flex items-center space-x-1">
-                          <div className="w-1.5 h-1.5 bg-emerald-900/300 rounded-full animate-pulse" />
-                          <span>Ordering Active</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                      <span className={`text-[8px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-full flex items-center space-x-1.5 ${
+                          preOrderWindow.isOpen 
+                              ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/40' 
+                              : 'bg-rose-950 text-rose-400 border border-rose-500/40'
+                      }`}>
+                          <div className={`w-1.5 h-1.5 rounded-full ${preOrderWindow.isOpen ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
+                          <span>{preOrderWindow.isOpen ? 'Ordering Active' : 'Ordering Closed'}</span>
                       </span>
-                      <span className="text-[9px] font-bold text-slate-400 tracking-widest uppercase">20:00 PM - 12:00 PM</span>
+                      <span className="text-[10px] font-bold text-slate-300 tracking-wider">
+                          {preOrderWindow.startTime} - {preOrderWindow.endTime}
+                      </span>
+                      {preOrderWindow.isOpen && preOrderWindow.timeRemainingText && (
+                          <span className="text-[10px] font-medium text-emerald-300 bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-500/30">
+                              ⏱️ {preOrderWindow.timeRemainingText}
+                          </span>
+                      )}
                   </div>
               </div>
               
-              <div className="relative w-full md:w-64">
-                  <Search className="w-3 h-3 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input 
-                      type="text" 
-                      placeholder="Filter daily menu..."
-                      value={searchMenu}
-                      onChange={(e) => setSearchMenu(e.target.value)}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-9 pr-4 py-2 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-[#4f46e5]/20 focus:border-[#4f46e5] transition-all"
-                  />
-              </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {dailyMenu.length === 0 ? (
-                  <div className="col-span-1 md:col-span-2 py-10 flex flex-col items-center justify-center text-slate-400">
-                      <Utensils className="w-8 h-8 mb-3 opacity-20" />
-                      <p className="text-[10px] font-bold uppercase tracking-widest">No items curated for today</p>
+              {preOrderWindow.isOpen && (
+                  <div className="relative w-full md:w-64">
+                      <Search className="w-3 h-3 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input 
+                          type="text" 
+                          placeholder="Filter daily menu..."
+                          value={searchMenu}
+                          onChange={(e) => setSearchMenu(e.target.value)}
+                          className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-9 pr-4 py-2 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-[#4f46e5]/20 focus:border-[#4f46e5] transition-all"
+                      />
                   </div>
-              ) : (
-                  dailyMenu.filter(item => (item.name || '').toLowerCase().includes(searchMenu.toLowerCase())).map((item, idx) => {
-                      const pendingAct = activities.find(a => 
-                          a.type === 'PRE-ORDER' && 
-                          (
-                              (a.description && item.name && a.description.toLowerCase().includes(item.name.toLowerCase())) ||
-                              (a.items && item.name && a.items.toLowerCase().includes(item.name.toLowerCase()))
-                          )
-                      );
-                      const pendingQty = pendingAct ? (Number(pendingAct.qty) || 1) : 0;
-                      const isFlash = !!orderedItems[item.id];
-
-                      return (
-                          <div 
-                              key={idx} 
-                              className={`relative bg-slate-800 border ${
-                                  pendingQty > 0 ? 'border-amber-500/60 bg-slate-800/90' : isFlash ? 'border-indigo-500/60' : 'border-slate-700 hover:bg-slate-700/80'
-                              } rounded-2xl p-5 flex items-center justify-between hover:shadow-md transition-all group overflow-hidden`}
-                          >
-                              <div className="min-w-0 pr-2">
-                                  <div className="flex items-center space-x-2 mb-0.5">
-                                      <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">{item.category || 'SNACKS'}</p>
-                                      {pendingQty > 0 && (
-                                          <span className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider bg-amber-950 text-amber-400 border border-amber-500/40 flex items-center space-x-1">
-                                              <Zap className="w-2.5 h-2.5 fill-current mr-0.5" />
-                                              <span>Qty: {pendingQty}</span>
-                                          </span>
-                                      )}
-                                  </div>
-                                  <p className="text-sm font-black text-white uppercase tracking-tight truncate">{item.name}</p>
-                                  <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest flex items-center space-x-1 mt-1">
-                                      <Clock className="w-2.5 h-2.5" />
-                                      <span>Rate: {item.price ? `৳${item.price}` : 'Rate Not Fixed'}</span>
-                                  </p>
-                              </div>
-
-                              <div className="flex items-center space-x-2 shrink-0">
-                                  <button 
-                                      type="button"
-                                      onClick={() => handlePreOrderClick(item, pendingQty)}
-                                      title={pendingQty > 0 ? `Already pre-ordered (Qty: ${pendingQty}). Click to add more.` : "Pre-Order this item"}
-                                      className={`w-10 h-10 rounded-xl ${
-                                          pendingQty > 0 
-                                              ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-md shadow-amber-600/30' 
-                                              : 'bg-[#4f46e5] text-white hover:bg-[#4338ca] shadow-md shadow-[#4f46e5]/20'
-                                      } flex items-center justify-center transition-all shrink-0 group-hover:scale-105 active:scale-95 cursor-pointer`}
-                                  >
-                                      <Zap className="w-5 h-5 fill-current" />
-                                  </button>
-                              </div>
-                          </div>
-                      );
-                  })
               )}
           </div>
+
+          {/* Conditional Rendering: If Outside Active Timing Window, Menu Disappears with Closed Notification */}
+          {!preOrderWindow.isOpen ? (
+              <div className="py-12 px-6 rounded-3xl bg-slate-950/70 border border-slate-800 text-center flex flex-col items-center justify-center space-y-3.5">
+                  <div className="w-14 h-14 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 shadow-inner">
+                      <Clock className="w-7 h-7" />
+                  </div>
+                  <h4 className="text-base font-black text-white uppercase tracking-wider">
+                      Pre-Order is Currently Closed
+                  </h4>
+                  <p className="text-xs text-slate-400 max-w-md leading-relaxed">
+                      {preOrderWindow.message}। টাইমিং এর বাইরে প্রি-অর্ডার গ্রহণ করা হয় না।
+                  </p>
+                  <div className="inline-flex items-center space-x-2 px-4 py-2 rounded-full bg-slate-900 border border-slate-700/80 text-[11px] font-black text-indigo-300">
+                      <Clock className="w-3.5 h-3.5" />
+                      <span>Daily Service Window: {preOrderWindow.startTime} - {preOrderWindow.endTime}</span>
+                  </div>
+              </div>
+          ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {dailyMenu.length === 0 ? (
+                      <div className="col-span-1 md:col-span-2 py-10 flex flex-col items-center justify-center text-slate-400">
+                          <Utensils className="w-8 h-8 mb-3 opacity-20" />
+                          <p className="text-[10px] font-bold uppercase tracking-widest">No items curated for today</p>
+                      </div>
+                  ) : (
+                      dailyMenu.filter(item => (item.name || '').toLowerCase().includes(searchMenu.toLowerCase())).map((item, idx) => {
+                          const pendingAct = activities.find(a => 
+                              a.type === 'PRE-ORDER' && 
+                              (
+                                  (a.description && item.name && a.description.toLowerCase().includes(item.name.toLowerCase())) ||
+                                  (a.items && item.name && a.items.toLowerCase().includes(item.name.toLowerCase()))
+                              )
+                          );
+                          const pendingQty = pendingAct ? (Number(pendingAct.qty) || 1) : 0;
+                          const isFlash = !!orderedItems[item.id];
+                          const itemDp = resolveImageUrl(item.DP || item.img || item.image || item.photo);
+
+                          return (
+                              <div 
+                                  key={idx} 
+                                  className={`relative bg-slate-800 border ${
+                                      pendingQty > 0 ? 'border-amber-500/60 bg-slate-800/90' : isFlash ? 'border-indigo-500/60' : 'border-slate-700 hover:bg-slate-700/80'
+                                  } rounded-2xl p-4 flex items-center justify-between hover:shadow-md transition-all group overflow-hidden`}
+                              >
+                                  <div className="flex items-center space-x-3.5 min-w-0 pr-2 flex-1">
+                                      <div className="w-14 h-14 rounded-2xl bg-slate-900 border border-slate-700/80 flex items-center justify-center overflow-hidden shrink-0 shadow-inner">
+                                          {itemDp ? (
+                                              <img 
+                                                  src={itemDp} 
+                                                  alt={item.name} 
+                                                  referrerPolicy="no-referrer"
+                                                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                              />
+                                          ) : (
+                                              <Utensils className="w-6 h-6 text-indigo-400" />
+                                          )}
+                                      </div>
+                                      <div className="min-w-0 flex-1">
+                                          <div className="flex items-center space-x-2 mb-0.5">
+                                              <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest truncate">{item.category || 'SNACKS'}</p>
+                                              {pendingQty > 0 && (
+                                                  <span className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider bg-amber-950 text-amber-400 border border-amber-500/40 flex items-center space-x-1 shrink-0">
+                                                      <Zap className="w-2.5 h-2.5 fill-current mr-0.5" />
+                                                      <span>Qty: {pendingQty}</span>
+                                                  </span>
+                                              )}
+                                          </div>
+                                          <p className="text-sm font-black text-white uppercase tracking-tight truncate">{item.name}</p>
+                                          <p className="text-xs font-black text-emerald-400 mt-0.5">
+                                              ৳{item.price ? item.price : 0}
+                                          </p>
+                                      </div>
+                                  </div>
+
+                                  <div className="flex items-center space-x-2 shrink-0">
+                                      <button 
+                                          type="button"
+                                          onClick={() => handlePreOrderClick(item, pendingQty)}
+                                          title={pendingQty > 0 ? `Already pre-ordered (Qty: ${pendingQty}). Click to add more.` : "Pre-Order this item"}
+                                          className={`w-10 h-10 rounded-xl ${
+                                              pendingQty > 0 
+                                                  ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-md shadow-amber-600/30' 
+                                                  : 'bg-[#4f46e5] text-white hover:bg-[#4338ca] shadow-md shadow-[#4f46e5]/20'
+                                          } flex items-center justify-center transition-all shrink-0 group-hover:scale-105 active:scale-95 cursor-pointer`}
+                                      >
+                                          <Zap className="w-5 h-5 fill-current" />
+                                      </button>
+                                  </div>
+                              </div>
+                          );
+                      })
+                  )}
+              </div>
+          )}
       </div>
 
       {/* Activity Log */}

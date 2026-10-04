@@ -44,10 +44,22 @@ export const getCanteenCloudSyncStatus = (): CloudSyncStatus => syncStatus;
 
 /**
  * Merge two arrays of objects by unique identifier (id or orderId or key)
+ * Also safely supports arrays of string IDs (such as canteen_daily_menu).
  */
 function mergeArrayData(localArr: any[], cloudArr: any[], keyField = 'id'): any[] {
   if (!Array.isArray(localArr)) localArr = [];
   if (!Array.isArray(cloudArr)) cloudArr = [];
+
+  const isLocalStrings = localArr.length > 0 && typeof localArr[0] === 'string';
+  const isCloudStrings = cloudArr.length > 0 && typeof cloudArr[0] === 'string';
+
+  if (isLocalStrings || isCloudStrings) {
+    // Preserve string IDs (e.g. canteen_daily_menu selected item IDs)
+    const set = new Set<string>();
+    localArr.forEach(i => { if (typeof i === 'string' && i.trim()) set.add(i.trim()); });
+    cloudArr.forEach(i => { if (typeof i === 'string' && i.trim()) set.add(i.trim()); });
+    return Array.from(set);
+  }
 
   const map = new Map<string, any>();
 
@@ -242,10 +254,22 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
           if (key === 'canteen_raw_inventory_items_v2') {
             const { deduplicated } = deduplicateRawItems([...localVal, ...cloudVal]);
             finalVal = deduplicated;
+          } else if (key === 'canteen_daily_menu') {
+            if (localVal.length > 0 && cloudVal.length === 0) {
+              finalVal = localVal;
+              queuePushKeyToCloud('canteen_daily_menu', localVal, 100);
+            } else if (cloudVal.length > 0 && localVal.length === 0) {
+              finalVal = cloudVal;
+            } else {
+              finalVal = mergeArrayData(localVal, cloudVal, 'id');
+            }
           } else {
             const keyField = key === 'canteen_pre_orders' ? 'orderId' : (key === 'canteen_expense_last_unit_prices' ? 'key' : 'id');
             finalVal = mergeArrayData(localVal, cloudVal, keyField);
           }
+        } else if (key === 'canteen_daily_menu' && Array.isArray(localVal) && localVal.length > 0 && (!Array.isArray(cloudVal) || cloudVal.length === 0)) {
+          finalVal = localVal;
+          queuePushKeyToCloud('canteen_daily_menu', localVal, 100);
         } else if (typeof cloudVal === 'object' && cloudVal !== null && typeof localVal === 'object' && localVal !== null) {
           finalVal = { ...cloudVal, ...localVal };
         }
@@ -338,6 +362,12 @@ export function initCanteenCloudSync(): () => void {
               if (key === 'canteen_raw_inventory_items_v2') {
                 const { deduplicated } = deduplicateRawItems([...parsed, ...currentLocal]);
                 mergedVal = deduplicated;
+              } else if (key === 'canteen_daily_menu') {
+                if (currentLocal.length > 0 && parsed.length === 0) {
+                  mergedVal = currentLocal;
+                } else {
+                  mergedVal = mergeArrayData(currentLocal, parsed, 'id');
+                }
               } else {
                 const keyField = key === 'canteen_pre_orders' ? 'orderId' : 'id';
                 mergedVal = mergeArrayData(currentLocal, parsed, keyField);
