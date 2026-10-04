@@ -50,22 +50,53 @@ import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
 
 export type BillCategory = 'ALL' | 'CANTEEN' | 'UNIT_FUND' | 'OTHERS';
 
-// Extract YYYY-MM from date string
+// Extract YYYY-MM from date string with robust support for "DD Mon YY" (e.g. "28 Sep 26"), "YYYY-MM-DD", etc.
 export const getTxMonthKey = (dateStr: any): string => {
   if (!dateStr) return '';
+  const str = String(dateStr).trim();
+
+  // 1. Direct YYYY-MM prefix (e.g. "2026-10", "2026-10-28", "2026/10/28")
+  const ymdMatch = str.match(/^(\d{4})[-\/](\d{1,2})/);
+  if (ymdMatch) {
+    return `${ymdMatch[1]}-${ymdMatch[2].padStart(2, '0')}`;
+  }
+
+  // 2. Format "DD Mon YY" or "DD Mon YYYY" (e.g. "28 Sep 26", "28 Oct 2026")
+  const MONTH_MAP: Record<string, string> = {
+    jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+    jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12'
+  };
+  const dmyAlphaMatch = str.match(/^(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{2,4})/);
+  if (dmyAlphaMatch) {
+    const monStr = dmyAlphaMatch[2].slice(0, 3).toLowerCase();
+    const mon = MONTH_MAP[monStr];
+    let yr = parseInt(dmyAlphaMatch[3], 10);
+    if (yr < 100) yr += 2000;
+    if (mon) {
+      return `${yr}-${mon}`;
+    }
+  }
+
+  // 3. Format DD-MM-YYYY or DD/MM/YYYY (e.g. "28-09-2026", "28/10/2026")
+  const dmyNumMatch = str.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{2,4})/);
+  if (dmyNumMatch) {
+    let yr = parseInt(dmyNumMatch[3], 10);
+    if (yr < 100) yr += 2000;
+    const mon = dmyNumMatch[2].padStart(2, '0');
+    return `${yr}-${mon}`;
+  }
+
+  // 4. Timestamp or ISO date fallback
   try {
-    const d = new Date(dateStr);
+    const d = new Date(str);
     if (!isNaN(d.getTime())) {
-      const y = d.getFullYear();
+      let y = d.getFullYear();
+      if (y < 1970 && y >= 1900) y += 100;
       const m = String(d.getMonth() + 1).padStart(2, '0');
       return `${y}-${m}`;
     }
-    const parts = String(dateStr).split(/[\/\-\s]/);
-    if (parts.length >= 3) {
-      if (parts[0].length === 4) return `${parts[0]}-${parts[1].padStart(2, '0')}`;
-      if (parts[2].length === 4) return `${parts[2]}-${parts[1].padStart(2, '0')}`;
-    }
   } catch {}
+
   return '';
 };
 
@@ -561,11 +592,45 @@ export const MemberDB: React.FC = () => {
     return txBill;
   };
 
+  // Helper to calculate Member's Total Due (পূর্ববর্তী সব বকেয়া + চলতি মাসের বিল - মোট পরিশোধ)
+  const getMemberTotalDue = (member: any, category: BillCategory = 'ALL'): number => {
+    const memberBdClean = String(member['BD No'] || member.bdNo || member.airman_id || '').replace(/\D/g, '');
+    const memberTxs = allTxs.filter((tx) => {
+      if (member.airman_id && tx.airman_id === member.airman_id) return true;
+      if (memberBdClean) {
+        const txBdClean = String(tx.bdNo || tx.airman_id || '').replace(/\D/g, '');
+        if (txBdClean === memberBdClean) return true;
+      }
+      return false;
+    });
+
+    const categoryFilteredTxs = category === 'ALL' 
+      ? memberTxs 
+      : memberTxs.filter((tx) => getTxCategory(tx) === category);
+
+    const allCharges = categoryFilteredTxs
+      .filter((tx) => tx.type !== 'BILL PAYMENT')
+      .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+    const allPayments = categoryFilteredTxs
+      .filter((tx) => tx.type === 'BILL PAYMENT')
+      .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+    const netTxDue = Math.max(0, allCharges - allPayments);
+    const profileDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
+
+    // If transactions exist in canteen_txs, netTxDue provides the exact cumulative ledger balance
+    if (categoryFilteredTxs.length > 0) {
+      return Math.max(profileDue, netTxDue);
+    }
+    return profileDue;
+  };
+
   // Direct Pay Bill opener - Always defaults to Total Due (আগের সব বকেয়া + বর্তমান বিল)
   const openPayBill = (member: any) => {
     setPayBillMember(member);
     setPayBillCategory(selectedCategory);
-    const totalDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
+    const totalDue = getMemberTotalDue(member, selectedCategory);
     setPayAmount(totalDue > 0 ? String(totalDue) : '');
     setPayMethod('CASH');
   };
@@ -1796,7 +1861,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {displayedMemberList.map((member, i) => {
             const memberDp = resolveImageUrl(member.DP);
-            const totalDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
+            const totalDue = getMemberTotalDue(member, selectedCategory);
             const displayedBill = getMemberFilteredBill(member, selectedCategory, selectedMonth);
 
             return (
@@ -1939,9 +2004,9 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
             <table className="w-full text-left text-xs text-slate-300">
               <thead className="bg-slate-950/90 text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-800">
                 <tr>
-                  <th className="px-4 py-3.5 text-center w-12">#</th>
-                  <th className="px-4 py-3.5">Member</th>
-                  <th className="px-4 py-3.5">Rank & BD No</th>
+                  <th className="px-4 py-3.5 text-center w-12 font-mono">#</th>
+                  <th className="px-4 py-3.5">Rank & Name</th>
+                  <th className="px-4 py-3.5 font-mono">BD No</th>
                   <th className="px-4 py-3.5">Role</th>
                   <th className="px-4 py-3.5">Contact</th>
                   <th className="px-4 py-3.5 text-right font-mono" title="নির্বাচিত মাসের অর্জিত বিল (অর্ডার/চার্জ - পেমেন্ট)">
@@ -1962,7 +2027,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
               <tbody className="divide-y divide-slate-800/60 font-sans">
                 {displayedMemberList.map((member, i) => {
                   const memberDp = resolveImageUrl(member.DP);
-                  const totalDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
+                  const totalDue = getMemberTotalDue(member, selectedCategory);
                   const displayedBill = getMemberFilteredBill(member, selectedCategory, selectedMonth);
 
                   return (
@@ -1981,22 +2046,20 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
                               <span>{(member['Surname'] || 'U').charAt(0)}</span>
                             )}
                           </div>
-                          <div>
-                            <span className="font-black text-white group-hover:text-indigo-300 transition-colors text-sm block">
+                          <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-indigo-500/15 border border-indigo-400/30 text-indigo-300 shrink-0">
+                              {member['Rank']}
+                            </span>
+                            <span className="font-black text-white group-hover:text-indigo-300 transition-colors text-sm">
                               {member['Surname']}
                             </span>
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center space-x-1.5">
-                          <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-indigo-500/15 border border-indigo-400/30 text-indigo-300">
-                            {member['Rank']}
-                          </span>
-                          <span className="font-mono text-slate-400 font-bold text-xs">
-                            #{member['BD No']}
-                          </span>
-                        </div>
+                      <td className="px-4 py-3 font-mono">
+                        <span className="px-2.5 py-1 rounded-lg text-xs font-bold font-mono text-slate-300 bg-slate-950/70 border border-slate-700/60 inline-block shadow-inner">
+                          #{member['BD No']}
+                        </span>
                       </td>
                       <td className="px-4 py-3">
                         <span className="text-[11px] font-bold text-slate-300">
@@ -2807,7 +2870,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
           selectedMonth={selectedMonth}
           initialTab={importModalInitialTab}
           onSuccess={(updatedList) => {
-            setMembers(updatedList);
+            setMembers(formatAndSortMembers(updatedList));
           }}
         />
       )}

@@ -23,6 +23,7 @@ import {
 import { supabase } from '../../../supabase';
 import { pushKeyToCloud, pullKeyFromCloud } from '../utils/canteenCloudSync';
 import { formatCanteenDate } from '../utils/dateUtils';
+import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
 
 export const getRunningMonthKey = (): string => {
   const now = new Date();
@@ -46,6 +47,17 @@ export const formatShortMonth = (monthKey: string): string => {
   if (parts.length < 2) return monthKey;
   const date = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, 1);
   return date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+};
+
+export const getMonthOnlyName = (monthKey: string): string => {
+  if (!monthKey || monthKey === 'ALL') {
+    const now = new Date();
+    return now.toLocaleDateString('en-US', { month: 'long' });
+  }
+  const parts = monthKey.split('-');
+  if (parts.length < 2) return monthKey;
+  const date = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, 1);
+  return date.toLocaleDateString('en-US', { month: 'long' });
 };
 
 export const formatPrevMonthKey = (monthKey: string): string => {
@@ -454,7 +466,14 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
     if (result.length === 0) {
       setErrorMessage('কোনো বৈধ ডাটা পাওয়া যায়নি। অনুগ্রহ করে ফাইল বা টেক্সটের ফরম্যাট চেক করুন।');
     } else {
-      setParsedRows(result);
+      const sortedResult = sortCanteenMembersByOfficeSeniority(
+        result.map((r) => ({
+          ...r,
+          'BD No': r.bdNo,
+          'Rank': r.member ? (r.member['Rank'] || r.member.rank) : ''
+        }))
+      );
+      setParsedRows(sortedResult);
     }
   };
 
@@ -518,21 +537,25 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
     processRawData(rows);
   };
 
-  // Download Exact Requested Template with Month Names in Headers:
-  // SL | BD No | Rank | Surname | Due (Last Month - MonthName) | Advance (Last Month - MonthName) | Due (This Month - MonthName)
+  // Download Exact Requested Template:
+  // SL | BD No | Rank | Surname | Due (Last Month Name) | Advance (Last Month Name) | Due (This Month Name)
+  // e.g. Due (September) | Advance (September) | Due (October)
   // No extra columns after that!
   const handleDownloadTemplate = () => {
-    const lastMonthLabel = formatMonthName(lastMonth);
-    const thisMonthLabel = formatMonthName(targetMonth);
+    const lastMonthOnly = getMonthOnlyName(lastMonth); // e.g. "September"
+    const thisMonthOnly = getMonthOnlyName(targetMonth); // e.g. "October"
 
-    const templateData = members.map((m, idx) => ({
+    // Strictly sort members according to Member DB seniority
+    const sortedMembers = sortCanteenMembersByOfficeSeniority(members);
+
+    const templateData = sortedMembers.map((m, idx) => ({
       'SL': idx + 1,
-      'BD No': String(m['BD No'] || '').trim(),
-      'Rank': String(m['Rank'] || '').trim(),
-      'Surname': String(m['Surname'] || '').trim(),
-      [`Due (Last Month - ${lastMonthLabel})`]: '',
-      [`Advance (Last Month - ${lastMonthLabel})`]: '',
-      [`Due (This Month - ${thisMonthLabel})`]: ''
+      'BD No': String(m['BD No'] || m.bdNo || '').trim(),
+      'Rank': String(m['Rank'] || m.rank || '').trim(),
+      'Surname': String(m['Surname'] || m.surname || m['Full Name'] || m.name || '').trim(),
+      [`Due (${lastMonthOnly})`]: '',
+      [`Advance (${lastMonthOnly})`]: '',
+      [`Due (${thisMonthOnly})`]: ''
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(templateData);
@@ -541,14 +564,14 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
       { wch: 14 },
       { wch: 12 },
       { wch: 22 },
-      { wch: 32 },
-      { wch: 34 },
-      { wch: 32 }
+      { wch: 20 },
+      { wch: 22 },
+      { wch: 20 }
     ];
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Bills_Template');
-    XLSX.writeFile(workbook, `Cafe_UAV_Bills_Template_${lastMonth}_${targetMonth}.xlsx`);
+    XLSX.writeFile(workbook, `Cafe_UAV_Bills_Template_${lastMonthOnly}_${thisMonthOnly}.xlsx`);
   };
 
   // Filter preview rows
@@ -790,7 +813,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
       }
 
       // Update Local Cache & Dispatch Global Events
-      const updatedMembersList = Array.from(updatedMembersMap.values());
+      const updatedMembersList = sortCanteenMembersByOfficeSeniority(Array.from(updatedMembersMap.values()));
       try {
         localStorage.setItem('canteen_members_cache', JSON.stringify(updatedMembersList));
       } catch {}
@@ -977,7 +1000,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
           <div className="p-3 bg-indigo-950/30 border border-indigo-500/20 rounded-2xl flex items-start space-x-2.5 text-xs text-indigo-200">
             <Info className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
             <div className="leading-relaxed">
-              <strong>টেমপ্লেট কলাম বিন্যাস:</strong> নির্বাচিত মাস <strong>{formatMonthName(targetMonth)}</strong> এর জন্য এক্সেল ফাইলে থাকবে: <code className="bg-slate-900 px-1.5 py-0.5 rounded text-amber-300">Due (Last Month) [{formatShortMonth(lastMonth)}]</code>, <code className="bg-slate-900 px-1.5 py-0.5 rounded text-emerald-300">Advance (Last Month) [{formatShortMonth(lastMonth)}]</code> এবং <code className="bg-slate-900 px-1.5 py-0.5 rounded text-sky-300">Due (This Month) [{formatShortMonth(targetMonth)}]</code>। এরপরে কোনো বাড়তি কলাম থাকবে না।
+              <strong>টেমপ্লেট কলাম বিন্যাস:</strong> নির্বাচিত মাস অনুযায়ী এক্সেল ফাইলে থাকবে: <code className="bg-slate-900 px-1.5 py-0.5 rounded text-amber-300">Due ({getMonthOnlyName(lastMonth)})</code>, <code className="bg-slate-900 px-1.5 py-0.5 rounded text-emerald-300">Advance ({getMonthOnlyName(lastMonth)})</code> এবং <code className="bg-slate-900 px-1.5 py-0.5 rounded text-sky-300">Due ({getMonthOnlyName(targetMonth)})</code>। এরপরে কোনো বাড়তি কলাম থাকবে না।
             </div>
           </div>
 
@@ -1336,19 +1359,19 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
                 </div>
                 <div className="bg-amber-950/30 border border-amber-500/20 rounded-xl p-3 text-center">
                   <span className="text-[10px] font-black text-amber-400 uppercase tracking-wider block truncate">
-                    Due ({formatShortMonth(lastMonth)})
+                    Due ({getMonthOnlyName(lastMonth)})
                   </span>
                   <span className="text-base sm:text-lg font-black text-amber-300 font-mono">৳{stats.totalDueLastMonth.toLocaleString()}</span>
                 </div>
                 <div className="bg-emerald-950/30 border border-emerald-500/20 rounded-xl p-3 text-center">
                   <span className="text-[10px] font-black text-emerald-400 uppercase tracking-wider block truncate">
-                    Adv ({formatShortMonth(lastMonth)})
+                    Adv ({getMonthOnlyName(lastMonth)})
                   </span>
                   <span className="text-base sm:text-lg font-black text-emerald-300 font-mono">৳{stats.totalAdvanceLastMonth.toLocaleString()}</span>
                 </div>
                 <div className="bg-sky-950/30 border border-sky-500/20 rounded-xl p-3 text-center col-span-2 sm:col-span-1">
                   <span className="text-[10px] font-black text-sky-400 uppercase tracking-wider block truncate">
-                    Due ({formatShortMonth(targetMonth)})
+                    Due ({getMonthOnlyName(targetMonth)})
                   </span>
                   <span className="text-base sm:text-lg font-black text-sky-300 font-mono">৳{stats.totalDueThisMonth.toLocaleString()}</span>
                 </div>
@@ -1386,16 +1409,13 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
                       <th className="px-3 py-2.5">BD No</th>
                       <th className="px-3 py-2.5">Member</th>
                       <th className="px-3 py-2.5 text-right font-mono">
-                        Due (Last Month)
-                        <span className="block text-[10px] text-amber-300 font-sans font-black">{formatMonthName(lastMonth)}</span>
+                        Due ({getMonthOnlyName(lastMonth)})
                       </th>
                       <th className="px-3 py-2.5 text-right font-mono">
-                        Advance (Last Month)
-                        <span className="block text-[10px] text-emerald-300 font-sans font-black">{formatMonthName(lastMonth)}</span>
+                        Advance ({getMonthOnlyName(lastMonth)})
                       </th>
                       <th className="px-3 py-2.5 text-right font-mono">
-                        Due (This Month)
-                        <span className="block text-[10px] text-sky-300 font-sans font-black">{formatMonthName(targetMonth)}</span>
+                        Due ({getMonthOnlyName(targetMonth)})
                       </th>
                       <th className="px-3 py-2.5 text-right font-mono">সর্বমোট বকেয়া (Total Due)</th>
                       <th className="px-3 py-2.5 text-center">Status</th>

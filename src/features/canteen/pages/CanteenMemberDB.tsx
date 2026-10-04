@@ -27,34 +27,10 @@ import { supabase } from '../../../supabase';
 import { resolveImageUrl, fetchDirectImageUrl, getCanteenConfig } from '../utils/canteenSettings';
 import { processGalleryImage } from '../utils/imageUpload';
 import { SaveButton } from '../components/SaveButton';
+import { sortCanteenMembersByOfficeSeniority, getRankWeight } from '../utils/canteenSeniority';
 
-// Seniority weighting
-export const getRankWeight = (rankStr?: string): number => {
-  if (!rankStr) return 999;
-  const upper = rankStr.toUpperCase().trim();
-  if (upper.includes('AIR CHIEF') || upper === 'ACM') return 1;
-  if (upper.includes('AIR MSHL') || upper === 'AM') return 2;
-  if (upper.includes('AVM') || upper.includes('AIR VICE')) return 3;
-  if (upper.includes('AIR CDRE') || upper.includes('COMMODORE')) return 4;
-  if (upper.includes('GP CAPT') || upper.includes('GROUP CAPTAIN')) return 5;
-  if (upper.includes('WG CDR') || upper.includes('WING COMMANDER')) return 6;
-  if (upper.includes('SQN LDR') || upper.includes('SQUADRON LEADER')) return 7;
-  if (upper.includes('FLT LT') || upper.includes('FLIGHT LIEUTENANT')) return 8;
-  if (upper.includes('FG OFFR') || upper.includes('FLYING OFFICER')) return 9;
-  if (upper.includes('PLT OFFR') || upper.includes('PILOT OFFICER')) return 10;
-  if (upper === 'MWO' || upper.includes('MASTER WARRANT')) return 20;
-  if (upper === 'SWO' || upper.includes('SENIOR WARRANT')) return 21;
-  if (upper === 'WO' || upper.includes('WARRANT')) return 22;
-  if (upper === 'SGT' || upper.includes('SERGEANT')) return 30;
-  if (upper === 'CPL' || upper.includes('CORPORAL')) return 31;
-  if (upper === 'LAC' || upper.includes('LEADING')) return 32;
-  if (upper === 'AC-1' || upper === 'AC1') return 33;
-  if (upper === 'AC-2' || upper === 'AC2') return 34;
-  if (upper === 'AC' || upper.includes('AIRCRAFTMAN')) return 35;
-  if (upper.includes('NC(E)') || upper.includes('NCE')) return 40;
-  if (upper.includes('CIV')) return 50;
-  return 100;
-};
+// Export getRankWeight from canteenSeniority
+export { getRankWeight };
 
 export interface ExcelMemberRow {
   bdNo: string;
@@ -150,16 +126,7 @@ export const CanteenMemberDB: React.FC = () => {
         DP: m.DP || ''
       }));
 
-    formatted.sort((a, b) => {
-      const weightA = getRankWeight(a.Rank);
-      const weightB = getRankWeight(b.Rank);
-      if (weightA !== weightB) return weightA - weightB;
-      const bdA = parseInt(String(a['BD No']).replace(/\D/g, ''), 10) || 999999;
-      const bdB = parseInt(String(b['BD No']).replace(/\D/g, ''), 10) || 999999;
-      return bdA - bdB;
-    });
-
-    return formatted;
+    return sortCanteenMembersByOfficeSeniority(formatted);
   };
 
   // Fetch Members from Supabase Cloud
@@ -769,9 +736,9 @@ export const CanteenMemberDB: React.FC = () => {
             <table className="w-full text-left text-xs text-slate-300">
               <thead className="bg-slate-950/90 text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-800">
                 <tr>
-                  <th className="px-4 py-3.5 text-center w-12">#</th>
-                  <th className="px-4 py-3.5">Member</th>
-                  <th className="px-4 py-3.5">Rank & BD No</th>
+                  <th className="px-4 py-3.5 text-center w-12 font-mono">#</th>
+                  <th className="px-4 py-3.5">Rank & Name</th>
+                  <th className="px-4 py-3.5 font-mono">BD No</th>
                   <th className="px-4 py-3.5">Role</th>
                   <th className="px-4 py-3.5">Contact</th>
                   <th className="px-4 py-3.5 text-right font-mono">Current Due</th>
@@ -798,22 +765,20 @@ export const CanteenMemberDB: React.FC = () => {
                               <span>{(member['Surname'] || 'U').charAt(0)}</span>
                             )}
                           </div>
-                          <div>
-                            <span className="font-black text-white group-hover:text-cyan-300 transition-colors text-sm block">
+                          <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-indigo-500/15 border border-indigo-400/30 text-indigo-300 shrink-0">
+                              {member['Rank']}
+                            </span>
+                            <span className="font-black text-white group-hover:text-cyan-300 transition-colors text-sm">
                               {member['Surname']}
                             </span>
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center space-x-1.5">
-                          <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-indigo-500/15 border border-indigo-400/30 text-indigo-300">
-                            {member['Rank']}
-                          </span>
-                          <span className="font-mono text-slate-400 font-bold text-xs">
-                            #{member['BD No']}
-                          </span>
-                        </div>
+                      <td className="px-4 py-3 font-mono">
+                        <span className="px-2.5 py-1 rounded-lg text-xs font-bold font-mono text-slate-300 bg-slate-950/70 border border-slate-700/60 inline-block shadow-inner">
+                          #{member['BD No']}
+                        </span>
                       </td>
                       <td className="px-4 py-3">
                         <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase border ${
