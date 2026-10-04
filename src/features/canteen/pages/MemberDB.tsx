@@ -52,8 +52,13 @@ import { BulkImportInitialBillsModal } from '../components/BulkImportInitialBill
 import { SetInitialBillModal } from '../components/SetInitialBillModal';
 import { PrintableCanteenBillModal } from '../components/PrintableCanteenBillModal';
 import { restoreRawStockForSaleCancellation } from '../utils/recipeManager';
-import { pushKeyToCloud, recordDeletedTxId } from '../utils/canteenCloudSync';
-import { exportCanteenBillToExcel } from '../utils/exportCanteenBillExcel';
+import { pushKeyToCloud, pullKeyFromCloud, recordDeletedTxId } from '../utils/canteenCloudSync';
+import {
+  exportCanteenBillToExcel,
+  formatRankBn,
+  formatMemberNameBn,
+  formatBengaliMonthYear
+} from '../utils/exportCanteenBillExcel';
 import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
 
 export type BillCategory = 'ALL' | 'CANTEEN' | 'UNIT_FUND' | 'OTHERS';
@@ -325,8 +330,8 @@ export const getTxCategory = (tx: any): 'CANTEEN' | 'UNIT_FUND' | 'OTHERS' => {
     return 'CANTEEN';
   }
   const desc = String(tx.items || tx.type || '').toLowerCase();
-  if (desc.includes('unit fund') || desc.includes('unit_fund')) return 'UNIT_FUND';
-  if (desc.includes('others') || desc.includes('other bill')) return 'OTHERS';
+  if (desc.includes('unit fund') || desc.includes('unit_fund') || desc.includes('ইউনিট ফান্ড')) return 'UNIT_FUND';
+  if (desc.includes('others') || desc.includes('other bill') || desc.includes('অন্যান্য')) return 'OTHERS';
   return 'CANTEEN';
 };
 
@@ -455,6 +460,7 @@ export const MemberDB: React.FC = () => {
   const [statementTx, setStatementTx] = useState<any[]>([]);
   const [statementCategory, setStatementCategory] = useState<BillCategory>('ALL');
   const [statementMonth, setStatementMonth] = useState<string>(() => getRunningMonthKey());
+  const [isCapturingPic, setIsCapturingPic] = useState(false);
 
   // Menu catalog prices cache for accurate item rate calculations
   const [menuCatalog, setMenuCatalog] = useState<any[]>(() => {
@@ -739,6 +745,29 @@ export const MemberDB: React.FC = () => {
 
   const toEnglishDate = formatCanteenDate;
 
+  // Load transactions from cloud on mount and keep synced
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      try {
+        const cloudTxs = await pullKeyFromCloud('canteen_txs');
+        if (isMounted && Array.isArray(cloudTxs) && cloudTxs.length > 0) {
+          const localTxs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+          const txMap = new Map();
+          [...localTxs, ...cloudTxs].forEach((t) => {
+            if (t && t.id) txMap.set(String(t.id), t);
+          });
+          const merged = Array.from(txMap.values());
+          localStorage.setItem('canteen_txs', JSON.stringify(merged));
+          setAllTxs(merged);
+        }
+      } catch (err) {
+        console.warn('Could not sync canteen_txs from cloud on mount:', err);
+      }
+    })();
+    return () => { isMounted = false; };
+  }, []);
+
   // Listen to transaction updates
   useEffect(() => {
     const handleTxsSync = () => {
@@ -755,6 +784,27 @@ export const MemberDB: React.FC = () => {
       window.removeEventListener('storage', handleTxsSync);
     };
   }, []);
+
+  // Keep open Profile and open Statement in real-time sync with transactions
+  useEffect(() => {
+    if (profileMember) {
+      const localTxs = (() => {
+        try { return JSON.parse(localStorage.getItem('canteen_txs') || '[]'); } catch { return []; }
+      })();
+      const effectiveTxs = allTxs && allTxs.length >= localTxs.length ? allTxs : localTxs;
+      setProfileTx(filterMemberTxs(profileMember, effectiveTxs));
+    }
+  }, [allTxs, profileMember]);
+
+  useEffect(() => {
+    if (statementMember) {
+      const localTxs = (() => {
+        try { return JSON.parse(localStorage.getItem('canteen_txs') || '[]'); } catch { return []; }
+      })();
+      const effectiveTxs = allTxs && allTxs.length >= localTxs.length ? allTxs : localTxs;
+      setStatementTx(filterMemberTxs(statementMember, effectiveTxs));
+    }
+  }, [allTxs, statementMember]);
 
   // Auto-dismiss dynamic payment confirmation animation after 4.5 seconds
   useEffect(() => {
@@ -822,13 +872,24 @@ export const MemberDB: React.FC = () => {
   // Helper to filter all transactions belonging to a specific member safely
   const filterMemberTxs = (member: any, txs: any[]): any[] => {
     if (!member || !Array.isArray(txs)) return [];
-    const mAirman = String(member.airman_id || '').trim();
-    const mBdClean = String(member['BD No'] || member.bdNo || member.airman_id || '').replace(/\D/g, '');
+    const mAirman = String(member.airman_id || member.airmanId || '').trim().toLowerCase();
+    const mBdClean = String(member['BD No'] || member.bdNo || member.bd_no || member.airman_id || '').replace(/\D/g, '');
+    const mSurname = String(member['Surname'] || member.surname || '').trim().toLowerCase();
+    const mRank = String(member['Rank'] || member.rank || '').trim().toLowerCase();
+
     return txs.filter((tx: any) => {
-      if (mAirman && tx.airman_id === mAirman) return true;
-      if (mBdClean) {
-        const txBdClean = String(tx.bdNo || tx.airman_id || '').replace(/\D/g, '');
-        if (txBdClean && txBdClean === mBdClean) return true;
+      if (!tx) return false;
+      const txAirman = String(tx.airman_id || tx.airmanId || '').trim().toLowerCase();
+      if (mAirman && txAirman && mAirman === txAirman) return true;
+
+      const txBdClean = String(tx.bdNo || tx['BD No'] || tx.bd_no || tx.airman_id || '').replace(/\D/g, '');
+      if (mBdClean && txBdClean && mBdClean === txBdClean) return true;
+
+      if (mSurname && tx.memberName) {
+        const txName = String(tx.memberName).toLowerCase();
+        if (txName.includes(mSurname) && (!mRank || txName.includes(mRank))) {
+          return true;
+        }
       }
       return false;
     });
@@ -881,12 +942,12 @@ export const MemberDB: React.FC = () => {
         const baseCanteenDue = Math.max(0, totalMemberDue - Math.max(0, unitFundDue) - Math.max(0, othersDue));
         return Math.max(txBill, baseCanteenDue);
       }
-      return txBill;
+      return txBill > 0 ? txBill : Number(member.Due ?? member.due ?? member.baki ?? 0);
     }
 
     // When viewing a specific month (e.g. September 2026 / "2026-09")
     const totalDue = getMemberTotalDue(member, category);
-    if (totalDue <= 0) return 0;
+    if (totalDue <= 0 && charges <= 0) return 0;
 
     // FIFO payment accounting across months:
     // Payments made in a later month (e.g. Oct) clear bills from earlier months (e.g. Sep)
@@ -905,7 +966,10 @@ export const MemberDB: React.FC = () => {
     const paymentsAvailableForThisMonth = Math.max(0, allPaymentsTotal - chargesBefore);
     const remainingUnpaidForMonth = Math.max(0, charges - paymentsAvailableForThisMonth);
 
-    return Math.min(remainingUnpaidForMonth, totalDue);
+    if (matchingTxs.length > 0) {
+      return remainingUnpaidForMonth;
+    }
+    return 0;
   };
 
   // Helper to calculate Member's Total Due (পূর্ববর্তী সব বকেয়া + চলতি মাসের বিল - মোট পরিশোধ)
@@ -982,8 +1046,9 @@ export const MemberDB: React.FC = () => {
     const runningMonth = getRunningMonthKey();
     setStatementMonth(selectedMonth !== 'ALL' ? selectedMonth : runningMonth);
     try {
-      const txs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-      const memberTxs = filterMemberTxs(member, txs);
+      const local = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+      const sourceTxs = allTxs && allTxs.length >= local.length ? allTxs : local;
+      const memberTxs = filterMemberTxs(member, sourceTxs);
       setStatementTx(memberTxs);
     } catch (e) {
       setStatementTx([]);
@@ -1009,8 +1074,9 @@ export const MemberDB: React.FC = () => {
       due: Number(member.Due ?? member.due ?? member.baki ?? 0)
     });
     try {
-      const txs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-      const memberTxs = filterMemberTxs(member, txs);
+      const local = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+      const sourceTxs = allTxs && allTxs.length >= local.length ? allTxs : local;
+      const memberTxs = filterMemberTxs(member, sourceTxs);
       setProfileTx(memberTxs);
     } catch (e) {
       setProfileTx([]);
@@ -1023,6 +1089,14 @@ export const MemberDB: React.FC = () => {
 
     txs.forEach((tx) => {
       if (tx.type === 'BILL PAYMENT') return;
+
+      // Skip Unit Fund & Others Fund - they appear in dedicated statement summary rows
+      const cat = getTxCategory(tx);
+      if (cat === 'UNIT_FUND' || cat === 'OTHERS') return;
+
+      const itemsStr = String(tx.items || '').trim();
+      // Skip previous due initial bill - it is displayed in the বকেয়া বিল summary row
+      if (itemsStr.includes('বকেয়া বিল')) return;
 
       // 1. If tx has structured soldItems array (from POS)
       if (Array.isArray(tx.soldItems) && tx.soldItems.length > 0) {
@@ -1047,8 +1121,8 @@ export const MemberDB: React.FC = () => {
       }
 
       // 2. Parse from tx.items string (e.g. "চা (2), সিঙ্গারা (1)" or "প্যাটিস")
-      const itemsStr = tx.items || 'ক্যান্টিন খরচ';
-      const parts = String(itemsStr).split(',').map((s) => s.trim()).filter(Boolean);
+      const fallbackStr = tx.items || 'ক্যান্টিন খরচ';
+      const parts = String(fallbackStr).split(',').map((s) => s.trim()).filter(Boolean);
 
       if (parts.length === 1) {
         const match = parts[0].match(/^(.+?)\s*\(([0-9]+)\)$/);
@@ -1265,6 +1339,8 @@ export const MemberDB: React.FC = () => {
     totalDue: number, 
     totalMonthBill: number, 
     previousDue: number,
+    unitFundBill: number = 0,
+    othersFundBill: number = 0,
     monthKey: string = 'ALL'
   ) => {
     let contact = (member.Contact || member.contact || member['Mobile No'] || '').trim();
@@ -1280,13 +1356,13 @@ export const MemberDB: React.FC = () => {
       phone = '880' + phone;
     }
 
-    const rank = member.Rank || member.rank || '';
-    const surname = member.Surname || member.surname || '';
-    const monthTitle = formatMonthName(monthKey);
+    const rank = formatRankBn(member.Rank || member.rank || '');
+    const surname = formatMemberNameBn(member.Surname || member.surname || '');
+    const monthTitle = formatBengaliMonthYear(monthKey);
 
     let rowsList = '';
     if (items.length === 0) {
-      rowsList = 'কোনো রেকর্ড পাওয়া যায়নি।\n';
+      rowsList = 'কোনো খাদ্যদ্রব্য খরচের রেকর্ড নেই।\n';
     } else {
       rowsList = items.map((r, idx) => 
         `${idx + 1}. ${r.itemName} | পরিমাণ: ${r.qty} | দর: ৳${r.rate} | মোট: ৳${r.total}`
@@ -1304,7 +1380,7 @@ export const MemberDB: React.FC = () => {
 ${rowsList}
 ━━━━━━━━━━━━━━━━━━━━━
 💰 *মোট বিল:* ৳${totalMonthBill}
-${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্তী মাস):* ৳${previousDue}\n` : ''}💳 *সর্বমোট প্রদেয় বিল:* ৳${totalDue}
+${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}${unitFundBill > 0 ? `🏛️ *ইউনিট ফান্ড:* ৳${unitFundBill}\n` : ''}${othersFundBill > 0 ? `📦 *অন্যান্য:* ৳${othersFundBill}\n` : ''}💳 *সর্বমোট প্রদেয় বিল:* ৳${totalDue}
 
 (বিল পরিশোধের জন্য ধন্যবাদ - CAFE UAV)`;
 
@@ -1586,27 +1662,66 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
     }
   };
 
-  // Helper to format and sort members by rank seniority
+  // Helper to format, deduplicate, and sort members by rank seniority
   const formatAndSortMembers = (data: any[]) => {
-    const formatted = data
-      .filter((m: any) => {
-        const bd = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
-        return bd !== '48456';
-      })
-      .map((m: any) => {
-        const effectiveDp = getMemberEffectiveDp(m);
-        return {
-          ...m,
-          Role: m.Role ?? m.role ?? 'Member',
-          role: m.Role ?? m.role ?? 'Member',
-          Due: Number(m.Due ?? m.due ?? m.baki ?? 0),
-          baki: Number(m.Due ?? m.due ?? m.baki ?? 0),
-          DP: effectiveDp || m.DP || ''
-        };
+    const seen = new Set<string>();
+    const uniqueList: any[] = [];
+
+    for (const m of data) {
+      if (!m) continue;
+      const cleanBd = String(m['BD No'] || m.bdNo || '').replace(/\D/g, '');
+      const airmanId = String(m.airman_id || '').trim().toLowerCase();
+      if (cleanBd === '48456') continue;
+
+      const primaryKey = (cleanBd && cleanBd !== '0') ? `bd_${cleanBd}` : (airmanId ? `airman_${airmanId}` : `name_${String(m.Rank || '').trim()}_${String(m.Surname || '').trim()}`);
+
+      const existingIdx = uniqueList.findIndex((item) => {
+        const iBd = String(item['BD No'] || item.bdNo || '').replace(/\D/g, '');
+        const iAirman = String(item.airman_id || '').trim().toLowerCase();
+        if (cleanBd && iBd && cleanBd === iBd) return true;
+        if (airmanId && iAirman && airmanId === iAirman) return true;
+        return false;
       });
 
+      if (existingIdx >= 0) {
+        const existing = uniqueList[existingIdx];
+        if (m.Due !== undefined && m.Due !== null) {
+          existing.Due = Number(m.Due);
+          existing.due = Number(m.Due);
+          existing.baki = Number(m.Due);
+        }
+        if (m.Advance !== undefined && m.Advance !== null) {
+          existing.Advance = Number(m.Advance);
+          existing.advance = Number(m.Advance);
+          existing.ogrim = Number(m.Advance);
+        }
+        if (!existing['Rank'] && m['Rank']) existing['Rank'] = m['Rank'];
+        if (!existing['Surname'] && m['Surname']) existing['Surname'] = m['Surname'];
+        if (!existing['Contact'] && (m['Contact'] || m['Mobile No'])) existing['Contact'] = m['Contact'] || m['Mobile No'];
+        continue;
+      }
+
+      if (seen.has(primaryKey)) continue;
+      if (cleanBd && seen.has(`bd_${cleanBd}`)) continue;
+      if (airmanId && seen.has(`airman_${airmanId}`)) continue;
+
+      seen.add(primaryKey);
+      if (cleanBd) seen.add(`bd_${cleanBd}`);
+      if (airmanId) seen.add(`airman_${airmanId}`);
+
+      const effectiveDp = getMemberEffectiveDp(m);
+      uniqueList.push({
+        ...m,
+        Role: m.Role ?? m.role ?? 'Member',
+        role: m.Role ?? m.role ?? 'Member',
+        Due: Number(m.Due ?? m.due ?? m.baki ?? 0),
+        baki: Number(m.Due ?? m.due ?? m.baki ?? 0),
+        DP: effectiveDp || m.DP || ''
+      });
+    }
+
     // Sort strictly by Office Nominal Roll Seniority & BAF Hierarchy
-    return sortCanteenMembersByOfficeSeniority(formatted);
+    return sortCanteenMembersByOfficeSeniority(uniqueList);
   };
 
   // Auto-sync Biodata silently in background ONLY if Canteen_Member is completely empty
@@ -2007,24 +2122,62 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
   const statementAggregatedItems = parseStatementAggregatedItems(filteredStatementTxs);
   const totalMonthBill = statementAggregatedItems.reduce((sum, r) => sum + r.total, 0);
 
+  const unitFundBill = filteredStatementTxs
+    .filter((tx) => getTxCategory(tx) === 'UNIT_FUND' && tx.type !== 'BILL PAYMENT')
+    .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+  const othersFundBill = filteredStatementTxs
+    .filter((tx) => getTxCategory(tx) === 'OTHERS' && tx.type !== 'BILL PAYMENT')
+    .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
   const currentMonthPayments = filteredStatementTxs
     .filter((tx) => tx.type === 'BILL PAYMENT')
     .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
 
   const memberTotalDue = Number(statementMember?.Due ?? statementMember?.due ?? statementMember?.baki ?? 0);
 
-  // বকেয়া বিল হিসাব: "Age old due clear hbe erpor New gula"
-  // memberTotalDue হলো সদস্যের সার্বিক বর্তমান বকেয়া (আগের সব বকেয়া + বর্তমান মাসের বিল)
-  // totalMonthBill হলো এই মাসের মোট হিসাব
+  // বকেয়া বিল হিসাব:
   let previousDue = 0;
-  if (memberTotalDue >= totalMonthBill) {
-    previousDue = Math.max(0, Math.round((memberTotalDue - totalMonthBill) * 100) / 100);
+  const currentMonthCharges = totalMonthBill + unitFundBill + othersFundBill;
+  if (memberTotalDue > currentMonthCharges) {
+    previousDue = Math.max(0, Math.round((memberTotalDue - currentMonthCharges) * 100) / 100);
   } else {
-    // পুরানো সব বকেয়া ইতিমধ্যে পরিশোধিত হয়ে গেছে
-    previousDue = 0;
+    const prevDueTxs = statementTx.filter(tx => {
+      const txMonth = getTxMonthKey(tx.date);
+      const isBefore = statementMonth !== 'ALL' && txMonth && txMonth < statementMonth;
+      return isBefore && (String(tx.items || '').includes('বকেয়া বিল') || tx.type === 'INITIAL_BILL');
+    });
+    const sumPrevInit = prevDueTxs.reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    previousDue = Math.min(memberTotalDue, sumPrevInit);
   }
 
-  const netPayable = memberTotalDue;
+  const netPayable = memberTotalDue > 0 ? memberTotalDue : Math.max(0, totalMonthBill + previousDue + unitFundBill + othersFundBill - currentMonthPayments);
+
+  const handleDownloadStatementPic = async () => {
+    const el = document.getElementById('statement-paper-slip');
+    if (!el) return;
+    setIsCapturingPic(true);
+    try {
+      const html2canvas = (await import('html2canvas')).default;
+      const canvas = await html2canvas(el, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff'
+      });
+      const dataUrl = canvas.toDataURL('image/png');
+      const rank = formatRankBn(statementMember?.['Rank'] || statementMember?.rank || '');
+      const surname = statementMember?.['Surname'] || statementMember?.surname || 'Member';
+      const monthStr = statementMonth || 'Statement';
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = `${rank}_${surname}_Statement_${monthStr}.png`;
+      a.click();
+    } catch (err) {
+      console.warn('Error capturing statement picture:', err);
+    } finally {
+      setIsCapturingPic(false);
+    }
+  };
 
   const grandTotalDue = useMemo(() => {
     return members.reduce((sum, m) => sum + Number(m.Due ?? m.due ?? m.baki ?? 0), 0);
@@ -3074,20 +3227,31 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
                 </div>
                 <div>
                   <h2 className="text-lg font-black text-white">{statementMember['Rank']} {statementMember['Surname']}</h2>
-                  <p className="text-[11px] font-bold text-slate-400 font-mono">Monthly Statement • {formatMonthName(statementMonth)}</p>
+                  <p className="text-[11px] font-bold text-slate-400 font-mono">Monthly Statement • {formatBengaliMonthYear(statementMonth)}</p>
                 </div>
               </div>
 
-              {/* Action Buttons: WhatsApp Send, Print Bill, Close */}
+              {/* Action Buttons: WhatsApp Send, Save Pic, Print Bill, Close */}
               <div className="flex items-center space-x-2.5">
                 {/* Send via WhatsApp Button */}
                 <button 
-                  onClick={() => handleSendWhatsApp(statementMember, statementAggregatedItems, netPayable, totalMonthBill, previousDue, statementMonth)}
+                  onClick={() => handleSendWhatsApp(statementMember, statementAggregatedItems, netPayable, totalMonthBill, previousDue, unitFundBill, othersFundBill, statementMonth)}
                   className="flex items-center space-x-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md shadow-emerald-500/20 active:translate-y-0.5"
                   title="Send Statement via WhatsApp"
                 >
                   <MessageCircle className="w-4 h-4" />
                   <span>WHATSAPP</span>
+                </button>
+
+                {/* Save Picture Button using html2canvas */}
+                <button 
+                  onClick={handleDownloadStatementPic}
+                  disabled={isCapturingPic}
+                  className="flex items-center space-x-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md shadow-purple-500/20 active:translate-y-0.5 disabled:opacity-50"
+                  title="ছবি হিসেবে সংরক্ষণ করুন (Save / Download Picture)"
+                >
+                  {isCapturingPic ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}
+                  <span>{isCapturingPic ? 'ছবি তৈরি হচ্ছে...' : 'ছবি ডাউনলোড'}</span>
                 </button>
 
                 {/* Print Bill / PDF */}
@@ -3128,7 +3292,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
                 >
                   {availableMonths.map((m) => (
                     <option key={m} value={m}>
-                      {formatMonthName(m)}
+                      {formatBengaliMonthYear(m)}
                     </option>
                   ))}
                 </select>
@@ -3137,7 +3301,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
 
             {/* Statement Content Area */}
             <div className="p-6 overflow-y-auto bg-slate-950/40 flex-1 print:p-0 print:bg-white print:overflow-visible">
-              <div className="bg-white rounded-2xl p-8 border border-slate-300 text-black max-w-3xl mx-auto shadow-sm">
+              <div id="statement-paper-slip" className="bg-white rounded-2xl p-8 border border-slate-300 text-black max-w-3xl mx-auto shadow-sm">
                 
                 {/* Header Banner */}
                 <div className="text-center mb-6 border-b-2 border-black pb-4">
@@ -3153,23 +3317,23 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
                     <tr>
                       <td className="border border-black p-2.5 text-left w-1/4 bg-slate-50 font-black">মাসের নাম</td>
                       <td className="border border-black p-2.5 text-left font-black" colSpan={3}>
-                        {formatMonthName(statementMonth)}
+                        {formatBengaliMonthYear(statementMonth)}
                       </td>
                     </tr>
                     <tr>
                       <td className="border border-black p-2.5 text-left bg-slate-50 font-black">পদবী ও নাম</td>
                       {/* Statement er Namer Pase Bd No lagbe na */}
                       <td className="border border-black p-2.5 text-left font-black" colSpan={3}>
-                        {statementMember['Rank']} {statementMember['Surname']}
+                        {formatRankBn(statementMember['Rank'] || statementMember.rank || '')} {statementMember['Surname'] || ''}
                       </td>
                     </tr>
                     
-                    {/* Heading Row: দ্রব্যের নাম , পরিমাণ , দর, মোট */}
+                    {/* Heading Row: দ্রব্যের নাম , পরিমাণ , দর, মোট (Bold & Center Align) */}
                     <tr className="bg-slate-100 text-center font-black">
-                      <td className="border border-black p-2.5 text-left">দ্রব্যের নাম</td>
-                      <td className="border border-black p-2.5 w-24 text-center">পরিমাণ</td>
-                      <td className="border border-black p-2.5 w-24 text-right">দর</td>
-                      <td className="border border-black p-2.5 w-28 text-right">মোট</td>
+                      <th className="border border-black p-2.5 text-center font-black">দ্রব্যের নাম</th>
+                      <th className="border border-black p-2.5 w-24 text-center font-black">পরিমাণ</th>
+                      <th className="border border-black p-2.5 w-24 text-center font-black">দর</th>
+                      <th className="border border-black p-2.5 w-28 text-center font-black">মোট</th>
                     </tr>
 
                     {statementAggregatedItems.length === 0 ? (
@@ -3202,14 +3366,43 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
                         ৳{totalMonthBill}
                       </td>
                     </tr>
-                    <tr>
-                      <td className="border border-black p-2.5 text-right font-black bg-amber-50/60" colSpan={3}>
-                        বকেয়া বিল {previousDue > 0 ? '(পূর্ববর্তী বকেয়া)' : ''}
-                      </td>
-                      <td className="border border-black p-2.5 text-right font-black font-mono text-sm text-amber-900">
-                        ৳{previousDue}
-                      </td>
-                    </tr>
+
+                    {/* বকেয়া বিল (যদি ০ থাকে তাহলে Hide থাকবে) */}
+                    {previousDue > 0 && (
+                      <tr>
+                        <td className="border border-black p-2.5 text-right font-black bg-amber-50/60" colSpan={3}>
+                          বকেয়া বিল
+                        </td>
+                        <td className="border border-black p-2.5 text-right font-black font-mono text-sm text-amber-900">
+                          ৳{previousDue}
+                        </td>
+                      </tr>
+                    )}
+
+                    {/* ইউনিট ফান্ড (যদি ০ থাকে তাহলে Hide থাকবে) */}
+                    {unitFundBill > 0 && (
+                      <tr>
+                        <td className="border border-black p-2.5 text-right font-black bg-indigo-50/60" colSpan={3}>
+                          ইউনিট ফান্ড
+                        </td>
+                        <td className="border border-black p-2.5 text-right font-black font-mono text-sm text-indigo-950">
+                          ৳{unitFundBill}
+                        </td>
+                      </tr>
+                    )}
+
+                    {/* অন্যান্য (যদি ০ থাকে তাহলে Hide থাকবে) */}
+                    {othersFundBill > 0 && (
+                      <tr>
+                        <td className="border border-black p-2.5 text-right font-black bg-sky-50/60" colSpan={3}>
+                          অন্যান্য
+                        </td>
+                        <td className="border border-black p-2.5 text-right font-black font-mono text-sm text-sky-950">
+                          ৳{othersFundBill}
+                        </td>
+                      </tr>
+                    )}
+
                     {currentMonthPayments > 0 && (
                       <tr>
                         <td className="border border-black p-2.5 text-right font-bold text-emerald-800 bg-emerald-50/60" colSpan={3}>
@@ -3230,18 +3423,6 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
                     </tr>
                   </tbody>
                 </table>
-
-                {/* Signatures */}
-                <div className="flex justify-between items-end pt-12 px-8 text-xs font-bold text-black text-center">
-                  <div>
-                    <div className="w-32 border-t border-black mb-1 mx-auto"></div>
-                    <p>গ্রাহকের স্বাক্ষর</p>
-                  </div>
-                  <div>
-                    <div className="w-32 border-t border-black mb-1 mx-auto"></div>
-                    <p>ম্যানেজার</p>
-                  </div>
-                </div>
               </div>
             </div>
           </div>
@@ -3736,6 +3917,10 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
           allTxs={allTxs}
           onSuccess={(updatedList) => {
             setMembers(formatAndSortMembers(updatedList));
+            try {
+              const freshTxs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+              setAllTxs(freshTxs);
+            } catch {}
           }}
         />
       )}

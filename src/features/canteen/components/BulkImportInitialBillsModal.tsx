@@ -22,9 +22,10 @@ import {
   Info 
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
-import { pushKeyToCloud, pullKeyFromCloud } from '../utils/canteenCloudSync';
+import { pushKeyToCloud, pullKeyFromCloud, recordDeletedTxId } from '../utils/canteenCloudSync';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
+import { formatBengaliMonthYear } from '../utils/exportCanteenBillExcel';
 import { getTxMonthKey } from '../pages/MemberDB';
 import JSZip from 'jszip';
 
@@ -106,8 +107,12 @@ export interface BillImportBatchItem {
   dueLastMonth: number;
   advanceLastMonth: number;
   dueThisMonth: number;
+  unitFund?: number;
+  othersFund?: number;
   importedAmount: number;
   resultingDue: number;
+  previousDue?: number;
+  previousAdvance?: number;
 }
 
 export interface BillImportBatch {
@@ -136,6 +141,7 @@ interface BulkImportInitialBillsModalProps {
 
 export interface ParsedBillRow {
   id: string;
+  sl?: number;
   rawBd: string;
   bdNo: string;
   targetMonth: string;      // This Month (e.g. 2026-10 or 2026-09)
@@ -143,6 +149,8 @@ export interface ParsedBillRow {
   dueLastMonth: number;     // Due (Last Month)
   advanceLastMonth: number; // Advance (Last Month)
   dueThisMonth: number;     // Due (This Month)
+  unitFund: number;         // Unit Fund
+  othersFund: number;       // Others
   totalDue: number;         // Resulting net due
   finalAdvance: number;     // Resulting net advance
   amount: number;
@@ -223,8 +231,11 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
   const [rollbackBatch, setRollbackBatch] = useState<BillImportBatch | null>(null);
   const [isRollingBack, setIsRollingBack] = useState<boolean>(false);
   const [historySearch, setHistorySearch] = useState<string>('');
+  const [isResettingAll, setIsResettingAll] = useState<boolean>(false);
+  const [showResetAllConfirm, setShowResetAllConfirm] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const rawDataRef = useRef<any[][] | null>(null);
 
   // Sync initialTab when modal opens or prop changes
   useEffect(() => {
@@ -249,19 +260,45 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
     loadCloudHistory();
   }, []);
 
-  // Build member lookup map by cleaned BD No
-  const memberMap = useMemo(() => {
+  // Build member lookup maps by cleaned BD No, raw BD, airman_id, Rank + Surname, and Surname
+  const { memberMap, memberByNameMap } = useMemo(() => {
     const map = new Map<string, any>();
+    const nameMap = new Map<string, any>();
+
     members.forEach((m) => {
-      const clean = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
-      if (clean) map.set(clean, m);
+      const rawBd = String(m['BD No'] || m.bdNo || '').trim();
+      const cleanBd = rawBd.replace(/\D/g, '');
+      const airmanId = String(m.airman_id || '').trim();
+      const cleanAirmanId = airmanId.replace(/\D/g, '');
+
+      if (cleanBd) map.set(cleanBd, m);
+      if (rawBd) map.set(rawBd.toLowerCase(), m);
+      if (cleanAirmanId) map.set(cleanAirmanId, m);
+      if (airmanId) map.set(airmanId.toLowerCase(), m);
+
+      if (cleanBd) {
+        map.set(`bd/${cleanBd}`, m);
+        map.set(`bd-${cleanBd}`, m);
+        map.set(`bd ${cleanBd}`, m);
+      }
+
+      const surname = String(m['Surname'] || m.surname || m['Full Name'] || m.name || '').trim().toLowerCase();
+      const rank = String(m['Rank'] || m.rank || '').trim().toLowerCase();
+      if (surname) {
+        nameMap.set(surname, m);
+        if (rank) {
+          nameMap.set(`${rank} ${surname}`, m);
+          nameMap.set(`${rank}-${surname}`, m);
+        }
+      }
     });
-    return map;
+
+    return { memberMap: map, memberByNameMap: nameMap };
   }, [members]);
 
   // Parse raw matrix / text data into structured rows:
   // Format: SL | BD No | Rank | Surname | Due (Last Month) | Advance (Last Month) | Due (This Month)
-  const processRawData = (rows: any[][]) => {
+  const processRawData = (rows: any[][], overrideTargetMonth?: string) => {
     setErrorMessage(null);
     setSuccessMessage(null);
 
@@ -269,9 +306,6 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
       setErrorMessage('কোনো ডাটা পাওয়া যায়নি।');
       return;
     }
-
-    const result: ParsedBillRow[] = [];
-    const seenBd = new Set<string>();
 
     const parseNum = (val: any): number => {
       if (val === null || val === undefined || val === '') return 0;
@@ -283,15 +317,21 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
     let headerRowIdx = -1;
     let slColIdx = -1;
     let bdColIdx = -1;
+    let rankColIdx = -1;
+    let surnameColIdx = -1;
     let dueLastMonthColIdx = -1;
     let advLastMonthColIdx = -1;
     let dueThisMonthColIdx = -1;
+    let unitFundColIdx = -1;
+    let othersFundColIdx = -1;
     let fallbackAmountColIdx = -1;
 
-    const lastMonthName = formatMonthName(lastMonth).toLowerCase();
-    const lastMonthAbbr = lastMonthName.split(' ')[0].slice(0, 3);
-    const thisMonthName = formatMonthName(targetMonth).toLowerCase();
-    const thisMonthAbbr = thisMonthName.split(' ')[0].slice(0, 3);
+    let detectedMonthFromHeader: string | null = null;
+
+    const monthMap: Record<string, string> = {
+      jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+      jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12'
+    };
 
     for (let r = 0; r < Math.min(rows.length, 5); r++) {
       const row = rows[r];
@@ -300,56 +340,111 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
 
       const hasBd = lowerCells.some((c) => c.includes('bd') || c.includes('airman') || c.includes('বিডি'));
       const hasBillOrDue = lowerCells.some(
-        (c) => c.includes('due') || c.includes('bill') || c.includes('adv') || c.includes('বকেয়া') || c.includes('অগ্রীম') || c.includes('টাকা')
+        (c) => c.includes('due') || c.includes('bill') || c.includes('adv') || c.includes('বকেয়া') || c.includes('অগ্রীম') || c.includes('টাকা') || c.includes('fund')
       );
       const hasName = lowerCells.some((c) => c.includes('name') || c.includes('surname') || c.includes('rank') || c.includes('নাম'));
 
-      if (hasBd || (hasBillOrDue && (hasName || lowerCells.some((c) => c === 'sl' || c === 'ser')))) {
+      if (hasBd || (hasBillOrDue && (hasName || lowerCells.some((c) => c === 'sl' || c === 'ser' || c === '#')))) {
         headerRowIdx = r;
+        const dueCols: number[] = [];
+        const advCols: number[] = [];
+
         lowerCells.forEach((c, idx) => {
           if (c === 'sl' || c === 'ser' || c === 'serial' || c.startsWith('sl') || c.includes('ক্রমিক') || c === '#') {
             slColIdx = idx;
           } else if (c.includes('bd') || c.includes('airman') || c.includes('বিডি')) {
             bdColIdx = idx;
-          } else {
-            const hasLastMonthSignal = 
-              c.includes('last') || 
-              c.includes('prev') || 
-              c.includes('পূর্ব') || 
-              c.includes('আগের') || 
-              (lastMonthAbbr && c.includes(lastMonthAbbr)) || 
-              c.includes(lastMonth);
-
-            const hasThisMonthSignal = 
-              c.includes('this') || 
-              c.includes('curr') || 
-              c.includes('চলতি') || 
-              c.includes('বর্তমান') || 
-              (thisMonthAbbr && c.includes(thisMonthAbbr)) || 
-              c.includes(targetMonth);
-
-            if (c.includes('adv') || c.includes('advance') || c.includes('অগ্রীম') || c.includes('ogrim')) {
-              advLastMonthColIdx = idx;
-            } else if (c.includes('due') || c.includes('bill') || c.includes('বকেয়া') || c.includes('বিল') || c.includes('টাকা')) {
-              if (hasThisMonthSignal && !hasLastMonthSignal) {
-                dueThisMonthColIdx = idx;
-              } else if (hasLastMonthSignal) {
-                dueLastMonthColIdx = idx;
-              } else {
-                if (dueLastMonthColIdx === -1) dueLastMonthColIdx = idx;
-                else if (dueThisMonthColIdx === -1) dueThisMonthColIdx = idx;
-                else if (fallbackAmountColIdx === -1) fallbackAmountColIdx = idx;
-              }
-            } else if (c.includes('amount') || c.includes('টাকা')) {
-              if (fallbackAmountColIdx === -1) fallbackAmountColIdx = idx;
-            }
+          } else if (c.includes('rank') || c.includes('পদবী')) {
+            rankColIdx = idx;
+          } else if (c.includes('surname') || c.includes('name') || c.includes('নাম')) {
+            surnameColIdx = idx;
+          } else if (c.includes('unit fund') || c.includes('unit_fund') || c.includes('ইউনিট ফান্ড') || c === 'unit fund' || c === 'unit') {
+            unitFundColIdx = idx;
+          } else if (c.includes('others') || c.includes('other') || c.includes('অন্যান্য') || c === 'others') {
+            othersFundColIdx = idx;
+          } else if (c.includes('adv') || c.includes('advance') || c.includes('অগ্রীম') || c.includes('ogrim')) {
+            advCols.push(idx);
+          } else if (c.includes('due') || c.includes('bill') || c.includes('বকেয়া') || c.includes('বিল')) {
+            dueCols.push(idx);
+          } else if (c.includes('amount') || c.includes('টাকা')) {
+            if (fallbackAmountColIdx === -1) fallbackAmountColIdx = idx;
           }
         });
+
+        // Assign amount columns cleanly: first due column is Last Month, second due column is This Month
+        if (dueCols.length >= 2) {
+          dueLastMonthColIdx = dueCols[0];
+          dueThisMonthColIdx = dueCols[1];
+        } else if (dueCols.length === 1) {
+          const cText = lowerCells[dueCols[0]];
+          if (cText.includes('last') || cText.includes('prev') || cText.includes('পূর্ব') || cText.includes('আগের')) {
+            dueLastMonthColIdx = dueCols[0];
+          } else {
+            dueThisMonthColIdx = dueCols[0];
+          }
+        }
+
+        if (advCols.length >= 1) {
+          advLastMonthColIdx = advCols[0];
+        }
+
+        // Detect month name from dueThisMonthColIdx or header cells (e.g. "Due (Sep)" -> 09)
+        if (dueThisMonthColIdx >= 0) {
+          const cellStr = lowerCells[dueThisMonthColIdx];
+          for (const [abbr, num] of Object.entries(monthMap)) {
+            if (cellStr.includes(abbr)) {
+              detectedMonthFromHeader = num;
+              break;
+            }
+          }
+        }
+
         break;
       }
     }
 
+    // Determine active targetMonth and lastMonth
+    let activeTargetMonth = overrideTargetMonth || targetMonth;
+    if (!overrideTargetMonth && detectedMonthFromHeader) {
+      const curYr = targetMonth ? parseInt(targetMonth.split('-')[0], 10) : new Date().getFullYear();
+      const detectedKey = `${curYr}-${detectedMonthFromHeader}`;
+      if (detectedKey !== targetMonth) {
+        activeTargetMonth = detectedKey;
+        setTargetMonth(detectedKey);
+        setSuccessMessage(`ফাইল থেকে টার্গেট মাস সনাক্ত করা হয়েছে: ${formatMonthName(detectedKey)}`);
+      }
+    }
+
+    const activeLastMonth = formatPrevMonthKey(activeTargetMonth);
+
+    // Standard fallback if headers were missing or partially identified
+    if (dueLastMonthColIdx === -1 && dueThisMonthColIdx === -1) {
+      const sampleRow = rows[headerRowIdx >= 0 ? headerRowIdx + 1 : 0] || [];
+      if (sampleRow.length >= 7) {
+        slColIdx = slColIdx >= 0 ? slColIdx : 0;
+        bdColIdx = bdColIdx >= 0 ? bdColIdx : 1;
+        rankColIdx = rankColIdx >= 0 ? rankColIdx : 2;
+        surnameColIdx = surnameColIdx >= 0 ? surnameColIdx : 3;
+        dueLastMonthColIdx = 4;
+        advLastMonthColIdx = 5;
+        dueThisMonthColIdx = 6;
+        if (sampleRow.length >= 8) unitFundColIdx = 7;
+        if (sampleRow.length >= 9) othersFundColIdx = 8;
+      }
+    } else {
+      // If template had 8 or 9 columns but unitFund / others was not identified by name
+      const headerLen = rows[headerRowIdx] ? rows[headerRowIdx].length : 0;
+      if (unitFundColIdx === -1 && headerLen >= 8) {
+        unitFundColIdx = 7;
+      }
+      if (othersFundColIdx === -1 && headerLen >= 9) {
+        othersFundColIdx = 8;
+      }
+    }
+
     const startRow = headerRowIdx >= 0 ? headerRowIdx + 1 : 0;
+    const result: ParsedBillRow[] = [];
+    const seenBd = new Set<string>();
 
     for (let r = startRow; r < rows.length; r++) {
       const row = rows[r];
@@ -364,38 +459,89 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
       const joined = strRow.join(' ').toLowerCase();
       if (
         (joined.includes('bd no') || joined.includes('rank') || joined.includes('surname')) &&
-        (joined.includes('due') || joined.includes('bill') || joined.includes('advance'))
+        (joined.includes('due') || joined.includes('bill') || joined.includes('advance') || joined.includes('fund'))
       ) {
         continue;
       }
 
       let detectedBd = '';
+      let matchedMember: any = null;
 
-      // Find BD Number
+      // 1. Primary: read from designated BD No column (Supports 1-digit, 2-digit, 4-digit, 6-digit BDs)
       if (bdColIdx >= 0 && bdColIdx < strRow.length) {
-        const rawBd = strRow[bdColIdx] || '';
-        const numOnly = rawBd.replace(/\D/g, '');
-        if (numOnly.length >= 4 && numOnly.length <= 7) {
-          detectedBd = numOnly;
+        let rawVal = String(strRow[bdColIdx] ?? '').trim();
+        if (rawVal.endsWith('.0')) rawVal = rawVal.slice(0, -2);
+
+        const cleanDigits = rawVal.replace(/\D/g, '');
+        if (cleanDigits) {
+          detectedBd = cleanDigits;
+          matchedMember = memberMap.get(cleanDigits) || memberMap.get(rawVal.toLowerCase()) || null;
+        } else if (rawVal) {
+          detectedBd = rawVal;
+          matchedMember = memberMap.get(rawVal.toLowerCase()) || null;
         }
       }
 
+      // 2. Secondary: Match by Rank & Surname if available in row
+      if (!matchedMember) {
+        const surnameVal = surnameColIdx >= 0 ? String(strRow[surnameColIdx] ?? '').trim().toLowerCase() : '';
+        const rankVal = rankColIdx >= 0 ? String(strRow[rankColIdx] ?? '').trim().toLowerCase() : '';
+        if (surnameVal) {
+          if (rankVal && memberByNameMap.has(`${rankVal} ${surnameVal}`)) {
+            matchedMember = memberByNameMap.get(`${rankVal} ${surnameVal}`);
+          } else if (memberByNameMap.has(surnameVal)) {
+            matchedMember = memberByNameMap.get(surnameVal);
+          }
+          if (matchedMember && !detectedBd) {
+            detectedBd = String(matchedMember['BD No'] || matchedMember.bdNo || matchedMember.airman_id || '').replace(/\D/g, '');
+          }
+        }
+      }
+
+      // 3. Fallback: Search other columns (strictly EXCLUDING amount and SL columns)
       if (!detectedBd) {
+        const excludedCols = new Set([
+          slColIdx,
+          dueLastMonthColIdx,
+          advLastMonthColIdx,
+          dueThisMonthColIdx,
+          unitFundColIdx,
+          othersFundColIdx,
+          fallbackAmountColIdx,
+          rankColIdx,
+          surnameColIdx
+        ]);
+
         for (let i = 0; i < strRow.length; i++) {
-          if (i === slColIdx) continue;
-          const n = strRow[i].replace(/\D/g, '');
-          if (n.length >= 4 && n.length <= 7) {
-            detectedBd = n;
+          if (excludedCols.has(i)) continue;
+          let val = String(strRow[i] ?? '').trim();
+          if (val.endsWith('.0')) val = val.slice(0, -2);
+          const digits = val.replace(/\D/g, '');
+          if (digits && (memberMap.has(digits) || memberMap.has(val.toLowerCase()))) {
+            detectedBd = digits;
+            matchedMember = memberMap.get(digits) || memberMap.get(val.toLowerCase());
             break;
           }
         }
       }
 
-      if (!detectedBd) continue;
-      if (seenBd.has(detectedBd)) continue;
+      if (!detectedBd) {
+        const surnameVal = surnameColIdx >= 0 ? String(strRow[surnameColIdx] ?? '').trim() : '';
+        const rawBdCol = bdColIdx >= 0 ? String(strRow[bdColIdx] ?? '').trim() : '';
+        if (surnameVal || rawBdCol) {
+          detectedBd = rawBdCol || surnameVal || `ROW-${r}`;
+        } else {
+          continue;
+        }
+      }
+
+      if (seenBd.has(detectedBd)) {
+        detectedBd = `${detectedBd}_${r}`;
+      }
       seenBd.add(detectedBd);
 
-      const matchedMember = memberMap.get(detectedBd) || null;
+      const rowSl = slColIdx >= 0 && strRow[slColIdx] ? parseInt(strRow[slColIdx], 10) : (r - startRow + 1);
+
       const currentDue = matchedMember
         ? Number(matchedMember.Due ?? matchedMember.due ?? matchedMember.baki ?? 0)
         : 0;
@@ -403,6 +549,8 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
       let dueLastMonth = 0;
       let advanceLastMonth = 0;
       let dueThisMonth = 0;
+      let unitFund = 0;
+      let othersFund = 0;
 
       if (dueLastMonthColIdx >= 0 && dueLastMonthColIdx < strRow.length) {
         dueLastMonth = parseNum(strRow[dueLastMonthColIdx]);
@@ -413,14 +561,22 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
       if (dueThisMonthColIdx >= 0 && dueThisMonthColIdx < strRow.length) {
         dueThisMonth = parseNum(strRow[dueThisMonthColIdx]);
       }
+      if (unitFundColIdx >= 0 && unitFundColIdx < strRow.length) {
+        unitFund = parseNum(strRow[unitFundColIdx]);
+      }
+      if (othersFundColIdx >= 0 && othersFundColIdx < strRow.length) {
+        othersFund = parseNum(strRow[othersFundColIdx]);
+      }
 
-      // Fallback if headers were not identified (e.g. raw copy-paste or template without headers)
-      if (dueLastMonth === 0 && advanceLastMonth === 0 && dueThisMonth === 0) {
-        let foundBdIdx = -1;
-        for (let i = 0; i < strRow.length; i++) {
-          if (strRow[i].replace(/\D/g, '') === detectedBd) {
-            foundBdIdx = i;
-            break;
+      // Fallback if headers were not identified
+      if (dueLastMonth === 0 && advanceLastMonth === 0 && dueThisMonth === 0 && unitFund === 0 && othersFund === 0) {
+        let foundBdIdx = bdColIdx >= 0 ? bdColIdx : -1;
+        if (foundBdIdx === -1) {
+          for (let i = 0; i < strRow.length; i++) {
+            if (strRow[i].replace(/\D/g, '') === detectedBd) {
+              foundBdIdx = i;
+              break;
+            }
           }
         }
 
@@ -437,23 +593,32 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
           }
 
           if (numericColsAfterBd.length === 1) {
-            // Single amount defaults to Due (This Month)
             dueThisMonth = numericColsAfterBd[0];
           } else if (numericColsAfterBd.length === 2) {
-            // Due (Last Month), Due (This Month)
             dueLastMonth = numericColsAfterBd[0];
             dueThisMonth = numericColsAfterBd[1];
-          } else if (numericColsAfterBd.length >= 3) {
-            // Due (Last Month), Advance (Last Month), Due (This Month)
+          } else if (numericColsAfterBd.length === 3) {
             dueLastMonth = numericColsAfterBd[0];
             advanceLastMonth = numericColsAfterBd[1];
             dueThisMonth = numericColsAfterBd[2];
+          } else if (numericColsAfterBd.length === 4) {
+            dueLastMonth = numericColsAfterBd[0];
+            advanceLastMonth = numericColsAfterBd[1];
+            dueThisMonth = numericColsAfterBd[2];
+            unitFund = numericColsAfterBd[3];
+          } else if (numericColsAfterBd.length >= 5) {
+            dueLastMonth = numericColsAfterBd[0];
+            advanceLastMonth = numericColsAfterBd[1];
+            dueThisMonth = numericColsAfterBd[2];
+            unitFund = numericColsAfterBd[3];
+            othersFund = numericColsAfterBd[4];
           }
         }
       }
 
       // Calculate Net Total Due and Final Advance
-      const totalDebits = dueLastMonth + dueThisMonth;
+      // Total debits = previous month due + this month canteen due + unit fund + others fund
+      const totalDebits = dueLastMonth + dueThisMonth + unitFund + othersFund;
       const totalCredits = advanceLastMonth;
 
       let netDue = 0;
@@ -467,17 +632,20 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
         finalAdv = totalCredits - totalDebits;
       }
 
-      const effectiveAmount = netDue > 0 ? netDue : (dueThisMonth > 0 ? dueThisMonth : dueLastMonth);
+      const effectiveAmount = netDue > 0 ? netDue : (dueThisMonth + unitFund + othersFund > 0 ? dueThisMonth + unitFund + othersFund : dueLastMonth);
 
       result.push({
-        id: `${detectedBd}_${targetMonth}`,
+        id: `${detectedBd}_${activeTargetMonth}`,
+        sl: rowSl,
         rawBd: detectedBd,
         bdNo: detectedBd,
-        targetMonth,
-        lastMonth,
+        targetMonth: activeTargetMonth,
+        lastMonth: activeLastMonth,
         dueLastMonth,
         advanceLastMonth,
         dueThisMonth,
+        unitFund,
+        othersFund,
         totalDue: netDue,
         finalAdvance: finalAdv,
         amount: effectiveAmount,
@@ -490,13 +658,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
     if (result.length === 0) {
       setErrorMessage('কোনো বৈধ ডাটা পাওয়া যায়নি। অনুগ্রহ করে ফাইল বা টেক্সটের ফরম্যাট চেক করুন।');
     } else {
-      const sortedResult = sortCanteenMembersByOfficeSeniority(
-        result.map((r) => ({
-          ...r,
-          'BD No': r.bdNo,
-          'Rank': r.member ? (r.member['Rank'] || r.member.rank) : ''
-        }))
-      );
+      const sortedResult = [...result].sort((a, b) => (a.sl || 0) - (b.sl || 0));
       setParsedRows(sortedResult);
     }
   };
@@ -526,6 +688,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
             .filter((arr) => arr.length > 0 && arr.some((s) => s.length > 0));
         }
 
+        rawDataRef.current = sheetData;
         processRawData(sheetData);
       } catch (err: any) {
         setErrorMessage(`ফাইল রিড করতে সমস্যা হয়েছে: ${err?.message || 'Unknown error'}`);
@@ -558,6 +721,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
       return line.split(/\s+/);
     });
 
+    rawDataRef.current = rows;
     processRawData(rows);
   };
 
@@ -589,7 +753,9 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
       'Surname',
       `Due\n(${lastMonthShort})`,
       `Advance\n(${lastMonthShort})`,
-      `Due\n(${thisMonthShort})`
+      `Due\n(${thisMonthShort})`,
+      'Unit Fund',
+      'Others'
     ];
 
     const aoa: any[][] = [];
@@ -684,6 +850,19 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
         pastAdvance = memberTotalAdvance;
       }
 
+      // Check for current/target month Unit Fund or Others Fund if already logged
+      const currentUnitFundTx = currentMonthTxs.find((tx: any) => {
+        const cat = String(tx.billType || tx.items || '').toUpperCase();
+        return cat.includes('UNIT');
+      });
+      const currentOthersFundTx = currentMonthTxs.find((tx: any) => {
+        const cat = String(tx.billType || tx.items || '').toUpperCase();
+        return cat.includes('OTHER');
+      });
+
+      const existingUnitFund = currentUnitFundTx ? Number(currentUnitFundTx.amount || 0) : 0;
+      const existingOthersFund = currentOthersFundTx ? Number(currentOthersFundTx.amount || 0) : 0;
+
       aoa.push([
         idx + 1,
         String(m['BD No'] || m.bdNo || '').trim(),
@@ -691,13 +870,15 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
         String(m['Surname'] || m.surname || m['Full Name'] || m.name || '').trim(),
         pastDue > 0 ? pastDue : '',
         pastAdvance > 0 ? pastAdvance : '',
-        thisMonthDue > 0 ? thisMonthDue : ''
+        thisMonthDue > 0 ? thisMonthDue : '',
+        existingUnitFund > 0 ? existingUnitFund : '',
+        existingOthersFund > 0 ? existingOthersFund : ''
       ]);
     });
 
     const worksheet = XLSX.utils.aoa_to_sheet(aoa);
 
-    // Set Column Widths
+    // Set Column Widths (9 columns total)
     worksheet['!cols'] = [
       { wch: 8 },  // SL
       { wch: 14 }, // BD No
@@ -706,6 +887,8 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
       { wch: 18 }, // Due (Last Month)
       { wch: 18 }, // Advance (Last Month)
       { wch: 18 }, // Due (This Month)
+      { wch: 16 }, // Unit Fund
+      { wch: 16 }, // Others
     ];
 
     // Set Row Heights (36pt for Header Row to display wrapped text comfortably)
@@ -715,7 +898,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
     ];
 
     // Style Header Row (Row 0): Font Arial Bold, All Center Aligned, Light Gray Fill, Wrap Text enabled
-    for (let c = 0; c < 7; c++) {
+    for (let c = 0; c < 9; c++) {
       const addr = XLSX.utils.encode_cell({ r: 0, c });
       if (worksheet[addr]) {
         worksheet[addr].s = {
@@ -730,7 +913,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
     // Style Data Rows: Font Arial, All Center Aligned, ONLY Name & Rank Left Aligned
     for (let i = 0; i < sortedMembers.length; i++) {
       const r = i + 1;
-      for (let c = 0; c < 7; c++) {
+      for (let c = 0; c < 9; c++) {
         const addr = XLSX.utils.encode_cell({ r, c });
         if (!worksheet[addr]) {
           worksheet[addr] = { t: 's', v: '' };
@@ -803,9 +986,11 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
     const totalDueLastMonth = parsedRows.reduce((sum, r) => sum + (r.dueLastMonth || 0), 0);
     const totalAdvanceLastMonth = parsedRows.reduce((sum, r) => sum + (r.advanceLastMonth || 0), 0);
     const totalDueThisMonth = parsedRows.reduce((sum, r) => sum + (r.dueThisMonth || 0), 0);
+    const totalUnitFund = parsedRows.reduce((sum, r) => sum + (r.unitFund || 0), 0);
+    const totalOthersFund = parsedRows.reduce((sum, r) => sum + (r.othersFund || 0), 0);
     const totalNetDue = parsedRows.reduce((sum, r) => sum + (r.totalDue || 0), 0);
 
-    return { total, matched, unmatched, totalDueLastMonth, totalAdvanceLastMonth, totalDueThisMonth, totalNetDue };
+    return { total, matched, unmatched, totalDueLastMonth, totalAdvanceLastMonth, totalDueThisMonth, totalUnitFund, totalOthersFund, totalNetDue };
   }, [parsedRows]);
 
   // Filter history rows
@@ -833,10 +1018,47 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
     setErrorMessage(null);
 
     try {
-      const updatedMembersMap = new Map<string, any>();
+      // Unique members map to strictly prevent member duplication
+      const uniqueMembersMap = new Map<string, any>();
+      const lookupIndex = new Map<string, any>();
+
       members.forEach((m) => {
-        const clean = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
-        updatedMembersMap.set(clean, { ...m });
+        const clean = String(m['BD No'] || m.bdNo || m.airman_id || '').replace(/\D/g, '');
+        const airmanId = String(m.airman_id || '').trim().toLowerCase();
+        const primaryKey = (clean && clean !== '0') ? `bd_${clean}` : (airmanId ? `airman_${airmanId}` : `name_${String(m.Rank || '').trim()}_${String(m.Surname || '').trim()}`);
+        if (!primaryKey) return;
+
+        if (!uniqueMembersMap.has(primaryKey)) {
+          uniqueMembersMap.set(primaryKey, { ...m });
+        } else {
+          const existing = uniqueMembersMap.get(primaryKey);
+          if (m.Due !== undefined && (existing.Due === undefined || Number(m.Due) > Number(existing.Due))) {
+            existing.Due = m.Due;
+            existing.due = m.Due;
+            existing.baki = m.Due;
+          }
+          if (m.Advance !== undefined && (existing.Advance === undefined || Number(m.Advance) > Number(existing.Advance))) {
+            existing.Advance = m.Advance;
+            existing.advance = m.Advance;
+            existing.ogrim = m.Advance;
+          }
+          if (!existing['Rank'] && m['Rank']) existing['Rank'] = m['Rank'];
+          if (!existing['Surname'] && m['Surname']) existing['Surname'] = m['Surname'];
+          if (!existing['Contact'] && (m['Contact'] || m['Mobile No'])) existing['Contact'] = m['Contact'] || m['Mobile No'];
+          if (!existing.airman_id && m.airman_id) existing.airman_id = m.airman_id;
+          if (!existing['BD No'] && m['BD No']) existing['BD No'] = m['BD No'];
+        }
+        const memberRef = uniqueMembersMap.get(primaryKey);
+
+        const rawBd = String(m['BD No'] || m.bdNo || '').trim().toLowerCase();
+        const surname = String(m.Surname || m.surname || '').trim().toLowerCase();
+        const rank = String(m.Rank || m.rank || '').trim().toLowerCase();
+
+        if (clean) lookupIndex.set(clean, memberRef);
+        if (airmanId) lookupIndex.set(airmanId, memberRef);
+        if (rawBd) lookupIndex.set(rawBd, memberRef);
+        if (surname) lookupIndex.set(surname, memberRef);
+        if (rank && surname) lookupIndex.set(`${rank} ${surname}`, memberRef);
       });
 
       const newTxs: any[] = [];
@@ -844,13 +1066,15 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
       const batchItems: BillImportBatchItem[] = [];
 
       for (const row of matchedRows) {
-        const targetMember = updatedMembersMap.get(row.bdNo);
+        const targetMember = lookupIndex.get(row.bdNo) || 
+          (row.member?.airman_id ? lookupIndex.get(String(row.member.airman_id).toLowerCase()) : null) ||
+          (row.rawBd ? lookupIndex.get(row.rawBd.toLowerCase()) : null);
         if (!targetMember) continue;
 
         const oldDue = Number(targetMember.Due ?? targetMember.due ?? targetMember.baki ?? 0);
         const oldAdv = Number(targetMember.Advance ?? targetMember.advance ?? targetMember.ogrim ?? 0);
 
-        const debits = row.dueLastMonth + row.dueThisMonth;
+        const debits = row.dueLastMonth + row.dueThisMonth + (row.unitFund || 0) + (row.othersFund || 0);
         const credits = row.advanceLastMonth;
 
         let finalDue = 0;
@@ -895,8 +1119,12 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
           dueLastMonth: row.dueLastMonth,
           advanceLastMonth: row.advanceLastMonth,
           dueThisMonth: row.dueThisMonth,
+          unitFund: row.unitFund || 0,
+          othersFund: row.othersFund || 0,
           importedAmount: row.totalDue,
-          resultingDue: finalDue
+          resultingDue: finalDue,
+          previousDue: oldDue,
+          previousAdvance: oldAdv
         });
 
         // Create transactions in canteen_txs
@@ -912,7 +1140,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
               bdNo: targetMember['BD No'] || targetMember.bdNo,
               memberName: `${targetMember['Rank'] || ''} ${targetMember['Surname'] || ''}`.trim(),
               rank: targetMember['Rank'] || targetMember.rank || '',
-              items: `বকেয়া বিল (${formatMonthName(lastMonth)})`,
+              items: `বকেয়া বিল (${formatBengaliMonthYear(lastMonth)})`,
               soldItems: [],
               amount: row.dueLastMonth,
               type: 'INITIAL_BILL',
@@ -932,7 +1160,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
               bdNo: targetMember['BD No'] || targetMember.bdNo,
               memberName: `${targetMember['Rank'] || ''} ${targetMember['Surname'] || ''}`.trim(),
               rank: targetMember['Rank'] || targetMember.rank || '',
-              items: `অগ্রীম জমা / Advance (${formatMonthName(lastMonth)})`,
+              items: `অগ্রীম জমা / Advance (${formatBengaliMonthYear(lastMonth)})`,
               soldItems: [],
               amount: row.advanceLastMonth,
               type: 'BILL PAYMENT',
@@ -952,7 +1180,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
               bdNo: targetMember['BD No'] || targetMember.bdNo,
               memberName: `${targetMember['Rank'] || ''} ${targetMember['Surname'] || ''}`.trim(),
               rank: targetMember['Rank'] || targetMember.rank || '',
-              items: `ক্যান্টিন বিল (${formatMonthName(targetMonth)})`,
+              items: `ক্যান্টিন বিল (${formatBengaliMonthYear(targetMonth)})`,
               soldItems: [],
               amount: row.dueThisMonth,
               type: 'INITIAL_BILL',
@@ -960,20 +1188,62 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
               billType: 'CANTEEN'
             });
           }
+
+          // 4. Unit Fund Transaction
+          if ((row.unitFund || 0) > 0) {
+            const txId = Date.now() + Math.random();
+            newTxIds.push(txId);
+            newTxs.push({
+              id: txId,
+              date: getDateForMonthKey(targetMonth, 28),
+              airman_id: targetMember.airman_id,
+              bdNo: targetMember['BD No'] || targetMember.bdNo,
+              memberName: `${targetMember['Rank'] || ''} ${targetMember['Surname'] || ''}`.trim(),
+              rank: targetMember['Rank'] || targetMember.rank || '',
+              items: `ইউনিট ফান্ড (${formatBengaliMonthYear(targetMonth)})`,
+              soldItems: [],
+              amount: row.unitFund,
+              type: 'INITIAL_BILL',
+              gateway: 'DUE',
+              billType: 'UNIT_FUND'
+            });
+          }
+
+          // 5. Others Fund Transaction
+          if ((row.othersFund || 0) > 0) {
+            const txId = Date.now() + Math.random();
+            newTxIds.push(txId);
+            newTxs.push({
+              id: txId,
+              date: getDateForMonthKey(targetMonth, 28),
+              airman_id: targetMember.airman_id,
+              bdNo: targetMember['BD No'] || targetMember.bdNo,
+              memberName: `${targetMember['Rank'] || ''} ${targetMember['Surname'] || ''}`.trim(),
+              rank: targetMember['Rank'] || targetMember.rank || '',
+              items: `অন্যান্য ফান্ড (${formatBengaliMonthYear(targetMonth)})`,
+              soldItems: [],
+              amount: row.othersFund,
+              type: 'INITIAL_BILL',
+              gateway: 'DUE',
+              billType: 'OTHERS'
+            });
+          }
         }
       }
 
       // Update Supabase Canteen_Member table in parallel chunks of 15
-      for (let i = 0; i < matchedRows.length; i += 15) {
-        const chunk = matchedRows.slice(i, i + 15);
+      const updatedMembersToSync = Array.from(uniqueMembersMap.values()).filter((m) => {
+        return batchItems.some((b) => b.airman_id === m.airman_id);
+      });
+
+      for (let i = 0; i < updatedMembersToSync.length; i += 15) {
+        const chunk = updatedMembersToSync.slice(i, i + 15);
         await Promise.all(
-          chunk.map((row) => {
-            const targetMember = updatedMembersMap.get(row.bdNo);
-            if (!targetMember) return Promise.resolve();
+          chunk.map((m) => {
             return supabase
               .from('Canteen_Member')
-              .update({ Due: targetMember.Due })
-              .eq('airman_id', targetMember.airman_id);
+              .update({ Due: m.Due })
+              .eq('airman_id', m.airman_id);
           })
         );
       }
@@ -1021,8 +1291,8 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
         console.warn('Failed saving import history:', e);
       }
 
-      // Update Local Cache & Dispatch Global Events
-      const updatedMembersList = sortCanteenMembersByOfficeSeniority(Array.from(updatedMembersMap.values()));
+      // Update Local Cache & Dispatch Global Events (strictly deduplicated unique members)
+      const updatedMembersList = sortCanteenMembersByOfficeSeniority(Array.from(uniqueMembersMap.values()));
       try {
         localStorage.setItem('canteen_members_cache', JSON.stringify(updatedMembersList));
       } catch {}
@@ -1054,44 +1324,128 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
     setSuccessMessage(null);
 
     try {
+      // Build unique members map and lookup index to prevent any duplication
+      const uniqueMembersMap = new Map<string, any>();
+      const lookupIndex = new Map<string, any>();
+
+      members.forEach((m) => {
+        const clean = String(m['BD No'] || m.bdNo || m.airman_id || '').replace(/\D/g, '');
+        const airmanId = String(m.airman_id || '').trim().toLowerCase();
+        const primaryKey = (clean && clean !== '0') ? `bd_${clean}` : (airmanId ? `airman_${airmanId}` : `name_${String(m.Rank || '').trim()}_${String(m.Surname || '').trim()}`);
+        if (!primaryKey) return;
+        if (!uniqueMembersMap.has(primaryKey)) {
+          uniqueMembersMap.set(primaryKey, { ...m });
+        }
+        const memberRef = uniqueMembersMap.get(primaryKey);
+
+        const rawBd = String(m['BD No'] || m.bdNo || '').trim().toLowerCase();
+        const surname = String(m.Surname || m.surname || '').trim().toLowerCase();
+        const rank = String(m.Rank || m.rank || '').trim().toLowerCase();
+
+        if (clean) lookupIndex.set(clean, memberRef);
+        if (airmanId) lookupIndex.set(airmanId, memberRef);
+        if (rawBd) lookupIndex.set(rawBd, memberRef);
+        if (surname) lookupIndex.set(surname, memberRef);
+        if (rank && surname) lookupIndex.set(`${rank} ${surname}`, memberRef);
+      });
+
       if (revertDues) {
         // 1. Revert each member's Due back to previousDue in Supabase
-        const updatedMembersMap = new Map<string, any>();
-        members.forEach((m) => {
-          const clean = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
-          updatedMembersMap.set(clean, { ...m });
-        });
+        const updatesList: { airman_id?: string; bdNo?: string; newDue: number }[] = [];
 
-        const updatePromises = batch.items.map(async (item) => {
-          const member = updatedMembersMap.get(item.bdNo);
+        batch.items.forEach((item) => {
+          const member = lookupIndex.get(item.bdNo) || 
+            (item.airman_id ? lookupIndex.get(item.airman_id.toLowerCase()) : null);
+
+          const targetAirmanId = member?.airman_id || item.airman_id;
+          const targetBd = member?.['BD No'] || member?.bdNo || item.bdNo;
+
+          let newDue = 0;
+          if (item.previousDue !== undefined) {
+            newDue = Math.max(0, Number(item.previousDue || 0));
+          } else {
+            const change = Number(item.importedAmount || (item.dueLastMonth + item.dueThisMonth + (item.unitFund || 0) + (item.othersFund || 0)));
+            newDue = Math.max(0, (item.resultingDue || 0) - change);
+          }
+
           if (member) {
-            member.Due = item.resultingDue - item.importedAmount; // Or revert
+            member.Due = newDue;
+            member.due = newDue;
+            member.baki = newDue;
           }
-          return supabase
-            .from('Canteen_Member')
-            .update({ Due: Math.max(0, (member?.Due || 0)) })
-            .eq('airman_id', item.airman_id);
+
+          if (targetAirmanId || targetBd) {
+            updatesList.push({
+              airman_id: targetAirmanId,
+              bdNo: targetBd,
+              newDue
+            });
+          }
         });
 
-        await Promise.all(updatePromises);
-
-        // 2. Remove associated transactions if any
-        if (batch.createdTransactionIds && batch.createdTransactionIds.length > 0) {
-          try {
-            const rawTxs = localStorage.getItem('canteen_txs');
-            if (rawTxs) {
-              const txs = JSON.parse(rawTxs);
-              const txIdSet = new Set(batch.createdTransactionIds.map(String));
-              const filteredTxs = txs.filter((t: any) => !txIdSet.has(String(t.id)));
-              localStorage.setItem('canteen_txs', JSON.stringify(filteredTxs));
-              await pushKeyToCloud('canteen_txs', filteredTxs);
-            }
-          } catch (e) {
-            console.warn('Failed removing txs on rollback:', e);
-          }
+        // Run Supabase updates in chunks of 15
+        for (let i = 0; i < updatesList.length; i += 15) {
+          const chunk = updatesList.slice(i, i + 15);
+          await Promise.all(
+            chunk.map((item) => {
+              if (item.airman_id) {
+                return supabase.from('Canteen_Member').update({ Due: item.newDue }).eq('airman_id', item.airman_id);
+              }
+              return supabase.from('Canteen_Member').update({ Due: item.newDue }).eq('BD No', item.bdNo);
+            })
+          );
         }
 
-        const updatedList = Array.from(updatedMembersMap.values());
+        // 2. Remove associated transactions and record tombstones so they NEVER return
+        try {
+          const rawTxs = localStorage.getItem('canteen_txs');
+          let txs: any[] = rawTxs ? JSON.parse(rawTxs) : [];
+          try {
+            const cloudTxs = await pullKeyFromCloud('canteen_txs');
+            if (Array.isArray(cloudTxs) && cloudTxs.length > txs.length) {
+              txs = cloudTxs;
+            }
+          } catch {}
+
+          const txIdSet = new Set((batch.createdTransactionIds || []).map(String));
+          const itemBdSet = new Set<string>();
+          batch.items.forEach((i) => {
+            const clean = String(i.bdNo || '').replace(/\D/g, '');
+            if (clean) itemBdSet.add(clean);
+            if (i.airman_id) itemBdSet.add(String(i.airman_id).toLowerCase());
+          });
+
+          const filteredTxs = txs.filter((t: any) => {
+            if (txIdSet.has(String(t.id))) {
+              recordDeletedTxId(t.id);
+              return false;
+            }
+            const tBd = String(t.bdNo || '').replace(/\D/g, '');
+            const tAirman = String(t.airman_id || '').toLowerCase();
+            const isInitial = t.type === 'INITIAL_BILL' || 
+              String(t.items || '').includes('বকেয়া বিল') ||
+              String(t.items || '').includes('ক্যান্টিন বিল') ||
+              String(t.items || '').includes('ইউনিট ফান্ড') ||
+              String(t.items || '').includes('অন্যান্য ফান্ড') ||
+              (t.type === 'BILL PAYMENT' && t.gateway === 'ADVANCE');
+
+            if (isInitial && (itemBdSet.has(tBd) || itemBdSet.has(tAirman))) {
+              const tMonth = getTxMonthKey(t.date);
+              if (!batch.targetMonth || tMonth === batch.targetMonth || (batch.lastMonth && tMonth === batch.lastMonth)) {
+                recordDeletedTxId(t.id);
+                return false;
+              }
+            }
+            return true;
+          });
+
+          localStorage.setItem('canteen_txs', JSON.stringify(filteredTxs));
+          await pushKeyToCloud('canteen_txs', filteredTxs);
+        } catch (e) {
+          console.warn('Failed removing txs on rollback:', e);
+        }
+
+        const updatedList = sortCanteenMembersByOfficeSeniority(Array.from(uniqueMembersMap.values()));
         try {
           localStorage.setItem('canteen_members_cache', JSON.stringify(updatedList));
         } catch {}
@@ -1099,7 +1453,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
         onSuccess(updatedList);
       }
 
-      // 4. Remove batch from history
+      // 3. Remove batch from history
       const nextHistory = importHistory.filter((b) => b.id !== batch.id);
       setImportHistory(nextHistory);
       try {
@@ -1116,13 +1470,89 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
       setRollbackBatch(null);
       setSuccessMessage(
         revertDues
-          ? `ইম্পোর্ট ব্যাচ (${batch.displayDate}) সফলভাবে রিমুভ ও সদস্যদের বকেয়া রিভার্স করা হয়েছে!`
+          ? `ইম্পোর্ট ব্যাচ (${batch.displayDate}) সফলভাবে মুছে ফেলা হয়েছে এবং সকল সদস্যের বকেয়া রিভার্স করা হয়েছে!`
           : `ইম্পোর্ট হিস্টোরি রেকর্ড সফলভাবে মুছে ফেলা হয়েছে!`
       );
     } catch (err: any) {
       setErrorMessage(`রিভার্স ব্যর্থ হয়েছে: ${err?.message || 'Unknown error'}`);
     } finally {
       setIsRollingBack(false);
+    }
+  };
+
+  // Reset ALL initial bills for all members (One-Click Clean Slate)
+  const handleResetAllMembersDues = async () => {
+    setIsResettingAll(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    try {
+      // 1. Reset Due to 0 in Supabase for all members unconditionally
+      const { error } = await supabase.from('Canteen_Member').update({ Due: 0 }).neq('airman_id', '');
+      if (error) {
+        console.warn('Supabase reset Due warning:', error);
+      }
+
+      // 2. Remove all INITIAL_BILL transactions from canteen_txs
+      try {
+        const rawTxs = localStorage.getItem('canteen_txs');
+        let txs: any[] = rawTxs ? JSON.parse(rawTxs) : [];
+        try {
+          const cloudTxs = await pullKeyFromCloud('canteen_txs');
+          if (Array.isArray(cloudTxs) && cloudTxs.length > txs.length) {
+            txs = cloudTxs;
+          }
+        } catch {}
+
+        const filteredTxs = txs.filter((t: any) => {
+          const isInitial = t.type === 'INITIAL_BILL' || 
+            String(t.items || '').includes('বকেয়া বিল') ||
+            String(t.items || '').includes('ক্যান্টিন বিল') ||
+            String(t.items || '').includes('ইউনিট ফান্ড') ||
+            String(t.items || '').includes('অন্যান্য ফান্ড') ||
+            (t.type === 'BILL PAYMENT' && t.gateway === 'ADVANCE');
+          if (isInitial) {
+            recordDeletedTxId(t.id);
+            return false;
+          }
+          return true;
+        });
+        localStorage.setItem('canteen_txs', JSON.stringify(filteredTxs));
+        await pushKeyToCloud('canteen_txs', filteredTxs);
+      } catch (txErr) {
+        console.warn('Error clearing txs on reset all:', txErr);
+      }
+
+      // 3. Clear members cache & state (strictly deduplicated)
+      const seen = new Set<string>();
+      const updatedMembers: any[] = [];
+      members.forEach((m) => {
+        const key = String(m.airman_id || m['BD No'] || '').trim();
+        if (key && !seen.has(key)) {
+          seen.add(key);
+          updatedMembers.push({ ...m, Due: 0, due: 0, baki: 0, Advance: 0, advance: 0, ogrim: 0 });
+        }
+      });
+      const sortedCleaned = sortCanteenMembersByOfficeSeniority(updatedMembers);
+      try {
+        localStorage.setItem('canteen_members_cache', JSON.stringify(sortedCleaned));
+      } catch {}
+
+      // 4. Clear import history
+      localStorage.setItem('canteen_bill_import_history', '[]');
+      await pushKeyToCloud('canteen_bill_import_history', []);
+      setImportHistory([]);
+
+      window.dispatchEvent(new Event('canteen_txs_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
+
+      onSuccess(sortedCleaned);
+      setShowResetAllConfirm(false);
+      setSuccessMessage('সকল সদস্যের পূর্ববর্তী সকল বকেয়া ও বিল সফলভাবে মুছে ৳০ (শূন্য) করা হয়েছে!');
+    } catch (err: any) {
+      setErrorMessage(`বকেয়া রিসেট করতে সমস্যা হয়েছে: ${err?.message || 'Unknown error'}`);
+    } finally {
+      setIsResettingAll(false);
     }
   };
 
@@ -1146,7 +1576,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
                 </span>
               </h2>
               <p className="text-xs text-slate-400 font-bold">
-                Due (Last Month), Advance (Last Month) ও Due (This Month) ফরম্যাটে বিল ইম্পোর্ট
+                Due (Last Month), Advance (Last Month), Due (This Month), Unit Fund ও Others ফরম্যাটে বিল ইম্পোর্ট
               </p>
             </div>
           </div>
@@ -1193,7 +1623,13 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
             <div className="flex items-center space-x-2">
               <select
                 value={targetMonth}
-                onChange={(e) => setTargetMonth(e.target.value)}
+                onChange={(e) => {
+                  const newMonth = e.target.value;
+                  setTargetMonth(newMonth);
+                  if (rawDataRef.current && rawDataRef.current.length > 0) {
+                    processRawData(rawDataRef.current, newMonth);
+                  }
+                }}
                 className="bg-slate-900 border border-slate-700 hover:border-indigo-500/50 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer min-w-[200px]"
               >
                 {availableMonths.map((m) => (
@@ -1209,7 +1645,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
           <div className="p-3 bg-indigo-950/30 border border-indigo-500/20 rounded-2xl flex items-start space-x-2.5 text-xs text-indigo-200">
             <Info className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
             <div className="leading-relaxed">
-              <strong>টেমপ্লেট কলাম বিন্যাস:</strong> নির্বাচিত মাস অনুযায়ী এক্সেল ফাইলে থাকবে: <code className="bg-slate-900 px-1.5 py-0.5 rounded text-amber-300">Due ({getMonthOnlyName(lastMonth)})</code>, <code className="bg-slate-900 px-1.5 py-0.5 rounded text-emerald-300">Advance ({getMonthOnlyName(lastMonth)})</code> এবং <code className="bg-slate-900 px-1.5 py-0.5 rounded text-sky-300">Due ({getMonthOnlyName(targetMonth)})</code>। এরপরে কোনো বাড়তি কলাম থাকবে না।
+              <strong>টেমপ্লেট কলাম বিন্যাস:</strong> নির্বাচিত মাস অনুযায়ী এক্সেল ফাইলে থাকবে: <code className="bg-slate-900 px-1.5 py-0.5 rounded text-slate-300">SL</code>, <code className="bg-slate-900 px-1.5 py-0.5 rounded text-white">BD No</code>, <code className="bg-slate-900 px-1.5 py-0.5 rounded text-slate-300">Rank</code>, <code className="bg-slate-900 px-1.5 py-0.5 rounded text-slate-300">Surname</code>, <code className="bg-slate-900 px-1.5 py-0.5 rounded text-amber-300">Due ({getMonthOnlyName(lastMonth)})</code>, <code className="bg-slate-900 px-1.5 py-0.5 rounded text-emerald-300">Advance ({getMonthOnlyName(lastMonth)})</code>, <code className="bg-slate-900 px-1.5 py-0.5 rounded text-sky-300">Due ({getMonthOnlyName(targetMonth)})</code>, <code className="bg-slate-900 px-1.5 py-0.5 rounded text-purple-300">Unit Fund</code> এবং <code className="bg-slate-900 px-1.5 py-0.5 rounded text-indigo-300">Others</code>।
             </div>
           </div>
 
@@ -1360,18 +1796,30 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
                   </p>
                 </div>
 
-                {importHistory.length > 0 && (
-                  <div className="relative w-full sm:w-56">
-                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input
-                      type="text"
-                      placeholder="Search history..."
-                      value={historySearch}
-                      onChange={(e) => setHistorySearch(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                    />
-                  </div>
-                )}
+                <div className="flex items-center space-x-2 flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowResetAllConfirm(true)}
+                    className="px-3 py-1.5 bg-rose-600/15 hover:bg-rose-600 text-rose-300 hover:text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 border border-rose-500/30 transition-all cursor-pointer shadow-sm"
+                    title="Reset all member dues to 0 and clear initial bills"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>সকলের বকেয়া রিসেট (Reset All Dues)</span>
+                  </button>
+
+                  {importHistory.length > 0 && (
+                    <div className="relative w-full sm:w-52">
+                      <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Search history..."
+                        value={historySearch}
+                        onChange={(e) => setHistorySearch(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
 
               {importHistory.length === 0 ? (
@@ -1456,7 +1904,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
                               এই ব্যাচে অন্তর্ভুক্ত সদস্যদের তালিকা ({batch.items.length}):
                             </h6>
                             <div className="border border-slate-800 rounded-xl overflow-hidden max-h-48 overflow-y-auto overflow-x-auto">
-                              <table className="w-full text-left text-xs text-slate-300 min-w-[540px]">
+                              <table className="w-full text-left text-xs text-slate-300 min-w-[680px]">
                                 <thead className="bg-slate-950 text-slate-400 text-[10px] font-black uppercase tracking-wider sticky top-0 border-b border-slate-800">
                                   <tr>
                                     <th className="px-3 py-2">#</th>
@@ -1465,6 +1913,8 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
                                     <th className="px-3 py-2 text-right font-mono">Due (Last Month)</th>
                                     <th className="px-3 py-2 text-right font-mono">Adv (Last Month)</th>
                                     <th className="px-3 py-2 text-right font-mono">Due (This Month)</th>
+                                    <th className="px-3 py-2 text-right font-mono">Unit Fund</th>
+                                    <th className="px-3 py-2 text-right font-mono">Others</th>
                                     <th className="px-3 py-2 text-right font-mono">Resulting Due</th>
                                   </tr>
                                 </thead>
@@ -1484,6 +1934,12 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
                                       </td>
                                       <td className="px-3 py-1.5 text-right font-mono text-sky-400">
                                         ৳{item.dueThisMonth || 0}
+                                      </td>
+                                      <td className="px-3 py-1.5 text-right font-mono text-purple-400">
+                                        ৳{item.unitFund || 0}
+                                      </td>
+                                      <td className="px-3 py-1.5 text-right font-mono text-indigo-400">
+                                        ৳{item.othersFund || 0}
                                       </td>
                                       <td className="px-3 py-1.5 text-right font-mono font-black text-rose-400">
                                         ৳{item.resultingDue}
@@ -1557,7 +2013,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
               </label>
 
               {/* Statistics Chips */}
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 pt-1">
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5 pt-1">
                 <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3 text-center">
                   <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Total Parsed</span>
                   <span className="text-base sm:text-lg font-black text-white font-mono">{stats.total}</span>
@@ -1578,11 +2034,23 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
                   </span>
                   <span className="text-base sm:text-lg font-black text-emerald-300 font-mono">৳{stats.totalAdvanceLastMonth.toLocaleString()}</span>
                 </div>
-                <div className="bg-sky-950/30 border border-sky-500/20 rounded-xl p-3 text-center col-span-2 sm:col-span-1">
+                <div className="bg-sky-950/30 border border-sky-500/20 rounded-xl p-3 text-center">
                   <span className="text-[10px] font-black text-sky-400 uppercase tracking-wider block truncate">
                     Due ({getMonthOnlyName(targetMonth)})
                   </span>
                   <span className="text-base sm:text-lg font-black text-sky-300 font-mono">৳{stats.totalDueThisMonth.toLocaleString()}</span>
+                </div>
+                <div className="bg-purple-950/30 border border-purple-500/20 rounded-xl p-3 text-center">
+                  <span className="text-[10px] font-black text-purple-400 uppercase tracking-wider block truncate">
+                    Unit Fund
+                  </span>
+                  <span className="text-base sm:text-lg font-black text-purple-300 font-mono">৳{stats.totalUnitFund.toLocaleString()}</span>
+                </div>
+                <div className="bg-indigo-950/30 border border-indigo-500/20 rounded-xl p-3 text-center col-span-2 sm:col-span-1">
+                  <span className="text-[10px] font-black text-indigo-400 uppercase tracking-wider block truncate">
+                    Others
+                  </span>
+                  <span className="text-base sm:text-lg font-black text-indigo-300 font-mono">৳{stats.totalOthersFund.toLocaleString()}</span>
                 </div>
               </div>
             </div>
@@ -1626,6 +2094,12 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
                       <th className="px-3 py-2.5 text-right font-mono">
                         Due ({getMonthOnlyName(targetMonth)})
                       </th>
+                      <th className="px-3 py-2.5 text-right font-mono">
+                        Unit Fund
+                      </th>
+                      <th className="px-3 py-2.5 text-right font-mono">
+                        Others
+                      </th>
                       <th className="px-3 py-2.5 text-right font-mono">সর্বমোট বকেয়া (Total Due)</th>
                       <th className="px-3 py-2.5 text-center">Status</th>
                     </tr>
@@ -1638,7 +2112,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
 
                       return (
                         <tr key={row.id || idx} className="hover:bg-slate-800/40">
-                          <td className="px-3 py-2 text-slate-500 font-mono">{idx + 1}</td>
+                          <td className="px-3 py-2 text-slate-500 font-mono">{row.sl ?? (idx + 1)}</td>
                           <td className="px-3 py-2 font-mono font-bold text-white">#{row.bdNo}</td>
                           <td className="px-3 py-2">
                             {row.member ? (
@@ -1657,6 +2131,12 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
                           </td>
                           <td className="px-3 py-2 text-right font-mono text-sky-300">
                             ৳{row.dueThisMonth || 0}
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono text-purple-300">
+                            ৳{row.unitFund || 0}
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono text-indigo-300">
+                            ৳{row.othersFund || 0}
                           </td>
                           <td className="px-3 py-2 text-right font-mono font-black text-rose-300">
                             <span className="px-2 py-0.5 rounded-lg bg-rose-950/60 border border-rose-500/40 text-rose-200">
@@ -1783,17 +2263,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
                   onClick={() => setRollbackBatch(null)}
                   className="w-full sm:w-auto px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-black uppercase transition-colors cursor-pointer"
                 >
-                  Cancel
-                </button>
-
-                <button
-                  type="button"
-                  disabled={isRollingBack}
-                  onClick={() => handleRollbackBatch(rollbackBatch, false)}
-                  className="w-full sm:w-auto px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl text-xs font-bold transition-colors cursor-pointer border border-slate-700"
-                  title="Delete history log only without changing dues"
-                >
-                  Delete Log Only
+                  বাতিল (Cancel)
                 </button>
 
                 <button
@@ -1805,12 +2275,73 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
                   {isRollingBack ? (
                     <>
                       <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Reverting Database...</span>
+                      <span>বকেয়া রিভার্স হচ্ছে...</span>
                     </>
                   ) : (
                     <>
                       <RotateCcw className="w-4 h-4" />
-                      <span>Revert Dues & Remove</span>
+                      <span>সকলের বকেয়া রিভার্স ও রিমুভ (Revert Dues & Remove)</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Reset All Member Dues Confirmation Dialog */}
+        {showResetAllConfirm && (
+          <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-md z-[90] flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-rose-500/40 rounded-3xl p-6 w-full max-w-lg shadow-2xl animate-in zoom-in-95 space-y-4">
+              <div className="flex items-start space-x-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white uppercase tracking-tight">
+                    RESET ALL MEMBER DUES TO ৳০?
+                  </h3>
+                  <p className="text-xs text-slate-400 font-bold mt-0.5">
+                    সকল সদস্যের বকেয়া ও ইম্পোর্ট হিস্টোরি সম্পূর্ণ রিসেট
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-4 bg-slate-950/80 border border-slate-800 rounded-2xl text-xs space-y-2 font-bold leading-relaxed text-slate-300">
+                <p>
+                  ⚠️ আপনি কি নিশ্চিত যে আপনি ডেটাবেজের <strong className="text-rose-400">সকল ৭৬ জন সদস্যের বকেয়া শূন্য (৳০)</strong> করতে চান এবং পূর্ববর্তী সকল প্রাথমিক বকেয়া ট্রানজেকশন ও ইম্পোর্ট হিস্টোরি ক্লিয়ার করতে চান?
+                </p>
+                <p className="text-[11px] text-amber-300">
+                  এটি করলে পুরো সিস্টেম সম্পূর্ণ ফ্রেশ অবস্থায় চলে আসবে এবং আপনি নতুন ৯-কলামের এক্সেল ফাইল দিয়ে নতুন করে বিল ইম্পোর্ট করতে পারবেন।
+                </p>
+              </div>
+
+              {/* Actions */}
+              <div className="flex flex-col sm:flex-row items-center justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  disabled={isResettingAll}
+                  onClick={() => setShowResetAllConfirm(false)}
+                  className="w-full sm:w-auto px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-black uppercase transition-colors cursor-pointer"
+                >
+                  বাতিল (Cancel)
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isResettingAll}
+                  onClick={handleResetAllMembersDues}
+                  className="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-lg shadow-rose-600/30 flex items-center justify-center space-x-2 transition-all cursor-pointer"
+                >
+                  {isResettingAll ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>রিসেট হচ্ছে...</span>
+                    </>
+                  ) : (
+                    <>
+                      <RotateCcw className="w-4 h-4" />
+                      <span>হ্যাঁ, সকলের বকেয়া শূন্য করুন</span>
                     </>
                   )}
                 </button>

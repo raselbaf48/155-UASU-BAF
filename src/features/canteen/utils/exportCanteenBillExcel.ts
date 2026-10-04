@@ -139,7 +139,16 @@ export const formatMemberNameBn = (name?: string): string => {
     'Mahfuz': 'মাহফুজ',
     'Sharif': 'শরীফ',
     'Selim': 'সেলিম',
-    'Sultan': 'সুলতান'
+    'Sultan': 'সুলতান',
+    'Shohana': 'সোহানা',
+    'Sonia': 'সোনিয়া',
+    'Mizan': 'মিজান',
+    'Musabbir': 'মুসাব্বির',
+    'Ashik': 'আশিক',
+    'Nur Nobi': 'নূর নবী',
+    'Irfan': 'ইরফান',
+    'Unit Guest': 'ইউনিট গেস্ট',
+    'Guest': 'গেস্ট'
   };
 
   // Direct case-insensitive lookup
@@ -202,6 +211,21 @@ export const getMonthNamesBn = (monthKey: string): { currMonthBn: string; prevMo
     prevMonthBn: prevM,
     titleMonthBn: `${currM} ${yearBn}`
   };
+};
+
+export const formatBengaliMonthYear = (monthKey: string): string => {
+  if (!monthKey || monthKey === 'ALL') return 'সকল মাস';
+  const parts = String(monthKey).split('-');
+  if (parts.length < 2) return monthKey;
+  const year = parts[0];
+  const month = parseInt(parts[1], 10);
+  const bnMonths = [
+    '', 'জানুয়ারি', 'ফেব্রুয়ারি', 'মার্চ', 'এপ্রিল', 'মে', 'জুন',
+    'জুলাই', 'আগস্ট', 'সেপ্টেম্বর', 'অক্টোবর', 'নভেম্বর', 'ডিসেম্বর'
+  ];
+  const mName = bnMonths[month] || parts[1];
+  const yBn = toBengaliNum(year);
+  return `${mName} ${yBn}`;
 };
 
 export interface ExportCanteenBillParams {
