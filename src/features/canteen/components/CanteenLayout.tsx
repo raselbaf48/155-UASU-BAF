@@ -75,6 +75,20 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
     DP: initialDp,
     due: isManager ? 0 : (initialMember?.due !== undefined ? initialMember.due : (cachedMember?.due !== undefined ? cachedMember.due : 0))
   });
+
+  // Keep visited manager views (Bill, Inventory, Menu, etc.) alive in memory to eliminate re-fetching and DP re-downloading
+  const [visitedManagerTabs, setVisitedManagerTabs] = useState<Set<string>>(() => new Set([isManager ? 'manager_dashboard' : 'personal_portal']));
+
+  useEffect(() => {
+    if (currentUser?.role === 'manager') {
+      setVisitedManagerTabs(prev => {
+        if (prev.has(activeTab)) return prev;
+        const next = new Set(prev);
+        next.add(activeTab);
+        return next;
+      });
+    }
+  }, [activeTab, currentUser?.role]);
   const [showLogin, setShowLogin] = useState(false);
   const [loginTab, setLoginTab] = useState<'member'|'manager'>('manager');
   const [loginInput, setLoginInput] = useState('');
@@ -505,6 +519,22 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
     { id: 'inventory', name: 'Inventory', icon: Boxes },
   ];
 
+  const renderManagerTab = (tabId: string) => {
+    switch (tabId) {
+      case 'manager_dashboard': return <ManagerDashboard />;
+      case 'pos_sales': return <PosSales />;
+      case 'member_db': return <MemberDB />;
+      case 'due_register': return <DueRegister />;
+      case 'menu': return <CanteenInventory readOnly={currentUser.role !== 'manager'} />;
+      case 'inventory': return <RawInventoryManagement readOnly={currentUser.role !== 'manager'} />;
+      case 'expenditures': return <Expenditures />;
+      case 'reports': return <CanteenReports />;
+      case 'fund': return <CanteenFund />;
+      case 'settings': return <CanteenSettings onClose={() => setActiveTab('manager_dashboard')} />;
+      default: return null;
+    }
+  };
+
   const renderContent = () => {
     // If not a manager, prevent access to any manager tabs
     const managerTabs = ['manager_dashboard', 'pos_sales', 'member_db', 'due_register', 'expenditures', 'reports', 'fund', 'settings'];
@@ -518,28 +548,36 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
       );
     }
 
-    switch(activeTab) {
-      case 'dashboard': return <EmployeeDashboard currentUser={currentUser} />;
-      case 'personal_portal': return (
-        <PersonalPortal 
-          currentUser={currentUser} 
-          customerDp={customerDp} 
-          onCustomerProfileClick={handleCustomerProfileClick} 
-        />
-      );
-
-      case 'manager_dashboard': return <ManagerDashboard />;
-      case 'pos_sales': return <PosSales />;
-      case 'member_db': return <MemberDB />;
-      case 'due_register': return <DueRegister />;
-      case 'menu': return <CanteenInventory readOnly={currentUser.role !== 'manager'} />;
-      case 'inventory': return <RawInventoryManagement readOnly={currentUser.role !== 'manager'} />;
-      case 'expenditures': return <Expenditures />;
-      case 'reports': return <CanteenReports />;
-      case 'fund': return <CanteenFund />;
-      case 'settings': return <CanteenSettings onClose={() => setActiveTab('manager_dashboard')} />;
-      default: return <div className="text-center p-10 font-bold text-slate-400 animate-pulse">Under Construction ({activeTab})</div>;
+    if (currentUser.role !== 'manager') {
+      switch(activeTab) {
+        case 'dashboard': return <EmployeeDashboard currentUser={currentUser} />;
+        case 'personal_portal': return (
+          <PersonalPortal 
+            currentUser={currentUser} 
+            customerDp={customerDp} 
+            onCustomerProfileClick={handleCustomerProfileClick} 
+          />
+        );
+        case 'menu': return <CanteenInventory readOnly={true} />;
+        case 'inventory': return <RawInventoryManagement readOnly={true} />;
+        default: return <div className="text-center p-10 font-bold text-slate-400 animate-pulse">Under Construction ({activeTab})</div>;
+      }
     }
+
+    // For manager: Keep visited tabs (Bill, Inventory, Menu, etc.) in DOM so switching tabs never re-downloads DPs or resets state
+    return (
+      <>
+        {Array.from(visitedManagerTabs).map((tabId: string) => (
+          <div
+            key={tabId}
+            style={{ display: activeTab === tabId ? 'block' : 'none' }}
+            className="w-full"
+          >
+            {renderManagerTab(tabId)}
+          </div>
+        ))}
+      </>
+    );
   };
 
   const isSettingsActive = activeTab === 'settings';

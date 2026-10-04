@@ -168,17 +168,18 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
           .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
 
         const olderNet = olderCharges - olderPayments;
+        const memberTotalDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
+        const memberTotalAdvance = Number(member.Advance ?? member.advance ?? member.ogrim ?? 0);
+        const netThisMonth = Math.max(0, currentPeriodCharges - currentPeriodPayments);
+        const diff = Math.max(0, memberTotalDue - netThisMonth);
+
         if (olderNet > 0) {
-          previousDue = olderNet;
+          previousDue = Math.max(olderNet, diff);
           previousAdvance = 0;
         } else if (olderNet < 0) {
           previousDue = 0;
           previousAdvance = Math.abs(olderNet);
         } else {
-          const memberTotalDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
-          const memberTotalAdvance = Number(member.Advance ?? member.advance ?? member.ogrim ?? 0);
-          const netThisMonth = Math.max(0, currentPeriodCharges - currentPeriodPayments);
-          const diff = memberTotalDue - netThisMonth;
           if (diff > 0) {
             previousDue = diff;
             previousAdvance = 0;
@@ -203,7 +204,10 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
         advance = totalCredits - totalBill;
         remainingDue = 0;
       } else {
-        remainingDue = totalBill - totalCredits;
+        const rawDue = totalBill - totalCredits;
+        const profileDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
+        // If member already cleared their balance in a subsequent month (e.g. October payment for September), cap due at current ledger balance
+        remainingDue = profileDue === 0 ? 0 : Math.min(rawDue, profileDue);
         advance = 0;
       }
 

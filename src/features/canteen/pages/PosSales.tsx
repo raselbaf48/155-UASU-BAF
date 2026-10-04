@@ -4,7 +4,7 @@ import { supabase } from '../../../supabase';
 import { resolveImageUrl } from '../utils/canteenSettings';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { deductRawStockForSales, restoreRawStockForSaleCancellation, getRecipeForMenuItem, getRawInventoryItems } from '../utils/recipeManager';
-import { pushKeyToCloud } from '../utils/canteenCloudSync';
+import { pushKeyToCloud, recordDeletedTxId } from '../utils/canteenCloudSync';
 
 export const PosSales: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -377,6 +377,7 @@ export const PosSales: React.FC = () => {
 
       fetchCatalog(); // Refresh catalog after stock restoration
 
+      recordDeletedTxId(txId);
       const updatedHistory = salesHistory.filter(tx => tx.id !== txId);
       setSalesHistory(updatedHistory);
       localStorage.setItem('canteen_txs', JSON.stringify(updatedHistory));

@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import * as XLSX from 'xlsx';
+import XLSX from 'xlsx-js-style';
+import { saveAs } from 'file-saver';
 import { 
   FileSpreadsheet, 
   Upload, 
@@ -9,21 +10,33 @@ import {
   Download, 
   X, 
   Layers, 
-  RefreshCw,
-  Search,
-  Check,
-  History,
-  RotateCcw,
-  ChevronDown,
-  ChevronUp,
-  AlertTriangle,
-  Calendar,
-  Info
+  RefreshCw, 
+  Search, 
+  Check, 
+  History, 
+  RotateCcw, 
+  ChevronDown, 
+  ChevronUp, 
+  AlertTriangle, 
+  Calendar, 
+  Info 
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { pushKeyToCloud, pullKeyFromCloud } from '../utils/canteenCloudSync';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
+import { getTxMonthKey } from '../pages/MemberDB';
+import JSZip from 'jszip';
+
+export const getMonthShortName = (monthKey: string): string => {
+  if (!monthKey || monthKey === 'ALL') {
+    return new Date().toLocaleDateString('en-US', { month: 'short' });
+  }
+  const parts = monthKey.split('-');
+  if (parts.length < 2) return monthKey;
+  const date = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, 1);
+  return date.toLocaleDateString('en-US', { month: 'short' });
+};
 
 export const getRunningMonthKey = (): string => {
   const now = new Date();
@@ -118,6 +131,7 @@ interface BulkImportInitialBillsModalProps {
   onSuccess: (updatedMembers: any[]) => void;
   selectedMonth?: string;
   initialTab?: 'FILE' | 'PASTE' | 'HISTORY';
+  allTxs?: any[];
 }
 
 export interface ParsedBillRow {
@@ -143,7 +157,8 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
   members,
   onSuccess,
   selectedMonth = 'ALL',
-  initialTab = 'FILE'
+  initialTab = 'FILE',
+  allTxs = []
 }) => {
   const [activeTab, setActiveTab] = useState<'FILE' | 'PASTE' | 'HISTORY'>(initialTab);
   const [targetMonth, setTargetMonth] = useState<string>(() => {
@@ -151,6 +166,15 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
   });
 
   const lastMonth = useMemo(() => formatPrevMonthKey(targetMonth), [targetMonth]);
+
+  const effectiveTxs = useMemo(() => {
+    if (allTxs && allTxs.length > 0) return allTxs;
+    try {
+      return JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+    } catch {
+      return [];
+    }
+  }, [allTxs]);
 
   const [importMode, setImportMode] = useState<'SET' | 'ADD'>('SET');
   const [createTransaction, setCreateTransaction] = useState<boolean>(true);
@@ -272,7 +296,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
     for (let r = 0; r < Math.min(rows.length, 5); r++) {
       const row = rows[r];
       if (!Array.isArray(row)) continue;
-      const lowerCells = row.map((c) => String(c ?? '').trim().toLowerCase());
+      const lowerCells = row.map((c) => String(c ?? '').replace(/\r?\n/g, ' ').trim().toLowerCase());
 
       const hasBd = lowerCells.some((c) => c.includes('bd') || c.includes('airman') || c.includes('বিডি'));
       const hasBillOrDue = lowerCells.some(
@@ -538,40 +562,225 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
   };
 
   // Download Exact Requested Template:
-  // SL | BD No | Rank | Surname | Due (Last Month Name) | Advance (Last Month Name) | Due (This Month Name)
-  // e.g. Due (September) | Advance (September) | Due (October)
-  // No extra columns after that!
-  const handleDownloadTemplate = () => {
-    const lastMonthOnly = getMonthOnlyName(lastMonth); // e.g. "September"
-    const thisMonthOnly = getMonthOnlyName(targetMonth); // e.g. "October"
+  // SL | BD No | Rank | Surname | Due\n(Month) | Advance\n(Month) | Due\n(Month)
+  // Font: Arial, All center aligned, Name & Rank left aligned
+  // Heading row is frozen so it stays visible while scrolling
+  // Wrap text with Due on top line and short month (e.g. (Aug)) on bottom line
+  // Carries over all unpaid dues from previous months (e.g. May through August when downloading for September)
+  const handleDownloadTemplate = async () => {
+    const lastMonthShort = getMonthShortName(lastMonth); // e.g. "Aug"
+    const thisMonthShort = getMonthShortName(targetMonth); // e.g. "Sep"
 
     // Strictly sort members according to Member DB seniority
     const sortedMembers = sortCanteenMembersByOfficeSeniority(members);
 
-    const templateData = sortedMembers.map((m, idx) => ({
-      'SL': idx + 1,
-      'BD No': String(m['BD No'] || m.bdNo || '').trim(),
-      'Rank': String(m['Rank'] || m.rank || '').trim(),
-      'Surname': String(m['Surname'] || m.surname || m['Full Name'] || m.name || '').trim(),
-      [`Due (${lastMonthOnly})`]: '',
-      [`Advance (${lastMonthOnly})`]: '',
-      [`Due (${thisMonthOnly})`]: ''
-    }));
+    // Common Border Style for clean gridlines
+    const cellBorder = {
+      top: { style: 'thin', color: { rgb: 'D1D5DB' } },
+      bottom: { style: 'thin', color: { rgb: 'D1D5DB' } },
+      left: { style: 'thin', color: { rgb: 'D1D5DB' } },
+      right: { style: 'thin', color: { rgb: 'D1D5DB' } },
+    };
 
-    const worksheet = XLSX.utils.json_to_sheet(templateData);
+    const headers = [
+      'SL',
+      'BD No',
+      'Rank',
+      'Surname',
+      `Due\n(${lastMonthShort})`,
+      `Advance\n(${lastMonthShort})`,
+      `Due\n(${thisMonthShort})`
+    ];
+
+    const aoa: any[][] = [];
+    aoa.push(headers);
+
+    sortedMembers.forEach((m, idx) => {
+      const memberBdClean = String(m['BD No'] || m.bdNo || m.airman_id || '').replace(/\D/g, '');
+      const memberTxs = effectiveTxs.filter((tx: any) => {
+        if (m.airman_id && tx.airman_id === m.airman_id) return true;
+        if (memberBdClean) {
+          const txBdClean = String(tx.bdNo || tx.airman_id || '').replace(/\D/g, '');
+          if (txBdClean === memberBdClean) return true;
+        }
+        return false;
+      });
+
+      // Older transactions strictly prior to targetMonth (e.g. May, June, July, August when target is September)
+      const olderTxs = memberTxs.filter((tx: any) => {
+        const txMonth = getTxMonthKey(tx.date);
+        return txMonth && txMonth < targetMonth;
+      });
+
+      const olderCharges = olderTxs
+        .filter((tx: any) => tx.type !== 'BILL PAYMENT')
+        .reduce((sum: number, tx: any) => sum + Number(tx.amount || 0), 0);
+
+      const olderPayments = olderTxs
+        .filter((tx: any) => tx.type === 'BILL PAYMENT')
+        .reduce((sum: number, tx: any) => sum + Number(tx.amount || 0), 0);
+
+      const olderNet = olderCharges - olderPayments;
+
+      // Current and future month transactions
+      const currentMonthTxs = memberTxs.filter((tx: any) => getTxMonthKey(tx.date) === targetMonth);
+      const currentCharges = currentMonthTxs
+        .filter((tx: any) => tx.type !== 'BILL PAYMENT')
+        .reduce((sum: number, tx: any) => sum + Number(tx.amount || 0), 0);
+      const currentPayments = currentMonthTxs
+        .filter((tx: any) => tx.type === 'BILL PAYMENT')
+        .reduce((sum: number, tx: any) => sum + Number(tx.amount || 0), 0);
+      const currentNet = Math.max(0, currentCharges - currentPayments);
+
+      const futureTxs = memberTxs.filter((tx: any) => {
+        const txMonth = getTxMonthKey(tx.date);
+        return txMonth && txMonth > targetMonth;
+      });
+      const futureNet = Math.max(0, futureTxs
+        .filter((tx: any) => tx.type !== 'BILL PAYMENT')
+        .reduce((sum: number, tx: any) => sum + Number(tx.amount || 0), 0) -
+        futureTxs
+        .filter((tx: any) => tx.type === 'BILL PAYMENT')
+        .reduce((sum: number, tx: any) => sum + Number(tx.amount || 0), 0)
+      );
+
+      const memberTotalDue = Number(m.Due ?? m.due ?? m.baki ?? 0);
+      const memberTotalAdvance = Number(m.Advance ?? m.advance ?? m.ogrim ?? 0);
+
+      let pastDue = 0;
+      let pastAdvance = 0;
+      let thisMonthDue = 0;
+
+      if (olderTxs.length > 0) {
+        if (olderNet > 0) {
+          pastDue = olderNet;
+          pastAdvance = 0;
+        } else if (olderNet < 0) {
+          pastDue = 0;
+          pastAdvance = Math.abs(olderNet);
+        }
+      }
+
+      if (currentNet > 0) {
+        thisMonthDue = currentNet;
+      }
+
+      // If member profile has a cumulative due greater than what older transactions alone recorded
+      if (memberTotalDue > 0) {
+        const remainingAfterOlder = Math.max(0, memberTotalDue - pastDue - futureNet);
+        if (thisMonthDue === 0 && remainingAfterOlder > 0) {
+          // Attribute member profile due to targetMonth when downloading that month's template
+          thisMonthDue = remainingAfterOlder;
+        } else if (thisMonthDue > 0) {
+          const diff = Math.max(0, memberTotalDue - thisMonthDue - futureNet);
+          if (diff > pastDue) {
+            pastDue = diff;
+            pastAdvance = 0;
+          }
+        }
+      }
+
+      if (pastDue === 0 && memberTotalAdvance > 0 && pastAdvance === 0) {
+        pastAdvance = memberTotalAdvance;
+      }
+
+      aoa.push([
+        idx + 1,
+        String(m['BD No'] || m.bdNo || '').trim(),
+        String(m['Rank'] || m.rank || '').trim(),
+        String(m['Surname'] || m.surname || m['Full Name'] || m.name || '').trim(),
+        pastDue > 0 ? pastDue : '',
+        pastAdvance > 0 ? pastAdvance : '',
+        thisMonthDue > 0 ? thisMonthDue : ''
+      ]);
+    });
+
+    const worksheet = XLSX.utils.aoa_to_sheet(aoa);
+
+    // Set Column Widths
     worksheet['!cols'] = [
-      { wch: 6 },
-      { wch: 14 },
-      { wch: 12 },
-      { wch: 22 },
-      { wch: 20 },
-      { wch: 22 },
-      { wch: 20 }
+      { wch: 8 },  // SL
+      { wch: 14 }, // BD No
+      { wch: 14 }, // Rank
+      { wch: 24 }, // Surname
+      { wch: 18 }, // Due (Last Month)
+      { wch: 18 }, // Advance (Last Month)
+      { wch: 18 }, // Due (This Month)
+    ];
+
+    // Set Row Heights (36pt for Header Row to display wrapped text comfortably)
+    worksheet['!rows'] = [
+      { hpt: 36 }, // Header Row with wrap text
+      ...Array(sortedMembers.length).fill({ hpt: 20 }) // Data rows
+    ];
+
+    // Style Header Row (Row 0): Font Arial Bold, All Center Aligned, Light Gray Fill, Wrap Text enabled
+    for (let c = 0; c < 7; c++) {
+      const addr = XLSX.utils.encode_cell({ r: 0, c });
+      if (worksheet[addr]) {
+        worksheet[addr].s = {
+          font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
+          alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+          border: cellBorder,
+          fill: { fgColor: { rgb: 'F3F4F6' } }
+        };
+      }
+    }
+
+    // Style Data Rows: Font Arial, All Center Aligned, ONLY Name & Rank Left Aligned
+    for (let i = 0; i < sortedMembers.length; i++) {
+      const r = i + 1;
+      for (let c = 0; c < 7; c++) {
+        const addr = XLSX.utils.encode_cell({ r, c });
+        if (!worksheet[addr]) {
+          worksheet[addr] = { t: 's', v: '' };
+        }
+        const isLeftAlign = (c === 2 || c === 3); // c=2 is Rank, c=3 is Surname/Name
+        worksheet[addr].s = {
+          font: { name: 'Arial', sz: 11, color: { rgb: '000000' } },
+          alignment: {
+            horizontal: isLeftAlign ? 'left' : 'center',
+            vertical: 'center',
+            wrapText: false
+          },
+          border: cellBorder
+        };
+      }
+    }
+
+    // Freeze Pane Settings (Heading row 1 is frozen)
+    worksheet['!views'] = [
+      { state: 'frozen', xSplit: 0, ySplit: 1, activePane: 'bottomLeft', topLeftCell: 'A2' }
     ];
 
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Bills_Template');
-    XLSX.writeFile(workbook, `Cafe_UAV_Bills_Template_${lastMonthOnly}_${thisMonthOnly}.xlsx`);
+    const wbout = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+    const filename = `Cafe_UAV_Bills_Template_${lastMonthShort}_${thisMonthShort}.xlsx`;
+
+    // Inject Freeze Pane into sheet1.xml to guarantee row 1 freeze across Excel and mobile apps
+    try {
+      const zip = await JSZip.loadAsync(wbout);
+      let sheetXml = await zip.file('xl/worksheets/sheet1.xml')?.async('string');
+      if (sheetXml) {
+        sheetXml = sheetXml.replace(
+          /<sheetView workbookViewId="0"[^>]*\/>/g,
+          '<sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView>'
+        );
+        zip.file('xl/worksheets/sheet1.xml', sheetXml);
+        const finalBlob = await zip.generateAsync({
+          type: 'blob',
+          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        });
+        saveAs(finalBlob, filename);
+        return;
+      }
+    } catch (zipErr) {
+      console.warn('Freeze pane zip injection warning:', zipErr);
+    }
+
+    const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    saveAs(blob, filename);
   };
 
   // Filter preview rows

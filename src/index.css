@@ -194,3 +194,63 @@ body::-webkit-scrollbar-track,
   animation: successPop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
+@keyframes checkmarkStroke {
+  0% {
+    stroke-dashoffset: 48;
+    opacity: 0;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+}
+.animate-checkmark-draw {
+  stroke-dasharray: 48;
+  stroke-dashoffset: 48;
+  animation: checkmarkStroke 0.6s cubic-bezier(0.65, 0, 0.45, 1) 0.2s forwards;
+}
+
+@keyframes pulseExpand {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.35);
+    opacity: 0.35;
+  }
+  100% {
+    transform: scale(1.65);
+    opacity: 0;
+  }
+}
+.animate-pulse-expand {
+  animation: pulseExpand 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+@keyframes confettiFloat {
+  0% {
+    transform: translate(0, 0) scale(0) rotate(0deg);
+    opacity: 1;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--tx, 0px), var(--ty, -120px)) scale(1) rotate(var(--tr, 360deg));
+    opacity: 0;
+  }
+}
+.animate-confetti-particle {
+  animation: confettiFloat 1.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes countdownBar {
+  0% { width: 100%; }
+  100% { width: 0%; }
+}
+.animate-countdown-bar {
+  animation: countdownBar 4s linear forwards;
+}
+
+

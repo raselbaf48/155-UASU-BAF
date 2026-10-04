@@ -377,17 +377,17 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
   useEffect(() => {
     fetchRawItems().then(() => fetchItems());
 
-    // Realtime channel for Canteen_Menu
+    // Realtime channel for Canteen_Menu with unique channel name
     const menuChannel = supabase
-      .channel('canteen_menu_realtime')
+      .channel(`canteen_menu_realtime_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'Canteen_Menu' }, () => {
         fetchItems();
       })
       .subscribe();
 
-    // Realtime channel for Canteen_Inventory
+    // Realtime channel for Canteen_Inventory with unique channel name
     const inventoryChannel = supabase
-      .channel('canteen_inventory_realtime')
+      .channel(`canteen_inv_catalog_realtime_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'Canteen_Inventory' }, () => {
         fetchRawItems().then(() => fetchItems());
       })

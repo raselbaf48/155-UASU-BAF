@@ -1,5 +1,6 @@
 import XLSX from 'xlsx-js-style';
 import { saveAs } from 'file-saver';
+import JSZip from 'jszip';
 import { getCanteenConfig } from './canteenSettings';
 import { sortCanteenMembersByOfficeSeniority } from './canteenSeniority';
 import { getTxCategory, getTxMonthKey, BillCategory } from '../pages/MemberDB';
@@ -210,7 +211,7 @@ export interface ExportCanteenBillParams {
   selectedMonth: string;
 }
 
-export function exportCanteenBillToExcel({
+export async function exportCanteenBillToExcel({
   members,
   allTxs,
   selectedCategory,
@@ -351,17 +352,18 @@ export function exportCanteenBillToExcel({
         .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
 
       const olderNet = olderCharges - olderPayments;
+      const memberTotalDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
+      const memberTotalAdvance = Number(member.Advance ?? member.advance ?? member.ogrim ?? 0);
+      const netThisMonth = Math.max(0, currentPeriodCharges - currentPeriodPayments);
+      const diff = Math.max(0, memberTotalDue - netThisMonth);
+
       if (olderNet > 0) {
-        previousDue = olderNet;
+        previousDue = Math.max(olderNet, diff);
         previousAdvance = 0;
       } else if (olderNet < 0) {
         previousDue = 0;
         previousAdvance = Math.abs(olderNet);
       } else {
-        const memberTotalDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
-        const memberTotalAdvance = Number(member.Advance ?? member.advance ?? member.ogrim ?? 0);
-        const netThisMonth = Math.max(0, currentPeriodCharges - currentPeriodPayments);
-        const diff = memberTotalDue - netThisMonth;
         if (diff > 0) {
           previousDue = diff;
           previousAdvance = 0;
@@ -465,8 +467,8 @@ export function exportCanteenBillToExcel({
     { wch: 14 }, // বকেয়া
   ];
 
-  // 6. Style Cells using SutonnyMJ / Bengali Font
-  const FONT_NAME = 'SutonnyMJ';
+  // 6. Style Cells using Arial Font
+  const FONT_NAME = 'Arial';
   const totalRowIndex = 5 + sortedMembers.length;
 
   // Title Style (Centered)
@@ -500,7 +502,7 @@ export function exportCanteenBillToExcel({
     }
   }
 
-  // Data Rows (r = 5 to 5 + sortedMembers.length - 1)
+  // Data Rows (r = 5 to 5 + sortedMembers.length - 1): Font Arial, All Center Aligned, ONLY Name & Rank Left Aligned
   for (let i = 0; i < sortedMembers.length; i++) {
     const r = 5 + i;
     for (let c = 0; c < 10; c++) {
@@ -508,11 +510,12 @@ export function exportCanteenBillToExcel({
       if (!ws[addr]) {
         ws[addr] = { t: 's', v: '' };
       }
+      const isLeftAlign = (c === 1 || c === 2); // c=1 is Rank, c=2 is Name
       ws[addr].s = {
         font: { name: FONT_NAME, sz: 11, color: { rgb: '000000' } },
         alignment: {
           vertical: 'center',
-          horizontal: c === 0 ? 'center' : c === 1 ? 'center' : c === 2 ? 'left' : 'right',
+          horizontal: isLeftAlign ? 'left' : 'center',
           wrapText: false
         },
         border: cellBorder
@@ -520,7 +523,7 @@ export function exportCanteenBillToExcel({
     }
   }
 
-  // Total Row Style (r = totalRowIndex)
+  // Total Row Style (r = totalRowIndex): All Center Aligned
   for (let c = 0; c < 10; c++) {
     const addr = XLSX.utils.encode_cell({ r: totalRowIndex, c });
     if (!ws[addr]) {
@@ -530,13 +533,18 @@ export function exportCanteenBillToExcel({
       font: { name: FONT_NAME, sz: 11, bold: true, color: { rgb: '000000' } },
       alignment: {
         vertical: 'center',
-        horizontal: c <= 2 ? 'center' : 'right',
+        horizontal: 'center',
         wrapText: false
       },
       border: cellBorder,
       fill: { fgColor: { rgb: 'E5E7EB' } }
     };
   }
+
+  // Freeze Heading Rows (Rows 1 to 5 are frozen)
+  ws['!views'] = [
+    { state: 'frozen', xSplit: 0, ySplit: 5, activePane: 'bottomLeft', topLeftCell: 'A6' }
+  ];
 
   // 7. Create Workbook and Append Sheet
   const wb = XLSX.utils.book_new();
@@ -545,6 +553,27 @@ export function exportCanteenBillToExcel({
   // 8. Generate Excel binary buffer and trigger download
   const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
   const filename = `CANTEEN MANAGEMENT - ${titleMonthBn}.xlsx`;
+
+  try {
+    const zip = await JSZip.loadAsync(wbout);
+    let sheetXml = await zip.file('xl/worksheets/sheet1.xml')?.async('string');
+    if (sheetXml) {
+      sheetXml = sheetXml.replace(
+        /<sheetView workbookViewId="0"[^>]*\/>/g,
+        '<sheetView workbookViewId="0"><pane ySplit="5" topLeftCell="A6" activePane="bottomLeft" state="frozen"/></sheetView>'
+      );
+      zip.file('xl/worksheets/sheet1.xml', sheetXml);
+      const finalBlob = await zip.generateAsync({
+        type: 'blob',
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      });
+      saveAs(finalBlob, filename);
+      return filename;
+    }
+  } catch (zipErr) {
+    console.warn('Freeze pane zip injection warning:', zipErr);
+  }
+
   const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   saveAs(blob, filename);
 

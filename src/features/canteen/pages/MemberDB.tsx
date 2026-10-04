@@ -33,7 +33,14 @@ import {
   Edit3,
   History,
   Download,
-  Users
+  Users,
+  Phone,
+  PhoneCall,
+  Copy,
+  Check,
+  Sparkles,
+  ShieldCheck,
+  ArrowRight
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, fetchDirectImageUrl, getCanteenConfig } from '../utils/canteenSettings';
@@ -44,7 +51,7 @@ import { BulkImportInitialBillsModal } from '../components/BulkImportInitialBill
 import { SetInitialBillModal } from '../components/SetInitialBillModal';
 import { PrintableCanteenBillModal } from '../components/PrintableCanteenBillModal';
 import { restoreRawStockForSaleCancellation } from '../utils/recipeManager';
-import { pushKeyToCloud } from '../utils/canteenCloudSync';
+import { pushKeyToCloud, recordDeletedTxId } from '../utils/canteenCloudSync';
 import { exportCanteenBillToExcel } from '../utils/exportCanteenBillExcel';
 import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
 
@@ -364,11 +371,15 @@ export interface StatementItemRow {
   total: number;
 }
 
+// Global in-memory cache to prevent repeated re-renders, flickering, and photo re-downloads across tab switches
+let globalMembersCache: any[] | null = null;
+let lastMembersSyncTimestamp = 0;
+
 export const MemberDB: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<BillCategory>('ALL');
   const [selectedMonth, setSelectedMonth] = useState<string>(() => getRunningMonthKey());
-  const [onlyWithBill, setOnlyWithBill] = useState<boolean>(false);
+  const [filterMode, setFilterMode] = useState<'AUTO' | 'ALL' | 'DUE'>('AUTO');
   const [viewMode, setViewMode] = useState<'BOX' | 'TABLE'>('BOX');
 
   const [allTxs, setAllTxs] = useState<any[]>(() => {
@@ -383,16 +394,23 @@ export const MemberDB: React.FC = () => {
   });
 
   const [members, setMembers] = useState<any[]>(() => {
+    if (globalMembersCache && globalMembersCache.length > 0) {
+      return globalMembersCache;
+    }
     try {
       const cached = localStorage.getItem('canteen_members_cache');
       if (cached) {
         const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          globalMembersCache = parsed;
+          return parsed;
+        }
       }
     } catch {}
     return [];
   });
   const [loading, setLoading] = useState<boolean>(() => {
+    if (globalMembersCache && globalMembersCache.length > 0) return false;
     try {
       const cached = localStorage.getItem('canteen_members_cache');
       if (cached) {
@@ -453,16 +471,215 @@ export const MemberDB: React.FC = () => {
     return lookupCatalogPrice(name, menuCatalog);
   };
 
+  // Expanded history rows: If a transaction contains multiple items, display each item on its own separate row
+  const displayHistoryRows = useMemo(() => {
+    const rows: Array<{
+      rowId: string;
+      ser: number;
+      tx: any;
+      txId: any;
+      date: string;
+      description: string;
+      qty: string | number;
+      amount: number;
+      type: string;
+    }> = [];
+
+    let currentSer = 1;
+
+    profileTx.forEach((tx) => {
+      if (tx.type === 'BILL PAYMENT') {
+        rows.push({
+          rowId: `${tx.id}_pay`,
+          ser: currentSer++,
+          tx,
+          txId: tx.id,
+          date: tx.date,
+          description: 'Payment Received - ' + (tx.gateway || 'CASH'),
+          qty: '-',
+          amount: tx.amount,
+          type: 'BILL PAYMENT'
+        });
+        return;
+      }
+
+      if (tx.type === 'INITIAL_BILL') {
+        rows.push({
+          rowId: `${tx.id}_init`,
+          ser: currentSer++,
+          tx,
+          txId: tx.id,
+          date: tx.date,
+          description: tx.items || 'বকেয়া বিল',
+          qty: '-',
+          amount: tx.amount,
+          type: 'INITIAL_BILL'
+        });
+        return;
+      }
+
+      // 1. Structured soldItems (from POS)
+      if (Array.isArray(tx.soldItems) && tx.soldItems.length > 0) {
+        tx.soldItems.forEach((si: any, sIdx: number) => {
+          const name = String(si.menuItemName || si.name || 'ক্যান্টিন খাদ্যদ্রব্য').trim();
+          const qty = Number(si.qty || si.quantity || 1);
+          let itemRate = Number(si.price || si.rate || 0);
+          if (itemRate <= 0) {
+            itemRate = lookupCatalogPrice(name, menuCatalog);
+          }
+          const itemTotal = itemRate > 0 ? (itemRate * qty) : Math.round((Number(tx.amount || 0) / tx.soldItems.length) * 100) / 100;
+          rows.push({
+            rowId: `${tx.id}_si_${sIdx}`,
+            ser: currentSer++,
+            tx,
+            txId: tx.id,
+            date: tx.date,
+            description: name,
+            qty: qty,
+            amount: itemTotal,
+            type: tx.type || 'SALE'
+          });
+        });
+        return;
+      }
+
+      // 2. Comma-separated items in tx.items (e.g. "COLD COFFEE (1), CHICKEN ONION (1)")
+      const itemsStr = String(tx.items || '').trim();
+      if (itemsStr.includes(',')) {
+        const parts = itemsStr.split(',').map((s: string) => s.trim()).filter(Boolean);
+        parts.forEach((part: string, pIdx: number) => {
+          let name = part;
+          let qty: number | string = 1;
+          const match = part.match(/^(.+?)\s*\(([0-9]+)\)$/);
+          if (match) {
+            name = match[1].trim();
+            qty = parseInt(match[2], 10) || 1;
+          }
+          let price = lookupCatalogPrice(name, menuCatalog);
+          const itemTotal = price > 0 ? (price * (Number(qty) || 1)) : Math.round((Number(tx.amount || 0) / parts.length) * 100) / 100;
+          rows.push({
+            rowId: `${tx.id}_part_${pIdx}`,
+            ser: currentSer++,
+            tx,
+            txId: tx.id,
+            date: tx.date,
+            description: name,
+            qty: qty,
+            amount: itemTotal,
+            type: tx.type || 'SALE'
+          });
+        });
+        return;
+      }
+
+      // 3. Single item
+      let qtyText: string | number = "-";
+      let descText = tx.items || 'ক্যান্টিন খাদ্যদ্রব্য';
+      if (tx.items && tx.items.includes('(')) {
+        const match = tx.items.match(/^(.+?)\s*\(([0-9]+)\)$/);
+        if (match) {
+          descText = match[1].trim();
+          qtyText = match[2];
+        }
+      }
+      rows.push({
+        rowId: `${tx.id}_single`,
+        ser: currentSer++,
+        tx,
+        txId: tx.id,
+        date: tx.date,
+        description: descText,
+        qty: qtyText,
+        amount: tx.amount,
+        type: tx.type || 'SALE'
+      });
+    });
+
+    return rows;
+  }, [profileTx, menuCatalog]);
+
   // Pay Bill Modal state
   const [payBillMember, setPayBillMember] = useState<any | null>(null);
   const [payBillCategory, setPayBillCategory] = useState<'ALL' | 'CANTEEN' | 'UNIT_FUND' | 'OTHERS'>('ALL');
   const [payAmount, setPayAmount] = useState('');
   const [payMethod, setPayMethod] = useState<'CASH' | 'UCB'>('CASH');
+  const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+  // Dynamic Payment Success Animation State
+  const [paymentSuccessData, setPaymentSuccessData] = useState<{
+    memberName: string;
+    rank: string;
+    surname: string;
+    bdNo: string;
+    dp?: string;
+    paidAmount: number;
+    previousDue: number;
+    newDue: number;
+    method: 'CASH' | 'UCB';
+    category: string;
+    txId: string;
+    date: string;
+    breakdownNote?: string;
+  } | null>(null);
+
+  // Soft harmonic celebration chime via Web Audio API
+  const playPaymentSuccessSound = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      if (ctx.state === 'suspended') {
+        ctx.resume();
+      }
+      const now = ctx.currentTime;
+      // Arpeggio chord: C5 (523.25Hz), E5 (659.25Hz), G5 (783.99Hz), C6 (1046.50Hz)
+      const notes = [523.25, 659.25, 783.99, 1046.50];
+      notes.forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+        gain.gain.setValueAtTime(0, now + idx * 0.08);
+        gain.gain.linearRampToValueAtTime(0.15, now + idx * 0.08 + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.5);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + idx * 0.08);
+        osc.stop(now + idx * 0.08 + 0.55);
+      });
+    } catch {}
+  };
 
   // Deletion modals
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [txDeleteConfirmId, setTxDeleteConfirmId] = useState<any | null>(null);
+  // Contact Action Modal (Call / WhatsApp)
+  const [contactActionMember, setContactActionMember] = useState<any | null>(null);
+  const [copiedPhone, setCopiedPhone] = useState(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+
+  const getTelHref = (raw: any): string => {
+    const clean = String(raw || '').replace(/[^\d+]/g, '');
+    return `tel:${clean}`;
+  };
+
+  const getWhatsAppHref = (raw: any, memberName?: string, dueAmount?: number): string => {
+    if (!raw) return '';
+    const digits = String(raw).replace(/\D/g, '');
+    if (!digits) return '';
+    let fullNumber = digits;
+    if (fullNumber.startsWith('01') && fullNumber.length === 11) {
+      fullNumber = '88' + fullNumber;
+    } else if (!fullNumber.startsWith('88') && fullNumber.length === 10) {
+      fullNumber = '880' + fullNumber;
+    }
+    const name = memberName ? memberName.trim() : 'সম্মানিত সদস্য';
+    let msg = `আসসালামু আলাইকুম ${name}, CAFE UAV ক্যান্টিন সংক্রান্ত বিষয়ে যোগাযোগ করছি।`;
+    if (dueAmount && dueAmount > 0) {
+      msg += ` আপনার বর্তমান বকেয়া বিল ৳${dueAmount}।`;
+    }
+    const text = encodeURIComponent(msg);
+    return `https://wa.me/${fullNumber}?text=${text}`;
+  };
 
   const toEnglishDate = formatCanteenDate;
 
@@ -482,6 +699,15 @@ export const MemberDB: React.FC = () => {
       window.removeEventListener('storage', handleTxsSync);
     };
   }, []);
+
+  // Auto-dismiss dynamic payment confirmation animation after 4.5 seconds
+  useEffect(() => {
+    if (!paymentSuccessData) return;
+    const timer = setTimeout(() => {
+      setPaymentSuccessData(null);
+    }, 4500);
+    return () => clearTimeout(timer);
+  }, [paymentSuccessData]);
 
   // Available months list derived from current date + past 12 months + transactions
   const availableMonths = useMemo(() => {
@@ -537,11 +763,24 @@ export const MemberDB: React.FC = () => {
     }
   };
 
+  // Helper to filter all transactions belonging to a specific member safely
+  const filterMemberTxs = (member: any, txs: any[]): any[] => {
+    if (!member || !Array.isArray(txs)) return [];
+    const mAirman = String(member.airman_id || '').trim();
+    const mBdClean = String(member['BD No'] || member.bdNo || member.airman_id || '').replace(/\D/g, '');
+    return txs.filter((tx: any) => {
+      if (mAirman && tx.airman_id === mAirman) return true;
+      if (mBdClean) {
+        const txBdClean = String(tx.bdNo || tx.airman_id || '').replace(/\D/g, '');
+        if (txBdClean && txBdClean === mBdClean) return true;
+      }
+      return false;
+    });
+  };
+
   // Calculate bill for a member given selected category and month
   const getMemberFilteredBill = (member: any, category: BillCategory, month: string) => {
-    const memberTxs = allTxs.filter(
-      (tx) => tx.airman_id === member.airman_id || (member['BD No'] && tx.bdNo === member['BD No'])
-    );
+    const memberTxs = filterMemberTxs(member, allTxs);
 
     if (category === 'ALL' && month === 'ALL') {
       const totalMemberDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
@@ -589,24 +828,37 @@ export const MemberDB: React.FC = () => {
       return txBill;
     }
 
-    return txBill;
+    // When viewing a specific month (e.g. September 2026 / "2026-09")
+    const totalDue = getMemberTotalDue(member, category);
+    if (totalDue <= 0) return 0;
+
+    // FIFO payment accounting across months:
+    // Payments made in a later month (e.g. Oct) clear bills from earlier months (e.g. Sep)
+    const categoryTxs = category === 'ALL'
+      ? memberTxs
+      : memberTxs.filter((tx) => getTxCategory(tx) === category || (tx.type === 'BILL PAYMENT' && (tx.billType === 'ALL' || !tx.billType)));
+
+    const allPaymentsTotal = categoryTxs
+      .filter((tx) => tx.type === 'BILL PAYMENT')
+      .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+    const chargesBefore = categoryTxs
+      .filter((tx) => tx.type !== 'BILL PAYMENT' && getTxMonthKey(tx.date) < month)
+      .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+    const paymentsAvailableForThisMonth = Math.max(0, allPaymentsTotal - chargesBefore);
+    const remainingUnpaidForMonth = Math.max(0, charges - paymentsAvailableForThisMonth);
+
+    return Math.min(remainingUnpaidForMonth, totalDue);
   };
 
   // Helper to calculate Member's Total Due (পূর্ববর্তী সব বকেয়া + চলতি মাসের বিল - মোট পরিশোধ)
   const getMemberTotalDue = (member: any, category: BillCategory = 'ALL'): number => {
-    const memberBdClean = String(member['BD No'] || member.bdNo || member.airman_id || '').replace(/\D/g, '');
-    const memberTxs = allTxs.filter((tx) => {
-      if (member.airman_id && tx.airman_id === member.airman_id) return true;
-      if (memberBdClean) {
-        const txBdClean = String(tx.bdNo || tx.airman_id || '').replace(/\D/g, '');
-        if (txBdClean === memberBdClean) return true;
-      }
-      return false;
-    });
+    const memberTxs = filterMemberTxs(member, allTxs);
 
     const categoryFilteredTxs = category === 'ALL' 
       ? memberTxs 
-      : memberTxs.filter((tx) => getTxCategory(tx) === category);
+      : memberTxs.filter((tx) => getTxCategory(tx) === category || (tx.type === 'BILL PAYMENT' && (tx.billType === 'ALL' || !tx.billType)));
 
     const allCharges = categoryFilteredTxs
       .filter((tx) => tx.type !== 'BILL PAYMENT')
@@ -619,8 +871,11 @@ export const MemberDB: React.FC = () => {
     const netTxDue = Math.max(0, allCharges - allPayments);
     const profileDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
 
-    // If transactions exist in canteen_txs, netTxDue provides the exact cumulative ledger balance
+    // If transactions exist in canteen_txs
     if (categoryFilteredTxs.length > 0) {
+      if (allPayments >= allCharges) {
+        return Math.min(profileDue, netTxDue);
+      }
       return Math.max(profileDue, netTxDue);
     }
     return profileDue;
@@ -672,7 +927,7 @@ export const MemberDB: React.FC = () => {
     setStatementMonth(selectedMonth !== 'ALL' ? selectedMonth : runningMonth);
     try {
       const txs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-      const memberTxs = txs.filter((tx: any) => tx.airman_id === member.airman_id || (member['BD No'] && tx.bdNo === member['BD No']));
+      const memberTxs = filterMemberTxs(member, txs);
       setStatementTx(memberTxs);
     } catch (e) {
       setStatementTx([]);
@@ -699,7 +954,7 @@ export const MemberDB: React.FC = () => {
     });
     try {
       const txs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-      const memberTxs = txs.filter((tx: any) => tx.airman_id === member.airman_id);
+      const memberTxs = filterMemberTxs(member, txs);
       setProfileTx(memberTxs);
     } catch (e) {
       setProfileTx([]);
@@ -1006,64 +1261,90 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
     if (!payBillMember) return;
     if (!payAmount || isNaN(Number(payAmount)) || Number(payAmount) <= 0) return;
 
-    const amount = Number(payAmount);
-    const currentDue = Number(payBillMember.Due ?? payBillMember.due ?? payBillMember.baki ?? 0);
-    const newDue = Math.max(0, currentDue - amount);
-    
-    // Update Supabase Canteen table 'Due' column
-    await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', payBillMember.airman_id);
-    
-    const catLabel = payBillCategory === 'ALL' ? 'ALL BILLS' : payBillCategory.replace('_', ' ');
-    const payeeName = `${payBillMember.Rank || payBillMember.rank || ''} ${payBillMember.Surname || payBillMember['Surname'] || payBillMember.name || ''}`.trim();
+    setIsSubmittingPayment(true);
+    try {
+      const amount = Number(payAmount);
+      const currentDue = Number(payBillMember.Due ?? payBillMember.due ?? payBillMember.baki ?? 0);
+      const newDue = Math.max(0, currentDue - amount);
+      
+      // Update Supabase Canteen table 'Due' column
+      await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', payBillMember.airman_id);
+      
+      const catLabel = payBillCategory === 'ALL' ? 'ALL BILLS' : payBillCategory.replace('_', ' ');
+      const payeeName = `${payBillMember.Rank || payBillMember.rank || ''} ${payBillMember.Surname || payBillMember['Surname'] || payBillMember.name || ''}`.trim();
 
-    // Priority: First clear old due, then new/current month bill
-    const thisMonthBill = getMemberFilteredBill(payBillMember, payBillCategory, selectedMonth);
-    const oldDue = Math.max(0, currentDue - thisMonthBill);
-    const clearedOld = Math.min(amount, oldDue);
-    const clearedNew = Math.max(0, amount - clearedOld);
+      // Priority: First clear old due, then new/current month bill
+      const thisMonthBill = getMemberFilteredBill(payBillMember, payBillCategory, selectedMonth);
+      const oldDue = Math.max(0, currentDue - thisMonthBill);
+      const clearedOld = Math.min(amount, oldDue);
+      const clearedNew = Math.max(0, amount - clearedOld);
 
-    let breakdownNote = '';
-    if (clearedOld > 0 && clearedNew > 0) {
-      breakdownNote = ` (পুরনো বকেয়া পরিশোধ: ৳${clearedOld} + বর্তমান বিল: ৳${clearedNew})`;
-    } else if (clearedOld > 0) {
-      breakdownNote = ` (পুরনো বকেয়া পরিশোধ: ৳${clearedOld})`;
-    } else if (clearedNew > 0) {
-      breakdownNote = ` (বর্তমান বিল পরিশোধ: ৳${clearedNew})`;
-    }
+      let breakdownNote = '';
+      if (clearedOld > 0 && clearedNew > 0) {
+        breakdownNote = ` (পুরনো বকেয়া পরিশোধ: ৳${clearedOld} + বর্তমান বিল: ৳${clearedNew})`;
+      } else if (clearedOld > 0) {
+        breakdownNote = ` (পুরনো বকেয়া পরিশোধ: ৳${clearedOld})`;
+      } else if (clearedNew > 0) {
+        breakdownNote = ` (বর্তমান বিল পরিশোধ: ৳${clearedNew})`;
+      }
 
-    const tx = {
-      id: 'tx-pay-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
-      date: formatCanteenDate(new Date()),
-      airman_id: payBillMember.airman_id,
-      bdNo: payBillMember['BD No'] || payBillMember.airman_id,
-      memberName: payeeName,
-      rank: payBillMember.Rank || payBillMember.rank || '',
-      items: `BILL PAYMENT - ${catLabel} (${payMethod})${breakdownNote}`,
-      amount: amount,
-      type: 'BILL PAYMENT',
-      billType: payBillCategory,
-      gateway: payMethod
-    };
-    const txs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-    localStorage.setItem('canteen_txs', JSON.stringify([tx, ...txs]));
-    
-    window.dispatchEvent(new Event('canteen_state_updated'));
-    window.dispatchEvent(new Event('canteen_txs_updated'));
-    window.dispatchEvent(new Event('baf_state_updated'));
-    window.dispatchEvent(new Event('storage'));
-    
-    const updatedMember = { ...payBillMember, Due: newDue, baki: newDue };
-    setPayBillMember(null);
-    setPayAmount('');
-    setMembers(prev => prev.map(m => m.airman_id === updatedMember.airman_id ? updatedMember : m));
-    
-    if (profileMember && profileMember.airman_id === updatedMember.airman_id) {
-      setProfileMember(updatedMember);
-      setProfileTx([tx, ...profileTx]);
-    }
-    if (statementMember && statementMember.airman_id === updatedMember.airman_id) {
-      setStatementMember(updatedMember);
-      setStatementTx([tx, ...statementTx]);
+      const tx = {
+        id: 'tx-pay-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+        date: formatCanteenDate(new Date()),
+        airman_id: payBillMember.airman_id,
+        bdNo: payBillMember['BD No'] || payBillMember.airman_id,
+        memberName: payeeName,
+        rank: payBillMember.Rank || payBillMember.rank || '',
+        items: `BILL PAYMENT - ${catLabel} (${payMethod})${breakdownNote}`,
+        amount: amount,
+        type: 'BILL PAYMENT',
+        billType: payBillCategory,
+        gateway: payMethod
+      };
+      const txs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+      localStorage.setItem('canteen_txs', JSON.stringify([tx, ...txs]));
+      
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('canteen_txs_updated'));
+      window.dispatchEvent(new Event('baf_state_updated'));
+      window.dispatchEvent(new Event('storage'));
+      
+      const updatedMember = { ...payBillMember, Due: newDue, baki: newDue };
+      
+      // Play celebratory harmonic chime
+      playPaymentSuccessSound();
+
+      // Activate dynamic confirmation animation
+      setPaymentSuccessData({
+        memberName: payeeName,
+        rank: payBillMember.Rank || payBillMember.rank || '',
+        surname: payBillMember.Surname || payBillMember['Surname'] || payBillMember.name || '',
+        bdNo: String(payBillMember['BD No'] || payBillMember.airman_id || '').replace(/\D/g, ''),
+        dp: resolveImageUrl(payBillMember.DP),
+        paidAmount: amount,
+        previousDue: currentDue,
+        newDue: newDue,
+        method: payMethod,
+        category: catLabel,
+        txId: tx.id,
+        date: tx.date,
+        breakdownNote
+      });
+
+      setPayBillMember(null);
+      setPayAmount('');
+      setMembers(prev => prev.map(m => m.airman_id === updatedMember.airman_id ? updatedMember : m));
+      
+      if (profileMember && profileMember.airman_id === updatedMember.airman_id) {
+        setProfileMember(updatedMember);
+        setProfileTx([tx, ...profileTx]);
+      }
+      if (statementMember && statementMember.airman_id === updatedMember.airman_id) {
+        setStatementMember(updatedMember);
+        setStatementTx([tx, ...statementTx]);
+      }
+    } finally {
+      setIsSubmittingPayment(false);
     }
   };
 
@@ -1157,6 +1438,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
     
     // 2. Remove transaction from localStorage and Supabase app_settings cloud sync
     const txIdStr = String(txToRemove.id);
+    recordDeletedTxId(txIdStr);
     let newTxs: any[] = [];
     try {
       const rawTxs = localStorage.getItem('canteen_txs');
@@ -1219,14 +1501,10 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
       })
       .map((m: any) => {
         const effectiveDp = getMemberEffectiveDp(m);
-        // If Supabase didn't have DP but we found it in local storage or config, save it back to cloud
-        if (!m.DP && effectiveDp && m.airman_id) {
-          supabase.from('Canteen_Member').update({ DP: effectiveDp }).eq('airman_id', m.airman_id).then();
-        }
         return {
           ...m,
-          Role: m.Role ?? m.role ?? '',
-          role: m.Role ?? m.role ?? '',
+          Role: m.Role ?? m.role ?? 'Member',
+          role: m.Role ?? m.role ?? 'Member',
           Due: Number(m.Due ?? m.due ?? m.baki ?? 0),
           baki: Number(m.Due ?? m.due ?? m.baki ?? 0),
           DP: effectiveDp || m.DP || ''
@@ -1237,7 +1515,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
     return sortCanteenMembersByOfficeSeniority(formatted);
   };
 
-  // Auto-sync Biodata silently in background if Canteen_Member is empty or missing airmen
+  // Auto-sync Biodata silently in background ONLY if Canteen_Member is completely empty
   const autoSyncBiodata = async () => {
     try {
       const { data: biodata } = await supabase.from('Biodata Register').select('*');
@@ -1276,6 +1554,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
         const { data: refreshed } = await supabase.from('Canteen_Member').select('*');
         if (refreshed && refreshed.length > 0) {
           const sorted = formatAndSortMembers(refreshed);
+          globalMembersCache = sorted;
           setMembers(sorted);
           try {
             localStorage.setItem('canteen_members_cache', JSON.stringify(sorted));
@@ -1287,47 +1566,155 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
     }
   };
 
-  const fetchMembers = async (forceShowLoading = false) => {
-    if (forceShowLoading) {
-      setLoading(true);
+  // Smart Delta-Sync: Check if cloud data matches local data.
+  // ONLY download/update the exact items that changed in the cloud; keep everything else completely intact!
+  const fetchMembers = async (forceSync = false) => {
+    // If local cache is present and we synced recently (< 45s), avoid unnecessary queries
+    const now = Date.now();
+    if (!forceSync && globalMembersCache && globalMembersCache.length > 0 && (now - lastMembersSyncTimestamp < 45000)) {
+      return;
     }
+
     try {
-      const { data, error } = await supabase.from('Canteen_Member').select('*');
-      if (!error && data && data.length > 0) {
-        const sorted = formatAndSortMembers(data);
-        setMembers(sorted);
+      const { data: cloudData, error } = await supabase.from('Canteen_Member').select('*');
+      if (error || !cloudData) return;
+
+      lastMembersSyncTimestamp = Date.now();
+
+      if (cloudData.length === 0) {
+        if (!globalMembersCache || globalMembersCache.length === 0) {
+          await autoSyncBiodata();
+        }
+        return;
+      }
+
+      setMembers((prevMembers) => {
+        const baseList = prevMembers && prevMembers.length > 0 ? prevMembers : (globalMembersCache || []);
+        
+        if (!baseList || baseList.length === 0) {
+          const sorted = formatAndSortMembers(cloudData);
+          globalMembersCache = sorted;
+          try {
+            localStorage.setItem('canteen_members_cache', JSON.stringify(sorted));
+          } catch {}
+          return sorted;
+        }
+
+        const localMap = new Map<string, any>();
+        baseList.forEach((m) => {
+          const key = String(m.airman_id || m['BD No'] || '').trim();
+          if (key) localMap.set(key, m);
+        });
+
+        let hasAnyDifference = false;
+        const updatedList: any[] = [];
+
+        for (const cloudM of cloudData) {
+          const key = String(cloudM.airman_id || cloudM['BD No'] || '').trim();
+          if (!key) continue;
+          const bdClean = String(cloudM['BD No'] || cloudM.airman_id || '').replace(/\D/g, '');
+          if (bdClean === '48456') continue;
+
+          const localM = localMap.get(key);
+
+          if (!localM) {
+            // New member found in cloud
+            hasAnyDifference = true;
+            const effectiveDp = getMemberEffectiveDp(cloudM);
+            updatedList.push({
+              ...cloudM,
+              Role: cloudM.Role ?? cloudM.role ?? 'Member',
+              role: cloudM.Role ?? cloudM.role ?? 'Member',
+              Due: Number(cloudM.Due ?? cloudM.due ?? cloudM.baki ?? 0),
+              baki: Number(cloudM.Due ?? cloudM.due ?? cloudM.baki ?? 0),
+              DP: effectiveDp || cloudM.DP || ''
+            });
+          } else {
+            // Compare each field to see if anything changed
+            const cloudDue = Number(cloudM.Due ?? cloudM.due ?? cloudM.baki ?? 0);
+            const localDue = Number(localM.Due ?? localM.due ?? localM.baki ?? 0);
+            const cloudDp = String(cloudM.DP || '').trim();
+            const localDp = String(localM.DP || '').trim();
+            const cloudRole = String(cloudM.Role ?? cloudM.role ?? '').trim();
+            const localRole = String(localM.Role ?? localM.role ?? '').trim();
+            const cloudRank = String(cloudM.Rank || '').trim();
+            const localRank = String(localM.Rank || '').trim();
+            const cloudSurname = String(cloudM.Surname || '').trim();
+            const localSurname = String(localM.Surname || '').trim();
+            const cloudContact = String(cloudM.Contact || cloudM['Mobile No'] || '').trim();
+            const localContact = String(localM.Contact || localM['Mobile No'] || '').trim();
+
+            const isDueDiff = Math.abs(cloudDue - localDue) > 0.01;
+            const isDpDiff = Boolean(cloudDp && cloudDp !== localDp);
+            const isRoleDiff = cloudRole !== localRole;
+            const isRankDiff = cloudRank !== localRank;
+            const isNameDiff = cloudSurname !== localSurname;
+            const isContactDiff = cloudContact !== localContact;
+
+            if (isDueDiff || isDpDiff || isRoleDiff || isRankDiff || isNameDiff || isContactDiff) {
+              hasAnyDifference = true;
+              // Only update the changed member, preserving unchanged local fields
+              const effectiveDp = isDpDiff ? cloudDp : (localM.DP || getMemberEffectiveDp(cloudM));
+              updatedList.push({
+                ...localM,
+                ...cloudM,
+                Role: cloudRole || localM.Role,
+                role: cloudRole || localM.Role,
+                Due: cloudDue,
+                baki: cloudDue,
+                DP: effectiveDp || localM.DP || ''
+              });
+            } else {
+              // EXACT SAME OBJECT REFERENCE!
+              // React will NOT re-render this member card or re-download its image!
+              updatedList.push(localM);
+            }
+          }
+        }
+
+        if (updatedList.length !== baseList.length) {
+          hasAnyDifference = true;
+        }
+
+        // If Cloud matches App data: Zero re-renders, zero photo re-downloads!
+        if (!hasAnyDifference) {
+          return baseList;
+        }
+
+        // Only sort and persist when there is an actual delta change
+        const sorted = sortCanteenMembersByOfficeSeniority(updatedList);
+        globalMembersCache = sorted;
         try {
           localStorage.setItem('canteen_members_cache', JSON.stringify(sorted));
         } catch {}
-      } else if (!data || data.length === 0) {
-        // If table is completely empty, trigger sync
-        await autoSyncBiodata();
-      }
+        return sorted;
+      });
     } catch (err) {
-      console.error('Error fetching Canteen members:', err);
+      console.warn('Smart delta sync note:', err);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    // 1. Fetch instantly without waiting for any heavy sync
-    fetchMembers();
+    // 1. Initial check (lightweight delta sync)
+    fetchMembers(false);
 
-    // 2. Safety timeout: never leave loading true for more than 2.5 seconds on slow/offline mobile
+    // 2. Safety timeout
     const safetyTimer = setTimeout(() => {
       setLoading(false);
-    }, 2500);
+    }, 1500);
 
-    // 3. Subscribe to realtime updates on Canteen_Member table (debounced)
+    // 3. Subscribe to realtime updates on Canteen_Member table (debounced delta sync)
     let debounceTimer: any = null;
+    const channelName = `canteen_members_realtime_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const channel = supabase
-      .channel('canteen_members_realtime')
+      .channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'Canteen_Member' }, () => {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
-          fetchMembers(false);
-        }, 600);
+          fetchMembers(true);
+        }, 1200);
       })
       .subscribe();
 
@@ -1495,13 +1882,21 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
     return { totalFilteredBill: sum, countWithBills: count };
   }, [filteredMembers, selectedCategory, selectedMonth, allTxs]);
 
+  // Determine if Due filter is active:
+  // Default is AUTO: filters by Due if countWithBills > 0, otherwise shows All if Due is 0.
+  const isDueFilterActive = useMemo(() => {
+    if (filterMode === 'DUE') return true;
+    if (filterMode === 'ALL') return false;
+    return countWithBills > 0;
+  }, [filterMode, countWithBills]);
+
   const displayedMemberList = useMemo(() => {
-    const list = !onlyWithBill ? filteredMembers : filteredMembers.filter((m) => {
+    const list = !isDueFilterActive ? filteredMembers : filteredMembers.filter((m) => {
       const b = getMemberFilteredBill(m, selectedCategory, selectedMonth);
       return b > 0;
     });
     return sortCanteenMembersByOfficeSeniority(list);
-  }, [filteredMembers, onlyWithBill, selectedCategory, selectedMonth, allTxs]);
+  }, [filteredMembers, isDueFilterActive, selectedCategory, selectedMonth, allTxs]);
 
   const handleExportBills = () => {
     setIsPrintModalOpen(true);
@@ -1589,7 +1984,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
         </div>
 
         <div 
-          onClick={() => setOnlyWithBill(!onlyWithBill)}
+          onClick={() => setFilterMode(isDueFilterActive ? 'ALL' : 'DUE')}
           className="bg-gradient-to-br from-rose-950/90 via-red-950/70 to-slate-900 border border-rose-500/50 hover:border-rose-400 rounded-2xl p-4 flex items-center justify-between shadow-lg shadow-rose-950/40 transition-all cursor-pointer group"
           title="সকল সদস্যের সর্বমোট প্রদেয় বকেয়া (Click to filter members with due)"
         >
@@ -1725,9 +2120,9 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
             <div className="flex items-center bg-slate-950 rounded-xl p-0.5 border border-slate-800">
               <button
                 type="button"
-                onClick={() => setOnlyWithBill(false)}
+                onClick={() => setFilterMode('ALL')}
                 className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer ${
-                  !onlyWithBill
+                  !isDueFilterActive
                     ? 'bg-slate-800 text-white shadow-xs'
                     : 'text-slate-400 hover:text-white'
                 }`}
@@ -1736,14 +2131,14 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
               </button>
               <button
                 type="button"
-                onClick={() => setOnlyWithBill(true)}
+                onClick={() => setFilterMode('DUE')}
                 className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer ${
-                  onlyWithBill
+                  isDueFilterActive
                     ? 'bg-indigo-600 text-white shadow-xs'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                With Bills ({countWithBills})
+                Due ({countWithBills})
               </button>
             </div>
           </div>
@@ -1836,13 +2231,13 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
       ) : displayedMemberList.length === 0 ? (
         <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-12 text-center space-y-3">
           <p className="text-slate-400 font-bold text-sm">
-            {onlyWithBill 
-              ? 'No members found with bills in this category/month' 
+            {isDueFilterActive 
+              ? 'No members found with due in this category/month' 
               : 'No member records found'}
           </p>
-          {onlyWithBill ? (
+          {isDueFilterActive ? (
             <button
-              onClick={() => setOnlyWithBill(false)}
+              onClick={() => setFilterMode('ALL')}
               className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-black uppercase tracking-wider inline-flex items-center space-x-2 cursor-pointer shadow-md shadow-indigo-600/30 transition-all"
             >
               <span>Show All Members ({filteredMembers.length})</span>
@@ -1857,7 +2252,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
             </button>
           )}
         </div>
-      ) : viewMode === 'BOX' ? (
+       ) : viewMode === 'BOX' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {displayedMemberList.map((member, i) => {
             const memberDp = resolveImageUrl(member.DP);
@@ -1868,13 +2263,13 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
               <div 
                 key={member.airman_id || i} 
                 onClick={() => openProfile(member)} 
-                className="relative bg-gradient-to-b from-slate-800/90 via-slate-900 to-slate-950 rounded-3xl p-6 border-t border-t-slate-600/60 border-x border-x-slate-700/60 border-b-4 border-b-slate-950 shadow-[0_12px_24px_-4px_rgba(0,0,0,0.65),0_4px_8px_-2px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.12),inset_0_-2px_4px_0_rgba(0,0,0,0.4)] hover:-translate-y-1.5 hover:shadow-[0_20px_35px_-6px_rgba(0,0,0,0.8),0_0_22px_0_rgba(79,70,229,0.3),inset_0_1px_0_0_rgba(255,255,255,0.2)] hover:border-b-indigo-900 transition-all duration-300 cursor-pointer group flex flex-col justify-between"
+                className="relative bg-gradient-to-b from-slate-800/90 via-slate-900 to-slate-950 rounded-3xl p-5 border-t border-t-slate-600/60 border-x border-x-slate-700/60 border-b-4 border-b-slate-950 shadow-[0_12px_24px_-4px_rgba(0,0,0,0.65),0_4px_8px_-2px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.12),inset_0_-2px_4px_0_rgba(0,0,0,0.4)] hover:-translate-y-1.5 hover:shadow-[0_20px_35px_-6px_rgba(0,0,0,0.8),0_0_22px_0_rgba(79,70,229,0.3),inset_0_1px_0_0_rgba(255,255,255,0.2)] hover:border-b-indigo-900 transition-all duration-300 cursor-pointer group flex flex-col justify-between overflow-hidden"
               >
-                {/* Top Details (Avatar & Member Information) */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-4">
+                {/* Top Section: Avatar & Member Info (Left) + Total Due (Right) */}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center space-x-3.5 min-w-0 flex-1">
                     {/* 3D Embossed Avatar Frame */}
-                    <div className="w-14 h-14 rounded-2xl bg-slate-950 text-white flex items-center justify-center font-black text-2xl shadow-[inset_0_2px_5px_rgba(0,0,0,0.8),0_3px_8px_rgba(0,0,0,0.5)] group-hover:scale-105 transition-transform duration-300 overflow-hidden shrink-0 border border-slate-700/70">
+                    <div className="w-12 h-12 rounded-2xl bg-slate-950 text-white flex items-center justify-center font-black text-xl shadow-[inset_0_2px_5px_rgba(0,0,0,0.8),0_3px_8px_rgba(0,0,0,0.5)] group-hover:scale-105 transition-transform duration-300 overflow-hidden shrink-0 border border-slate-700/70">
                       {memberDp ? (
                         <img 
                           src={memberDp} 
@@ -1889,82 +2284,89 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
                         </span>
                       )}
                     </div>
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <div className="flex items-center space-x-1.5 mb-1 flex-wrap gap-y-1">
-                        <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-indigo-500/15 border-t border-indigo-400/40 border-b-2 border-indigo-950 text-indigo-300 shadow-sm">
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-indigo-500/15 border-t border-indigo-400/40 border-b-2 border-indigo-950 text-indigo-300 shadow-sm shrink-0">
                           {member['Rank']}
                         </span>
-                        <span className="text-[10px] font-bold text-slate-400 font-mono">
-                          #{member['BD No']}
+                        <span className="text-[10px] font-mono font-bold text-slate-400">
+                          BD/{member['BD No'] || member.airman_id?.replace(/\D/g, '') || '-'}
                         </span>
-                        {member.Role && (
-                          <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider border shadow-sm ${
-                            member.Role.toLowerCase() === 'manager' 
-                              ? 'bg-amber-500/15 text-amber-300 border-amber-500/30' 
-                              : member.Role.toLowerCase() === 'staff' || member.Role.toLowerCase() === 'cook'
-                              ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
-                              : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                          }`}>
-                            {member.Role}
-                          </span>
-                        )}
                       </div>
-                      <h3 className="font-black text-white text-base leading-snug group-hover:text-indigo-300 transition-colors">
+                      <h3 className="font-black text-white text-base leading-snug group-hover:text-indigo-300 transition-colors break-words" title={`${member['Rank']} ${member['Surname']}`}>
                         {member['Surname']}
                       </h3>
                     </div>
                   </div>
 
-                  {/* Due / Bill amount: Top = TOTAL DUE (আগের বকেয়া সহ মোট বকেয়া), Below = THIS MONTH BILL */}
-                  <div className="text-right flex flex-col items-end shrink-0 pl-2">
-                    <div
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setInitialBillMember(member);
-                      }}
-                      className="group/duetop cursor-pointer flex flex-col items-end"
-                      title="Click to set/edit Total Due (সর্বমোট বকেয়া সম্পাদন করুন)"
-                    >
-                      <div className="flex items-center space-x-1">
-                        <p className="text-[10px] font-black text-slate-400 tracking-wider uppercase mb-0.5 group-hover/duetop:text-indigo-300 transition-colors">
-                          TOTAL DUE
-                        </p>
-                        <Edit3 className="w-2.5 h-2.5 text-slate-500 group-hover/duetop:text-indigo-400 opacity-0 group-hover/duetop:opacity-100 transition-opacity" />
-                      </div>
-                      <p className={`text-2xl sm:text-3xl font-black font-mono tracking-tight leading-none ${totalDue === 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
-                        ৳{totalDue.toLocaleString()}
-                      </p>
-                    </div>
+                  {/* Total Due: Big & Clear Top-Right */}
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setInitialBillMember(member);
+                    }}
+                    className="group/duetop cursor-pointer flex flex-col items-end shrink-0 pl-1"
+                    title="Click to set/edit Total Due"
+                  >
+                    <span className="text-[9px] font-black text-slate-400 tracking-wider uppercase mb-0.5 group-hover/duetop:text-indigo-300 transition-colors">
+                      TOTAL DUE
+                    </span>
+                    <span className={`text-xl sm:text-2xl font-black font-mono tracking-tight leading-none ${totalDue === 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
+                      ৳{totalDue.toLocaleString()}
+                    </span>
+                  </div>
+                </div>
 
-                    {/* High-Visibility Selected Month Bill Badge */}
+                {/* Middle Row: Contact & Month Bill Badge */}
+                <div className="mt-3.5 pt-2.5 border-t border-slate-800/80 flex items-center justify-between gap-2">
+                  {member.Contact || member['Mobile No'] ? (
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        openStatement(member);
+                        setContactActionMember(member);
+                        setCopiedPhone(false);
                       }}
-                      className={`mt-2.5 px-3 py-1.5 rounded-2xl border shadow-sm transition-all cursor-pointer inline-flex items-center justify-between space-x-2 active:scale-95 group/carddue w-full max-w-[210px] ${
-                        displayedBill > 0
-                          ? 'bg-gradient-to-r from-amber-950/70 via-slate-900 to-amber-950/50 border-amber-500/50 text-amber-200 hover:border-amber-400 shadow-amber-950/30 ring-1 ring-amber-500/20'
-                          : 'bg-slate-950/80 border-slate-700/80 text-slate-400 hover:bg-slate-800 hover:border-slate-500 shadow-black/40'
-                      }`}
-                      title={`${formatMonthName(selectedMonth)} এর হিসাব বিবরণী দেখুন (Click to view Statement)`}
+                      className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 text-xs font-mono font-bold transition-all cursor-pointer group/num active:scale-95 shrink-0"
+                      title="Click to Call or Send WhatsApp Message"
                     >
-                      <div className="flex items-center space-x-1.5 shrink-0">
-                        <Calendar className={`w-3.5 h-3.5 ${displayedBill > 0 ? 'text-amber-400' : 'text-slate-500'} group-hover/carddue:rotate-6 transition-transform`} />
-                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-300 font-sans">
-                          {formatShortMonth(selectedMonth)} BILL:
-                        </span>
-                      </div>
-                      <span className={`text-xs sm:text-sm font-black font-mono tracking-tight shrink-0 ${displayedBill > 0 ? 'text-amber-300' : 'text-slate-400'}`}>
-                        ৳{displayedBill.toLocaleString()}
+                      <PhoneCall className="w-3.5 h-3.5 text-emerald-400 group-hover/num:scale-110 transition-transform shrink-0" />
+                      <span className="font-bold underline decoration-emerald-500/40 underline-offset-2">
+                        {member.Contact || member['Mobile No']}
                       </span>
                     </button>
-                  </div>
+                  ) : (
+                    <span className="text-[11px] font-bold text-slate-500 font-mono italic">
+                      No Contact
+                    </span>
+                  )}
+
+                  {/* Selected Month Bill Badge */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openStatement(member);
+                    }}
+                    className={`px-2.5 py-1 rounded-xl border shadow-sm transition-all cursor-pointer inline-flex items-center space-x-1.5 active:scale-95 group/carddue shrink-0 ${
+                      displayedBill > 0
+                        ? 'bg-gradient-to-r from-amber-950/70 via-slate-900 to-amber-950/50 border-amber-500/50 text-amber-200 hover:border-amber-400 shadow-amber-950/30 ring-1 ring-amber-500/20'
+                        : 'bg-slate-950/80 border-slate-700/80 text-slate-400 hover:bg-slate-800 hover:border-slate-500 shadow-black/40'
+                    }`}
+                    title={`${formatMonthName(selectedMonth)} এর হিসাব বিবরণী দেখুন (Click to view Statement)`}
+                  >
+                    <Calendar className={`w-3.5 h-3.5 ${displayedBill > 0 ? 'text-amber-400' : 'text-slate-500'} group-hover/carddue:rotate-6 transition-transform shrink-0`} />
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-300 font-sans shrink-0">
+                      {formatShortMonth(selectedMonth)} BILL:
+                    </span>
+                    <span className={`text-xs font-black font-mono tracking-tight shrink-0 ${displayedBill > 0 ? 'text-amber-300' : 'text-slate-400'}`}>
+                      ৳{displayedBill.toLocaleString()}
+                    </span>
+                  </button>
                 </div>
 
                 {/* Bottom Action Bar: Left side = Statement, Right side = Pay Bill */}
-                <div className="mt-5 pt-3.5 border-t border-slate-800/80 flex items-center space-x-2.5">
+                <div className="mt-3 pt-3 border-t border-slate-800/80 flex items-center space-x-2.5">
                   {/* Left Side: Statement */}
                   <button
                     type="button"
@@ -1972,7 +2374,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
                       e.stopPropagation();
                       openStatement(member);
                     }}
-                    className="flex-1 py-2.5 px-3 bg-slate-800/90 hover:bg-slate-700/90 text-indigo-300 hover:text-white rounded-xl text-xs font-black tracking-wider uppercase flex items-center justify-center space-x-1.5 border border-slate-700/70 transition-all shadow-sm active:translate-y-0.5 group/btn"
+                    className="flex-1 py-2 px-3 bg-slate-800/90 hover:bg-slate-700/90 text-indigo-300 hover:text-white rounded-xl text-xs font-black tracking-wider uppercase flex items-center justify-center space-x-1.5 border border-slate-700/70 transition-all shadow-sm active:translate-y-0.5 group/btn"
                     title="View Statement & Monthly Bill"
                   >
                     <FileText className="w-3.5 h-3.5 text-indigo-400 group-hover/btn:scale-110 transition-transform" />
@@ -1986,7 +2388,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
                       e.stopPropagation();
                       openPayBill(member);
                     }}
-                    className="flex-1 py-2.5 px-3 bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black tracking-wider uppercase flex items-center justify-center space-x-1.5 shadow-[0_4px_12px_rgba(16,185,129,0.3)] border-t border-emerald-300/40 active:translate-y-0.5 transition-all group/btn"
+                    className="flex-1 py-2 px-3 bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black tracking-wider uppercase flex items-center justify-center space-x-1.5 shadow-[0_4px_12px_rgba(16,185,129,0.3)] border-t border-emerald-300/40 active:translate-y-0.5 transition-all group/btn"
                     title="Direct Pay Bill"
                   >
                     <Banknote className="w-3.5 h-3.5 group-hover/btn:scale-110 transition-transform" />
@@ -2066,8 +2468,26 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
                           {member.Role || 'Member'}
                         </span>
                       </td>
-                      <td className="px-4 py-3 font-mono text-slate-400 text-xs">
-                        {member['Contact'] || '-'}
+                      <td className="px-4 py-3 font-mono text-xs" onClick={(e) => e.stopPropagation()}>
+                        {member.Contact || member['Mobile No'] ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setContactActionMember(member);
+                              setCopiedPhone(false);
+                            }}
+                            className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/25 text-xs font-mono font-bold transition-all cursor-pointer group/tblph active:scale-95"
+                            title="Click to Call or Send WhatsApp Message"
+                          >
+                            <PhoneCall className="w-3 h-3 text-emerald-400 group-hover/tblph:scale-110 transition-transform shrink-0" />
+                            <span className="font-bold underline decoration-emerald-500/30 underline-offset-2">
+                              {member.Contact || member['Mobile No']}
+                            </span>
+                          </button>
+                        ) : (
+                          <span className="text-slate-500 italic">-</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <span className={`text-base font-black font-mono ${displayedBill === 0 ? 'text-slate-400' : 'text-amber-400'}`}>
@@ -2404,11 +2824,11 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
                         <span>Transaction History</span>
                       </h3>
                       <span className="text-[10px] font-bold text-slate-400 font-mono">
-                        Total {profileTx.length} records
+                        Total {displayHistoryRows.length} records
                       </span>
                     </div>
 
-                    {profileTx.length === 0 ? (
+                    {displayHistoryRows.length === 0 ? (
                       <div className="bg-slate-800/80 rounded-2xl p-8 text-center text-slate-400 font-bold border border-slate-700 text-xs">
                         No transactions found
                       </div>
@@ -2416,71 +2836,52 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
                       <>
                         {/* Mobile Card View (sm:hidden) */}
                         <div className="sm:hidden space-y-2.5">
-                          {profileTx.map((tx, idx) => {
-                            let qtyText = "-";
-                            let descText = tx.items;
-                            
-                            if (tx.items && tx.items.includes('(')) {
-                              const itemsList = tx.items.split(', ');
-                              let totalQty = 0;
-                              itemsList.forEach((it: string) => {
-                                const match = it.match(/\((\d+)\)/);
-                                if (match) totalQty += parseInt(match[1]);
-                              });
-                              if (totalQty > 0) qtyText = `${totalQty} pcs`;
-                            }
-                            if (tx.type === 'BILL PAYMENT') {
-                              qtyText = "-";
-                              descText = 'Payment Received - ' + (tx.gateway || 'CASH');
-                            }
-
-                            return (
-                              <div key={tx.id || idx} className="bg-slate-800/90 p-3.5 rounded-2xl border border-slate-700/80 space-y-2.5">
-                                <div className="flex items-center justify-between text-[11px] font-mono">
-                                  <span className="px-2 py-0.5 rounded-md bg-slate-900 text-indigo-300 font-bold border border-slate-700">
-                                    #{idx + 1}
-                                  </span>
-                                  <span className="text-slate-400 font-bold">
-                                    {toEnglishDate(tx.date)}
-                                  </span>
-                                  <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase border ${
-                                    tx.type === 'BILL PAYMENT'
-                                      ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                                      : 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
-                                  }`}>
-                                    {tx.type || 'SALE'}
-                                  </span>
-                                </div>
-
-                                <div className="text-xs font-bold text-white break-words">
-                                  {descText}
-                                </div>
-
-                                <div className="flex items-center justify-between pt-2 border-t border-slate-700/60">
-                                  <div className="flex items-center space-x-2">
-                                    {qtyText !== '-' && (
-                                      <span className="text-[11px] font-mono font-bold text-slate-400 bg-slate-900/60 px-2 py-0.5 rounded-md border border-slate-700/50">
-                                        Qty: {qtyText}
-                                      </span>
-                                    )}
-                                    <span className="text-sm font-black font-mono text-rose-400">
-                                      ৳{tx.amount}
-                                    </span>
-                                  </div>
-
-                                  <button 
-                                    type="button"
-                                    onClick={() => setTxDeleteConfirmId(tx)} 
-                                    className="px-2.5 py-1 text-rose-400 hover:text-white bg-rose-500/10 hover:bg-rose-600 rounded-lg border border-rose-500/20 text-[11px] font-bold transition-colors flex items-center space-x-1"
-                                    title="Remove Record"
-                                  >
-                                    <Trash2 className="w-3 h-3" />
-                                    <span>Delete</span>
-                                  </button>
-                                </div>
+                          {displayHistoryRows.map((row) => (
+                            <div key={row.rowId} className="bg-slate-800/90 p-3.5 rounded-2xl border border-slate-700/80 space-y-2.5">
+                              <div className="flex items-center justify-between text-[11px] font-mono">
+                                <span className="px-2 py-0.5 rounded-md bg-slate-900 text-indigo-300 font-bold border border-slate-700">
+                                  #{row.ser}
+                                </span>
+                                <span className="text-slate-400 font-bold">
+                                  {toEnglishDate(row.date)}
+                                </span>
+                                <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase border ${
+                                  row.type === 'BILL PAYMENT'
+                                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                    : 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
+                                }`}>
+                                  {row.type || 'SALE'}
+                                </span>
                               </div>
-                            );
-                          })}
+
+                              <div className="text-xs font-bold text-white break-words">
+                                {row.description}
+                              </div>
+
+                              <div className="flex items-center justify-between pt-2 border-t border-slate-700/60">
+                                <div className="flex items-center space-x-2">
+                                  {row.qty !== '-' && (
+                                    <span className="text-[11px] font-mono font-bold text-slate-400 bg-slate-900/60 px-2 py-0.5 rounded-md border border-slate-700/50">
+                                      Qty: {row.qty}
+                                    </span>
+                                  )}
+                                  <span className="text-sm font-black font-mono text-rose-400">
+                                    ৳{row.amount}
+                                  </span>
+                                </div>
+
+                                <button 
+                                  type="button"
+                                  onClick={() => setTxDeleteConfirmId(row.tx)} 
+                                  className="px-2.5 py-1 text-rose-400 hover:text-white bg-rose-500/10 hover:bg-rose-600 rounded-lg border border-rose-500/20 text-[11px] font-bold transition-colors flex items-center space-x-1"
+                                  title="Remove Record"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                  <span>Delete</span>
+                                </button>
+                              </div>
+                            </div>
+                          ))}
                         </div>
 
                         {/* Desktop Table View (hidden sm:block) */}
@@ -2498,44 +2899,25 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
                                 </tr>
                               </thead>
                               <tbody>
-                                {profileTx.map((tx, idx) => {
-                                  let qtyText = "-";
-                                  let descText = tx.items;
-                                  
-                                  if (tx.items && tx.items.includes('(')) {
-                                    const itemsList = tx.items.split(', ');
-                                    let totalQty = 0;
-                                    itemsList.forEach((it: string) => {
-                                      const match = it.match(/\((\d+)\)/);
-                                      if (match) totalQty += parseInt(match[1]);
-                                    });
-                                    if (totalQty > 0) qtyText = totalQty.toString();
-                                  }
-                                  if (tx.type === 'BILL PAYMENT') {
-                                    qtyText = "-";
-                                    descText = 'Payment Received - ' + (tx.gateway || 'CASH');
-                                  }
-
-                                  return (
-                                    <tr key={tx.id || idx} className="border-b border-slate-700/50 last:border-0 hover:bg-slate-700/20">
-                                      <td className="px-4 py-2.5 font-mono">{idx + 1}</td>
-                                      <td className="px-4 py-2.5 font-mono">{toEnglishDate(tx.date)}</td>
-                                      <td className="px-4 py-2.5 font-bold">{descText}</td>
-                                      <td className="px-4 py-2.5 text-center font-bold">{qtyText}</td>
-                                      <td className="px-4 py-2.5 text-right font-black text-rose-400">৳{tx.amount}</td>
-                                      <td className="px-4 py-2.5 text-center">
-                                        <button 
-                                          type="button"
-                                          onClick={() => setTxDeleteConfirmId(tx)} 
-                                          className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer" 
-                                          title="Remove Record"
-                                        >
-                                          <Trash2 className="w-3.5 h-3.5" />
-                                        </button>
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
+                                {displayHistoryRows.map((row) => (
+                                  <tr key={row.rowId} className="border-b border-slate-700/50 last:border-0 hover:bg-slate-700/20">
+                                    <td className="px-4 py-2.5 font-mono">{row.ser}</td>
+                                    <td className="px-4 py-2.5 font-mono">{toEnglishDate(row.date)}</td>
+                                    <td className="px-4 py-2.5 font-bold">{row.description}</td>
+                                    <td className="px-4 py-2.5 text-center font-bold">{row.qty}</td>
+                                    <td className="px-4 py-2.5 text-right font-black text-rose-400">৳{row.amount}</td>
+                                    <td className="px-4 py-2.5 text-center">
+                                      <button 
+                                        type="button"
+                                        onClick={() => setTxDeleteConfirmId(row.tx)} 
+                                        className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer" 
+                                        title="Remove Record"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
                               </tbody>
                             </table>
                           </div>
@@ -2809,10 +3191,216 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
               <button 
                 type="button"
                 onClick={handleSettleAccount}
-                className="w-full mt-4 py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black tracking-widest uppercase transition-all shadow-md shadow-emerald-500/20"
+                disabled={isSubmittingPayment || !payAmount || Number(payAmount) <= 0}
+                className="w-full mt-4 py-3.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-500 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white rounded-xl text-xs font-black tracking-widest uppercase transition-all shadow-lg shadow-emerald-950/50 flex items-center justify-center space-x-2 cursor-pointer active:translate-y-0.5"
               >
-                CONFIRM PAYMENT
+                {isSubmittingPayment ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <span>পেমেন্ট নিশ্চিত করা হচ্ছে...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4 text-emerald-300" />
+                    <span>CONFIRM PAYMENT</span>
+                  </>
+                )}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Dynamic Payment Success Confirmation Modal with Celebration Animation */}
+      {paymentSuccessData && (
+        <div 
+          className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[90] flex items-center justify-center p-4 animate-in fade-in duration-300"
+          onClick={() => setPaymentSuccessData(null)}
+        >
+          <div 
+            className="bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 border border-emerald-500/50 rounded-[2.5rem] p-6 sm:p-8 w-full max-w-md shadow-[0_0_60px_-10px_rgba(16,185,129,0.45),0_25px_50px_-12px_rgba(0,0,0,0.85)] animate-success-pop relative overflow-hidden text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Dynamic Celebration Confetti Particles radiating outward */}
+            <div className="absolute inset-0 pointer-events-none overflow-hidden">
+              {[
+                { tx: '-120px', ty: '-140px', tr: '240deg', color: 'bg-emerald-400', size: 'w-2.5 h-2.5 rounded-full', delay: '0.05s' },
+                { tx: '130px', ty: '-150px', tr: '380deg', color: 'bg-amber-400', size: 'w-2 h-3 rounded-sm', delay: '0.08s' },
+                { tx: '-80px', ty: '-180px', tr: '190deg', color: 'bg-cyan-400', size: 'w-3 h-2 rounded-sm', delay: '0.1s' },
+                { tx: '90px', ty: '-190px', tr: '420deg', color: 'bg-teal-300', size: 'w-2.5 h-2.5 rounded-full', delay: '0.02s' },
+                { tx: '-160px', ty: '-90px', tr: '160deg', color: 'bg-yellow-300', size: 'w-2 h-2.5 rounded-sm', delay: '0.12s' },
+                { tx: '150px', ty: '-80px', tr: '300deg', color: 'bg-emerald-300', size: 'w-3 h-3 rounded-full', delay: '0.07s' },
+                { tx: '-50px', ty: '-210px', tr: '280deg', color: 'bg-indigo-400', size: 'w-2 h-3 rounded-sm', delay: '0.15s' },
+                { tx: '40px', ty: '-220px', tr: '340deg', color: 'bg-pink-400', size: 'w-2.5 h-2.5 rounded-full', delay: '0.04s' },
+                { tx: '-140px', ty: '-40px', tr: '210deg', color: 'bg-amber-300', size: 'w-2.5 h-2.5 rounded-full', delay: '0.18s' },
+                { tx: '140px', ty: '-30px', tr: '400deg', color: 'bg-teal-400', size: 'w-3 h-2 rounded-sm', delay: '0.11s' },
+                { tx: '-100px', ty: '-120px', tr: '170deg', color: 'bg-emerald-400', size: 'w-2 h-2 rounded-full', delay: '0.06s' },
+                { tx: '110px', ty: '-110px', tr: '310deg', color: 'bg-cyan-300', size: 'w-2.5 h-3 rounded-sm', delay: '0.14s' },
+                { tx: '-20px', ty: '-170px', tr: '260deg', color: 'bg-yellow-400', size: 'w-3 h-2 rounded-sm', delay: '0.09s' },
+                { tx: '20px', ty: '-180px', tr: '350deg', color: 'bg-emerald-200', size: 'w-2 h-2 rounded-full', delay: '0.16s' },
+                { tx: '-180px', ty: '-110px', tr: '200deg', color: 'bg-teal-200', size: 'w-2.5 h-2.5 rounded-sm', delay: '0.13s' },
+                { tx: '170px', ty: '-120px', tr: '390deg', color: 'bg-amber-400', size: 'w-2 h-2.5 rounded-full', delay: '0.03s' },
+                { tx: '-60px', ty: '-130px', tr: '150deg', color: 'bg-cyan-400', size: 'w-2.5 h-2.5 rounded-full', delay: '0.17s' },
+                { tx: '70px', ty: '-140px', tr: '330deg', color: 'bg-emerald-400', size: 'w-3 h-2 rounded-sm', delay: '0.05s' },
+                { tx: '-110px', ty: '-200px', tr: '270deg', color: 'bg-lime-400', size: 'w-2 h-3 rounded-sm', delay: '0.19s' },
+                { tx: '100px', ty: '-210px', tr: '360deg', color: 'bg-sky-400', size: 'w-2.5 h-2.5 rounded-full', delay: '0.08s' }
+              ].map((p, idx) => (
+                <div
+                  key={idx}
+                  className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 ${p.size} ${p.color} animate-confetti-particle shadow-sm`}
+                  style={{
+                    '--tx': p.tx,
+                    '--ty': p.ty,
+                    '--tr': p.tr,
+                    animationDelay: p.delay
+                  } as React.CSSProperties}
+                />
+              ))}
+            </div>
+
+            {/* Glowing Backdrop Aura */}
+            <div className="absolute -top-24 left-1/2 -translate-x-1/2 w-64 h-64 bg-emerald-500/25 rounded-full blur-3xl pointer-events-none"></div>
+
+            {/* Close Button Top Right */}
+            <button
+              type="button"
+              onClick={() => setPaymentSuccessData(null)}
+              className="absolute top-5 right-5 p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-full transition-colors cursor-pointer z-10"
+              title="Close"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* Animated Checkmark Circle with Radial Pulse Waves */}
+            <div className="relative w-24 h-24 mx-auto mb-5 flex items-center justify-center">
+              {/* Outer expanding pulse wave 1 */}
+              <div className="absolute inset-0 rounded-full bg-emerald-500/30 animate-pulse-expand pointer-events-none"></div>
+              {/* Outer expanding pulse wave 2 */}
+              <div 
+                className="absolute inset-0 rounded-full bg-teal-400/25 animate-pulse-expand pointer-events-none" 
+                style={{ animationDelay: '0.4s' }}
+              ></div>
+
+              {/* Main Glowing Circle */}
+              <div className="relative w-20 h-20 rounded-full bg-gradient-to-tr from-emerald-600 via-emerald-500 to-teal-400 flex items-center justify-center shadow-[0_0_30px_rgba(16,185,129,0.6),inset_0_2px_4px_rgba(255,255,255,0.4)] border-2 border-emerald-300/40">
+                <svg
+                  className="w-10 h-10 text-white drop-shadow-md"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="3.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="20 6 9 17 4 12" className="animate-checkmark-draw" />
+                </svg>
+              </div>
+
+              {/* Sparkle Badges */}
+              <Sparkles className="absolute -top-1 -right-1 w-6 h-6 text-amber-300 animate-bounce" />
+              <Sparkles className="absolute -bottom-1 -left-1 w-5 h-5 text-emerald-300 animate-pulse" />
+            </div>
+
+            {/* Title & Celebration Heading */}
+            <div className="space-y-1 mb-4">
+              <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-emerald-300 text-xs font-black uppercase tracking-wider">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                <span>বিল পরিশোধ সফল হয়েছে</span>
+              </span>
+              <h3 className="text-2xl font-black text-white tracking-tight">
+                Payment Confirmed!
+              </h3>
+            </div>
+
+            {/* Paid Amount Display Card with Emerald Glow */}
+            <div className="my-4 py-4 px-5 bg-gradient-to-r from-emerald-950/80 via-slate-900 to-emerald-950/80 rounded-2xl border border-emerald-500/40 shadow-inner">
+              <p className="text-[10px] font-black uppercase tracking-widest text-emerald-300 mb-0.5">
+                পরিশোধকৃত পরিমাণ (Amount Paid)
+              </p>
+              <div className="text-4xl sm:text-5xl font-black font-mono text-emerald-400 tracking-tight flex items-center justify-center space-x-1">
+                <span>৳</span>
+                <span>{paymentSuccessData.paidAmount.toLocaleString()}</span>
+              </div>
+              <div className="mt-2 flex items-center justify-center space-x-2">
+                <span className="px-2.5 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300 text-[11px] font-black uppercase font-mono border border-emerald-500/30 inline-flex items-center space-x-1">
+                  <Check className="w-3 h-3 text-emerald-400" />
+                  <span>{paymentSuccessData.method} PAYMENT</span>
+                </span>
+                <span className="text-[11px] font-bold text-slate-400">
+                  • {paymentSuccessData.category}
+                </span>
+              </div>
+            </div>
+
+            {/* Member Identity & Ledger Adjustment Breakdown */}
+            <div className="space-y-2 text-left bg-slate-950/80 rounded-2xl p-4 border border-slate-800 text-xs font-bold">
+              {/* Member Row */}
+              <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                <div className="flex items-center space-x-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-lg bg-slate-900 border border-slate-700 flex items-center justify-center overflow-hidden shrink-0 text-xs font-black text-indigo-400">
+                    {paymentSuccessData.dp ? (
+                      <img src={paymentSuccessData.dp} alt={paymentSuccessData.surname} className="w-full h-full object-cover" />
+                    ) : (
+                      (paymentSuccessData.surname || 'U').charAt(0)
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-[10px] text-indigo-300 uppercase font-mono mr-1.5">{paymentSuccessData.rank}</span>
+                    <span className="text-white font-black truncate">{paymentSuccessData.surname}</span>
+                  </div>
+                </div>
+                <span className="font-mono text-slate-400 text-xs shrink-0">
+                  BD/{paymentSuccessData.bdNo}
+                </span>
+              </div>
+
+              {/* Due Balance Shift Row */}
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-slate-400">পূর্বে মোট বকেয়া:</span>
+                <span className="font-mono text-slate-300 line-through">৳{paymentSuccessData.previousDue.toLocaleString()}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-300 font-black">বর্তমান অবশিষ্ট বকেয়া:</span>
+                <span className={`font-mono text-base font-black ${paymentSuccessData.newDue === 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {paymentSuccessData.newDue === 0 ? '৳০ (সম্পূর্ণ পরিশোধিত)' : `৳${paymentSuccessData.newDue.toLocaleString()}`}
+                </span>
+              </div>
+
+              {/* Transaction Reference & Date */}
+              <div className="flex items-center justify-between pt-1.5 border-t border-slate-800/80 text-[10px] text-slate-500 font-mono">
+                <span>TX: {paymentSuccessData.txId.slice(0, 14)}...</span>
+                <span>{paymentSuccessData.date}</span>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="mt-5 flex items-center space-x-3">
+              <button
+                type="button"
+                onClick={() => {
+                  const m = members.find(mem => String(mem['BD No'] || mem.airman_id || '').replace(/\D/g, '') === paymentSuccessData.bdNo);
+                  setPaymentSuccessData(null);
+                  if (m) openStatement(m);
+                }}
+                className="flex-1 py-3 px-3 bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all border border-slate-700 flex items-center justify-center space-x-1.5 cursor-pointer shadow-sm active:translate-y-0.5"
+              >
+                <FileText className="w-4 h-4 text-indigo-400" />
+                <span>রসিদ / হিসাব</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setPaymentSuccessData(null)}
+                className="flex-1 py-3 px-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-md shadow-emerald-900/40 flex items-center justify-center space-x-1.5 cursor-pointer active:translate-y-0.5"
+              >
+                <span>সম্পন্ন (DONE)</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Dynamic Auto-dismiss Progress Bar */}
+            <div className="mt-4 w-full bg-slate-800/80 h-1.5 rounded-full overflow-hidden">
+              <div className="bg-gradient-to-r from-emerald-500 to-teal-400 h-full animate-countdown-bar rounded-full"></div>
             </div>
           </div>
         </div>
@@ -2861,6 +3449,165 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
           </div>
         </div>
       )}
+
+      {/* Contact Action Modal (Direct Phone Call / WhatsApp Message) */}
+      {contactActionMember && (
+        <div 
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[85] flex items-center justify-center p-4 animate-in fade-in duration-200"
+          onClick={() => setContactActionMember(null)}
+        >
+          <div 
+            className="bg-slate-900 border border-slate-700/80 rounded-[2rem] p-6 w-full max-w-md shadow-2xl shadow-black/80 animate-in zoom-in-95 duration-200 relative overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Top decorative gradient glow */}
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-emerald-500 via-teal-400 to-indigo-500"></div>
+
+            {/* Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+              <div className="flex items-center space-x-3">
+                <div className="w-12 h-12 rounded-2xl bg-slate-950 border border-slate-700 flex items-center justify-center overflow-hidden shrink-0 shadow-inner">
+                  {contactActionMember.DP ? (
+                    <img
+                      src={resolveImageUrl(contactActionMember.DP)}
+                      alt={contactActionMember['Surname']}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover"
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                    />
+                  ) : (
+                    <span className="font-black text-lg text-emerald-400">
+                      {(contactActionMember['Surname'] || 'U').charAt(0)}
+                    </span>
+                  )}
+                </div>
+                <div>
+                  <div className="flex items-center space-x-1.5 mb-0.5">
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-emerald-500/15 border border-emerald-400/30 text-emerald-300">
+                      {contactActionMember['Rank']}
+                    </span>
+                    <span className="text-[10px] font-mono font-bold text-slate-400">
+                      BD/{contactActionMember['BD No'] || contactActionMember.airman_id?.replace(/\D/g, '') || '-'}
+                    </span>
+                  </div>
+                  <h3 className="font-black text-white text-base leading-tight">
+                    {contactActionMember['Surname']}
+                  </h3>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setContactActionMember(null)}
+                className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                title="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Phone Number Display Box with Copy Button */}
+            <div className="my-5 p-3.5 bg-slate-950/80 rounded-2xl border border-slate-800 flex items-center justify-between gap-3">
+              <div className="flex items-center space-x-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                  <Phone className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">যোগাযোগের নম্বর (Phone / Mobile)</p>
+                  <p className="text-lg font-black font-mono text-emerald-400 truncate tracking-wide">
+                    {contactActionMember.Contact || contactActionMember['Mobile No']}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const num = String(contactActionMember.Contact || contactActionMember['Mobile No'] || '');
+                  if (num) {
+                    navigator.clipboard.writeText(num);
+                    setCopiedPhone(true);
+                    setTimeout(() => setCopiedPhone(false), 2000);
+                  }
+                }}
+                className={`px-3 py-1.5 rounded-xl border text-xs font-black inline-flex items-center space-x-1.5 transition-all cursor-pointer ${
+                  copiedPhone 
+                    ? 'bg-emerald-600 text-white border-emerald-500 shadow-md shadow-emerald-600/30' 
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+                }`}
+                title="Copy Number to Clipboard"
+              >
+                {copiedPhone ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-white" />
+                    <span>কপি হয়েছে</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>কপি</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Quick Balance/Due Status Notice */}
+            {(() => {
+              const due = getMemberTotalDue(contactActionMember, selectedCategory);
+              return (
+                <div className="mb-5 px-3.5 py-2.5 bg-slate-800/50 rounded-xl border border-slate-700/60 flex items-center justify-between text-xs">
+                  <span className="font-bold text-slate-300">বর্তমান বকেয়া (Total Due):</span>
+                  <span className={`font-mono font-black ${due > 0 ? 'text-rose-400 text-sm' : 'text-emerald-400 text-sm'}`}>
+                    ৳{due.toLocaleString()}
+                  </span>
+                </div>
+              );
+            })()}
+
+            {/* Direct Action Buttons: Call & WhatsApp */}
+            <div className="space-y-3">
+              {/* Direct Phone Call Button */}
+              <a
+                href={getTelHref(contactActionMember.Contact || contactActionMember['Mobile No'])}
+                className="w-full py-3.5 px-4 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white rounded-2xl text-sm font-black uppercase tracking-wider flex items-center justify-center space-x-2.5 shadow-lg shadow-emerald-900/40 border-t border-emerald-300/40 active:translate-y-0.5 transition-all group/call"
+              >
+                <PhoneCall className="w-5 h-5 shrink-0 group-hover/call:scale-110 transition-transform" />
+                <span>সরাসরি কল করুন (Phone Call)</span>
+              </a>
+
+              {/* WhatsApp Message Button */}
+              {(() => {
+                const due = getMemberTotalDue(contactActionMember, selectedCategory);
+                return (
+                  <a
+                    href={getWhatsAppHref(
+                      contactActionMember.Contact || contactActionMember['Mobile No'],
+                      `${contactActionMember['Rank'] || ''} ${contactActionMember['Surname'] || ''}`.trim(),
+                      due
+                    )}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-3.5 px-4 bg-gradient-to-r from-teal-600 via-teal-500 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white rounded-2xl text-sm font-black uppercase tracking-wider flex items-center justify-center space-x-2.5 shadow-lg shadow-teal-900/40 border-t border-teal-300/40 active:translate-y-0.5 transition-all group/wa"
+                  >
+                    <MessageCircle className="w-5 h-5 shrink-0 group-hover/wa:scale-110 transition-transform" />
+                    <span>হোয়াটসঅ্যাপ মেসেজ পাঠান (WhatsApp)</span>
+                  </a>
+                );
+              })()}
+            </div>
+
+            {/* Close / Cancel Button */}
+            <button
+              type="button"
+              onClick={() => setContactActionMember(null)}
+              className="w-full mt-4 py-2.5 bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 rounded-xl text-xs font-black uppercase tracking-wider transition-colors cursor-pointer border border-slate-700/60"
+            >
+              বন্ধ করুন (Close)
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Bulk Import Initial Bills Modal */}
       {isImportBillsModalOpen && (
         <BulkImportInitialBillsModal
@@ -2869,6 +3616,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল (পূর্ববর্ত
           members={members}
           selectedMonth={selectedMonth}
           initialTab={importModalInitialTab}
+          allTxs={allTxs}
           onSuccess={(updatedList) => {
             setMembers(formatAndSortMembers(updatedList));
           }}

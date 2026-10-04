@@ -43,10 +43,31 @@ const notifyStatus = (status: Partial<CloudSyncStatus>) => {
 export const getCanteenCloudSyncStatus = (): CloudSyncStatus => syncStatus;
 
 /**
+ * Deleted Transaction Tombstones to prevent deleted records from resurrecting on cloud sync
+ */
+export function getDeletedTxIds(): Set<string> {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = localStorage.getItem('canteen_deleted_tx_ids');
+    if (raw) return new Set(JSON.parse(raw).map(String));
+  } catch {}
+  return new Set();
+}
+
+export function recordDeletedTxId(txId: string | number) {
+  if (typeof window === 'undefined' || !txId) return;
+  try {
+    const set = getDeletedTxIds();
+    set.add(String(txId));
+    localStorage.setItem('canteen_deleted_tx_ids', JSON.stringify(Array.from(set)));
+  } catch {}
+}
+
+/**
  * Merge two arrays of objects by unique identifier (id or orderId or key)
  * Also safely supports arrays of string IDs (such as canteen_daily_menu).
  */
-function mergeArrayData(localArr: any[], cloudArr: any[], keyField = 'id'): any[] {
+function mergeArrayData(localArr: any[], cloudArr: any[], keyField = 'id', keyName = ''): any[] {
   if (!Array.isArray(localArr)) localArr = [];
   if (!Array.isArray(cloudArr)) cloudArr = [];
 
@@ -59,6 +80,13 @@ function mergeArrayData(localArr: any[], cloudArr: any[], keyField = 'id'): any[
     localArr.forEach(i => { if (typeof i === 'string' && i.trim()) set.add(i.trim()); });
     cloudArr.forEach(i => { if (typeof i === 'string' && i.trim()) set.add(i.trim()); });
     return Array.from(set);
+  }
+
+  // Filter out any explicitly deleted transactions so they NEVER resurrect
+  if (keyName === 'canteen_txs') {
+    const deletedIds = getDeletedTxIds();
+    localArr = localArr.filter(t => !deletedIds.has(String(t?.id)));
+    cloudArr = cloudArr.filter(t => !deletedIds.has(String(t?.id)));
   }
 
   const map = new Map<string, any>();
@@ -265,7 +293,11 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
             }
           } else {
             const keyField = key === 'canteen_pre_orders' ? 'orderId' : (key === 'canteen_expense_last_unit_prices' ? 'key' : 'id');
-            finalVal = mergeArrayData(localVal, cloudVal, keyField);
+            finalVal = mergeArrayData(localVal, cloudVal, keyField, key);
+            if (key === 'canteen_txs') {
+              const deletedIds = getDeletedTxIds();
+              finalVal = finalVal.filter((t: any) => !deletedIds.has(String(t?.id)));
+            }
           }
         } else if (key === 'canteen_daily_menu' && Array.isArray(localVal) && localVal.length > 0 && (!Array.isArray(cloudVal) || cloudVal.length === 0)) {
           finalVal = localVal;
@@ -370,7 +402,11 @@ export function initCanteenCloudSync(): () => void {
                 }
               } else {
                 const keyField = key === 'canteen_pre_orders' ? 'orderId' : 'id';
-                mergedVal = mergeArrayData(currentLocal, parsed, keyField);
+                mergedVal = mergeArrayData(currentLocal, parsed, keyField, key);
+                if (key === 'canteen_txs') {
+                  const deletedIds = getDeletedTxIds();
+                  mergedVal = mergedVal.filter((t: any) => !deletedIds.has(String(t?.id)));
+                }
               }
             }
 
