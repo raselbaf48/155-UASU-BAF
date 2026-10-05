@@ -171,7 +171,20 @@ export const CanteenMemberDB: React.FC = () => {
   // Filter members by search and role
   const filteredMembers = useMemo(() => {
     return members.filter((m) => {
-      const term = searchTerm.toLowerCase();
+      if (!searchTerm.trim()) {
+        if (roleFilter === 'ALL') return true;
+        const weight = getRankWeight(m['Rank']);
+        if (roleFilter === 'OFFICER') return weight >= 1 && weight <= 10;
+        if (roleFilter === 'JCO') return weight >= 20 && weight <= 29;
+        if (roleFilter === 'AIRMEN') return weight >= 30 && weight <= 39;
+        if (roleFilter === 'STAFF') {
+          const r = String(m['Role'] || '').toLowerCase();
+          return r.includes('staff') || r.includes('cook') || r.includes('manager') || r.includes('cashier');
+        }
+        return true;
+      }
+
+      const term = searchTerm.toLowerCase().trim();
       const matchSearch =
         (m['BD No'] || '').toLowerCase().includes(term) ||
         (m['Rank'] || '').toLowerCase().includes(term) ||
@@ -180,7 +193,15 @@ export const CanteenMemberDB: React.FC = () => {
         (m['Role'] || '').toLowerCase().includes(term) ||
         getMemberBanglaName(m).toLowerCase().includes(term);
 
-      if (!matchSearch) return false;
+      // Support bill search
+      const normalizedDigits = term.replace(/[০-৯]/g, (d) => String('০১২৩৪৫৬৭৮৯'.indexOf(d)));
+      const cleanNum = normalizedDigits.replace(/[^0-9.]/g, '');
+      const totalDue = Number(m.Due ?? m.due ?? m.baki ?? 0);
+      const matchBill = cleanNum.length > 0 && (
+        cleanNum === '0' ? totalDue === 0 : (String(totalDue) === cleanNum || String(totalDue).includes(cleanNum))
+      );
+
+      if (!matchSearch && !matchBill) return false;
 
       if (roleFilter === 'ALL') return true;
       const weight = getRankWeight(m['Rank']);
@@ -591,7 +612,7 @@ export const CanteenMemberDB: React.FC = () => {
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
               type="text"
-              placeholder="Search by BD No, Rank, Surname, Role, or Contact..."
+              placeholder="Search by BD No, Rank, Surname, Due Bill, Role, or Contact..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500 rounded-xl pl-11 pr-4 py-2.5 text-xs font-bold text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"

@@ -1,11 +1,32 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Plus, ShoppingCart, Minus, Trash2, CheckCircle2, X, History, Calendar, Package as PackageIcon, AlertTriangle, ChefHat, Filter } from 'lucide-react';
+import { 
+  Search, Plus, ShoppingCart, Minus, Trash2, CheckCircle2, X, History, Calendar, 
+  Package as PackageIcon, AlertTriangle, ChefHat, Filter, User, Users, Utensils, 
+  CheckSquare, Square, Check, ArrowRight, ChevronRight, Layers, Sparkles, Coffee, 
+  ShieldCheck, RefreshCw, ChevronDown, ChevronUp, CheckCheck
+} from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl } from '../utils/canteenSettings';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { deductRawStockForSales, restoreRawStockForSaleCancellation, getRecipeForMenuItem, getRawInventoryItems } from '../utils/recipeManager';
 import { pushKeyToCloud, recordDeletedTxId } from '../utils/canteenCloudSync';
+import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
+
+const isOfficerMember = (m: any): boolean => {
+  const r = String(m?.Rank || m?.rank || '').toUpperCase().trim();
+  const officerRanks = ['ACM', 'AM', 'AVM', 'AIR CDRE', 'GP CAPT', 'WG CDR', 'SQN LDR', 'FLT LT', 'FG OFFR', 'FLG OFFR', 'PLT OFFR'];
+  return officerRanks.some((or) => r.includes(or));
+};
+
+const isCivilianMember = (m: any): boolean => {
+  const r = String(m?.Rank || m?.rank || '').toUpperCase().trim();
+  return r.includes('CIV') || r.includes('NC(E)') || r.includes('NCE');
+};
+
+const isAirmanMember = (m: any): boolean => {
+  return !isOfficerMember(m) && !isCivilianMember(m);
+};
 
 export const PosSales: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -245,6 +266,27 @@ export const PosSales: React.FC = () => {
 ]);
   const [basket, setBasket] = useState<any[]>([]);
   
+  // 3 POS Sales Modes:
+  // 1. MENU_FIXED: মেনু ও ডেট Fixed -> Multiple Members Batch Sale
+  // 2. MEMBER_FIXED: মেম্বার ও ডেট Fixed -> Multiple Menu Items Order
+  // 3. NORMAL: Standard POS
+  const [posMode, setPosMode] = useState<'MENU_FIXED' | 'MEMBER_FIXED' | 'NORMAL'>('NORMAL');
+
+  // Mode 1: MENU_FIXED State
+  const [batchSelectedMemberIds, setBatchSelectedMemberIds] = useState<Set<string>>(new Set());
+  const [batchRankFilter, setBatchRankFilter] = useState<'ALL' | 'OFFICER' | 'AIRMEN' | 'CIVILIAN'>('ALL');
+  const [batchSearchTerm, setBatchSearchTerm] = useState('');
+
+  // Mode 2: MEMBER_FIXED State
+  const [fixedMember, setFixedMember] = useState<any | null>(null);
+  const [fixedMemberSearch, setFixedMemberSearch] = useState('');
+  const [showFixedMemberDropdown, setShowFixedMemberDropdown] = useState(false);
+
+  // Mobile Bottom Drawer / Cart Modal State
+  const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
+  const [showBatchMenuModal, setShowBatchMenuModal] = useState(false);
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
+
   // Member Search State
   const [members, setMembers] = useState<any[]>([]);
   const [selectedMembers, setSelectedMembers] = useState<any[]>([]);
@@ -692,76 +734,223 @@ export const PosSales: React.FC = () => {
       setBasket(basket.filter(b => b.id !== id));
   };
 
-  const handleCheckout = async () => {
-      if (basket.length === 0 || selectedMembers.length === 0) return;
-      
-      const memberChargeAmount = basketTotal;
-      const multiplier = selectedMembers.length > 0 ? selectedMembers.length : 1;
+  const sortedMembers = useMemo(() => {
+    return sortCanteenMembersByOfficeSeniority(members);
+  }, [members]);
 
-      if (selectedMembers.length > 0) {
-          for (const m of selectedMembers) {
-              const currentDue = Number(m.Due ?? m.due ?? m.baki ?? 0);
-              const newDue = currentDue + memberChargeAmount;
-              await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', m.airman_id);
-              
-              // save tx to localstorage for statement
-              const txDateStr = formatCanteenDate(saleDate);
-              const txMemberName = [m.Rank || m.rank, m.Surname || m.surname || m.Name || m.name].filter(Boolean).join(' ') || m['BD No'] || m.airman_id;
-              const tx = {
-                  id: Date.now() + Math.random(),
-                  date: txDateStr,
-                  airman_id: m.airman_id,
-                  bdNo: m['BD No'] || m.bdNo || m.airman_id,
-                  memberName: txMemberName,
-                  rank: m.Rank || m.rank || '',
-                  items: basket.map(b => `${b.name} (${b.qty})`).join(', '),
-                  soldItems: basket.map(b => ({
-                      menuItemId: b.id,
-                      menuItemName: b.name,
-                      price: Number(b.price || 0),
-                      qty: b.qty
-                  })),
-                  amount: memberChargeAmount,
-                  type: 'SALE',
-                  gateway: 'DUE'
-              };
-              const existingTx = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-              const mergedTxs = [tx, ...existingTx];
-              localStorage.setItem('canteen_txs', JSON.stringify(mergedTxs));
-              try {
-                pushKeyToCloud('canteen_txs', mergedTxs);
-              } catch (e) {}
-              window.dispatchEvent(new Event('canteen_txs_updated'));
-              window.dispatchEvent(new Event('canteen_state_updated'));
-              window.dispatchEvent(new Event('storage'));
-          }
-          
-          const newRecents = [...selectedMembers, ...recentMembers].reduce((acc, curr) => {
-              if (!acc.find((x: any) => x.airman_id === curr.airman_id)) acc.push(curr);
-              return acc;
-          }, []).slice(0, 5);
-          setRecentMembers(newRecents);
-          localStorage.setItem('canteen_recent_members', JSON.stringify(newRecents));
+  const officerCount = useMemo(() => members.filter(isOfficerMember).length, [members]);
+  const airmenCount = useMemo(() => members.filter(isAirmanMember).length, [members]);
+  const civilianCount = useMemo(() => members.filter(isCivilianMember).length, [members]);
+
+  const filteredBatchMembers = useMemo(() => {
+    return sortedMembers.filter((m) => {
+      if (batchRankFilter === 'OFFICER' && !isOfficerMember(m)) return false;
+      if (batchRankFilter === 'AIRMEN' && !isAirmanMember(m)) return false;
+      if (batchRankFilter === 'CIVILIAN' && !isCivilianMember(m)) return false;
+
+      if (!batchSearchTerm.trim()) return true;
+      const term = batchSearchTerm.toLowerCase().trim();
+      const surname = String(m['Surname'] || m.surname || '').toLowerCase();
+      const rank = String(m['Rank'] || m.rank || '').toLowerCase();
+      const bd = String(m['BD No'] || m.bdNo || m.airman_id || '').toLowerCase();
+      return surname.includes(term) || rank.includes(term) || bd.includes(term);
+    });
+  }, [sortedMembers, batchRankFilter, batchSearchTerm]);
+
+  const toggleBatchMember = (airmanId: string) => {
+    setBatchSelectedMemberIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(airmanId)) {
+        next.delete(airmanId);
+      } else {
+        next.add(airmanId);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAllFilteredBatch = () => {
+    setBatchSelectedMemberIds((prev) => {
+      const next = new Set(prev);
+      filteredBatchMembers.forEach((m) => {
+        if (m.airman_id) next.add(m.airman_id);
+      });
+      return next;
+    });
+  };
+
+  const handleClearBatchMembers = () => {
+    setBatchSelectedMemberIds(new Set());
+  };
+
+  // Fixed Member search filter (Mode 2)
+  const filteredFixedMemberCandidates = useMemo(() => {
+    if (!fixedMemberSearch.trim()) return recentMembers.length > 0 ? recentMembers : sortedMembers.slice(0, 8);
+    const term = fixedMemberSearch.toLowerCase().trim();
+    return sortedMembers.filter((m) => {
+      const surname = String(m['Surname'] || m.surname || '').toLowerCase();
+      const rank = String(m['Rank'] || m.rank || '').toLowerCase();
+      const bd = String(m['BD No'] || m.bdNo || m.airman_id || '').toLowerCase();
+      return surname.includes(term) || rank.includes(term) || bd.includes(term);
+    }).slice(0, 10);
+  }, [sortedMembers, fixedMemberSearch, recentMembers]);
+
+  const handleCheckout = async () => {
+    if (isCheckingOut) return;
+
+    let targetMembersList: any[] = [];
+    const perMemberAmount = basketTotal;
+
+    if (posMode === 'MENU_FIXED') {
+      if (basket.length === 0) {
+        setToastMessage('⚠️ মেনু আইটেম খালি! অনুগ্রহ করে অন্তত ১টি মেনু আইটেম যোগ করুন।');
+        setTimeout(() => setToastMessage(''), 3500);
+        return;
+      }
+      targetMembersList = members.filter((m) => batchSelectedMemberIds.has(m.airman_id));
+      if (targetMembersList.length === 0) {
+        setToastMessage('⚠️ কোনো সদস্য সিলেক্ট করা হয়নি! অনুগ্রহ করে সদস্য নির্বাচন করুন।');
+        setTimeout(() => setToastMessage(''), 3500);
+        return;
+      }
+    } else if (posMode === 'MEMBER_FIXED') {
+      if (!fixedMember) {
+        setToastMessage('⚠️ কোনো সদস্য সিলেক্ট করা হয়নি! অনুগ্রহ করে প্রথমে সদস্য নির্বাচন করুন।');
+        setTimeout(() => setToastMessage(''), 3500);
+        return;
+      }
+      if (basket.length === 0) {
+        setToastMessage('⚠️ কার্ট খালি! অনুগ্রহ করে মেনু আইটেম যোগ করুন।');
+        setTimeout(() => setToastMessage(''), 3500);
+        return;
+      }
+      targetMembersList = [fixedMember];
+    } else {
+      // NORMAL Mode
+      if (basket.length === 0 || selectedMembers.length === 0) {
+        setToastMessage('⚠️ কার্ট খালি অথবা কোনো সদস্য সিলেক্ট করা হয়নি!');
+        setTimeout(() => setToastMessage(''), 3500);
+        return;
+      }
+      targetMembersList = selectedMembers;
+    }
+
+    setIsCheckingOut(true);
+    const multiplier = targetMembersList.length;
+    const totalSalesAmount = perMemberAmount * multiplier;
+
+    try {
+      const txDateStr = formatCanteenDate(saleDate);
+      const newTransactions: any[] = [];
+
+      for (const m of targetMembersList) {
+        const currentDue = Number(m.Due ?? m.due ?? m.baki ?? 0);
+        const newDue = currentDue + perMemberAmount;
+
+        await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', m.airman_id);
+
+        const txMemberName = [m.Rank || m.rank, m.Surname || m.surname || m.Name || m.name].filter(Boolean).join(' ') || m['BD No'] || m.airman_id;
+        const tx = {
+          id: Date.now() + Math.random(),
+          date: txDateStr,
+          airman_id: m.airman_id,
+          bdNo: m['BD No'] || m.bdNo || m.airman_id,
+          memberName: txMemberName,
+          rank: m.Rank || m.rank || '',
+          items: basket.map((b) => `${b.name} (${b.qty})`).join(', '),
+          soldItems: basket.map((b) => ({
+            menuItemId: b.id,
+            menuItemName: b.name,
+            price: Number(b.price || 0),
+            qty: b.qty
+          })),
+          amount: perMemberAmount,
+          type: 'SALE',
+          gateway: 'DUE'
+        };
+        newTransactions.push(tx);
       }
 
+      // Update members in memory
+      setMembers((prev) =>
+        prev.map((member) => {
+          const matched = targetMembersList.find((tm) => tm.airman_id === member.airman_id);
+          if (matched) {
+            const currentDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
+            return {
+              ...member,
+              Due: currentDue + perMemberAmount,
+              due: currentDue + perMemberAmount,
+              baki: currentDue + perMemberAmount
+            };
+          }
+          return member;
+        })
+      );
+
+      // Save transactions to local & cloud
+      const existingTx = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+      const mergedTxs = [...newTransactions, ...existingTx];
+      localStorage.setItem('canteen_txs', JSON.stringify(mergedTxs));
+      try {
+        await pushKeyToCloud('canteen_txs', mergedTxs);
+      } catch (e) {}
+
+      // Update recent members
+      const newRecents = [...targetMembersList, ...recentMembers].reduce((acc, curr) => {
+        if (!acc.find((x: any) => x.airman_id === curr.airman_id)) acc.push(curr);
+        return acc;
+      }, []).slice(0, 5);
+      setRecentMembers(newRecents);
+      localStorage.setItem('canteen_recent_members', JSON.stringify(newRecents));
+
       // Deduct raw materials stock according to menu recipes
-      const itemsForDeduction = basket.map(b => ({
-          menuItemId: b.id,
-          menuItemName: b.name,
-          qty: b.qty * multiplier
+      const itemsForDeduction = basket.map((b) => ({
+        menuItemId: b.id,
+        menuItemName: b.name,
+        qty: b.qty * multiplier
       }));
       const deductionResult = deductRawStockForSales(itemsForDeduction);
 
+      window.dispatchEvent(new Event('canteen_txs_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+      window.dispatchEvent(new Event('canteen_inventory_updated'));
+      window.dispatchEvent(new Event('storage'));
+
       const deductionSummary = deductionResult.deducted.length > 0 
-          ? ` (${deductionResult.deducted.length}টি কাঁচামালের স্টক বিয়োগ হয়েছে)`
-          : '';
-      setToastMessage(`✅ Sale completed successfully for ৳${memberChargeAmount * multiplier}!${deductionSummary}`); 
-      setTimeout(() => setToastMessage(''), 3000);
-      
-      setBasket([]);
-      setSelectedMembers([]);
-      setMemberSearchTerm('');
+        ? ` (${deductionResult.deducted.length}টি কাঁচামালের স্টক বিয়োগ হয়েছে)`
+        : '';
+
+      const successMsg = posMode === 'MENU_FIXED'
+        ? `✅ সফলভাবে ${multiplier} জন সদস্যের সেল সম্পন্ন হয়েছে (মোট ৳${totalSalesAmount})!${deductionSummary}`
+        : posMode === 'MEMBER_FIXED'
+        ? `✅ সফলভাবে ${targetMembersList[0]['Rank']} ${targetMembersList[0]['Surname']} এর সেল সম্পন্ন হয়েছে (৳${totalSalesAmount})!${deductionSummary}`
+        : `✅ Sale completed successfully for ৳${totalSalesAmount}!${deductionSummary}`;
+
+      setToastMessage(successMsg);
+      setTimeout(() => setToastMessage(''), 4000);
+
+      // Clean up for next order
+      if (posMode === 'MENU_FIXED') {
+        setBatchSelectedMemberIds(new Set());
+      } else if (posMode === 'MEMBER_FIXED') {
+        setBasket([]);
+        setFixedMember((prev: any) => prev ? { ...prev, Due: (Number(prev.Due ?? prev.due ?? prev.baki ?? 0) + perMemberAmount), due: (Number(prev.Due ?? prev.due ?? prev.baki ?? 0) + perMemberAmount), baki: (Number(prev.Due ?? prev.due ?? prev.baki ?? 0) + perMemberAmount) } : null);
+      } else {
+        setBasket([]);
+        setSelectedMembers([]);
+        setMemberSearchTerm('');
+      }
+
+      setIsMobileCartOpen(false);
       fetchCatalog();
+    } catch (err: any) {
+      setToastMessage(`❌ সমস্যা হয়েছে: ${err?.message || 'Error completing sale'}`);
+      setTimeout(() => setToastMessage(''), 4000);
+    } finally {
+      setIsCheckingOut(false);
+    }
   };
 
   const availableCategories = useMemo(() => {
@@ -797,85 +986,761 @@ export const PosSales: React.FC = () => {
   
   return (
     <>
-    <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300 pb-10 flex flex-col md:flex-row gap-8">
+    <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300 pb-28 md:pb-12 px-2 sm:px-4">
       
-      {/* Left Column: Catalog */}
-      <div className="md:w-2/3 space-y-6">
-         {/* Header */}
-         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-               <h2 className="text-2xl font-black text-white uppercase tracking-tighter">CANTEEN POS</h2>
-               
+      {/* Top Header & History Button */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/60 p-4 rounded-3xl border border-slate-800/80 shadow-md">
+        <div>
+          <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+            <h2 className="text-xl sm:text-2xl font-black text-white uppercase tracking-tight">CANTEEN POS</h2>
+            <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-mono text-[11px] font-black border border-indigo-500/30">
+              {posMode === 'MENU_FIXED' ? '১. মেনু ও ডেট ফিক্সড' : posMode === 'MEMBER_FIXED' ? '২. মেম্বার ও ডেট ফিক্সড' : '৩. নরমাল POS'}
+            </span>
+          </div>
+          <p className="text-xs text-slate-400 mt-0.5">ক্যান্টিন সেলস ম্যানেজমেন্ট ও অটোমেটিক বকেয়া হিসাব</p>
+        </div>
+
+        <button 
+          onClick={loadHistory}
+          className="flex items-center justify-center space-x-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold tracking-wider transition-colors shadow-sm cursor-pointer self-start sm:self-auto border border-slate-700 active:scale-95"
+        >
+          <History className="w-4 h-4 text-indigo-400" />
+          <span>SALES HISTORY</span>
+        </button>
+      </div>
+
+      {/* 3 POS Modes Switcher Tab Bar */}
+      <div className="bg-slate-900 p-1.5 sm:p-2 rounded-2xl border border-slate-800 shadow-xl">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 sm:gap-2">
+          
+          {/* Mode 1: MENU_FIXED */}
+          <button
+            type="button"
+            onClick={() => setPosMode('MENU_FIXED')}
+            className={`p-3 rounded-xl transition-all cursor-pointer text-left flex items-center sm:flex-col sm:items-start gap-2.5 sm:gap-1 border ${
+              posMode === 'MENU_FIXED'
+                ? 'bg-gradient-to-r sm:bg-gradient-to-b from-indigo-600 to-indigo-700 text-white border-indigo-400 shadow-lg shadow-indigo-600/30 ring-1 ring-indigo-400/50'
+                : 'bg-slate-950/60 text-slate-300 hover:bg-slate-800/80 hover:text-white border-slate-800/80'
+            }`}
+          >
+            <div className={`p-2 rounded-lg shrink-0 ${posMode === 'MENU_FIXED' ? 'bg-white/20 text-white' : 'bg-slate-900 text-indigo-400 border border-slate-800'}`}>
+              <Layers className="w-4 h-4" />
             </div>
-            <button 
-               onClick={loadHistory}
-               className="flex items-center space-x-2 px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-bold tracking-widest hover:bg-slate-700 transition-colors shadow-sm cursor-pointer"
-            >
-               <History className="w-4 h-4" />
-               <span>HISTORY</span>
-            </button>
-         </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center space-x-1.5">
+                <span className="text-xs sm:text-sm font-black truncate">১. মেনু ও ডেট Fixed</span>
+              </div>
+              <p className={`text-[10px] truncate ${posMode === 'MENU_FIXED' ? 'text-indigo-100' : 'text-slate-400'}`}>
+                Multiple Member নির্বাচন করে ব্যাচ সেল
+              </p>
+            </div>
+          </button>
 
-         {/* Search */}
-         <div className="relative">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input 
-               type="text" 
-               placeholder="Search items..."
-               value={searchTerm}
-               onChange={(e) => setSearchTerm(e.target.value)}
-               className="w-full bg-slate-900 border border-slate-700 rounded-2xl pl-12 pr-4 py-3.5 text-sm font-bold text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#4f46e5]/20 focus:border-[#4f46e5] transition-all shadow-sm"
-            />
-         </div>
+          {/* Mode 2: MEMBER_FIXED */}
+          <button
+            type="button"
+            onClick={() => setPosMode('MEMBER_FIXED')}
+            className={`p-3 rounded-xl transition-all cursor-pointer text-left flex items-center sm:flex-col sm:items-start gap-2.5 sm:gap-1 border ${
+              posMode === 'MEMBER_FIXED'
+                ? 'bg-gradient-to-r sm:bg-gradient-to-b from-indigo-600 to-indigo-700 text-white border-indigo-400 shadow-lg shadow-indigo-600/30 ring-1 ring-indigo-400/50'
+                : 'bg-slate-950/60 text-slate-300 hover:bg-slate-800/80 hover:text-white border-slate-800/80'
+            }`}
+          >
+            <div className={`p-2 rounded-lg shrink-0 ${posMode === 'MEMBER_FIXED' ? 'bg-white/20 text-white' : 'bg-slate-900 text-indigo-400 border border-slate-800'}`}>
+              <User className="w-4 h-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center space-x-1.5">
+                <span className="text-xs sm:text-sm font-black truncate">২. Member & ডেট Fixed</span>
+              </div>
+              <p className={`text-[10px] truncate ${posMode === 'MEMBER_FIXED' ? 'text-indigo-100' : 'text-slate-400'}`}>
+                Multiple Menu সেট করে দ্রুত অর্ডার
+              </p>
+            </div>
+          </button>
 
-         {/* Category Filter Pills */}
-         <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-            {availableCategories.map((cat) => {
-               const count = cat === 'ALL' 
+          {/* Mode 3: NORMAL */}
+          <button
+            type="button"
+            onClick={() => setPosMode('NORMAL')}
+            className={`p-3 rounded-xl transition-all cursor-pointer text-left flex items-center sm:flex-col sm:items-start gap-2.5 sm:gap-1 border ${
+              posMode === 'NORMAL'
+                ? 'bg-gradient-to-r sm:bg-gradient-to-b from-indigo-600 to-indigo-700 text-white border-indigo-400 shadow-lg shadow-indigo-600/30 ring-1 ring-indigo-400/50'
+                : 'bg-slate-950/60 text-slate-300 hover:bg-slate-800/80 hover:text-white border-slate-800/80'
+            }`}
+          >
+            <div className={`p-2 rounded-lg shrink-0 ${posMode === 'NORMAL' ? 'bg-white/20 text-white' : 'bg-slate-900 text-indigo-400 border border-slate-800'}`}>
+              <ShoppingCart className="w-4 h-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center space-x-1.5">
+                <span className="text-xs sm:text-sm font-black truncate">৩. Normal POS</span>
+              </div>
+              <p className={`text-[10px] truncate ${posMode === 'NORMAL' ? 'text-indigo-100' : 'text-slate-400'}`}>
+                স্ট্যান্ডার্ড ক্যাটারিং ও পয়েন্ট অফ সেল
+              </p>
+            </div>
+          </button>
+
+        </div>
+      </div>
+
+      {/* ======================================================== */}
+      {/* MODE 1: MENU_FIXED (মেনু ও ডেট Fixed - Multiple Member) */}
+      {/* ======================================================== */}
+      {posMode === 'MENU_FIXED' && (
+        <div className="space-y-6">
+          {/* Fixed Settings Card: Date + Fixed Menu Items */}
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-6 shadow-xl space-y-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800/80 pb-4">
+              <div>
+                <span className="px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 text-[10px] font-black uppercase tracking-wider border border-indigo-500/30 inline-flex items-center space-x-1.5 mb-2">
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>অপশন ১: মেনু ও তারিখ ফিক্সড (ব্যাচ সেলস)</span>
+                </span>
+                <h3 className="text-lg sm:text-xl font-black text-white">ফিক্সড মেনু ও তারিখ নির্ধারণ</h3>
+                <p className="text-xs text-slate-400 mt-0.5">এখানে নির্ধারিত মেনু আইটেম ও তারিখ ফিক্সড থাকবে, একসাথে একাধিক সদস্যের বিল এন্ট্রি হবে</p>
+              </div>
+
+              {/* Date Selector */}
+              <div className="flex items-center space-x-2 bg-slate-950 p-2.5 rounded-2xl border border-slate-800 shrink-0">
+                <Calendar className="w-4 h-4 text-indigo-400 shrink-0 ml-1.5" />
+                <div className="flex flex-col pr-2">
+                  <span className="text-[9px] font-black uppercase tracking-wider text-slate-400">ফিক্সড তারিখ (Date)</span>
+                  <input 
+                    type="date"
+                    value={saleDate}
+                    onChange={(e) => setSaleDate(e.target.value)}
+                    className="bg-transparent text-xs font-bold text-white outline-none cursor-pointer"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Fixed Menu Items List & Price */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center space-x-2">
+                  <Utensils className="w-4 h-4 text-amber-400" />
+                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-300">ফিক্সড মেনু আইটেম সমূহ:</h4>
+                  <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-lg border border-emerald-500/20">
+                    জনপ্রতি বিল: ৳{basketTotal}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowBatchMenuModal(true)}
+                  className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black tracking-wide flex items-center space-x-1.5 transition-all shadow-md shadow-indigo-600/20 active:scale-95 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>{basket.length === 0 ? 'মেনু আইটেম যোগ করুন' : 'মেনু পরিবর্তন / আইটেম যোগ'}</span>
+                </button>
+              </div>
+
+              {basket.length === 0 ? (
+                <div 
+                  onClick={() => setShowBatchMenuModal(true)}
+                  className="p-6 rounded-2xl border-2 border-dashed border-slate-800 hover:border-indigo-500/50 bg-slate-950/40 text-center cursor-pointer transition-all group"
+                >
+                  <PackageIcon className="w-8 h-8 mx-auto text-slate-500 group-hover:text-indigo-400 group-hover:scale-110 transition-all mb-2" />
+                  <p className="text-xs font-bold text-slate-300">কোনো ফিক্সড মেনু আইটেম নির্বাচন করা হয়নি</p>
+                  <p className="text-[11px] text-slate-500 mt-1">এখানে ক্লিক করে ক্যাটালগ থেকে আইটেম যোগ করুন (যেমন: চা, পরোটা, ডিম বা খিচুড়ি)</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                  {basket.map((item) => (
+                    <div 
+                      key={item.id} 
+                      className="bg-slate-950/80 p-3 rounded-2xl border border-slate-800/80 flex items-center justify-between gap-3 shadow-inner"
+                    >
+                      <div className="flex items-center space-x-3 min-w-0">
+                        <div className="w-9 h-9 rounded-xl bg-slate-900 border border-slate-800 overflow-hidden shrink-0 flex items-center justify-center">
+                          {item.DP ? (
+                            <img src={resolveImageUrl(item.DP)} alt={item.name} className="w-full h-full object-cover" />
+                          ) : (
+                            <PackageIcon className="w-4 h-4 text-slate-400" />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-black text-white truncate">{item.name}</p>
+                          <p className="text-[11px] font-mono text-indigo-400 font-bold">
+                            ৳{item.price} x {item.qty} = ৳{item.price * item.qty}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-1.5 shrink-0">
+                        <div className="flex items-center space-x-1 bg-slate-900 rounded-lg border border-slate-800 p-0.5">
+                          <button 
+                            onClick={() => updateQty(item.id, -1)}
+                            className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white"
+                          >
+                            <Minus className="w-3 h-3" />
+                          </button>
+                          <span className="text-xs font-mono font-black text-white w-4 text-center">{item.qty}</span>
+                          <button 
+                            onClick={() => updateQty(item.id, 1)}
+                            className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white"
+                          >
+                            <Plus className="w-3 h-3" />
+                          </button>
+                        </div>
+                        <button 
+                          onClick={() => removeFromBasket(item.id)}
+                          className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 rounded-lg transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Multiple Member Selection Section */}
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-6 shadow-xl space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base sm:text-lg font-black text-white flex items-center space-x-2">
+                  <Users className="w-5 h-5 text-indigo-400" />
+                  <span>সদস্য নির্বাচন (Select Members)</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">যেসব সদস্যদের এই ফিক্সড বিল দেওয়া হবে তাদের টিক দিন</p>
+              </div>
+
+              {/* Quick Bulk Action Buttons */}
+              <div className="flex items-center space-x-2 self-start sm:self-auto flex-wrap gap-y-1">
+                <button
+                  type="button"
+                  onClick={handleSelectAllFilteredBatch}
+                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-black tracking-wider flex items-center space-x-1.5 border border-slate-700 transition-all cursor-pointer"
+                >
+                  <CheckSquare className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>সবাইকে সিলেক্ট ({filteredBatchMembers.length})</span>
+                </button>
+                {batchSelectedMemberIds.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleClearBatchMembers}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-950/40 text-rose-300 text-xs font-black tracking-wider flex items-center space-x-1.5 border border-slate-700 transition-all cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>রিসেট ({batchSelectedMemberIds.size})</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Search & Rank Filters */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input 
+                  type="text"
+                  value={batchSearchTerm}
+                  onChange={(e) => setBatchSearchTerm(e.target.value)}
+                  placeholder="নাম, পদবি বা BD No লিখে খুঁজুন..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-9 py-2.5 text-xs sm:text-sm font-bold text-white placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
+                />
+                {batchSearchTerm && (
+                  <button 
+                    onClick={() => setBatchSearchTerm('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs font-bold p-1"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              {/* Rank Filter Pills */}
+              <div className="flex items-center space-x-1 bg-slate-950 p-1 rounded-xl border border-slate-800 overflow-x-auto scrollbar-none shrink-0">
+                {(['ALL', 'OFFICER', 'AIRMEN', 'CIVILIAN'] as const).map((r) => {
+                  const count = r === 'ALL' ? members.length : r === 'OFFICER' ? officerCount : r === 'AIRMEN' ? airmenCount : civilianCount;
+                  const label = r === 'ALL' ? 'সকল' : r === 'OFFICER' ? 'অফিসার' : r === 'AIRMEN' ? 'এয়ারম্যান' : 'সিভিলিয়ান';
+                  const isSel = batchRankFilter === r;
+                  return (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => setBatchRankFilter(r)}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer ${
+                        isSel ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      {label} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* KPI Stats Strip */}
+            <div className="p-3 bg-slate-950/70 border border-slate-800/80 rounded-2xl flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center space-x-4 flex-wrap gap-y-1 text-xs font-mono">
+                <span className="text-slate-400">
+                  নির্বাচিত সদস্য: <strong className="text-indigo-400 text-sm">{batchSelectedMemberIds.size} জন</strong>
+                </span>
+                <span className="text-slate-500">•</span>
+                <span className="text-slate-400">
+                  জনপ্রতি বিল: <strong className="text-white text-sm">৳{basketTotal}</strong>
+                </span>
+                <span className="text-slate-500">•</span>
+                <span className="text-slate-400">
+                  সর্বমোট বিক্রয়: <strong className="text-emerald-400 text-sm sm:text-base font-black">৳{basketTotal * batchSelectedMemberIds.size}</strong>
+                </span>
+              </div>
+
+              {/* Desktop Confirm Button in strip */}
+              <button
+                type="button"
+                onClick={handleCheckout}
+                disabled={isCheckingOut || basket.length === 0 || batchSelectedMemberIds.size === 0}
+                className={`hidden md:flex items-center space-x-2 px-5 py-2.5 rounded-xl font-black text-xs tracking-wider uppercase transition-all shadow-md ${
+                  (!isCheckingOut && basket.length > 0 && batchSelectedMemberIds.size > 0)
+                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30 cursor-pointer active:scale-95'
+                    : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/50'
+                }`}
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>কনফার্ম সেলস ({batchSelectedMemberIds.size} জন • ৳{basketTotal * batchSelectedMemberIds.size})</span>
+              </button>
+            </div>
+
+            {/* Members Grid */}
+            <div className="max-h-[500px] overflow-y-auto pr-1 space-y-2">
+              {filteredBatchMembers.length === 0 ? (
+                <div className="text-center py-12 text-slate-400 bg-slate-950/40 rounded-2xl border border-slate-800 p-6">
+                  <Users className="w-10 h-10 mx-auto opacity-20 mb-2" />
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-300">কোনো সদস্য পাওয়া যায়নি</p>
+                  <p className="text-[11px] text-slate-500 mt-1">সার্চ ফিল্টার চেক করুন বা অন্য ফিল্টার ব্যবহার করুন।</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5">
+                  {filteredBatchMembers.map((m) => {
+                    const isSelected = batchSelectedMemberIds.has(m.airman_id);
+                    return (
+                      <div
+                        key={m.airman_id}
+                        onClick={() => toggleBatchMember(m.airman_id)}
+                        className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 select-none active:scale-[0.98] ${
+                          isSelected
+                            ? 'bg-indigo-950/40 border-indigo-500 shadow-md shadow-indigo-950/40'
+                            : 'bg-slate-950/60 border-slate-800/80 hover:border-slate-700 hover:bg-slate-950'
+                        }`}
+                      >
+                        <div className="flex items-center space-x-3 min-w-0">
+                          <div className={`w-5 h-5 rounded-lg flex items-center justify-center shrink-0 border transition-colors ${
+                            isSelected 
+                              ? 'bg-indigo-600 border-indigo-500 text-white' 
+                              : 'border-slate-700 bg-slate-900 text-transparent'
+                          }`}>
+                            <Check className="w-3.5 h-3.5 stroke-[3]" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center space-x-1.5 truncate">
+                              <span className="text-xs font-black text-white truncate">
+                                {m['Rank']} {m['Surname']}
+                              </span>
+                            </div>
+                            <div className="flex items-center space-x-2 mt-0.5">
+                              <span className="text-[10px] font-mono text-slate-400">BD: {m['BD No']}</span>
+                              <span className="text-[10px] font-mono font-bold text-amber-400">বকেয়া: ৳{m.Due || 0}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {isSelected && (
+                          <span className="text-[10px] font-mono font-bold text-emerald-400 shrink-0 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-500/30">
+                            +৳{basketTotal}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODE 2: MEMBER_FIXED (Member & ডেট Fixed - Multiple Menu) */}
+      {/* ======================================================== */}
+      {posMode === 'MEMBER_FIXED' && (
+        <div className="space-y-6">
+          {/* Pinned Fixed Member & Date Banner */}
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-6 shadow-xl space-y-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800/80 pb-4">
+              <div>
+                <span className="px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 text-[10px] font-black uppercase tracking-wider border border-indigo-500/30 inline-flex items-center space-x-1.5 mb-2">
+                  <User className="w-3.5 h-3.5" />
+                  <span>অপশন ২: সদস্য ও তারিখ ফিক্সড (মাল্টি-মেনু অর্ডার)</span>
+                </span>
+                <h3 className="text-lg sm:text-xl font-black text-white">ফিক্সড সদস্য ও তারিখ নির্ধারণ</h3>
+                <p className="text-xs text-slate-400 mt-0.5">সদস্য ও তারিখ ফিক্সড থাকবে, নিচের ক্যাটালগ থেকে দ্রুত একাধিক মেনু আইটেম যোগ করুন</p>
+              </div>
+
+              {/* Date Selector */}
+              <div className="flex items-center space-x-2 bg-slate-950 p-2.5 rounded-2xl border border-slate-800 shrink-0">
+                <Calendar className="w-4 h-4 text-indigo-400 shrink-0 ml-1.5" />
+                <div className="flex flex-col pr-2">
+                  <span className="text-[9px] font-black uppercase tracking-wider text-slate-400">ফিক্সড তারিখ (Date)</span>
+                  <input 
+                    type="date"
+                    value={saleDate}
+                    onChange={(e) => setSaleDate(e.target.value)}
+                    className="bg-transparent text-xs font-bold text-white outline-none cursor-pointer"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Member Selector / Pinned Card */}
+            {!fixedMember ? (
+              <div className="space-y-3">
+                <label className="text-xs font-black uppercase tracking-wider text-amber-300 flex items-center space-x-2">
+                  <User className="w-4 h-4" />
+                  <span>প্রথমে ফিক্সড সদস্য নির্বাচন করুন (Search & Select Member):</span>
+                </label>
+
+                <div className="relative">
+                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input 
+                    type="text"
+                    value={fixedMemberSearch}
+                    onChange={(e) => {
+                      setFixedMemberSearch(e.target.value);
+                      setShowFixedMemberDropdown(true);
+                    }}
+                    onFocus={() => setShowFixedMemberDropdown(true)}
+                    placeholder="সদস্যের নাম বা BD No লিখে খুঁজুন..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-2xl pl-10 pr-4 py-3 text-sm font-bold text-white placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
+                  />
+
+                  {showFixedMemberDropdown && (
+                    <div className="absolute left-0 right-0 top-full mt-2 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden max-h-64 z-50 overflow-y-auto">
+                      {fixedMemberSearch === '' && recentMembers.length > 0 && (
+                        <div className="px-4 py-2 bg-slate-950 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                          সাম্প্রতিক সদস্যবৃন্দ (Recent Members)
+                        </div>
+                      )}
+                      {filteredFixedMemberCandidates.map((m) => (
+                        <div
+                          key={m.airman_id}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            setFixedMember(m);
+                            setShowFixedMemberDropdown(false);
+                            setFixedMemberSearch('');
+                          }}
+                          className="px-4 py-3 hover:bg-slate-800 cursor-pointer flex items-center justify-between border-b border-slate-800 last:border-0 transition-colors"
+                        >
+                          <div>
+                            <p className="text-xs font-bold text-white">{m['Rank']} {m['Surname']}</p>
+                            <p className="text-[10px] text-slate-400 font-mono">BD: {m['BD No']} | বকেয়া: ৳{m.Due || 0}</p>
+                          </div>
+                          <Plus className="w-4 h-4 text-indigo-400" />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Quick Recent Member Chips */}
+                {recentMembers.length > 0 && (
+                  <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">দ্রুত সিলেক্ট:</span>
+                    {recentMembers.slice(0, 5).map((m) => (
+                      <button
+                        key={m.airman_id}
+                        type="button"
+                        onClick={() => setFixedMember(m)}
+                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-indigo-900/40 text-slate-200 text-xs font-bold border border-slate-700 hover:border-indigo-500/50 transition-colors flex items-center space-x-1 cursor-pointer"
+                      >
+                        <span>{m['Rank']} {m['Surname']}</span>
+                        <span className="text-[10px] text-slate-400 font-mono">({m['BD No']})</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* Pinned Member Card */
+              <div className="p-4 bg-indigo-950/30 border border-indigo-500/40 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-inner">
+                <div className="flex items-center space-x-3.5">
+                  <div className="w-12 h-12 rounded-2xl bg-indigo-600/20 border border-indigo-500/40 text-indigo-300 flex items-center justify-center shrink-0">
+                    <User className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                      <h4 className="text-base font-black text-white">{fixedMember['Rank']} {fixedMember['Surname']}</h4>
+                      <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-700 text-indigo-300 font-mono text-xs font-bold">
+                        BD: {fixedMember['BD No']}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-300 font-mono text-xs font-bold">
+                        বর্তমান বকেয়া: ৳{fixedMember.Due || 0}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-indigo-300/80 mt-1">
+                      📌 এই সদস্য ফিক্সড রয়েছে। নিচের ক্যাটালগ থেকে একের পর এক মেনু আইটেম নির্বাচন করুন।
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-2 self-end sm:self-auto">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFixedMember(null);
+                      setBasket([]);
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold border border-slate-700 transition-colors cursor-pointer"
+                  >
+                    সদস্য পরিবর্তন করুন
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Two Columns: Catalog on Left, Member Cart on Right */}
+          <div className="flex flex-col lg:flex-row gap-6">
+            {/* Left Column: Catalog */}
+            <div className="lg:w-2/3 space-y-4">
+              {/* Search & Categories */}
+              <div className="relative">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input 
+                  type="text" 
+                  placeholder="মেনু আইটেম খুঁজুন..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-2xl pl-12 pr-4 py-3 text-sm font-bold text-slate-200 focus:outline-none focus:border-indigo-500 transition-all shadow-sm"
+                />
+              </div>
+
+              {/* Category Pills */}
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+                {availableCategories.map((cat) => {
+                  const isSelected = selectedCategory === cat;
+                  return (
+                    <button
+                      key={cat}
+                      onClick={() => setSelectedCategory(cat)}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-black tracking-wider uppercase transition-all shrink-0 cursor-pointer flex items-center space-x-1.5 border ${
+                        isSelected
+                          ? 'bg-[#4f46e5] text-white border-[#4f46e5] shadow-sm shadow-indigo-500/25'
+                          : 'bg-slate-900 text-slate-400 hover:text-slate-200 hover:bg-slate-800 border-slate-800'
+                      }`}
+                    >
+                      <span>{cat}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Catalog Items Grid */}
+              <div className="space-y-2.5 max-h-[550px] overflow-y-auto pr-1">
+                {filteredCatalog.map((item) => {
+                  const inBasket = basket.find(b => b.id === item.id);
+                  return (
+                    <div 
+                      key={item.id} 
+                      onClick={() => addToBasket(item)}
+                      className={`rounded-2xl p-3.5 flex items-center justify-between border transition-all bg-slate-900 cursor-pointer hover:border-indigo-500/50 group ${
+                        inBasket ? 'border-indigo-500 shadow-sm shadow-indigo-900/30' : 'border-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-3 min-w-0 mr-2">
+                        <div className="w-11 h-11 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center shrink-0 overflow-hidden">
+                          {item.DP ? (
+                            <img src={resolveImageUrl(item.DP)} alt={item.name} className="w-full h-full object-cover" />
+                          ) : (
+                            <PackageIcon className="w-5 h-5 text-slate-400" />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">{item.category}</span>
+                          <h4 className="text-xs sm:text-sm font-black text-white truncate group-hover:text-indigo-300 transition-colors">
+                            {item.name}
+                          </h4>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-3 shrink-0">
+                        <span className="text-base font-black text-white font-mono">৳{item.price}</span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            addToBasket(item);
+                          }}
+                          className={`w-9 h-9 rounded-xl flex items-center justify-center font-black transition-all cursor-pointer ${
+                            inBasket ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-indigo-600 hover:text-white'
+                          }`}
+                        >
+                          <Plus className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Right Column: Order Basket (Desktop) */}
+            <div className="lg:w-1/3">
+              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl flex flex-col min-h-[500px] sticky top-24">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-white flex items-center space-x-2">
+                    <ShoppingCart className="w-4 h-4 text-indigo-400" />
+                    <span>ফিক্সড মেম্বার কার্ট</span>
+                  </h3>
+                  <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-mono text-xs font-bold">
+                    {basket.length} আইটেম
+                  </span>
+                </div>
+
+                {fixedMember ? (
+                  <div className="p-3 bg-slate-950 rounded-2xl border border-slate-800/80 mb-3">
+                    <p className="text-xs font-black text-white">{fixedMember['Rank']} {fixedMember['Surname']}</p>
+                    <p className="text-[10px] text-slate-400 font-mono">BD: {fixedMember['BD No']} | পূর্ব বকেয়া: ৳{fixedMember.Due || 0}</p>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-amber-950/20 border border-amber-500/30 rounded-2xl text-amber-300 text-xs mb-3 text-center">
+                    ⚠️ কোনো সদস্য সিলেক্ট করা হয়নি!
+                  </div>
+                )}
+
+                {/* Cart Items List */}
+                <div className="flex-1 overflow-y-auto space-y-2 mb-4 max-h-[300px] pr-1">
+                  {basket.length === 0 ? (
+                    <div className="text-center py-12 text-slate-500">
+                      <ShoppingCart className="w-8 h-8 mx-auto opacity-20 mb-2" />
+                      <p className="text-xs font-bold uppercase tracking-wider">কার্ট খালি</p>
+                      <p className="text-[11px] text-slate-500 mt-1">বামপাশের ক্যাটালগ থেকে আইটেম যোগ করুন</p>
+                    </div>
+                  ) : (
+                    basket.map((item) => (
+                      <div key={item.id} className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-bold text-white truncate">{item.name}</p>
+                          <p className="text-[10px] text-slate-400 font-mono">৳{item.price} x {item.qty} = ৳{item.price * item.qty}</p>
+                        </div>
+                        <div className="flex items-center space-x-1 shrink-0">
+                          <button onClick={() => updateQty(item.id, -1)} className="p-1 hover:bg-slate-800 rounded text-slate-400"><Minus className="w-3 h-3" /></button>
+                          <span className="text-xs font-mono font-bold text-white w-4 text-center">{item.qty}</span>
+                          <button onClick={() => updateQty(item.id, 1)} className="p-1 hover:bg-slate-800 rounded text-slate-400"><Plus className="w-3 h-3" /></button>
+                          <button onClick={() => removeFromBasket(item.id)} className="p-1 text-rose-400 hover:text-rose-300 ml-1"><Trash2 className="w-3.5 h-3.5" /></button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Summary & Confirm */}
+                <div className="border-t border-slate-800 pt-3 space-y-3">
+                  <div className="flex items-center justify-between text-xs font-mono">
+                    <span className="text-slate-400">মোট বিক্রয় মূল্য:</span>
+                    <span className="text-lg font-black text-white">৳{basketTotal}</span>
+                  </div>
+                  {fixedMember && (
+                    <div className="flex items-center justify-between text-xs font-mono text-emerald-400">
+                      <span>নতুন মোট বকেয়া হবে:</span>
+                      <span className="font-bold">৳{(Number(fixedMember.Due || 0) + basketTotal)}</span>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleCheckout}
+                    disabled={isCheckingOut || !fixedMember || basket.length === 0}
+                    className={`w-full py-3.5 rounded-xl text-xs font-black tracking-wider uppercase flex items-center justify-center space-x-2 transition-all shadow-md ${
+                      (!isCheckingOut && fixedMember && basket.length > 0)
+                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30 cursor-pointer active:scale-95'
+                        : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/50'
+                    }`}
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>কনফার্ম সেলস (৳{basketTotal})</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODE 3: NORMAL (নরমাল POS যেমন এখন আছে)                   */}
+      {/* ======================================================== */}
+      {posMode === 'NORMAL' && (
+        <div className="flex flex-col md:flex-row gap-8">
+          
+          {/* Left Column: Catalog */}
+          <div className="md:w-2/3 space-y-6">
+            {/* Search */}
+            <div className="relative">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input 
+                type="text" 
+                placeholder="Search items..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-2xl pl-12 pr-4 py-3.5 text-sm font-bold text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#4f46e5]/20 focus:border-[#4f46e5] transition-all shadow-sm"
+              />
+            </div>
+
+            {/* Category Filter Pills */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+              {availableCategories.map((cat) => {
+                const count = cat === 'ALL' 
                   ? catalog.length 
                   : catalog.filter(i => (i.category || 'SNACKS').toUpperCase() === cat).length;
-               const isSelected = selectedCategory === cat;
-               return (
+                const isSelected = selectedCategory === cat;
+                return (
                   <button
-                     key={cat}
-                     onClick={() => setSelectedCategory(cat)}
-                     className={`px-3.5 py-1.5 rounded-xl text-xs font-black tracking-wider uppercase transition-all shrink-0 cursor-pointer flex items-center space-x-1.5 border ${
-                        isSelected
-                           ? 'bg-[#4f46e5] text-white border-[#4f46e5] shadow-sm shadow-indigo-500/25'
-                           : 'bg-slate-900 text-slate-400 hover:text-slate-200 hover:bg-slate-800 border-slate-800'
-                     }`}
+                    key={cat}
+                    onClick={() => setSelectedCategory(cat)}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-black tracking-wider uppercase transition-all shrink-0 cursor-pointer flex items-center space-x-1.5 border ${
+                      isSelected
+                        ? 'bg-[#4f46e5] text-white border-[#4f46e5] shadow-sm shadow-indigo-500/25'
+                        : 'bg-slate-900 text-slate-400 hover:text-slate-200 hover:bg-slate-800 border-slate-800'
+                    }`}
                   >
-                     <span>{cat}</span>
-                     <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
-                        isSelected ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-500'
-                     }`}>
-                        {count}
-                     </span>
+                    <span>{cat}</span>
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                      isSelected ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-500'
+                    }`}>
+                      {count}
+                    </span>
                   </button>
-               );
-            })}
-         </div>
+                );
+              })}
+            </div>
 
-          {/* Items List */}
-          <div className="space-y-3 h-[600px] overflow-y-auto pr-2">
-            {filteredCatalog.map((item, i) => {
-               const inBasket = basket.find(b => b.id === item.id);
-               const itemRecipe = getRecipeForMenuItem(item.id, item.name);
+            {/* Items List */}
+            <div className="space-y-3 h-[600px] overflow-y-auto pr-2">
+              {filteredCatalog.map((item, i) => {
+                const inBasket = basket.find(b => b.id === item.id);
+                const itemRecipe = getRecipeForMenuItem(item.id, item.name);
 
-               return (
-               <div 
-                  key={i} 
-                  onClick={() => addToBasket(item)} 
-                  className={`rounded-2xl p-4 flex items-center justify-between border transition-all duration-300 bg-slate-900 cursor-pointer hover:-translate-y-1 hover:shadow-[0_15px_30px_-10px_rgba(79,70,229,0.3)] group ${
-                     inBasket 
+                return (
+                  <div 
+                    key={i} 
+                    onClick={() => addToBasket(item)} 
+                    className={`rounded-2xl p-4 flex items-center justify-between border transition-all duration-300 bg-slate-900 cursor-pointer hover:-translate-y-1 hover:shadow-[0_15px_30px_-10px_rgba(79,70,229,0.3)] group ${
+                      inBasket 
                         ? 'border-[#4f46e5] shadow-[0_10px_20px_-10px_rgba(79,70,229,0.2)]' 
                         : 'border-slate-800 hover:border-indigo-500/50'
-                  }`}
-               >
-                  <div className="flex items-center space-x-4 min-w-0 flex-1 mr-2">
-                     <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-inner transition-colors duration-300 overflow-hidden shrink-0 border border-slate-800/80 ${
+                    }`}
+                  >
+                    <div className="flex items-center space-x-4 min-w-0 flex-1 mr-2">
+                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-inner transition-colors duration-300 overflow-hidden shrink-0 border border-slate-800/80 ${
                         inBasket ? 'bg-indigo-900/30 text-indigo-400' : 'bg-[#0f172a] text-slate-400 group-hover:bg-slate-800 group-hover:text-indigo-300'
-                     }`}>
+                      }`}>
                         {item.DP ? (
                           <img 
                             src={resolveImageUrl(item.DP)} 
@@ -887,207 +1752,549 @@ export const PosSales: React.FC = () => {
                         ) : (
                           <PackageIcon className="w-6 h-6 group-hover:scale-110 transition-transform duration-300" />
                         )}
-                     </div>
-                     <div className="min-w-0 flex-1">
+                      </div>
+                      <div className="min-w-0 flex-1">
                         <p className="text-[10px] font-black text-[#4f46e5] uppercase tracking-widest mb-0.5">{item.category}</p>
                         <h3 className="font-black text-base text-white group-hover:text-indigo-400 transition-colors truncate">
-                           {item.name}
+                          {item.name}
                         </h3>
                         
                         {/* Raw Items / Recipe Badge */}
                         {itemRecipe.length > 0 ? (
-                           <div className="flex items-center space-x-1 mt-1 overflow-x-auto scrollbar-none">
-                              <span className="flex items-center space-x-1 px-2 py-0.5 rounded-lg bg-indigo-950/60 border border-indigo-500/30 text-[9px] font-bold text-indigo-300 tracking-wide truncate">
-                                 <ChefHat className="w-3 h-3 text-indigo-400 shrink-0" />
-                                 <span className="truncate">
-                                    {itemRecipe.map(r => `${r.rawItemName} ${r.quantity}${r.unit}`).join(', ')}
-                                 </span>
+                          <div className="flex items-center space-x-1 mt-1 overflow-x-auto scrollbar-none">
+                            <span className="flex items-center space-x-1 px-2 py-0.5 rounded-lg bg-indigo-950/60 border border-indigo-500/30 text-[9px] font-bold text-indigo-300 tracking-wide truncate">
+                              <ChefHat className="w-3 h-3 text-indigo-400 shrink-0" />
+                              <span className="truncate">
+                                {itemRecipe.map(r => `${r.rawItemName} ${r.quantity}${r.unit}`).join(', ')}
                               </span>
-                           </div>
+                            </span>
+                          </div>
                         ) : (
-                           <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider mt-0.5">READY TO SERVE</p>
+                          <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider mt-0.5">READY TO SERVE</p>
                         )}
-                     </div>
-                  </div>
-                  <div className="flex items-center space-x-4 shrink-0">
-                     <p className="text-xl font-black tracking-tighter text-white font-mono">৳{item.price}</p>
-                     
-                     <button 
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-4 shrink-0">
+                      <p className="text-xl font-black tracking-tighter text-white font-mono">৳{item.price}</p>
+                      
+                      <button 
                         onClick={(e) => { 
-                           e.stopPropagation(); 
-                           addToBasket(item); 
+                          e.stopPropagation(); 
+                          addToBasket(item); 
                         }} 
                         className={`w-10 h-10 rounded-xl flex items-center justify-center font-black shadow-sm transition-all duration-300 ${
-                           inBasket 
-                              ? 'bg-[#4f46e5] text-white hover:bg-[#4338ca] hover:scale-110 cursor-pointer' 
-                              : 'bg-[#0f172a] text-white group-hover:bg-[#4f46e5] group-hover:scale-110 cursor-pointer'
+                          inBasket 
+                            ? 'bg-[#4f46e5] text-white hover:bg-[#4338ca] hover:scale-110 cursor-pointer' 
+                            : 'bg-[#0f172a] text-white group-hover:bg-[#4f46e5] group-hover:scale-110 cursor-pointer'
                         }`}
                         title="Add to basket"
-                     >
+                      >
                         <Plus className="w-5 h-5" />
-                     </button>
+                      </button>
+                    </div>
                   </div>
-               </div>
-            )})}
+                );
+              })}
+            </div>
           </div>
-       </div>
 
-      {/* Right Column: Member Basket */}
-      <div className="md:w-1/3">
-         <div className="bg-slate-900 rounded-[2rem] border-t-4 border-t-[#4f46e5] shadow-sm border border-slate-800 min-h-[600px] flex flex-col sticky top-24">
-            <div className="p-6 border-b border-slate-800 flex items-center justify-between bg-slate-800 rounded-t-[2rem]">
-               <h3 className="text-xs font-black text-white uppercase tracking-widest flex items-center space-x-2">
+          {/* Right Column: Member Basket (Desktop) */}
+          <div className="md:w-1/3">
+            <div className="bg-slate-900 rounded-[2rem] border-t-4 border-t-[#4f46e5] shadow-sm border border-slate-800 min-h-[600px] flex flex-col sticky top-24">
+              <div className="p-6 border-b border-slate-800 flex items-center justify-between bg-slate-800 rounded-t-[2rem]">
+                <h3 className="text-xs font-black text-white uppercase tracking-widest flex items-center space-x-2">
                   <ShoppingCart className="w-4 h-4 text-indigo-500" />
                   <span>MEMBER BASKET</span>
-               </h3>
-               <span className="px-3 py-1 bg-[#4f46e5] text-white rounded-full text-[8px] font-black tracking-widest uppercase shadow-sm">
+                </h3>
+                <span className="px-3 py-1 bg-[#4f46e5] text-white rounded-full text-[8px] font-black tracking-widest uppercase shadow-sm">
                   {basket.length} ITEMS
-               </span>
-            </div>
-            
-            <div className="p-6 border-b border-slate-800 relative z-10 space-y-4">
+                </span>
+              </div>
+              
+              <div className="p-6 border-b border-slate-800 relative z-10 space-y-4">
                 <div>
-                    <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-2 flex items-center space-x-1">
-                        <Calendar className="w-3 h-3" />
-                        <span>Sale Date</span>
-                    </label>
-                    <input 
-                        type="date" 
-                        value={saleDate}
-                        onChange={(e) => setSaleDate(e.target.value)}
-                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-sm font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
+                  <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-2 flex items-center space-x-1">
+                    <Calendar className="w-3 h-3" />
+                    <span>Sale Date</span>
+                  </label>
+                  <input 
+                    type="date" 
+                    value={saleDate}
+                    onChange={(e) => setSaleDate(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-sm font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
                 </div>
 
                 <div>
-                    <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-2 block">Billed To (Search Member)</label>
-                    
-                    {selectedMembers.length > 0 && (
+                  <label className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-2 block">Billed To (Search Member)</label>
+                  
+                  {selectedMembers.length > 0 && (
                     <div className="flex flex-wrap gap-2 mb-3">
-                        {selectedMembers.map(m => (
-                            <span key={m.airman_id} className="flex items-center space-x-1 px-3 py-1.5 bg-indigo-900/30 text-indigo-400 rounded-lg text-[10px] font-bold border border-indigo-500/20">
-                                <span>{m['Rank']} {m['Surname']}</span>
-                                <button onClick={() => setSelectedMembers(selectedMembers.filter(sm => sm.airman_id !== m.airman_id))} className="text-indigo-400 hover:text-indigo-300 ml-1">
-                                    <X className="w-3 h-3" />
-                                </button>
-                            </span>
-                        ))}
+                      {selectedMembers.map(m => (
+                        <span key={m.airman_id} className="flex items-center space-x-1 px-3 py-1.5 bg-indigo-900/30 text-indigo-400 rounded-lg text-[10px] font-bold border border-indigo-500/20">
+                          <span>{m['Rank']} {m['Surname']}</span>
+                          <button onClick={() => setSelectedMembers(selectedMembers.filter(sm => sm.airman_id !== m.airman_id))} className="text-indigo-400 hover:text-indigo-300 ml-1">
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
                     </div>
-                    )}
+                  )}
 
-                <div className="relative">
-                   <input 
+                  <div className="relative">
+                    <input 
                       type="text" 
                       value={memberSearchTerm}
                       onChange={(e) => {
-                          setMemberSearchTerm(e.target.value);
-                          setShowMemberDropdown(true);
+                        setMemberSearchTerm(e.target.value);
+                        setShowMemberDropdown(true);
                       }}
                       onFocus={() => setShowMemberDropdown(true)}
                       onBlur={() => setTimeout(() => setShowMemberDropdown(false), 200)}
                       className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-sm font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                       placeholder="Search Name or BD No..."
-                   />
-                   
-                   {showMemberDropdown && (
-                       <div className="absolute left-0 right-0 top-full mt-2 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-60 z-50">
-                           {memberSearchTerm === '' && recentMembers.length > 0 && (
-                               <div className="px-4 py-2 bg-slate-900/50 text-[10px] font-black text-slate-400 uppercase tracking-widest">Recent Members</div>
-                           )}
-                           {(memberSearchTerm === '' ? recentMembers : members.filter(m => {
-                               const name = m['Surname'] || '';
-                               const bd = m['BD No'] || '';
-                               return name.toLowerCase().includes(memberSearchTerm.toLowerCase()) || bd.includes(memberSearchTerm);
-                           }).slice(0, 5)).map(m => (
-                               <div 
-                                   key={m.airman_id} 
-                                   onMouseDown={(e) => {
-                                       e.preventDefault();
-                                       if (!selectedMembers.find(sm => sm.airman_id === m.airman_id)) {
-                                           setSelectedMembers([...selectedMembers, m]);
-                                       }
-                                       setMemberSearchTerm('');
-                                       setShowMemberDropdown(false);
-                                   }}
-                                   className="px-4 py-3 hover:bg-slate-700 cursor-pointer flex items-center justify-between border-b border-slate-700/50 last:border-0 transition-colors"
-                               >
-                                   <div>
-                                       <p className="text-xs font-bold text-white">{m['Rank']} {m['Surname']}</p>
-                                       <p className="text-[10px] text-slate-400">BD: {m['BD No']}</p>
-                                   </div>
-                                   <Plus className="w-4 h-4 text-slate-400" />
-                               </div>
-                           ))}
-                           {memberSearchTerm !== '' && members.filter(m => {
-                               const name = m['Surname'] || '';
-                               const bd = m['BD No'] || '';
-                               return name.toLowerCase().includes(memberSearchTerm.toLowerCase()) || bd.includes(memberSearchTerm);
-                           }).length === 0 && (
-                               <div className="px-4 py-3 text-xs text-slate-400 text-center">No members found</div>
-                           )}
-                       </div>
-                   )}
-                </div>
-            </div>
-            </div>
-
-            <div className="flex-1 p-6 flex flex-col gap-4 overflow-y-auto">
-               {basket.length === 0 ? (
-                   <div className="flex-1 flex flex-col items-center justify-center text-slate-400 space-y-2">
-                       <ShoppingCart className="w-10 h-10 opacity-20" />
-                       <p className="text-xs font-bold uppercase tracking-widest opacity-50">Basket is empty</p>
-                   </div>
-               ) : (
-                   basket.map((item) => (
-                       <div key={item.id} className="flex items-center justify-between bg-slate-800 p-4 rounded-xl border border-slate-800">
-                           <div className="flex-1 pr-4 flex items-center space-x-3 min-w-0">
-                               {item.DP && (
-                                 <div className="w-10 h-10 rounded-lg bg-slate-900 border border-slate-700 overflow-hidden shrink-0 shadow-sm">
-                                   <img 
-                                     src={resolveImageUrl(item.DP)} 
-                                     alt={item.name} 
-                                     referrerPolicy="no-referrer"
-                                     className="w-full h-full object-cover"
-                                     onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                                   />
-                                 </div>
-                               )}
-                               <div className="min-w-0 flex-1">
-                                  <p className="text-xs font-black text-white leading-tight truncate">{item.name}</p>
-                                  <p className="text-[10px] font-bold text-slate-400 mt-1">৳{item.price} x {item.qty}</p>
-                               </div>
+                    />
+                    
+                    {showMemberDropdown && (
+                      <div className="absolute left-0 right-0 top-full mt-2 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-60 z-50">
+                        {memberSearchTerm === '' && recentMembers.length > 0 && (
+                          <div className="px-4 py-2 bg-slate-900/50 text-[10px] font-black text-slate-400 uppercase tracking-widest">Recent Members</div>
+                        )}
+                        {(memberSearchTerm === '' ? recentMembers : members.filter(m => {
+                          const name = m['Surname'] || '';
+                          const bd = m['BD No'] || '';
+                          return name.toLowerCase().includes(memberSearchTerm.toLowerCase()) || bd.includes(memberSearchTerm);
+                        }).slice(0, 5)).map(m => (
+                          <div 
+                            key={m.airman_id} 
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              if (!selectedMembers.find(sm => sm.airman_id === m.airman_id)) {
+                                setSelectedMembers([...selectedMembers, m]);
+                              }
+                              setMemberSearchTerm('');
+                              setShowMemberDropdown(false);
+                            }}
+                            className="px-4 py-3 hover:bg-slate-700 cursor-pointer flex items-center justify-between border-b border-slate-700/50 last:border-0 transition-colors"
+                          >
+                            <div>
+                              <p className="text-xs font-bold text-white">{m['Rank']} {m['Surname']}</p>
+                              <p className="text-[10px] text-slate-400">BD: {m['BD No']}</p>
                             </div>
-                           <div className="flex items-center space-x-3">
-                               <div className="flex items-center space-x-2 bg-slate-900 rounded-lg border border-slate-700 p-1">
-                                   <button onClick={() => updateQty(item.id, -1)} className="p-1 hover:bg-slate-800 rounded text-slate-400"><Minus className="w-3 h-3" /></button>
-                                   <span className="text-xs font-black w-4 text-center">{item.qty}</span>
-                                   <button onClick={() => updateQty(item.id, 1)} className="p-1 hover:bg-slate-800 rounded text-slate-400"><Plus className="w-3 h-3" /></button>
-                               </div>
-                               <button onClick={() => removeFromBasket(item.id)} className="p-1.5 text-rose-400 hover:text-rose-600 hover:bg-rose-900/30 rounded-lg transition-colors">
-                                   <Trash2 className="w-4 h-4" />
-                               </button>
-                           </div>
-                       </div>
-                   ))
-               )}
-            </div>
+                            <Plus className="w-4 h-4 text-slate-400" />
+                          </div>
+                        ))}
+                        {memberSearchTerm !== '' && members.filter(m => {
+                          const name = m['Surname'] || '';
+                          const bd = m['BD No'] || '';
+                          return name.toLowerCase().includes(memberSearchTerm.toLowerCase()) || bd.includes(memberSearchTerm);
+                        }).length === 0 && (
+                          <div className="px-4 py-3 text-xs text-slate-400 text-center">No members found</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
 
-            <div className="p-6 bg-slate-800 rounded-b-[2rem] border-t border-slate-800 space-y-4">
+              <div className="flex-1 p-6 flex flex-col gap-4 overflow-y-auto">
+                {basket.length === 0 ? (
+                  <div className="flex-1 flex flex-col items-center justify-center text-slate-400 space-y-2">
+                    <ShoppingCart className="w-10 h-10 opacity-20" />
+                    <p className="text-xs font-bold uppercase tracking-widest opacity-50">Basket is empty</p>
+                  </div>
+                ) : (
+                  basket.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between bg-slate-800 p-4 rounded-xl border border-slate-800">
+                      <div className="flex-1 pr-4 flex items-center space-x-3 min-w-0">
+                        {item.DP && (
+                          <div className="w-10 h-10 rounded-lg bg-slate-900 border border-slate-700 overflow-hidden shrink-0 shadow-sm">
+                            <img 
+                              src={resolveImageUrl(item.DP)} 
+                              alt={item.name} 
+                              referrerPolicy="no-referrer"
+                              className="w-full h-full object-cover"
+                              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                            />
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-black text-white leading-tight truncate">{item.name}</p>
+                          <p className="text-[10px] font-bold text-slate-400 mt-1">৳{item.price} x {item.qty}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center space-x-3">
+                        <div className="flex items-center space-x-2 bg-slate-900 rounded-lg border border-slate-700 p-1">
+                          <button onClick={() => updateQty(item.id, -1)} className="p-1 hover:bg-slate-800 rounded text-slate-400"><Minus className="w-3 h-3" /></button>
+                          <span className="text-xs font-black w-4 text-center">{item.qty}</span>
+                          <button onClick={() => updateQty(item.id, 1)} className="p-1 hover:bg-slate-800 rounded text-slate-400"><Plus className="w-3 h-3" /></button>
+                        </div>
+                        <button onClick={() => removeFromBasket(item.id)} className="p-1.5 text-rose-400 hover:text-rose-600 hover:bg-rose-900/30 rounded-lg transition-colors">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="p-6 bg-slate-800 rounded-b-[2rem] border-t border-slate-800 space-y-4">
                 <div className="flex items-center justify-between">
-                    <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Total Amount</span>
-                    <span className="text-2xl font-black text-white tracking-tighter">৳{basketTotal}</span>
+                  <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Total Amount</span>
+                  <span className="text-2xl font-black text-white tracking-tighter">৳{basketTotal}</span>
                 </div>
                 <button 
-                    onClick={handleCheckout}
-                    disabled={basket.length === 0 || selectedMembers.length === 0}
-                    className={`w-full py-4 rounded-xl text-[10px] font-black tracking-widest uppercase flex items-center justify-center space-x-2 transition-all shadow-md ${(basket.length > 0 && selectedMembers.length > 0) ? 'bg-emerald-900/30 hover:bg-emerald-600 text-white shadow-emerald-500/20' : 'bg-slate-800 text-slate-400 cursor-not-allowed'}`}
+                  onClick={handleCheckout}
+                  disabled={basket.length === 0 || selectedMembers.length === 0}
+                  className={`w-full py-4 rounded-xl text-[10px] font-black tracking-widest uppercase flex items-center justify-center space-x-2 transition-all shadow-md ${(basket.length > 0 && selectedMembers.length > 0) ? 'bg-emerald-900/30 hover:bg-emerald-600 text-white shadow-emerald-500/20' : 'bg-slate-800 text-slate-400 cursor-not-allowed'}`}
                 >
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>COMPLETE SALE</span>
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>COMPLETE SALE</span>
                 </button>
+              </div>
             </div>
-         </div>
+          </div>
+
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MOBILE STICKY FLOATING BOTTOM BAR (md:hidden)            */}
+      {/* ======================================================== */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 p-3 shadow-2xl safe-area-bottom">
+        {posMode === 'MENU_FIXED' ? (
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] uppercase font-bold text-slate-400">
+                {batchSelectedMemberIds.size} জন নির্বাচিত • জনপ্রতি ৳{basketTotal}
+              </p>
+              <p className="text-base font-black text-emerald-400 font-mono">
+                মোট: ৳{basketTotal * batchSelectedMemberIds.size}
+              </p>
+            </div>
+            {basket.length === 0 ? (
+              <button
+                type="button"
+                onClick={() => setShowBatchMenuModal(true)}
+                className="px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-black tracking-wider uppercase flex items-center space-x-1.5 shadow-md active:scale-95"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>মেনু যোগ করুন</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleCheckout}
+                disabled={isCheckingOut || batchSelectedMemberIds.size === 0}
+                className={`px-4 py-2.5 rounded-xl text-xs font-black tracking-wider uppercase flex items-center space-x-1.5 shadow-md transition-all ${
+                  (!isCheckingOut && batchSelectedMemberIds.size > 0)
+                    ? 'bg-emerald-600 text-white active:scale-95 shadow-emerald-600/30'
+                    : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/50'
+                }`}
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>কনফার্ম সেলস</span>
+              </button>
+            )}
+          </div>
+        ) : posMode === 'MEMBER_FIXED' ? (
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] uppercase font-bold text-slate-400 truncate">
+                {fixedMember ? `${fixedMember['Surname']} • ` : 'সদস্য বাকি • '}{basket.length} আইটেম
+              </p>
+              <p className="text-base font-black text-emerald-400 font-mono">
+                ৳{basketTotal}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsMobileCartOpen(true)}
+              className="px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-black tracking-wider uppercase flex items-center space-x-1.5 shadow-md shadow-indigo-600/30 active:scale-95 cursor-pointer"
+            >
+              <ShoppingCart className="w-4 h-4" />
+              <span>কার্ট ও চেকআউট ({basket.length})</span>
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] uppercase font-bold text-slate-400">
+                {selectedMembers.length} সদস্য • {basket.length} আইটেম
+              </p>
+              <p className="text-base font-black text-emerald-400 font-mono">
+                ৳{basketTotal}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsMobileCartOpen(true)}
+              className="px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-black tracking-wider uppercase flex items-center space-x-1.5 shadow-md shadow-indigo-600/30 active:scale-95 cursor-pointer"
+            >
+              <ShoppingCart className="w-4 h-4" />
+              <span>কার্ট দেখুন ({basket.length})</span>
+            </button>
+          </div>
+        )}
       </div>
+
+      {/* ======================================================== */}
+      {/* MODE 1: BATCH MENU CATALOG PICKER MODAL                   */}
+      {/* ======================================================== */}
+      <AnimatePresence>
+        {showBatchMenuModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-2 sm:p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden"
+            >
+              {/* Header */}
+              <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 shrink-0">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30">
+                    <Utensils className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm sm:text-base font-black text-white">ফিক্সড মেনু নির্বাচন করুন</h3>
+                    <p className="text-[11px] text-slate-400">এই আইটেমগুলো সবার একাউন্টে বিল হিসেবে যোগ হবে</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowBatchMenuModal(false)}
+                  className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Search & Categories */}
+              <div className="p-3 sm:p-4 border-b border-slate-800 bg-slate-950/60 space-y-2 shrink-0">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="মেনু আইটেম সার্চ করুন..."
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-xs font-bold text-white placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
+                  {availableCategories.map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setSelectedCategory(cat)}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all shrink-0 cursor-pointer ${
+                        selectedCategory === cat
+                          ? 'bg-indigo-600 text-white'
+                          : 'bg-slate-900 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Items List */}
+              <div className="p-3 sm:p-4 overflow-y-auto space-y-2 flex-1 max-h-[420px]">
+                {filteredCatalog.map((item) => {
+                  const inBasket = basket.find(b => b.id === item.id);
+                  return (
+                    <div
+                      key={item.id}
+                      className={`p-3 rounded-xl border flex items-center justify-between gap-2 transition-all ${
+                        inBasket ? 'bg-indigo-950/30 border-indigo-500/60' : 'bg-slate-950/70 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-black text-white truncate">{item.name}</p>
+                        <p className="text-[11px] font-mono text-indigo-400 font-bold">৳{item.price}</p>
+                      </div>
+
+                      <div className="flex items-center space-x-2 shrink-0">
+                        {inBasket ? (
+                          <div className="flex items-center space-x-1.5 bg-slate-900 rounded-lg border border-slate-700 p-0.5">
+                            <button onClick={() => updateQty(item.id, -1)} className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800"><Minus className="w-3.5 h-3.5" /></button>
+                            <span className="text-xs font-mono font-black text-white w-5 text-center">{inBasket.qty}</span>
+                            <button onClick={() => updateQty(item.id, 1)} className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800"><Plus className="w-3.5 h-3.5" /></button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => addToBasket(item)}
+                            className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-colors flex items-center space-x-1"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>যোগ</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Footer */}
+              <div className="p-4 border-t border-slate-800 bg-slate-950 flex items-center justify-between gap-3 shrink-0">
+                <div className="text-xs font-mono">
+                  <span className="text-slate-400">জনপ্রতি ফিক্সড মূল্য: </span>
+                  <strong className="text-emerald-400 text-sm font-black">৳{basketTotal}</strong>
+                  <span className="text-slate-500 text-[10px] ml-1">({basket.length}টি আইটেম)</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowBatchMenuModal(false)}
+                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black tracking-wider uppercase transition-all shadow-md active:scale-95"
+                >
+                  সম্পন্ন করুন (Done)
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ======================================================== */}
+      {/* MOBILE BOTTOM CART DRAWER SHEET (isMobileCartOpen)       */}
+      {/* ======================================================== */}
+      <AnimatePresence>
+        {isMobileCartOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-end justify-center md:hidden"
+            onClick={() => setIsMobileCartOpen(false)}
+          >
+            <motion.div
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-slate-900 border-t border-slate-800 rounded-t-3xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden"
+            >
+              {/* Drawer Grabber & Header */}
+              <div className="p-4 border-b border-slate-800 bg-slate-900/90 flex items-center justify-between shrink-0">
+                <div className="flex items-center space-x-2">
+                  <ShoppingCart className="w-5 h-5 text-indigo-400" />
+                  <h3 className="text-sm font-black text-white uppercase tracking-wider">
+                    {posMode === 'MEMBER_FIXED' ? 'মেম্বার অর্ডার কার্ট' : 'সেলস কার্ট ও চেকআউট'}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsMobileCartOpen(false)}
+                  className="p-1.5 text-slate-400 hover:text-white rounded-lg bg-slate-800"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Mode-Specific Member Context */}
+              <div className="p-3 bg-slate-950 border-b border-slate-800/80 shrink-0 space-y-2">
+                {posMode === 'MEMBER_FIXED' ? (
+                  fixedMember ? (
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-bold text-white">{fixedMember['Rank']} {fixedMember['Surname']}</p>
+                        <p className="text-[10px] text-slate-400 font-mono">BD: {fixedMember['BD No']} | পূর্ব বকেয়া: ৳{fixedMember.Due || 0}</p>
+                      </div>
+                      <span className="px-2 py-0.5 bg-indigo-500/20 text-indigo-300 text-[10px] font-bold rounded">
+                        ফিক্সড মেম্বার
+                      </span>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-amber-400">⚠️ অনুগ্রহ করে প্রথমে সদস্য নির্বাচন করুন</p>
+                  )
+                ) : (
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">বিল প্রাপক সদস্য:</label>
+                    {selectedMembers.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedMembers.map(m => (
+                          <span key={m.airman_id} className="inline-flex items-center px-2 py-1 bg-indigo-950 border border-indigo-500/30 text-indigo-300 rounded text-[11px] font-bold">
+                            <span>{m['Rank']} {m['Surname']}</span>
+                            <button onClick={() => setSelectedMembers(selectedMembers.filter(sm => sm.airman_id !== m.airman_id))} className="ml-1 text-slate-400 hover:text-white">
+                              ✕
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-amber-400">⚠️ কোনো সদস্য নির্বাচিত নেই</p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Cart Items List */}
+              <div className="p-3 overflow-y-auto space-y-2 flex-1">
+                {basket.length === 0 ? (
+                  <div className="text-center py-10 text-slate-500">
+                    <ShoppingCart className="w-8 h-8 mx-auto opacity-20 mb-2" />
+                    <p className="text-xs font-bold uppercase tracking-wider">কার্ট খালি</p>
+                  </div>
+                ) : (
+                  basket.map((item) => (
+                    <div key={item.id} className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-bold text-white truncate">{item.name}</p>
+                        <p className="text-[11px] font-mono text-slate-400">৳{item.price} x {item.qty} = ৳{item.price * item.qty}</p>
+                      </div>
+                      <div className="flex items-center space-x-1.5 shrink-0">
+                        <div className="flex items-center space-x-1 bg-slate-900 rounded-lg border border-slate-700 p-0.5">
+                          <button onClick={() => updateQty(item.id, -1)} className="p-1 hover:bg-slate-800 rounded text-slate-400"><Minus className="w-3 h-3" /></button>
+                          <span className="text-xs font-mono font-bold text-white w-4 text-center">{item.qty}</span>
+                          <button onClick={() => updateQty(item.id, 1)} className="p-1 hover:bg-slate-800 rounded text-slate-400"><Plus className="w-3 h-3" /></button>
+                        </div>
+                        <button onClick={() => removeFromBasket(item.id)} className="p-1 text-rose-400 hover:text-rose-300"><Trash2 className="w-3.5 h-3.5" /></button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Drawer Footer & Checkout */}
+              <div className="p-4 border-t border-slate-800 bg-slate-950 space-y-3 shrink-0">
+                <div className="flex items-center justify-between text-xs font-mono">
+                  <span className="text-slate-400">মোট বিক্রয় মূল্য:</span>
+                  <span className="text-xl font-black text-white">৳{basketTotal}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCheckout}
+                  disabled={
+                    isCheckingOut || 
+                    basket.length === 0 || 
+                    (posMode === 'MEMBER_FIXED' ? !fixedMember : selectedMembers.length === 0)
+                  }
+                  className={`w-full py-3.5 rounded-xl text-xs font-black tracking-wider uppercase flex items-center justify-center space-x-2 transition-all shadow-md ${
+                    (!isCheckingOut && basket.length > 0 && (posMode === 'MEMBER_FIXED' ? !!fixedMember : selectedMembers.length > 0))
+                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30 cursor-pointer active:scale-95'
+                      : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/50'
+                  }`}
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>কনফার্ম সেলস (৳{basketTotal})</span>
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
     </div>
 
     

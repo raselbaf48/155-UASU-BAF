@@ -17,6 +17,7 @@ export const CANTEEN_CLOUD_KEYS = [
   'canteen_member_bangla_names',
   'canteen_fund_transfers',
   'canteen_daily_menu',
+  'canteen_daily_menu_updated_at',
   'canteen_menu_recipes_v2',
   'canteen_raw_stock_logs_v2',
   'canteen_expense_last_unit_prices',
@@ -271,6 +272,7 @@ function dispatchKeyUpdateEvent(key: string) {
       window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
       break;
     case 'canteen_daily_menu':
+    case 'canteen_daily_menu_updated_at':
       window.dispatchEvent(new Event('canteen_daily_menu_updated'));
       break;
     case 'canteen_bill_import_history':
@@ -758,7 +760,10 @@ export function initCanteenCloudSync(): () => void {
   const handleLocalRecipes = () => queuePushKeyToCloud('canteen_menu_recipes_v2');
   const handleLocalStockLogs = () => queuePushKeyToCloud('canteen_raw_stock_logs_v2');
   const handleLocalRawInventory = () => queuePushKeyToCloud('canteen_raw_inventory_items_v2');
-  const handleLocalDailyMenu = () => queuePushKeyToCloud('canteen_daily_menu');
+  const handleLocalDailyMenu = () => {
+    queuePushKeyToCloud('canteen_daily_menu');
+    queuePushKeyToCloud('canteen_daily_menu_updated_at');
+  };
 
   window.addEventListener('canteen_txs_updated', handleLocalTxs);
   window.addEventListener('canteen_pre_orders_updated', handleLocalOrders);
@@ -779,6 +784,7 @@ export function initCanteenCloudSync(): () => void {
     queuePushKeyToCloud('canteen_member_bangla_names');
     queuePushKeyToCloud('canteen_fund_transfers');
     queuePushKeyToCloud('canteen_daily_menu');
+    queuePushKeyToCloud('canteen_daily_menu_updated_at');
     queuePushKeyToCloud('canteen_raw_inventory_items_v2');
     queuePushKeyToCloud('canteen_raw_stock_logs_v2');
     queuePushKeyToCloud('canteen_menu_recipes_v2');

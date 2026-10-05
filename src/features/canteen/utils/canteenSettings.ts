@@ -24,9 +24,86 @@ export const DEFAULT_CANTEEN_CONFIG: CanteenConfig = {
   managerBdNo: '',
   footer: 'Official Canteen of UAV | Integrity and Service',
   preOrderEnabled: true,
-  preOrderStartTime: '08:00',
-  preOrderEndTime: '16:00'
+  preOrderStartTime: '18:00',
+  preOrderEndTime: '08:00'
 };
+
+export const CANTEEN_DAILY_MENU_KEY = 'canteen_daily_menu';
+export const CANTEEN_DAILY_MENU_TIMESTAMP_KEY = 'canteen_daily_menu_updated_at';
+
+/**
+ * Checks if the daily curated menu has passed the 12:00 PM (noon) auto-reset threshold.
+ * Everyday at 12:00 PM, curated menu automatically resets.
+ * If current time >= 12:00 PM and the menu was set before today 12:00 PM, it is expired.
+ * If current time < 12:00 PM and the menu was set before yesterday 12:00 PM, it is expired.
+ */
+export function isDailyMenuExpired(timestampMs?: number): boolean {
+  const now = new Date();
+  const threshold = new Date(now);
+  if (now.getHours() < 12) {
+    // If before 12:00 PM today, latest reset was yesterday 12:00 PM
+    threshold.setDate(threshold.getDate() - 1);
+  }
+  threshold.setHours(12, 0, 0, 0);
+
+  let targetTs = timestampMs;
+  if (targetTs === undefined) {
+    const raw = localStorage.getItem(CANTEEN_DAILY_MENU_TIMESTAMP_KEY);
+    targetTs = raw ? new Date(raw).getTime() : 0;
+  }
+
+  // If never set or set before the threshold, it is expired
+  return !targetTs || targetTs < threshold.getTime();
+}
+
+/**
+ * Loads the curated menu item IDs, automatically resetting to [] if 12:00 PM threshold has passed.
+ */
+export function getCuratedDailyMenu(): string[] {
+  try {
+    const rawMenu = localStorage.getItem(CANTEEN_DAILY_MENU_KEY);
+    if (!rawMenu) return [];
+
+    let parsed: any[] = [];
+    try {
+      parsed = JSON.parse(rawMenu);
+    } catch {
+      return [];
+    }
+    if (!Array.isArray(parsed) || parsed.length === 0) return [];
+
+    // Check expiration against daily 12:00 PM threshold
+    if (isDailyMenuExpired()) {
+      localStorage.setItem(CANTEEN_DAILY_MENU_KEY, '[]');
+      localStorage.setItem(CANTEEN_DAILY_MENU_TIMESTAMP_KEY, new Date().toISOString());
+      window.dispatchEvent(new Event('canteen_daily_menu_updated'));
+      window.dispatchEvent(new Event('canteen_menu_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
+      return [];
+    }
+
+    return parsed;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Saves newly curated menu item IDs with fresh timestamp so it remains active until the next 12:00 PM.
+ */
+export function saveCuratedDailyMenu(itemIds: string[]): void {
+  try {
+    localStorage.setItem(CANTEEN_DAILY_MENU_KEY, JSON.stringify(itemIds));
+    localStorage.setItem(CANTEEN_DAILY_MENU_TIMESTAMP_KEY, new Date().toISOString());
+    window.dispatchEvent(new Event('canteen_daily_menu_updated'));
+    window.dispatchEvent(new Event('canteen_menu_updated'));
+    window.dispatchEvent(new Event('canteen_state_updated'));
+    window.dispatchEvent(new Event('storage'));
+  } catch (e) {
+    console.error('Failed to save curated daily menu:', e);
+  }
+}
 
 export interface PreOrderTimeStatus {
   isOpen: boolean;
@@ -40,8 +117,9 @@ export interface PreOrderTimeStatus {
 export function checkPreOrderWindow(config?: CanteenConfig): PreOrderTimeStatus {
   const cfg = config || getCanteenConfig();
   const isEnabled = cfg.preOrderEnabled !== false;
-  const startTime = cfg.preOrderStartTime || '08:00';
-  const endTime = cfg.preOrderEndTime || '16:00';
+  // Default to 18:00 - 08:00 (Evening 6 PM to Morning 8 AM)
+  const startTime = cfg.preOrderStartTime || '18:00';
+  const endTime = cfg.preOrderEndTime || '08:00';
 
   if (!isEnabled) {
     return {
@@ -49,7 +127,7 @@ export function checkPreOrderWindow(config?: CanteenConfig): PreOrderTimeStatus 
       isEnabled: false,
       startTime,
       endTime,
-      message: 'Pre-Order service is currently disabled by Manager'
+      message: 'প্রি-অর্ডার সার্ভিস বর্তমানে ম্যানেজার কর্তৃক বন্ধ রয়েছে'
     };
   }
 
@@ -59,14 +137,14 @@ export function checkPreOrderWindow(config?: CanteenConfig): PreOrderTimeStatus 
   const [startH, startM] = startTime.split(':').map(Number);
   const [endH, endM] = endTime.split(':').map(Number);
 
-  const startMinutes = (isNaN(startH) ? 8 : startH) * 60 + (isNaN(startM) ? 0 : startM);
-  const endMinutes = (isNaN(endH) ? 16 : endH) * 60 + (isNaN(endM) ? 0 : endM);
+  const startMinutes = (isNaN(startH) ? 18 : startH) * 60 + (isNaN(startM) ? 0 : startM);
+  const endMinutes = (isNaN(endH) ? 8 : endH) * 60 + (isNaN(endM) ? 0 : endM);
 
   let isOpen = false;
   let timeRemainingText = '';
 
   if (startMinutes <= endMinutes) {
-    // Normal window within same day (e.g. 08:00 to 16:00)
+    // Normal window within same day
     isOpen = currentMinutes >= startMinutes && currentMinutes < endMinutes;
     if (isOpen) {
       const diff = endMinutes - currentMinutes;
@@ -75,7 +153,7 @@ export function checkPreOrderWindow(config?: CanteenConfig): PreOrderTimeStatus 
       timeRemainingText = h > 0 ? `${h}h ${m}m remaining` : `${m} minutes remaining`;
     }
   } else {
-    // Overnight window (e.g. 20:00 to 02:00)
+    // Overnight window (e.g. 18:00 to 08:00)
     isOpen = currentMinutes >= startMinutes || currentMinutes < endMinutes;
     if (isOpen) {
       const diff = currentMinutes >= startMinutes 
@@ -83,7 +161,7 @@ export function checkPreOrderWindow(config?: CanteenConfig): PreOrderTimeStatus 
         : (endMinutes - currentMinutes);
       const h = Math.floor(diff / 60);
       const m = diff % 60;
-      timeRemainingText = h > 0 ? `${h}h ${m}m remaining` : `${m} minutes remaining`;
+      timeRemainingText = h > 0 ? `${h} ঘণ্টা ${m} মিনিট বাকি` : `${m} মিনিট বাকি`;
     }
   }
 
@@ -91,11 +169,7 @@ export function checkPreOrderWindow(config?: CanteenConfig): PreOrderTimeStatus 
   if (isOpen) {
     message = `Pre-Order is OPEN (${startTime} - ${endTime})`;
   } else {
-    if (currentMinutes < startMinutes && startMinutes <= endMinutes) {
-      message = `Pre-Order will appear & open at ${startTime}`;
-    } else {
-      message = `Pre-Order closed at ${endTime}`;
-    }
+    message = `Pre-Order Closed (সক্রিয় সময়: ${startTime} - ${endTime})`;
   }
 
   return {

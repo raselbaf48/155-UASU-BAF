@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Users,
   Shield,
+  Clipboard,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
@@ -57,6 +58,8 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
   onImportComplete,
 }) => {
   const [rows, setRows] = useState<ParsedAirmanRow[]>([]);
+  const [activeTab, setActiveTab] = useState<'FILE' | 'PASTE'>('FILE');
+  const [pasteText, setPasteText] = useState<string>('');
   const [fileName, setFileName] = useState<string>('');
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [isImporting, setIsImporting] = useState<boolean>(false);
@@ -339,6 +342,41 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
     exportAirmenTemplateExcel('BAF_155_UASU_Airmen_Biodata_Template.xlsx');
   };
 
+  const handleParsePaste = () => {
+    if (!pasteText.trim()) {
+      alert('অনুগ্রহ করে ডাটা পেস্ট করুন বা লিখে দিন।');
+      return;
+    }
+    const lines = pasteText
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean);
+
+    const rawRows: any[][] = lines.map((line) => {
+      if (line.includes('\t')) return line.split('\t').map((c) => c.trim());
+      if (line.includes(',')) return line.split(',').map((c) => c.trim());
+      return line.split(/\s+/).map((c) => c.trim());
+    });
+
+    if (rawRows.length === 0) return;
+
+    // Check if first line contains header keywords
+    const firstJoined = rawRows[0].join(' ').toLowerCase();
+    const hasHeader =
+      firstJoined.includes('bd') ||
+      firstJoined.includes('rank') ||
+      firstJoined.includes('name') ||
+      firstJoined.includes('পদবি');
+
+    if (!hasHeader) {
+      // Prepend standard header matching standard column order:
+      rawRows.unshift(['BD No', 'Rank', 'Full Name', 'Trade', 'Flight', 'Mobile No', 'Present Address']);
+    }
+
+    setFileName('Direct Paste / Typed');
+    processData(rawRows);
+  };
+
   const totalErrors = rows.reduce((sum, r) => sum + r.errors.length, 0);
   const canImport = rows.length > 0 && totalErrors === 0 && !isImporting;
 
@@ -415,59 +453,119 @@ export const BulkImportAirmenModal: React.FC<BulkImportAirmenModalProps> = ({
 
         {/* Modal Body */}
         <div className="p-6 overflow-y-auto space-y-6 flex-1">
-          {/* Upload Section + Template Download */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* Drag and drop box */}
-            <div
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
-              className={`md:col-span-2 border-2 border-dashed rounded-2xl p-6 flex flex-col items-center justify-center text-center cursor-pointer transition-all ${
-                isDragging
-                  ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/30 ring-4 ring-emerald-500/20'
-                  : 'border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800'
+          {/* Tab Selector */}
+          <div className="flex items-center space-x-2 border-b border-slate-200 dark:border-slate-800 pb-2">
+            <button
+              type="button"
+              onClick={() => setActiveTab('FILE')}
+              className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                activeTab === 'FILE'
+                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".xlsx, .xls, .csv"
-                className="hidden"
-                onChange={handleFileChange}
-              />
-              <div className="w-12 h-12 rounded-2xl bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-400 flex items-center justify-center mb-2 shadow-xs">
-                <Upload className="w-6 h-6" />
-              </div>
-              <div className="text-sm font-bold text-slate-900 dark:text-white">
-                {fileName ? `Selected: ${fileName}` : 'Click to select or drag & drop Excel (.xlsx) file'}
-              </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Supports Excel (.xlsx) spreadsheets
-              </p>
-            </div>
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>Excel / CSV File</span>
+            </button>
 
-            {/* Template Card */}
-            <div className="bg-emerald-50/70 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/70 rounded-2xl p-5 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center space-x-1.5 text-xs font-black text-emerald-900 dark:text-emerald-300 uppercase tracking-wide">
-                  <Shield className="w-3.5 h-3.5" />
-                  <span>Standard Excel Template</span>
+            <button
+              type="button"
+              onClick={() => setActiveTab('PASTE')}
+              className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+                activeTab === 'PASTE'
+                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Clipboard className="w-3.5 h-3.5" />
+              <span>Direct Copy-Paste / লিখে দিন</span>
+            </button>
+          </div>
+
+          {/* Upload Section + Template Download */}
+          {activeTab === 'FILE' ? (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Drag and drop box */}
+              <div
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
+                className={`md:col-span-2 border-2 border-dashed rounded-2xl p-6 flex flex-col items-center justify-center text-center cursor-pointer transition-all ${
+                  isDragging
+                    ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/30 ring-4 ring-emerald-500/20'
+                    : 'border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".xlsx, .xls, .csv"
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
+                <div className="w-12 h-12 rounded-2xl bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-400 flex items-center justify-center mb-2 shadow-xs">
+                  <Upload className="w-6 h-6" />
                 </div>
-                <p className="text-xs text-emerald-800 dark:text-emerald-200/80 mt-1 leading-relaxed">
-                  Download our pre-formatted Excel (.xlsx) spreadsheet template with official column headers, custom styling, and thin table grid borders.
+                <div className="text-sm font-bold text-slate-900 dark:text-white">
+                  {fileName ? `Selected: ${fileName}` : 'Click to select or drag & drop Excel (.xlsx) file'}
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  Supports Excel (.xlsx) spreadsheets
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={handleDownloadExcelSample}
-                className="mt-4 w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs flex items-center justify-center space-x-2 shadow-xs transition-colors cursor-pointer"
-              >
-                <FileSpreadsheet className="w-4 h-4" />
-                <span>Download Template (.xlsx)</span>
-              </button>
+
+              {/* Template Card */}
+              <div className="bg-emerald-50/70 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/70 rounded-2xl p-5 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center space-x-1.5 text-xs font-black text-emerald-900 dark:text-emerald-300 uppercase tracking-wide">
+                    <Shield className="w-3.5 h-3.5" />
+                    <span>Standard Excel Template</span>
+                  </div>
+                  <p className="text-xs text-emerald-800 dark:text-emerald-200/80 mt-1 leading-relaxed">
+                    Download our pre-formatted Excel (.xlsx) spreadsheet template with official column headers, custom styling, and thin table grid borders.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleDownloadExcelSample}
+                  className="mt-4 w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs flex items-center justify-center space-x-2 shadow-xs transition-colors cursor-pointer"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  <span>Download Template (.xlsx)</span>
+                </button>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="space-y-3 bg-slate-50 dark:bg-slate-800/50 p-4 sm:p-5 rounded-2xl border border-slate-200 dark:border-slate-700/80">
+              <div>
+                <label className="text-xs font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest block mb-1.5">
+                  Excel বা নোট থেকে লাইনগুলো কপি করে এখানে পেস্ট করুন অথবা সরাসরি লিখুন:
+                </label>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-2">
+                  ফরম্যাট: <code className="font-mono bg-slate-200 dark:bg-slate-900 px-1.5 py-0.5 rounded text-emerald-600 dark:text-emerald-400">BD No &nbsp; Rank &nbsp; Name &nbsp; Trade &nbsp; Flight &nbsp; Mobile &nbsp; Address</code> (কমা, ট্যাব অথবা স্পেস আলাদা করা যাবে)
+                </p>
+                <textarea
+                  rows={6}
+                  value={pasteText}
+                  onChange={(e) => setPasteText(e.target.value)}
+                  placeholder={`উদাহরণ:\n502931  Sgt  Rubel    Afr Fitt   Admin       01712345678  Dhaka\n502932  Cpl  Asad     Rad Fitt   Avionics    01812345678  Chittagong\n502933  LAC  Rahim    Inst Fitt  Mechanics   01912345678  Sylhet`}
+                  className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl p-3.5 text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 placeholder:text-slate-400 dark:placeholder:text-slate-600"
+                />
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleParsePaste}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center space-x-1.5 cursor-pointer shadow-md shadow-emerald-600/30"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Parse & Preview / রূপান্তর করুন</span>
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Parsed Rows Preview */}
           {rows.length > 0 && (

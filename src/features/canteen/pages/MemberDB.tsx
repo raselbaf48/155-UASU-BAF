@@ -1255,9 +1255,10 @@ export const MemberDB: React.FC = () => {
   };
 
   const openPayBill = (member: any) => {
+    const totalDue = getMemberTotalDue(member, selectedCategory);
+    if (totalDue <= 0) return; // Prevent paying if Total Due is Nil
     setPayBillMember(member);
     setPayBillCategory(selectedCategory);
-    const totalDue = getMemberTotalDue(member, selectedCategory);
     setPayAmount(totalDue > 0 ? String(totalDue) : '');
     setPayMethod('UCB');
   };
@@ -2236,19 +2237,63 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
     if (rankTypeFilter === 'AIRMEN' && !isAirmanMember(m)) return false;
     if (rankTypeFilter === 'CIVILIAN' && !isCivilianMember(m)) return false;
 
-    const term = searchTerm.toLowerCase();
+    if (!searchTerm.trim()) return true;
+
+    const term = searchTerm.toLowerCase().trim();
     const bdNo = String(m['BD No'] || '').toLowerCase();
     const rank = String(m['Rank'] || '').toLowerCase();
     const rankBn = (getMemberBanglaRank(m) || formatRankBn(m['Rank'])).toLowerCase();
     const surname = String(m['Surname'] || '').toLowerCase();
     const role = String(m['Role'] || '').toLowerCase();
     const bnName = (getMemberBanglaName(m) || formatMemberNameBn(m['Surname'])).toLowerCase();
-    return bdNo.includes(term) ||
+    const contact = String(m['Contact'] || m['Mobile No'] || '').toLowerCase();
+
+    // 1. Text field search matching (BD No, Rank, Bangla Rank, Surname, Bangla Name, Role, Contact)
+    if (
+      bdNo.includes(term) ||
       rank.includes(term) ||
       rankBn.includes(term) ||
       surname.includes(term) ||
       role.includes(term) ||
-      bnName.includes(term);
+      bnName.includes(term) ||
+      contact.includes(term)
+    ) {
+      return true;
+    }
+
+    // 2. Bill / Total Due amount search matching (e.g. searching '123' finds member with 123 due, also supports '৳123' and Bengali '১২৩')
+    const normalizedDigits = term.replace(/[০-৯]/g, (d) => String('০১২৩৪৫৬৭৮৯'.indexOf(d)));
+    const cleanNum = normalizedDigits.replace(/[^0-9.]/g, '');
+
+    if (cleanNum.length > 0) {
+      const totalDueCurrent = getMemberTotalDue(m, selectedCategory);
+      const totalDueAll = getMemberTotalDue(m, 'ALL');
+      const monthBill = getMemberFilteredBill(m, selectedCategory, selectedMonth);
+      const rawProfileDue = Number(m.Due ?? m.due ?? m.baki ?? 0);
+
+      const billCandidates = [
+        totalDueCurrent,
+        Math.round(totalDueCurrent),
+        totalDueAll,
+        Math.round(totalDueAll),
+        monthBill,
+        Math.round(monthBill),
+        rawProfileDue,
+        Math.round(rawProfileDue),
+      ];
+
+      const matchesBillNumber = billCandidates.some((val) => {
+        const valStr = String(val);
+        if (cleanNum === '0') {
+          return val === 0;
+        }
+        return valStr === cleanNum || valStr.includes(cleanNum);
+      });
+
+      if (matchesBillNumber) return true;
+    }
+
+    return false;
   });
 
   // Summary statistics for active filter
@@ -2282,13 +2327,15 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
   }, [filterMode, countWithBills]);
 
   const displayedMemberList = useMemo(() => {
-    const list = !isDueFilterActive ? filteredMembers : filteredMembers.filter((m) => {
+    // When user types in search bar, do not suppress members with 0 current-month bill so their search always returns the matched members
+    const isSearching = searchTerm.trim().length > 0;
+    const list = (!isDueFilterActive || isSearching) ? filteredMembers : filteredMembers.filter((m) => {
       const b = getMemberFilteredBill(m, selectedCategory, selectedMonth);
       const totalDue = getMemberTotalDue(m, selectedCategory);
       return selectedMonth === 'ALL' ? totalDue > 0 : b > 0;
     });
     return sortCanteenMembersByOfficeSeniority(list);
-  }, [filteredMembers, isDueFilterActive, selectedCategory, selectedMonth, allTxs]);
+  }, [filteredMembers, isDueFilterActive, selectedCategory, selectedMonth, allTxs, searchTerm]);
 
   const handleExportBills = () => {
     setIsPrintModalOpen(true);
@@ -2692,11 +2739,21 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <input 
             type="text" 
-            placeholder="Search members by BD No, Rank, Surname, or বাংলা নাম..." 
+            placeholder="Search members by BD No, Rank, Surname, Bill, or বাংলা নাম..." 
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-700 rounded-2xl pl-12 pr-4 py-3 text-sm font-bold text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#4f46e5]/20 focus:border-[#4f46e5] transition-all shadow-sm"
+            className="w-full bg-slate-900 border border-slate-700 rounded-2xl pl-12 pr-10 py-3 text-sm font-bold text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#4f46e5]/20 focus:border-[#4f46e5] transition-all shadow-sm"
           />
+          {searchTerm && (
+            <button
+              type="button"
+              onClick={() => setSearchTerm('')}
+              className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800 transition-colors cursor-pointer"
+              title="Clear search"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
         {/* Actions: Import Initial Bills Button, Export Bill Button & View Mode Toggle */}
@@ -2959,15 +3016,21 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                   {/* Right Side: Pay Bill */}
                   <button
                     type="button"
+                    disabled={totalDue <= 0}
                     onClick={(e) => {
                       e.stopPropagation();
+                      if (totalDue <= 0) return;
                       openPayBill(member);
                     }}
-                    className="flex-1 py-2 px-3 bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black tracking-wider uppercase flex items-center justify-center space-x-1.5 shadow-[0_4px_12px_rgba(16,185,129,0.3)] border-t border-emerald-300/40 active:translate-y-0.5 transition-all group/btn"
-                    title="Direct Pay Bill"
+                    className={`flex-1 py-2 px-3 rounded-xl text-xs font-black tracking-wider uppercase flex items-center justify-center space-x-1.5 transition-all group/btn ${
+                      totalDue > 0
+                        ? 'bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-[0_4px_12px_rgba(16,185,129,0.3)] border-t border-emerald-300/40 active:translate-y-0.5 cursor-pointer'
+                        : 'bg-slate-800/50 text-slate-500 border border-slate-800/80 cursor-not-allowed opacity-50 shadow-none pointer-events-none'
+                    }`}
+                    title={totalDue > 0 ? "Direct Pay Bill" : "কোনো বকেয়া নেই (Total Due is Nil)"}
                   >
-                    <Banknote className="w-3.5 h-3.5 group-hover/btn:scale-110 transition-transform" />
-                    <span className="truncate">PAY BILL {totalDue > 0 ? `(৳${totalDue})` : ''}</span>
+                    <Banknote className={`w-3.5 h-3.5 ${totalDue > 0 ? 'group-hover/btn:scale-110 text-white' : 'text-slate-500'} transition-transform`} />
+                    <span className="truncate">PAY BILL</span>
                   </button>
                 </div>
               </div>
@@ -3117,12 +3180,20 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                           </button>
                           <button
                             type="button"
-                            onClick={() => openPayBill(member)}
-                            className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-[11px] font-black uppercase flex items-center space-x-1 shadow-xs transition-all cursor-pointer"
-                            title="Pay Bill"
+                            disabled={totalDue <= 0}
+                            onClick={() => {
+                              if (totalDue <= 0) return;
+                              openPayBill(member);
+                            }}
+                            className={`px-3 py-1.5 rounded-lg text-[11px] font-black uppercase flex items-center space-x-1 shadow-xs transition-all ${
+                              totalDue > 0
+                                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white cursor-pointer'
+                                : 'bg-slate-800/50 text-slate-500 border border-slate-800 cursor-not-allowed opacity-50 shadow-none pointer-events-none'
+                            }`}
+                            title={totalDue > 0 ? "Pay Bill" : "কোনো বকেয়া নেই (Total Due is Nil)"}
                           >
-                            <Banknote className="w-3 h-3" />
-                            <span>Pay {totalDue > 0 ? `(৳${totalDue})` : ''}</span>
+                            <Banknote className={`w-3 h-3 ${totalDue > 0 ? 'text-white' : 'text-slate-500'}`} />
+                            <span>PAY BILL</span>
                           </button>
                           <button
                             type="button"

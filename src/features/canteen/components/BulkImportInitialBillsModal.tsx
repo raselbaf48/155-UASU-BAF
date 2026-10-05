@@ -20,7 +20,8 @@ import {
   ChevronUp, 
   AlertTriangle, 
   Calendar, 
-  Info 
+  Info,
+  ArrowLeftRight
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { pushKeyToCloud, pullKeyFromCloud, recordDeletedTxId } from '../utils/canteenCloudSync';
@@ -159,6 +160,9 @@ export interface ParsedBillRow {
   member: any | null;
   currentDue: number;
   status: 'matched' | 'unmatched';
+  rank?: string;
+  surname?: string;
+  isValid?: boolean;
 }
 
 export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalProps> = ({
@@ -300,6 +304,240 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
 
     return { memberMap: map, memberByNameMap: nameMap };
   }, [members]);
+
+  // Month Names Map for Smart Freeform Parsing
+  const SMART_MONTH_MAP: Record<string, string> = {
+    jan: '01', january: '01', januray: '01', জানু: '01', জানুয়ারি: '01',
+    feb: '02', february: '02', ফেব: '02', ফেব্রুয়ারি: '02',
+    mar: '03', march: '03', মার্চ: '03',
+    apr: '04', april: '04', এপ্রিল: '04',
+    may: '05', মে: '05',
+    jun: '06', june: '06', জুন: '06',
+    jul: '07', july: '07', জুলাই: '07',
+    aug: '08', august: '08', আগস্ট: '08', অগাস্ট: '08',
+    sep: '09', sept: '09', september: '09', সেপ্টে: '09', সেপ্টেম্বর: '09',
+    oct: '10', october: '10', অক্টো: '10', অক্টোবর: '10',
+    nov: '11', november: '11', নভে: '11', নভেম্বর: '11',
+    dec: '12', december: '12', ডিসে: '12', ডিসেম্বর: '12',
+  };
+
+  const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  // Intelligent parser for Free-form / Note format:
+  // e.g.:
+  // Aug
+  // Sgt Rubel    115 Advance
+  // Sgt Absar    230 Due
+  // Sep
+  // Sgt Asad     450 Due
+  const parseSmartFreeformText = (text: string, defaultTargetMonth: string): ParsedBillRow[] | null => {
+    if (!text || !text.trim()) return null;
+
+    const rawLines = text.split('\n').map((l) => l.trim());
+    let currentTargetMonth = defaultTargetMonth || formatPrevMonthKey(getRunningMonthKey());
+    let currentLastMonth = formatPrevMonthKey(currentTargetMonth);
+    let currentYear = parseInt(currentTargetMonth.split('-')[0], 10) || new Date().getFullYear();
+
+    const parsedResults: ParsedBillRow[] = [];
+
+    const detectMonthHeading = (line: string): string | null => {
+      const clean = line.replace(/^[#\-*:=\s\[]+|[#\-*:=\s\]]+$/g, '').trim().toLowerCase();
+      const stripped = clean.replace(/\b(month|billing|bill|মাস)\b/gi, '').trim();
+      const tokens = stripped.split(/[\s,/:—-]+/).filter(Boolean);
+      if (tokens.length === 0 || tokens.length > 4) return null;
+
+      for (const t of tokens) {
+        if (SMART_MONTH_MAP[t]) {
+          const mNum = SMART_MONTH_MAP[t];
+          let yr = currentYear;
+          for (const other of tokens) {
+            if (other !== t) {
+              const num = parseInt(other, 10);
+              if (num >= 2020 && num <= 2035) yr = num;
+              else if (num >= 20 && num <= 35) yr = 2000 + num;
+            }
+          }
+          return `${yr}-${mNum}`;
+        }
+      }
+
+      const numMatch = clean.match(/\b(202[0-9])[-/](0?[1-9]|1[0-2])\b/) || clean.match(/\b(0?[1-9]|1[0-2])[-/](202[0-9])\b/);
+      if (numMatch) {
+        if (numMatch[1].length === 4) return `${numMatch[1]}-${numMatch[2].padStart(2, '0')}`;
+        return `${numMatch[2]}-${numMatch[1].padStart(2, '0')}`;
+      }
+      return null;
+    };
+
+    const matchMemberInLine = (line: string): { member: any; matchedSubstr: string } | null => {
+      const lower = line.toLowerCase();
+
+      // 1. Check BD No in line
+      const bdMatches = line.match(/\b(?:bd[/\s-]*)?(\d{5,7})\b/gi);
+      if (bdMatches) {
+        for (const rawMatch of bdMatches) {
+          const digits = rawMatch.replace(/\D/g, '');
+          const found = memberMap.get(digits) || memberMap.get(`bd/${digits}`);
+          if (found) {
+            return { member: found, matchedSubstr: rawMatch };
+          }
+        }
+      }
+
+      // 2. Rank + Surname match
+      for (const m of members) {
+        const rank = String(m['Rank'] || m.rank || '').trim().toLowerCase();
+        const surname = String(m['Surname'] || m.surname || '').trim().toLowerCase();
+        if (rank && surname) {
+          const full = `${rank} ${surname}`;
+          const rx = new RegExp(`(^|[^a-zA-Z0-9])${escapeRegex(full)}([^a-zA-Z0-9]|$)`, 'i');
+          if (rx.test(lower)) {
+            return { member: m, matchedSubstr: `${m['Rank']} ${m['Surname']}` };
+          }
+        }
+      }
+
+      // 3. Surname match
+      for (const m of members) {
+        const surname = String(m['Surname'] || m.surname || '').trim().toLowerCase();
+        if (surname && surname.length >= 3) {
+          const rx = new RegExp(`(^|[^a-zA-Z0-9])${escapeRegex(surname)}([^a-zA-Z0-9]|$)`, 'i');
+          if (rx.test(lower)) {
+            return { member: m, matchedSubstr: m['Surname'] || m.surname };
+          }
+        }
+      }
+
+      // 4. Bangla Name match
+      for (const m of members) {
+        const bn = (m.nameBn || m['Name (Bangla)'] || '').trim().toLowerCase();
+        if (bn && bn.length >= 2 && lower.includes(bn)) {
+          return { member: m, matchedSubstr: bn };
+        }
+      }
+
+      return null;
+    };
+
+    let slCounter = 1;
+
+    for (let i = 0; i < rawLines.length; i++) {
+      const line = rawLines[i];
+      if (!line) continue;
+
+      const detectedMonth = detectMonthHeading(line);
+      if (detectedMonth) {
+        currentTargetMonth = detectedMonth;
+        currentLastMonth = formatPrevMonthKey(currentTargetMonth);
+        currentYear = parseInt(currentTargetMonth.split('-')[0], 10) || currentYear;
+        continue;
+      }
+
+      const memberMatch = matchMemberInLine(line);
+      if (!memberMatch) {
+        continue;
+      }
+
+      const matchedMember = memberMatch.member;
+      const detectedBd = String(matchedMember['BD No'] || matchedMember.bdNo || matchedMember.airman_id || `MEMBER_${slCounter}`).replace(/\D/g, '');
+
+      const enDigitLine = line.replace(/[০-৯]/g, (d) => String('০১২৩৪৫৬৭৮৯'.indexOf(d)));
+      const lineWithoutMember = enDigitLine.replace(new RegExp(escapeRegex(memberMatch.matchedSubstr), 'gi'), ' ');
+
+      let dueLastMonth = 0;
+      let advanceLastMonth = 0;
+      let dueThisMonth = 0;
+      let unitFund = 0;
+      let othersFund = 0;
+
+      const numMatches = Array.from(lineWithoutMember.matchAll(/(?:৳|tk|amount[:\s]*)?([0-9]+(?:\.[0-9]+)?)/gi));
+      const amounts = numMatches.map((m) => parseFloat(m[1])).filter((n) => !isNaN(n));
+
+      const lowerRem = lineWithoutMember.toLowerCase();
+
+      const isAdvance = /\b(advance|adv|advan|অগ্রিম|অগ্রীম|cr|credit)\b/i.test(lowerRem) || lowerRem.includes('(-)');
+      const isDue = /\b(due|baki|bill|বকেয়া|বিল|debit|dr)\b/i.test(lowerRem);
+      const isPrev = /\b(last|prev|previous|আগের|পূর্ব)\b/i.test(lowerRem);
+      const isUnitFund = /\b(unit\s*fund|uf|ইউনিট\s*ফান্ড)\b/i.test(lowerRem);
+      const isOthers = /\b(others?|অন্যান্য)\b/i.test(lowerRem);
+
+      if (amounts.length === 1) {
+        const amt = amounts[0];
+        if (isAdvance) {
+          advanceLastMonth = amt;
+        } else if (isUnitFund) {
+          unitFund = amt;
+        } else if (isOthers) {
+          othersFund = amt;
+        } else if (isPrev) {
+          dueLastMonth = amt;
+        } else {
+          dueThisMonth = amt;
+        }
+      } else if (amounts.length >= 2) {
+        if (amounts.length >= 3) {
+          dueLastMonth = amounts[0];
+          advanceLastMonth = amounts[1];
+          dueThisMonth = amounts[2];
+          if (amounts.length >= 4) unitFund = amounts[3];
+          if (amounts.length >= 5) othersFund = amounts[4];
+        } else if (amounts.length === 2) {
+          if (isAdvance && isDue) {
+            dueThisMonth = amounts[0];
+            advanceLastMonth = amounts[1];
+          } else {
+            dueLastMonth = amounts[0];
+            dueThisMonth = amounts[1];
+          }
+        }
+      }
+
+      const currentDue = Number(matchedMember.Due ?? matchedMember.due ?? matchedMember.baki ?? 0);
+      const debits = dueLastMonth + dueThisMonth + unitFund + othersFund;
+      const credits = advanceLastMonth;
+
+      let netDue = 0;
+      let finalAdv = 0;
+      if (debits >= credits) {
+        netDue = debits - credits;
+        finalAdv = 0;
+      } else {
+        netDue = 0;
+        finalAdv = credits - debits;
+      }
+
+      const effectiveAmount = netDue > 0
+        ? netDue
+        : (dueThisMonth + unitFund + othersFund > 0
+            ? dueThisMonth + unitFund + othersFund
+            : (dueLastMonth > 0 ? dueLastMonth : advanceLastMonth));
+
+      parsedResults.push({
+        id: `${detectedBd}_${currentTargetMonth}_${slCounter}`,
+        sl: slCounter++,
+        rawBd: detectedBd,
+        bdNo: detectedBd,
+        targetMonth: currentTargetMonth,
+        lastMonth: currentLastMonth,
+        dueLastMonth,
+        advanceLastMonth,
+        dueThisMonth,
+        unitFund,
+        othersFund,
+        totalDue: netDue,
+        finalAdvance: finalAdv,
+        amount: effectiveAmount,
+        member: matchedMember,
+        surname: matchedMember['Surname'] || matchedMember.surname || '',
+        rank: matchedMember['Rank'] || matchedMember.rank || '',
+        currentDue,
+        status: 'matched',
+        isValid: true
+      });
+    }
+
+    return parsedResults.length > 0 ? parsedResults : null;
+  };
 
   // Parse raw matrix / text data into structured rows:
   // Format: SL | BD No | Rank | Surname | Due (Last Month) | Advance (Last Month) | Due (This Month)
@@ -661,6 +899,16 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
     }
 
     if (result.length === 0) {
+      // Fallback: Check if rows can be parsed by smart freeform parser
+      const rowStrings = rows.map((r) => Array.isArray(r) ? r.join(' ') : String(r)).join('\n');
+      const smartFallback = parseSmartFreeformText(rowStrings, activeTargetMonth);
+      if (smartFallback && smartFallback.length > 0) {
+        setErrorMessage(null);
+        const sortedSmart = [...smartFallback].sort((a, b) => (a.sl || 0) - (b.sl || 0));
+        setParsedRows(sortedSmart);
+        setSuccessMessage(`সফলভাবে ${sortedSmart.length} জনের বিল ডাটা পাওয়া গেছে। প্রিভিউ দেখে কনফার্ম করুন।`);
+        return;
+      }
       setErrorMessage('কোনো বৈধ ডাটা পাওয়া যায়নি। অনুগ্রহ করে ফাইল বা টেক্সটের ফরম্যাট চেক করুন।');
     } else {
       const sortedResult = [...result].sort((a, b) => (a.sl || 0) - (b.sl || 0));
@@ -714,6 +962,23 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
       return;
     }
 
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    // 1. Try smart free-form parser first (e.g. "Aug\nSgt Rubel 115 Advance\nSgt Absar 230 Due\n\nSep\nSgt Asad 450 Due")
+    const smartResults = parseSmartFreeformText(pasteText, targetMonth);
+    if (smartResults && smartResults.length > 0) {
+      const sortedSmart = [...smartResults].sort((a, b) => (a.sl || 0) - (b.sl || 0));
+      rawDataRef.current = sortedSmart.map(r => [r.bdNo, r.rank, r.surname, r.dueLastMonth, r.advanceLastMonth, r.dueThisMonth]);
+      setParsedRows(sortedSmart);
+      if (sortedSmart[0].targetMonth && sortedSmart[0].targetMonth !== targetMonth) {
+        setTargetMonth(sortedSmart[0].targetMonth);
+      }
+      setSuccessMessage(`সফলভাবে ${sortedSmart.length} জনের বিল ডাটা পাওয়া গেছে। প্রিভিউ দেখে নিশ্চিত করুন।`);
+      return;
+    }
+
+    // 2. Fallback: Standard tabular splitting
     const lines = pasteText
       .split('\n')
       .map((l) => l.trim())
@@ -998,6 +1263,15 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
     return { total, matched, unmatched, totalDueLastMonth, totalAdvanceLastMonth, totalDueThisMonth, totalUnitFund, totalOthersFund, totalNetDue };
   }, [parsedRows]);
 
+  // Detected unique months in current parsed rows
+  const detectedMonthsList = useMemo(() => {
+    const set = new Set<string>();
+    parsedRows.forEach((r) => {
+      if (r.targetMonth) set.add(r.targetMonth);
+    });
+    return Array.from(set).sort();
+  }, [parsedRows]);
+
   // Filter history rows
   const filteredHistory = useMemo(() => {
     if (!historySearch.trim()) return importHistory;
@@ -1114,13 +1388,16 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
         targetMember.advance = finalAdv;
         targetMember.ogrim = finalAdv;
 
+        const rowTargetMonth = row.targetMonth || targetMonth;
+        const rowLastMonth = row.lastMonth || formatPrevMonthKey(rowTargetMonth);
+
         batchItems.push({
           airman_id: targetMember.airman_id,
           bdNo: row.bdNo,
           rank: targetMember['Rank'] || '',
           surname: targetMember['Surname'] || '',
-          targetMonth,
-          lastMonth,
+          targetMonth: rowTargetMonth,
+          lastMonth: rowLastMonth,
           dueLastMonth: row.dueLastMonth,
           advanceLastMonth: row.advanceLastMonth,
           dueThisMonth: row.dueThisMonth,
@@ -1144,13 +1421,13 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
             newTxIds.push(txId);
             newTxs.push({
               id: txId,
-              date: getFormattedDateForMonth(lastMonth, 28),
-              monthKey: lastMonth,
+              date: getFormattedDateForMonth(rowLastMonth, 28),
+              monthKey: rowLastMonth,
               airman_id: cleanAirmanId,
               bdNo: targetMember['BD No'] || targetMember.bdNo || (cleanBdNo ? `BD/${cleanBdNo}` : ''),
               memberName: fullMemberName,
               rank: targetMember['Rank'] || targetMember.rank || '',
-              items: `বকেয়া বিল (${formatBengaliMonthYear(lastMonth)})`,
+              items: `বকেয়া বিল (${formatBengaliMonthYear(rowLastMonth)})`,
               soldItems: [],
               amount: row.dueLastMonth,
               type: 'INITIAL_BILL',
@@ -1165,13 +1442,13 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
             newTxIds.push(txId);
             newTxs.push({
               id: txId,
-              date: getFormattedDateForMonth(lastMonth, 25),
-              monthKey: lastMonth,
+              date: getFormattedDateForMonth(rowTargetMonth, 25),
+              monthKey: rowTargetMonth,
               airman_id: cleanAirmanId,
               bdNo: targetMember['BD No'] || targetMember.bdNo || (cleanBdNo ? `BD/${cleanBdNo}` : ''),
               memberName: fullMemberName,
               rank: targetMember['Rank'] || targetMember.rank || '',
-              items: `অগ্রীম জমা / Advance (${formatBengaliMonthYear(lastMonth)})`,
+              items: `অগ্রীম জমা / Advance (${formatBengaliMonthYear(rowTargetMonth)})`,
               soldItems: [],
               amount: row.advanceLastMonth,
               type: 'BILL PAYMENT',
@@ -1186,13 +1463,13 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
             newTxIds.push(txId);
             newTxs.push({
               id: txId,
-              date: getFormattedDateForMonth(targetMonth, 28),
-              monthKey: targetMonth,
+              date: getFormattedDateForMonth(rowTargetMonth, 28),
+              monthKey: rowTargetMonth,
               airman_id: cleanAirmanId,
               bdNo: targetMember['BD No'] || targetMember.bdNo || (cleanBdNo ? `BD/${cleanBdNo}` : ''),
               memberName: fullMemberName,
               rank: targetMember['Rank'] || targetMember.rank || '',
-              items: `ক্যান্টিন বিল (${formatBengaliMonthYear(targetMonth)})`,
+              items: `ক্যান্টিন বিল (${formatBengaliMonthYear(rowTargetMonth)})`,
               soldItems: [],
               amount: row.dueThisMonth,
               type: 'INITIAL_BILL',
@@ -1208,13 +1485,13 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
             newTxIds.push(txId);
             newTxs.push({
               id: txId,
-              date: getFormattedDateForMonth(targetMonth, 28),
-              monthKey: targetMonth,
+              date: getFormattedDateForMonth(rowTargetMonth, 28),
+              monthKey: rowTargetMonth,
               airman_id: cleanAirmanId,
               bdNo: targetMember['BD No'] || targetMember.bdNo || (cleanBdNo ? `BD/${cleanBdNo}` : ''),
               memberName: fullMemberName,
               rank: targetMember['Rank'] || targetMember.rank || '',
-              items: `ক্যান্টিন বিল (${formatBengaliMonthYear(targetMonth)})`,
+              items: `ক্যান্টিন বিল (${formatBengaliMonthYear(rowTargetMonth)})`,
               soldItems: [],
               amount: fallbackAmount,
               type: 'INITIAL_BILL',
@@ -1229,13 +1506,13 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
             newTxIds.push(txId);
             newTxs.push({
               id: txId,
-              date: getFormattedDateForMonth(targetMonth, 28),
-              monthKey: targetMonth,
+              date: getFormattedDateForMonth(rowTargetMonth, 28),
+              monthKey: rowTargetMonth,
               airman_id: cleanAirmanId,
               bdNo: targetMember['BD No'] || targetMember.bdNo || (cleanBdNo ? `BD/${cleanBdNo}` : ''),
               memberName: fullMemberName,
               rank: targetMember['Rank'] || targetMember.rank || '',
-              items: `ইউনিট ফান্ড (${formatBengaliMonthYear(targetMonth)})`,
+              items: `ইউনিট ফান্ড (${formatBengaliMonthYear(rowTargetMonth)})`,
               soldItems: [],
               amount: row.unitFund,
               type: 'INITIAL_BILL',
@@ -1250,13 +1527,13 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
             newTxIds.push(txId);
             newTxs.push({
               id: txId,
-              date: getFormattedDateForMonth(targetMonth, 28),
-              monthKey: targetMonth,
+              date: getFormattedDateForMonth(rowTargetMonth, 28),
+              monthKey: rowTargetMonth,
               airman_id: cleanAirmanId,
               bdNo: targetMember['BD No'] || targetMember.bdNo || (cleanBdNo ? `BD/${cleanBdNo}` : ''),
               memberName: fullMemberName,
               rank: targetMember['Rank'] || targetMember.rank || '',
-              items: `অন্যান্য ফান্ড (${formatBengaliMonthYear(targetMonth)})`,
+              items: `অন্যান্য ফান্ড (${formatBengaliMonthYear(rowTargetMonth)})`,
               soldItems: [],
               amount: row.othersFund,
               type: 'INITIAL_BILL',
@@ -1290,7 +1567,14 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
           const existingTxs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
           const txMap = new Map<string, any>();
           const affectedCleanBds = new Set(newTxs.map(t => String(t.bdNo || t.airman_id || '').replace(/\D/g, '')));
-          const affectedMonths = new Set([targetMonth, lastMonth].filter(Boolean));
+          const affectedMonths = new Set<string>([targetMonth, lastMonth].filter(Boolean));
+          newTxs.forEach((t) => {
+            if (t.monthKey) affectedMonths.add(t.monthKey);
+          });
+          batchItems.forEach((b) => {
+            if (b.targetMonth) affectedMonths.add(b.targetMonth);
+            if (b.lastMonth) affectedMonths.add(b.lastMonth);
+          });
           
           existingTxs.forEach((t: any) => { 
             if (!t || !t.id) return;
@@ -1366,8 +1650,13 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
 
       onSuccess(updatedMembersList);
 
+      const allBatchMonths = Array.from(new Set(batchItems.map((b) => b.targetMonth).filter(Boolean)));
+      const monthNamesStr = allBatchMonths.length > 0
+        ? allBatchMonths.map((m) => formatMonthName(m)).join(', ')
+        : `${formatMonthName(lastMonth)} ও ${formatMonthName(targetMonth)}`;
+
       setSuccessMessage(
-        `সফলভাবে ${matchedRows.length} জন সদস্যের (${formatMonthName(lastMonth)} ও ${formatMonthName(targetMonth)}) বকেয়া ও অগ্রীম বিল আপডেট করা হয়েছে!`
+        `সফলভাবে ${matchedRows.length} জন সদস্যের (${monthNamesStr}) বকেয়া ও বিল আপডেট করা হয়েছে!`
       );
 
       setTimeout(() => {
@@ -1635,7 +1924,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
               <h2 className="text-lg sm:text-xl font-black text-white uppercase tracking-tight flex items-center gap-2">
                 BULK IMPORT BILLS
                 <span className="text-[10px] bg-emerald-500/20 text-emerald-300 font-mono px-2 py-0.5 rounded-full border border-emerald-500/30">
-                  {formatShortMonth(targetMonth)}
+                  {detectedMonthsList.length > 0 ? detectedMonthsList.map(m => formatShortMonth(m)).join(', ') : 'AUTO'}
                 </span>
               </h2>
               <p className="text-xs text-slate-400 font-bold">
@@ -1667,52 +1956,37 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
 
         {/* Modal Body */}
         <div className="p-5 sm:p-6 overflow-y-auto space-y-4 flex-1">
-          {/* Target Month Selector Banner - Only show on Upload and Paste tabs */}
+          {/* Smart Auto-Detect Month Banner */}
           {activeTab !== 'HISTORY' && (
-            <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-inner">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0">
-                  <Calendar className="w-5 h-5" />
+            <div className="p-3 sm:p-3.5 bg-indigo-950/40 border border-indigo-500/30 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-indigo-200 shadow-xs">
+              <div className="flex items-center space-x-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-300 shrink-0">
+                  <Calendar className="w-4 h-4" />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <span className="text-[10px] font-black uppercase tracking-wider text-indigo-400 block">
-                    টার্গেট বিলের মাস (Target Month)
+                    স্বয়ংক্রিয় মাস সনাক্তকরণ (Auto-Detect Month)
                   </span>
-                  <p className="text-xs text-slate-300 font-bold">
-                    যেই মাস সিলেক্ট করবেন, টেমপ্লেটে সেই মাসের এবং তার আগের মাসের হিসাব আসবে
+                  <p className="text-[11px] text-slate-300 font-bold truncate">
+                    এক্সেল বা টেক্সটে উল্লেখিত মাস অনুযায়ী (যেমন Aug, Sep) স্বয়ংক্রিয়ভাবে বিল যোগ হবে
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-center space-x-2">
-                <select
-                  value={targetMonth}
-                  onChange={(e) => {
-                    const newMonth = e.target.value;
-                    setTargetMonth(newMonth);
-                    if (rawDataRef.current && rawDataRef.current.length > 0) {
-                      processRawData(rawDataRef.current, newMonth);
-                    }
-                  }}
-                  className="bg-slate-900 border border-slate-700 hover:border-indigo-500/50 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer min-w-[200px]"
-                >
-                  {availableMonths.map((m) => (
-                    <option key={m} value={m}>
-                      {formatMonthName(m)} {m === getRunningMonthKey() ? '(চলতি মাস)' : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {detectedMonthsList.length > 0 && (
+                <div className="flex items-center space-x-2 shrink-0 bg-slate-950/60 px-3 py-1.5 rounded-xl border border-slate-800">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">সনাক্তকৃত মাস:</span>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {detectedMonthsList.map((m) => (
+                      <span key={m} className="px-2 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-[10px] font-mono font-black">
+                        {formatShortMonth(m)}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
-
-          {/* Explanation Strip */}
-          <div className="p-3 bg-indigo-950/30 border border-indigo-500/20 rounded-2xl flex items-start space-x-2.5 text-xs text-indigo-200">
-            <Info className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
-            <div className="leading-relaxed">
-              <strong>টেমপ্লেট কলাম বিন্যাস:</strong> নির্বাচিত মাস অনুযায়ী এক্সেল ফাইলে থাকবে: <code className="bg-slate-900 px-1.5 py-0.5 rounded text-slate-300">SL</code>, <code className="bg-slate-900 px-1.5 py-0.5 rounded text-white">BD No</code>, <code className="bg-slate-900 px-1.5 py-0.5 rounded text-slate-300">Rank</code>, <code className="bg-slate-900 px-1.5 py-0.5 rounded text-slate-300">Surname</code>, <code className="bg-slate-900 px-1.5 py-0.5 rounded text-amber-300">Due ({getMonthOnlyName(lastMonth)})</code>, <code className="bg-slate-900 px-1.5 py-0.5 rounded text-emerald-300">Advance ({getMonthOnlyName(lastMonth)})</code>, <code className="bg-slate-900 px-1.5 py-0.5 rounded text-sky-300">Due ({getMonthOnlyName(targetMonth)})</code>, <code className="bg-slate-900 px-1.5 py-0.5 rounded text-purple-300">Unit Fund</code> এবং <code className="bg-slate-900 px-1.5 py-0.5 rounded text-indigo-300">Others</code>।
-            </div>
-          </div>
 
           {/* Success or Error Alerts */}
           {successMessage && (
@@ -2089,19 +2363,19 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
                 </div>
                 <div className="bg-amber-950/30 border border-amber-500/20 rounded-xl p-3 text-center">
                   <span className="text-[10px] font-black text-amber-400 uppercase tracking-wider block truncate">
-                    Due ({getMonthOnlyName(lastMonth)})
+                    Due (Last Month)
                   </span>
                   <span className="text-base sm:text-lg font-black text-amber-300 font-mono">৳{stats.totalDueLastMonth.toLocaleString()}</span>
                 </div>
                 <div className="bg-emerald-950/30 border border-emerald-500/20 rounded-xl p-3 text-center">
                   <span className="text-[10px] font-black text-emerald-400 uppercase tracking-wider block truncate">
-                    Adv ({getMonthOnlyName(lastMonth)})
+                    Advance (Last Month)
                   </span>
                   <span className="text-base sm:text-lg font-black text-emerald-300 font-mono">৳{stats.totalAdvanceLastMonth.toLocaleString()}</span>
                 </div>
                 <div className="bg-sky-950/30 border border-sky-500/20 rounded-xl p-3 text-center">
                   <span className="text-[10px] font-black text-sky-400 uppercase tracking-wider block truncate">
-                    Due ({getMonthOnlyName(targetMonth)})
+                    Due (This Month)
                   </span>
                   <span className="text-base sm:text-lg font-black text-sky-300 font-mono">৳{stats.totalDueThisMonth.toLocaleString()}</span>
                 </div>
@@ -2125,10 +2399,14 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
           {activeTab !== 'HISTORY' && parsedRows.length > 0 && (
             <div className="space-y-3">
               <div className="flex items-center justify-between gap-3 flex-wrap">
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center space-x-2 flex-wrap gap-y-1">
                   <h4 className="text-xs font-black text-white uppercase tracking-wider">
                     ডাটা প্রিভিউ ({filteredPreview.length} / {parsedRows.length})
                   </h4>
+                  <div className="flex items-center space-x-1.5 px-2 py-0.5 rounded-lg bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 text-[10px] font-bold">
+                    <ArrowLeftRight className="w-3 h-3 text-indigo-400 shrink-0 animate-pulse" />
+                    <span>বামে-ডানে স্ক্রোল করে দেখুন (Swipe ⇄)</span>
+                  </div>
                 </div>
 
                 <div className="relative w-full sm:w-64">
@@ -2143,30 +2421,32 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
                 </div>
               </div>
 
-              <div className="border border-slate-800 rounded-2xl overflow-hidden max-h-64 overflow-y-auto">
-                <table className="w-full text-left text-xs text-slate-300">
+              {/* Scrollable Container with overflow-x-auto & touch-pan-x for Mobile */}
+              <div className="border border-slate-800 rounded-2xl max-h-64 sm:max-h-80 overflow-y-auto overflow-x-auto touch-pan-x scrollbar-thin scrollbar-thumb-slate-700 bg-slate-950/40">
+                <table className="w-full text-left text-xs text-slate-300 min-w-[860px] border-collapse">
                   <thead className="bg-slate-950 text-slate-400 uppercase font-black text-[10px] tracking-wider sticky top-0 z-10 border-b border-slate-800">
                     <tr>
-                      <th className="px-3 py-2.5">#</th>
-                      <th className="px-3 py-2.5">BD No</th>
-                      <th className="px-3 py-2.5">Member</th>
-                      <th className="px-3 py-2.5 text-right font-mono">
-                        Due ({getMonthOnlyName(lastMonth)})
+                      <th className="px-3 py-2.5 whitespace-nowrap bg-slate-950">#</th>
+                      <th className="px-3 py-2.5 whitespace-nowrap bg-slate-950">BD No</th>
+                      <th className="px-3 py-2.5 whitespace-nowrap bg-slate-950">Member</th>
+                      <th className="px-3 py-2.5 whitespace-nowrap bg-slate-950 text-indigo-400">Month (মাস)</th>
+                      <th className="px-3 py-2.5 text-right font-mono whitespace-nowrap bg-slate-950">
+                        Due (Last Month)
                       </th>
-                      <th className="px-3 py-2.5 text-right font-mono">
-                        Advance ({getMonthOnlyName(lastMonth)})
+                      <th className="px-3 py-2.5 text-right font-mono whitespace-nowrap bg-slate-950">
+                        Advance (Last Month)
                       </th>
-                      <th className="px-3 py-2.5 text-right font-mono">
-                        Due ({getMonthOnlyName(targetMonth)})
+                      <th className="px-3 py-2.5 text-right font-mono whitespace-nowrap bg-slate-950">
+                        Due (This Month)
                       </th>
-                      <th className="px-3 py-2.5 text-right font-mono">
+                      <th className="px-3 py-2.5 text-right font-mono whitespace-nowrap bg-slate-950">
                         Unit Fund
                       </th>
-                      <th className="px-3 py-2.5 text-right font-mono">
+                      <th className="px-3 py-2.5 text-right font-mono whitespace-nowrap bg-slate-950">
                         Others
                       </th>
-                      <th className="px-3 py-2.5 text-right font-mono">সর্বমোট বকেয়া (Total Due)</th>
-                      <th className="px-3 py-2.5 text-center">Status</th>
+                      <th className="px-3 py-2.5 text-right font-mono whitespace-nowrap bg-slate-950">সর্বমোট বকেয়া (Total Due)</th>
+                      <th className="px-3 py-2.5 text-center whitespace-nowrap bg-slate-950">Status</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60 font-sans">
@@ -2176,10 +2456,10 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
                         : (row.currentDue + row.totalDue);
 
                       return (
-                        <tr key={row.id || idx} className="hover:bg-slate-800/40">
-                          <td className="px-3 py-2 text-slate-500 font-mono">{row.sl ?? (idx + 1)}</td>
-                          <td className="px-3 py-2 font-mono font-bold text-white">#{row.bdNo}</td>
-                          <td className="px-3 py-2">
+                        <tr key={row.id || idx} className="hover:bg-slate-800/40 transition-colors">
+                          <td className="px-3 py-2 text-slate-500 font-mono whitespace-nowrap">{row.sl ?? (idx + 1)}</td>
+                          <td className="px-3 py-2 font-mono font-bold text-white whitespace-nowrap">#{row.bdNo}</td>
+                          <td className="px-3 py-2 whitespace-nowrap">
                             {row.member ? (
                               <span className="font-bold text-white">
                                 {row.member['Rank']} {row.member['Surname']}
@@ -2188,27 +2468,32 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
                               <span className="text-amber-400 font-bold italic">সদস্য পাওয়া যায়নি</span>
                             )}
                           </td>
-                          <td className="px-3 py-2 text-right font-mono text-amber-300">
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            <span className="px-2 py-0.5 rounded-md bg-indigo-500/15 border border-indigo-500/30 font-mono font-black text-indigo-300 text-[10px]">
+                              {formatShortMonth(row.targetMonth)}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono text-amber-300 whitespace-nowrap">
                             ৳{row.dueLastMonth || 0}
                           </td>
-                          <td className="px-3 py-2 text-right font-mono text-emerald-400">
+                          <td className="px-3 py-2 text-right font-mono text-emerald-400 whitespace-nowrap">
                             ৳{row.advanceLastMonth || 0}
                           </td>
-                          <td className="px-3 py-2 text-right font-mono text-sky-300">
+                          <td className="px-3 py-2 text-right font-mono text-sky-300 whitespace-nowrap">
                             ৳{row.dueThisMonth || 0}
                           </td>
-                          <td className="px-3 py-2 text-right font-mono text-purple-300">
+                          <td className="px-3 py-2 text-right font-mono text-purple-300 whitespace-nowrap">
                             ৳{row.unitFund || 0}
                           </td>
-                          <td className="px-3 py-2 text-right font-mono text-indigo-300">
+                          <td className="px-3 py-2 text-right font-mono text-indigo-300 whitespace-nowrap">
                             ৳{row.othersFund || 0}
                           </td>
-                          <td className="px-3 py-2 text-right font-mono font-black text-rose-300">
+                          <td className="px-3 py-2 text-right font-mono font-black text-rose-300 whitespace-nowrap">
                             <span className="px-2 py-0.5 rounded-lg bg-rose-950/60 border border-rose-500/40 text-rose-200">
                               ৳{resultingDue}
                             </span>
                           </td>
-                          <td className="px-3 py-2 text-center">
+                          <td className="px-3 py-2 text-center whitespace-nowrap">
                             {row.status === 'matched' ? (
                               <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                                 <Check className="w-3 h-3 mr-1" />

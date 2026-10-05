@@ -5,7 +5,7 @@ import {
   ArrowUpRight, ArrowDownLeft, Filter, Layers 
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
-import { resolveImageUrl, getCanteenConfig, checkPreOrderWindow, CanteenConfig, PreOrderTimeStatus } from '../utils/canteenSettings';
+import { resolveImageUrl, getCanteenConfig, checkPreOrderWindow, getCuratedDailyMenu, CanteenConfig, PreOrderTimeStatus } from '../utils/canteenSettings';
 import { formatCanteenDate } from '../utils/dateUtils';
 
 interface EmployeeDashboardProps { 
@@ -362,7 +362,7 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
       };
 
       const handleStorageChange = (e: StorageEvent) => {
-          if (e.key === 'canteen_daily_menu' || e.key === 'canteen_txs' || e.key === 'canteen_pre_orders') {
+          if (e.key === 'canteen_daily_menu' || e.key === 'canteen_txs' || e.key === 'canteen_pre_orders' || e.key === 'canteen_daily_menu_updated_at') {
               fetchMenu();
               fetchActivities();
           }
@@ -370,6 +370,7 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
 
       window.addEventListener('storage', handleStorageChange);
       window.addEventListener('canteen_menu_updated', handleSync);
+      window.addEventListener('canteen_daily_menu_updated', handleSync);
       window.addEventListener('canteen_state_updated', handleSync);
       window.addEventListener('canteen_txs_updated', handleSync);
       window.addEventListener('baf_state_updated', handleSync);
@@ -377,6 +378,7 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
       return () => {
           window.removeEventListener('storage', handleStorageChange);
           window.removeEventListener('canteen_menu_updated', handleSync);
+          window.removeEventListener('canteen_daily_menu_updated', handleSync);
           window.removeEventListener('canteen_state_updated', handleSync);
           window.removeEventListener('canteen_txs_updated', handleSync);
           window.removeEventListener('baf_state_updated', handleSync);
@@ -384,10 +386,9 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
   }, [fetchActivities]);
 
   const fetchMenu = async () => {
-      const stored = localStorage.getItem('canteen_daily_menu');
-      if (stored) {
+      const ids = getCuratedDailyMenu();
+      if (ids && ids.length > 0) {
           try {
-              const ids = JSON.parse(stored);
               if (ids.length > 0) {
                   const allItems = [
   {
@@ -868,14 +869,14 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
                       <Clock className="w-7 h-7" />
                   </div>
                   <h4 className="text-base font-black text-white uppercase tracking-wider">
-                      Pre-Order is Currently Closed
+                      প্রি-অর্ডার বর্তমানে বন্ধ আছে (Pre-Order Closed)
                   </h4>
                   <p className="text-xs text-slate-400 max-w-md leading-relaxed">
-                      {preOrderWindow.message}। টাইমিং এর বাইরে প্রি-অর্ডার গ্রহণ করা হয় না।
+                      সদস্যদের জন্য প্রি-অর্ডারের সক্রিয় সময়: <strong className="text-indigo-400">১৮:০০ - ০৮:০০ (সন্ধ্যা ৬টা থেকে সকাল ৮টা)</strong>। নির্ধারিত সময়ের বাইরে প্রি-অর্ডার সাময়িকভাবে বন্ধ থাকে।
                   </p>
                   <div className="inline-flex items-center space-x-2 px-4 py-2 rounded-full bg-slate-900 border border-slate-700/80 text-[11px] font-black text-indigo-300">
                       <Clock className="w-3.5 h-3.5" />
-                      <span>Daily Service Window: {preOrderWindow.startTime} - {preOrderWindow.endTime}</span>
+                      <span>দৈনিক প্রি-অর্ডার সক্রিয় সময়: সন্ধ্যা ১৮:০০ থেকে পরদিন সকাল ০৮:০০ (1800 - 0800)</span>
                   </div>
               </div>
           ) : (
