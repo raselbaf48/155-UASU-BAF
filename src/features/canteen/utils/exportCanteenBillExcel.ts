@@ -229,6 +229,135 @@ export const formatBengaliMonthYear = (monthKey: string): string => {
   return `${mName} ${yBn}`;
 };
 
+// Helper to determine if a transaction is a valid non-reverted payment
+export const isPaymentTx = (tx: any): boolean => {
+  if (!tx) return false;
+  const isPay = tx.type === 'BILL PAYMENT' || tx.type === 'PAYMENT';
+  if (!isPay) return false;
+  if (tx.isReverted || tx.status === 'REVERTED') return false;
+  if (String(tx.items || '').includes('[বাতিল / REVERTED]')) return false;
+  return true;
+};
+
+/**
+ * Resolves the billing month key for a PAYMENT transaction according to the 25th-to-24th billing cycle:
+ * - Payments made between 25th of month M and 24th of month M+1 count as payments for month M.
+ *   Example: 25 Sep to 24 Oct -> "2026-09"
+ *            25 Oct to 24 Nov -> "2026-10"
+ *            25 Nov to 24 Dec -> "2026-11"
+ *            25 Dec to 24 Jan -> "2026-12"
+ */
+export const getPaymentCycleMonthKey = (dateVal: any): string => {
+  if (!dateVal) return '';
+
+  let year: number | null = null;
+  let month: number | null = null; // 1-12
+  let day: number | null = null; // 1-31
+
+  if (dateVal instanceof Date) {
+    if (!isNaN(dateVal.getTime())) {
+      year = dateVal.getFullYear();
+      month = dateVal.getMonth() + 1;
+      day = dateVal.getDate();
+    }
+  } else if (typeof dateVal === 'number' || (/^\d{10,13}$/).test(String(dateVal).trim())) {
+    const d = new Date(Number(dateVal));
+    if (!isNaN(d.getTime())) {
+      year = d.getFullYear();
+      month = d.getMonth() + 1;
+      day = d.getDate();
+    }
+  } else {
+    let str = String(dateVal).trim();
+    if (!str || str === '-') return '';
+
+    // Bengali numerals conversion
+    const bnDigits: Record<string, string> = {
+      '০': '0', '১': '1', '২': '2', '৩': '3', '৪': '4',
+      '৫': '5', '৬': '6', '৭': '7', '৮': '8', '৯': '9'
+    };
+    str = str.replace(/[০-৯]/g, (ch) => bnDigits[ch] || ch);
+
+    // 1. ISO format or YYYY-MM-DD
+    const ymdMatch = str.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+    if (ymdMatch) {
+      year = parseInt(ymdMatch[1], 10);
+      month = parseInt(ymdMatch[2], 10);
+      day = parseInt(ymdMatch[3], 10);
+    } else {
+      // 2. Format DD-MM-YYYY or DD/MM/YYYY
+      const dmyMatch = str.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})/);
+      if (dmyMatch) {
+        day = parseInt(dmyMatch[1], 10);
+        month = parseInt(dmyMatch[2], 10);
+        year = parseInt(dmyMatch[3], 10);
+      } else {
+        // 3. Format "DD Mon YY" or "DD Mon YYYY" (e.g. "02 Oct 26", "28-Sep-2026", "Mon, 05 Oct 2026")
+        const MONTH_MAP: Record<string, number> = {
+          jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+          jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12
+        };
+        const dmyAlphaMatch = str.match(/(?:^|[,\s])(\d{1,2})[\s\-\/\.]+([A-Za-z]{3,9})[\s\-\/\.]+(\d{2,4})/);
+        if (dmyAlphaMatch) {
+          day = parseInt(dmyAlphaMatch[1], 10);
+          const monStr = dmyAlphaMatch[2].slice(0, 3).toLowerCase();
+          month = MONTH_MAP[monStr] || null;
+          let yr = parseInt(dmyAlphaMatch[3], 10);
+          if (yr < 100) yr += 2000;
+          year = yr;
+        } else {
+          // 4. Bengali month names e.g. "০২ অক্টোবর ২০২৬" or "25 সেপ্টেম্বর 26"
+          const BN_MONTH_MAP: Record<string, number> = {
+            'জানু': 1, 'ফেব্রু': 2, 'মার্চ': 3, 'এপ্রি': 4, 'মে': 5, 'জুন': 6,
+            'জুলাই': 7, 'আগস্ট': 8, 'সেপ্টে': 9, 'অক্টো': 10, 'নভে': 11, 'ডিসে': 12
+          };
+          const bnMatch = str.match(/^(\d{1,2})[\s\-\/\.]+([^\d\s\-\/\.]+)/);
+          if (bnMatch) {
+            day = parseInt(bnMatch[1], 10);
+            const rawMon = bnMatch[2].trim();
+            for (const [k, v] of Object.entries(BN_MONTH_MAP)) {
+              if (rawMon.includes(k)) {
+                month = v;
+                break;
+              }
+            }
+            const yrMatch = str.match(/\d{2,4}$/);
+            if (yrMatch) {
+              let yr = parseInt(yrMatch[0], 10);
+              if (yr < 100) yr += 2000;
+              year = yr;
+            }
+          } else {
+            // 5. Try native Date parsing
+            const parsed = new Date(str);
+            if (!isNaN(parsed.getTime())) {
+              year = parsed.getFullYear();
+              month = parsed.getMonth() + 1;
+              day = parsed.getDate();
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (year && month && day) {
+    if (day >= 25) {
+      return `${year}-${String(month).padStart(2, '0')}`;
+    } else {
+      let prevM = month - 1;
+      let prevY = year;
+      if (prevM < 1) {
+        prevM = 12;
+        prevY -= 1;
+      }
+      return `${prevY}-${String(prevM).padStart(2, '0')}`;
+    }
+  }
+
+  return getTxMonthKey(dateVal);
+};
+
 export interface ExportCanteenBillParams {
   members: any[];
   allTxs: any[];
@@ -283,16 +412,13 @@ export async function exportCanteenBillToExcel({
   // Row 2: Title "ক্যান্টিন বিলঃ ১৫৫ ইউএএসইউ বিএএফ"
   aoa.push(['', '', '', `${categoryTitle}ঃ ${unitName}`]);
 
-  // Row 3: Subtitle with group filter and due filter if specified
+  // Row 3: Subtitle with group filter and due filter if specified ('বিমানসেনা' and 'বকেয়া বিল' are hidden as requested)
   const filterTitleBn = filterLabel === 'OFFICER' 
     ? ' (অফিসার)' 
     : filterLabel === 'CIVILIAN' 
     ? ' (সিভিলিয়ান)' 
-    : filterLabel === 'AIRMEN' 
-    ? ' (বিমানসেনা)' 
     : '';
-  const dueTitleBn = dueOnly ? ' (বকেয়া তালিকা)' : '';
-  aoa.push(['', '', '', `মাসঃ ${titleMonthBn}${filterTitleBn}${dueTitleBn}`]);
+  aoa.push(['', '', '', `মাসঃ ${titleMonthBn}${filterTitleBn}`]);
 
   // Row 4: Empty separator
   aoa.push([]);
@@ -323,16 +449,6 @@ export async function exportCanteenBillToExcel({
 
   let serialCounter = 0;
 
-  // Helper to determine if a transaction is a valid non-reverted payment
-  const isPaymentTx = (tx: any): boolean => {
-    if (!tx) return false;
-    const isPay = tx.type === 'BILL PAYMENT' || tx.type === 'PAYMENT';
-    if (!isPay) return false;
-    if (tx.isReverted || tx.status === 'REVERTED') return false;
-    if (String(tx.items || '').includes('[বাতিল / REVERTED]')) return false;
-    return true;
-  };
-
   const isCategoryMatch = (tx: any, cat: BillCategory): boolean => {
     if (cat === 'ALL') return true;
     if (isPaymentTx(tx)) {
@@ -342,6 +458,9 @@ export async function exportCanteenBillToExcel({
   };
 
   const getMonthKeyOfTx = (tx: any): string => {
+    if (isPaymentTx(tx)) {
+      return getPaymentCycleMonthKey(tx.date || tx.timestamp || tx.created_at);
+    }
     return tx.monthKey || getTxMonthKey(tx.date) || '';
   };
 
@@ -463,21 +582,15 @@ export async function exportCanteenBillToExcel({
 
       totalBill = previousDue + currentPeriodCharges;
 
-      // 3. Post-Paid Canteen Realtime Payment Settlement:
-      const paymentsAfterPrior = memberCategoryTxs
-        .filter((tx) => isPaymentTx(tx) && getMonthKeyOfTx(tx) >= selectedMonth)
+      // 3. Current Month Payments: payments that belong to selectedMonth's payment cycle (25th of month to 24th of next month)
+      const currentMonthPayments = memberCategoryTxs
+        .filter((tx) => isPaymentTx(tx) && getMonthKeyOfTx(tx) === selectedMonth)
         .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
 
-      const allPaymentsToDate = memberCategoryTxs
-        .filter((tx) => isPaymentTx(tx))
-        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-
-      const effectivePayments = Math.max(paymentsAfterPrior, Math.max(0, allPaymentsToDate - priorPayments));
-
-      paidBill = effectivePayments;
+      paidBill = currentMonthPayments;
       currentPeriodPayments = paidBill;
 
-      const totalCredits = previousAdvance + effectivePayments;
+      const totalCredits = previousAdvance + paidBill;
       if (totalCredits >= totalBill) {
         advance = totalCredits - totalBill;
         remainingDue = 0;
@@ -614,6 +727,7 @@ export async function exportCanteenBillToExcel({
         ws[addr] = { t: 's', v: '' };
       }
       const isLeftAlign = (c === 1 || c === 2); // c=1 is Rank, c=2 is Name
+      const rowBgColor = i % 2 === 0 ? { rgb: 'FFFFFF' } : { rgb: 'F8FAFC' };
       ws[addr].s = {
         font: { name: FONT_NAME, sz: 11, color: { rgb: '000000' } },
         alignment: {
@@ -621,7 +735,8 @@ export async function exportCanteenBillToExcel({
           horizontal: isLeftAlign ? 'left' : 'center',
           wrapText: false
         },
-        border: cellBorder
+        border: cellBorder,
+        fill: { fgColor: rowBgColor }
       };
     }
   }

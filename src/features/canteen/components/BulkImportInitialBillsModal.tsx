@@ -27,7 +27,7 @@ import { supabase } from '../../../supabase';
 import { pushKeyToCloud, pullKeyFromCloud, recordDeletedTxId } from '../utils/canteenCloudSync';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
-import { formatBengaliMonthYear } from '../utils/exportCanteenBillExcel';
+import { formatBengaliMonthYear, getPaymentCycleMonthKey } from '../utils/exportCanteenBillExcel';
 import { getTxMonthKey } from '../pages/MemberDB';
 import { deduplicateCanteenTransactions, getFormattedDateForMonth } from '../utils/importHistoryTxs';
 import JSZip from 'jszip';
@@ -1042,9 +1042,17 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
         return false;
       });
 
+      const getTxMonth = (tx: any) => {
+        const isPay = tx.type === 'BILL PAYMENT' || tx.type === 'PAYMENT';
+        if (isPay) {
+          return getPaymentCycleMonthKey(tx.date || tx.timestamp || tx.created_at || tx.createdAt) || tx.monthKey || '';
+        }
+        return tx.monthKey || getTxMonthKey(tx.date) || '';
+      };
+
       // Older transactions strictly prior to targetMonth (e.g. May, June, July, August when target is September)
       const olderTxs = memberTxs.filter((tx: any) => {
-        const txMonth = getTxMonthKey(tx.date);
+        const txMonth = getTxMonth(tx);
         return txMonth && txMonth < targetMonth;
       });
 
@@ -1059,7 +1067,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
       const olderNet = olderCharges - olderPayments;
 
       // Current and future month transactions
-      const currentMonthTxs = memberTxs.filter((tx: any) => getTxMonthKey(tx.date) === targetMonth);
+      const currentMonthTxs = memberTxs.filter((tx: any) => getTxMonth(tx) === targetMonth);
       const currentCharges = currentMonthTxs
         .filter((tx: any) => tx.type !== 'BILL PAYMENT')
         .reduce((sum: number, tx: any) => sum + Number(tx.amount || 0), 0);
@@ -1069,7 +1077,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
       const currentNet = Math.max(0, currentCharges - currentPayments);
 
       const futureTxs = memberTxs.filter((tx: any) => {
-        const txMonth = getTxMonthKey(tx.date);
+        const txMonth = getTxMonth(tx);
         return txMonth && txMonth > targetMonth;
       });
       const futureNet = Math.max(0, futureTxs

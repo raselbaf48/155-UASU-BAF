@@ -1,10 +1,12 @@
 import { getRankWeight, getCleanBdNo } from './canteenSeniority';
-import { toBengaliNum } from './exportCanteenBillExcel';
+import { toBengaliNum, formatRankBn, formatMemberNameBn } from './exportCanteenBillExcel';
 import { pushKeyToCloud, pullKeyFromCloud } from './canteenCloudSync';
 
 export interface WhatsAppTemplateConfig {
-  seniorTemplate: string;
-  juniorTemplate: string;
+
+  seniorTemplate: string;      // Individual Senior template
+  juniorTemplate: string;      // Individual Junior template
+  multipleTemplate: string;    // Multiple / Group template
   accountNo: string;
   accountName: string;
   bankBranch: string;
@@ -14,30 +16,51 @@ export interface WhatsAppTemplateConfig {
 export const DEFAULT_SENIOR_MSG_TEMPLATE = `আসসালামু আলাইকুম স্যার;
 ক্যান্টিন বিলঃ {মাস}
 মোট বিলঃ {মোট_বিল} টাকা
-আপনার ক্যান্টিন বিল আগামী {পরের_মাসের_৫_তারিখ} তারিখের মধ্যে পরিশোধ করার জন্য অনুরোধ করা হলো।  
+আপনার ক্যান্টিন বিল আগামী {পরের_মাসের_৫_তারিখ} তারিখের মধ্যে পরিশোধ করার জন্য অনুরোধ করা হলো।
 
-UCB Account No : {একাউন্ট_নম্বর}
+Account No : {একাউন্ট_নম্বর}
 {হিসাবধারীর_নাম}
+United Commercial Bank Limited.
 {শাখা}
 
-ধন্যবাদান্তে
+বিদ্রঃ বিল পরিশোধ করে আমার Whatsapp এর ইনবক্সে Payment এর স্ক্রীনশট পাঠানোর অনুরোধ করা হল।
+
+ধন্যবাদান্তে 
 {ম্যানেজার}`;
 
 export const DEFAULT_JUNIOR_MSG_TEMPLATE = `আসসালামু আলাইকুম;
 ক্যান্টিন বিলঃ {মাস}
 মোট বিলঃ {মোট_বিল} টাকা
-আপনার ক্যান্টিন বিল আগামী {পরের_মাসের_৫_তারিখ} তারিখের মধ্যে পরিশোধ করার জন্য অনুরোধ করা হলো।  
+আপনার ক্যান্টিন বিল আগামী {পরের_মাসের_৫_তারিখ} তারিখের মধ্যে পরিশোধ করার জন্য অনুরোধ করা হলো।
 
-UCB Account No : {একাউন্ট_নম্বর}
+Account No : {একাউন্ট_নম্বর}
 {হিসাবধারীর_নাম}
+United Commercial Bank Limited.
 {শাখা}
 
-ধন্যবাদান্তে
+বিদ্রঃ বিল পরিশোধ করে আমার Whatsapp এর ইনবক্সে Payment এর স্ক্রীনশট পাঠানোর অনুরোধ করা হল।
+
+ধন্যবাদান্তে 
+{ম্যানেজার}`;
+
+export const DEFAULT_MULTIPLE_MSG_TEMPLATE = `আসসালামু আলাইকুম স্যার/অল;
+ক্যান্টিন বিলঃ {মাস}
+যাদের ক্যান্টিন বিল বাকি আছে, তাদের বিল আগামী {পরের_মাসের_৫_তারিখ} তারিখের মধ্যে পরিশোধ করার জন্য অনুরোধ করা হলো।
+
+Account No : {একাউন্ট_নম্বর}
+{হিসাবধারীর_নাম}
+United Commercial Bank Limited.
+{শাখা}
+
+বিদ্রঃ বিল পরিশোধ করে আমার Whatsapp এর ইনবক্সে Payment এর স্ক্রীনশট পাঠানোর অনুরোধ করা হল।
+
+ধন্যবাদান্তে 
 {ম্যানেজার}`;
 
 export const DEFAULT_WHATSAPP_TEMPLATE_CONFIG: WhatsAppTemplateConfig = {
   seniorTemplate: DEFAULT_SENIOR_MSG_TEMPLATE,
   juniorTemplate: DEFAULT_JUNIOR_MSG_TEMPLATE,
+  multipleTemplate: DEFAULT_MULTIPLE_MSG_TEMPLATE,
   accountNo: '',
   accountName: 'MD RASEL HOSSEN',
   bankBranch: 'Kathgor Brunch',
@@ -47,6 +70,30 @@ export const DEFAULT_WHATSAPP_TEMPLATE_CONFIG: WhatsAppTemplateConfig = {
 const STORAGE_KEY = 'canteen_whatsapp_template_config';
 
 /**
+ * Resolves Manager's display name into authentic Bengali (e.g. "LAC Nishad" -> "এলএসি নিশাদ")
+ */
+export function getManagerDisplayBangla(config?: WhatsAppTemplateConfig, managerName?: string): string {
+  if (config?.managerTitle && config.managerTitle.trim() && config.managerTitle.trim() !== 'ক্যান্টিন ম্যানেজার') {
+    return config.managerTitle.trim();
+  }
+  const nameToUse = (managerName || 'LAC Nishad').trim();
+  if (/[\u0980-\u09FF]/.test(nameToUse)) {
+    return nameToUse;
+  }
+  const parts = nameToUse.split(/\s+/);
+  if (parts.length >= 2) {
+    const rankPart = parts[0];
+    const surnamePart = parts.slice(1).join(' ');
+    const bnRank = formatRankBn(rankPart);
+    const bnName = formatMemberNameBn(surnamePart);
+    return `${bnRank} ${bnName}`.trim();
+  } else if (parts.length === 1) {
+    return formatMemberNameBn(parts[0]);
+  }
+  return 'ক্যান্টিন ম্যানেজার';
+}
+
+/**
  * Load WhatsApp Template Config from LocalStorage
  */
 export function getWhatsAppTemplateConfig(): WhatsAppTemplateConfig {
@@ -54,6 +101,16 @@ export function getWhatsAppTemplateConfig(): WhatsAppTemplateConfig {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
+      // Auto-migrate older configs to include multipleTemplate and updated bank format
+      if (!parsed.multipleTemplate) {
+        parsed.multipleTemplate = DEFAULT_MULTIPLE_MSG_TEMPLATE;
+      }
+      if (parsed.seniorTemplate && parsed.seniorTemplate.includes('UCB Account No :')) {
+        parsed.seniorTemplate = DEFAULT_SENIOR_MSG_TEMPLATE;
+      }
+      if (parsed.juniorTemplate && parsed.juniorTemplate.includes('UCB Account No :')) {
+        parsed.juniorTemplate = DEFAULT_JUNIOR_MSG_TEMPLATE;
+      }
       return {
         ...DEFAULT_WHATSAPP_TEMPLATE_CONFIG,
         ...parsed
@@ -200,7 +257,7 @@ export function isMemberSeniorToManager(
 }
 
 /**
- * Build the final WhatsApp message string based on Seniority and Template Config
+ * Build the final WhatsApp message string based on Seniority and Template Config (Individual Member)
  */
 export function buildWhatsAppBillMessage(params: {
   member: any;
@@ -231,9 +288,7 @@ export function buildWhatsAppBillMessage(params: {
   const monthShort = formatBengaliMonthShortYear(monthKey);
   const dueDate = getBengaliNextMonthDueDate(monthKey);
   const formattedBill = toBengaliNum(Math.round(totalDue));
-  const effectiveManager = config.managerTitle && config.managerTitle.trim() !== 'ক্যান্টিন ম্যানেজার' 
-    ? config.managerTitle 
-    : (managerName || 'ক্যান্টিন ম্যানেজার');
+  const effectiveManager = getManagerDisplayBangla(config, managerName);
 
   // Replace placeholders
   let msg = rawTemplate
@@ -249,3 +304,32 @@ export function buildWhatsAppBillMessage(params: {
 
   return { message: msg, isSenior };
 }
+
+/**
+ * Build Multiple / Group WhatsApp Bill Announcement message (e.g. for Print Preview sharing)
+ */
+export function buildWhatsAppMultipleBillMessage(params: {
+  monthKey?: string;
+  config?: WhatsAppTemplateConfig;
+  managerName?: string;
+}): string {
+  const {
+    monthKey,
+    config = getWhatsAppTemplateConfig(),
+    managerName = 'LAC Nishad'
+  } = params;
+
+  const rawTemplate = config.multipleTemplate || DEFAULT_MULTIPLE_MSG_TEMPLATE;
+  const monthShort = formatBengaliMonthShortYear(monthKey);
+  const dueDate = getBengaliNextMonthDueDate(monthKey);
+  const effectiveManager = getManagerDisplayBangla(config, managerName);
+
+  return rawTemplate
+    .replace(/\{মাস\}/g, monthShort)
+    .replace(/\{পরের_মাসের_৫_তারিখ\}/g, dueDate)
+    .replace(/\{একাউন্ট_নম্বর\}/g, config.accountNo ? config.accountNo.trim() : '')
+    .replace(/\{হিসাবধারীর_নাম\}/g, config.accountName || 'MD RASEL HOSSEN')
+    .replace(/\{শাখা\}/g, config.bankBranch || 'Kathgor Brunch')
+    .replace(/\{ম্যানেজার\}/g, effectiveManager);
+}
+

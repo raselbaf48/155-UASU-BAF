@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Printer, X, FileSpreadsheet, ChevronLeft, ChevronRight, Calendar, Users } from 'lucide-react';
+import { Printer, X, FileSpreadsheet, ChevronLeft, ChevronRight, Calendar, Users, Loader2, CheckCircle2 } from 'lucide-react';
+import { toBlob as htmlToImageToBlob } from 'html-to-image';
+import html2canvas from 'html2canvas';
+import { saveAs } from 'file-saver';
 import { BillCategory, getTxCategory, getTxMonthKey } from '../pages/MemberDB';
 import { getCanteenConfig } from '../utils/canteenSettings';
 import { 
@@ -18,8 +21,12 @@ import {
   formatRankBn,
   formatMemberNameBn,
   getMonthNamesBn,
-  exportCanteenBillToExcel
+  exportCanteenBillToExcel,
+  getPaymentCycleMonthKey
 } from '../utils/exportCanteenBillExcel';
+import { WhatsAppIcon } from '../pages/MemberDB';
+import { buildWhatsAppMultipleBillMessage } from '../utils/canteenWhatsAppTemplate';
+
 
 export type MemberRoleFilter = 'OVERALL' | 'OFFICER' | 'AIRMEN' | 'CIVILIAN';
 
@@ -101,6 +108,8 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
   const [roleFilter, setRoleFilter] = useState<MemberRoleFilter>('OVERALL');
   const [dueFilter, setDueFilter] = useState<'ALL' | 'DUE'>('ALL');
   const [banglaVersion, setBanglaVersion] = useState<number>(0);
+  const [isSharingWhatsApp, setIsSharingWhatsApp] = useState<boolean>(false);
+  const [whatsAppShareSuccess, setWhatsAppShareSuccess] = useState<string | null>(null);
 
   // Live state synchronized with storage and cloud events for true realtime updates
   const [liveTxs, setLiveTxs] = useState<any[]>(allTxs);
@@ -235,7 +244,14 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
   }, [filteredMembers]);
 
   // Helper to extract comparable YYYY-MM key from any transaction
+  // Payments follow the 25th-24th billing cycle: 25 Sep - 24 Oct belongs to Sep (2026-09), 25 Oct - 24 Nov belongs to Oct (2026-10)
   const getMonthKeyOfTx = (tx: any): string => {
+    if (isPaymentTx(tx)) {
+      const cycleKey = getPaymentCycleMonthKey(tx.date || tx.timestamp || tx.created_at || tx.createdAt);
+      if (cycleKey) return cycleKey;
+      if (tx.monthKey) return tx.monthKey;
+      return '';
+    }
     return tx.monthKey || getTxMonthKey(tx.date) || '';
   };
 
@@ -304,6 +320,9 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
       let currentPeriodPayments = 0;
       let previousDue = 0;
       let previousAdvance = 0;
+      let canteenBill = 0;
+      let unitFund = 0;
+      let othersFund = 0;
       let totalBill = 0;
       let paidBill = 0;
       let advance = 0;
@@ -313,17 +332,23 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
       const memberTotalAdvance = Number(member.Advance ?? member.advance ?? member.ogrim ?? 0);
 
       if (activeMonth === 'ALL') {
-        const allCharges = computeEffectiveCharges(memberCategoryTxs);
+        const canteenTxs = memberCategoryTxs.filter((tx) => getTxCategory(tx) === 'CANTEEN');
+        const unitFundTxs = memberCategoryTxs.filter((tx) => getTxCategory(tx) === 'UNIT_FUND');
+        const othersFundTxs = memberCategoryTxs.filter((tx) => getTxCategory(tx) === 'OTHERS');
+
+        canteenBill = computeEffectiveCharges(canteenTxs);
+        unitFund = computeEffectiveCharges(unitFundTxs);
+        othersFund = computeEffectiveCharges(othersFundTxs);
+        currentPeriodCharges = canteenBill + unitFund + othersFund;
 
         const allPayments = memberCategoryTxs
           .filter((tx) => isPaymentTx(tx))
           .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
 
-        currentPeriodCharges = allCharges;
         currentPeriodPayments = allPayments;
         previousDue = 0;
         previousAdvance = memberTotalAdvance;
-        totalBill = Math.max(memberTotalDue + allPayments, allCharges);
+        totalBill = Math.max(memberTotalDue + allPayments, currentPeriodCharges);
         paidBill = allPayments;
         remainingDue = memberTotalDue;
         advance = memberTotalAdvance;
@@ -356,28 +381,27 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
 
         // 2. Current Month Charges: transactions belonging specifically to activeMonth
         const currentMonthTxs = memberCategoryTxs.filter((tx) => getMonthKeyOfTx(tx) === activeMonth);
-        currentPeriodCharges = computeEffectiveCharges(currentMonthTxs);
+        const canteenTxs = currentMonthTxs.filter((tx) => getTxCategory(tx) === 'CANTEEN');
+        const unitFundTxs = currentMonthTxs.filter((tx) => getTxCategory(tx) === 'UNIT_FUND');
+        const othersFundTxs = currentMonthTxs.filter((tx) => getTxCategory(tx) === 'OTHERS');
+
+        canteenBill = computeEffectiveCharges(canteenTxs);
+        unitFund = computeEffectiveCharges(unitFundTxs);
+        othersFund = computeEffectiveCharges(othersFundTxs);
+        currentPeriodCharges = canteenBill + unitFund + othersFund;
 
         // Total bill for this month
         totalBill = previousDue + currentPeriodCharges;
 
-        // 3. Post-Paid Canteen Realtime Payment Settlement:
-        // In post-paid canteen, bills for activeMonth are collected in activeMonth and activeMonth+1 (e.g. October for September)
-        // Payments made during or after prior period that apply to this statement:
-        const paymentsAfterPrior = memberCategoryTxs
-          .filter((tx) => isPaymentTx(tx) && getMonthKeyOfTx(tx) >= activeMonth)
+        // 3. Current Month Payments: payments that belong to activeMonth's payment cycle (25th of month to 24th of next month)
+        const currentMonthPayments = memberCategoryTxs
+          .filter((tx) => isPaymentTx(tx) && getMonthKeyOfTx(tx) === activeMonth)
           .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
 
-        const allPaymentsToDate = memberCategoryTxs
-          .filter((tx) => isPaymentTx(tx))
-          .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-
-        const effectivePayments = Math.max(paymentsAfterPrior, Math.max(0, allPaymentsToDate - priorPayments));
-
-        paidBill = effectivePayments;
+        paidBill = currentMonthPayments;
         currentPeriodPayments = paidBill;
 
-        const totalCredits = previousAdvance + effectivePayments;
+        const totalCredits = previousAdvance + paidBill;
         if (totalCredits >= totalBill) {
           advance = totalCredits - totalBill;
           remainingDue = 0;
@@ -396,7 +420,9 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
         name: nameFormatted,
         previousDue,
         previousAdvance,
-        canteenBill: currentPeriodCharges,
+        canteenBill,
+        unitFund,
+        othersFund,
         totalBill,
         paidBill,
         advance,
@@ -420,6 +446,41 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
     }));
   }, [rows, dueFilter]);
 
+  // Dynamic Auto-Hide of Columns: If after filtering any column is completely empty (all 0), it automatically hides
+  const showColPreviousDue = useMemo(() => displayedRows.some((r) => r.previousDue > 0), [displayedRows]);
+  const showColPreviousAdvance = useMemo(() => displayedRows.some((r) => r.previousAdvance > 0), [displayedRows]);
+  const showColCanteenBill = useMemo(() => displayedRows.some((r) => r.canteenBill > 0) || (!displayedRows.some((r) => r.unitFund > 0) && !displayedRows.some((r) => r.othersFund > 0)), [displayedRows]);
+  const showColUnitFund = useMemo(() => displayedRows.some((r) => r.unitFund > 0), [displayedRows]);
+  const showColOthersFund = useMemo(() => displayedRows.some((r) => r.othersFund > 0), [displayedRows]);
+  const showColTotalBill = useMemo(() => displayedRows.some((r) => r.totalBill > 0) || displayedRows.length > 0, [displayedRows]);
+  const showColPaidBill = useMemo(() => displayedRows.some((r) => r.paidBill > 0), [displayedRows]);
+  const showColAdvance = useMemo(() => displayedRows.some((r) => r.advance > 0), [displayedRows]);
+  const showColRemainingDue = useMemo(() => displayedRows.some((r) => r.remainingDue > 0) || displayedRows.length > 0, [displayedRows]);
+
+  const visibleColumnsCount = useMemo(() => {
+    let count = 3; // ser, rank, name
+    if (showColPreviousDue) count++;
+    if (showColPreviousAdvance) count++;
+    if (showColCanteenBill) count++;
+    if (showColUnitFund) count++;
+    if (showColOthersFund) count++;
+    if (showColTotalBill) count++;
+    if (showColPaidBill) count++;
+    if (showColAdvance) count++;
+    if (showColRemainingDue) count++;
+    return count;
+  }, [
+    showColPreviousDue,
+    showColPreviousAdvance,
+    showColCanteenBill,
+    showColUnitFund,
+    showColOthersFund,
+    showColTotalBill,
+    showColPaidBill,
+    showColAdvance,
+    showColRemainingDue
+  ]);
+
   // Totals calculated strictly for the currently displayed rows
   const totals = useMemo(() => {
     return displayedRows.reduce(
@@ -427,13 +488,15 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
         acc.previousDue += r.previousDue;
         acc.previousAdvance += r.previousAdvance;
         acc.canteenBill += r.canteenBill;
+        acc.unitFund += r.unitFund;
+        acc.othersFund += r.othersFund;
         acc.totalBill += r.totalBill;
         acc.paidBill += r.paidBill;
         acc.advance += r.advance;
         acc.remainingDue += r.remainingDue;
         return acc;
       },
-      { previousDue: 0, previousAdvance: 0, canteenBill: 0, totalBill: 0, paidBill: 0, advance: 0, remainingDue: 0 }
+      { previousDue: 0, previousAdvance: 0, canteenBill: 0, unitFund: 0, othersFund: 0, totalBill: 0, paidBill: 0, advance: 0, remainingDue: 0 }
     );
   }, [displayedRows]);
 
@@ -482,6 +545,206 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
       getBanglaName: (m) => getMemberBanglaName(m),
       getBanglaRank: (m) => getMemberBanglaRank(m) || formatRankBn(m['Rank'] || m.rank || ''),
     });
+  };
+
+  const handleShareToWhatsApp = async () => {
+    const element = document.getElementById('print-canteen-bill-content');
+    if (!element) return;
+
+    setIsSharingWhatsApp(true);
+    try {
+      const canteenConfig = getCanteenConfig();
+      const managerName = canteenConfig?.managerName || 'LAC Nishad';
+      
+      // 1. Build the Multiple / Group message text
+      const shareMessage = buildWhatsAppMultipleBillMessage({
+        monthKey: activeMonth,
+        managerName
+      });
+
+      // 2. High-resolution canvas capture of the bill table container (scale 2 for crisp retina text)
+      let blob: Blob | null = null;
+
+      // Determine required full dimensions so all 10 columns are rendered completely without clipping
+      const tableEl = element.querySelector('table');
+      const tableScrollWidth = tableEl ? tableEl.scrollWidth : 0;
+      const targetWidth = Math.max(
+        element.scrollWidth,
+        element.offsetWidth,
+        tableScrollWidth + 48,
+        orientation === 'landscape' ? 1200 : 960
+      );
+      const targetHeight = Math.max(
+        element.scrollHeight,
+        element.offsetHeight
+      );
+
+      // Method A: html-to-image (Uses browser's native engine, completely immune to CSS oklch parser bugs)
+      // Setting skipFonts: true and fontEmbedCSS: '' prevents reading cross-origin remote stylesheet rules (avoiding cssRules SecurityError)
+      try {
+        blob = await htmlToImageToBlob(element, {
+          quality: 0.95,
+          pixelRatio: 2,
+          backgroundColor: '#ffffff',
+          skipFonts: true,
+          fontEmbedCSS: '',
+          cacheBust: true,
+          width: targetWidth,
+          height: targetHeight,
+          style: {
+            width: `${targetWidth}px`,
+            minWidth: `${targetWidth}px`,
+            maxWidth: `${targetWidth}px`,
+            margin: '0',
+            transform: 'none',
+            boxShadow: 'none',
+          },
+          filter: (node) => {
+            if (node instanceof HTMLElement && (node.classList.contains('print:hidden') || node.classList.contains('no-print'))) {
+              return false;
+            }
+            return true;
+          }
+        });
+      } catch (imgErr) {
+        console.warn('html-to-image capture attempt failed, trying fallback:', imgErr);
+      }
+
+      // Method B Fallback: html2canvas with bulletproof oklch sanitizer proxy
+      if (!blob) {
+        const colorCanvas = document.createElement('canvas');
+        colorCanvas.width = 1;
+        colorCanvas.height = 1;
+        const colorCtx = colorCanvas.getContext('2d');
+        const convertOklch = (str: string): string => {
+          if (!str || typeof str !== 'string' || !str.includes('oklch')) return str;
+          return str.replace(/oklch\([^)]+\)/gi, (match) => {
+            if (!colorCtx) return '#000000';
+            try {
+              colorCtx.fillStyle = '#000000';
+              colorCtx.fillStyle = match;
+              return colorCtx.fillStyle || '#000000';
+            } catch {
+              return '#000000';
+            }
+          });
+        };
+
+        const createStyleProxy = (style: CSSStyleDeclaration) => {
+          return new Proxy(style, {
+            get(target, prop) {
+              if (prop === 'getPropertyValue') {
+                return (name: string) => {
+                  const val = target.getPropertyValue(name);
+                  return convertOklch(val);
+                };
+              }
+              const val = (target as any)[prop];
+              if (typeof val === 'function') {
+                return val.bind(target);
+              }
+              if (typeof val === 'string' && val.includes('oklch')) {
+                return convertOklch(val);
+              }
+              return val;
+            }
+          });
+        };
+
+        const originalGetComputedStyle = window.getComputedStyle;
+        try {
+          window.getComputedStyle = function (elt: Element, pseudoElt?: string | null) {
+            const s = originalGetComputedStyle.call(window, elt, pseudoElt);
+            return createStyleProxy(s);
+          };
+
+          const canvas = await html2canvas(element, {
+            scale: 2,
+            backgroundColor: '#ffffff',
+            useCORS: true,
+            logging: false,
+            width: targetWidth,
+            windowWidth: targetWidth,
+            onclone: (clonedDoc) => {
+              const clonedTarget = clonedDoc.getElementById('print-canteen-bill-content');
+              if (clonedTarget) {
+                clonedTarget.style.width = `${targetWidth}px`;
+                clonedTarget.style.minWidth = `${targetWidth}px`;
+                clonedTarget.style.maxWidth = `${targetWidth}px`;
+              }
+              if (clonedDoc.defaultView) {
+                const clonedOrig = clonedDoc.defaultView.getComputedStyle;
+                clonedDoc.defaultView.getComputedStyle = function (elt: Element, pseudoElt?: string | null) {
+                  const s = clonedOrig.call(clonedDoc.defaultView, elt, pseudoElt);
+                  return createStyleProxy(s);
+                };
+              }
+              // Convert any inline and style tag occurrences
+              clonedDoc.querySelectorAll('style').forEach((styleTag) => {
+                if (styleTag.textContent && styleTag.textContent.includes('oklch')) {
+                  styleTag.textContent = convertOklch(styleTag.textContent);
+                }
+              });
+              clonedDoc.querySelectorAll<HTMLElement>('*').forEach((el) => {
+                if (el.style) {
+                  if (el.style.color && el.style.color.includes('oklch')) el.style.color = convertOklch(el.style.color);
+                  if (el.style.backgroundColor && el.style.backgroundColor.includes('oklch')) el.style.backgroundColor = convertOklch(el.style.backgroundColor);
+                  if (el.style.borderColor && el.style.borderColor.includes('oklch')) el.style.borderColor = convertOklch(el.style.borderColor);
+                }
+              });
+            }
+          });
+          blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+        } finally {
+          window.getComputedStyle = originalGetComputedStyle;
+        }
+      }
+
+      if (!blob) throw new Error('Could not generate image blob');
+
+      const cleanMonth = titleMonthBn.replace(/\s+/g, '_');
+      const roleSuffix = roleFilter === 'OFFICER' ? '_অফিসার' : roleFilter === 'AIRMEN' ? '_বিমানসেনা' : roleFilter === 'CIVILIAN' ? '_সিভিলিয়ান' : '';
+      const dueSuffix = dueFilter === 'DUE' ? '_বকেয়া' : '';
+      const fileName = `ক্যান্টিন_বিল_${cleanMonth}${roleSuffix}${dueSuffix}.png`;
+      const file = new File([blob], fileName, { type: 'image/png' });
+
+      // 3. If Web Share API supports file sharing (Mobile Android / iOS / APK):
+      if (typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: `ক্যান্টিন বিল - ${titleMonthBn}`,
+            text: shareMessage
+          });
+          setWhatsAppShareSuccess('✅ হোয়াটসঅ্যাপে বিলের ছবি ও মেসেজ শেয়ার করা হয়েছে!');
+          setTimeout(() => setWhatsAppShareSuccess(null), 5000);
+          return;
+        } catch (err: any) {
+          if (err.name === 'AbortError') return; // User closed dialog
+          console.warn('Navigator share error, falling back:', err);
+        }
+      }
+
+      // 4. Fallback for Desktop PC or browsers where navigator.canShare({ files }) is not available:
+      // Download the generated image & copy text & open WhatsApp
+      saveAs(blob, fileName);
+      if (navigator.clipboard) {
+        try {
+          await navigator.clipboard.writeText(shareMessage);
+        } catch {}
+      }
+
+      // Open WhatsApp with pre-filled message
+      window.open(`https://wa.me/?text=${encodeURIComponent(shareMessage)}`, '_blank');
+      setWhatsAppShareSuccess('✅ বিলের ছবি ডাউনলোড হয়েছে এবং মেসেজ কপি হয়েছে! হোয়াটসঅ্যাপে ছবি ও মেসেজ পেস্ট করে পাঠান।');
+      setTimeout(() => setWhatsAppShareSuccess(null), 7000);
+
+    } catch (err: any) {
+      console.error('WhatsApp share error:', err);
+      alert('ছবি তৈরি করতে সমস্যা হয়েছে: ' + (err.message || 'Error'));
+    } finally {
+      setIsSharingWhatsApp(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -689,6 +952,22 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
             <span className="text-center">Export Excel (.xlsx)</span>
           </button>
 
+          {/* WhatsApp Share Button */}
+          <button
+            type="button"
+            onClick={handleShareToWhatsApp}
+            disabled={isSharingWhatsApp}
+            className="flex items-center justify-center space-x-1.5 px-3.5 sm:px-4 py-2 bg-[#25D366] hover:bg-[#20ba59] text-white rounded-xl font-black text-xs transition-all shadow-md shadow-[#25D366]/30 active:translate-y-0.5 cursor-pointer disabled:opacity-60"
+            title="ছবি সহ হোয়াটসঅ্যাপে পাঠান (Share Bill Preview with Image on WhatsApp)"
+          >
+            {isSharingWhatsApp ? (
+              <Loader2 className="w-4 h-4 animate-spin text-white" />
+            ) : (
+              <WhatsAppIcon className="w-4 h-4 text-white" />
+            )}
+            <span className="text-center whitespace-nowrap">WHATSAPP (ছবি সহ শেয়ার)</span>
+          </button>
+
           {/* Print / Save as PDF Button */}
           <button
             type="button"
@@ -702,8 +981,26 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
         </div>
       </div>
 
+      {/* WhatsApp Share Success Toast Alert */}
+      {whatsAppShareSuccess && (
+        <div className="bg-emerald-950/95 border-b border-emerald-500/40 text-emerald-200 px-4 py-2.5 text-xs font-bold flex items-center justify-between animate-fadeIn shrink-0 print:hidden shadow-md">
+          <div className="flex items-center space-x-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{whatsAppShareSuccess}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setWhatsAppShareSuccess(null)}
+            className="text-emerald-400 hover:text-white p-1 rounded-lg transition-colors cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+
       {/* Printable Content Area */}
-      <div className="canteen-bill-print-area flex-1 overflow-auto print:overflow-visible bg-slate-800/60 print:bg-white p-3 sm:p-6 print:p-0 flex justify-center print:block">
+      <div className="canteen-bill-print-area flex-1 overflow-auto print:overflow-visible bg-slate-800/60 print:bg-white p-2 sm:p-6 print:p-0 flex flex-col items-center justify-start print:block">
         <style type="text/css">
           {`
             @media print {
@@ -796,142 +1093,233 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
               }
             }
 
-            .sutonny-font {
-              font-family: 'SutonnyMJ', 'SolaimanLipi', 'Kalpurush', 'Nikosh', 'Bangla', sans-serif !important;
+            .sutonny-font, .sutonny-font * {
+              font-family: 'SutonnyMJ', 'SutonnyOMJ', 'Noto Serif Bengali', 'Tiro Bangla', 'SolaimanLipi', 'Kalpurush', serif !important;
             }
           `}
         </style>
 
-        {/* Paper Container */}
+        {/* Paper Container: Real A4 Dimensions ensure all columns are visible and never clipped */}
         <div
           id="print-canteen-bill-content"
-          className={`sutonny-font mx-auto h-fit shrink-0 bg-white text-black print:shadow-none print:border-none border border-slate-300 shadow-2xl p-4 sm:p-8 print:p-0 print:m-0 transition-all ${
+          className={`sutonny-font mx-auto h-fit shrink-0 bg-white text-black print:shadow-none print:border-none border border-slate-300 shadow-2xl p-3 sm:p-6 print:p-0 print:m-0 transition-all ${
             orientation === 'landscape'
-              ? 'w-full sm:w-[297mm] min-h-[210mm] print:w-full print:min-h-0'
-              : 'w-full sm:w-[210mm] min-h-[297mm] print:w-full print:min-h-0'
+              ? 'w-[297mm] min-w-[297mm] print:w-full print:min-w-0'
+              : 'w-[210mm] min-w-[210mm] print:w-full print:min-w-0'
           }`}
         >
           <div className="w-full">
-            {/* Header: Centered Titles - ONLY Headlines are BOLD */}
-            <div className="text-center mb-4 space-y-1">
-              <h1 className="text-lg sm:text-xl font-bold tracking-wide text-black">
-                {categoryTitle}ঃ {unitName}{roleFilter === 'OFFICER' ? ' (অফিসার)' : roleFilter === 'AIRMEN' ? ' (বিমানসেনা)' : roleFilter === 'CIVILIAN' ? ' (সিভিলিয়ান)' : ''}{dueFilter === 'DUE' ? ' (বকেয়া তালিকা)' : ''}
+            {/* Header: Exact 3-line format requested */}
+            <div className="text-center mb-4 space-y-0.5">
+              <h1 className="text-base sm:text-lg font-bold text-black tracking-wide">
+                {roleFilter === 'OFFICER'
+                  ? 'ক্যান্টিন বিলঃ অফিসার'
+                  : roleFilter === 'AIRMEN'
+                  ? 'ক্যান্টিন বিলঃ বিমানসেনা'
+                  : roleFilter === 'CIVILIAN'
+                  ? 'ক্যান্টিন বিলঃ সিভিলিয়ান'
+                  : 'ক্যান্টিন বিলঃ অফিসার/বিমানসেনা/সিভিলিয়ান'
+                }
               </h1>
               <h2 className="text-sm sm:text-base font-bold text-black">
-                মাসঃ {titleMonthBn}
+                {unitName}
               </h2>
+              <h3 className="text-xs sm:text-sm font-bold text-black">
+                মাসঃ {currMonthBn}
+              </h3>
             </div>
 
-            {/* Official 10-Column Table: Heading Row is BOLD, Below is strictly NORMAL FONT */}
-            <div className="w-full overflow-x-auto print:overflow-visible">
+            {/* Official Table: All Heading cells are Center Aligned, Dynamic Auto-Hide of empty columns */}
+            <div className="w-full overflow-x-visible print:overflow-visible">
               <table
-                className="no-zebra w-full border-collapse border border-black text-[12px] font-normal"
-                style={{ pageBreakInside: 'auto' }}
+                className="w-full border-collapse border border-black text-[11px] font-normal"
+                style={{ pageBreakInside: 'auto', tableLayout: 'auto' }}
               >
                 <thead
-                  className="bg-slate-100 print:bg-slate-100 text-black font-bold"
-                  style={{ backgroundColor: '#f1f5f9', color: '#000000', display: 'table-header-group' }}
+                  className="bg-slate-200 print:bg-slate-200 text-black font-bold"
+                  style={{ backgroundColor: '#e2e8f0', color: '#000000', display: 'table-header-group' }}
                 >
-                  <tr className="border border-black font-bold">
-                    <th className="p-2 border border-black font-bold text-center align-middle w-10">
+                  <tr className="border border-black font-bold text-center">
+                    <th className="p-1.5 border border-black font-bold text-center align-middle whitespace-nowrap w-9">
                       ক্রমিক<br />নং
                     </th>
-                    <th className="p-2 border border-black font-bold text-center align-middle w-20">
+                    <th className="p-1.5 border border-black font-bold text-center align-middle whitespace-nowrap w-16">
                       পদবী
                     </th>
-                    <th className="p-2 border border-black font-bold text-center align-middle w-32">
+                    <th className="p-1.5 border border-black font-bold text-center align-middle w-28">
                       নাম
                     </th>
-                    <th className="p-2 border border-black font-bold text-center align-middle w-24">
-                      বকেয়া বিল<br />({prevMonthBn})
-                    </th>
-                    <th className="p-2 border border-black font-bold text-center align-middle w-24">
-                      অগ্রীম বিল<br />({prevMonthBn})
-                    </th>
-                    <th className="p-2 border border-black font-bold text-center align-middle w-24">
-                      {categoryTitle}<br />({currMonthBn})
-                    </th>
-                    <th className="p-2 border border-black font-bold text-center align-middle w-24">
-                      সর্বমোট<br />বিল
-                    </th>
-                    <th className="p-2 border border-black font-bold text-center align-middle w-24">
-                      পরিশোধিত<br />বিল
-                    </th>
-                    <th className="p-2 border border-black font-bold text-center align-middle w-16">
-                      অগ্রিম
-                    </th>
-                    <th className="p-2 border border-black font-bold text-center align-middle w-20">
-                      বকেয়া
-                    </th>
+                    {showColPreviousDue && (
+                      <th className="p-1.5 border border-black font-bold text-center align-middle whitespace-nowrap w-20">
+                        বকেয়া বিল<br /><span className="text-[10px] font-normal">({prevMonthBn})</span>
+                      </th>
+                    )}
+                    {showColPreviousAdvance && (
+                      <th className="p-1.5 border border-black font-bold text-center align-middle whitespace-nowrap w-20">
+                        অগ্রীম বিল<br /><span className="text-[10px] font-normal">({prevMonthBn})</span>
+                      </th>
+                    )}
+                    {showColCanteenBill && (
+                      <th className="p-1.5 border border-black font-bold text-center align-middle whitespace-nowrap w-20">
+                        ক্যান্টিন বিল<br /><span className="text-[10px] font-normal">({currMonthBn})</span>
+                      </th>
+                    )}
+                    {showColUnitFund && (
+                      <th className="p-1.5 border border-black font-bold text-center align-middle whitespace-nowrap w-20">
+                        ইউনিট ফান্ড
+                      </th>
+                    )}
+                    {showColOthersFund && (
+                      <th className="p-1.5 border border-black font-bold text-center align-middle whitespace-nowrap w-20">
+                        অন্যান্য
+                      </th>
+                    )}
+                    {showColTotalBill && (
+                      <th className="p-1.5 border border-black font-bold text-center align-middle whitespace-nowrap w-20">
+                        সর্বমোট<br />বিল
+                      </th>
+                    )}
+                    {showColPaidBill && (
+                      <th className="p-1.5 border border-black font-bold text-center align-middle whitespace-nowrap w-20">
+                        পরিশোধিত<br />বিল
+                      </th>
+                    )}
+                    {showColAdvance && (
+                      <th className="p-1.5 border border-black font-bold text-center align-middle whitespace-nowrap w-14">
+                        অগ্রিম
+                      </th>
+                    )}
+                    {showColRemainingDue && (
+                      <th className="p-1.5 border border-black font-bold text-center align-middle whitespace-nowrap w-20">
+                        বকেয়া
+                      </th>
+                    )}
                   </tr>
                 </thead>
 
-                <tbody className="font-normal text-black">
+                <tbody className="font-normal text-black" style={{ color: '#000000' }}>
                   {displayedRows.length === 0 ? (
                     <tr>
-                      <td colSpan={10} className="p-8 text-center text-slate-700 font-normal border border-black">
+                      <td colSpan={visibleColumnsCount} className="p-8 text-center font-normal border border-black" style={{ color: '#334155' }}>
                         {dueFilter === 'DUE' ? 'এই মাসে কোনো বকেয়া নেই (No Due Members Found)' : 'কোনো সদস্যের রেকর্ড পাওয়া যায়নি'}
                       </td>
                     </tr>
                   ) : (
-                    displayedRows.map((row) => (
-                      <tr key={row.ser} className="border border-black hover:bg-slate-50 print:hover:bg-transparent font-normal">
-                        <td className="p-1.5 border border-black font-normal text-center align-middle">{row.serBn}</td>
-                        <td className="p-1.5 border border-black font-normal text-center align-middle">{row.rank}</td>
-                        <td className="p-1.5 border border-black font-normal text-left px-2.5 align-middle">{row.name}</td>
-                        <td className="p-1.5 border border-black font-normal text-right px-2 align-middle">
-                          {formatAmountBn(row.previousDue)}
-                        </td>
-                        <td className="p-1.5 border border-black font-normal text-right px-2 align-middle">
-                          {formatAmountBn(row.previousAdvance)}
-                        </td>
-                        <td className="p-1.5 border border-black font-normal text-right px-2 align-middle">
-                          {formatAmountBn(row.canteenBill)}
-                        </td>
-                        <td className="p-1.5 border border-black font-normal text-right px-2 align-middle">
-                          {formatAmountBn(row.totalBill)}
-                        </td>
-                        <td className="p-1.5 border border-black font-normal text-right px-2 text-emerald-800 align-middle">
-                          {formatAmountBn(row.paidBill)}
-                        </td>
-                        <td className="p-1.5 border border-black font-normal text-right px-2 text-indigo-800 align-middle">
-                          {formatAmountBn(row.advance)}
-                        </td>
-                        <td className="p-1.5 border border-black font-normal text-right px-2 text-rose-700 align-middle">
-                          {formatAmountBn(row.remainingDue)}
-                        </td>
-                      </tr>
-                    ))
+                    displayedRows.map((row, index) => {
+                      const isEven = index % 2 === 0;
+                      const rowBg = isEven ? '#ffffff' : '#f1f5f9';
+                      return (
+                        <tr
+                          key={row.ser}
+                          className={`border border-black font-normal ${isEven ? 'bg-white' : 'bg-slate-100'}`}
+                          style={{ backgroundColor: rowBg, color: '#000000' }}
+                        >
+                          <td className="py-1 px-1 border border-black font-normal text-center align-middle text-[11px] whitespace-nowrap">{row.serBn}</td>
+                          <td className="py-1 px-1.5 border border-black font-normal text-center align-middle text-[11px] whitespace-nowrap">{row.rank}</td>
+                          <td className="py-1 px-2 border border-black font-normal text-left align-middle text-[11px] font-medium">{row.name}</td>
+                          {showColPreviousDue && (
+                            <td className="py-1 px-1.5 border border-black font-normal text-right align-middle text-[11px] whitespace-nowrap">
+                              {formatAmountBn(row.previousDue)}
+                            </td>
+                          )}
+                          {showColPreviousAdvance && (
+                            <td className="py-1 px-1.5 border border-black font-normal text-right align-middle text-[11px] whitespace-nowrap">
+                              {formatAmountBn(row.previousAdvance)}
+                            </td>
+                          )}
+                          {showColCanteenBill && (
+                            <td className="py-1 px-1.5 border border-black font-normal text-right align-middle text-[11px] whitespace-nowrap">
+                              {formatAmountBn(row.canteenBill)}
+                            </td>
+                          )}
+                          {showColUnitFund && (
+                            <td className="py-1 px-1.5 border border-black font-normal text-right align-middle text-[11px] whitespace-nowrap">
+                              {formatAmountBn(row.unitFund)}
+                            </td>
+                          )}
+                          {showColOthersFund && (
+                            <td className="py-1 px-1.5 border border-black font-normal text-right align-middle text-[11px] whitespace-nowrap">
+                              {formatAmountBn(row.othersFund)}
+                            </td>
+                          )}
+                          {showColTotalBill && (
+                            <td className="py-1 px-1.5 border border-black font-normal text-right align-middle text-[11px] whitespace-nowrap font-medium">
+                              {formatAmountBn(row.totalBill)}
+                            </td>
+                          )}
+                          {showColPaidBill && (
+                            <td className="py-1 px-1.5 border border-black font-normal text-right align-middle text-[11px] whitespace-nowrap" style={{ color: '#047857' }}>
+                              {formatAmountBn(row.paidBill)}
+                            </td>
+                          )}
+                          {showColAdvance && (
+                            <td className="py-1 px-1.5 border border-black font-normal text-right align-middle text-[11px] whitespace-nowrap" style={{ color: '#3730a3' }}>
+                              {formatAmountBn(row.advance)}
+                            </td>
+                          )}
+                          {showColRemainingDue && (
+                            <td className="py-1 px-1.5 border border-black font-normal text-right align-middle text-[11px] whitespace-nowrap font-semibold" style={{ color: '#be123c' }}>
+                              {formatAmountBn(row.remainingDue)}
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })
                   )}
 
                   {/* Summary Row - Strictly Normal Font */}
-                  <tr className="bg-slate-100 print:bg-slate-100 font-normal border border-black">
-                    <td colSpan={3} className="p-2 border border-black text-center font-normal align-middle">
+                  <tr className="font-bold border border-black" style={{ backgroundColor: '#e2e8f0' }}>
+                    <td colSpan={3} className="py-1.5 px-2 border border-black text-center font-bold align-middle text-[11px]">
                       সর্বমোট
                     </td>
-                    <td className="p-2 border border-black font-normal text-right px-2 align-middle">
-                      {formatAmountBn(totals.previousDue, true)}
-                    </td>
-                    <td className="p-2 border border-black font-normal text-right px-2 align-middle">
-                      {formatAmountBn(totals.previousAdvance, true)}
-                    </td>
-                    <td className="p-2 border border-black font-normal text-right px-2 align-middle">
-                      {formatAmountBn(totals.canteenBill, true)}
-                    </td>
-                    <td className="p-2 border border-black font-normal text-right px-2 align-middle">
-                      {formatAmountBn(totals.totalBill, true)}
-                    </td>
-                    <td className="p-2 border border-black font-normal text-right px-2 text-emerald-900 align-middle">
-                      {formatAmountBn(totals.paidBill, true)}
-                    </td>
-                    <td className="p-2 border border-black font-normal text-right px-2 text-indigo-900 align-middle">
-                      {formatAmountBn(totals.advance, true)}
-                    </td>
-                    <td className="p-2 border border-black font-normal text-right px-2 text-rose-900 align-middle">
-                      {formatAmountBn(totals.remainingDue, true)}
-                    </td>
+                    {showColPreviousDue && (
+                      <td className="py-1.5 px-1.5 border border-black font-bold text-right align-middle text-[11px] whitespace-nowrap">
+                        {formatAmountBn(totals.previousDue, true)}
+                      </td>
+                    )}
+                    {showColPreviousAdvance && (
+                      <td className="py-1.5 px-1.5 border border-black font-bold text-right align-middle text-[11px] whitespace-nowrap">
+                        {formatAmountBn(totals.previousAdvance, true)}
+                      </td>
+                    )}
+                    {showColCanteenBill && (
+                      <td className="py-1.5 px-1.5 border border-black font-bold text-right align-middle text-[11px] whitespace-nowrap">
+                        {formatAmountBn(totals.canteenBill, true)}
+                      </td>
+                    )}
+                    {showColUnitFund && (
+                      <td className="py-1.5 px-1.5 border border-black font-bold text-right align-middle text-[11px] whitespace-nowrap">
+                        {formatAmountBn(totals.unitFund, true)}
+                      </td>
+                    )}
+                    {showColOthersFund && (
+                      <td className="py-1.5 px-1.5 border border-black font-bold text-right align-middle text-[11px] whitespace-nowrap">
+                        {formatAmountBn(totals.othersFund, true)}
+                      </td>
+                    )}
+                    {showColTotalBill && (
+                      <td className="py-1.5 px-1.5 border border-black font-bold text-right align-middle text-[11px] whitespace-nowrap">
+                        {formatAmountBn(totals.totalBill, true)}
+                      </td>
+                    )}
+                    {showColPaidBill && (
+                      <td className="py-1.5 px-1.5 border border-black font-bold text-right align-middle text-[11px] whitespace-nowrap" style={{ color: '#047857' }}>
+                        {formatAmountBn(totals.paidBill, true)}
+                      </td>
+                    )}
+                    {showColAdvance && (
+                      <td className="py-1.5 px-1.5 border border-black font-bold text-right align-middle text-[11px] whitespace-nowrap" style={{ color: '#3730a3' }}>
+                        {formatAmountBn(totals.advance, true)}
+                      </td>
+                    )}
+                    {showColRemainingDue && (
+                      <td className="py-1.5 px-1.5 border border-black font-bold text-right align-middle text-[11px] whitespace-nowrap" style={{ color: '#be123c' }}>
+                        {formatAmountBn(totals.remainingDue, true)}
+                      </td>
+                    )}
                   </tr>
                 </tbody>
+
               </table>
             </div>
           </div>

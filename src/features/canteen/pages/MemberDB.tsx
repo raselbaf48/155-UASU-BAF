@@ -64,7 +64,8 @@ import {
   formatRankBn,
   formatMemberNameBn,
   formatBengaliMonthYear,
-  toBengaliNum
+  toBengaliNum,
+  getPaymentCycleMonthKey
 } from '../utils/exportCanteenBillExcel';
 import {
   generateStatementCanvasBlob,
@@ -1173,7 +1174,7 @@ export const MemberDB: React.FC = () => {
   const paymentCountsByMethod = useMemo(() => {
     const monthFiltered = allPaymentTxs.filter((tx: any) => {
       if (paymentMonthFilter !== 'ALL') {
-        const txMonth = tx?.monthKey || getTxMonthKey(tx?.date);
+        const txMonth = getPaymentCycleMonthKey(tx?.date || tx?.timestamp || tx?.created_at) || tx?.monthKey || getTxMonthKey(tx?.date);
         if (txMonth !== paymentMonthFilter) return false;
       }
       return true;
@@ -1196,7 +1197,7 @@ export const MemberDB: React.FC = () => {
   const filteredPaymentTxs = useMemo(() => {
     return allPaymentTxs.filter((tx: any) => {
       if (paymentMonthFilter !== 'ALL') {
-        const txMonth = tx?.monthKey || getTxMonthKey(tx?.date);
+        const txMonth = getPaymentCycleMonthKey(tx?.date || tx?.timestamp || tx?.created_at) || tx?.monthKey || getTxMonthKey(tx?.date);
         if (txMonth !== paymentMonthFilter) return false;
       }
       if (paymentMethodFilter !== 'ALL') {
@@ -1566,7 +1567,10 @@ export const MemberDB: React.FC = () => {
     const matchingTxs = memberTxs.filter((tx) => {
       const cat = getTxCategory(tx);
       const catMatch = category === 'ALL' || cat === category;
-      const txMonth = tx?.monthKey || getTxMonthKey(tx.date);
+      const isPay = tx?.type === 'BILL PAYMENT' || tx?.type === 'PAYMENT';
+      const txMonth = isPay
+        ? (getPaymentCycleMonthKey(tx?.date || tx?.timestamp || tx?.created_at || tx?.createdAt) || tx?.monthKey || '')
+        : (tx?.monthKey || getTxMonthKey(tx.date));
       const monthMatch = txMonth === month;
       return catMatch && monthMatch;
     });
@@ -1583,7 +1587,13 @@ export const MemberDB: React.FC = () => {
         .filter((tx) => tx.type === 'BILL PAYMENT' && !tx.isReverted && tx.status !== 'REVERTED')
         .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
 
-      const beforeTxs = categoryTxs.filter((tx) => (tx?.monthKey || getTxMonthKey(tx.date)) < month);
+      const beforeTxs = categoryTxs.filter((tx) => {
+        const isPay = tx?.type === 'BILL PAYMENT' || tx?.type === 'PAYMENT';
+        const m = isPay
+          ? (getPaymentCycleMonthKey(tx?.date || tx?.timestamp || tx?.created_at || tx?.createdAt) || tx?.monthKey || '')
+          : (tx?.monthKey || getTxMonthKey(tx.date));
+        return m < month;
+      });
       const chargesBefore = calculateEffectiveCharges(beforeTxs);
 
       const paymentsAvailableForThisMonth = Math.max(0, allPaymentsTotal - chargesBefore);
@@ -2240,10 +2250,16 @@ export const MemberDB: React.FC = () => {
       const catLabel = payBillCategory === 'ALL' ? 'ALL BILLS' : payBillCategory.replace('_', ' ');
       const payeeName = `${payBillMember.Rank || payBillMember.rank || ''} ${payBillMember.Surname || payBillMember['Surname'] || payBillMember.name || ''}`.trim();
 
+      const now = new Date();
+      const paymentMonthCycle = getPaymentCycleMonthKey(now);
+
       const tx = {
         id: 'tx-pay-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
-        date: formatCanteenDate(new Date()),
-        monthKey: getRunningMonthKey(),
+        date: formatCanteenDate(now),
+        created_at: now.toISOString(),
+        createdAt: now.toISOString(),
+        timestamp: now.getTime(),
+        monthKey: paymentMonthCycle,
         airman_id: payBillMember.airman_id,
         bdNo: payBillMember['BD No'] || payBillMember.airman_id,
         memberName: payeeName,
