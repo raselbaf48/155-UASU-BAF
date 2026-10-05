@@ -1,7 +1,36 @@
 import { supabase } from '../../../supabase';
 import { pushKeyToCloud, pullKeyFromCloud } from './canteenCloudSync';
+import { formatRankBn, formatMemberNameBn } from './exportCanteenBillExcel';
 
 export const BANGLA_NAMES_STORAGE_KEY = 'canteen_member_bangla_names';
+
+export interface BafRankOption {
+  rank: string;
+  bn: string;
+}
+
+export const BAF_RANKS_WITH_BN: BafRankOption[] = [
+  { rank: 'Air Chief Mshl', bn: 'এয়ার চিফ মার্শাল' },
+  { rank: 'Air Mshl', bn: 'এয়ার মার্শাল' },
+  { rank: 'AVM', bn: 'এয়ার ভাইস মার্শাল' },
+  { rank: 'Air Cdre', bn: 'এয়ার কমোডর' },
+  { rank: 'Gp Capt', bn: 'গ্রুপ ক্যাপ্টেন' },
+  { rank: 'Wg Cdr', bn: 'উইং কমাঃ' },
+  { rank: 'Sqn Ldr', bn: 'স্কোঃ লীঃ' },
+  { rank: 'Flt Lt', bn: 'ফ্লাঃ লেঃ' },
+  { rank: 'Flg Offr', bn: 'ফ্লাঃ অঃ' },
+  { rank: 'Plt Offr', bn: 'পাইলট অফিসার' },
+  { rank: 'MWO', bn: 'মাঃওঃঅঃ (মাস্টার ওয়ারেন্ট অফিসার)' },
+  { rank: 'SWO', bn: 'সিঃওঃঅঃ (সিনিয়র ওয়ারেন্ট অফিসার)' },
+  { rank: 'WO', bn: 'ওঃঅঃ (ওয়ারেন্ট অফিসার)' },
+  { rank: 'Sgt', bn: 'সার্জেন্ট' },
+  { rank: 'Cpl', bn: 'কর্পোরাল' },
+  { rank: 'LAC', bn: 'এলএসি' },
+  { rank: 'AC-1', bn: 'এসি-১' },
+  { rank: 'AC-2', bn: 'এসি-২' },
+  { rank: 'NC(E)', bn: 'এনসি(ই)' },
+  { rank: 'Civilian', bn: 'সিভিলিয়ান / বেসামরিক' }
+];
 
 /**
  * Standard pre-populated Bengali names for all canteen members and ranks.
@@ -272,7 +301,13 @@ export function getMemberBanglaName(memberOrId: any): string {
       }
     }
 
-    return '';
+    // Fallback to comprehensive dictionary in exportCanteenBillExcel
+    if (surname) {
+      const fmt = formatMemberNameBn(surname);
+      if (fmt && fmt !== surname) return fmt;
+    }
+
+    return formatMemberNameBn(cleaned) || '';
   }
 
   // If passed a string ID / BD / Surname
@@ -289,7 +324,10 @@ export function getMemberBanglaName(memberOrId: any): string {
   if (cleaned && names[cleaned]) return names[cleaned];
   if (cleaned && COMMON_SURNAME_DICTIONARY[cleaned]) return COMMON_SURNAME_DICTIONARY[cleaned];
 
-  return '';
+  const fmt = formatMemberNameBn(str);
+  if (fmt && fmt !== str) return fmt;
+
+  return formatMemberNameBn(cleaned) || '';
 }
 
 /**
@@ -359,3 +397,65 @@ export async function syncMemberBanglaNamesFromCloud(): Promise<Record<string, s
   }
   return getAllMemberBanglaNames();
 }
+
+/**
+  * Get Bengali Rank for a member object or rank string
+  */
+export function getMemberBanglaRank(rankOrMember: any): string {
+  if (!rankOrMember) return '';
+  const names = getAllMemberBanglaNames();
+
+  if (typeof rankOrMember === 'object') {
+    if (rankOrMember.Rank_bn) return String(rankOrMember.Rank_bn).trim();
+    if (rankOrMember.rankBn) return String(rankOrMember.rankBn).trim();
+    if (rankOrMember.rank_bn) return String(rankOrMember.rank_bn).trim();
+
+    const airmanId = rankOrMember.airman_id ? String(rankOrMember.airman_id).trim() : '';
+    const bdNo = String(rankOrMember['BD No'] || rankOrMember.bdNo || '').trim();
+    if (airmanId && names[`rank_${airmanId}`]) return names[`rank_${airmanId}`];
+    if (bdNo && names[`rank_${bdNo}`]) return names[`rank_${bdNo}`];
+
+    return formatRankBn(rankOrMember['Rank'] || rankOrMember.rank || '');
+  }
+
+  const str = String(rankOrMember).trim();
+  if (names[`rank_${str}`]) return names[`rank_${str}`];
+  return formatRankBn(str);
+}
+
+/**
+  * Save or update a member's Bengali Rank in local storage and Supabase Cloud
+  */
+export async function saveMemberBanglaRank(
+  memberIdOrBd: string,
+  rankBn: string,
+  additionalKeys?: string[]
+): Promise<void> {
+  const current = getAllMemberBanglaNames();
+  const trimmedKey = `rank_${String(memberIdOrBd).trim()}`;
+  const trimmedVal = String(rankBn).trim();
+
+  current[trimmedKey] = trimmedVal;
+
+  if (additionalKeys && Array.isArray(additionalKeys)) {
+    additionalKeys.forEach(k => {
+      if (k) {
+        current[`rank_${String(k).trim()}`] = trimmedVal;
+      }
+    });
+  }
+
+  cachedBanglaNames = { ...current };
+
+  try {
+    localStorage.setItem(BANGLA_NAMES_STORAGE_KEY, JSON.stringify(current));
+    window.dispatchEvent(new Event('canteen_member_bangla_names_updated'));
+    window.dispatchEvent(new Event('canteen_state_updated'));
+    window.dispatchEvent(new Event('storage'));
+
+    await pushKeyToCloud(BANGLA_NAMES_STORAGE_KEY, current);
+  } catch (err) {
+    console.warn('Error saving Bengali rank:', err);
+  }
+}
+

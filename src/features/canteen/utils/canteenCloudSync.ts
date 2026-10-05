@@ -10,6 +10,7 @@ import { resolveImageUrl, getCanteenConfig } from './canteenSettings';
 
 export const CANTEEN_CLOUD_KEYS = [
   'canteen_txs',
+  'canteen_deleted_tx_ids',
   'canteen_pre_orders',
   'canteen_expenses',
   'canteen_bazar_advances',
@@ -63,7 +64,10 @@ export function recordDeletedTxId(txId: string | number) {
   try {
     const set = getDeletedTxIds();
     set.add(String(txId));
-    localStorage.setItem('canteen_deleted_tx_ids', JSON.stringify(Array.from(set)));
+    const arr = Array.from(set);
+    localStorage.setItem('canteen_deleted_tx_ids', JSON.stringify(arr));
+    // Persist tombstones to cloud immediately so deleted items NEVER return on any device/refresh
+    pushKeyToCloud('canteen_deleted_tx_ids', arr).catch(() => {});
   } catch {}
 }
 
@@ -86,11 +90,19 @@ function mergeArrayData(localArr: any[], cloudArr: any[], keyField = 'id', keyNa
     return Array.from(set);
   }
 
-  // Filter out any explicitly deleted transactions so they NEVER resurrect
+  // Filter out any explicitly deleted transactions and phantom auto-dues so they NEVER resurrect
   if (keyName === 'canteen_txs') {
     const deletedIds = getDeletedTxIds();
-    localArr = localArr.filter(t => !deletedIds.has(String(t?.id)));
-    cloudArr = cloudArr.filter(t => !deletedIds.has(String(t?.id)));
+    const isPhantomOrDeleted = (t: any) => {
+      if (!t) return true;
+      const tId = String(t.id || '');
+      if (deletedIds.has(tId)) return true;
+      if (tId.startsWith('init-auto-due-') || tId.startsWith('init-due-')) return true;
+      if (String(t.items || '').includes('বকেয়া ও প্রারম্ভিক বিল')) return true;
+      return false;
+    };
+    localArr = localArr.filter(t => !isPhantomOrDeleted(t));
+    cloudArr = cloudArr.filter(t => !isPhantomOrDeleted(t));
   }
 
   const map = new Map<string, any>();
@@ -112,7 +124,31 @@ function mergeArrayData(localArr: any[], cloudArr: any[], keyField = 'id', keyNa
     }
   }
 
-  return Array.from(map.values());
+  const mergedList = Array.from(map.values());
+  if (keyName === 'canteen_txs') {
+    const seenInitial = new Set<string>();
+    const deduped: any[] = [];
+    for (const t of mergedList) {
+      if (!t) continue;
+      const isInitial = t.type === 'INITIAL_BILL' || 
+        String(t.items || '').includes('ক্যান্টিন বিল') || 
+        String(t.items || '').includes('বকেয়া বিল');
+      if (isInitial) {
+        const cleanBd = String(t.bdNo || t.airman_id || '').replace(/\D/g, '');
+        const month = t.monthKey || t.date || '';
+        const bType = t.billType || 'CANTEEN';
+        const k = `${cleanBd}_${month}_${bType}`;
+        if (cleanBd && seenInitial.has(k)) {
+          continue; // Drop duplicate
+        }
+        seenInitial.add(k);
+      }
+      deduped.push(t);
+    }
+    return deduped;
+  }
+
+  return mergedList;
 }
 
 /**
@@ -275,6 +311,16 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
         cloudKeyMap.set(row.setting_key, JSON.parse(row.setting_value));
       } catch {
         cloudKeyMap.set(row.setting_key, row.setting_value);
+      }
+    }
+
+    // Merge deleted transaction IDs first so any incoming txs are filtered accurately
+    const cloudDeleted = cloudKeyMap.get('canteen_deleted_tx_ids');
+    if (Array.isArray(cloudDeleted) && cloudDeleted.length > 0) {
+      const localDeleted = getDeletedTxIds();
+      cloudDeleted.forEach(id => localDeleted.add(String(id)));
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('canteen_deleted_tx_ids', JSON.stringify(Array.from(localDeleted)));
       }
     }
 

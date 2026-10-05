@@ -29,6 +29,13 @@ import { resolveImageUrl, fetchDirectImageUrl, getCanteenConfig } from '../utils
 import { processGalleryImage } from '../utils/imageUpload';
 import { SaveButton } from '../components/SaveButton';
 import { sortCanteenMembersByOfficeSeniority, getRankWeight } from '../utils/canteenSeniority';
+import { 
+  getMemberBanglaName, 
+  saveMemberBanglaName,
+  getMemberBanglaRank,
+  saveMemberBanglaRank,
+  BAF_RANKS_WITH_BN 
+} from '../utils/memberBanglaNames';
 
 // Export getRankWeight from canteenSeniority
 export { getRankWeight };
@@ -74,6 +81,7 @@ export const CanteenMemberDB: React.FC = () => {
     bdNo: '',
     rank: 'LAC',
     surname: '',
+    nameBn: '',
     contact: '',
     role: 'Member',
     dp: ''
@@ -169,7 +177,8 @@ export const CanteenMemberDB: React.FC = () => {
         (m['Rank'] || '').toLowerCase().includes(term) ||
         (m['Surname'] || '').toLowerCase().includes(term) ||
         (m['Contact'] || '').toLowerCase().includes(term) ||
-        (m['Role'] || '').toLowerCase().includes(term);
+        (m['Role'] || '').toLowerCase().includes(term) ||
+        getMemberBanglaName(m).toLowerCase().includes(term);
 
       if (!matchSearch) return false;
 
@@ -231,6 +240,13 @@ export const CanteenMemberDB: React.FC = () => {
     };
 
     try {
+      if (singleMember.nameBn?.trim()) {
+        await saveMemberBanglaName(
+          payload.airman_id || cleanBd,
+          singleMember.nameBn.trim(),
+          [cleanBd, singleMember.surname.trim()]
+        );
+      }
       const { error } = await supabase.from('Canteen_Member').upsert([payload], { onConflict: 'airman_id' });
       if (error) throw error;
 
@@ -449,6 +465,24 @@ export const CanteenMemberDB: React.FC = () => {
         DP: editMember.DP || null
       };
 
+      // Persist Bengali Name & Rank
+      const nameBn = String(editMember.nameBn ?? getMemberBanglaName(editMember) ?? '').trim();
+      const rankBn = String(editMember.rankBn ?? getMemberBanglaRank(editMember) ?? '').trim();
+      if (nameBn) {
+        await saveMemberBanglaName(
+          payload.airman_id || cleanBd,
+          nameBn,
+          [cleanBd, editMember['Surname']]
+        );
+      }
+      if (rankBn) {
+        await saveMemberBanglaRank(
+          payload.airman_id || cleanBd,
+          rankBn,
+          [cleanBd]
+        );
+      }
+
       const { error } = await supabase.from('Canteen_Member').update(payload).eq('airman_id', payload.airman_id);
       if (error) throw error;
 
@@ -666,6 +700,7 @@ export const CanteenMemberDB: React.FC = () => {
                       <div className="flex items-center space-x-1.5 mb-1 flex-wrap gap-y-1">
                         <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-indigo-500/15 border border-indigo-500/30 text-indigo-300">
                           {member['Rank']}
+                          {getMemberBanglaRank(member) ? ` (${getMemberBanglaRank(member)})` : ''}
                         </span>
                         <span className="text-[10px] font-bold text-slate-400 font-mono">
                           #{member['BD No']}
@@ -682,9 +717,19 @@ export const CanteenMemberDB: React.FC = () => {
                           </span>
                         )}
                       </div>
-                      <h3 className="font-black text-white text-base leading-snug group-hover:text-cyan-300 transition-colors">
-                        {member['Surname']}
-                      </h3>
+                      <div className="flex items-baseline space-x-1.5 flex-wrap">
+                        <h3 className="font-black text-white text-base leading-snug group-hover:text-cyan-300 transition-colors">
+                          {member['Surname']}
+                        </h3>
+                        {(() => {
+                          const bn = getMemberBanglaName(member);
+                          return bn ? (
+                            <span className="text-emerald-400 font-bold text-xs font-sans">
+                              ({bn})
+                            </span>
+                          ) : null;
+                        })()}
+                      </div>
                       {member['Contact'] && (
                         <p className="text-[11px] text-slate-400 font-mono flex items-center gap-1 mt-0.5">
                           <Phone className="w-3 h-3 text-slate-500" />
@@ -711,7 +756,11 @@ export const CanteenMemberDB: React.FC = () => {
                 <div className="pt-3 border-t border-slate-800/80 flex items-center space-x-2">
                   <button
                     type="button"
-                    onClick={() => setEditMember({ ...member })}
+                    onClick={() => setEditMember({ 
+                      ...member, 
+                      nameBn: getMemberBanglaName(member),
+                      rankBn: getMemberBanglaRank(member)
+                    })}
                     className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer border border-slate-700/60"
                   >
                     <Edit2 className="w-3.5 h-3.5 text-cyan-400" />
@@ -769,10 +818,19 @@ export const CanteenMemberDB: React.FC = () => {
                           <div className="flex items-center space-x-2 flex-wrap gap-y-1">
                             <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-indigo-500/15 border border-indigo-400/30 text-indigo-300 shrink-0">
                               {member['Rank']}
+                              {getMemberBanglaRank(member) ? ` (${getMemberBanglaRank(member)})` : ''}
                             </span>
                             <span className="font-black text-white group-hover:text-cyan-300 transition-colors text-sm">
                               {member['Surname']}
                             </span>
+                            {(() => {
+                              const bn = getMemberBanglaName(member);
+                              return bn ? (
+                                <span className="text-emerald-400 font-bold text-xs font-sans">
+                                  ({bn})
+                                </span>
+                              ) : null;
+                            })()}
                           </div>
                         </div>
                       </td>
@@ -808,7 +866,11 @@ export const CanteenMemberDB: React.FC = () => {
                         <div className="flex items-center justify-center space-x-1.5">
                           <button
                             type="button"
-                            onClick={() => setEditMember({ ...member })}
+                            onClick={() => setEditMember({ 
+                              ...member, 
+                              nameBn: getMemberBanglaName(member),
+                              rankBn: getMemberBanglaRank(member)
+                            })}
                             className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-300 hover:text-white rounded-lg text-[11px] font-black uppercase flex items-center space-x-1 border border-slate-700 transition-all cursor-pointer"
                             title="Edit Profile"
                           >
@@ -917,8 +979,8 @@ export const CanteenMemberDB: React.FC = () => {
                       onChange={(e) => setSingleMember({ ...singleMember, rank: e.target.value })}
                       className="w-full bg-slate-950 text-white rounded-xl px-4 py-3 text-sm font-bold border border-slate-700 focus:outline-none focus:ring-2 focus:ring-cyan-500"
                     >
-                      {['Air Chief Mshl', 'Air Mshl', 'AVM', 'Air Cdre', 'Gp Capt', 'Wg Cdr', 'Sqn Ldr', 'Flt Lt', 'Fg Offr', 'Plt Offr', 'MWO', 'SWO', 'WO', 'Sgt', 'Cpl', 'LAC', 'AC-1', 'AC-2', 'NC(E)', 'Civilian'].map(r => (
-                        <option key={r} value={r}>{r}</option>
+                      {BAF_RANKS_WITH_BN.map(item => (
+                        <option key={item.rank} value={item.rank}>{item.rank} — {item.bn}</option>
                       ))}
                     </select>
                   </div>
@@ -934,6 +996,20 @@ export const CanteenMemberDB: React.FC = () => {
                       value={singleMember.surname}
                       onChange={(e) => setSingleMember({ ...singleMember, surname: e.target.value })}
                       className="w-full bg-slate-950 text-white rounded-xl px-4 py-3 text-sm font-bold border border-slate-700 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                    />
+                  </div>
+
+                  {/* Bangla Name */}
+                  <div>
+                    <label className="text-[11px] font-black text-emerald-400 uppercase tracking-wider block mb-1.5">
+                      বাংলা নাম (Bangla Name)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. তানভীর, মেহেদী, নিশাদ..."
+                      value={singleMember.nameBn}
+                      onChange={(e) => setSingleMember({ ...singleMember, nameBn: e.target.value })}
+                      className="w-full bg-slate-950 text-emerald-300 placeholder-slate-600 rounded-xl px-4 py-3 text-sm font-bold border border-emerald-500/40 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
                   </div>
 
@@ -974,32 +1050,23 @@ export const CanteenMemberDB: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Photo URL / Upload */}
+                  {/* Photo Import / Upload (No URL box) */}
                   <div className="sm:col-span-2 space-y-2">
                     <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider block">
-                      Member Profile Photo (URL or Gallery Upload)
+                      Member Profile Photo
                     </label>
-                    <div className="flex items-center space-x-3">
-                      <div className="w-12 h-12 rounded-xl bg-slate-950 border border-slate-700 flex items-center justify-center overflow-hidden shrink-0">
+                    <div className="flex items-center space-x-3 bg-slate-950/60 p-3 rounded-2xl border border-slate-800">
+                      <div className="w-12 h-12 rounded-xl bg-slate-950 border border-slate-700 flex items-center justify-center overflow-hidden shrink-0 shadow-inner">
                         {singleMember.dp ? (
                           <img src={resolveImageUrl(singleMember.dp)} alt="Preview" className="w-full h-full object-cover" />
                         ) : (
                           <ImageIcon className="w-5 h-5 text-slate-500" />
                         )}
                       </div>
-                      <input
-                        type="text"
-                        placeholder="Google Photos / Direct Image URL..."
-                        value={singleMember.dp}
-                        onChange={(e) => {
-                          setSingleMember({ ...singleMember, dp: e.target.value });
-                          handleResolveImageUrl(e.target.value);
-                        }}
-                        className="flex-1 bg-slate-950 text-white rounded-xl px-4 py-3 text-xs font-bold border border-slate-700 focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                      />
-                      <label className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-black uppercase cursor-pointer border border-slate-700 flex items-center space-x-1.5 shrink-0">
+                      
+                      <label className="px-4 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer border border-cyan-500/50 flex items-center space-x-1.5 shadow-md shadow-cyan-950 transition-all active:scale-95">
                         <Upload className="w-4 h-4" />
-                        <span>Gallery</span>
+                        <span>Import Photo</span>
                         <input
                           type="file"
                           accept="image/*"
@@ -1017,12 +1084,18 @@ export const CanteenMemberDB: React.FC = () => {
                           }}
                         />
                       </label>
+
+                      {singleMember.dp && (
+                        <button
+                          type="button"
+                          onClick={() => setSingleMember(prev => ({ ...prev, dp: '' }))}
+                          className="px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Remove</span>
+                        </button>
+                      )}
                     </div>
-                    {resolvingDp && (
-                      <p className="text-[10px] text-amber-400 flex items-center gap-1 font-bold">
-                        <Loader2 className="w-3 h-3 animate-spin" /> Resolving photo link...
-                      </p>
-                    )}
                   </div>
                 </div>
 
@@ -1234,25 +1307,94 @@ export const CanteenMemberDB: React.FC = () => {
             </div>
 
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
+              {/* Line 1: Rank (English) on Left, Rank in Bangla on Right */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">Rank</label>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
+                    Rank / পদবি (English)
+                  </label>
                   <select
                     value={editMember['Rank'] || 'LAC'}
-                    onChange={(e) => setEditMember({ ...editMember, Rank: e.target.value })}
-                    className="w-full bg-slate-950 text-white rounded-xl px-3 py-2 text-xs font-bold border border-slate-700"
+                    onChange={(e) => {
+                      const newRank = e.target.value;
+                      setEditMember({ 
+                        ...editMember, 
+                        Rank: newRank,
+                        rankBn: getMemberBanglaRank(newRank)
+                      });
+                    }}
+                    className="w-full bg-slate-950 text-white rounded-xl px-3 py-2 text-xs font-bold border border-slate-700 focus:outline-none focus:ring-1 focus:ring-cyan-500"
                   >
-                    {['Air Chief Mshl', 'Air Mshl', 'AVM', 'Air Cdre', 'Gp Capt', 'Wg Cdr', 'Sqn Ldr', 'Flt Lt', 'Fg Offr', 'Plt Offr', 'MWO', 'SWO', 'WO', 'Sgt', 'Cpl', 'LAC', 'AC-1', 'AC-2', 'NC(E)', 'Civilian'].map(r => (
-                      <option key={r} value={r}>{r}</option>
+                    {BAF_RANKS_WITH_BN.map(item => (
+                      <option key={item.rank} value={item.rank}>
+                        {item.rank} — {item.bn}
+                      </option>
                     ))}
                   </select>
                 </div>
+
+                <div>
+                  <label className="text-[10px] font-black text-emerald-400 uppercase tracking-wider block mb-1 flex items-center justify-between">
+                    <span>পদবি বাংলায় (Rank in Bangla)</span>
+                    <span className="text-[9px] text-slate-400 font-normal">স্বয়ংক্রিয় বা কাস্টম</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. উইং কমাঃ, স্কোঃ লীঃ, ফ্লাঃ লেঃ, ফ্লাঃ অঃ..."
+                    value={editMember.rankBn ?? getMemberBanglaRank(editMember)}
+                    onChange={(e) => setEditMember({ ...editMember, rankBn: e.target.value })}
+                    className="w-full bg-slate-950 text-emerald-300 placeholder-slate-600 rounded-xl px-3 py-2.5 text-xs font-bold border border-emerald-500/40 focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500 shadow-inner"
+                  />
+                </div>
+              </div>
+
+              {/* Line 2: Surname (English) on Left, Bangla Name on Right */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
+                    Surname / Name (English)
+                  </label>
+                  <input
+                    type="text"
+                    value={editMember['Surname'] || ''}
+                    onChange={(e) => setEditMember({ ...editMember, Surname: e.target.value })}
+                    className="w-full bg-slate-950 text-white rounded-xl px-3 py-2.5 text-xs font-bold border border-slate-700"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black text-emerald-400 uppercase tracking-wider block mb-1 flex items-center justify-between">
+                    <span>বাংলা নাম (Bangla Name)</span>
+                    <span className="text-[9px] text-slate-400 font-normal">বাংলায় নাম</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. আফতাব, তানভীর, মেহেদী, রাসেল..."
+                    value={editMember.nameBn ?? getMemberBanglaName(editMember)}
+                    onChange={(e) => setEditMember({ ...editMember, nameBn: e.target.value })}
+                    className="w-full bg-slate-950 text-emerald-300 placeholder-slate-600 rounded-xl px-3 py-2.5 text-xs font-bold border border-emerald-500/40 focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500 shadow-inner"
+                  />
+                </div>
+              </div>
+
+              {/* Line 3: Contact & Role */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">Contact</label>
+                  <input
+                    type="text"
+                    value={editMember['Contact'] || ''}
+                    onChange={(e) => setEditMember({ ...editMember, Contact: e.target.value })}
+                    className="w-full bg-slate-950 text-white rounded-xl px-3 py-2.5 text-xs font-bold border border-slate-700 font-mono"
+                  />
+                </div>
+
                 <div>
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">Role</label>
                   <select
                     value={editMember['Role'] || 'Member'}
                     onChange={(e) => setEditMember({ ...editMember, Role: e.target.value })}
-                    className="w-full bg-slate-950 text-white rounded-xl px-3 py-2 text-xs font-bold border border-slate-700"
+                    className="w-full bg-slate-950 text-white rounded-xl px-3 py-2.5 text-xs font-bold border border-slate-700"
                   >
                     {['Member', 'Manager', 'Staff', 'Cook', 'Cashier'].map(r => (
                       <option key={r} value={r}>{r}</option>
@@ -1261,63 +1403,52 @@ export const CanteenMemberDB: React.FC = () => {
                 </div>
               </div>
 
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">Surname / Name</label>
-                <input
-                  type="text"
-                  value={editMember['Surname'] || ''}
-                  onChange={(e) => setEditMember({ ...editMember, Surname: e.target.value })}
-                  className="w-full bg-slate-950 text-white rounded-xl px-3 py-2.5 text-xs font-bold border border-slate-700"
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">Contact</label>
-                <input
-                  type="text"
-                  value={editMember['Contact'] || ''}
-                  onChange={(e) => setEditMember({ ...editMember, Contact: e.target.value })}
-                  className="w-full bg-slate-950 text-white rounded-xl px-3 py-2.5 text-xs font-bold border border-slate-700 font-mono"
-                />
-              </div>
-
-              {/* Photo */}
-              <div className="space-y-1.5">
+              {/* Photo: Import Icon only, NO URL box */}
+              <div className="space-y-1.5 pt-1">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Photo</label>
-                <div className="flex items-center space-x-2">
-                  <div className="w-10 h-10 rounded-xl bg-slate-950 border border-slate-700 flex items-center justify-center overflow-hidden shrink-0">
+                <div className="flex items-center space-x-3 bg-slate-950/60 p-2.5 rounded-2xl border border-slate-800">
+                  <div className="w-12 h-12 rounded-xl bg-slate-950 border border-slate-700 flex items-center justify-center overflow-hidden shrink-0 shadow-inner">
                     {editMember.DP ? (
                       <img src={resolveImageUrl(editMember.DP)} alt="DP" className="w-full h-full object-cover" />
                     ) : (
-                      <ImageIcon className="w-4 h-4 text-slate-500" />
+                      <ImageIcon className="w-5 h-5 text-slate-500" />
                     )}
                   </div>
-                  <input
-                    type="text"
-                    placeholder="Photo URL..."
-                    value={editMember.DP || ''}
-                    onChange={(e) => setEditMember({ ...editMember, DP: e.target.value })}
-                    className="flex-1 bg-slate-950 text-white rounded-xl px-3 py-2 text-xs font-bold border border-slate-700"
-                  />
-                  <label className="p-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold cursor-pointer border border-slate-700">
-                    <Upload className="w-4 h-4" />
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={async (e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          try {
-                            const b64 = await processGalleryImage(file);
-                            setEditMember(prev => prev ? ({ ...prev, DP: b64 }) : null);
-                          } catch (err) {
-                            console.error(err);
+
+                  <div className="flex items-center gap-2">
+                    <label className="px-3.5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-black uppercase cursor-pointer flex items-center space-x-1.5 shadow-md shadow-cyan-950 transition-all active:scale-95">
+                      <Upload className="w-4 h-4" />
+                      <span>Import Photo</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            try {
+                              const b64 = await processGalleryImage(file);
+                              setEditMember(prev => prev ? ({ ...prev, DP: b64 }) : null);
+                            } catch (err) {
+                              console.error(err);
+                            }
                           }
-                        }
-                      }}
-                    />
-                  </label>
+                        }}
+                      />
+                    </label>
+
+                    {editMember.DP && (
+                      <button
+                        type="button"
+                        onClick={() => setEditMember(prev => prev ? ({ ...prev, DP: null }) : null)}
+                        className="px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1"
+                        title="Remove photo"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Remove</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

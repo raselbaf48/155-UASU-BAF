@@ -28,7 +28,7 @@ import { formatCanteenDate } from '../utils/dateUtils';
 import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
 import { formatBengaliMonthYear } from '../utils/exportCanteenBillExcel';
 import { getTxMonthKey } from '../pages/MemberDB';
-import { syncImportHistoryToTransactions, getFormattedDateForMonth } from '../utils/importHistoryTxs';
+import { deduplicateCanteenTransactions, getFormattedDateForMonth } from '../utils/importHistoryTxs';
 import JSZip from 'jszip';
 
 export const getMonthShortName = (monthKey: string): string => {
@@ -1290,18 +1290,31 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
           const existingTxs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
           const txMap = new Map<string, any>();
           const affectedCleanBds = new Set(newTxs.map(t => String(t.bdNo || t.airman_id || '').replace(/\D/g, '')));
+          const affectedMonths = new Set([targetMonth, lastMonth].filter(Boolean));
           
           existingTxs.forEach((t: any) => { 
             if (!t || !t.id) return;
             const tBd = String(t.bdNo || t.airman_id || '').replace(/\D/g, '');
-            // If this is an old lumped auto-due transaction and we are now importing specific month bills, drop it
-            if (tBd && affectedCleanBds.has(tBd) && String(t.id).startsWith('init-auto-due-')) {
-              return;
+            const tMonth = t.monthKey || getTxMonthKey(t.date);
+            const isInitial = t.type === 'INITIAL_BILL' || 
+              String(t.items || '').includes('ক্যান্টিন বিল') || 
+              String(t.items || '').includes('বকেয়া বিল') ||
+              String(t.items || '').includes('ইউনিট ফান্ড') ||
+              String(t.items || '').includes('অন্যান্য ফান্ড') ||
+              String(t.id).startsWith('init-auto-due-') ||
+              String(t.id).startsWith('init-due-') ||
+              String(t.id).startsWith('tx-import-');
+            
+            // If importing this month or last month, remove any older initial/imported bills for these affected members to avoid duplicates!
+            if (tBd && affectedCleanBds.has(tBd) && isInitial) {
+              if (affectedMonths.has(tMonth) || String(t.id).startsWith('init-')) {
+                return; // Drop old bill so it is cleanly replaced by the new imported one
+              }
             }
             txMap.set(String(t.id), t); 
           });
           newTxs.forEach((t: any) => { if (t && t.id) txMap.set(String(t.id), t); });
-          const mergedTxs = Array.from(txMap.values());
+          const mergedTxs = deduplicateCanteenTransactions(Array.from(txMap.values()));
           localStorage.setItem('canteen_txs', JSON.stringify(mergedTxs));
           await pushKeyToCloud('canteen_txs', mergedTxs);
         } catch (e) {

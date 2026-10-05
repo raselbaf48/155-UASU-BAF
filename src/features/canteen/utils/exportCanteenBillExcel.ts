@@ -37,15 +37,15 @@ export const formatRankBn = (rankStr?: string): string => {
   if (r === 'AC' || r.includes('AIRCRAFTMAN')) return 'এসি';
 
   // Commissioned Officers
-  if (r === 'ACM') return 'এয়ার চিফ মার্শাল';
-  if (r === 'AM') return 'এয়ার মার্শাল';
+  if (r === 'ACM' || r.includes('CHIEF MARSHAL')) return 'এয়ার চিফ মার্শাল';
+  if (r === 'AM' || r === 'AIR MSHL') return 'এয়ার মার্শাল';
   if (r === 'AVM') return 'এয়ার ভাইস মার্শাল';
   if (r === 'AIR CDRE' || r.includes('COMMODORE')) return 'এয়ার কমোডর';
   if (r === 'GP CAPT' || r.includes('GROUP CAPTAIN')) return 'গ্রুপ ক্যাপ্টেন';
-  if (r === 'WG CDR' || r.includes('WING COMMANDER')) return 'উইং কমান্ডার';
-  if (r === 'SQN LDR' || r.includes('SQUADRON LEADER')) return 'স্কোয়াড্রন লিডার';
-  if (r === 'FLT LT' || r.includes('FLIGHT LIEUTENANT')) return 'ফ্লাইট লেফটেন্যান্ট';
-  if (r === 'FG OFFR' || r.includes('FLYING OFFICER')) return 'ফ্লাইং অফিসার';
+  if (r === 'WG CDR' || r.includes('WING COMMANDER')) return 'উইং কমাঃ';
+  if (r === 'SQN LDR' || r.includes('SQUADRON LEADER')) return 'স্কোঃ লীঃ';
+  if (r === 'FLT LT' || r.includes('FLIGHT LIEUTENANT')) return 'ফ্লাঃ লেঃ';
+  if (r === 'FLG OFFR' || r === 'FG OFFR' || r.includes('FLYING OFFICER')) return 'ফ্লাঃ অঃ';
   if (r === 'PLT OFFR' || r.includes('PILOT OFFICER')) return 'পাইলট অফিসার';
   if (r === 'CIV' || r.includes('CIVILIAN')) return 'বেসামরিক';
 
