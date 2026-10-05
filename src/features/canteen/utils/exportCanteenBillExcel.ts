@@ -345,6 +345,55 @@ export async function exportCanteenBillToExcel({
     return tx.monthKey || getTxMonthKey(tx.date) || '';
   };
 
+  const computeEffectiveCharges = (txList: any[]): number => {
+    let salesTotal = 0;
+    const initialTxsByGroup = new Map<string, any[]>();
+
+    txList.forEach((tx) => {
+      if (!tx || isPaymentTx(tx) || tx.type === 'REVERTED' || tx.isReverted || tx.status === 'REVERTED' || String(tx.items || '').includes('[বাতিল')) return;
+
+      const isInit = tx.type === 'INITIAL_BILL' || 
+        tx.type === 'AMOUNT_CHANGE' ||
+        tx.isAmountChange ||
+        String(tx.id || '').startsWith('tx-init-') || 
+        String(tx.id || '').startsWith('init-') || 
+        String(tx.items || '').includes('ক্যান্টিন বিল') || 
+        String(tx.items || '').includes('বকেয়া বিল') ||
+        String(tx.items || '').includes('Changed amount from');
+
+      if (!isInit) {
+        salesTotal += Number(tx.amount || 0);
+      } else {
+        const mKey = tx.monthKey || getTxMonthKey(tx.date) || 'DEFAULT';
+        const cKey = getTxCategory(tx);
+        const groupKey = `${mKey}__${cKey}`;
+        if (!initialTxsByGroup.has(groupKey)) {
+          initialTxsByGroup.set(groupKey, []);
+        }
+        initialTxsByGroup.get(groupKey)!.push(tx);
+      }
+    });
+
+    let initialBillsTotal = 0;
+    initialTxsByGroup.forEach((groupTxs) => {
+      if (groupTxs.length === 1) {
+        initialBillsTotal += Number(groupTxs[0].amount || 0);
+      } else {
+        const sorted = [...groupTxs].sort((a, b) => {
+          if (a.isAmountChange && !b.isAmountChange) return -1;
+          if (!a.isAmountChange && b.isAmountChange) return 1;
+          const timeA = new Date(a.created_at || a.createdAt || a.timestamp || 0).getTime() || 0;
+          const timeB = new Date(b.created_at || b.createdAt || b.timestamp || 0).getTime() || 0;
+          if (timeA !== timeB) return timeB - timeA;
+          return String(b.id || '').localeCompare(String(a.id || ''));
+        });
+        initialBillsTotal += Number(sorted[0].amount || 0);
+      }
+    });
+
+    return salesTotal + initialBillsTotal;
+  };
+
   // 3. Process each member row
   sortedMembers.forEach((member, index) => {
     const memberTxs = allTxs.filter((tx) => isTxBelongingToMember(member, tx));
@@ -367,9 +416,7 @@ export async function exportCanteenBillToExcel({
     const memberTotalAdvance = Number(member.Advance ?? member.advance ?? member.ogrim ?? 0);
 
     if (selectedMonth === 'ALL') {
-      const allCharges = memberCategoryTxs
-        .filter((tx) => !isPaymentTx(tx))
-        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+      const allCharges = computeEffectiveCharges(memberCategoryTxs);
 
       const allPayments = memberCategoryTxs
         .filter((tx) => isPaymentTx(tx))
@@ -392,9 +439,7 @@ export async function exportCanteenBillToExcel({
         return m && m < selectedMonth;
       });
 
-      const priorCharges = priorTxs
-        .filter((tx) => !isPaymentTx(tx))
-        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+      const priorCharges = computeEffectiveCharges(priorTxs);
 
       const priorPayments = priorTxs
         .filter((tx) => isPaymentTx(tx))
@@ -414,33 +459,25 @@ export async function exportCanteenBillToExcel({
 
       // 2. Current Month Charges: transactions belonging specifically to selectedMonth
       const currentMonthTxs = memberCategoryTxs.filter((tx) => getMonthKeyOfTx(tx) === selectedMonth);
-      currentPeriodCharges = currentMonthTxs
-        .filter((tx) => !isPaymentTx(tx))
-        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-
-      const currentMonthDirectPayments = currentMonthTxs
-        .filter((tx) => isPaymentTx(tx))
-        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+      currentPeriodCharges = computeEffectiveCharges(currentMonthTxs);
 
       totalBill = previousDue + currentPeriodCharges;
 
-      // 3. Realtime Payment Settlement:
+      // 3. Post-Paid Canteen Realtime Payment Settlement:
+      const paymentsAfterPrior = memberCategoryTxs
+        .filter((tx) => isPaymentTx(tx) && getMonthKeyOfTx(tx) >= selectedMonth)
+        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
       const allPaymentsToDate = memberCategoryTxs
         .filter((tx) => isPaymentTx(tx))
         .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
 
-      const paymentsAbsorbedByPriorMonths = Math.min(priorCharges, allPaymentsToDate);
-      const paymentsAvailableForThisMonth = Math.max(0, allPaymentsToDate - paymentsAbsorbedByPriorMonths);
+      const effectivePayments = Math.max(paymentsAfterPrior, Math.max(0, allPaymentsToDate - priorPayments));
 
-      if (totalBill > 0) {
-        paidBill = Math.min(totalBill, Math.max(currentMonthDirectPayments, paymentsAvailableForThisMonth));
-      } else {
-        paidBill = currentMonthDirectPayments;
-      }
-
+      paidBill = effectivePayments;
       currentPeriodPayments = paidBill;
 
-      const totalCredits = previousAdvance + paidBill;
+      const totalCredits = previousAdvance + effectivePayments;
       if (totalCredits >= totalBill) {
         advance = totalCredits - totalBill;
         remainingDue = 0;

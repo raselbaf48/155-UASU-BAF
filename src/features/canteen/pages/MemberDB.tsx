@@ -512,9 +512,6 @@ export const MemberDB: React.FC = () => {
   // Profile Modal state
   const [profileMember, setProfileMember] = useState<any | null>(null);
   const [profileTx, setProfileTx] = useState<any[]>([]);
-  const [isEditingBanglaName, setIsEditingBanglaName] = useState(false);
-  const [editBanglaNameVal, setEditBanglaNameVal] = useState('');
-  const [isSavingBanglaName, setIsSavingBanglaName] = useState(false);
 
   // Initial Bill Modals state
   const [isImportBillsModalOpen, setIsImportBillsModalOpen] = useState(false);
@@ -556,34 +553,93 @@ export const MemberDB: React.FC = () => {
 
     let calendarTime = 0;
 
-    // 1. Parse real date string first: "DD Mon YY", "DD Mon YYYY", "YYYY-MM-DD", etc.
-    if (tx.date && typeof tx.date === 'string') {
-      const trimmed = tx.date.trim();
-      const parts = trimmed.split(/[\s\-/]+/);
-      if (parts.length === 3) {
-        let day = parseInt(parts[0], 10);
-        let monStr = parts[1].toLowerCase();
-        let yr = parseInt(parts[2], 10);
+    // 1. Parse real date string first: "DD Mon YY", "DD Mon YYYY", "YYYY-MM-DD", Bengali digits, etc.
+    const rawDate = tx.date || tx.txDate || '';
+    if (rawDate && typeof rawDate === 'string') {
+      let str = rawDate.trim();
+      const bnDigits: Record<string, string> = {
+        '০': '0', '১': '1', '২': '2', '৩': '3', '৪': '4',
+        '৫': '5', '৬': '6', '৭': '7', '৮': '8', '৯': '9'
+      };
+      str = str.replace(/[০-৯]/g, (ch) => bnDigits[ch] || ch);
 
-        if (parts[0].length === 4) {
-          yr = parseInt(parts[0], 10);
-          monStr = parts[1];
-          day = parseInt(parts[2], 10);
+      // A. "DD Mon YY" or "DD Mon YYYY" or "DD-Mon-YY" (e.g. "05 Oct 26", "28 Sep 26", "28 Aug 26")
+      const MONTH_MAP: Record<string, number> = {
+        jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+        jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
+      };
+      const dmyAlpha = str.match(/^(\d{1,2})[\s\-\/\.]+([A-Za-z]{3,9})[\s\-\/\.]+(\d{2,4})/);
+      if (dmyAlpha) {
+        const day = parseInt(dmyAlpha[1], 10);
+        const mKey = dmyAlpha[2].slice(0, 3).toLowerCase();
+        let yr = parseInt(dmyAlpha[3], 10);
+        if (yr < 100) yr += 2000;
+        const monIdx = MONTH_MAP[mKey];
+        if (monIdx !== undefined) {
+          calendarTime = new Date(yr, monIdx, day, 12, 0, 0).getTime();
         }
+      }
 
-        const fullYr = yr < 100 ? 2000 + yr : yr;
-        const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
-        let monIdx = monthNames.findIndex(m => monStr.startsWith(m));
-        if (monIdx === -1 && !isNaN(Number(monStr))) {
-          monIdx = Number(monStr) - 1;
+      // B. Bengali month names (e.g. "২৮ আগস্ট ২৬", "২৮ সেপ্টেম্বর ২০২৬", "আগস্ট ২০২৬")
+      if (!calendarTime) {
+        const BN_MONTHS: Record<string, number> = {
+          'জানু': 0, 'ফেব্রু': 1, 'মার্চ': 2, 'এপ্রি': 3, 'মে': 4, 'জুন': 5,
+          'জুলা': 6, 'আগস্ট': 7, 'সেপ্টে': 8, 'অক্টো': 9, 'নভে': 10, 'ডিসে': 11
+        };
+        for (const [bnPrefix, mIdx] of Object.entries(BN_MONTHS)) {
+          if (str.includes(bnPrefix)) {
+            const dayMatch = str.match(/^(\d{1,2})/);
+            const yrMatch = str.match(/(\d{4}|\d{2})$/) || str.match(/\s(\d{2,4})/);
+            const day = dayMatch ? parseInt(dayMatch[1], 10) : 28;
+            let yr = yrMatch ? parseInt(yrMatch[1], 10) : 2026;
+            if (yr < 100) yr += 2000;
+            calendarTime = new Date(yr, mIdx, day, 12, 0, 0).getTime();
+            break;
+          }
         }
+      }
 
-        if (monIdx >= 0 && !isNaN(day) && !isNaN(fullYr)) {
-          calendarTime = new Date(fullYr, monIdx, day, 12, 0, 0).getTime();
+      // C. Format DD/MM/YYYY or DD-MM-YYYY
+      if (!calendarTime) {
+        const dmyNum = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
+        if (dmyNum) {
+          const day = parseInt(dmyNum[1], 10);
+          const mon = parseInt(dmyNum[2], 10) - 1;
+          let yr = parseInt(dmyNum[3], 10);
+          if (yr < 100) yr += 2000;
+          if (mon >= 0 && mon < 12) {
+            calendarTime = new Date(yr, mon, day, 12, 0, 0).getTime();
+          }
         }
-      } else if (trimmed.match(/^\d{4}-\d{2}$/)) {
-        const [y, m] = trimmed.split('-').map(Number);
-        calendarTime = new Date(y, m - 1, 28, 12, 0, 0).getTime();
+      }
+
+      // D. Format YYYY-MM-DD
+      if (!calendarTime) {
+        const ymdNum = str.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+        if (ymdNum) {
+          const yr = parseInt(ymdNum[1], 10);
+          const mon = parseInt(ymdNum[2], 10) - 1;
+          const day = parseInt(ymdNum[3], 10);
+          calendarTime = new Date(yr, mon, day, 12, 0, 0).getTime();
+        }
+      }
+
+      // E. Format YYYY-MM
+      if (!calendarTime) {
+        const ymNum = str.match(/^(\d{4})[\/\-](\d{1,2})/);
+        if (ymNum) {
+          const yr = parseInt(ymNum[1], 10);
+          const mon = parseInt(ymNum[2], 10) - 1;
+          calendarTime = new Date(yr, mon, 28, 12, 0, 0).getTime();
+        }
+      }
+
+      // F. Standard Date fallback
+      if (!calendarTime) {
+        const d = new Date(str);
+        if (!isNaN(d.getTime())) {
+          calendarTime = d.getTime();
+        }
       }
     }
 
@@ -596,8 +652,8 @@ export const MemberDB: React.FC = () => {
 
     // Secondary sub-day tie-breaker from createdAt or numeric ID timestamp
     let subDayTieBreaker = 0;
-    if (tx.createdAt) {
-      const t = new Date(tx.createdAt).getTime();
+    if (tx.createdAt || tx.created_at) {
+      const t = new Date(tx.createdAt || tx.created_at).getTime();
       if (!isNaN(t)) subDayTieBreaker = t % 86400000;
     }
     if (!subDayTieBreaker) {
@@ -612,8 +668,8 @@ export const MemberDB: React.FC = () => {
     }
 
     // Fallback if no calendar date could be parsed
-    if (tx.createdAt) {
-      const t = new Date(tx.createdAt).getTime();
+    if (tx.createdAt || tx.created_at) {
+      const t = new Date(tx.createdAt || tx.created_at).getTime();
       if (!isNaN(t)) return t;
     }
     const numMatch = String(tx.id || '').match(/(\d{13})/);
@@ -671,17 +727,18 @@ export const MemberDB: React.FC = () => {
         return;
       }
 
-      if (tx.type === 'INITIAL_BILL') {
+      if (tx.type === 'INITIAL_BILL' || tx.type === 'AMOUNT_CHANGE' || tx.type === 'ADJUSTED') {
+        const isChange = tx.isAmountChange || tx.type === 'AMOUNT_CHANGE' || String(tx.items || '').includes('Changed amount');
         rows.push({
           rowId: `${tx.id}_init`,
           ser: currentSer++,
           tx,
           txId: tx.id,
           date: tx.date,
-          description: tx.items || 'বকেয়া বিল',
+          description: tx.items || (isChange ? `Changed amount from ${tx.previousAmount ?? ''} to ${tx.amount}` : 'বকেয়া বিল'),
           qty: '-',
           amount: tx.amount,
-          type: 'INITIAL_BILL'
+          type: isChange ? 'AMOUNT_CHANGE' : 'INITIAL_BILL'
         });
         return;
       }
@@ -763,10 +820,10 @@ export const MemberDB: React.FC = () => {
       });
     });
 
-    // Sort all rows newest first: payments and latest orders on top, prior bills chronologically or below
+    // Sort all rows newest first: latest dates on top, oldest at the bottom
     rows.sort((a, b) => {
-      const timeA = parseTxTime(a.tx || { date: a.date });
-      const timeB = parseTxTime(b.tx || { date: b.date });
+      const timeA = parseTxTime(a.tx || { date: a.date, id: a.txId });
+      const timeB = parseTxTime(b.tx || { date: b.date, id: b.txId });
       if (timeA !== timeB) return timeB - timeA;
       return String(b.txId || '').localeCompare(String(a.txId || ''));
     });
@@ -808,10 +865,65 @@ export const MemberDB: React.FC = () => {
     return displayHistoryRows.map((r, idx) => ({ ...r, ser: idx + 1 }));
   }, [displayHistoryRows]);
 
+  // Helper to compute effective charges for a member:
+  // - All regular sales / food purchases are added up.
+  // - For INITIAL_BILL / AMOUNT_CHANGE entries: if an amount was changed for a month,
+  //   the newest change entry defines the active bill for that month,
+  //   while earlier historical entries remain safely in the audit history table.
+  const calculateEffectiveCharges = (txList: any[]): number => {
+    let salesTotal = 0;
+    const initialTxsByGroup = new Map<string, any[]>();
+
+    txList.forEach((tx) => {
+      if (!tx || tx.type === 'BILL PAYMENT' || tx.type === 'REVERTED' || tx.isReverted) return;
+
+      const isInit = tx.type === 'INITIAL_BILL' || 
+        tx.type === 'AMOUNT_CHANGE' ||
+        tx.isAmountChange ||
+        String(tx.id || '').startsWith('tx-init-') || 
+        String(tx.id || '').startsWith('init-') || 
+        String(tx.items || '').includes('ক্যান্টিন বিল') || 
+        String(tx.items || '').includes('বকেয়া বিল') ||
+        String(tx.items || '').includes('Changed amount from');
+
+      if (!isInit) {
+        salesTotal += Number(tx.amount || 0);
+      } else {
+        const mKey = tx.monthKey || getTxMonthKey(tx.date) || 'DEFAULT';
+        const cKey = getTxCategory(tx);
+        const groupKey = `${mKey}__${cKey}`;
+        if (!initialTxsByGroup.has(groupKey)) {
+          initialTxsByGroup.set(groupKey, []);
+        }
+        initialTxsByGroup.get(groupKey)!.push(tx);
+      }
+    });
+
+    let initialBillsTotal = 0;
+    initialTxsByGroup.forEach((groupTxs) => {
+      if (groupTxs.length === 1) {
+        initialBillsTotal += Number(groupTxs[0].amount || 0);
+      } else {
+        // Sort newest first by timestamp / created_at / id, prioritizing corrected transactions
+        const sorted = [...groupTxs].sort((a, b) => {
+          if (a.isAmountChange && !b.isAmountChange) return -1;
+          if (!a.isAmountChange && b.isAmountChange) return 1;
+          const timeA = new Date(a.created_at || a.createdAt || a.timestamp || 0).getTime() || 0;
+          const timeB = new Date(b.created_at || b.createdAt || b.timestamp || 0).getTime() || 0;
+          if (timeA !== timeB) return timeB - timeA;
+          return String(b.id || '').localeCompare(String(a.id || ''));
+        });
+        initialBillsTotal += Number(sorted[0].amount || 0);
+      }
+    });
+
+    return salesTotal + initialBillsTotal;
+  };
+
   // Overall financial summary for open profile member (Billed, Paid, Net Due)
   const profileMemberStats = useMemo(() => {
     if (!profileMember) return { totalBilled: 0, totalPaid: 0, netDue: 0 };
-    let billed = 0;
+    const effectiveBilled = calculateEffectiveCharges(profileTx || []);
     let paid = 0;
     (profileTx || []).forEach((t: any) => {
       if (!t) return;
@@ -819,15 +931,13 @@ export const MemberDB: React.FC = () => {
       if (isReverted) return;
       if (t.type === 'BILL PAYMENT') {
         paid += Number(t.amount || 0);
-      } else {
-        billed += Number(t.amount || 0);
       }
     });
     // Live ledger net due: Total Billed - Total Paid
     const netDue = (profileTx && profileTx.length > 0)
-      ? Math.max(0, billed - paid)
+      ? Math.max(0, effectiveBilled - paid)
       : Number(profileMember.Due ?? profileMember.due ?? profileMember.baki ?? 0);
-    return { totalBilled: billed, totalPaid: paid, netDue };
+    return { totalBilled: effectiveBilled, totalPaid: paid, netDue };
   }, [profileMember, profileTx]);
 
   // Pay Bill Modal state
@@ -857,6 +967,7 @@ export const MemberDB: React.FC = () => {
   const [isPaymentHistoryOpen, setIsPaymentHistoryOpen] = useState(false);
   const [paymentSearch, setPaymentSearch] = useState('');
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<'ALL' | 'CASH' | 'UCB'>('ALL');
+  const [paymentMonthFilter, setPaymentMonthFilter] = useState<string>(() => getRunningMonthKey());
   const [paymentToDelete, setPaymentToDelete] = useState<any | null>(null);
   const [isDeletingPayment, setIsDeletingPayment] = useState(false);
   const [paymentDeleteSuccessMsg, setPaymentDeleteSuccessMsg] = useState<string | null>(null);
@@ -938,8 +1049,36 @@ export const MemberDB: React.FC = () => {
       });
   }, [allTxs]);
 
+  // Payment counts for each method in the currently selected month
+  const paymentCountsByMethod = useMemo(() => {
+    const monthFiltered = allPaymentTxs.filter((tx: any) => {
+      if (paymentMonthFilter !== 'ALL') {
+        const txMonth = tx?.monthKey || getTxMonthKey(tx?.date);
+        if (txMonth !== paymentMonthFilter) return false;
+      }
+      return true;
+    });
+
+    let allCount = monthFiltered.length;
+    let cashCount = 0;
+    let ucbCount = 0;
+
+    monthFiltered.forEach((tx: any) => {
+      const gw = String(tx.gateway || tx.items || '').toUpperCase();
+      if (gw.includes('CASH')) cashCount++;
+      else if (gw.includes('UCB')) ucbCount++;
+      else cashCount++;
+    });
+
+    return { allCount, cashCount, ucbCount };
+  }, [allPaymentTxs, paymentMonthFilter]);
+
   const filteredPaymentTxs = useMemo(() => {
     return allPaymentTxs.filter((tx: any) => {
+      if (paymentMonthFilter !== 'ALL') {
+        const txMonth = tx?.monthKey || getTxMonthKey(tx?.date);
+        if (txMonth !== paymentMonthFilter) return false;
+      }
       if (paymentMethodFilter !== 'ALL') {
         const gateway = String(tx.gateway || tx.items || '').toUpperCase();
         if (paymentMethodFilter === 'CASH' && !gateway.includes('CASH')) return false;
@@ -956,13 +1095,13 @@ export const MemberDB: React.FC = () => {
       }
       return true;
     });
-  }, [allPaymentTxs, paymentMethodFilter, paymentSearch]);
+  }, [allPaymentTxs, paymentMonthFilter, paymentMethodFilter, paymentSearch]);
 
   const totalPaymentsAmount = useMemo(() => {
-    return allPaymentTxs
+    return filteredPaymentTxs
       .filter((tx: any) => !tx.isReverted && tx.status !== 'REVERTED')
       .reduce((sum: number, tx: any) => sum + Number(tx.amount || 0), 0);
-  }, [allPaymentTxs]);
+  }, [filteredPaymentTxs]);
 
   const getTelHref = (raw: any): string => {
     const clean = String(raw || '').replace(/[^\d+]/g, '');
@@ -1312,9 +1451,7 @@ export const MemberDB: React.FC = () => {
       return catMatch && monthMatch;
     });
 
-    const charges = matchingTxs
-      .filter((tx) => tx.type !== 'BILL PAYMENT' && tx.type !== 'REVERTED')
-      .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    const charges = calculateEffectiveCharges(matchingTxs);
 
     // If transactions exist for this specific month, compute month's remaining unpaid charges
     if (matchingTxs.length > 0) {
@@ -1326,16 +1463,15 @@ export const MemberDB: React.FC = () => {
         .filter((tx) => tx.type === 'BILL PAYMENT' && !tx.isReverted && tx.status !== 'REVERTED')
         .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
 
-      const chargesBefore = categoryTxs
-        .filter((tx) => tx.type !== 'BILL PAYMENT' && tx.type !== 'REVERTED' && (tx?.monthKey || getTxMonthKey(tx.date)) < month)
-        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+      const beforeTxs = categoryTxs.filter((tx) => (tx?.monthKey || getTxMonthKey(tx.date)) < month);
+      const chargesBefore = calculateEffectiveCharges(beforeTxs);
 
       const paymentsAvailableForThisMonth = Math.max(0, allPaymentsTotal - chargesBefore);
       return Math.min(totalDue, Math.max(0, charges - paymentsAvailableForThisMonth));
     }
 
-    // Only if the member has NO transactions at all, fallback to initial profile due if viewing the initial month
-    if (memberTxs.length === 0 && month === '2026-09' && totalDue > 0) {
+    // Only if the member has NO transactions at all, fallback to initial profile due if viewing the current running month
+    if (memberTxs.length === 0 && (month === getRunningMonthKey() || month === '2026-10') && totalDue > 0) {
       return totalDue;
     }
 
@@ -1349,9 +1485,7 @@ export const MemberDB: React.FC = () => {
     const memberTxs = filterMemberTxs(member, allTxs);
 
     if (category === 'ALL') {
-      const allCharges = memberTxs
-        .filter((tx) => tx.type !== 'BILL PAYMENT' && tx.type !== 'REVERTED')
-        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+      const allCharges = calculateEffectiveCharges(memberTxs);
       const allPayments = memberTxs
         .filter((tx) => tx.type === 'BILL PAYMENT' && !tx.isReverted && tx.status !== 'REVERTED')
         .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
@@ -1365,11 +1499,19 @@ export const MemberDB: React.FC = () => {
     }
 
     // Sub-category filters (CANTEEN, UNIT_FUND, OTHERS)
-    const unitFundTxs = memberTxs.filter((tx) => getTxCategory(tx) === 'UNIT_FUND');
-    const unitFundDue = Math.max(0, unitFundTxs.reduce((sum, tx) => sum + (tx.type === 'BILL PAYMENT' && !tx.isReverted && tx.status !== 'REVERTED' ? -Number(tx.amount || 0) : tx.type !== 'BILL PAYMENT' && tx.type !== 'REVERTED' ? Number(tx.amount || 0) : 0), 0));
+    const unitFundTxList = memberTxs.filter((tx) => getTxCategory(tx) === 'UNIT_FUND');
+    const unitFundCharges = calculateEffectiveCharges(unitFundTxList);
+    const unitFundPayments = unitFundTxList
+      .filter((tx) => tx.type === 'BILL PAYMENT' && !tx.isReverted && tx.status !== 'REVERTED')
+      .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    const unitFundDue = Math.max(0, unitFundCharges - unitFundPayments);
 
-    const othersTxs = memberTxs.filter((tx) => getTxCategory(tx) === 'OTHERS');
-    const othersDue = Math.max(0, othersTxs.reduce((sum, tx) => sum + (tx.type === 'BILL PAYMENT' && !tx.isReverted && tx.status !== 'REVERTED' ? -Number(tx.amount || 0) : tx.type !== 'BILL PAYMENT' && tx.type !== 'REVERTED' ? Number(tx.amount || 0) : 0), 0));
+    const othersTxList = memberTxs.filter((tx) => getTxCategory(tx) === 'OTHERS');
+    const othersCharges = calculateEffectiveCharges(othersTxList);
+    const othersPayments = othersTxList
+      .filter((tx) => tx.type === 'BILL PAYMENT' && !tx.isReverted && tx.status !== 'REVERTED')
+      .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    const othersDue = Math.max(0, othersCharges - othersPayments);
 
     if (category === 'UNIT_FUND') {
       return unitFundDue;
@@ -1380,9 +1522,8 @@ export const MemberDB: React.FC = () => {
     }
 
     if (category === 'CANTEEN') {
-      const canteenCharges = memberTxs
-        .filter((tx) => getTxCategory(tx) === 'CANTEEN' && tx.type !== 'BILL PAYMENT' && tx.type !== 'REVERTED')
-        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+      const canteenTxList = memberTxs.filter((tx) => getTxCategory(tx) === 'CANTEEN');
+      const canteenCharges = calculateEffectiveCharges(canteenTxList);
       const canteenPayments = memberTxs
         .filter((tx) => (tx.billType === 'CANTEEN' || tx.billType === 'ALL' || (!tx.billType && getTxCategory(tx) === 'CANTEEN')) && tx.type === 'BILL PAYMENT' && !tx.isReverted && tx.status !== 'REVERTED')
         .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
@@ -1401,7 +1542,12 @@ export const MemberDB: React.FC = () => {
   const openPayBill = (member: any) => {
     const totalDue = getMemberTotalDue(member, selectedCategory);
     if (totalDue <= 0) return; // Prevent paying if Total Due is Nil
-    setPayBillMember(member);
+    setPayBillMember({
+      ...member,
+      Due: totalDue,
+      due: totalDue,
+      baki: totalDue
+    });
     setPayBillCategory(selectedCategory);
     setPayAmount(totalDue > 0 ? String(totalDue) : '');
     setPayMethod('UCB');
@@ -1466,8 +1612,6 @@ export const MemberDB: React.FC = () => {
 
   // Open Profile Modal (Read-only view of member details and history)
   const openProfile = (member: any) => {
-    setIsEditingBanglaName(false);
-    setEditBanglaNameVal('');
     const effDp = getMemberEffectiveDp(member);
     const fullMember = {
       ...member,
@@ -1489,31 +1633,48 @@ export const MemberDB: React.FC = () => {
     }
   };
 
-  const handleSaveBanglaName = async () => {
-    if (!profileMember) return;
-    const trimmed = editBanglaNameVal.trim();
-    if (!trimmed) return;
-    setIsSavingBanglaName(true);
-    try {
-      const airmanId = profileMember.airman_id || `airman-${profileMember['BD No']}`;
-      const bdNo = String(profileMember['BD No'] || '').trim();
-      const surname = String(profileMember['Surname'] || '').trim();
-      const keys = [bdNo, surname, airmanId].filter(Boolean);
-      await saveMemberBanglaName(airmanId, trimmed, keys);
-      setBanglaVersion((v) => v + 1);
-      setIsEditingBanglaName(false);
-    } catch (err) {
-      console.warn('Failed to save Bangla name:', err);
-    } finally {
-      setIsSavingBanglaName(false);
-    }
-  };
-
   // Build Aggregated Statement rows matching: দ্রব্যের নাম, পরিমাণ, দর, মোট
   const parseStatementAggregatedItems = (txs: any[]): StatementItemRow[] => {
     const itemMap = new Map<string, { itemName: string; qty: number; total: number; rates: number[] }>();
 
-    txs.forEach((tx) => {
+    // Deduplicate initial bills per month and category, keeping only the latest corrected amount
+    const initialTxsByGroup = new Map<string, any>();
+    const regularTxs: any[] = [];
+
+    (txs || []).forEach((tx) => {
+      if (!tx || tx.type === 'BILL PAYMENT' || tx.type === 'REVERTED' || tx.isReverted || tx.status === 'REVERTED' || String(tx.items || '').includes('[বাতিল')) return;
+
+      const isInit = tx.type === 'INITIAL_BILL' || 
+        tx.type === 'AMOUNT_CHANGE' ||
+        tx.isAmountChange ||
+        String(tx.id || '').startsWith('tx-init-') || 
+        String(tx.id || '').startsWith('init-') || 
+        String(tx.items || '').includes('ক্যান্টিন বিল') || 
+        String(tx.items || '').includes('বকেয়া বিল') ||
+        String(tx.items || '').includes('Changed amount from');
+
+      if (isInit) {
+        const mKey = tx.monthKey || getTxMonthKey(tx.date) || 'DEFAULT';
+        const cKey = getTxCategory(tx);
+        const groupKey = `${mKey}__${cKey}`;
+        const existing = initialTxsByGroup.get(groupKey);
+        if (!existing) {
+          initialTxsByGroup.set(groupKey, tx);
+        } else {
+          const timeA = new Date(existing.created_at || existing.createdAt || existing.timestamp || 0).getTime() || 0;
+          const timeB = new Date(tx.created_at || tx.createdAt || tx.timestamp || 0).getTime() || 0;
+          if (timeB >= timeA) {
+            initialTxsByGroup.set(groupKey, tx);
+          }
+        }
+      } else {
+        regularTxs.push(tx);
+      }
+    });
+
+    const effectiveTxs = [...regularTxs, ...Array.from(initialTxsByGroup.values())];
+
+    effectiveTxs.forEach((tx) => {
       if (tx.type === 'BILL PAYMENT') return;
 
       // Skip Unit Fund & Others Fund - they appear in dedicated statement summary rows
@@ -1570,7 +1731,10 @@ export const MemberDB: React.FC = () => {
           rec.total += finalTotal;
           if (rate > 0) rec.rates.push(rate);
         } else {
-          const name = parts[0].trim();
+          let name = parts[0].trim();
+          if (name.includes('Changed amount') || tx.isAmountChange) {
+            name = `ক্যান্টিন বিল (${formatBengaliMonthYear(tx.monthKey || statementMonth)})`;
+          }
           const total = Number(tx.amount || 0);
           let rate = lookupCatalogPrice(name, menuCatalog);
           if (rate <= 0) rate = total;
@@ -3395,59 +3559,9 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                         </>
                       )}
                       <span>{profileMember['Surname']}</span>
-                      {!isEditingBanglaName ? (
-                        <span className="inline-flex items-center gap-1">
-                          <span className="text-emerald-400 font-sans text-sm font-bold">
-                            ({getMemberBanglaName(profileMember) || formatMemberNameBn(profileMember['Surname'])})
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setIsEditingBanglaName(true);
-                              setEditBanglaNameVal(getMemberBanglaName(profileMember) || formatMemberNameBn(profileMember['Surname']));
-                            }}
-                            className="p-1 hover:bg-slate-800 text-slate-400 hover:text-emerald-400 rounded-lg transition-colors cursor-pointer"
-                            title="বাংলা নাম পরিবর্তন করুন (Edit Bangla Name)"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5 bg-slate-950 px-2 py-1 rounded-xl border border-emerald-500/40">
-                          <input
-                            type="text"
-                            value={editBanglaNameVal}
-                            onChange={(e) => setEditBanglaNameVal(e.target.value)}
-                            className="px-2 py-0.5 bg-slate-900 border border-emerald-500/50 rounded-lg text-emerald-300 text-xs font-bold font-sans focus:outline-none focus:ring-1 focus:ring-emerald-500 w-32"
-                            placeholder="বাংলা নাম..."
-                            autoFocus
-                            onKeyDown={async (e) => {
-                              if (e.key === 'Enter') {
-                                await handleSaveBanglaName();
-                              } else if (e.key === 'Escape') {
-                                setIsEditingBanglaName(false);
-                              }
-                            }}
-                          />
-                          <button
-                            type="button"
-                            onClick={handleSaveBanglaName}
-                            disabled={isSavingBanglaName}
-                            className="p-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
-                            title="সংরক্ষণ করুন (Save)"
-                          >
-                            {isSavingBanglaName ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setIsEditingBanglaName(false)}
-                            className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs transition-colors cursor-pointer"
-                            title="বাতিল (Cancel)"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </span>
-                      )}
+                      <span className="text-emerald-400 font-sans text-sm font-bold">
+                        ({getMemberBanglaName(profileMember) || formatMemberNameBn(profileMember['Surname'])})
+                      </span>
                     </h2>
                   </div>
                   <p className="text-xs font-bold text-indigo-400 font-mono">BD No: {profileMember['BD No']}</p>
@@ -3595,13 +3709,15 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                                   <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase border ${
                                     row.type === 'BILL PAYMENT'
                                       ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                      : row.type === 'AMOUNT_CHANGE'
+                                      ? 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
                                       : row.type === 'INITIAL_BILL'
                                       ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
                                       : row.type === 'REVERTED'
                                       ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
                                       : 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
                                   }`}>
-                                    {row.type === 'REVERTED' ? 'REVERTED / বাতিল' : row.type === 'BILL PAYMENT' ? 'পরিশোধ / PAYMENT' : row.type === 'INITIAL_BILL' ? 'ইম্পোর্ট / প্রারম্ভিক বিল' : (row.type || 'খাবার / SALE')}
+                                    {row.type === 'REVERTED' ? 'REVERTED / বাতিল' : row.type === 'BILL PAYMENT' ? 'পরিশোধ / PAYMENT' : row.type === 'AMOUNT_CHANGE' ? 'বিল সংশোধন / CHANGE' : row.type === 'INITIAL_BILL' ? 'ইম্পোর্ট / প্রারম্ভিক বিল' : (row.type || 'খাবার / SALE')}
                                   </span>
                                 </div>
 
@@ -3610,6 +3726,11 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                                   {row.type === 'INITIAL_BILL' && (
                                     <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
                                       ইম্পোর্ট বিল
+                                    </span>
+                                  )}
+                                  {row.type === 'AMOUNT_CHANGE' && (
+                                    <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                                      বিল সংশোধন
                                     </span>
                                   )}
                                 </div>
@@ -3623,10 +3744,10 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                                     )}
                                     <span className={`text-sm font-black font-mono ${
                                       row.type === 'REVERTED'
-                                        ? 'text-rose-400/70 line-through font-mono'
+                                        ? 'text-slate-400/70 line-through font-mono'
                                         : row.type === 'BILL PAYMENT'
                                         ? 'text-emerald-400'
-                                        : row.type === 'INITIAL_BILL'
+                                        : row.type === 'INITIAL_BILL' || row.type === 'AMOUNT_CHANGE'
                                         ? 'text-amber-400'
                                         : 'text-rose-400'
                                     }`}>
@@ -3697,6 +3818,11 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                                               ইম্পোর্ট বিল
                                             </span>
                                           )}
+                                          {row.type === 'AMOUNT_CHANGE' && (
+                                            <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                                              বিল সংশোধন
+                                            </span>
+                                          )}
                                         </div>
                                       </td>
                                       <td className="px-4 py-2.5 text-center font-bold">
@@ -3708,10 +3834,10 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                                       </td>
                                       <td className={`px-4 py-2.5 text-right font-black ${
                                         row.type === 'REVERTED'
-                                          ? 'text-rose-400/70 line-through font-mono'
+                                          ? 'text-slate-400/70 line-through font-mono'
                                           : row.type === 'BILL PAYMENT'
                                           ? 'text-emerald-400 font-mono'
-                                          : row.type === 'INITIAL_BILL'
+                                          : row.type === 'INITIAL_BILL' || row.type === 'AMOUNT_CHANGE'
                                           ? 'text-amber-400 font-mono'
                                           : 'text-rose-400 font-mono'
                                       }`}>
@@ -4011,7 +4137,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
             <div className="text-center mb-6">
               <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Current Due Amount</p>
               <p className="text-3xl font-black text-rose-500 font-mono">
-                ৳{payBillMember.Due ?? payBillMember.baki ?? 0}
+                ৳{(getMemberTotalDue(payBillMember, payBillCategory || selectedCategory) || payBillMember.Due || payBillMember.baki || 0).toLocaleString()}
               </p>
             </div>
 
@@ -4504,6 +4630,8 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
           isOpen={!!initialBillMember}
           onClose={() => setInitialBillMember(null)}
           member={initialBillMember}
+          initialMonth={selectedMonth !== 'ALL' ? selectedMonth : getRunningMonthKey()}
+          allTxs={allTxs}
           onSuccess={(updatedMember) => {
             setMembers((prev) =>
               prev.map((m) =>
@@ -4594,25 +4722,66 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                 />
               </div>
 
-              {/* Quick Method Filters & Total Summary */}
-              <div className="flex items-center space-x-2 shrink-0 justify-between sm:justify-end">
-                <div className="flex items-center bg-slate-950 rounded-xl p-0.5 border border-slate-800">
-                  {(['ALL', 'CASH', 'UCB'] as const).map((method) => (
-                    <button
-                      key={method}
-                      type="button"
-                      onClick={() => setPaymentMethodFilter(method)}
-                      className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer ${
-                        paymentMethodFilter === method
-                          ? 'bg-indigo-600 text-white shadow-xs'
-                          : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      {method}
-                    </button>
-                  ))}
+              {/* Month Selector, Quick Method Filters & Total Summary */}
+              <div className="flex flex-wrap items-center gap-2 shrink-0 justify-between sm:justify-end">
+                {/* Month Dropdown with default Running Month */}
+                <div className="flex items-center space-x-1.5 bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1">
+                  <Calendar className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                  <select
+                    value={paymentMonthFilter}
+                    onChange={(e) => setPaymentMonthFilter(e.target.value)}
+                    className="bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer"
+                  >
+                    <option value="ALL" className="bg-slate-900 text-white">সব মাস (All Months)</option>
+                    {availableMonths.map((m) => (
+                      <option key={m} value={m} className="bg-slate-900 text-white">
+                        {formatBengaliMonthYear(m)} {m === getRunningMonthKey() ? '(চলতি মাস)' : ''}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
+                {/* Method Buttons with Total Numbers */}
+                <div className="flex items-center bg-slate-950 rounded-xl p-0.5 border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethodFilter('ALL')}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer flex items-center space-x-1 ${
+                      paymentMethodFilter === 'ALL'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <span>ALL</span>
+                    <span className="opacity-90 font-mono">({paymentCountsByMethod.allCount})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethodFilter('CASH')}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer flex items-center space-x-1 ${
+                      paymentMethodFilter === 'CASH'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <span>CASH</span>
+                    <span className="opacity-90 font-mono">({paymentCountsByMethod.cashCount})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethodFilter('UCB')}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer flex items-center space-x-1 ${
+                      paymentMethodFilter === 'UCB'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <span>UCB</span>
+                    <span className="opacity-90 font-mono">({paymentCountsByMethod.ucbCount})</span>
+                  </button>
+                </div>
+
+                {/* মোট আদায় অনুযায়ী আপডেট */}
                 <div className="px-3 py-1 bg-emerald-950/60 border border-emerald-500/30 rounded-xl flex items-center space-x-1.5 text-xs">
                   <span className="text-slate-400 text-[10px] uppercase font-bold">মোট আদায়:</span>
                   <span className="text-emerald-400 font-mono font-black">৳{totalPaymentsAmount.toLocaleString()}</span>

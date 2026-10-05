@@ -91,27 +91,31 @@ export function deduplicateCanteenTransactions(txs: any[]): any[] {
     idDeduped.push(t);
   }
 
-  // Second pass: Deduplicate duplicate initial bills for the exact same member, month, and billType
+  // Second pass: Deduplicate duplicate identical initial bills (only identical copies with same amount and items)
   const result: any[] = [];
-  const seenInitialBills = new Map<string, any>(); // key: `${cleanBd}_${monthKey}_${billType}` -> tx
+  const seenExactInitialBills = new Set<string>();
 
   for (const t of idDeduped) {
     const isInitial = t.type === 'INITIAL_BILL' || 
+      t.type === 'AMOUNT_CHANGE' ||
       String(t.items || '').includes('ক্যান্টিন বিল') || 
-      String(t.items || '').includes('বকেয়া বিল');
+      String(t.items || '').includes('বকেয়া বিল') ||
+      String(t.items || '').includes('Changed amount from');
 
     if (isInitial) {
       const cleanBd = String(t.bdNo || t.airman_id || '').replace(/\D/g, '');
       const month = t.monthKey || getTxMonthKey(t.date);
       const billType = t.billType || 'CANTEEN';
-      const key = `${cleanBd}_${month}_${billType}`;
+      const amt = Number(t.amount || 0);
+      const itemStr = String(t.items || '').trim();
+      const key = `${cleanBd}_${month}_${billType}_${amt}_${itemStr}`;
 
-      if (cleanBd && month && seenInitialBills.has(key)) {
-        // Drop duplicate initial bill without tombstoning
+      if (cleanBd && month && seenExactInitialBills.has(key)) {
+        // Drop exact duplicate twin copy
         continue;
       }
       if (cleanBd && month) {
-        seenInitialBills.set(key, t);
+        seenExactInitialBills.add(key);
       }
       result.push(t);
     } else {

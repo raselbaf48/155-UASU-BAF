@@ -1372,32 +1372,16 @@ export const CanteenMemberDB: React.FC = () => {
               </div>
 
               {/* Line 2: Surname (English) on Left, Bangla Name on Right */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
-                    Surname / Name (English)
-                  </label>
-                  <input
-                    type="text"
-                    value={editMember['Surname'] || ''}
-                    onChange={(e) => setEditMember({ ...editMember, Surname: e.target.value })}
-                    className="w-full bg-slate-950 text-white rounded-xl px-3 py-2.5 text-xs font-bold border border-slate-700"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[10px] font-black text-emerald-400 uppercase tracking-wider block mb-1 flex items-center justify-between">
-                    <span>বাংলা নাম (Bangla Name)</span>
-                    <span className="text-[9px] text-slate-400 font-normal">বাংলায় নাম</span>
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. আফতাব, তানভীর, মেহেদী, রাসেল..."
-                    value={editMember.nameBn ?? getMemberBanglaName(editMember)}
-                    onChange={(e) => setEditMember({ ...editMember, nameBn: e.target.value })}
-                    className="w-full bg-slate-950 text-emerald-300 placeholder-slate-600 rounded-xl px-3 py-2.5 text-xs font-bold border border-emerald-500/40 focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500 shadow-inner"
-                  />
-                </div>
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
+                  Surname / Name (English)
+                </label>
+                <input
+                  type="text"
+                  value={editMember['Surname'] || ''}
+                  onChange={(e) => setEditMember({ ...editMember, Surname: e.target.value })}
+                  className="w-full bg-slate-950 text-white rounded-xl px-3 py-2.5 text-xs font-bold border border-slate-700"
+                />
               </div>
 
               {/* Line 3: Contact & Role */}

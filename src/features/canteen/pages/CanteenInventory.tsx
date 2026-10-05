@@ -151,7 +151,9 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
   };
 
   useEffect(() => {
-    fetchRawItems().then(() => fetchItems());
+    // Run both immediately in parallel without sequential delay
+    fetchRawItems();
+    fetchItems();
 
     // Realtime channel for Canteen_Menu with unique channel name
     const menuChannel = supabase

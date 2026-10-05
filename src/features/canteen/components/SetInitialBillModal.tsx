@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Receipt, 
   X, 
@@ -7,7 +7,8 @@ import {
   Coins, 
   Layers, 
   RefreshCw,
-  Calendar
+  Calendar,
+  ChevronDown
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { pushKeyToCloud } from '../utils/canteenCloudSync';
@@ -15,43 +16,140 @@ import { formatCanteenDate } from '../utils/dateUtils';
 import { resolveImageUrl } from '../utils/canteenSettings';
 import { getFormattedDateForMonth } from '../utils/importHistoryTxs';
 import { formatBengaliMonthYear } from '../utils/exportCanteenBillExcel';
+import { getTxMonthKey, getRunningMonthKey } from '../pages/MemberDB';
 
 interface SetInitialBillModalProps {
   isOpen: boolean;
   onClose: () => void;
   member: any;
   onSuccess: (updatedMember: any) => void;
+  initialMonth?: string;
+  allTxs?: any[];
 }
 
 export const SetInitialBillModal: React.FC<SetInitialBillModalProps> = ({
   isOpen,
   onClose,
   member,
-  onSuccess
+  onSuccess,
+  initialMonth,
+  allTxs
 }) => {
   const currentDue = Number(member?.Due ?? member?.due ?? member?.baki ?? 0);
-  const [billAmount, setBillAmount] = useState<string>(currentDue > 0 ? String(currentDue) : '');
+  const defaultRunningMonth = initialMonth && initialMonth !== 'ALL' ? initialMonth : getRunningMonthKey();
+
+  const [billMonth, setBillMonth] = useState<string>(defaultRunningMonth);
+  const [billAmount, setBillAmount] = useState<string>('');
+  const [previousAmount, setPreviousAmount] = useState<number>(0);
   const [billMode, setBillMode] = useState<'SET' | 'ADD'>('SET');
-  const [billMonth, setBillMonth] = useState<string>('2026-09');
   const [billNote, setBillNote] = useState<string>('');
   const [createTransaction, setCreateTransaction] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Month options list for dropdown: Next month, Current month, and past 12 months
+  const monthOptions = useMemo(() => {
+    const list: Array<{ key: string; label: string }> = [];
+    const now = new Date();
+    // Next month (in case user wants to schedule next month)
+    const next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const nextKey = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`;
+    list.push({ 
+      key: nextKey, 
+      label: `${formatBengaliMonthYear(nextKey)} (${next.toLocaleString('en', { month: 'short' })} ${next.getFullYear()})` 
+    });
+
+    // Current month and past 12 months
+    for (let i = 0; i <= 12; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const bnLabel = formatBengaliMonthYear(key);
+      const enMonth = d.toLocaleString('en', { month: 'short' });
+      list.push({
+        key,
+        label: `${bnLabel} (${enMonth} ${d.getFullYear()})${i === 0 ? ' • চলতি মাস (Current)' : ''}`
+      });
+    }
+    return list;
+  }, []);
+
+  // Helper to find existing initial bill amount for this member in the specified month
+  const findPreviousAmountForMonth = (targetM: string): number => {
+    if (!member) return 0;
+    try {
+      const txs = allTxs && allTxs.length > 0 
+        ? allTxs 
+        : (() => {
+            try { return JSON.parse(localStorage.getItem('canteen_txs') || '[]'); } catch { return []; }
+          })();
+
+      const cleanBdNo = String(member?.['BD No'] || member?.bdNo || member?.airman_id || '').replace(/\D/g, '');
+      const mAirman = String(member?.airman_id || '').trim().toLowerCase();
+
+      const memberInitialTx = txs.find((t: any) => {
+        if (!t) return false;
+        const isInit = t.type === 'INITIAL_BILL' || 
+          String(t.id || '').startsWith('init-') || 
+          String(t.id || '').startsWith('tx-init-') || 
+          String(t.id || '').startsWith('tx-import-') ||
+          String(t.items || '').includes('ক্যান্টিন বিল') || 
+          String(t.items || '').includes('বকেয়া বিল') ||
+          String(t.items || '').includes('Changed amount from');
+        if (!isInit) return false;
+
+        const tBd = String(t.bdNo || t['BD No'] || t.airman_id || '').replace(/\D/g, '');
+        const tAirman = String(t.airman_id || '').trim().toLowerCase();
+        const bdMatch = cleanBdNo && tBd && (cleanBdNo === tBd || cleanBdNo.replace(/^0+/, '') === tBd.replace(/^0+/, ''));
+        const airmanMatch = mAirman && tAirman && mAirman === tAirman;
+        if (!bdMatch && !airmanMatch) return false;
+
+        const txMonth = t.monthKey || getTxMonthKey(t.date);
+        return txMonth === targetM;
+      });
+
+      if (memberInitialTx && Number(memberInitialTx.amount) > 0) {
+        return Number(memberInitialTx.amount);
+      }
+    } catch {}
+
+    // Fallback if viewing current running month and member has profile due
+    if (targetM === getRunningMonthKey()) {
+      const rawDue = Number(member?.Due ?? member?.due ?? member?.baki ?? 0);
+      if (rawDue > 0) return rawDue;
+    }
+    return 0;
+  };
+
+  // Sync state whenever member or modal open changes
   useEffect(() => {
     if (member) {
-      const due = Number(member?.Due ?? member?.due ?? member?.baki ?? 0);
-      setBillAmount(due > 0 ? String(due) : '');
+      const targetM = initialMonth && initialMonth !== 'ALL' ? initialMonth : getRunningMonthKey();
+      setBillMonth(targetM);
+      const prev = findPreviousAmountForMonth(targetM);
+      setPreviousAmount(prev);
+      setBillAmount(prev > 0 ? String(prev) : '');
       setBillMode('SET');
-      setBillMonth('2026-09');
       setBillNote('');
       setErrorMessage(null);
     }
-  }, [member]);
+  }, [member, initialMonth]);
+
+  // Handle month selection change: load that month's existing amount into the box
+  const handleMonthChange = (newMonth: string) => {
+    setBillMonth(newMonth);
+    const prev = findPreviousAmountForMonth(newMonth);
+    setPreviousAmount(prev);
+    setBillAmount(prev > 0 ? String(prev) : '');
+    setErrorMessage(null);
+  };
 
   const memberDp = member?.DP ? resolveImageUrl(member.DP) : '';
   const numAmount = parseFloat(billAmount) || 0;
-  const resultingDue = billMode === 'SET' ? numAmount : currentDue + numAmount;
+  
+  // In SET mode, replacing previous month amount with new amount
+  const resultingDue = billMode === 'SET' 
+    ? Math.max(0, currentDue - previousAmount + numAmount)
+    : currentDue + numAmount;
 
   const handleSaveInitialBill = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,65 +179,83 @@ export const SetInitialBillModal: React.FC<SetInitialBillModalProps> = ({
       // 2. Synchronize transactions in canteen_txs
       const cleanBdNo = String(member['BD No'] || member.bdNo || member.airman_id || '').replace(/\D/g, '');
       const mAirman = String(member.airman_id || '').trim().toLowerCase();
-      const txDate = getFormattedDateForMonth(billMonth, 28);
-      const defaultLabel = billMonth === '2026-08' 
-        ? 'বকেয়া বিল (আগস্ট ২০২৬)' 
-        : billMonth === '2026-09' 
-        ? 'ক্যান্টিন বিল (সেপ্টেম্বর ২০২৬)' 
-        : `বিল (${formatBengaliMonthYear(billMonth)})`;
+      const isAmountChanged = previousAmount > 0 && previousAmount !== numAmount;
+      // If changed, the change event date is TODAY so it shows as a new history record
+      const txDate = isAmountChanged 
+        ? formatCanteenDate(new Date()) 
+        : getFormattedDateForMonth(billMonth, 28);
+      
+      // Determine description: if changed from previous amount, use exact format "Changed amount from X to Y"
+      let defaultLabel = `বিল (${formatBengaliMonthYear(billMonth)})`;
+      if (isAmountChanged) {
+        defaultLabel = `Changed amount from ${previousAmount} to ${numAmount}`;
+      } else if (billMonth === '2026-08') {
+        defaultLabel = 'বকেয়া বিল (আগস্ট ২০২৬)';
+      } else if (billMonth === '2026-09') {
+        defaultLabel = 'ক্যান্টিন বিল (সেপ্টেম্বর ২০২৬)';
+      } else if (billMonth === '2026-10') {
+        defaultLabel = 'ক্যান্টিন বিল (অক্টোবর ২০২৬)';
+      }
 
       const existingTxs = (() => {
         try { return JSON.parse(localStorage.getItem('canteen_txs') || '[]'); } catch { return []; }
       })();
 
-      // Helper to match initial / imported bills belonging to this member
-      const isMemberInitialTx = (t: any) => {
+      // Helper to match initial / imported bills belonging to this member for this specific target month
+      const isThisMemberTxInTargetMonth = (t: any) => {
         if (!t) return false;
         const isInitType = t.type === 'INITIAL_BILL' || 
           String(t.id || '').startsWith('init-') || 
           String(t.id || '').startsWith('tx-init-') || 
           String(t.id || '').startsWith('tx-import-') ||
           String(t.items || '').includes('ক্যান্টিন বিল') || 
-          String(t.items || '').includes('বকেয়া বিল');
+          String(t.items || '').includes('বকেয়া বিল') ||
+          String(t.items || '').includes('Changed amount from');
         if (!isInitType) return false;
+
         const tBd = String(t.bdNo || t['BD No'] || t.airman_id || '').replace(/\D/g, '');
         const tAirman = String(t.airman_id || '').trim().toLowerCase();
-        if (cleanBdNo && tBd && (cleanBdNo === tBd || cleanBdNo.replace(/^0+/, '') === tBd.replace(/^0+/, ''))) return true;
-        if (mAirman && tAirman && mAirman === tAirman) return true;
-        return false;
+        const bdMatch = cleanBdNo && tBd && (cleanBdNo === tBd || cleanBdNo.replace(/^0+/, '') === tBd.replace(/^0+/, ''));
+        const airmanMatch = mAirman && tAirman && mAirman === tAirman;
+        if (!bdMatch && !airmanMatch) return false;
+
+        const txMonth = t.monthKey || getTxMonthKey(t.date);
+        return txMonth === billMonth;
       };
 
       let updatedTxs: any[] = [];
 
       if (billMode === 'SET') {
-        // In SET mode, remove all prior initial/imported bills for this member across all months
-        // so that the new amount does NOT get added to the previous bill
-        const remainingTxs = existingTxs.filter((t: any) => !isMemberInitialTx(t));
+        // In SET mode:
+        // Replace previous initial bill for this member in this target month so only the corrected amount sits in the bill
+        const preservedTxs = existingTxs.filter((t: any) => !isThisMemberTxInTargetMonth(t));
 
         if (createTransaction && numAmount > 0) {
           const now = Date.now();
+          const cleanLabel = billNote.trim() || (billMonth === '2026-08' ? 'বকেয়া বিল (আগস্ট ২০২৬)' : `ক্যান্টিন বিল (${formatBengaliMonthYear(billMonth)})`);
           const newTx = {
-            id: `tx-init-${cleanBdNo}-${billMonth}-${now}`,
+            id: `tx-init-change-${cleanBdNo}-${billMonth}-${now}`,
             created_at: new Date().toISOString(),
             createdAt: new Date().toISOString(),
             timestamp: now,
-            date: txDate,
+            date: getFormattedDateForMonth(billMonth, 28),
             monthKey: billMonth,
             airman_id: member.airman_id,
             bdNo: member['BD No'] || member.bdNo,
             memberName: `${member['Rank'] || ''} ${member['Surname'] || ''}`.trim(),
             rank: member['Rank'] || member.rank || '',
-            items: billNote.trim() || defaultLabel,
+            items: cleanLabel,
             soldItems: [],
             amount: numAmount,
             type: 'INITIAL_BILL',
             gateway: 'DUE',
-            billType: 'CANTEEN'
+            billType: 'CANTEEN',
+            isAmountChange: isAmountChanged,
+            previousAmount: previousAmount
           };
-          updatedTxs = [newTx, ...remainingTxs];
+          updatedTxs = [newTx, ...preservedTxs];
         } else {
-          // If setting to 0 or unchecked transaction creation, keep remaining transactions without old initial bills
-          updatedTxs = remainingTxs;
+          updatedTxs = preservedTxs;
         }
       } else {
         // In ADD mode, append a new initial bill transaction for the added amount
@@ -305,51 +421,38 @@ export const SetInitialBillModal: React.FC<SetInitialBillModalProps> = ({
             </div>
             <p className="text-[10px] text-slate-400 mt-1 font-medium">
               {billMode === 'SET' 
-                ? '💡 বকেয়া প্রতিস্থাপন: পূর্ববর্তী সব প্রারম্ভিক বকেয়া মুছে নতুন নির্ধারিত পরিমাণ সেট হবে।' 
+                ? '💡 বকেয়া প্রতিস্থাপন: নির্বাচিত মাসের পূর্ববর্তী প্রারম্ভিক বিল মুছে নতুন পরিমাণ দিয়ে প্রতিস্থাপিত হবে।' 
                 : `💡 বকেয়া যোগ: পূর্বের বকেয়া (৳${currentDue.toLocaleString()}) এর সাথে নতুন পরিমাণ যোগ হবে।`}
             </p>
           </div>
 
-          {/* Month Selector */}
+          {/* Month Selector: Clean Dropdown List */}
           <div>
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
-              টার্গেট মাস (Bill Month)
+              টার্গেট মাস (Target Month)
             </label>
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => setBillMonth('2026-08')}
-                className={`py-2 px-2.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
-                  billMonth === '2026-08'
-                    ? 'bg-blue-600 text-white shadow-md border border-blue-400'
-                    : 'bg-slate-800 text-slate-300 hover:bg-slate-750'
-                }`}
+            <div className="relative">
+              <select
+                value={billMonth}
+                onChange={(e) => handleMonthChange(e.target.value)}
+                className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-xs font-bold font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 appearance-none cursor-pointer pr-10"
               >
-                আগস্ট ২০২৬
-              </button>
-              <button
-                type="button"
-                onClick={() => setBillMonth('2026-09')}
-                className={`py-2 px-2.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
-                  billMonth === '2026-09'
-                    ? 'bg-emerald-600 text-white shadow-md border border-emerald-400'
-                    : 'bg-slate-800 text-slate-300 hover:bg-slate-750'
-                }`}
-              >
-                সেপ্টেম্বর ২০২৬
-              </button>
-              <button
-                type="button"
-                onClick={() => setBillMonth('2026-10')}
-                className={`py-2 px-2.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
-                  billMonth === '2026-10'
-                    ? 'bg-purple-600 text-white shadow-md border border-purple-400'
-                    : 'bg-slate-800 text-slate-300 hover:bg-slate-750'
-                }`}
-              >
-                অক্টোবর ২০২৬
-              </button>
+                {monthOptions.map((opt) => (
+                  <option key={opt.key} value={opt.key} className="bg-slate-900 text-white py-1.5">
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-indigo-400">
+                <ChevronDown className="w-4 h-4" />
+              </div>
             </div>
+            {previousAmount > 0 && (
+              <p className="text-[11px] text-amber-300 mt-1.5 font-bold flex items-center gap-1.5">
+                <Coins className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>এই মাসের পূর্ববর্তী নির্ধারিত বিল: <strong className="font-mono text-white">৳{previousAmount}</strong></span>
+              </p>
+            )}
           </div>
 
           {/* Amount input */}
@@ -367,18 +470,23 @@ export const SetInitialBillModal: React.FC<SetInitialBillModalProps> = ({
               onChange={(e) => setBillAmount(e.target.value)}
               className="w-full bg-slate-950 border border-slate-700 text-white font-mono text-lg font-black rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
+            {previousAmount > 0 && numAmount !== previousAmount && numAmount > 0 && (
+              <p className="text-[10px] font-bold text-indigo-300 mt-1">
+                লেনদেন ইতিহাসে সংরক্ষিত হবে: <span className="font-mono text-amber-300">Changed amount from {previousAmount} to {numAmount}</span>
+              </p>
+            )}
           </div>
 
           {/* Note / Remarks */}
           <div>
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
-              বিবরণ / নোট
+              বিবরণ / নোট (ঐচ্ছিক)
             </label>
             <input
               type="text"
               value={billNote}
               onChange={(e) => setBillNote(e.target.value)}
-              placeholder="e.g. পূর্ববর্তী বকেয়া বিল"
+              placeholder={previousAmount > 0 && previousAmount !== numAmount ? `Changed amount from ${previousAmount} to ${numAmount}` : "e.g. পূর্ববর্তী বকেয়া বিল"}
               className="w-full bg-slate-950 border border-slate-700 text-white text-xs font-bold rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
@@ -435,3 +543,4 @@ export const SetInitialBillModal: React.FC<SetInitialBillModalProps> = ({
     </div>
   );
 };
+

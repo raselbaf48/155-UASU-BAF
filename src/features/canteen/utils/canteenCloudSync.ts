@@ -146,7 +146,7 @@ function mergeArrayData(localArr: any[], cloudArr: any[], keyField = 'id', keyNa
 
   const mergedList = Array.from(map.values());
   if (keyName === 'canteen_txs') {
-    // Sort newest first so latest valid transaction or initial bill is preferred over older ones
+    // Sort newest first
     const sortedList = [...mergedList].sort((a, b) => {
       const timeA = new Date(a?.created_at || a?.createdAt || a?.timestamp || a?.date || 0).getTime() || 0;
       const timeB = new Date(b?.created_at || b?.createdAt || b?.timestamp || b?.date || 0).getTime() || 0;
@@ -154,23 +154,30 @@ function mergeArrayData(localArr: any[], cloudArr: any[], keyField = 'id', keyNa
       return String(b?.id || '').localeCompare(String(a?.id || ''));
     });
 
-    const seenInitial = new Set<string>();
+    // Deduplicate only truly identical transaction copies (same member, month, billType, amount, and items)
+    // Preserving all historical initial bills and amount change entries intact!
+    const seenExactInitial = new Set<string>();
     const deduped: any[] = [];
     for (const t of sortedList) {
       if (!t) continue;
       const isInitial = t.type === 'INITIAL_BILL' || 
+        t.type === 'AMOUNT_CHANGE' ||
         String(t.items || '').includes('ক্যান্টিন বিল') || 
-        String(t.items || '').includes('বকেয়া বিল');
+        String(t.items || '').includes('বকেয়া বিল') ||
+        String(t.items || '').includes('Changed amount from');
+
       if (isInitial) {
         const cleanBd = String(t.bdNo || t.airman_id || '').replace(/\D/g, '');
         const month = t.monthKey || (t.date ? String(t.date).trim() : '');
         const bType = t.billType || 'CANTEEN';
-        const k = `${cleanBd}_${month}_${bType}`;
-        if (cleanBd && month && seenInitial.has(k)) {
-          continue; // Drop older duplicate initial bill
+        const amt = Number(t.amount || 0);
+        const itemStr = String(t.items || '').trim();
+        const exactKey = `${cleanBd}_${month}_${bType}_${amt}_${itemStr}`;
+        if (cleanBd && month && seenExactInitial.has(exactKey)) {
+          continue; // Drop only identical twin copies
         }
         if (cleanBd && month) {
-          seenInitial.add(k);
+          seenExactInitial.add(exactKey);
         }
       }
       deduped.push(t);
@@ -497,10 +504,23 @@ export function preloadAllCanteenMedia() {
     try {
       const menu = getCanteenMenuCache();
       if (Array.isArray(menu) && menu.length > 0) {
-        menu.slice(0, 10).forEach((item: any) => {
+        menu.forEach((item: any) => {
           const imgUrl = item?.DP || item?.img || item?.image;
-          if (imgUrl && !imgUrl.startsWith('data:')) preloadImage(imgUrl);
+          if (imgUrl) preloadImage(imgUrl);
         });
+      }
+    } catch {}
+
+    try {
+      const rawStored = localStorage.getItem('canteen_raw_inventory_items_v2');
+      if (rawStored) {
+        const rawItems = JSON.parse(rawStored);
+        if (Array.isArray(rawItems)) {
+          rawItems.forEach((r: any) => {
+            const imgUrl = r?.DP || r?.dp || r?.image;
+            if (imgUrl) preloadImage(imgUrl);
+          });
+        }
       }
     } catch {}
   }, 800);
