@@ -1,4 +1,4 @@
-import { pushKeyToCloud, pullKeyFromCloud, getDeletedTxIds } from './canteenCloudSync';
+import { pushKeyToCloud, queuePushKeyToCloud, pullKeyFromCloud, getDeletedTxIds } from './canteenCloudSync';
 import { getTxMonthKey } from '../pages/MemberDB';
 import { formatBengaliMonthYear } from './exportCanteenBillExcel';
 
@@ -74,8 +74,8 @@ export function deduplicateCanteenTransactions(txs: any[]): any[] {
 
   // Sort newest first so latest valid transaction is preferred
   const sorted = [...txs].sort((a, b) => {
-    const timeA = new Date(a?.created_at || a?.createdAt || a?.date || 0).getTime();
-    const timeB = new Date(b?.created_at || b?.createdAt || b?.date || 0).getTime();
+    const timeA = new Date(a?.created_at || a?.createdAt || a?.timestamp || a?.date || 0).getTime() || (typeof a?.timestamp === 'number' ? a.timestamp : 0);
+    const timeB = new Date(b?.created_at || b?.createdAt || b?.timestamp || b?.date || 0).getTime() || (typeof b?.timestamp === 'number' ? b.timestamp : 0);
     if (timeA !== timeB) return timeB - timeA;
     return String(b?.id || '').localeCompare(String(a?.id || ''));
   });
@@ -318,10 +318,14 @@ export async function syncImportHistoryToTransactions(): Promise<any[]> {
     const allTxsList = Array.from(txMap.values());
     const cleaned = deduplicateCanteenTransactions(allTxsList);
 
-    // 5. Persist clean state to local and cloud
+    // 5. Persist clean state to local and cloud only if changed
     try {
+      const prevRaw = localStorage.getItem('canteen_txs') || '[]';
+      const isChanged = cleaned.length !== localTxs.length || JSON.stringify(cleaned) !== prevRaw;
       localStorage.setItem('canteen_txs', JSON.stringify(cleaned));
-      await pushKeyToCloud('canteen_txs', cleaned);
+      if (isChanged) {
+        queuePushKeyToCloud('canteen_txs', cleaned, 2000);
+      }
     } catch (err) {
       console.warn('[importHistoryTxs] Error persisting cleaned transactions:', err);
     }

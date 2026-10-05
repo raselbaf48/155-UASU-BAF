@@ -78,19 +78,51 @@ export const SetInitialBillModal: React.FC<SetInitialBillModalProps> = ({
           .eq('BD No', member['BD No']);
       }
 
-      // 2. Optionally append to canteen_txs with accurate monthKey and date
-      if (createTransaction && numAmount > 0) {
-        try {
-          const cleanBdNo = String(member['BD No'] || member.bdNo || member.airman_id || '').replace(/\D/g, '');
-          const txDate = getFormattedDateForMonth(billMonth, 28);
-          const defaultLabel = billMonth === '2026-08' 
-            ? 'বকেয়া বিল (আগস্ট ২০২৬)' 
-            : billMonth === '2026-09' 
-            ? 'ক্যান্টিন বিল (সেপ্টেম্বর ২০২৬)' 
-            : `বিল (${formatBengaliMonthYear(billMonth)})`;
+      // 2. Synchronize transactions in canteen_txs
+      const cleanBdNo = String(member['BD No'] || member.bdNo || member.airman_id || '').replace(/\D/g, '');
+      const mAirman = String(member.airman_id || '').trim().toLowerCase();
+      const txDate = getFormattedDateForMonth(billMonth, 28);
+      const defaultLabel = billMonth === '2026-08' 
+        ? 'বকেয়া বিল (আগস্ট ২০২৬)' 
+        : billMonth === '2026-09' 
+        ? 'ক্যান্টিন বিল (সেপ্টেম্বর ২০২৬)' 
+        : `বিল (${formatBengaliMonthYear(billMonth)})`;
 
+      const existingTxs = (() => {
+        try { return JSON.parse(localStorage.getItem('canteen_txs') || '[]'); } catch { return []; }
+      })();
+
+      // Helper to match initial / imported bills belonging to this member
+      const isMemberInitialTx = (t: any) => {
+        if (!t) return false;
+        const isInitType = t.type === 'INITIAL_BILL' || 
+          String(t.id || '').startsWith('init-') || 
+          String(t.id || '').startsWith('tx-init-') || 
+          String(t.id || '').startsWith('tx-import-') ||
+          String(t.items || '').includes('ক্যান্টিন বিল') || 
+          String(t.items || '').includes('বকেয়া বিল');
+        if (!isInitType) return false;
+        const tBd = String(t.bdNo || t['BD No'] || t.airman_id || '').replace(/\D/g, '');
+        const tAirman = String(t.airman_id || '').trim().toLowerCase();
+        if (cleanBdNo && tBd && (cleanBdNo === tBd || cleanBdNo.replace(/^0+/, '') === tBd.replace(/^0+/, ''))) return true;
+        if (mAirman && tAirman && mAirman === tAirman) return true;
+        return false;
+      };
+
+      let updatedTxs: any[] = [];
+
+      if (billMode === 'SET') {
+        // In SET mode, remove all prior initial/imported bills for this member across all months
+        // so that the new amount does NOT get added to the previous bill
+        const remainingTxs = existingTxs.filter((t: any) => !isMemberInitialTx(t));
+
+        if (createTransaction && numAmount > 0) {
+          const now = Date.now();
           const newTx = {
-            id: `tx-init-${cleanBdNo}-${billMonth}-${Date.now()}`,
+            id: `tx-init-${cleanBdNo}-${billMonth}-${now}`,
+            created_at: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+            timestamp: now,
             date: txDate,
             monthKey: billMonth,
             airman_id: member.airman_id,
@@ -104,24 +136,43 @@ export const SetInitialBillModal: React.FC<SetInitialBillModalProps> = ({
             gateway: 'DUE',
             billType: 'CANTEEN'
           };
-          const existingTxs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-          // Remove old generic init-auto-due for this member if resetting
-          const filteredExisting = billMode === 'SET' 
-            ? existingTxs.filter((t: any) => {
-                const tBd = String(t.bdNo || t.airman_id || '').replace(/\D/g, '');
-                return !(tBd === cleanBdNo && (t.id.startsWith('init-auto-due-') || (t.type === 'INITIAL_BILL' && t.monthKey === billMonth)));
-              })
-            : existingTxs;
-
-          const updatedTxs = [newTx, ...filteredExisting];
-          localStorage.setItem('canteen_txs', JSON.stringify(updatedTxs));
-          await pushKeyToCloud('canteen_txs', updatedTxs);
-        } catch (e) {
-          console.warn('Failed to record initial bill transaction:', e);
+          updatedTxs = [newTx, ...remainingTxs];
+        } else {
+          // If setting to 0 or unchecked transaction creation, keep remaining transactions without old initial bills
+          updatedTxs = remainingTxs;
+        }
+      } else {
+        // In ADD mode, append a new initial bill transaction for the added amount
+        if (createTransaction && numAmount > 0) {
+          const now = Date.now();
+          const newTx = {
+            id: `tx-init-${cleanBdNo}-${billMonth}-${now}`,
+            created_at: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+            timestamp: now,
+            date: txDate,
+            monthKey: billMonth,
+            airman_id: member.airman_id,
+            bdNo: member['BD No'] || member.bdNo,
+            memberName: `${member['Rank'] || ''} ${member['Surname'] || ''}`.trim(),
+            rank: member['Rank'] || member.rank || '',
+            items: billNote.trim() || `${defaultLabel} (বকেয়া যোগ)`,
+            soldItems: [],
+            amount: numAmount,
+            type: 'INITIAL_BILL',
+            gateway: 'DUE',
+            billType: 'CANTEEN'
+          };
+          updatedTxs = [newTx, ...existingTxs];
+        } else {
+          updatedTxs = existingTxs;
         }
       }
 
-      // 3. Update local caches
+      localStorage.setItem('canteen_txs', JSON.stringify(updatedTxs));
+      await pushKeyToCloud('canteen_txs', updatedTxs);
+
+      // 3. Update local member caches
       const updatedMember = {
         ...member,
         Due: resultingDue,
@@ -142,6 +193,7 @@ export const SetInitialBillModal: React.FC<SetInitialBillModalProps> = ({
 
       window.dispatchEvent(new Event('canteen_txs_updated'));
       window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('canteen_members_updated'));
       window.dispatchEvent(new Event('storage'));
 
       onSuccess(updatedMember);
@@ -251,6 +303,11 @@ export const SetInitialBillModal: React.FC<SetInitialBillModalProps> = ({
                 বকেয়া যোগ (Add Due)
               </button>
             </div>
+            <p className="text-[10px] text-slate-400 mt-1 font-medium">
+              {billMode === 'SET' 
+                ? '💡 বকেয়া প্রতিস্থাপন: পূর্ববর্তী সব প্রারম্ভিক বকেয়া মুছে নতুন নির্ধারিত পরিমাণ সেট হবে।' 
+                : `💡 বকেয়া যোগ: পূর্বের বকেয়া (৳${currentDue.toLocaleString()}) এর সাথে নতুন পরিমাণ যোগ হবে।`}
+            </p>
           </div>
 
           {/* Month Selector */}

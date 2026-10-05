@@ -228,13 +228,18 @@ const KNOWN_RESOLUTIONS: Record<string, string> = {
   'https://photos.app.goo.gl/ydicbnTyNZqrN1zT9': 'https://lh3.googleusercontent.com/pw/AP1GczPXDD5Dohq-6TWemgeYREoimsS-iXc6KjQoxxRgI0hjRf2tESul2P6eQYmPbFDBUzcP7tRKaBH8HkHHoBqJb83Ng8bbo5mKFhfT4YkiEcEVrCc3Nd39=s800'
 };
 
+let memoryResolvedCache: Record<string, string> | null = null;
+
 function getResolvedCache(): Record<string, string> {
+  if (memoryResolvedCache) return memoryResolvedCache;
   try {
-    const raw = localStorage.getItem(RESOLVED_CACHE_KEY);
+    const raw = typeof window !== 'undefined' ? localStorage.getItem(RESOLVED_CACHE_KEY) : null;
     const parsed = raw ? JSON.parse(raw) : {};
-    return { ...KNOWN_RESOLUTIONS, ...parsed };
+    memoryResolvedCache = { ...KNOWN_RESOLUTIONS, ...parsed };
+    return memoryResolvedCache;
   } catch {
-    return { ...KNOWN_RESOLUTIONS };
+    memoryResolvedCache = { ...KNOWN_RESOLUTIONS };
+    return memoryResolvedCache;
   }
 }
 
@@ -242,7 +247,10 @@ function setResolvedCache(url: string, resolvedUrl: string) {
   try {
     const cache = getResolvedCache();
     cache[url] = resolvedUrl;
-    localStorage.setItem(RESOLVED_CACHE_KEY, JSON.stringify(cache));
+    memoryResolvedCache = cache;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(RESOLVED_CACHE_KEY, JSON.stringify(cache));
+    }
   } catch {}
 }
 

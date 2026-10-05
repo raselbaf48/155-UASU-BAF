@@ -1,6 +1,25 @@
 import { supabase } from '../../../supabase';
 import { deduplicateRawItems } from './recipeManager';
 import { resolveImageUrl, getCanteenConfig } from './canteenSettings';
+import { 
+  getCanteenMembersCache, 
+  setCanteenMembersCache, 
+  fetchCanteenMembersOnce, 
+  getCanteenMenuCache, 
+  fetchCanteenMenuOnce,
+  DEFAULT_CANTEEN_MENU_ITEMS,
+  CanteenMenuItem
+} from './canteenMenuData';
+
+export { 
+  getCanteenMembersCache, 
+  setCanteenMembersCache, 
+  fetchCanteenMembersOnce, 
+  getCanteenMenuCache, 
+  fetchCanteenMenuOnce,
+  DEFAULT_CANTEEN_MENU_ITEMS 
+};
+export type { CanteenMenuItem };
 
 /**
  * Canteen Cloud Sync Engine
@@ -127,9 +146,17 @@ function mergeArrayData(localArr: any[], cloudArr: any[], keyField = 'id', keyNa
 
   const mergedList = Array.from(map.values());
   if (keyName === 'canteen_txs') {
+    // Sort newest first so latest valid transaction or initial bill is preferred over older ones
+    const sortedList = [...mergedList].sort((a, b) => {
+      const timeA = new Date(a?.created_at || a?.createdAt || a?.timestamp || a?.date || 0).getTime() || 0;
+      const timeB = new Date(b?.created_at || b?.createdAt || b?.timestamp || b?.date || 0).getTime() || 0;
+      if (timeA !== timeB) return timeB - timeA;
+      return String(b?.id || '').localeCompare(String(a?.id || ''));
+    });
+
     const seenInitial = new Set<string>();
     const deduped: any[] = [];
-    for (const t of mergedList) {
+    for (const t of sortedList) {
       if (!t) continue;
       const isInitial = t.type === 'INITIAL_BILL' || 
         String(t.items || '').includes('ক্যান্টিন বিল') || 
@@ -140,7 +167,7 @@ function mergeArrayData(localArr: any[], cloudArr: any[], keyField = 'id', keyNa
         const bType = t.billType || 'CANTEEN';
         const k = `${cleanBd}_${month}_${bType}`;
         if (cleanBd && month && seenInitial.has(k)) {
-          continue; // Drop duplicate
+          continue; // Drop older duplicate initial bill
         }
         if (cleanBd && month) {
           seenInitial.add(k);
@@ -455,31 +482,28 @@ export function preloadAllCanteenMedia() {
     if (cfg.logoUrl) preloadImage(cfg.logoUrl);
   } catch {}
 
-  // 2. Member DPs from local member cache
-  try {
-    const cached = localStorage.getItem('canteen_members_cache');
-    if (cached) {
-      const members = JSON.parse(cached);
-      if (Array.isArray(members)) {
-        members.forEach((m: any) => {
-          if (m?.DP) preloadImage(m.DP);
+  // 2. Stagger preloading for only the top 10 most recent/active members and menu items
+  // avoiding CPU/network flood when entering the canteen app
+  setTimeout(() => {
+    try {
+      const cached = getCanteenMembersCache();
+      if (Array.isArray(cached) && cached.length > 0) {
+        cached.slice(0, 10).forEach((m: any) => {
+          if (m?.DP && !m.DP.startsWith('data:')) preloadImage(m.DP);
         });
       }
-    }
-  } catch {}
+    } catch {}
 
-  // 3. Menu items
-  try {
-    const menuRaw = localStorage.getItem('canteen_daily_menu');
-    if (menuRaw) {
-      const items = JSON.parse(menuRaw);
-      if (Array.isArray(items)) {
-        items.forEach((item: any) => {
-          if (item?.DP || item?.img || item?.image) preloadImage(item.DP || item.img || item.image);
+    try {
+      const menu = getCanteenMenuCache();
+      if (Array.isArray(menu) && menu.length > 0) {
+        menu.slice(0, 10).forEach((item: any) => {
+          const imgUrl = item?.DP || item?.img || item?.image;
+          if (imgUrl && !imgUrl.startsWith('data:')) preloadImage(imgUrl);
         });
       }
-    }
-  } catch {}
+    } catch {}
+  }, 800);
 }
 
 /**
@@ -505,8 +529,8 @@ export async function syncCanteenMembersFromCloud(forceFull = false): Promise<vo
 
     // If no local cache yet: download everything and warm up cache
     if (!hasLocalCache || forceFull) {
-      const { data, error } = await supabase.from('Canteen_Member').select('*');
-      if (error || !data) return;
+      const data = await fetchCanteenMembersOnce(forceFull);
+      if (!data || data.length === 0) return;
 
       localStorage.setItem('canteen_members_cache', JSON.stringify(data));
       data.forEach((m: any) => {
@@ -521,7 +545,6 @@ export async function syncCanteenMembersFromCloud(forceFull = false): Promise<vo
             bdNo: cleanBd
           }));
         }
-        if (m.DP) preloadImage(m.DP);
       });
 
       preloadAllCanteenMedia();
@@ -643,9 +666,10 @@ export function initCanteenCloudSync(): () => void {
   }
   isInitialized = true;
 
-  // 1. Initial Pull from Cloud: Settings + Members + Preload all DPs and media
+  // 1. Initial Pull from Cloud: Settings + Members + Menu Catalog + Preload Media
   pullAllCanteenDataFromCloud();
   syncCanteenMembersFromCloud();
+  fetchCanteenMenuOnce();
   preloadAllCanteenMedia();
 
   // 2. Setup Realtime subscription on app_settings
@@ -808,21 +832,6 @@ export function initCanteenCloudSync(): () => void {
   window.addEventListener('canteen_raw_inventory_updated', handleLocalRawInventory);
   window.addEventListener('canteen_daily_menu_updated', handleLocalDailyMenu);
 
-  const handleStateUpdated = () => {
-    queuePushKeyToCloud('canteen_txs');
-    queuePushKeyToCloud('canteen_pre_orders');
-    queuePushKeyToCloud('canteen_expenses');
-    queuePushKeyToCloud('canteen_bazar_advances');
-    queuePushKeyToCloud('canteen_member_bangla_names');
-    queuePushKeyToCloud('canteen_fund_transfers');
-    queuePushKeyToCloud('canteen_daily_menu');
-    queuePushKeyToCloud('canteen_daily_menu_updated_at');
-    queuePushKeyToCloud('canteen_raw_inventory_items_v2');
-    queuePushKeyToCloud('canteen_raw_stock_logs_v2');
-    queuePushKeyToCloud('canteen_menu_recipes_v2');
-  };
-  window.addEventListener('canteen_state_updated', handleStateUpdated);
-
   return () => {
     supabase.removeChannel(channel);
     supabase.removeChannel(memberChannel);
@@ -835,7 +844,6 @@ export function initCanteenCloudSync(): () => void {
     window.removeEventListener('canteen_raw_stock_logs_updated', handleLocalStockLogs);
     window.removeEventListener('canteen_raw_inventory_updated', handleLocalRawInventory);
     window.removeEventListener('canteen_daily_menu_updated', handleLocalDailyMenu);
-    window.removeEventListener('canteen_state_updated', handleStateUpdated);
     isInitialized = false;
   };
 }

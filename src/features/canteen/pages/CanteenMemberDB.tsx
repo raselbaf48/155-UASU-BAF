@@ -36,6 +36,7 @@ import {
   saveMemberBanglaRank,
   BAF_RANKS_WITH_BN 
 } from '../utils/memberBanglaNames';
+import { getCanteenMembersCache, fetchCanteenMembersOnce } from '../utils/canteenMenuData';
 
 // Export getRankWeight from canteenSeniority
 export { getRankWeight };
@@ -56,20 +57,20 @@ export const CanteenMemberDB: React.FC = () => {
   const [viewMode, setViewMode] = useState<'BOX' | 'TABLE'>('BOX');
   
   const [members, setMembers] = useState<any[]>(() => {
+    const cached = getCanteenMembersCache();
+    if (cached && cached.length > 0) return cached;
     try {
-      const cached = localStorage.getItem('canteen_members_cache');
-      if (cached) {
-        const parsed = JSON.parse(cached);
+      const stored = localStorage.getItem('canteen_members_cache');
+      if (stored) {
+        const parsed = JSON.parse(stored);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch {}
     return [];
   });
   const [loading, setLoading] = useState<boolean>(() => {
-    try {
-      const cached = localStorage.getItem('canteen_members_cache');
-      return !(cached && JSON.parse(cached).length > 0);
-    } catch { return true; }
+    const cached = getCanteenMembersCache();
+    return !(cached && cached.length > 0);
   });
 
   // Add Member Modal State
@@ -140,13 +141,12 @@ export const CanteenMemberDB: React.FC = () => {
 
   // Fetch Members from Supabase Cloud
   const fetchMembersFromCloud = async (showLoader = false) => {
-    if (showLoader) setLoading(true);
+    if (showLoader && members.length === 0) setLoading(true);
     try {
-      const { data, error } = await supabase.from('Canteen_Member').select('*');
-      if (!error && data && data.length > 0) {
+      const data = await fetchCanteenMembersOnce(showLoader);
+      if (data && data.length > 0) {
         const sorted = sortMembers(data);
         setMembers(sorted);
-        localStorage.setItem('canteen_members_cache', JSON.stringify(sorted));
       }
     } catch (err) {
       console.warn('Error fetching Canteen members:', err);

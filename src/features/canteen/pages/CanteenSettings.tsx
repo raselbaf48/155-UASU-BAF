@@ -12,6 +12,7 @@ import {
 } from '../utils/canteenSettings';
 import { resetAllCanteenData } from '../utils/resetCanteenData';
 import { pullAllCanteenDataFromCloud } from '../utils/canteenCloudSync';
+import { getCanteenMembersCache, fetchCanteenMembersOnce } from '../utils/canteenMenuData';
 import { supabase } from '../../../supabase';
 import { SaveButton } from '../components/SaveButton';
 import { CanteenMemberDB } from './CanteenMemberDB';
@@ -146,16 +147,22 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
   }, []);
 
   const fetchMembers = async () => {
+    const cached = getCanteenMembersCache();
+    if (cached && cached.length > 0) {
+      setMembers(cached);
+      return;
+    }
     setLoadingMembers(true);
     try {
-      const { data, error } = await supabase.from('Canteen_Member').select('*');
-      if (!error && data) {
+      const data = await fetchCanteenMembersOnce();
+      if (data && data.length > 0) {
         setMembers(data);
       }
     } catch (e) {
       console.warn('Failed to load members for manager picker:', e);
+    } finally {
+      setLoadingMembers(false);
     }
-    setLoadingMembers(false);
   };
 
   const handleSelectManager = (member: any) => {

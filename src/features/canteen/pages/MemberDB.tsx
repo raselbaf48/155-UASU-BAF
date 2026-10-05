@@ -78,6 +78,12 @@ import {
   BAF_RANKS_WITH_BN,
   syncMemberBanglaNamesFromCloud 
 } from '../utils/memberBanglaNames';
+import { 
+  fetchCanteenMembersOnce, 
+  getCanteenMembersCache, 
+  fetchCanteenMenuOnce, 
+  getCanteenMenuCache 
+} from '../utils/canteenMenuData';
 
 export type BillCategory = 'ALL' | 'CANTEEN' | 'UNIT_FUND' | 'OTHERS';
 
@@ -475,6 +481,11 @@ export const MemberDB: React.FC = () => {
     if (globalMembersCache && globalMembersCache.length > 0) {
       return globalMembersCache;
     }
+    const shared = getCanteenMembersCache();
+    if (shared && shared.length > 0) {
+      globalMembersCache = shared;
+      return shared;
+    }
     try {
       const cached = localStorage.getItem('canteen_members_cache');
       if (cached) {
@@ -488,15 +499,8 @@ export const MemberDB: React.FC = () => {
     return [];
   });
   const [loading, setLoading] = useState<boolean>(() => {
-    if (globalMembersCache && globalMembersCache.length > 0) return false;
-    try {
-      const cached = localStorage.getItem('canteen_members_cache');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) return false;
-      }
-    } catch {}
-    return true;
+    const cached = globalMembersCache || getCanteenMembersCache();
+    return !(cached && cached.length > 0);
   });
 
   // Officer / Airmen / Civilian counts
@@ -532,67 +536,91 @@ export const MemberDB: React.FC = () => {
   const [isCapturingPic, setIsCapturingPic] = useState(false);
 
   // Menu catalog prices cache for accurate item rate calculations
-  const [menuCatalog, setMenuCatalog] = useState<any[]>(() => {
-    try {
-      const cached = localStorage.getItem('canteen_menu_cache');
-      if (cached) return JSON.parse(cached);
-    } catch {}
-    return [];
-  });
+  const [menuCatalog, setMenuCatalog] = useState<any[]>(() => getCanteenMenuCache());
 
   useEffect(() => {
-    const fetchMenuCatalog = async () => {
-      try {
-        const { data, error } = await supabase.from('Canteen_Menu').select('*');
-        if (!error && data && data.length > 0) {
-          setMenuCatalog(data);
-          localStorage.setItem('canteen_menu_cache', JSON.stringify(data));
-        }
-      } catch (err) {
-        console.warn('Could not fetch Canteen_Menu:', err);
+    fetchCanteenMenuOnce().then((data) => {
+      if (data && data.length > 0) {
+        setMenuCatalog(data);
       }
-    };
-    fetchMenuCatalog();
+    });
   }, []);
 
   const getMenuItemPrice = (name: string): number => {
     return lookupCatalogPrice(name, menuCatalog);
   };
 
-  // Robust date/time parser to ensure newest transactions always sort to the top
+  // Robust date/time parser to ensure newest transactions always sort to the top by real calendar date
   const parseTxTime = (tx: any): number => {
     if (!tx) return 0;
-    const numMatch = String(tx.id || '').match(/(\d{13})/);
-    if (numMatch) {
-      const t = Number(numMatch[1]);
-      if (t > 1500000000000) return t;
+
+    let calendarTime = 0;
+
+    // 1. Parse real date string first: "DD Mon YY", "DD Mon YYYY", "YYYY-MM-DD", etc.
+    if (tx.date && typeof tx.date === 'string') {
+      const trimmed = tx.date.trim();
+      const parts = trimmed.split(/[\s\-/]+/);
+      if (parts.length === 3) {
+        let day = parseInt(parts[0], 10);
+        let monStr = parts[1].toLowerCase();
+        let yr = parseInt(parts[2], 10);
+
+        if (parts[0].length === 4) {
+          yr = parseInt(parts[0], 10);
+          monStr = parts[1];
+          day = parseInt(parts[2], 10);
+        }
+
+        const fullYr = yr < 100 ? 2000 + yr : yr;
+        const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+        let monIdx = monthNames.findIndex(m => monStr.startsWith(m));
+        if (monIdx === -1 && !isNaN(Number(monStr))) {
+          monIdx = Number(monStr) - 1;
+        }
+
+        if (monIdx >= 0 && !isNaN(day) && !isNaN(fullYr)) {
+          calendarTime = new Date(fullYr, monIdx, day, 12, 0, 0).getTime();
+        }
+      } else if (trimmed.match(/^\d{4}-\d{2}$/)) {
+        const [y, m] = trimmed.split('-').map(Number);
+        calendarTime = new Date(y, m - 1, 28, 12, 0, 0).getTime();
+      }
     }
+
+    if (!calendarTime && tx.monthKey) {
+      const [y, m] = String(tx.monthKey).split('-').map(Number);
+      if (!isNaN(y) && !isNaN(m)) {
+        calendarTime = new Date(y, m - 1, 28, 12, 0, 0).getTime();
+      }
+    }
+
+    // Secondary sub-day tie-breaker from createdAt or numeric ID timestamp
+    let subDayTieBreaker = 0;
+    if (tx.createdAt) {
+      const t = new Date(tx.createdAt).getTime();
+      if (!isNaN(t)) subDayTieBreaker = t % 86400000;
+    }
+    if (!subDayTieBreaker) {
+      const numMatch = String(tx.id || '').match(/(\d{13})/);
+      if (numMatch) {
+        subDayTieBreaker = Number(numMatch[1]) % 86400000;
+      }
+    }
+
+    if (calendarTime > 0) {
+      return calendarTime + subDayTieBreaker;
+    }
+
+    // Fallback if no calendar date could be parsed
     if (tx.createdAt) {
       const t = new Date(tx.createdAt).getTime();
       if (!isNaN(t)) return t;
     }
-    if (tx.date) {
-      const parts = String(tx.date).trim().split(/\s+/);
-      if (parts.length === 3) {
-        const day = parseInt(parts[0], 10);
-        const monStr = parts[1].toLowerCase();
-        const yr = parseInt(parts[2], 10);
-        const fullYr = yr < 100 ? 2000 + yr : yr;
-        const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
-        const monIdx = monthNames.findIndex(m => monStr.startsWith(m));
-        if (monIdx >= 0) {
-          return new Date(fullYr, monIdx, day || 1, 12, 0, 0).getTime();
-        }
-      }
-      if (String(tx.date).match(/^\d{4}-\d{2}$/)) {
-        const [y, m] = String(tx.date).split('-').map(Number);
-        return new Date(y, m - 1, 28).getTime();
-      }
+    const numMatch = String(tx.id || '').match(/(\d{13})/);
+    if (numMatch) {
+      return Number(numMatch[1]);
     }
-    if (tx.monthKey) {
-      const [y, m] = String(tx.monthKey).split('-').map(Number);
-      return new Date(y, m - 1, 28).getTime();
-    }
+
     return 0;
   };
 
@@ -747,6 +775,30 @@ export const MemberDB: React.FC = () => {
     rows.forEach((r, idx) => {
       r.ser = idx + 1;
     });
+
+    // If no transactions found yet but member has an existing ledger Due, show Opening Balance row
+    if (rows.length === 0 && profileMember) {
+      const rawDue = Number(profileMember.Due ?? profileMember.due ?? profileMember.baki ?? 0);
+      if (rawDue > 0) {
+        rows.push({
+          rowId: `synthetic-due-${profileMember.airman_id || profileMember['BD No'] || 'init'}`,
+          ser: 1,
+          tx: {
+            id: `synthetic-due-${profileMember.airman_id || profileMember['BD No'] || 'init'}`,
+            date: 'প্রারম্ভিক বকেয়া',
+            amount: rawDue,
+            type: 'INITIAL_BILL',
+            items: 'প্রারম্ভিক বকেয়া বিল (Opening Balance)'
+          },
+          txId: `synthetic-due-${profileMember.airman_id || profileMember['BD No'] || 'init'}`,
+          date: 'প্রারম্ভিক বকেয়া',
+          description: 'প্রারম্ভিক বকেয়া বিল (Opening Balance)',
+          qty: '-',
+          amount: rawDue,
+          type: 'INITIAL_BILL'
+        });
+      }
+    }
 
     return rows;
   }, [profileTx, menuCatalog, profileMember]);
@@ -971,25 +1023,51 @@ export const MemberDB: React.FC = () => {
     return () => { isMounted = false; };
   }, []);
 
-  // Listen to transaction updates
+  // Listen to transaction updates with debouncing to prevent thrashing on cloud pulls
   useEffect(() => {
+    let debounceTimer: any = null;
     const handleTxsSync = () => {
-      try {
-        const deletedIds = getDeletedTxIds();
-        const raw = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-        const clean = raw.filter((t: any) => t && !deletedIds.has(String(t.id)) && !t.isReverted && t.status !== 'REVERTED');
-        setAllTxs(clean);
-      } catch {}
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        try {
+          const deletedIds = getDeletedTxIds();
+          const raw = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+          const clean = raw.filter((t: any) => t && !deletedIds.has(String(t.id)) && !t.isReverted && t.status !== 'REVERTED');
+          setAllTxs(prev => {
+            if (prev.length === clean.length && JSON.stringify(prev) === JSON.stringify(clean)) {
+              return prev;
+            }
+            return clean;
+          });
+        } catch {}
+      }, 100);
     };
     window.addEventListener('canteen_txs_updated', handleTxsSync);
     window.addEventListener('canteen_bill_import_history_updated', handleTxsSync);
     window.addEventListener('canteen_state_updated', handleTxsSync);
     window.addEventListener('storage', handleTxsSync);
     return () => {
+      clearTimeout(debounceTimer);
       window.removeEventListener('canteen_txs_updated', handleTxsSync);
       window.removeEventListener('canteen_bill_import_history_updated', handleTxsSync);
       window.removeEventListener('canteen_state_updated', handleTxsSync);
       window.removeEventListener('storage', handleTxsSync);
+    };
+  }, []);
+
+  // Listen to canteen members updates across all components and sync channels
+  useEffect(() => {
+    const handleMembersUpdated = (e: any) => {
+      const updated = e?.detail || getCanteenMembersCache();
+      if (Array.isArray(updated) && updated.length > 0) {
+        globalMembersCache = updated;
+        setMembers(updated);
+        setLoading(false);
+      }
+    };
+    window.addEventListener('canteen_members_updated', handleMembersUpdated);
+    return () => {
+      window.removeEventListener('canteen_members_updated', handleMembersUpdated);
     };
   }, []);
 
@@ -1115,9 +1193,75 @@ export const MemberDB: React.FC = () => {
     }
   };
 
+  // Pre-index transactions by clean BD No and airman_id for O(1) lightning-fast member bill calculations
+  const txIndex = useMemo(() => {
+    const airmanMap = new Map<string, any[]>();
+    const bdMap = new Map<string, any[]>();
+
+    (allTxs || []).forEach((tx: any) => {
+      if (!tx) return;
+      const txAirman = String(tx.airman_id || tx.airmanId || '').trim().toLowerCase();
+      if (txAirman) {
+        if (!airmanMap.has(txAirman)) airmanMap.set(txAirman, []);
+        airmanMap.get(txAirman)!.push(tx);
+      }
+      const txBdClean = String(tx.bdNo || tx['BD No'] || tx.bd_no || tx.airman_id || '').replace(/\D/g, '');
+      const txBdNoZero = txBdClean.replace(/^0+/, '');
+      if (txBdClean) {
+        if (!bdMap.has(txBdClean)) bdMap.set(txBdClean, []);
+        bdMap.get(txBdClean)!.push(tx);
+      }
+      if (txBdNoZero && txBdNoZero !== txBdClean) {
+        if (!bdMap.has(txBdNoZero)) bdMap.set(txBdNoZero, []);
+        bdMap.get(txBdNoZero)!.push(tx);
+      }
+    });
+
+    return { airmanMap, bdMap };
+  }, [allTxs]);
+
   // Helper to filter all transactions belonging to a specific member safely
   const filterMemberTxs = (member: any, txs: any[]): any[] => {
     if (!member || !Array.isArray(txs)) return [];
+
+    if (txs === allTxs) {
+      const mAirman = String(member.airman_id || member.airmanId || '').trim().toLowerCase();
+      const mBdClean = String(member['BD No'] || member.bdNo || member.bd_no || member.airman_id || '').replace(/\D/g, '');
+      const mBdCleanNoZero = mBdClean.replace(/^0+/, '');
+
+      const foundTxs: any[] = [];
+      const seenTxIds = new Set<string>();
+
+      if (mAirman && txIndex.airmanMap.has(mAirman)) {
+        txIndex.airmanMap.get(mAirman)!.forEach(t => {
+          if (t && t.id && !seenTxIds.has(String(t.id))) {
+            seenTxIds.add(String(t.id));
+            foundTxs.push(t);
+          }
+        });
+      }
+
+      if (mBdClean && txIndex.bdMap.has(mBdClean)) {
+        txIndex.bdMap.get(mBdClean)!.forEach(t => {
+          if (t && t.id && !seenTxIds.has(String(t.id))) {
+            seenTxIds.add(String(t.id));
+            foundTxs.push(t);
+          }
+        });
+      }
+
+      if (mBdCleanNoZero && mBdCleanNoZero !== mBdClean && txIndex.bdMap.has(mBdCleanNoZero)) {
+        txIndex.bdMap.get(mBdCleanNoZero)!.forEach(t => {
+          if (t && t.id && !seenTxIds.has(String(t.id))) {
+            seenTxIds.add(String(t.id));
+            foundTxs.push(t);
+          }
+        });
+      }
+
+      if (foundTxs.length > 0) return foundTxs;
+    }
+
     const mAirman = String(member.airman_id || member.airmanId || '').trim().toLowerCase();
     const mBdClean = String(member['BD No'] || member.bdNo || member.bd_no || member.airman_id || '').replace(/\D/g, '');
     const mBdCleanNoZero = mBdClean.replace(/^0+/, '');
@@ -1135,7 +1279,7 @@ export const MemberDB: React.FC = () => {
 
       if (mSurname && tx.memberName) {
         const txName = String(tx.memberName).toLowerCase();
-        if (txName.includes(mSurname) && (!mRank || txName.includes(mRank))) {
+        if (txName.includes(mSurname) && (!mRank || mRank === '-' || txName.includes(mRank))) {
           return true;
         }
       }
@@ -1190,8 +1334,8 @@ export const MemberDB: React.FC = () => {
       return Math.min(totalDue, Math.max(0, charges - paymentsAvailableForThisMonth));
     }
 
-    // If viewing September 2026 and member has an outstanding ledger due from September / initial bills
-    if (month === '2026-09' && totalDue > 0) {
+    // Only if the member has NO transactions at all, fallback to initial profile due if viewing the initial month
+    if (memberTxs.length === 0 && month === '2026-09' && totalDue > 0) {
       return totalDue;
     }
 
@@ -2082,8 +2226,8 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
     }
 
     try {
-      const { data: cloudData, error } = await supabase.from('Canteen_Member').select('*');
-      if (error || !cloudData) return;
+      const cloudData = await fetchCanteenMembersOnce(forceSync);
+      if (!cloudData) return;
 
       lastMembersSyncTimestamp = Date.now();
 
@@ -2891,6 +3035,8 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                           src={memberDp} 
                           alt={member['Surname']} 
                           referrerPolicy="no-referrer"
+                          loading="lazy"
+                          decoding="async"
                           className="w-full h-full object-cover"
                           onError={(e) => { e.currentTarget.style.display = 'none'; }}
                         />
@@ -3085,7 +3231,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                         <div className="flex items-center space-x-3">
                           <div className="w-9 h-9 rounded-xl bg-slate-950 border border-slate-700/80 flex items-center justify-center font-black text-xs text-indigo-400 overflow-hidden shrink-0 shadow-inner">
                             {memberDp ? (
-                              <img src={memberDp} alt={member['Surname']} referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                              <img src={memberDp} alt={member['Surname']} referrerPolicy="no-referrer" loading="lazy" decoding="async" className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
                             ) : (
                               <span>{(member['Surname'] || 'U').charAt(0)}</span>
                             )}
@@ -4366,9 +4512,24 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                   : m
               )
             );
+            if (globalMembersCache) {
+              globalMembersCache = globalMembersCache.map((m: any) =>
+                m.airman_id === updatedMember.airman_id || m['BD No'] === updatedMember['BD No']
+                  ? updatedMember
+                  : m
+              );
+            }
             try {
               const freshTxs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
               setAllTxs(freshTxs);
+              if (profileMember && (profileMember.airman_id === updatedMember.airman_id || profileMember['BD No'] === updatedMember['BD No'])) {
+                setProfileMember(updatedMember);
+                setProfileTx(filterMemberTxs(updatedMember, freshTxs));
+              }
+              if (statementMember && (statementMember.airman_id === updatedMember.airman_id || statementMember['BD No'] === updatedMember['BD No'])) {
+                setStatementMember(updatedMember);
+                setStatementTx(filterMemberTxs(updatedMember, freshTxs));
+              }
             } catch {}
           }}
         />

@@ -2,7 +2,7 @@
  * Image processing utility for Canteen Item & Member photos.
  * Reads image from local gallery/storage and resizes/compresses it to an optimized base64 data URL.
  */
-export async function processGalleryImage(file: File, maxDimension = 600, quality = 0.8): Promise<string> {
+export async function processGalleryImage(file: File, maxDimension = 320, quality = 0.72): Promise<string> {
   return new Promise((resolve, reject) => {
     if (!file.type.startsWith('image/')) {
       reject(new Error('Selected file is not an image'));

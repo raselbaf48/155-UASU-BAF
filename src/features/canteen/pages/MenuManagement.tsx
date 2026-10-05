@@ -5,6 +5,7 @@ import { Coffee, Plus, Calendar, X, Utensils } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl } from '../utils/canteenSettings';
 import { queuePushKeyToCloud } from '../utils/canteenCloudSync';
+import { getCanteenMenuCache, fetchCanteenMenuOnce } from '../utils/canteenMenuData';
 
 export const MenuManagement: React.FC = () => {
   const { t, i18n } = useTranslation();
@@ -12,20 +13,28 @@ export const MenuManagement: React.FC = () => {
   const [items, setItems] = useState<any[]>(() => {
     try {
       const raw = localStorage.getItem('canteen_menu_items_list');
-      return raw ? JSON.parse(raw) : [
-        { id: '1', meal: 'Snacks', name_bn: 'সিঙ্গারা ও চা', name_en: 'Singara & Tea', price: 20, max: 50, DP: '' },
-        { id: '2', meal: 'Snacks', name_bn: 'সমুচা ও কফি', name_en: 'Samoosa & Coffee', price: 30, max: 40, DP: '' },
-      ];
-    } catch {
-      return [];
-    }
+      if (raw) return JSON.parse(raw);
+      const cached = getCanteenMenuCache();
+      if (cached && cached.length > 0) {
+        return cached.map((d: any) => ({
+          id: d.id,
+          meal: d.category || 'Snacks',
+          name_bn: d.name,
+          name_en: d.name,
+          price: d.price || 0,
+          max: d.stock || 50,
+          DP: d.DP || d.img || ''
+        }));
+      }
+    } catch {}
+    return [];
   });
 
   useEffect(() => {
     const fetchCloudMenu = async () => {
       try {
-        const { data, error } = await supabase.from('Canteen_Menu').select('*');
-        if (!error && data && data.length > 0) {
+        const data = await fetchCanteenMenuOnce();
+        if (data && data.length > 0) {
           const mapped = data.map((d: any) => ({
             id: d.id,
             meal: d.category || 'Snacks',
@@ -120,7 +129,7 @@ export const MenuManagement: React.FC = () => {
                      <td className="px-6 py-3">
                         <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 overflow-hidden flex items-center justify-center">
                           {itemDp ? (
-                            <img src={itemDp} alt="" className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                            <img src={itemDp} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
                           ) : (
                             <Utensils className="w-4 h-4 text-slate-400" />
                           )}
