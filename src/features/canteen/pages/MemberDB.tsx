@@ -647,7 +647,7 @@ export const MemberDB: React.FC = () => {
   const [statementImageBlob, setStatementImageBlob] = useState<Blob | null>(null);
   const [whatsAppNotice, setWhatsAppNotice] = useState<string | null>(null);
   const [canteenConfig, setCanteenConfig] = useState<any>(() => getCanteenConfig());
-  const [showWhatsAppTemplateBox, setShowWhatsAppTemplateBox] = useState<boolean>(true);
+  const [showWhatsAppTemplateBox, setShowWhatsAppTemplateBox] = useState<boolean>(false);
 
   useEffect(() => {
     syncWhatsAppTemplateConfigFromCloud().catch(() => {});
@@ -3080,8 +3080,50 @@ export const MemberDB: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
-      {/* If Unit Fund or Others is selected, render the dedicated Fund Batch Bill Page! */}
-      {(selectedCategory === 'UNIT_FUND' || selectedCategory === 'OTHERS') ? (
+      {/* If WhatsApp Template Box is open, render dedicated Message Format page (nothing else) */}
+      {showWhatsAppTemplateBox ? (
+        <div className="space-y-4 animate-in fade-in duration-300">
+          {/* Top Bar with Back Button */}
+          <div className="flex items-center justify-between gap-3 bg-slate-900/90 border border-slate-800 p-2.5 sm:p-3.5 rounded-2xl shadow-xl">
+            <div className="flex items-center space-x-2.5 min-w-0">
+              <button
+                type="button"
+                onClick={() => setShowWhatsAppTemplateBox(false)}
+                className="flex items-center justify-center space-x-1.5 px-3 py-1.5 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs uppercase tracking-wider transition-all cursor-pointer shadow-xs border border-slate-700 active:scale-95 group shrink-0"
+                title="Back"
+              >
+                <ArrowLeft className="w-3.5 h-3.5 text-emerald-400 group-hover:-translate-x-0.5 transition-transform" />
+                <span>Back</span>
+              </button>
+              <div className="h-5 w-px bg-slate-800 shrink-0" />
+              <div className="min-w-0">
+                <h2 className="text-xs sm:text-base font-black text-white uppercase tracking-tight flex items-center gap-1.5 truncate">
+                  <WhatsAppIcon className="w-4 h-4 text-[#25D366] shrink-0" />
+                  <span className="truncate">Default Message Format</span>
+                </h2>
+                <p className="text-[10px] text-slate-400 truncate hidden xs:block">
+                  বিল নোটিশ ও ব্যাংক একাউন্ট সংক্রান্ত তথ্য
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowWhatsAppTemplateBox(false)}
+              className="p-1.5 h-8 w-8 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer shrink-0 border border-slate-700/80"
+              title="Back"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Dedicated Message Format Content - Only message format related info */}
+          <WhatsAppMessageTemplateBox 
+            canteenConfig={canteenConfig}
+            currentMonth={selectedMonth}
+          />
+        </div>
+      ) : (selectedCategory === 'UNIT_FUND' || selectedCategory === 'OTHERS') ? (
         <FundBatchBillPage
           category={selectedCategory}
           members={members}
@@ -3120,16 +3162,12 @@ export const MemberDB: React.FC = () => {
             <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
               <button
                 type="button"
-                onClick={() => setShowWhatsAppTemplateBox(!showWhatsAppTemplateBox)}
-                className={`flex items-center justify-center space-x-1.5 px-3.5 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md active:scale-95 border ${
-                  showWhatsAppTemplateBox 
-                    ? 'bg-[#25D366] text-white border-emerald-400/50 shadow-[#25D366]/25' 
-                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
-                }`}
-                title="WhatsApp মেসেজ ফরম্যাট বক্স প্রদর্শন বা লুকান"
+                onClick={() => setShowWhatsAppTemplateBox(true)}
+                className="flex items-center justify-center space-x-1.5 px-3.5 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md active:scale-95 border bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border-slate-700"
+                title="Default Message Format পেজ খুলুন"
               >
-                <WhatsAppIcon className="w-4 h-4 text-white" />
-                <span>মেসেজ ফরম্যাট</span>
+                <WhatsAppIcon className="w-4 h-4 text-emerald-400" />
+                <span>Default Msg Format</span>
               </button>
 
               <button
@@ -3145,14 +3183,6 @@ export const MemberDB: React.FC = () => {
               </button>
             </div>
           </div>
-
-          {/* WhatsApp Message Format Box (Prominently displayed right on Bill Page) */}
-          {showWhatsAppTemplateBox && (
-            <WhatsAppMessageTemplateBox 
-              canteenConfig={canteenConfig}
-              currentMonth={selectedMonth}
-            />
-          )}
 
       {/* Delete / Success Notification Banner */}
       {paymentDeleteSuccessMsg && (

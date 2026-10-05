@@ -13,7 +13,7 @@ import {
 import { queuePushKeyToCloud } from '../utils/canteenCloudSync';
 import { getCanteenMenuCache, fetchCanteenMenuOnce, getCanteenMembersCache, fetchCanteenMembersOnce } from '../utils/canteenMenuData';
 import { formatCanteenDate } from '../utils/dateUtils';
-import { deductRawStockForSales, restoreRawStockForSaleCancellation } from '../utils/recipeManager';
+import { deductRawStockForSales, restoreRawStockForSaleCancellation, calculateMenuItemStockInfo, getRawInventoryItems, getMenuRecipes } from '../utils/recipeManager';
 import {
   BarChart,
   Bar,
@@ -82,6 +82,10 @@ export const ManagerDashboard: React.FC = () => {
   const [summarySearch, setSummarySearch] = useState('');
   const [expandedMenuKey, setExpandedMenuKey] = useState<string | null>(null);
 
+  // Raw Inventory & Recipes state for live stock calculation
+  const [rawInventory, setRawInventory] = useState<any[]>(() => getRawInventoryItems());
+  const [recipesMap, setRecipesMap] = useState<any>(() => getMenuRecipes());
+
   useEffect(() => {
     fetchMembers();
     fetchCatalog();
@@ -97,12 +101,16 @@ export const ManagerDashboard: React.FC = () => {
     const handleSync = () => {
       loadDailyMenu();
       loadPreOrders();
+      setRawInventory(getRawInventoryItems());
+      setRecipesMap(getMenuRecipes());
     };
 
     window.addEventListener('canteen_daily_menu_updated', handleSync);
     window.addEventListener('canteen_pre_orders_updated', handleSync);
     window.addEventListener('canteen_menu_updated', handleSync);
     window.addEventListener('canteen_state_updated', handleSync);
+    window.addEventListener('canteen_raw_inventory_updated', handleSync);
+    window.addEventListener('canteen_menu_recipes_updated', handleSync);
 
     return () => {
       clearInterval(interval);
@@ -110,6 +118,8 @@ export const ManagerDashboard: React.FC = () => {
       window.removeEventListener('canteen_pre_orders_updated', handleSync);
       window.removeEventListener('canteen_menu_updated', handleSync);
       window.removeEventListener('canteen_state_updated', handleSync);
+      window.removeEventListener('canteen_raw_inventory_updated', handleSync);
+      window.removeEventListener('canteen_menu_recipes_updated', handleSync);
     };
   }, []);
 
@@ -553,6 +563,7 @@ export const ManagerDashboard: React.FC = () => {
                           }).filter(i => (i.name || '').toLowerCase().includes(searchCatalog.toLowerCase())).map(item => {
                               const isSelected = Array.isArray(selectedItems) && selectedItems.includes(item.id);
                               const itemDp = resolveImageUrl(item.DP || item.img || item.image || item.photo);
+                              const stockInfo = calculateMenuItemStockInfo(item.id, item.name, rawInventory, recipesMap);
                           return (
                               <div 
                                   key={item.id} 
@@ -576,7 +587,17 @@ export const ManagerDashboard: React.FC = () => {
                                       <div className="min-w-0">
                                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{item.category || 'Snacks'}</p>
                                           <p className="text-sm font-bold text-white truncate">{item.name}</p>
-                                          <p className="text-xs font-black text-emerald-400">৳{item.price}</p>
+                                          <div className="flex items-center space-x-2 mt-0.5">
+                                              <p className="text-xs font-black text-emerald-400">৳{item.price}</p>
+                                              <span className={`text-[10px] font-black px-1.5 py-0.5 rounded border flex items-center gap-1 ${
+                                                  stockInfo.availableStock > 0 
+                                                      ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40' 
+                                                      : 'bg-rose-950/80 text-rose-300 border-rose-500/40'
+                                              }`}>
+                                                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${stockInfo.availableStock > 0 ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                                                  <span>স্টকঃ {stockInfo.availableStock}</span>
+                                              </span>
+                                          </div>
                                       </div>
                                   </div>
                                   <div className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors shrink-0 ${isSelected ? 'bg-[#4f46e5] text-white shadow-md' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>

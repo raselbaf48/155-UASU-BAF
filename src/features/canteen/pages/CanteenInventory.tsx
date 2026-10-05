@@ -26,7 +26,8 @@ import {
   getIngredientToInventoryRatio,
   getRawItemSubUnitInfo,
   decodeNotesMeta,
-  RAW_ITEMS_STORAGE_KEY
+  RAW_ITEMS_STORAGE_KEY,
+  calculateMenuItemStockInfo
 } from '../utils/recipeManager';
 
 export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = false}) => {
@@ -776,8 +777,9 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       {/* Items Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
          {filteredItems.map(item => {
-            const itemRecipe = getRecipeForMenuItem(item.id, item.name);
+            const itemRecipe = getRecipeForMenuItem(item.id, item.name, recipes);
             const costRes = calculateMenuItemCost(itemRecipe, availableRawItems);
+            const stockInfo = calculateMenuItemStockInfo(item.id, item.name, availableRawItems, recipes);
             const displayCost = itemRecipe.length > 0 ? costRes.totalCost : Number(item.Cost ?? item.cost ?? 0);
             const priceNum = Number(item.price) || 0;
             const profit = priceNum - displayCost;
@@ -818,11 +820,23 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                         </div>
                      </div>
 
-                     {/* Item Name */}
-                     <div className="mt-4">
-                        <h3 className="font-black text-white text-lg tracking-tight uppercase group-hover:text-indigo-300 transition-colors truncate" title={item.name}>
-                           {item.name}
-                        </h3>
+                     {/* Item Name & Live Available Stock Badge */}
+                     <div className="mt-4 flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                           <h3 className="font-black text-white text-lg tracking-tight uppercase group-hover:text-indigo-300 transition-colors truncate" title={item.name}>
+                              {item.name}
+                           </h3>
+                        </div>
+                        <div className="shrink-0">
+                           <span className={`px-2.5 py-1 rounded-xl text-[11px] font-black tracking-tight border flex items-center gap-1.5 shadow-xs whitespace-nowrap ${
+                              stockInfo.availableStock > 0 
+                                 ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40' 
+                                 : 'bg-rose-950/80 text-rose-300 border-rose-500/40'
+                           }`}>
+                              <span className={`w-2 h-2 rounded-full shrink-0 ${stockInfo.availableStock > 0 ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
+                              <span>মজুদঃ {stockInfo.availableStock} টি</span>
+                           </span>
+                        </div>
                      </div>
 
                      {/* Cost & Selling Price Box */}
@@ -1049,6 +1063,58 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                                           ৳{profit.toFixed(1)}
                                        </span>
                                     </div>
+                                 </div>
+                              );
+                           })()}
+
+                           {/* Live Stock & Portions Breakdown Box */}
+                           {(() => {
+                              const stockInfo = calculateMenuItemStockInfo(
+                                 selectedItemForModal.id, 
+                                 modalFormData.name || selectedItemForModal.name, 
+                                 availableRawItems, 
+                                 recipes
+                              );
+                              return (
+                                 <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 space-y-3">
+                                    <div className="flex items-center justify-between">
+                                       <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                                          <span className={`w-2 h-2 rounded-full ${stockInfo.availableStock > 0 ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`}></span>
+                                          <span>লাইভ মজুদ স্টক (Available Stock)</span>
+                                       </span>
+                                       <span className={`px-2.5 py-0.5 rounded-lg text-xs font-black font-mono border ${
+                                          stockInfo.availableStock > 0 ? 'bg-emerald-950 text-emerald-300 border-emerald-500/30' : 'bg-rose-950 text-rose-300 border-rose-500/30'
+                                       }`}>
+                                          {stockInfo.availableStock > 0 ? `${stockInfo.availableStock} টি তৈরি সম্ভব` : 'স্টক শেষ (০ টি)'}
+                                       </span>
+                                    </div>
+                                    {stockInfo.limitingIngredient && stockInfo.isRecipeBased && (
+                                       <div className="p-2.5 rounded-xl bg-amber-950/40 border border-amber-500/30 text-[11px] text-amber-200">
+                                          <span className="font-bold">সীমিত কাঁচামাল: </span>
+                                          <span className="font-mono font-black">{stockInfo.limitingIngredient.rawItemName}</span>
+                                          <span> (মজুদ: {stockInfo.limitingIngredient.currentStock} {stockInfo.limitingIngredient.stockUnit} দিয়ে সর্বোচ্চ </span>
+                                          <span className="font-bold text-amber-300">{stockInfo.limitingIngredient.portions} টি</span>
+                                          <span> তৈরি করা যাবে)</span>
+                                       </div>
+                                    )}
+                                    {stockInfo.ingredientsBreakdown.length > 0 && stockInfo.isRecipeBased && (
+                                       <div className="space-y-1.5">
+                                          <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 block">কাঁচামাল অনুযায়ী প্রাপ্যতা:</span>
+                                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-36 overflow-y-auto pr-1">
+                                             {stockInfo.ingredientsBreakdown.map((b, i) => (
+                                                <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800 text-[11px]">
+                                                   <span className="text-slate-300 font-medium truncate max-w-[120px]" title={b.rawItemName}>{b.rawItemName}</span>
+                                                   <div className="text-right">
+                                                      <span className={`font-mono font-bold ${b.portionsPossible === stockInfo.availableStock ? 'text-amber-400 font-black' : 'text-slate-300'}`}>
+                                                         {b.portionsPossible} টি
+                                                      </span>
+                                                      <span className="text-[9px] text-slate-500 ml-1">({b.currentStock}{b.stockUnit})</span>
+                                                   </div>
+                                                </div>
+                                             ))}
+                                          </div>
+                                       </div>
+                                    )}
                                  </div>
                               );
                            })()}

@@ -9,7 +9,7 @@ import {
 import { supabase } from '../../../supabase';
 import { resolveImageUrl } from '../utils/canteenSettings';
 import { formatCanteenDate } from '../utils/dateUtils';
-import { deductRawStockForSales, restoreRawStockForSaleCancellation, getRecipeForMenuItem, getRawInventoryItems } from '../utils/recipeManager';
+import { deductRawStockForSales, restoreRawStockForSaleCancellation, getRecipeForMenuItem, getRawInventoryItems, calculateMenuItemStockInfo, getMenuRecipes } from '../utils/recipeManager';
 import { pushKeyToCloud, recordDeletedTxId } from '../utils/canteenCloudSync';
 import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
 import { 
@@ -59,6 +59,25 @@ export const PosSales: React.FC = () => {
   const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
   const [showBatchMenuModal, setShowBatchMenuModal] = useState(false);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
+
+  // Live Raw Inventory & Recipe states for realtime available stock calculation
+  const [rawInventory, setRawInventory] = useState<any[]>(() => getRawInventoryItems());
+  const [recipesMap, setRecipesMap] = useState<any>(() => getMenuRecipes());
+
+  useEffect(() => {
+    const handleSyncStock = () => {
+      setRawInventory(getRawInventoryItems());
+      setRecipesMap(getMenuRecipes());
+    };
+    window.addEventListener('canteen_raw_inventory_updated', handleSyncStock);
+    window.addEventListener('canteen_menu_recipes_updated', handleSyncStock);
+    window.addEventListener('storage', handleSyncStock);
+    return () => {
+      window.removeEventListener('canteen_raw_inventory_updated', handleSyncStock);
+      window.removeEventListener('canteen_menu_recipes_updated', handleSyncStock);
+      window.removeEventListener('storage', handleSyncStock);
+    };
+  }, []);
 
   // Member Search State
   const [members, setMembers] = useState<any[]>(() => {
@@ -1279,7 +1298,8 @@ export const PosSales: React.FC = () => {
             <div className="space-y-3 h-[600px] overflow-y-auto pr-2">
               {filteredCatalog.map((item, i) => {
                 const inBasket = basket.find(b => b.id === item.id);
-                const itemRecipe = getRecipeForMenuItem(item.id, item.name);
+                const itemRecipe = getRecipeForMenuItem(item.id, item.name, recipesMap);
+                const stockInfo = calculateMenuItemStockInfo(item.id, item.name, rawInventory, recipesMap);
 
                 return (
                   <div 
@@ -1308,7 +1328,17 @@ export const PosSales: React.FC = () => {
                         )}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="text-[10px] font-black text-[#4f46e5] uppercase tracking-widest mb-0.5">{item.category}</p>
+                        <div className="flex items-center space-x-2 mb-0.5">
+                          <p className="text-[10px] font-black text-[#4f46e5] uppercase tracking-widest">{item.category}</p>
+                          <span className={`text-[10px] font-black px-2 py-0.5 rounded-md border flex items-center gap-1 ${
+                            stockInfo.availableStock > 0 
+                              ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40' 
+                              : 'bg-rose-950/80 text-rose-300 border-rose-500/40'
+                          }`}>
+                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${stockInfo.availableStock > 0 ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                            <span>স্টকঃ {stockInfo.availableStock}</span>
+                          </span>
+                        </div>
                         <h3 className="font-black text-base text-white group-hover:text-indigo-400 transition-colors truncate">
                           {item.name}
                         </h3>

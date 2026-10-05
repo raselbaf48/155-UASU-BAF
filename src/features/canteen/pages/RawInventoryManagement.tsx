@@ -803,6 +803,11 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
   const [isUpdatingDp, setIsUpdatingDp] = useState(false);
   const [quickDpToast, setQuickDpToast] = useState<string | null>(null);
 
+  // Delete Confirmation Modal state (Replaces blocked window.confirm)
+  const [itemToDelete, setItemToDelete] = useState<RawInventoryItem | null>(null);
+  const [isDeletingItem, setIsDeletingItem] = useState(false);
+  const [showResetConfirmModal, setShowResetConfirmModal] = useState(false);
+
   const [newItemData, setNewItemData] = useState<{
     name?: string;
     nameBn?: string;
@@ -1586,25 +1591,51 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
     setShowAddModal(true);
   };
 
-  const handleDeleteItem = async (item: RawInventoryItem) => {
-    const confirmDelete = window.confirm(`Are you sure you want to delete ${item.name} (${item.nameBn})?`);
-    if (confirmDelete) {
-      setItems(prev => prev.filter(i => i.id !== item.id));
+  const handleDeleteItem = (item: RawInventoryItem) => {
+    setItemToDelete(item);
+  };
+
+  const confirmAndDeleteItem = async () => {
+    if (!itemToDelete) return;
+    const target = itemToDelete;
+    setIsDeletingItem(true);
+    try {
+      const remainingItems = items.filter(i => i.id !== target.id);
+      setItems(remainingItems);
+      lastSavedItemsJsonRef.current = JSON.stringify(remainingItems);
+      saveRawInventoryItems(remainingItems);
+
       try {
-        await supabase.from('Canteen_Inventory').delete().eq('id', item.id);
+        await supabase.from('Canteen_Inventory').delete().eq('id', target.id);
       } catch (err) {
         console.warn('Delete from Canteen_Inventory table note:', err);
       }
+
+      queuePushKeyToCloud('canteen_raw_inventory_items_v2', remainingItems);
+      
+      // Dispatch update event immediately so recipes and menu recalculate
+      window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+      setItemToDelete(null);
+      setShowAddModal(false);
+    } catch (err) {
+      console.error('Error deleting raw item:', err);
+    } finally {
+      setIsDeletingItem(false);
     }
   };
 
   // Reset to default
   const handleResetToDefault = () => {
-    const confirmReset = window.confirm('Reset raw inventory items to original list? This will restore standard items (Chicken, Rice, Dal, Milk Powder, etc.).');
-    if (confirmReset) {
-      const { deduplicated } = deduplicateRawItems(INITIAL_RAW_ITEMS);
-      setItems(deduplicated);
-    }
+    setShowResetConfirmModal(true);
+  };
+
+  const confirmResetToDefault = () => {
+    const { deduplicated } = deduplicateRawItems(INITIAL_RAW_ITEMS);
+    setItems(deduplicated);
+    lastSavedItemsJsonRef.current = JSON.stringify(deduplicated);
+    saveRawInventoryItems(deduplicated);
+    window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+    setShowResetConfirmModal(false);
   };
 
   // Quick DP Photo Update Handler (Instantly syncs to Supabase Canteen_Inventory DP column)
@@ -2130,8 +2161,8 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                           </div>
                         </div>
 
-                        {/* Status Badge */}
-                        <div className="shrink-0">
+                        {/* Status Badge & Quick Actions */}
+                        <div className="shrink-0 flex items-center gap-1.5">
                           {isZero ? (
                             <span className="px-2.5 py-1 rounded-xl text-[10px] font-black bg-rose-500/20 text-rose-300 border-t border-rose-400/40 border-b-2 border-rose-950 inline-flex items-center gap-1 shadow-sm">
                               <AlertCircle className="w-3 h-3" /> Out
@@ -2144,6 +2175,27 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                             <span className="px-2.5 py-1 rounded-xl text-[10px] font-black bg-emerald-500/20 text-emerald-300 border-t border-emerald-400/40 border-b-2 border-emerald-950 inline-flex items-center gap-1 shadow-sm">
                               <CheckCircle2 className="w-3 h-3" /> OK
                             </span>
+                          )}
+
+                          {!readOnly && (
+                            <div className="flex items-center gap-1 ml-1" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                onClick={() => handleEditItem(item)}
+                                className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors cursor-pointer shadow-sm"
+                                title="Edit Item (সম্পাদনা করুন)"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setItemToDelete(item)}
+                                className="p-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/20 transition-all cursor-pointer shadow-sm active:scale-95"
+                                title="Delete Item (আইটেম ডিলিট করুন)"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           )}
                         </div>
                       </div>
@@ -2274,13 +2326,14 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                   <th className="px-4 py-4 text-right">Unit Cost</th>
                   <th className="px-4 py-4 text-right">Total Value</th>
                   <th className="px-4 py-4 text-center">Stock Status</th>
+                  <th className="px-4 py-4 text-center">Action</th>
                 </tr>
               </thead>
 
               <tbody className="divide-y divide-slate-800/60 text-slate-200">
                 {filteredItems.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-6 py-12 text-center text-slate-500 font-bold">
+                    <td colSpan={9} className="px-6 py-12 text-center text-slate-500 font-bold">
                       <Boxes className="w-8 h-8 mx-auto text-slate-600 mb-2 opacity-60" />
                       <p>No raw items found matching your criteria</p>
                       {searchTerm && (
@@ -2467,6 +2520,32 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                             <span className="px-2.5 py-1 rounded-full text-[11px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 inline-flex items-center gap-1">
                               <CheckCircle2 className="w-3 h-3" /> In Stock
                             </span>
+                          )}
+                        </td>
+
+                        {/* Action Column */}
+                        <td className="px-4 py-3.5 text-center">
+                          {!readOnly ? (
+                            <div className="flex items-center justify-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                onClick={() => handleEditItem(item)}
+                                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors cursor-pointer shadow-sm"
+                                title="Edit Item (সম্পাদনা করুন)"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setItemToDelete(item)}
+                                className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/20 transition-all cursor-pointer shadow-sm active:scale-95"
+                                title="Delete Item (আইটেম ডিলিট করুন)"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-slate-600 text-xs">-</span>
                           )}
                         </td>
                       </tr>
@@ -3920,6 +3999,110 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
         </div>
       )}
 
-    </div>
-  );
-};
+      {/* Delete Item Confirmation Popup Modal */}
+      {itemToDelete && (
+        <div className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-gradient-to-b from-slate-900 to-slate-950 border border-slate-700/80 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
+            <div className="text-center space-y-2">
+              <div className="w-14 h-14 rounded-2xl bg-rose-500/20 border border-rose-500/40 text-rose-400 flex items-center justify-center mx-auto shadow-[0_0_20px_rgba(239,68,68,0.3)]">
+                <Trash2 className="w-7 h-7" />
+              </div>
+              <h3 className="text-lg font-black text-white">কাঁচামাল ডিলিট নিশ্চিতকরণ</h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                আপনি কি নিশ্চিত যে আপনি এই কাঁচামালটি ইনভেন্টরি থেকে স্থায়ীভাবে মুছে ফেলতে চান?
+              </p>
+            </div>
+
+            {/* Target Item Summary Box */}
+            <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800/80 flex items-center gap-3.5">
+              <div className="w-12 h-12 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center overflow-hidden shrink-0">
+                {(itemToDelete.dp || itemToDelete.DP || itemToDelete.image) ? (
+                  <img src={itemToDelete.dp || itemToDelete.DP || itemToDelete.image} alt={itemToDelete.name} className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-sm font-black text-indigo-400">{itemToDelete.name.slice(0, 2).toUpperCase()}</span>
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <h4 className="text-sm font-black text-white truncate">{itemToDelete.name}</h4>
+                <p className="text-xs text-slate-400 truncate">{itemToDelete.nameBn}</p>
+                <div className="flex items-center gap-2 mt-1 text-[11px] font-mono">
+                  <span className="text-emerald-400 font-bold">স্টক: {itemToDelete.currentStock} {itemToDelete.unit}</span>
+                  <span className="text-slate-500">•</span>
+                  <span className="text-indigo-300 font-bold">৳{itemToDelete.unitCost}/{itemToDelete.unit}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-300 flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+              <span>
+                এটি মুছে ফেললে এই আইটেমটি ইনভেন্টরি ও ক্লাউড ডাটাবেজ থেকে স্থায়ীভাবে বাদ পড়বে এবং সংশ্লিষ্ট মেনু রেসিপির মজুদ হিসাব স্বয়ংক্রিয়ভাবে পরিবর্তিত হবে।
+              </span>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingItem}
+                onClick={() => setItemToDelete(null)}
+                className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-all cursor-pointer"
+              >
+                বাতিল (Cancel)
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingItem}
+                onClick={confirmAndDeleteItem}
+                className="w-full py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-bold transition-all shadow-lg shadow-rose-600/30 flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+              >
+                {isDeletingItem ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>মুছে ফেলা হচ্ছে...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>হ্যাঁ, মুছে ফেলুন</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Defaults Confirmation Modal */}
+      {showResetConfirmModal && (
+        <div className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-gradient-to-b from-slate-900 to-slate-950 border border-slate-700/80 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
+            <div className="text-center space-y-2">
+              <div className="w-14 h-14 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center mx-auto">
+                <RotateCcw className="w-7 h-7" />
+              </div>
+              <h3 className="text-lg font-black text-white">রিসেট কনফার্মেশন</h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                কাঁচামালের তালিকা কি ডিফল্ট তালিকায় রিসেট করতে চান? (Chicken, Rice, Dal, Milk Powder ইত্যাদি প্রাথমিক আইটেমগুলো পুনরায় সেট হবে)।
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowResetConfirmModal(false)}
+                className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-all cursor-pointer"
+              >
+                বাতিল (Cancel)
+              </button>
+              <button
+                type="button"
+                onClick={confirmResetToDefault}
+                className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span>হ্যাঁ, রিসেট করুন</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}

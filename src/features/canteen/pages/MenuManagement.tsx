@@ -6,6 +6,7 @@ import { supabase } from '../../../supabase';
 import { resolveImageUrl } from '../utils/canteenSettings';
 import { queuePushKeyToCloud } from '../utils/canteenCloudSync';
 import { getCanteenMenuCache, fetchCanteenMenuOnce } from '../utils/canteenMenuData';
+import { calculateMenuItemStockInfo, getRawInventoryItems, getMenuRecipes } from '../utils/recipeManager';
 
 export const MenuManagement: React.FC = () => {
   const { t, i18n } = useTranslation();
@@ -52,6 +53,24 @@ export const MenuManagement: React.FC = () => {
       }
     };
     fetchCloudMenu();
+  }, []);
+
+  const [rawInventory, setRawInventory] = useState<any[]>(() => getRawInventoryItems());
+  const [recipesMap, setRecipesMap] = useState<any>(() => getMenuRecipes());
+
+  useEffect(() => {
+    const handleSync = () => {
+      setRawInventory(getRawInventoryItems());
+      setRecipesMap(getMenuRecipes());
+    };
+    window.addEventListener('canteen_raw_inventory_updated', handleSync);
+    window.addEventListener('canteen_menu_recipes_updated', handleSync);
+    window.addEventListener('storage', handleSync);
+    return () => {
+      window.removeEventListener('canteen_raw_inventory_updated', handleSync);
+      window.removeEventListener('canteen_menu_recipes_updated', handleSync);
+      window.removeEventListener('storage', handleSync);
+    };
   }, []);
 
   const [showAdd, setShowAdd] = useState(false);
@@ -117,13 +136,15 @@ export const MenuManagement: React.FC = () => {
                 <th className="px-6 py-4">Meal Type</th>
                 <th className="px-6 py-4">{t('item')}</th>
                 <th className="px-6 py-4 text-right">{t('price')}</th>
-                <th className="px-6 py-4 text-center">Max Qty</th>
+                <th className="px-6 py-4 text-center">লাইভ মজুদ (Live Stock)</th>
                 <th className="px-6 py-4 text-right">{t('action')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50 text-slate-200 dark:text-slate-300">
               {items.map((row) => {
                   const itemDp = resolveImageUrl(row.DP || row.img || row.image);
+                  const itemName = i18n.language === 'bn' ? (row.name_bn || row.name_en) : (row.name_en || row.name_bn);
+                  const stockInfo = calculateMenuItemStockInfo(row.id, itemName, rawInventory, recipesMap);
                   return (
                   <tr key={row.id} className="hover:bg-slate-800 dark:hover:bg-slate-800/20 transition-colors">
                      <td className="px-6 py-3">
@@ -136,9 +157,18 @@ export const MenuManagement: React.FC = () => {
                         </div>
                      </td>
                      <td className="px-6 py-4 font-bold text-slate-400 text-xs uppercase tracking-wider">{row.meal}</td>
-                     <td className="px-6 py-4 font-bold">{i18n.language === 'bn' ? row.name_bn : row.name_en}</td>
+                     <td className="px-6 py-4 font-bold">{itemName}</td>
                      <td className="px-6 py-4 text-right font-bold text-emerald-600">{formatMoney(row.price, i18n.language)}</td>
-                     <td className="px-6 py-4 text-center font-bold">{row.max}</td>
+                     <td className="px-6 py-4 text-center">
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-black border ${
+                           stockInfo.availableStock > 0 
+                             ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40' 
+                             : 'bg-rose-950/80 text-rose-300 border-rose-500/40'
+                        }`}>
+                           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${stockInfo.availableStock > 0 ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                           <span>{stockInfo.availableStock} টি</span>
+                        </span>
+                     </td>
                      <td className="px-6 py-4 text-right">
                         <button onClick={() => handleDelete(row.id)} className="text-rose-500 hover:text-rose-400 font-bold text-xs bg-rose-900/30 px-3 py-1.5 rounded-lg transition-colors cursor-pointer">
                             {t('cancel')}

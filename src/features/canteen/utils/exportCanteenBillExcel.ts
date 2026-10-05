@@ -423,14 +423,16 @@ export async function exportCanteenBillToExcel({
   // Row 4: Empty separator
   aoa.push([]);
 
-  // Row 5: Exact 10 Table Column Headers
+  // Row 5: Exact 12 Table Column Headers
   const headers = [
     'ক্রমিক\nনং',
     'পদবী',
     'নাম',
     `বকেয়া বিল\n(${prevMonthBn})`,
     `অগ্রীম বিল\n(${prevMonthBn})`,
-    `${categoryTitle}\n(${currMonthBn})`,
+    `ক্যান্টিন বিল\n(${currMonthBn})`,
+    'ইউনিট ফান্ড',
+    'অন্যান্য',
     'সর্বমোট\nবিল',
     'পরিশোধিত\nবিল',
     'অগ্রিম',
@@ -442,6 +444,8 @@ export async function exportCanteenBillToExcel({
   let sumPreviousDue = 0;
   let sumPreviousAdvance = 0;
   let sumCanteenBill = 0;
+  let sumUnitFund = 0;
+  let sumOthersFund = 0;
   let sumTotalBill = 0;
   let sumPaidBill = 0;
   let sumAdvance = 0;
@@ -578,7 +582,14 @@ export async function exportCanteenBillToExcel({
 
       // 2. Current Month Charges: transactions belonging specifically to selectedMonth
       const currentMonthTxs = memberCategoryTxs.filter((tx) => getMonthKeyOfTx(tx) === selectedMonth);
-      currentPeriodCharges = computeEffectiveCharges(currentMonthTxs);
+      const canteenTxs = currentMonthTxs.filter((tx) => getTxCategory(tx) === 'CANTEEN');
+      const unitFundTxs = currentMonthTxs.filter((tx) => getTxCategory(tx) === 'UNIT_FUND');
+      const othersFundTxs = currentMonthTxs.filter((tx) => getTxCategory(tx) === 'OTHERS');
+      
+      const canteenBill = computeEffectiveCharges(canteenTxs);
+      const unitFund = computeEffectiveCharges(unitFundTxs);
+      const othersFund = computeEffectiveCharges(othersFundTxs);
+      currentPeriodCharges = canteenBill + unitFund + othersFund;
 
       totalBill = previousDue + currentPeriodCharges;
 
@@ -611,11 +622,23 @@ export async function exportCanteenBillToExcel({
     // Accumulate sums
     sumPreviousDue += previousDue;
     sumPreviousAdvance += previousAdvance;
-    sumCanteenBill += currentPeriodCharges;
+    sumCanteenBill += (selectedMonth === 'ALL' ? currentPeriodCharges : computeEffectiveCharges(memberCategoryTxs.filter(tx => getMonthKeyOfTx(tx) === selectedMonth && getTxCategory(tx) === 'CANTEEN')));
+    sumUnitFund += computeEffectiveCharges(memberCategoryTxs.filter(tx => (selectedMonth === 'ALL' || getMonthKeyOfTx(tx) === selectedMonth) && getTxCategory(tx) === 'UNIT_FUND'));
+    sumOthersFund += computeEffectiveCharges(memberCategoryTxs.filter(tx => (selectedMonth === 'ALL' || getMonthKeyOfTx(tx) === selectedMonth) && getTxCategory(tx) === 'OTHERS'));
     sumTotalBill += totalBill;
     sumPaidBill += paidBill;
     sumAdvance += advance;
     sumRemainingDue += remainingDue;
+
+    const rowCanteenBill = selectedMonth === 'ALL'
+      ? computeEffectiveCharges(memberCategoryTxs.filter((tx) => getTxCategory(tx) === 'CANTEEN'))
+      : computeEffectiveCharges(memberCategoryTxs.filter((tx) => getMonthKeyOfTx(tx) === selectedMonth && getTxCategory(tx) === 'CANTEEN'));
+    const rowUnitFund = selectedMonth === 'ALL'
+      ? computeEffectiveCharges(memberCategoryTxs.filter((tx) => getTxCategory(tx) === 'UNIT_FUND'))
+      : computeEffectiveCharges(memberCategoryTxs.filter((tx) => getMonthKeyOfTx(tx) === selectedMonth && getTxCategory(tx) === 'UNIT_FUND'));
+    const rowOthersFund = selectedMonth === 'ALL'
+      ? computeEffectiveCharges(memberCategoryTxs.filter((tx) => getTxCategory(tx) === 'OTHERS'))
+      : computeEffectiveCharges(memberCategoryTxs.filter((tx) => getMonthKeyOfTx(tx) === selectedMonth && getTxCategory(tx) === 'OTHERS'));
 
     aoa.push([
       toBengaliNum(serialCounter),                          // ক্রমিক নং
@@ -623,7 +646,9 @@ export async function exportCanteenBillToExcel({
       nameFormatted,                                        // নাম (বাংলায়)
       previousDue > 0 ? previousDue : '',                   // বকেয়া বিল (আগের মাস)
       previousAdvance > 0 ? previousAdvance : '',           // অগ্রীম বিল (আগের মাস)
-      currentPeriodCharges > 0 ? currentPeriodCharges : '', // ক্যান্টিন বিল (এই মাস)
+      rowCanteenBill > 0 ? rowCanteenBill : '',             // ক্যান্টিন বিল (এই মাস)
+      rowUnitFund > 0 ? rowUnitFund : '',                   // ইউনিট ফান্ড
+      rowOthersFund > 0 ? rowOthersFund : '',               // অন্যান্য
       totalBill > 0 ? totalBill : '',                       // সর্বমোট বিল
       paidBill > 0 ? paidBill : '',                         // পরিশোধিত বিল
       advance > 0 ? advance : '',                           // অগ্রিম
@@ -631,7 +656,7 @@ export async function exportCanteenBillToExcel({
     ]);
   });
 
-  // 4. Append Total Summary Row (for 10 columns)
+  // 4. Append Total Summary Row (for 12 columns)
   aoa.push([
     'সর্বমোট',
     '',
@@ -639,6 +664,8 @@ export async function exportCanteenBillToExcel({
     sumPreviousDue > 0 ? sumPreviousDue : '',
     sumPreviousAdvance > 0 ? sumPreviousAdvance : '',
     sumCanteenBill > 0 ? sumCanteenBill : '',
+    sumUnitFund > 0 ? sumUnitFund : '',
+    sumOthersFund > 0 ? sumOthersFund : '',
     sumTotalBill > 0 ? sumTotalBill : '',
     sumPaidBill > 0 ? sumPaidBill : '',
     sumAdvance > 0 ? sumAdvance : '',
@@ -669,7 +696,7 @@ export async function exportCanteenBillToExcel({
     { hpt: 24 }, // Total Row
   ];
 
-  // Set Column Widths for 10 columns
+  // Set Column Widths for 12 columns
   ws['!cols'] = [
     { wch: 8 },  // ক্রমিক নং
     { wch: 14 }, // পদবী
@@ -677,6 +704,8 @@ export async function exportCanteenBillToExcel({
     { wch: 16 }, // বকেয়া বিল (আগের মাস)
     { wch: 16 }, // অগ্রীম বিল (আগের মাস)
     { wch: 16 }, // ক্যান্টিন বিল (এই মাস)
+    { wch: 14 }, // ইউনিট ফান্ড
+    { wch: 14 }, // অন্যান্য
     { wch: 14 }, // সর্বমোট বিল
     { wch: 14 }, // পরিশোধিত বিল
     { wch: 12 }, // অগ্রিম
@@ -706,7 +735,7 @@ export async function exportCanteenBillToExcel({
   }
 
   // Header Row (r = 4): ALL CELLS CENTER ALIGNED
-  for (let c = 0; c < 10; c++) {
+  for (let c = 0; c < 12; c++) {
     const addr = XLSX.utils.encode_cell({ r: 4, c });
     if (ws[addr]) {
       ws[addr].s = {
@@ -721,7 +750,7 @@ export async function exportCanteenBillToExcel({
   // Data Rows (r = 5 to 5 + sortedMembers.length - 1): Font Arial, All Center Aligned, ONLY Name & Rank Left Aligned
   for (let i = 0; i < sortedMembers.length; i++) {
     const r = 5 + i;
-    for (let c = 0; c < 10; c++) {
+    for (let c = 0; c < 12; c++) {
       const addr = XLSX.utils.encode_cell({ r, c });
       if (!ws[addr]) {
         ws[addr] = { t: 's', v: '' };
@@ -742,7 +771,7 @@ export async function exportCanteenBillToExcel({
   }
 
   // Total Row Style (r = totalRowIndex): All Center Aligned
-  for (let c = 0; c < 10; c++) {
+  for (let c = 0; c < 12; c++) {
     const addr = XLSX.utils.encode_cell({ r: totalRowIndex, c });
     if (!ws[addr]) {
       ws[addr] = { t: 's', v: '' };

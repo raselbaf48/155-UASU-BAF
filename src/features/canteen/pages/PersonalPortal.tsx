@@ -8,6 +8,7 @@ import { supabase } from '../../../supabase';
 import { resolveImageUrl, getCanteenConfig, checkPreOrderWindow, getCuratedDailyMenu, CanteenConfig, PreOrderTimeStatus } from '../utils/canteenSettings';
 import { getCanteenMenuCache, fetchCanteenMenuOnce } from '../utils/canteenMenuData';
 import { formatCanteenDate } from '../utils/dateUtils';
+import { calculateMenuItemStockInfo, getRawInventoryItems, getMenuRecipes } from '../utils/recipeManager';
 
 interface EmployeeDashboardProps { 
   onManagerPortalClick?: () => void; 
@@ -42,6 +43,10 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
   const [orderedItems, setOrderedItems] = useState<Record<string, boolean>>({});
   const [cancelConfirmId, setCancelConfirmId] = useState<string | null>(null);
   const [duplicateConfirmItem, setDuplicateConfirmItem] = useState<{ item: any; currentQty: number } | null>(null);
+
+  // Live Raw Inventory & Recipes for realtime available stock
+  const [rawInventory, setRawInventory] = useState<any[]>(() => getRawInventoryItems());
+  const [recipesMap, setRecipesMap] = useState<any>(() => getMenuRecipes());
 
   const toEnglishDate = formatCanteenDate;
 
@@ -369,12 +374,16 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
       const handleSync = () => {
           fetchMenu();
           fetchActivities();
+          setRawInventory(getRawInventoryItems());
+          setRecipesMap(getMenuRecipes());
       };
 
       const handleStorageChange = (e: StorageEvent) => {
-          if (e.key === 'canteen_daily_menu' || e.key === 'canteen_txs' || e.key === 'canteen_pre_orders' || e.key === 'canteen_daily_menu_updated_at') {
+          if (e.key === 'canteen_daily_menu' || e.key === 'canteen_txs' || e.key === 'canteen_pre_orders' || e.key === 'canteen_daily_menu_updated_at' || e.key === 'canteen_raw_inventory_items_v2') {
               fetchMenu();
               fetchActivities();
+              setRawInventory(getRawInventoryItems());
+              setRecipesMap(getMenuRecipes());
           }
       };
 
@@ -384,6 +393,8 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
       window.addEventListener('canteen_state_updated', handleSync);
       window.addEventListener('canteen_txs_updated', handleSync);
       window.addEventListener('baf_state_updated', handleSync);
+      window.addEventListener('canteen_raw_inventory_updated', handleSync);
+      window.addEventListener('canteen_menu_recipes_updated', handleSync);
       
       return () => {
           window.removeEventListener('storage', handleStorageChange);
@@ -392,6 +403,8 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
           window.removeEventListener('canteen_state_updated', handleSync);
           window.removeEventListener('canteen_txs_updated', handleSync);
           window.removeEventListener('baf_state_updated', handleSync);
+          window.removeEventListener('canteen_raw_inventory_updated', handleSync);
+          window.removeEventListener('canteen_menu_recipes_updated', handleSync);
       };
   }, [fetchActivities]);
 
@@ -420,6 +433,13 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
           const windowStatus = checkPreOrderWindow(canteenConfig);
           if (!windowStatus.isOpen) {
               setClosedToast(`Pre-Order is currently closed (${windowStatus.startTime} - ${windowStatus.endTime}). Pre-orders can only be placed during active hours.`);
+              setTimeout(() => setClosedToast(null), 4000);
+              return;
+          }
+
+          const stockInfo = calculateMenuItemStockInfo(item.id, item.name, rawInventory, recipesMap);
+          if (deltaQty > 0 && stockInfo.availableStock <= 0) {
+              setClosedToast(`দুঃখিত, '${item.name}'-এর প্রয়োজনীয় কাঁচামালের ঘাটতি থাকায় স্টক নেই (Out of Stock)!`);
               setTimeout(() => setClosedToast(null), 4000);
               return;
           }
@@ -657,6 +677,7 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
                       </div>
                   ) : (
                       dailyMenu.filter(item => (item.name || '').toLowerCase().includes(searchMenu.toLowerCase())).map((item, idx) => {
+                          const stockInfo = calculateMenuItemStockInfo(item.id, item.name, rawInventory, recipesMap);
                           const pendingAct = activities.find(a => 
                               a.type === 'PRE-ORDER' && 
                               (
@@ -700,9 +721,19 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
                                               )}
                                           </div>
                                           <p className="text-sm font-black text-white uppercase tracking-tight truncate">{item.name}</p>
-                                          <p className="text-xs font-black text-emerald-400 mt-0.5">
-                                              ৳{item.price ? item.price : 0}
-                                          </p>
+                                          <div className="flex items-center space-x-2 mt-0.5">
+                                              <p className="text-xs font-black text-emerald-400">
+                                                  ৳{item.price ? item.price : 0}
+                                              </p>
+                                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-md border flex items-center gap-1 ${
+                                                  stockInfo.availableStock > 0 
+                                                      ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40' 
+                                                      : 'bg-rose-950/80 text-rose-300 border-rose-500/40'
+                                              }`}>
+                                                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${stockInfo.availableStock > 0 ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                                                  <span>স্টকঃ {stockInfo.availableStock}</span>
+                                              </span>
+                                          </div>
                                       </div>
                                   </div>
 

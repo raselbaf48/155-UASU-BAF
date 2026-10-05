@@ -1871,8 +1871,8 @@ export const getMenuRecipes = (): MenuRecipeMap => {
   return DEFAULT_MENU_RECIPES;
 };
 
-export const getRecipeForMenuItem = (menuItemId: string, menuItemName?: string): RecipeIngredient[] => {
-  const recipes = getMenuRecipes();
+export const getRecipeForMenuItem = (menuItemId: string, menuItemName?: string, customRecipes?: MenuRecipeMap): RecipeIngredient[] => {
+  const recipes = customRecipes || getMenuRecipes();
   let found: RecipeIngredient[] | undefined = undefined;
   if (menuItemId && (menuItemId in recipes)) {
     found = recipes[menuItemId];
@@ -1894,7 +1894,33 @@ export const getRecipeForMenuItem = (menuItemId: string, menuItemName?: string):
       // Bengali common names fallback
       if (!found || found.length === 0) {
         const lower = menuItemName.toLowerCase();
-        if ((lower.includes('চটপটি') || lower.includes('chotpoti')) && recipes['CHOTPOTI']) {
+        if ((lower.includes('দুধ চা') || lower.includes('মিল্ক চা') || lower.includes('milk tea') || lower.includes('চা') || lower.includes('tea')) && recipes['MILK TEA']) {
+          found = recipes['MILK TEA'];
+        } else if ((lower.includes('রং চা') || lower.includes('লাল চা') || lower.includes('liquor tea') || lower.includes('black tea')) && recipes['LIQUOR TEA']) {
+          found = recipes['LIQUOR TEA'];
+        } else if ((lower.includes('গ্রিন টি') || lower.includes('green tea')) && recipes['GREEN TEA']) {
+          found = recipes['GREEN TEA'];
+        } else if ((lower.includes('কোল্ড কফি') || lower.includes('cold coffee')) && recipes['COLD COFFEE']) {
+          found = recipes['COLD COFFEE'];
+        } else if ((lower.includes('কফি') || lower.includes('দুধ কফি') || lower.includes('coffee') || lower.includes('milk coffee')) && recipes['MILK COFFEE']) {
+          found = recipes['MILK COFFEE'];
+        } else if ((lower.includes('মামলেট') || lower.includes('ওমলেট') || lower.includes('omelet') || lower.includes('mumlet')) && recipes['EGG MUMLET']) {
+          found = recipes['EGG MUMLET'];
+        } else if ((lower.includes('পোচ') || lower.includes('poach')) && recipes['EGG POACH']) {
+          found = recipes['EGG POACH'];
+        } else if ((lower.includes('সিদ্ধ ডিম') || lower.includes('boiled egg')) && recipes['BOILED EGG']) {
+          found = recipes['BOILED EGG'];
+        } else if ((lower.includes('ডিম ভাজি') || lower.includes('egg fry')) && recipes['EGG FRY']) {
+          found = recipes['EGG FRY'];
+        } else if ((lower.includes('নুডুলস') || lower.includes('noodles')) && (recipes['EGG NOODLES'] || recipes['NOODLES'])) {
+          found = recipes['EGG NOODLES'] || recipes['NOODLES'];
+        } else if ((lower.includes('বার্গার') || lower.includes('burger')) && recipes['BURGER']) {
+          found = recipes['BURGER'];
+        } else if ((lower.includes('স্যান্ডউইচ') || lower.includes('sandwich') || lower.includes('sandwitch')) && (recipes['SANDWICH'] || recipes['SANDWITCH'])) {
+          found = recipes['SANDWICH'] || recipes['SANDWITCH'];
+        } else if ((lower.includes('পাস্তা') || lower.includes('pasta')) && recipes['PASTA']) {
+          found = recipes['PASTA'];
+        } else if ((lower.includes('চটপটি') || lower.includes('chotpoti')) && recipes['CHOTPOTI']) {
           found = recipes['CHOTPOTI'];
         } else if ((lower.includes('হালিম') || lower.includes('halim')) && recipes['HALIM']) {
           found = recipes['HALIM'];
@@ -1945,6 +1971,193 @@ export const getRecipeForMenuItem = (menuItemId: string, menuItemName?: string):
   } catch {
     return found;
   }
+};
+
+/**
+ * Detailed stock calculation info for a menu item.
+ * Realtime stock is dynamically computed from raw materials inventory stock:
+ * If an item requires raw ingredients (e.g. Milk Tea requires Milk Powder, Sugar, LPG):
+ * Stock = Math.min(portions possible from each ingredient).
+ * If any ingredient is depleted (0 stock), available stock is 0.
+ */
+export interface MenuItemStockInfo {
+  availableStock: number;
+  isRecipeBased: boolean;
+  limitingIngredient?: {
+    rawItemId: string;
+    rawItemName: string;
+    portions: number;
+    currentStock: number;
+    stockUnit: string;
+    requiredPerPortion: number;
+    requiredUnit: string;
+  };
+  ingredientsBreakdown: Array<{
+    rawItemId: string;
+    rawItemName: string;
+    requiredPerPortion: number;
+    unit: string;
+    currentStock: number;
+    stockUnit: string;
+    portionsPossible: number;
+  }>;
+}
+
+export const calculateMenuItemStockInfo = (
+  menuItemId: string,
+  menuItemName: string,
+  rawItemsList?: RawInventoryItem[],
+  recipesMap?: MenuRecipeMap
+): MenuItemStockInfo => {
+  const rawItems = rawItemsList && rawItemsList.length > 0 ? rawItemsList : getRawInventoryItems();
+  const recipes = recipesMap || getMenuRecipes();
+
+  // 1. Resolve Recipe for this menu item
+  const recipe = getRecipeForMenuItem(menuItemId, menuItemName, recipes);
+
+  if (recipe && recipe.length > 0) {
+    let minPortions = Infinity;
+    let limiting: MenuItemStockInfo['limitingIngredient'] = undefined;
+    const breakdown: MenuItemStockInfo['ingredientsBreakdown'] = [];
+
+    for (const ing of recipe) {
+      // Find matching raw item in current raw inventory
+      let rawItem = rawItems.find(r => r.id === ing.rawItemId);
+      if (!rawItem && ing.rawItemName) {
+        const ingNorm = normalizeRawItemName(ing.rawItemName);
+        rawItem = rawItems.find(r =>
+          r.name.toLowerCase() === ing.rawItemName.toLowerCase() ||
+          normalizeRawItemName(r.name) === ingNorm ||
+          (r.nameBn && normalizeRawItemName(r.nameBn) === ingNorm)
+        );
+      }
+
+      if (!rawItem) {
+        // Raw item does not exist or not found, so 0 portions can be made
+        minPortions = 0;
+        limiting = {
+          rawItemId: ing.rawItemId || '',
+          rawItemName: ing.rawItemName,
+          portions: 0,
+          currentStock: 0,
+          stockUnit: ing.unit,
+          requiredPerPortion: ing.quantity,
+          requiredUnit: ing.unit
+        };
+        breakdown.push({
+          rawItemId: ing.rawItemId || '',
+          rawItemName: ing.rawItemName,
+          requiredPerPortion: ing.quantity,
+          unit: ing.unit,
+          currentStock: 0,
+          stockUnit: ing.unit,
+          portionsPossible: 0
+        });
+        continue;
+      }
+
+      const rawStock = Math.max(0, Number(rawItem.currentStock ?? (rawItem as any).stock ?? (rawItem as any).Quantity ?? 0));
+      const ratio = getIngredientToInventoryRatio(rawItem, ing.unit);
+      const amountPerPortionInInventoryUnit = ing.quantity / ratio;
+
+      let portions = 0;
+      if (amountPerPortionInInventoryUnit <= 0) {
+        portions = 9999;
+      } else {
+        portions = Math.floor(rawStock / amountPerPortionInInventoryUnit);
+      }
+
+      breakdown.push({
+        rawItemId: rawItem.id,
+        rawItemName: rawItem.name || ing.rawItemName,
+        requiredPerPortion: ing.quantity,
+        unit: ing.unit,
+        currentStock: rawStock,
+        stockUnit: rawItem.unit,
+        portionsPossible: portions
+      });
+
+      if (portions < minPortions) {
+        minPortions = portions;
+        limiting = {
+          rawItemId: rawItem.id,
+          rawItemName: rawItem.name || ing.rawItemName,
+          portions,
+          currentStock: rawStock,
+          stockUnit: rawItem.unit,
+          requiredPerPortion: ing.quantity,
+          requiredUnit: ing.unit
+        };
+      }
+    }
+
+    const finalStock = minPortions === Infinity ? 0 : Math.max(0, minPortions);
+    return {
+      availableStock: finalStock,
+      isRecipeBased: true,
+      limitingIngredient: limiting,
+      ingredientsBreakdown: breakdown
+    };
+  }
+
+  // 2. Direct raw item matching (ready-to-serve, packaged goods)
+  const itemNorm = normalizeRawItemName(menuItemName || '');
+  const directRaw = rawItems.find(r =>
+    (menuItemId && r.id === menuItemId) ||
+    r.name.toLowerCase() === (menuItemName || '').toLowerCase() ||
+    normalizeRawItemName(r.name) === itemNorm ||
+    (r.nameBn && (
+      normalizeRawItemName(r.nameBn) === itemNorm ||
+      r.nameBn.toLowerCase().includes((menuItemName || '').toLowerCase()) ||
+      (menuItemName || '').toLowerCase().includes(r.nameBn.toLowerCase())
+    ))
+  );
+
+  if (directRaw) {
+    const isCase = (directRaw.unit || '').toLowerCase() === 'case';
+    const packSize = (directRaw.packSize && directRaw.packSize > 1) ? directRaw.packSize : 1;
+    const rawStock = Math.max(0, Number(directRaw.currentStock ?? (directRaw as any).stock ?? (directRaw as any).Quantity ?? 0));
+    const stockVal = isCase ? Math.floor(rawStock * packSize) : Math.floor(rawStock);
+
+    return {
+      availableStock: stockVal,
+      isRecipeBased: false,
+      limitingIngredient: {
+        rawItemId: directRaw.id,
+        rawItemName: directRaw.name,
+        portions: stockVal,
+        currentStock: rawStock,
+        stockUnit: directRaw.unit,
+        requiredPerPortion: 1,
+        requiredUnit: directRaw.unit
+      },
+      ingredientsBreakdown: [{
+        rawItemId: directRaw.id,
+        rawItemName: directRaw.name,
+        requiredPerPortion: 1,
+        unit: directRaw.unit,
+        currentStock: rawStock,
+        stockUnit: directRaw.unit,
+        portionsPossible: stockVal
+      }]
+    };
+  }
+
+  // 3. Fallback: item without linked recipe or raw stock
+  return {
+    availableStock: 50,
+    isRecipeBased: false,
+    ingredientsBreakdown: []
+  };
+};
+
+export const getMenuItemAvailableStock = (
+  menuItemId: string,
+  menuItemName: string,
+  rawItemsList?: RawInventoryItem[],
+  recipesMap?: MenuRecipeMap
+): number => {
+  return calculateMenuItemStockInfo(menuItemId, menuItemName, rawItemsList, recipesMap).availableStock;
 };
 
 /**

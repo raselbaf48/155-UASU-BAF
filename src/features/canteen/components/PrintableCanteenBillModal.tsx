@@ -309,7 +309,6 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
     return sortedMembers.map((member, index) => {
       // 100% reliable transaction matching by BD No, ID, or surname
       const memberTxs = liveTxs.filter((tx) => isTxBelongingToMember(member, tx));
-      const memberCategoryTxs = memberTxs.filter((tx) => isCategoryMatch(tx, selectedCategory));
 
       const rankFormatted = getMemberBanglaRank(member) || formatRankBn(member['Rank'] || member.rank || '');
       const rawName = member['Surname'] || member['Full Name'] || member['Name'] || '';
@@ -332,16 +331,16 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
       const memberTotalAdvance = Number(member.Advance ?? member.advance ?? member.ogrim ?? 0);
 
       if (activeMonth === 'ALL') {
-        const canteenTxs = memberCategoryTxs.filter((tx) => getTxCategory(tx) === 'CANTEEN');
-        const unitFundTxs = memberCategoryTxs.filter((tx) => getTxCategory(tx) === 'UNIT_FUND');
-        const othersFundTxs = memberCategoryTxs.filter((tx) => getTxCategory(tx) === 'OTHERS');
+        const canteenTxs = memberTxs.filter((tx) => getTxCategory(tx) === 'CANTEEN');
+        const unitFundTxs = memberTxs.filter((tx) => getTxCategory(tx) === 'UNIT_FUND');
+        const othersFundTxs = memberTxs.filter((tx) => getTxCategory(tx) === 'OTHERS');
 
         canteenBill = computeEffectiveCharges(canteenTxs);
         unitFund = computeEffectiveCharges(unitFundTxs);
         othersFund = computeEffectiveCharges(othersFundTxs);
         currentPeriodCharges = canteenBill + unitFund + othersFund;
 
-        const allPayments = memberCategoryTxs
+        const allPayments = memberTxs
           .filter((tx) => isPaymentTx(tx))
           .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
 
@@ -356,7 +355,7 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
         // Specific Month (e.g. '2026-09', '2026-07', '2026-10')
 
         // 1. Prior Period: strictly transactions dated prior to this month
-        const priorTxs = memberCategoryTxs.filter((tx) => {
+        const priorTxs = memberTxs.filter((tx) => {
           const m = getMonthKeyOfTx(tx);
           return m && m < activeMonth;
         });
@@ -380,7 +379,7 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
         }
 
         // 2. Current Month Charges: transactions belonging specifically to activeMonth
-        const currentMonthTxs = memberCategoryTxs.filter((tx) => getMonthKeyOfTx(tx) === activeMonth);
+        const currentMonthTxs = memberTxs.filter((tx) => getMonthKeyOfTx(tx) === activeMonth);
         const canteenTxs = currentMonthTxs.filter((tx) => getTxCategory(tx) === 'CANTEEN');
         const unitFundTxs = currentMonthTxs.filter((tx) => getTxCategory(tx) === 'UNIT_FUND');
         const othersFundTxs = currentMonthTxs.filter((tx) => getTxCategory(tx) === 'OTHERS');
@@ -394,7 +393,7 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
         totalBill = previousDue + currentPeriodCharges;
 
         // 3. Current Month Payments: payments that belong to activeMonth's payment cycle (25th of month to 24th of next month)
-        const currentMonthPayments = memberCategoryTxs
+        const currentMonthPayments = memberTxs
           .filter((tx) => isPaymentTx(tx) && getMonthKeyOfTx(tx) === activeMonth)
           .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
 
@@ -447,15 +446,27 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
   }, [rows, dueFilter]);
 
   // Dynamic Auto-Hide of Columns: If after filtering any column is completely empty (all 0), it automatically hides
-  const showColPreviousDue = useMemo(() => displayedRows.some((r) => r.previousDue > 0), [displayedRows]);
-  const showColPreviousAdvance = useMemo(() => displayedRows.some((r) => r.previousAdvance > 0), [displayedRows]);
-  const showColCanteenBill = useMemo(() => displayedRows.some((r) => r.canteenBill > 0) || (!displayedRows.some((r) => r.unitFund > 0) && !displayedRows.some((r) => r.othersFund > 0)), [displayedRows]);
-  const showColUnitFund = useMemo(() => displayedRows.some((r) => r.unitFund > 0), [displayedRows]);
-  const showColOthersFund = useMemo(() => displayedRows.some((r) => r.othersFund > 0), [displayedRows]);
-  const showColTotalBill = useMemo(() => displayedRows.some((r) => r.totalBill > 0) || displayedRows.length > 0, [displayedRows]);
-  const showColPaidBill = useMemo(() => displayedRows.some((r) => r.paidBill > 0), [displayedRows]);
-  const showColAdvance = useMemo(() => displayedRows.some((r) => r.advance > 0), [displayedRows]);
-  const showColRemainingDue = useMemo(() => displayedRows.some((r) => r.remainingDue > 0) || displayedRows.length > 0, [displayedRows]);
+  const rawShowColPreviousDue = useMemo(() => displayedRows.some((r) => (r.previousDue || 0) > 0), [displayedRows]);
+  const rawShowColPreviousAdvance = useMemo(() => displayedRows.some((r) => (r.previousAdvance || 0) > 0), [displayedRows]);
+  const rawShowColCanteenBill = useMemo(() => displayedRows.some((r) => (r.canteenBill || 0) > 0), [displayedRows]);
+  const rawShowColUnitFund = useMemo(() => displayedRows.some((r) => (r.unitFund || 0) > 0), [displayedRows]);
+  const rawShowColOthersFund = useMemo(() => displayedRows.some((r) => (r.othersFund || 0) > 0), [displayedRows]);
+  const rawShowColTotalBill = useMemo(() => displayedRows.some((r) => (r.totalBill || 0) > 0), [displayedRows]);
+  const rawShowColPaidBill = useMemo(() => displayedRows.some((r) => (r.paidBill || 0) > 0), [displayedRows]);
+  const rawShowColAdvance = useMemo(() => displayedRows.some((r) => (r.advance || 0) > 0), [displayedRows]);
+  const rawShowColRemainingDue = useMemo(() => displayedRows.some((r) => (r.remainingDue || 0) > 0), [displayedRows]);
+
+  const hasAnyBillData = rawShowColPreviousDue || rawShowColPreviousAdvance || rawShowColCanteenBill || rawShowColUnitFund || rawShowColOthersFund || rawShowColTotalBill || rawShowColPaidBill || rawShowColAdvance || rawShowColRemainingDue;
+
+  const showColPreviousDue = rawShowColPreviousDue;
+  const showColPreviousAdvance = rawShowColPreviousAdvance;
+  const showColCanteenBill = rawShowColCanteenBill || (!hasAnyBillData);
+  const showColUnitFund = rawShowColUnitFund;
+  const showColOthersFund = rawShowColOthersFund;
+  const showColTotalBill = rawShowColTotalBill || (!hasAnyBillData);
+  const showColPaidBill = rawShowColPaidBill;
+  const showColAdvance = rawShowColAdvance;
+  const showColRemainingDue = rawShowColRemainingDue || (!hasAnyBillData);
 
   const visibleColumnsCount = useMemo(() => {
     let count = 3; // ser, rank, name
@@ -750,7 +761,7 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
   if (!isOpen) return null;
 
   return createPortal(
-    <div className="canteen-bill-modal-portal fixed inset-0 z-[100] flex flex-col bg-slate-950/80 backdrop-blur-md animate-fadeIn text-black">
+    <div className="canteen-bill-modal-portal fixed inset-0 z-[100] flex flex-col bg-slate-950 print:bg-white text-black">
       {/* Top Header Controls (Hidden on Print) */}
       <div className="canteen-print-controls-bar flex-none bg-slate-900 border-b border-slate-700 p-3 sm:p-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 sm:gap-4 shadow-2xl print:hidden z-10">
         <div className="flex items-center space-x-3 text-white">
@@ -1000,7 +1011,7 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
 
 
       {/* Printable Content Area */}
-      <div className="canteen-bill-print-area flex-1 overflow-auto print:overflow-visible bg-slate-800/60 print:bg-white p-2 sm:p-6 print:p-0 flex flex-col items-center justify-start print:block">
+      <div className="canteen-bill-print-area flex-1 overflow-auto print:overflow-visible bg-slate-950 print:bg-white p-2 sm:p-6 print:p-0 flex flex-col items-center justify-start print:block">
         <style type="text/css">
           {`
             @media print {
