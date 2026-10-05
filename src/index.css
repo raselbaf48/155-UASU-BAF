@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* Sutonny Mj / Bengali Serif font for Statement slip */
+#statement-paper-slip, #statement-paper-slip * {
+  font-family: 'SutonnyMJ', 'SutonnyOMJ', 'Noto Serif Bengali', 'Tiro Bangla', 'SolaimanLipi', 'Kalpurush', serif !important;
+}
+
 @media print {
   @page {
     margin: 8mm 12mm;

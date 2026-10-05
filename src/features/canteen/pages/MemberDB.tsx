@@ -45,7 +45,8 @@ import {
   ShieldCheck,
   ArrowRight,
   AlertCircle,
-  Sliders
+  Sliders,
+  Share2
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, fetchDirectImageUrl, getCanteenConfig } from '../utils/canteenSettings';
@@ -62,8 +63,16 @@ import {
   exportCanteenBillToExcel,
   formatRankBn,
   formatMemberNameBn,
-  formatBengaliMonthYear
+  formatBengaliMonthYear,
+  toBengaliNum
 } from '../utils/exportCanteenBillExcel';
+import {
+  generateStatementCanvasBlob,
+  downloadStatementBlob,
+  saveStatementToGalleryOrDownload,
+  isGenericCanteenBill
+} from '../utils/statementCanvasGenerator';
+import { saveAs } from 'file-saver';
 import { 
   sortCanteenMembersByOfficeSeniority,
   isCivilianMember,
@@ -84,8 +93,103 @@ import {
   fetchCanteenMenuOnce, 
   getCanteenMenuCache 
 } from '../utils/canteenMenuData';
+import { FundBatchBillPage } from './FundBatchBillPage';
 
 export type BillCategory = 'ALL' | 'CANTEEN' | 'UNIT_FUND' | 'OTHERS';
+
+// Official WhatsApp Brand SVG Icon
+export const WhatsAppIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
+  <svg 
+    viewBox="0 0 24 24" 
+    width="24" 
+    height="24" 
+    className={className}
+    fill="currentColor"
+  >
+    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.05 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.82 11.82 0 00-3.473-8.413z" />
+  </svg>
+);
+
+// Map English food item names to clear, authentic Bengali names
+export const formatItemNameBn = (rawName?: string): string => {
+  if (!rawName) return '';
+  const trimmed = rawName.trim();
+  if (/[\u0980-\u09FF]/.test(trimmed)) return trimmed;
+
+  const upper = trimmed.toUpperCase();
+  const itemMap: Record<string, string> = {
+    'COLD COFFEE': 'কোল্ড কফি',
+    'HOT COFFEE': 'হট কফি',
+    'MILK COFFEE': 'মিল্ক কফি',
+    'COFFEE': 'কফি',
+    'GREEN TEA': 'গ্রিন টি',
+    'LIQUOR TEA': 'রং চা',
+    'MILK TEA': 'দুধ চা',
+    'RAW TEA': 'রং চা',
+    'TEA': 'চা',
+    'LEMON JUICE': 'লেমন জুস',
+    'CHICKEN ONION': 'চিকেন অনিয়ন (পেঁয়াজু)',
+    'CHICKEN PASTA': 'চিকেন পাস্তা',
+    'PASTA': 'পাস্তা',
+    'CHICKEN PULAW': 'চিকেন পোলাও',
+    'CHOTPOTI': 'চটপটি',
+    'DRY CAKE': 'ড্রাই কেক',
+    'CAKE': 'কেক',
+    'EGG FRY': 'ডিম ভাজি',
+    'BOILED EGG': 'সিদ্ধ ডিম',
+    'EGG MUMLET': 'ডিম অমলেট',
+    'EGG KHICURI': 'ডিম খিচুড়ি',
+    'EGG KHICHURI': 'ডিম খিচুড়ি',
+    'EGG NOODLES': 'এগ নুডুলস',
+    'NOODLES': 'নুডুলস',
+    'HALIM': 'হালিম',
+    'NORMAL BISCUIT': 'বিস্কুট',
+    'BISCUIT': 'বিস্কুট',
+    'ONE TIME BOX': 'ওয়ান টাইম বক্স',
+    'PORATA': 'পরোটা',
+    'PORATA (HOTEL)': 'পরোটা (হোটেল)',
+    'PORATA (UNIT)': 'পরোটা (ইউনিট)',
+    'ROASTED CHICKEN': 'রোস্ট চিকেন',
+    'BEEF BURGER': 'বিফ বার্গার',
+    'CHICKEN BURGER': 'চিকেন বার্গার',
+    'BURGER': 'বার্গার',
+    'SOSA': 'শসা',
+    'SWARMA': 'শর্মা',
+    'SHWARMA': 'শর্মা',
+    'CHICKEN BIRIYANI': 'চিকেন বিরিয়ানি',
+    'CHICKEN BIRYANI': 'চিকেন বিরিয়ানি',
+    'CHICKEN CURRY': 'চিকেন কারি',
+    'CHICKEN KHICHURI': 'চিকেন খিচুড়ি',
+    'SINGARA': 'সিঙ্গারা',
+    'SHINGARA': 'সিঙ্গারা',
+    'SAMOSA': 'সমুচা',
+    'SOMOSA': 'সমুচা',
+    'PATTIES': 'প্যাটিস',
+    'CHICKEN PATTIES': 'চিকেন প্যাটিস',
+    'ROLL': 'রোল',
+    'CHICKEN ROLL': 'চিকেন রোল',
+    'SWEET': 'মিষ্টি',
+    'SANDWICH': 'স্যান্ডউইচ',
+    'CHICKEN SANDWICH': 'চিকেন স্যান্ডউইচ',
+    'UNIT FUND': 'ইউনিট ফান্ড',
+    'UNIT FUND BILL': 'ইউনিট ফান্ড বিল',
+    'OTHERS': 'অন্যান্য',
+    'OTHERS BILL': 'অন্যান্য বিল',
+    'CANTEEN': 'ক্যান্টিন বিল',
+    'CANTEEN BILL': 'ক্যান্টিন বিল',
+    'INITIAL BILL': 'প্রারম্ভিক বিল'
+  };
+
+  if (itemMap[upper]) return itemMap[upper];
+
+  for (const [enKey, bnVal] of Object.entries(itemMap)) {
+    if (upper.includes(enKey)) {
+      return upper.replace(enKey, bnVal);
+    }
+  }
+
+  return trimmed;
+};
 
 export const isOfficerMember = (member: any): boolean => {
   const rank = String(member?.Rank || member?.rank || '').toUpperCase().trim();
@@ -531,6 +635,9 @@ export const MemberDB: React.FC = () => {
   const [statementCategory, setStatementCategory] = useState<BillCategory>('ALL');
   const [statementMonth, setStatementMonth] = useState<string>(() => getRunningMonthKey());
   const [isCapturingPic, setIsCapturingPic] = useState(false);
+  const [statementImageFile, setStatementImageFile] = useState<File | null>(null);
+  const [statementImageBlob, setStatementImageBlob] = useState<Blob | null>(null);
+  const [whatsAppNotice, setWhatsAppNotice] = useState<string | null>(null);
 
   // Menu catalog prices cache for accurate item rate calculations
   const [menuCatalog, setMenuCatalog] = useState<any[]>(() => getCanteenMenuCache());
@@ -1801,6 +1908,7 @@ export const MemberDB: React.FC = () => {
 
     const rows: StatementItemRow[] = [];
     itemMap.forEach((val) => {
+      const safeQty = val.qty > 0 ? val.qty : 1;
       // 1. Direct catalog lookup for accurate unit price (দর)
       let finalRate = lookupCatalogPrice(val.itemName, menuCatalog);
 
@@ -1809,20 +1917,24 @@ export const MemberDB: React.FC = () => {
         finalRate = Math.round(val.rates[0] * 100) / 100;
       }
 
-      // 3. Fallback to average unit cost
-      if (finalRate <= 0 && val.qty > 0) {
-        finalRate = Math.round((val.total / val.qty) * 100) / 100;
+      // 3. Fallback to unit cost
+      if (finalRate <= 0 && safeQty > 0) {
+        finalRate = Math.round((val.total / safeQty) * 100) / 100;
+      }
+
+      if (finalRate <= 0 && val.total > 0) {
+        finalRate = val.total;
       }
 
       // Calculate accurate total (পরিমাণ × দর)
-      const calculatedTotal = (finalRate > 0 && val.qty > 0)
-        ? Math.round(finalRate * val.qty * 100) / 100
+      const calculatedTotal = (finalRate > 0 && safeQty > 0)
+        ? Math.round(finalRate * safeQty * 100) / 100
         : Math.round(val.total * 100) / 100;
 
       rows.push({
         itemName: val.itemName,
-        qty: val.qty,
-        rate: finalRate,
+        qty: safeQty,
+        rate: finalRate > 0 ? finalRate : Math.round(calculatedTotal / safeQty),
         total: calculatedTotal
       });
     });
@@ -1922,8 +2034,8 @@ export const MemberDB: React.FC = () => {
     return rows;
   };
 
-  // WhatsApp send handler with formatted bill breakdown
-  const handleSendWhatsApp = (
+  // 1. Share statement picture directly to WhatsApp (Via Web Share with picture attached)
+  const handleShareWhatsAppImage = async (
     member: any, 
     items: StatementItemRow[], 
     totalDue: number, 
@@ -1933,12 +2045,89 @@ export const MemberDB: React.FC = () => {
     othersFundBill: number = 0,
     monthKey: string = 'ALL'
   ) => {
+    const rank = getMemberBanglaRank(member) || formatRankBn(member.Rank || member.rank || '');
+    const surname = getMemberBanglaName(member) || formatMemberNameBn(member.Surname || member.surname || '');
+    const fileName = `ক্যাফে_ইউএভি_${rank}_${surname}_বিল.png`;
+
+    let file = statementImageFile;
+    let blob = statementImageBlob;
+
+    if (!file || !blob) {
+      try {
+        blob = await generateStatementCanvasBlob({
+          statementMonth: monthKey,
+          statementMember: member,
+          items,
+          totalMonthBill,
+          previousDue,
+          unitFundBill,
+          othersFundBill,
+          effectivePayments,
+          netPayable: totalDue,
+          rankBn: rank,
+          nameBn: surname
+        });
+        if (blob) {
+          file = new File([blob], fileName, { type: 'image/png' });
+          setStatementImageBlob(blob);
+          setStatementImageFile(file);
+        }
+      } catch (e) {
+        console.warn('Canvas generator note:', e);
+      }
+    }
+
+    // Copy member name/contact to clipboard so user can quickly paste in WhatsApp search
+    const contact = (member.Contact || member.contact || member['Mobile No'] || '').trim();
+    if (navigator.clipboard) {
+      try {
+        await navigator.clipboard.writeText(contact || `${rank} ${surname}`);
+      } catch {}
+    }
+
+    // Mobile Web Share API - Sends the actual Statement Picture directly to WhatsApp!
+    if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({
+          files: [file],
+          title: `ক্যাফে ইউএভি - ${rank} ${surname}`,
+          text: `🍽️ ক্যাফে ইউএভি - ${rank} ${surname} এর ${formatBengaliMonthYear(monthKey)} বিল বিবরণী (মোট প্রদেয়: ৳${toBengaliNum(totalDue)})`
+        });
+        return;
+      } catch (shareErr: any) {
+        if (shareErr.name === 'AbortError') return;
+        console.warn('Share error fallback:', shareErr);
+      }
+    }
+
+    // Fallback if Web Share is not supported
+    if (blob) {
+      downloadStatementBlob(blob, fileName);
+    }
+    const cleanPhone = contact.replace(/\D/g, '');
+    const fullPhone = cleanPhone.startsWith('01') ? '88' + cleanPhone : cleanPhone;
+    window.open(fullPhone ? `https://wa.me/${fullPhone}` : `https://wa.me/`, '_blank');
+  };
+
+  // 2. Direct WhatsApp chat to specific member with pre-filled bill text & picture copied/saved
+  const handleDirectWhatsAppChat = async (
+    member: any, 
+    items: StatementItemRow[], 
+    totalDue: number, 
+    totalMonthBill: number, 
+    previousDue: number,
+    unitFundBill: number = 0,
+    othersFundBill: number = 0,
+    monthKey: string = 'ALL'
+  ) => {
+    const rank = getMemberBanglaRank(member) || formatRankBn(member.Rank || member.rank || '');
+    const surname = getMemberBanglaName(member) || formatMemberNameBn(member.Surname || member.surname || '');
+    const fileName = `ক্যাফে_ইউএভি_${rank}_${surname}_বিল.png`;
+
     let contact = (member.Contact || member.contact || member['Mobile No'] || '').trim();
     if (!contact) {
-      contact = prompt('সদস্যের WhatsApp নম্বর লিখুন (e.g. 017XXXXXXXX):') || '';
+      contact = prompt(`"${rank} ${surname}" এর WhatsApp মোবাইল নম্বর লিখুন (e.g. 017XXXXXXXX):`) || '';
     }
-    if (!contact) return;
-
     let phone = contact.replace(/\D/g, '');
     if (phone.startsWith('01') && phone.length === 11) {
       phone = '88' + phone;
@@ -1946,36 +2135,96 @@ export const MemberDB: React.FC = () => {
       phone = '880' + phone;
     }
 
-    const rank = formatRankBn(member.Rank || member.rank || '');
-    const surname = formatMemberNameBn(member.Surname || member.surname || '');
-    const monthTitle = formatBengaliMonthYear(monthKey);
-
-    let rowsList = '';
-    if (items.length === 0) {
-      rowsList = 'কোনো খাদ্যদ্রব্য খরচের রেকর্ড নেই।\n';
-    } else {
-      rowsList = items.map((r, idx) => 
-        `${idx + 1}. ${r.itemName} | পরিমাণ: ${r.qty} | দর: ৳${r.rate} | মোট: ৳${r.total}`
-      ).join('\n');
+    // 1. Ensure Statement Picture is generated and ready
+    let blob = statementImageBlob;
+    let file = statementImageFile;
+    if (!blob) {
+      try {
+        blob = await generateStatementCanvasBlob({
+          statementMonth: monthKey,
+          statementMember: member,
+          items,
+          totalMonthBill,
+          previousDue,
+          unitFundBill,
+          othersFundBill,
+          effectivePayments,
+          netPayable: totalDue,
+          rankBn: rank,
+          nameBn: surname
+        });
+        if (blob) {
+          setStatementImageBlob(blob);
+          file = new File([blob], fileName, { type: 'image/png' });
+          setStatementImageFile(file);
+        }
+      } catch (err) {
+        console.warn('Canvas generator note:', err);
+      }
     }
 
-    const message = 
-`🍽️ *CAFE UAV - মাসিক বিল বিবরণী*
-📅 *মাসের নাম:* ${monthTitle}
-👤 *পদবী ও নাম:* ${rank} ${surname}
+    // 2. Save image to device gallery & copy to clipboard for instant 1-tap paste
+    if (blob) {
+      downloadStatementBlob(blob, fileName);
+      if (navigator.clipboard && (window as any).ClipboardItem) {
+        try {
+          await navigator.clipboard.write([
+            new ClipboardItem({ 'image/png': blob })
+          ]);
+        } catch (clipErr) {
+          console.warn('Clipboard write note:', clipErr);
+        }
+      }
+    }
 
-━━━━━━━━━━━━━━━━━━━━━
-*দ্রব্যের নাম | পরিমাণ | দর | মোট*
-━━━━━━━━━━━━━━━━━━━━━
-${rowsList}
-━━━━━━━━━━━━━━━━━━━━━
-💰 *মোট বিল:* ৳${totalMonthBill}
-${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}${unitFundBill > 0 ? `🏛️ *ইউনিট ফান্ড:* ৳${unitFundBill}\n` : ''}${othersFundBill > 0 ? `📦 *অন্যান্য:* ৳${othersFundBill}\n` : ''}💳 *সর্বমোট প্রদেয় বিল:* ৳${totalDue}
+    const monthName = formatBengaliMonthYear(monthKey);
+    let msg = `🍽️ *ক্যাফে ইউএভি (CAFE UAV)* 🍽️\n`;
+    msg += `📄 *মাসিক বিল বিবরণী*\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `🗓️ *মাসের নাম:* ${monthName}\n`;
+    msg += `👤 *পদবী ও নাম:* ${rank} ${surname}\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `📋 *দ্রব্য ও খরচের হিসাব:*\n`;
 
-(বিল পরিশোধের জন্য ধন্যবাদ - CAFE UAV)`;
+    if (items.length === 0) {
+      msg += `• ক্যান্টিন বিল (${monthName})\n`;
+      msg += `  └ পরিমাণ: ১ টি | দর: ৳${toBengaliNum(totalMonthBill)} | মোট: ৳${toBengaliNum(totalMonthBill)}\n`;
+    } else {
+      items.forEach((it) => {
+        const isGeneric = isGenericCanteenBill(it.itemName);
+        const name = isGeneric ? `ক্যান্টিন বিল (${monthName})` : formatItemNameBn(it.itemName);
+        const qty = it.qty > 0 ? it.qty : 1;
+        const rate = it.rate > 0 ? it.rate : Math.round(it.total / qty);
+        msg += `• ${name}\n`;
+        msg += `  └ পরিমাণ: ${toBengaliNum(qty)} টি | দর: ৳${toBengaliNum(rate)} | মোট: ৳${toBengaliNum(it.total)}\n`;
+      });
+    }
 
-    const whatsappUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
-    window.open(whatsappUrl, '_blank');
+    msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `💰 *চলতি মাসের বিল:* ৳${toBengaliNum(totalMonthBill)}\n`;
+    if (previousDue > 0) {
+      msg += `⏳ *পূর্বের বকেয়া বিল:* ৳${toBengaliNum(previousDue)}\n`;
+    }
+    if (unitFundBill > 0) {
+      msg += `🏛️ *ইউনিট ফান্ড:* ৳${toBengaliNum(unitFundBill)}\n`;
+    }
+    if (othersFundBill > 0) {
+      msg += `📦 *অন্যান্য:* ৳${toBengaliNum(othersFundBill)}\n`;
+    }
+    if (effectivePayments > 0) {
+      msg += `✅ *পরিশোধিত বিল:* -৳${toBengaliNum(effectivePayments)}\n`;
+    }
+    msg += `🔴 *সর্বমোট প্রদেয় বিল:* ৳${toBengaliNum(totalDue)}\n`;
+    msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+    msg += `ধন্যবাদ, ক্যাফে ইউএভি`;
+
+    if (phone) {
+      window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
+      setWhatsAppNotice(`✅ ${rank} ${surname} এর চ্যাটে বিল ওপেন হয়েছে! স্লিপের ছবি গ্যালারিতে সেভ ও কপি হয়েছে। চ্যাটে 📎 (Gallery) বা Paste থেকে ছবিটি সেন্ড করুন।`);
+      setTimeout(() => setWhatsAppNotice(null), 6000);
+    } else {
+      window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+    }
   };
 
   // Pay bill execution
@@ -2650,21 +2899,40 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
   };
 
   // Statement rows calculation for Statement modal
-  const filteredStatementTxs = statementTx.filter((tx) => {
-    const txMonth = tx?.monthKey || getTxMonthKey(tx.date);
-    return statementMonth === 'ALL' || txMonth === statementMonth;
-  });
+  const filteredStatementTxs = useMemo(() => {
+    return statementTx.filter((tx) => {
+      const txMonth = tx?.monthKey || getTxMonthKey(tx.date);
+      return statementMonth === 'ALL' || txMonth === statementMonth;
+    });
+  }, [statementTx, statementMonth]);
 
-  const statementAggregatedItems = parseStatementAggregatedItems(filteredStatementTxs);
-  const totalMonthBill = statementAggregatedItems.reduce((sum, r) => sum + r.total, 0);
+  const statementAggregatedItems = useMemo(() => {
+    return parseStatementAggregatedItems(filteredStatementTxs);
+  }, [filteredStatementTxs, menuCatalog]);
 
-  const unitFundBill = filteredStatementTxs
-    .filter((tx) => getTxCategory(tx) === 'UNIT_FUND' && tx.type !== 'BILL PAYMENT')
-    .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+  const totalMonthBill = useMemo(() => {
+    const itemTotal = statementAggregatedItems.reduce((sum, r) => sum + r.total, 0);
+    if (itemTotal > 0) return itemTotal;
+    if (statementMember) {
+      const filtered = getMemberFilteredBill(statementMember, 'ALL', statementMonth);
+      if (filtered > 0) return filtered;
+      const totalDue = getMemberTotalDue(statementMember, 'ALL');
+      if (totalDue > 0) return totalDue;
+    }
+    return 0;
+  }, [statementAggregatedItems, statementMember, statementMonth, allTxs]);
 
-  const othersFundBill = filteredStatementTxs
-    .filter((tx) => getTxCategory(tx) === 'OTHERS' && tx.type !== 'BILL PAYMENT')
-    .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+  const unitFundBill = useMemo(() => {
+    return filteredStatementTxs
+      .filter((tx) => getTxCategory(tx) === 'UNIT_FUND' && tx.type !== 'BILL PAYMENT')
+      .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+  }, [filteredStatementTxs]);
+
+  const othersFundBill = useMemo(() => {
+    return filteredStatementTxs
+      .filter((tx) => getTxCategory(tx) === 'OTHERS' && tx.type !== 'BILL PAYMENT')
+      .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+  }, [filteredStatementTxs]);
 
   const memberTotalDue = statementMember ? getMemberTotalDue(statementMember, 'ALL') : 0;
 
@@ -2696,27 +2964,98 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
     ? 0
     : Math.max(0, totalMonthBill + previousDue + unitFundBill + othersFundBill - effectivePayments);
 
+  // Pre-render the statement slip into an image file so WhatsApp click has fresh user activation and instant image file ready
+  useEffect(() => {
+    if (!statementMember) {
+      setStatementImageFile(null);
+      setStatementImageBlob(null);
+      return;
+    }
+
+    const rank = getMemberBanglaRank(statementMember) || formatRankBn(statementMember.Rank || statementMember.rank || '');
+    const surname = getMemberBanglaName(statementMember) || formatMemberNameBn(statementMember.Surname || statementMember.surname || '');
+    const fileName = `ক্যাফে_ইউএভি_${rank}_${surname}_বিল.png`;
+
+    let isCancelled = false;
+
+    generateStatementCanvasBlob({
+      statementMonth,
+      statementMember,
+      items: statementAggregatedItems,
+      totalMonthBill,
+      previousDue,
+      unitFundBill,
+      othersFundBill,
+      effectivePayments,
+      netPayable,
+      rankBn: rank,
+      nameBn: surname
+    }).then((blob) => {
+      if (isCancelled || !blob) return;
+      setStatementImageBlob(blob);
+      const file = new File([blob], fileName, { type: 'image/png' });
+      setStatementImageFile(file);
+    }).catch((err) => {
+      console.warn('Canvas pre-rendering note:', err);
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [
+    statementMember?.airman_id, 
+    statementMonth, 
+    statementAggregatedItems, 
+    totalMonthBill, 
+    previousDue, 
+    netPayable
+  ]);
+
   const handleDownloadStatementPic = async () => {
-    const el = document.getElementById('statement-paper-slip');
-    if (!el) return;
+    if (!statementMember) return;
     setIsCapturingPic(true);
     try {
-      const html2canvas = (await import('html2canvas')).default;
-      const canvas = await html2canvas(el, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#ffffff'
-      });
-      const dataUrl = canvas.toDataURL('image/png');
-      const rank = formatRankBn(statementMember?.['Rank'] || statementMember?.rank || '');
-      const surname = statementMember?.['Surname'] || statementMember?.surname || 'Member';
-      const monthStr = statementMonth || 'Statement';
-      const a = document.createElement('a');
-      a.href = dataUrl;
-      a.download = `${rank}_${surname}_Statement_${monthStr}.png`;
-      a.click();
+      const rank = getMemberBanglaRank(statementMember) || formatRankBn(statementMember?.['Rank'] || statementMember?.rank || '');
+      const surname = getMemberBanglaName(statementMember) || formatMemberNameBn(statementMember?.['Surname'] || statementMember?.surname || 'Member');
+      const fileName = `ক্যাফে_ইউএভি_${rank}_${surname}_বিল.png`;
+
+      let blob = statementImageBlob;
+      if (!blob) {
+        blob = await generateStatementCanvasBlob({
+          statementMonth,
+          statementMember,
+          items: statementAggregatedItems,
+          totalMonthBill,
+          previousDue,
+          unitFundBill,
+          othersFundBill,
+          effectivePayments,
+          netPayable,
+          rankBn: rank,
+          nameBn: surname
+        });
+        if (blob) {
+          setStatementImageBlob(blob);
+          const file = new File([blob], fileName, { type: 'image/png' });
+          setStatementImageFile(file);
+        }
+      }
+
+      if (blob) {
+        const result = await saveStatementToGalleryOrDownload(blob, statementImageFile, fileName);
+        if (result.method === 'share') {
+          setWhatsAppNotice('ছবিটি গ্যালারিতে সেভ করতে শেয়ার অপশন থেকে "Save to Photos/Gallery" অথবা হোয়াটসঅ্যাপ নির্বাচন করুন।');
+          setTimeout(() => setWhatsAppNotice(null), 5000);
+        } else {
+          setWhatsAppNotice('স্টেটমেন্টের ছবি সফলভাবে ডাউনলোড করা হয়েছে!');
+          setTimeout(() => setWhatsAppNotice(null), 4000);
+        }
+      } else {
+        alert('ছবি ডাউনলোড করতে সমস্যা হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।');
+      }
     } catch (err) {
-      console.warn('Error capturing statement picture:', err);
+      console.error('Error downloading statement picture:', err);
+      alert('ছবি তৈরি করতে সমস্যা হয়েছে।');
     } finally {
       setIsCapturingPic(false);
     }
@@ -2732,33 +3071,57 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
-      {/* Top Controls */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-        <div>
-          <h2 className="text-xl sm:text-2xl font-black text-white uppercase tracking-tighter flex items-center gap-2.5">
-            <Receipt className="w-6 h-6 sm:w-7 sm:h-7 text-indigo-400" />
-            <span>BILL MANAGEMENT</span>
-          </h2>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Canteen Bill, Unit Fund Bill & Others Bill Administration
-          </p>
-        </div>
+      {/* If Unit Fund or Others is selected, render the dedicated Fund Batch Bill Page! */}
+      {(selectedCategory === 'UNIT_FUND' || selectedCategory === 'OTHERS') ? (
+        <FundBatchBillPage
+          category={selectedCategory}
+          members={members}
+          allTxs={allTxs}
+          selectedMonth={selectedMonth}
+          onBack={() => setSelectedCategory('CANTEEN')}
+          onCategoryChange={(cat) => setSelectedCategory(cat)}
+          onSuccess={() => fetchMembers(true)}
+          openStatement={openStatement}
+          openPayBill={openPayBill}
+          openProfile={openProfile}
+          setInitialBillMember={setInitialBillMember}
+          handleExportBills={handleExportBills}
+          getMemberBanglaName={getMemberBanglaName}
+          getMemberBanglaRank={getMemberBanglaRank}
+          formatRankBn={formatRankBn}
+          formatMemberNameBn={formatMemberNameBn}
+          getMemberTotalDue={getMemberTotalDue}
+          getMemberFilteredBill={getMemberFilteredBill}
+        />
+      ) : (
+        <>
+          {/* Top Controls */}
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+            <div>
+              <h2 className="text-xl sm:text-2xl font-black text-white uppercase tracking-tighter flex items-center gap-2.5">
+                <Receipt className="w-6 h-6 sm:w-7 sm:h-7 text-indigo-400" />
+                <span>BILL MANAGEMENT</span>
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Canteen Bill, Unit Fund Bill & Others Bill Administration
+              </p>
+            </div>
 
-        {/* Payment History Action Button */}
-        <div className="flex items-center space-x-2 w-full sm:w-auto">
-          <button
-            type="button"
-            onClick={() => setIsPaymentHistoryOpen(true)}
-            className="w-full sm:w-auto flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-indigo-900/40 transition-all cursor-pointer active:scale-95 border border-indigo-400/30 group"
-          >
-            <History className="w-4 h-4 text-indigo-200 group-hover:rotate-[-45deg] transition-transform" />
-            <span>Payment History</span>
-            <span className="px-1.5 py-0.5 rounded-full bg-black/30 text-[10px] font-mono font-black text-indigo-200 border border-indigo-400/20">
-              {allPaymentTxs.length}
-            </span>
-          </button>
-        </div>
-      </div>
+            {/* Payment History Action Button */}
+            <div className="flex items-center space-x-2 w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={() => setIsPaymentHistoryOpen(true)}
+                className="w-full sm:w-auto flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-indigo-900/40 transition-all cursor-pointer active:scale-95 border border-indigo-400/30 group"
+              >
+                <History className="w-4 h-4 text-indigo-200 group-hover:rotate-[-45deg] transition-transform" />
+                <span>Payment History</span>
+                <span className="px-1.5 py-0.5 rounded-full bg-black/30 text-[10px] font-mono font-black text-indigo-200 border border-indigo-400/20">
+                  {allPaymentTxs.length}
+                </span>
+              </button>
+            </div>
+          </div>
 
       {/* Delete / Success Notification Banner */}
       {paymentDeleteSuccessMsg && (
@@ -2773,22 +3136,19 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
         </div>
       )}
 
-      {/* KPI Summary Banner (Compact 2-Column Row: Monthly Total Due & Overall Total Due - No Total Member) */}
-      <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+      {/* KPI Summary Banner (Compact 2-Column Row: Monthly Total Due & Overall Total Due Side-by-Side) */}
+      <div className="grid grid-cols-2 gap-2 sm:gap-2.5">
         {/* Card 1: Monthly Total Due */}
-        <div className="bg-slate-900/90 border border-slate-800/90 hover:border-slate-700/80 rounded-xl p-2.5 sm:p-3 flex items-center space-x-2.5 shadow-sm min-w-0 transition-colors">
-          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
-            <Receipt className="w-4 h-4 sm:w-5 sm:h-5" />
+        <div className="bg-slate-900/90 border border-slate-800/90 hover:border-slate-700/80 rounded-xl p-2 sm:p-2.5 flex items-center space-x-2 shadow-xs min-w-0 transition-colors">
+          <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+            <Receipt className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-slate-400 truncate">
-              Monthly Total Due
+            <p className="text-[8px] sm:text-[9px] font-black uppercase tracking-wider text-slate-400 truncate">
+              Monthly Billed
             </p>
-            <p className="text-base sm:text-xl font-black text-emerald-400 font-mono tracking-tight truncate leading-tight mt-0.5">
+            <p className="text-sm sm:text-base font-black text-emerald-400 font-mono tracking-tight truncate leading-tight mt-0.5">
               ৳{totalFilteredBill.toLocaleString()}
-            </p>
-            <p className="text-[9px] sm:text-[10px] text-indigo-300 font-bold truncate mt-0.5">
-              {formatCompactMonth(selectedMonth)} এর মোট অর্জিত বিল
             </p>
           </div>
         </div>
@@ -2803,49 +3163,41 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
               setFilterMode(isDueFilterActive ? 'ALL' : 'DUE');
             }
           }}
-          className="bg-gradient-to-br from-rose-950/70 via-red-950/40 to-slate-900 border border-rose-500/40 hover:border-rose-400/80 rounded-xl p-2.5 sm:p-3 flex items-center justify-between shadow-md shadow-rose-950/20 transition-all cursor-pointer group min-w-0"
-          title="সকল সদস্যের সর্বমোট প্রদেয় বকেয়া (Click to filter members with due)"
+          className="bg-gradient-to-br from-rose-950/70 via-red-950/40 to-slate-900 border border-rose-500/40 hover:border-rose-400/80 rounded-xl p-2 sm:p-2.5 flex items-center justify-between shadow-xs transition-all cursor-pointer group min-w-0"
+          title="সকল সদস্যের সর্বমোট প্রদেয় বকেয়া"
         >
-          <div className="flex items-center space-x-2.5 min-w-0 flex-1">
-            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-rose-500/20 border border-rose-500/30 flex items-center justify-center text-rose-300 shrink-0 group-hover:scale-105 transition-transform">
-              <Coins className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400" />
+          <div className="flex items-center space-x-2 min-w-0 flex-1">
+            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-rose-500/20 border border-rose-500/30 flex items-center justify-center text-rose-300 shrink-0">
+              <Coins className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="flex items-center space-x-1.5 flex-wrap">
-                <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-rose-300 truncate">
-                  Overall Total Due
-                </p>
-                <span className="text-[8px] sm:text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-200 border border-rose-500/30">
-                  {membersWithDueCount} জন
-                </span>
-              </div>
-              <p className="text-base sm:text-xl font-black text-white font-mono tracking-tight drop-shadow-sm truncate leading-tight mt-0.5">
-                ৳{grandTotalDue.toLocaleString()}
+              <p className="text-[8px] sm:text-[9px] font-black uppercase tracking-wider text-rose-300 truncate">
+                Total Due
               </p>
-              <p className="text-[9px] sm:text-[10px] text-rose-300/90 font-bold truncate mt-0.5">
-                পূর্ববর্তী সব সহ সর্বমোট বকেয়া
+              <p className="text-sm sm:text-base font-black text-white font-mono tracking-tight drop-shadow-sm truncate leading-tight mt-0.5">
+                ৳{grandTotalDue.toLocaleString()}
               </p>
             </div>
           </div>
-          <ChevronRight className="w-3.5 h-3.5 text-rose-400 group-hover:translate-x-0.5 transition-transform shrink-0 ml-1" />
+          <ChevronRight className="w-3.5 h-3.5 text-rose-400 group-hover:translate-x-0.5 transition-transform shrink-0 ml-0.5" />
         </div>
       </div>
 
-      {/* Top Filter: Overall, Officer, Airmen, Civilian */}
-      <div className="w-full min-w-0 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 sm:gap-3 bg-slate-900/90 border border-slate-800 rounded-2xl p-2 sm:p-2.5 shadow-sm">
-        <div className="grid grid-cols-4 w-full sm:flex sm:w-auto items-center gap-1 sm:gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800/80">
+      {/* Top Filter: Overall, Officer, Airmen, Civilian (Selected member box removed) */}
+      <div className="w-full min-w-0 bg-slate-900/90 border border-slate-800 rounded-2xl p-1.5 sm:p-2 shadow-sm">
+        <div className="grid grid-cols-4 w-full items-center gap-1 sm:gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800/80">
           <button
             type="button"
             onClick={() => setRankTypeFilter('OVERALL')}
-            className={`px-1.5 sm:px-3.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 sm:space-x-2 ${
+            className={`px-1 sm:px-3 py-1.5 rounded-lg text-[9px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 sm:space-x-1.5 ${
               rankTypeFilter === 'OVERALL'
                 ? 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white shadow-md shadow-indigo-600/30'
                 : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
             }`}
           >
-            <Users className="w-3.5 h-3.5 shrink-0 hidden xs:inline-block sm:inline-block" />
+            <Users className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0 hidden xs:inline-block sm:inline-block" />
             <span>OVERALL</span>
-            <span className="px-1 py-0.2 rounded-md bg-white/15 text-[9px] sm:text-[10px] font-mono font-bold">
+            <span className="px-1 py-0.2 rounded-md bg-white/15 text-[8px] sm:text-[9px] font-mono font-bold">
               {overallCount}
             </span>
           </button>
@@ -2853,15 +3205,15 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
           <button
             type="button"
             onClick={() => setRankTypeFilter('OFFICER')}
-            className={`px-1.5 sm:px-3.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 sm:space-x-2 ${
+            className={`px-1 sm:px-3 py-1.5 rounded-lg text-[9px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 sm:space-x-1.5 ${
               rankTypeFilter === 'OFFICER'
                 ? 'bg-gradient-to-r from-amber-600 to-orange-600 text-white shadow-md shadow-amber-600/30'
                 : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
             }`}
           >
-            <ShieldCheck className="w-3.5 h-3.5 shrink-0 hidden xs:inline-block sm:inline-block" />
+            <ShieldCheck className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0 hidden xs:inline-block sm:inline-block" />
             <span>OFFICER</span>
-            <span className="px-1 py-0.2 rounded-md bg-white/15 text-[9px] sm:text-[10px] font-mono font-bold">
+            <span className="px-1 py-0.2 rounded-md bg-white/15 text-[8px] sm:text-[9px] font-mono font-bold">
               {officerCount}
             </span>
           </button>
@@ -2869,15 +3221,15 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
           <button
             type="button"
             onClick={() => setRankTypeFilter('AIRMEN')}
-            className={`px-1.5 sm:px-3.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 sm:space-x-2 ${
+            className={`px-1 sm:px-3 py-1.5 rounded-lg text-[9px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 sm:space-x-1.5 ${
               rankTypeFilter === 'AIRMEN'
                 ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-600/30'
                 : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
             }`}
           >
-            <User className="w-3.5 h-3.5 shrink-0 hidden xs:inline-block sm:inline-block" />
+            <User className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0 hidden xs:inline-block sm:inline-block" />
             <span>AIRMEN</span>
-            <span className="px-1 py-0.2 rounded-md bg-white/15 text-[9px] sm:text-[10px] font-mono font-bold">
+            <span className="px-1 py-0.2 rounded-md bg-white/15 text-[8px] sm:text-[9px] font-mono font-bold">
               {airmenCount}
             </span>
           </button>
@@ -2885,83 +3237,76 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
           <button
             type="button"
             onClick={() => setRankTypeFilter('CIVILIAN')}
-            className={`px-1.5 sm:px-3.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 sm:space-x-2 ${
+            className={`px-1 sm:px-3 py-1.5 rounded-lg text-[9px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 sm:space-x-1.5 ${
               rankTypeFilter === 'CIVILIAN'
                 ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-md shadow-purple-600/30'
                 : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
             }`}
           >
-            <Coffee className="w-3.5 h-3.5 shrink-0 hidden xs:inline-block sm:inline-block" />
+            <Coffee className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0 hidden xs:inline-block sm:inline-block" />
             <span>CIVILIAN</span>
-            <span className="px-1 py-0.2 rounded-md bg-white/15 text-[9px] sm:text-[10px] font-mono font-bold">
+            <span className="px-1 py-0.2 rounded-md bg-white/15 text-[8px] sm:text-[9px] font-mono font-bold">
               {civilianCount}
             </span>
           </button>
-        </div>
-
-        <div className="text-[11px] font-bold text-slate-400 px-1 sm:px-2 flex items-center space-x-1.5 shrink-0">
-          <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse shrink-0" />
-          <span className="truncate">
-            Active Filter: <strong className="text-white uppercase">{rankTypeFilter}</strong> ({displayedMemberList.length} members shown)
-          </span>
         </div>
       </div>
 
       {/* Bill Category Tabs & Compact Month Selector */}
       <div className="bg-slate-900/85 border border-slate-800 rounded-xl p-2.5 sm:p-3 space-y-2.5 shadow-sm">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
-          {/* Bill Category Filter Pills: Canteen Bill, Unit Fund Bill, Others Bill, All */}
-          <div className="flex items-center gap-1 overflow-x-auto pb-0.5 scrollbar-none">
+          {/* Bill Category Filter Pills: All, Canteen, Unit Fund, Others - Responsive grid on mobile so All is never pushed out */}
+          <div className="w-full sm:w-auto grid grid-cols-4 sm:flex items-center gap-1 sm:gap-1.5 p-1 bg-slate-950/90 rounded-xl border border-slate-800">
+            <button
+              type="button"
+              onClick={() => setSelectedCategory('ALL')}
+              className={`px-1.5 sm:px-2.5 py-1.5 rounded-lg text-[10px] sm:text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 ${
+                selectedCategory === 'ALL'
+                  ? 'bg-slate-700 text-white shadow-xs ring-1 ring-slate-400/50'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+              }`}
+            >
+              <Receipt className="w-3.5 h-3.5 text-slate-300 shrink-0" />
+              <span>All</span>
+            </button>
+
             <button
               type="button"
               onClick={() => setSelectedCategory('CANTEEN')}
-              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer flex items-center space-x-1.5 ${
+              className={`px-1.5 sm:px-2.5 py-1.5 rounded-lg text-[10px] sm:text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 ${
                 selectedCategory === 'CANTEEN'
                   ? 'bg-amber-600 text-white shadow-xs ring-1 ring-amber-400/50'
-                  : 'bg-slate-800/70 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700/50'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
               }`}
             >
-              <Coffee className="w-3.5 h-3.5 text-amber-400" />
-              <span>Canteen Bill</span>
+              <Coffee className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span>Canteen</span>
             </button>
 
             <button
               type="button"
               onClick={() => setSelectedCategory('UNIT_FUND')}
-              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer flex items-center space-x-1.5 ${
+              className={`px-1.5 sm:px-2.5 py-1.5 rounded-lg text-[10px] sm:text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 ${
                 selectedCategory === 'UNIT_FUND'
                   ? 'bg-indigo-600 text-white shadow-xs ring-1 ring-indigo-400/50'
-                  : 'bg-slate-800/70 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700/50'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
               }`}
             >
-              <Landmark className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Unit Fund Bill</span>
+              <Landmark className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+              <span className="truncate">Unit Fund</span>
             </button>
 
             <button
               type="button"
               onClick={() => setSelectedCategory('OTHERS')}
-              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer flex items-center space-x-1.5 ${
+              className={`px-1.5 sm:px-2.5 py-1.5 rounded-lg text-[10px] sm:text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 ${
                 selectedCategory === 'OTHERS'
                   ? 'bg-cyan-600 text-white shadow-xs ring-1 ring-cyan-400/50'
-                  : 'bg-slate-800/70 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700/50'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
               }`}
             >
-              <Layers className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Others Bill</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setSelectedCategory('ALL')}
-              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer flex items-center space-x-1.5 ${
-                selectedCategory === 'ALL'
-                  ? 'bg-slate-700 text-white shadow-xs ring-1 ring-slate-400/50'
-                  : 'bg-slate-800/70 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700/50'
-              }`}
-            >
-              <Receipt className="w-3.5 h-3.5 text-slate-300" />
-              <span>All</span>
+              <Layers className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <span>Others</span>
             </button>
           </div>
 
@@ -3001,7 +3346,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
           <div className="flex items-center space-x-2 flex-wrap gap-y-1">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <span>
-              Showing: <strong className="text-white">{selectedCategory === 'CANTEEN' ? 'Canteen Bill' : selectedCategory === 'UNIT_FUND' ? 'Unit Fund Bill' : selectedCategory === 'OTHERS' ? 'Others Bill' : 'All Bills'}</strong>
+              Showing: <strong className="text-white">{selectedCategory === 'CANTEEN' ? 'Canteen' : selectedCategory === 'UNIT_FUND' ? 'Unit Fund' : selectedCategory === 'OTHERS' ? 'Others' : 'All Bills'}</strong>
               {' • '}
               <strong className="text-indigo-300 font-mono">{formatCompactMonth(selectedMonth)}</strong>
             </span>
@@ -3064,76 +3409,62 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
           )}
         </div>
 
-        {/* Actions: Import Initial Bills Button, Export Bill Button & View Mode Toggle */}
-        <div className="flex items-center space-x-2.5 self-end sm:self-auto shrink-0 flex-wrap gap-y-2">
-          <button
-            type="button"
-            onClick={() => {
-              setImportModalInitialTab('FILE');
-              setIsImportBillsModalOpen(true);
-            }}
-            className="px-4 py-2.5 bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 shadow-md shadow-emerald-500/25 border-t border-emerald-300/40 active:translate-y-0.5 transition-all cursor-pointer"
-            title="Bulk Import Initial Bills (Excel / CSV / Copy-Paste / History)"
-          >
-            <FileSpreadsheet className="w-4 h-4" />
-            <span>IMPORT BILLS</span>
-          </button>
+        {/* Actions: Import Button & Export Button (Only when ALL is selected) & View Mode Toggle (Icons Only) */}
+        <div className="flex items-center space-x-2 self-end sm:self-auto shrink-0 flex-wrap gap-y-2">
+          {selectedCategory === 'ALL' && (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setImportModalInitialTab('FILE');
+                  setIsImportBillsModalOpen(true);
+                }}
+                className="px-4 py-2.5 bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 shadow-md shadow-emerald-500/25 border-t border-emerald-300/40 active:translate-y-0.5 transition-all cursor-pointer"
+                title="Bulk Import Initial Bills (Excel / CSV / Copy-Paste / History)"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>IMPORT</span>
+              </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setImportModalInitialTab('HISTORY');
-              setIsImportBillsModalOpen(true);
-            }}
-            className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-2xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 border border-slate-700/80 shadow-sm active:translate-y-0.5 transition-all cursor-pointer"
-            title="ইম্পোর্ট হিস্টোরি ও ব্যাচ বিবরণী দেখুন (View Import History Batches)"
-          >
-            <History className="w-4 h-4 text-emerald-400" />
-            <span>ইম্পোর্ট হিস্টোরি</span>
-            {importHistoryCount > 0 && (
-              <span className="px-1.5 py-0.2 rounded-md bg-emerald-500/20 text-emerald-300 font-mono text-[10px] font-bold border border-emerald-500/30">
-                {importHistoryCount}
-              </span>
-            )}
-          </button>
+              <button
+                type="button"
+                onClick={handleExportBills}
+                className="px-4 py-2.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-500 text-white rounded-2xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 shadow-md shadow-indigo-500/25 border-t border-indigo-300/40 active:translate-y-0.5 transition-all cursor-pointer"
+                title="Export Bill (Print Preview, PDF & Excel)"
+              >
+                <Printer className="w-4 h-4" />
+                <span>EXPORT (PDF)</span>
+              </button>
+            </>
+          )}
 
-          <button
-            type="button"
-            onClick={handleExportBills}
-            className="px-4 py-2.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-500 text-white rounded-2xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 shadow-md shadow-indigo-500/25 border-t border-indigo-300/40 active:translate-y-0.5 transition-all cursor-pointer"
-            title="Export Bill (Print Preview, PDF & Excel)"
-          >
-            <Printer className="w-4 h-4" />
-            <span>EXPORT BILL (PDF)</span>
-          </button>
-
-          {/* View Mode Toggle: Box vs Table */}
+          {/* View Mode Toggle: Box vs Table (Icons only) */}
           <div className="flex items-center bg-slate-900 rounded-2xl p-1 border border-slate-800 shadow-sm">
             <button
               type="button"
               onClick={() => setViewMode('BOX')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 transition-all cursor-pointer ${
+              className={`p-2 rounded-xl text-xs transition-all cursor-pointer flex items-center justify-center ${
                 viewMode === 'BOX'
                   ? 'bg-indigo-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-white'
               }`}
               title="Box / Card View"
+              aria-label="Box View"
             >
-              <LayoutGrid className="w-3.5 h-3.5" />
-              <span>Box View</span>
+              <LayoutGrid className="w-4 h-4" />
             </button>
             <button
               type="button"
               onClick={() => setViewMode('TABLE')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 transition-all cursor-pointer ${
+              className={`p-2 rounded-xl text-xs transition-all cursor-pointer flex items-center justify-center ${
                 viewMode === 'TABLE'
                   ? 'bg-indigo-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-white'
               }`}
               title="Table View"
+              aria-label="Table View"
             >
-              <List className="w-3.5 h-3.5" />
-              <span>Table View</span>
+              <List className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -3523,6 +3854,8 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
           </div>
         </div>
       )}
+      </>
+      )}
 
       {/* Profile Modal (No Pay Bill, No Statement, DP hidden before Edit mode) */}
       {profileMember && (
@@ -3908,10 +4241,10 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                   </div>
                   <div className="min-w-0 flex-1">
                     <h2 className="text-base sm:text-lg font-black text-white truncate leading-tight">
-                      {statementMember['Rank']} {statementMember['Surname']}
+                      {getMemberBanglaRank(statementMember) || formatRankBn(statementMember['Rank'] || statementMember.rank || '')} {getMemberBanglaName(statementMember) || formatMemberNameBn(statementMember['Surname'] || '')}
                     </h2>
                     <p className="text-[11px] font-bold text-slate-400 font-mono truncate mt-0.5">
-                      Monthly Statement • {formatBengaliMonthYear(statementMonth)}
+                      মাসিক হিসাব বিবরণী • {formatBengaliMonthYear(statementMonth)}
                     </p>
                   </div>
                 </div>
@@ -3927,42 +4260,85 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                 </button>
               </div>
 
-              {/* Row 2: Action Buttons: WhatsApp Send, Save Pic, Print Bill */}
+              {/* Row 2: Action Buttons: Direct WhatsApp Chat, Share Image, Download Pic, Print */}
               <div className="flex items-center gap-2 overflow-x-auto w-full pt-0.5 scrollbar-none">
-                {/* Send via WhatsApp Button */}
+                {/* 1. WHATSAPP Direct Chat with Member (Full breakdown & copied/saved statement picture) */}
                 <button 
                   type="button"
-                  onClick={() => handleSendWhatsApp(statementMember, statementAggregatedItems, netPayable, totalMonthBill, previousDue, unitFundBill, othersFundBill, statementMonth)}
-                  className="flex items-center space-x-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md shadow-emerald-500/20 active:translate-y-0.5 whitespace-nowrap cursor-pointer"
-                  title="Send Statement via WhatsApp"
+                  onClick={() => handleDirectWhatsAppChat(statementMember, statementAggregatedItems, netPayable, totalMonthBill, previousDue, unitFundBill, othersFundBill, statementMonth)}
+                  disabled={isCapturingPic}
+                  className="flex items-center space-x-1.5 px-3.5 py-2 bg-[#25D366] hover:bg-[#20ba59] text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md shadow-[#25D366]/25 active:translate-y-0.5 whitespace-nowrap cursor-pointer disabled:opacity-60"
+                  title="সরাসরি সদস্যের হোয়াটসঅ্যাপ চ্যাটে স্টেটমেন্ট ও ছবি পাঠান"
                 >
-                  <MessageCircle className="w-4 h-4 shrink-0" />
-                  <span>WHATSAPP</span>
+                  <WhatsAppIcon className="w-4 h-4 shrink-0 text-white" />
+                  <span>WHATSAPP (সরাসরি চ্যাট ও ছবি)</span>
                 </button>
 
-                {/* Save Picture Button using html2canvas */}
+                {/* 2. Share Image via System Share (Attaches picture directly in WhatsApp) */}
+                <button 
+                  type="button"
+                  onClick={() => handleShareWhatsAppImage(statementMember, statementAggregatedItems, netPayable, totalMonthBill, previousDue, unitFundBill, othersFundBill, statementMonth)}
+                  disabled={isCapturingPic}
+                  className="flex items-center space-x-1.5 px-3 py-2 bg-emerald-800 hover:bg-emerald-700 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md shadow-emerald-800/25 active:translate-y-0.5 whitespace-nowrap cursor-pointer disabled:opacity-60"
+                  title="ছবি সরাসরি হোয়াটসঅ্যাপে শেয়ার করুন"
+                >
+                  <Share2 className="w-4 h-4 shrink-0 text-white" />
+                  <span>ছবি সহ শেয়ার</span>
+                </button>
+
+                {/* 3. Download Pic Button */}
                 <button 
                   type="button"
                   onClick={handleDownloadStatementPic}
                   disabled={isCapturingPic}
-                  className="flex items-center space-x-1.5 px-3.5 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md shadow-purple-500/20 active:translate-y-0.5 disabled:opacity-50 whitespace-nowrap cursor-pointer"
-                  title="ছবি হিসেবে সংরক্ষণ করুন (Save / Download Picture)"
+                  className="flex items-center space-x-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md border border-slate-700/80 active:translate-y-0.5 disabled:opacity-50 whitespace-nowrap cursor-pointer"
+                  title="স্টেটমেন্টের ছবি ডাউনলোড করুন"
                 >
-                  {isCapturingPic ? <Loader2 className="w-4 h-4 animate-spin shrink-0" /> : <ImageIcon className="w-4 h-4 shrink-0" />}
-                  <span>{isCapturingPic ? 'ছবি তৈরি হচ্ছে...' : 'ছবি ডাউনলোড'}</span>
+                  {isCapturingPic ? (
+                    <Loader2 className="w-4 h-4 animate-spin shrink-0 text-indigo-400" />
+                  ) : (
+                    <Download className="w-4 h-4 shrink-0 text-indigo-400" />
+                  )}
+                  <span>ছবি ডাউনলোড</span>
                 </button>
 
-                {/* Print Bill / PDF */}
+                {/* 4. Print */}
                 <button 
                   type="button"
                   onClick={() => window.print()} 
-                  className="flex items-center space-x-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md shadow-indigo-500/20 active:translate-y-0.5 whitespace-nowrap cursor-pointer"
-                  title="Print Bill / Save as PDF"
+                  className="flex items-center space-x-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md shadow-indigo-500/20 active:translate-y-0.5 whitespace-nowrap cursor-pointer"
+                  title="প্রিন্ট করুন"
                 >
                   <Printer className="w-4 h-4 shrink-0" />
-                  <span>PRINT BILL</span>
+                  <span>প্রিন্ট</span>
                 </button>
               </div>
+
+              {/* WhatsApp Notification Toast (Floating, Non-blocking) */}
+              {whatsAppNotice && (
+                <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[100] max-w-lg w-[92%] bg-slate-900/95 border border-emerald-500/50 rounded-2xl p-3.5 shadow-2xl backdrop-blur-md flex items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-5">
+                  <div className="flex items-center space-x-3 min-w-0 flex-1">
+                    <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-[#25D366] flex items-center justify-center shrink-0">
+                      <WhatsAppIcon className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-white leading-tight">
+                        {whatsAppNotice}
+                      </p>
+                      <p className="text-[11px] text-slate-300 mt-0.5">
+                        💡 টিপস: চ্যাটে 📎 (Gallery) অথবা কীবোর্ডে Paste করলেই ছবিটি সেন্ড হয়ে যাবে।
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setWhatsAppNotice(null)}
+                    className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 shrink-0 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Modal Month Filter Bar (Hidden when printing - Bill Cat removed as requested) */}
@@ -3990,126 +4366,148 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
               </div>
             </div>
 
-            {/* Statement Content Area */}
-            <div className="p-6 overflow-y-auto bg-slate-950/40 flex-1 print:p-0 print:bg-white print:overflow-visible">
-              <div id="statement-paper-slip" className="bg-white rounded-2xl p-8 border border-slate-300 text-black max-w-3xl mx-auto shadow-sm">
+            {/* Statement Content Area - Exact replica of Pic 2 with Sutonny Mj font */}
+            <div className="p-4 sm:p-6 overflow-y-auto bg-slate-950/40 flex-1 print:p-0 print:bg-white print:overflow-visible flex justify-center">
+              <div 
+                id="statement-paper-slip" 
+                style={{ fontFamily: "'SutonnyMJ', 'SutonnyOMJ', 'Noto Serif Bengali', 'Tiro Bangla', 'SolaimanLipi', 'Kalpurush', serif" }}
+                className="bg-white rounded-none sm:rounded-2xl p-6 sm:p-8 text-black w-full max-w-md mx-auto shadow-sm"
+              >
                 
-                {/* Header Banner */}
-                <div className="text-center mb-6 border-b-2 border-black pb-4">
-                  <h2 className="text-2xl font-black text-black tracking-wider">🍽️ CAFE UAV 🍽️</h2>
-                  <p className="text-xs font-bold text-slate-700 mt-0.5">
+                {/* Header Banner matching Pic 2 */}
+                <div className="text-center mb-5">
+                  <div className="flex items-center justify-center space-x-2 text-2xl sm:text-3xl font-black text-black tracking-tight">
+                    <span>🍽️</span>
+                    <span>ক্যাফে ইউএভি</span>
+                    <span>🍽️</span>
+                  </div>
+                  <p className="text-sm sm:text-base font-bold text-slate-700 mt-1">
                     মাসিক বিল বিবরণী
                   </p>
+                  <div className="w-full h-1 bg-black mt-4"></div>
                 </div>
 
-                {/* Statement Paper Table */}
-                <table className="w-full border-collapse border border-black text-xs font-bold text-black mb-6">
+                {/* Statement Paper Table matching Pic 2 - Normal white cells */}
+                <table className="w-full border-collapse border-2 border-black text-sm sm:text-base font-bold text-black bg-white">
                   <tbody>
-                    <tr>
-                      <td className="border border-black p-2.5 text-left w-1/4 bg-slate-50 font-black">মাসের নাম</td>
-                      <td className="border border-black p-2.5 text-left font-black" colSpan={3}>
+                    <tr className="bg-white">
+                      <td className="border border-black p-3 text-left w-1/3 bg-white font-black">মাসের নাম</td>
+                      <td className="border border-black p-3 text-left font-black bg-white" colSpan={3}>
                         {formatBengaliMonthYear(statementMonth)}
                       </td>
                     </tr>
-                    <tr>
-                      <td className="border border-black p-2.5 text-left bg-slate-50 font-black">পদবী ও নাম</td>
-                      {/* Statement er Namer Pase Bd No lagbe na */}
-                      <td className="border border-black p-2.5 text-left font-black" colSpan={3}>
-                        {formatRankBn(statementMember['Rank'] || statementMember.rank || '')} {statementMember['Surname'] || ''}
+                    <tr className="bg-white">
+                      <td className="border border-black p-3 text-left bg-white font-black">পদবী ও নাম</td>
+                      <td className="border border-black p-3 text-left font-black bg-white" colSpan={3}>
+                        {getMemberBanglaRank(statementMember) || formatRankBn(statementMember['Rank'] || statementMember.rank || '')} {getMemberBanglaName(statementMember) || formatMemberNameBn(statementMember['Surname'] || '')}
                       </td>
                     </tr>
                     
                     {/* Heading Row: দ্রব্যের নাম , পরিমাণ , দর, মোট (Bold & Center Align) */}
-                    <tr className="bg-slate-100 text-center font-black">
-                      <th className="border border-black p-2.5 text-center font-black">দ্রব্যের নাম</th>
-                      <th className="border border-black p-2.5 w-24 text-center font-black">পরিমাণ</th>
-                      <th className="border border-black p-2.5 w-24 text-center font-black">দর</th>
-                      <th className="border border-black p-2.5 w-28 text-center font-black">মোট</th>
+                    <tr className="bg-white text-center font-black">
+                      <th className="border border-black p-3 text-center font-black w-2/5 bg-white">দ্রব্যের নাম</th>
+                      <th className="border border-black p-3 text-center font-black w-1/5 bg-white">পরিমাণ</th>
+                      <th className="border border-black p-3 text-center font-black w-1/5 bg-white">দর</th>
+                      <th className="border border-black p-3 text-center font-black w-1/5 bg-white">মোট</th>
                     </tr>
 
+                    {/* Items Rows - All 4 columns visible: দ্রব্যের নাম, পরিমাণ, দর, মোট */}
                     {statementAggregatedItems.length === 0 ? (
-                      <tr>
-                        <td className="border border-black p-4 text-center font-normal" colSpan={4}>
-                          কোনো খাদ্যদ্রব্য খরচের রেকর্ড নেই
+                      <tr className="bg-white">
+                        <td className="border border-black p-3 text-left font-bold bg-white">
+                          ক্যান্টিন বিল ({formatBengaliMonthYear(statementMonth)})
+                        </td>
+                        <td className="border border-black p-3 text-center font-bold bg-white">১</td>
+                        <td className="border border-black p-3 text-center font-bold bg-white">
+                          ৳{toBengaliNum(totalMonthBill)}
+                        </td>
+                        <td className="border border-black p-3 text-center font-bold bg-white">
+                          ৳{toBengaliNum(totalMonthBill)}
                         </td>
                       </tr>
                     ) : (
-                      statementAggregatedItems.map((item, idx) => (
-                        <tr key={idx} className="text-center">
-                          <td className="border border-black p-2.5 text-left font-semibold">{item.itemName}</td>
-                          <td className="border border-black p-2.5 font-mono text-center">{item.qty}</td>
-                          <td className="border border-black p-2.5 text-right font-mono">
-                            ৳{item.rate}
-                          </td>
-                          <td className="border border-black p-2.5 text-right font-mono font-black">
-                            ৳{item.total}
-                          </td>
-                        </tr>
-                      ))
+                      statementAggregatedItems.map((item, idx) => {
+                        const isGeneric = isGenericCanteenBill(item.itemName);
+                        const displayName = isGeneric ? `ক্যান্টিন বিল (${formatBengaliMonthYear(statementMonth)})` : formatItemNameBn(item.itemName);
+                        const qty = item.qty > 0 ? item.qty : 1;
+                        const rate = item.rate > 0 ? item.rate : Math.round(item.total / qty);
+                        return (
+                          <tr key={idx} className="bg-white">
+                            <td className="border border-black p-3 text-left font-bold bg-white">{displayName}</td>
+                            <td className="border border-black p-3 text-center font-bold bg-white">{toBengaliNum(qty)}</td>
+                            <td className="border border-black p-3 text-center font-bold bg-white">
+                              ৳{toBengaliNum(rate)}
+                            </td>
+                            <td className="border border-black p-3 text-center font-bold bg-white">
+                              ৳{toBengaliNum(item.total)}
+                            </td>
+                          </tr>
+                        );
+                      })
                     )}
 
-                    {/* Summary Rows */}
-                    <tr>
-                      <td className="border border-black p-2.5 text-right font-black bg-slate-50" colSpan={3}>
+                    {/* Summary Rows - Normal white cells, no alternating grey */}
+                    <tr className="bg-white">
+                      <td className="border border-black p-3 text-right font-black bg-white" colSpan={3}>
                         মোট বিল
                       </td>
-                      <td className="border border-black p-2.5 text-right font-black font-mono text-sm">
-                        ৳{totalMonthBill}
+                      <td className="border border-black p-3 text-center font-black bg-white">
+                        ৳{toBengaliNum(totalMonthBill)}
                       </td>
                     </tr>
 
                     {/* বকেয়া বিল (যদি ০ থাকে তাহলে Hide থাকবে) */}
                     {previousDue > 0 && (
-                      <tr>
-                        <td className="border border-black p-2.5 text-right font-black bg-amber-50/60" colSpan={3}>
+                      <tr className="bg-white">
+                        <td className="border border-black p-3 text-right font-black bg-white" colSpan={3}>
                           বকেয়া বিল
                         </td>
-                        <td className="border border-black p-2.5 text-right font-black font-mono text-sm text-amber-900">
-                          ৳{previousDue}
+                        <td className="border border-black p-3 text-center font-black bg-white">
+                          ৳{toBengaliNum(previousDue)}
                         </td>
                       </tr>
                     )}
 
                     {/* ইউনিট ফান্ড (যদি ০ থাকে তাহলে Hide থাকবে) */}
                     {unitFundBill > 0 && (
-                      <tr>
-                        <td className="border border-black p-2.5 text-right font-black bg-indigo-50/60" colSpan={3}>
+                      <tr className="bg-white">
+                        <td className="border border-black p-3 text-right font-black bg-white" colSpan={3}>
                           ইউনিট ফান্ড
                         </td>
-                        <td className="border border-black p-2.5 text-right font-black font-mono text-sm text-indigo-950">
-                          ৳{unitFundBill}
+                        <td className="border border-black p-3 text-center font-black bg-white">
+                          ৳{toBengaliNum(unitFundBill)}
                         </td>
                       </tr>
                     )}
 
                     {/* অন্যান্য (যদি ০ থাকে তাহলে Hide থাকবে) */}
                     {othersFundBill > 0 && (
-                      <tr>
-                        <td className="border border-black p-2.5 text-right font-black bg-sky-50/60" colSpan={3}>
+                      <tr className="bg-white">
+                        <td className="border border-black p-3 text-right font-black bg-white" colSpan={3}>
                           অন্যান্য
                         </td>
-                        <td className="border border-black p-2.5 text-right font-black font-mono text-sm text-sky-950">
-                          ৳{othersFundBill}
+                        <td className="border border-black p-3 text-center font-black bg-white">
+                          ৳{toBengaliNum(othersFundBill)}
                         </td>
                       </tr>
                     )}
 
                     {effectivePayments > 0 && (
-                      <tr>
-                        <td className="border border-black p-2.5 text-right font-bold text-emerald-800 bg-emerald-50/60" colSpan={3}>
+                      <tr className="bg-white">
+                        <td className="border border-black p-3 text-right font-black bg-white" colSpan={3}>
                           পরিশোধিত বিল
                         </td>
-                        <td className="border border-black p-2.5 text-right font-bold font-mono text-sm text-emerald-700">
-                          -৳{effectivePayments}
+                        <td className="border border-black p-3 text-center font-black bg-white text-emerald-700">
+                          -৳{toBengaliNum(effectivePayments)}
                         </td>
                       </tr>
                     )}
-                    <tr>
-                      <td className="border border-black p-2.5 text-right font-black bg-slate-100" colSpan={3}>
+                    <tr className="bg-white">
+                      <td className="border border-black p-3 text-right font-black bg-white" colSpan={3}>
                         সর্বমোট প্রদেয় বিল
                       </td>
-                      <td className="border border-black p-2.5 text-right font-black font-mono text-base text-rose-700 bg-slate-100">
-                        ৳{netPayable}
+                      <td className="border border-black p-3 text-center font-black text-[#e11d48] bg-white text-base sm:text-lg">
+                        ৳{toBengaliNum(netPayable)}
                       </td>
                     </tr>
                   </tbody>
