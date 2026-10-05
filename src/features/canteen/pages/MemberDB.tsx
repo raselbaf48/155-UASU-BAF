@@ -79,6 +79,13 @@ import {
   isAirmanMember 
 } from '../utils/canteenSeniority';
 export { isCivilianMember, isAirmanMember };
+import { WhatsAppMessageTemplateBox } from '../components/WhatsAppMessageTemplateBox';
+import {
+  buildWhatsAppBillMessage,
+  isMemberSeniorToManager,
+  getWhatsAppTemplateConfig,
+  syncWhatsAppTemplateConfigFromCloud
+} from '../utils/canteenWhatsAppTemplate';
 import { 
   getMemberBanglaName, 
   saveMemberBanglaName, 
@@ -638,6 +645,12 @@ export const MemberDB: React.FC = () => {
   const [statementImageFile, setStatementImageFile] = useState<File | null>(null);
   const [statementImageBlob, setStatementImageBlob] = useState<Blob | null>(null);
   const [whatsAppNotice, setWhatsAppNotice] = useState<string | null>(null);
+  const [canteenConfig, setCanteenConfig] = useState<any>(() => getCanteenConfig());
+  const [showWhatsAppTemplateBox, setShowWhatsAppTemplateBox] = useState<boolean>(true);
+
+  useEffect(() => {
+    syncWhatsAppTemplateConfigFromCloud().catch(() => {});
+  }, []);
 
   // Menu catalog prices cache for accurate item rate calculations
   const [menuCatalog, setMenuCatalog] = useState<any[]>(() => getCanteenMenuCache());
@@ -2085,13 +2098,23 @@ export const MemberDB: React.FC = () => {
       } catch {}
     }
 
+    const { message: shareText } = buildWhatsAppBillMessage({
+      member,
+      totalDue,
+      monthKey,
+      managerName: canteenConfig?.managerName || 'LAC Nishad',
+      managerBdNo: canteenConfig?.managerBdNo,
+      rankBn: rank,
+      nameBn: surname
+    });
+
     // Mobile Web Share API - Sends the actual Statement Picture directly to WhatsApp!
     if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
       try {
         await navigator.share({
           files: [file],
           title: `ক্যাফে ইউএভি - ${rank} ${surname}`,
-          text: `🍽️ ক্যাফে ইউএভি - ${rank} ${surname} এর ${formatBengaliMonthYear(monthKey)} বিল বিবরণী (মোট প্রদেয়: ৳${toBengaliNum(totalDue)})`
+          text: shareText
         });
         return;
       } catch (shareErr: any) {
@@ -2177,50 +2200,20 @@ export const MemberDB: React.FC = () => {
       }
     }
 
-    const monthName = formatBengaliMonthYear(monthKey);
-    let msg = `🍽️ *ক্যাফে ইউএভি (CAFE UAV)* 🍽️\n`;
-    msg += `📄 *মাসিক বিল বিবরণী*\n`;
-    msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    msg += `🗓️ *মাসের নাম:* ${monthName}\n`;
-    msg += `👤 *পদবী ও নাম:* ${rank} ${surname}\n`;
-    msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    msg += `📋 *দ্রব্য ও খরচের হিসাব:*\n`;
-
-    if (items.length === 0) {
-      msg += `• ক্যান্টিন বিল (${monthName})\n`;
-      msg += `  └ পরিমাণ: ১ টি | দর: ৳${toBengaliNum(totalMonthBill)} | মোট: ৳${toBengaliNum(totalMonthBill)}\n`;
-    } else {
-      items.forEach((it) => {
-        const isGeneric = isGenericCanteenBill(it.itemName);
-        const name = isGeneric ? `ক্যান্টিন বিল (${monthName})` : formatItemNameBn(it.itemName);
-        const qty = it.qty > 0 ? it.qty : 1;
-        const rate = it.rate > 0 ? it.rate : Math.round(it.total / qty);
-        msg += `• ${name}\n`;
-        msg += `  └ পরিমাণ: ${toBengaliNum(qty)} টি | দর: ৳${toBengaliNum(rate)} | মোট: ৳${toBengaliNum(it.total)}\n`;
-      });
-    }
-
-    msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    msg += `💰 *চলতি মাসের বিল:* ৳${toBengaliNum(totalMonthBill)}\n`;
-    if (previousDue > 0) {
-      msg += `⏳ *পূর্বের বকেয়া বিল:* ৳${toBengaliNum(previousDue)}\n`;
-    }
-    if (unitFundBill > 0) {
-      msg += `🏛️ *ইউনিট ফান্ড:* ৳${toBengaliNum(unitFundBill)}\n`;
-    }
-    if (othersFundBill > 0) {
-      msg += `📦 *অন্যান্য:* ৳${toBengaliNum(othersFundBill)}\n`;
-    }
-    if (effectivePayments > 0) {
-      msg += `✅ *পরিশোধিত বিল:* -৳${toBengaliNum(effectivePayments)}\n`;
-    }
-    msg += `🔴 *সর্বমোট প্রদেয় বিল:* ৳${toBengaliNum(totalDue)}\n`;
-    msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
-    msg += `ধন্যবাদ, ক্যাফে ইউএভি`;
+    // 3. Build WhatsApp message using the configurable Senior / Junior template
+    const { message: msg, isSenior } = buildWhatsAppBillMessage({
+      member,
+      totalDue,
+      monthKey,
+      managerName: canteenConfig?.managerName || 'LAC Nishad',
+      managerBdNo: canteenConfig?.managerBdNo,
+      rankBn: rank,
+      nameBn: surname
+    });
 
     if (phone) {
       window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
-      setWhatsAppNotice(`✅ ${rank} ${surname} এর চ্যাটে বিল ওপেন হয়েছে! স্লিপের ছবি গ্যালারিতে সেভ ও কপি হয়েছে। চ্যাটে 📎 (Gallery) বা Paste থেকে ছবিটি সেন্ড করুন।`);
+      setWhatsAppNotice(`✅ ${rank} ${surname} (${isSenior ? 'সিনিয়র স্যার' : 'মেম্বার'}) এর চ্যাটে বিল ওপেন হয়েছে! স্লিপের ছবি গ্যালারিতে সেভ ও কপি হয়েছে। চ্যাটে 📎 (Gallery) বা Paste থেকে ছবিটি সেন্ড করুন।`);
       setTimeout(() => setWhatsAppNotice(null), 6000);
     } else {
       window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
@@ -3107,8 +3100,22 @@ export const MemberDB: React.FC = () => {
               </p>
             </div>
 
-            {/* Payment History Action Button */}
-            <div className="flex items-center space-x-2 w-full sm:w-auto">
+            {/* Action Buttons: WhatsApp Template Toggle & Payment History */}
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={() => setShowWhatsAppTemplateBox(!showWhatsAppTemplateBox)}
+                className={`flex items-center justify-center space-x-1.5 px-3.5 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md active:scale-95 border ${
+                  showWhatsAppTemplateBox 
+                    ? 'bg-[#25D366] text-white border-emerald-400/50 shadow-[#25D366]/25' 
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                }`}
+                title="WhatsApp মেসেজ ফরম্যাট বক্স প্রদর্শন বা লুকান"
+              >
+                <WhatsAppIcon className="w-4 h-4 text-white" />
+                <span>মেসেজ ফরম্যাট</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => setIsPaymentHistoryOpen(true)}
@@ -3122,6 +3129,14 @@ export const MemberDB: React.FC = () => {
               </button>
             </div>
           </div>
+
+          {/* WhatsApp Message Format Box (Prominently displayed right on Bill Page) */}
+          {showWhatsAppTemplateBox && (
+            <WhatsAppMessageTemplateBox 
+              canteenConfig={canteenConfig}
+              currentMonth={selectedMonth}
+            />
+          )}
 
       {/* Delete / Success Notification Banner */}
       {paymentDeleteSuccessMsg && (
