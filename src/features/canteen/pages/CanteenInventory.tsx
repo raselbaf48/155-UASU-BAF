@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   Search, Plus, Edit2, Trash2, ImageIcon, Save, X, Loader2, 
   AlertTriangle, CheckCircle2, ChefHat, Sparkles, AlertCircle, 
@@ -1823,32 +1824,48 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       )}
 
       {/* Delete Confirmation Modal */}
-      {deleteConfirmId && (
-         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[70] flex items-center justify-center p-4">
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in zoom-in-95 text-center">
-               <div className="w-16 h-16 bg-rose-500/10 border border-rose-500/30 text-rose-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                  <Trash2 className="w-8 h-8" />
-               </div>
-               <h3 className="text-lg font-black text-white uppercase tracking-tight mb-2">Delete Item?</h3>
-               <p className="text-xs font-bold text-slate-400 mb-6">Are you sure you want to delete this item?</p>
-               
-               <div className="flex space-x-3">
-                  <button 
-                     onClick={() => setDeleteConfirmId(null)} 
-                     className="flex-1 py-3 bg-slate-800 text-slate-200 rounded-xl text-xs font-black tracking-widest hover:bg-slate-700 transition-colors cursor-pointer"
-                  >
-                     CANCEL
-                  </button>
-                  <button 
-                     onClick={() => confirmDelete(deleteConfirmId)} 
-                     className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black tracking-widest transition-colors shadow-md shadow-rose-600/30 cursor-pointer"
-                  >
-                     DELETE
-                  </button>
-               </div>
-            </div>
-         </div>
-      )}
+      <AnimatePresence>
+        {deleteConfirmId && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[70] flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.88, y: 20, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.88, y: 20, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 450, damping: 28 }}
+              className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-sm shadow-2xl text-center relative overflow-hidden"
+            >
+              <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-rose-500 via-amber-500 to-rose-500" />
+              <div className="w-16 h-16 bg-rose-500/10 border border-rose-500/30 text-rose-500 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-inner">
+                <Trash2 className="w-8 h-8 animate-pulse" />
+              </div>
+              <h3 className="text-lg font-black text-white uppercase tracking-tight mb-2">Delete Item?</h3>
+              <p className="text-xs font-bold text-slate-400 mb-6">Are you sure you want to delete this item?</p>
+              
+              <div className="flex space-x-3">
+                <button 
+                  type="button"
+                  onClick={() => setDeleteConfirmId(null)} 
+                  className="flex-1 py-3 bg-slate-800 text-slate-200 rounded-xl text-xs font-black tracking-widest hover:bg-slate-700 transition-colors cursor-pointer active:scale-95"
+                >
+                  CANCEL
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => confirmDelete(deleteConfirmId)} 
+                  className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black tracking-widest transition-all shadow-md shadow-rose-600/30 cursor-pointer active:scale-95"
+                >
+                  DELETE
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   Search, 
   Trash2, 
@@ -51,11 +52,9 @@ import { formatCanteenDate } from '../utils/dateUtils';
 import { SaveButton } from '../components/SaveButton';
 import { BulkImportInitialBillsModal } from '../components/BulkImportInitialBillsModal';
 import { SetInitialBillModal } from '../components/SetInitialBillModal';
-import { MonthBillSplitModal } from '../components/MonthBillSplitModal';
-import { BatchMonthBillSplitModal } from '../components/BatchMonthBillSplitModal';
 import { PrintableCanteenBillModal } from '../components/PrintableCanteenBillModal';
 import { restoreRawStockForSaleCancellation } from '../utils/recipeManager';
-import { pushKeyToCloud, pullKeyFromCloud, recordDeletedTxId } from '../utils/canteenCloudSync';
+import { pushKeyToCloud, pullKeyFromCloud, recordDeletedTxId, getDeletedTxIds } from '../utils/canteenCloudSync';
 import { syncImportHistoryToTransactions } from '../utils/importHistoryTxs';
 import {
   exportCanteenBillToExcel,
@@ -428,6 +427,29 @@ export interface StatementItemRow {
 let globalMembersCache: any[] | null = null;
 let lastMembersSyncTimestamp = 0;
 
+// One-time client-side purge to ensure all local bill & payment history and dues are reset to Nil (0)
+if (typeof window !== 'undefined') {
+  const NIL_RESET_KEY = 'canteen_nil_reset_applied_20261005';
+  if (localStorage.getItem(NIL_RESET_KEY) !== 'done') {
+    try {
+      localStorage.setItem('canteen_txs', '[]');
+      localStorage.setItem('canteen_bill_import_history', '[]');
+      localStorage.removeItem('canteen_members_cache');
+      localStorage.setItem('canteen_deleted_tx_ids', '[]');
+      globalMembersCache = null;
+      Object.keys(localStorage).forEach((k) => {
+        if (k.startsWith('canteen_member_')) {
+          try {
+            const parsed = JSON.parse(localStorage.getItem(k) || '{}');
+            localStorage.setItem(k, JSON.stringify({ ...parsed, Due: 0, due: 0, baki: 0 }));
+          } catch {}
+        }
+      });
+      localStorage.setItem(NIL_RESET_KEY, 'done');
+    } catch {}
+  }
+}
+
 export const MemberDB: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<BillCategory>('ALL');
@@ -489,10 +511,6 @@ export const MemberDB: React.FC = () => {
   const [isImportBillsModalOpen, setIsImportBillsModalOpen] = useState(false);
   const [importModalInitialTab, setImportModalInitialTab] = useState<'FILE' | 'PASTE' | 'HISTORY'>('FILE');
   const [initialBillMember, setInitialBillMember] = useState<any | null>(null);
-
-  // Split Month Bill Modal state (Aug & Sep allocation)
-  const [splitBillMember, setSplitBillMember] = useState<any | null>(null);
-  const [isBatchSplitModalOpen, setIsBatchSplitModalOpen] = useState(false);
   const [profileMonthFilter, setProfileMonthFilter] = useState<string>('ALL');
 
   // Statement Modal state
@@ -530,7 +548,44 @@ export const MemberDB: React.FC = () => {
     return lookupCatalogPrice(name, menuCatalog);
   };
 
-  // Expanded history rows: If a transaction contains multiple items, display each item on its own separate row
+  // Robust date/time parser to ensure newest transactions always sort to the top
+  const parseTxTime = (tx: any): number => {
+    if (!tx) return 0;
+    const numMatch = String(tx.id || '').match(/(\d{13})/);
+    if (numMatch) {
+      const t = Number(numMatch[1]);
+      if (t > 1500000000000) return t;
+    }
+    if (tx.createdAt) {
+      const t = new Date(tx.createdAt).getTime();
+      if (!isNaN(t)) return t;
+    }
+    if (tx.date) {
+      const parts = String(tx.date).trim().split(/\s+/);
+      if (parts.length === 3) {
+        const day = parseInt(parts[0], 10);
+        const monStr = parts[1].toLowerCase();
+        const yr = parseInt(parts[2], 10);
+        const fullYr = yr < 100 ? 2000 + yr : yr;
+        const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+        const monIdx = monthNames.findIndex(m => monStr.startsWith(m));
+        if (monIdx >= 0) {
+          return new Date(fullYr, monIdx, day || 1, 12, 0, 0).getTime();
+        }
+      }
+      if (String(tx.date).match(/^\d{4}-\d{2}$/)) {
+        const [y, m] = String(tx.date).split('-').map(Number);
+        return new Date(y, m - 1, 28).getTime();
+      }
+    }
+    if (tx.monthKey) {
+      const [y, m] = String(tx.monthKey).split('-').map(Number);
+      return new Date(y, m - 1, 28).getTime();
+    }
+    return 0;
+  };
+
+  // Expanded history rows: Newest transactions at top, preserves previous bills & supports reverted payments
   const displayHistoryRows = useMemo(() => {
     const rows: Array<{
       rowId: string;
@@ -546,18 +601,29 @@ export const MemberDB: React.FC = () => {
 
     let currentSer = 1;
 
-    profileTx.forEach((tx) => {
+    // Sort member transactions newest first
+    const sortedProfileTx = [...profileTx].sort((a: any, b: any) => {
+      const timeA = parseTxTime(a);
+      const timeB = parseTxTime(b);
+      if (timeA !== timeB) return timeB - timeA;
+      return String(b.id || '').localeCompare(String(a.id || ''));
+    });
+
+    sortedProfileTx.forEach((tx) => {
       if (tx.type === 'BILL PAYMENT') {
+        const isReverted = tx.isReverted || tx.status === 'REVERTED' || String(tx.items || '').includes('[বাতিল / REVERTED]');
         rows.push({
           rowId: `${tx.id}_pay`,
           ser: currentSer++,
           tx,
           txId: tx.id,
           date: tx.date,
-          description: 'Payment Received - ' + (tx.gateway || 'CASH'),
-          qty: '-',
+          description: isReverted 
+            ? `BILL PAYMENT (বাতিল / REVERTED) - ${tx.gateway || 'CASH'} (বকেয়া পুনর্বহাল)`
+            : (tx.items || ('Payment Received - ' + (tx.gateway || 'CASH'))),
+          qty: isReverted ? 'বাতিল' : '-',
           amount: tx.amount,
-          type: 'BILL PAYMENT'
+          type: isReverted ? 'REVERTED' : 'BILL PAYMENT'
         });
         return;
       }
@@ -654,22 +720,55 @@ export const MemberDB: React.FC = () => {
       });
     });
 
-    if (rows.length === 0 && profileMember) {
+    // Ensure member's prior bill/due is NEVER lost when payment is made
+    if (profileMember) {
+      const activePaymentsTotal = profileTx
+        .filter((t: any) => t.type === 'BILL PAYMENT' && !t.isReverted && t.status !== 'REVERTED')
+        .reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0);
       const memDue = Number(profileMember.Due ?? profileMember.due ?? profileMember.baki ?? 0);
-      if (memDue > 0) {
+      const existingCharges = rows
+        .filter((r) => r.type !== 'BILL PAYMENT' && r.type !== 'REVERTED')
+        .reduce((sum, r) => sum + Number(r.amount || 0), 0);
+
+      const neededPriorBill = Math.max(0, (memDue + activePaymentsTotal) - existingCharges);
+      const autoInitId = `init-due-${profileMember.airman_id || profileMember['BD No'] || 'mem'}`;
+      const deletedIds = getDeletedTxIds();
+
+      if (neededPriorBill > 0 && !deletedIds.has(autoInitId)) {
         rows.push({
-          rowId: `init_due_fallback_${profileMember.airman_id || profileMember['BD No'] || 'mem'}`,
-          ser: 1,
-          tx: { id: 'fallback-init', type: 'INITIAL_BILL', amount: memDue, monthKey: '2026-09' },
-          txId: 'fallback-init',
+          rowId: `init_due_auto_${profileMember.airman_id || profileMember['BD No'] || 'mem'}`,
+          ser: currentSer++,
+          tx: {
+            id: autoInitId,
+            type: 'INITIAL_BILL',
+            amount: neededPriorBill,
+            monthKey: '2026-09',
+            date: '28 Sep 26',
+            items: 'বকেয়া বিল (সেপ্টেম্বর ২০২৬)',
+            billType: 'CANTEEN'
+          },
+          txId: autoInitId,
           date: '28 Sep 26',
-          description: 'বকেয়া বিল / প্রারম্ভিক হিসাব (Initial / Imported Due Bill)',
+          description: 'বকেয়া বিল (সেপ্টেম্বর ২০২৬)',
           qty: '-',
-          amount: memDue,
+          amount: neededPriorBill,
           type: 'INITIAL_BILL'
         });
       }
     }
+
+    // Sort all rows newest first: payments and latest orders on top, prior bills chronologically or below
+    rows.sort((a, b) => {
+      const timeA = parseTxTime(a.tx || { date: a.date });
+      const timeB = parseTxTime(b.tx || { date: b.date });
+      if (timeA !== timeB) return timeB - timeA;
+      return String(b.txId || '').localeCompare(String(a.txId || ''));
+    });
+
+    // Re-index continuous serials after newest-first sorting: #1, #2, #3...
+    rows.forEach((r, idx) => {
+      r.ser = idx + 1;
+    });
 
     return rows;
   }, [profileTx, menuCatalog, profileMember]);
@@ -711,46 +810,53 @@ export const MemberDB: React.FC = () => {
   const profileMonthSummary = useMemo(() => {
     if (!profileMember) return { totalCharges: 0, totalPayments: 0, netDue: 0 };
     
-    const txsForMonth = profileMonthFilter === 'ALL'
-      ? profileTx
-      : profileTx.filter((t: any) => {
-          const m = t?.monthKey || getTxMonthKey(t?.date);
-          if (m === profileMonthFilter) return true;
-          if (profileMonthFilter === '2026-08' && (String(t?.items || '').includes('আগস্ট') || (t.date && t.date.includes('Aug')))) return true;
-          if (profileMonthFilter === '2026-09' && (String(t?.items || '').includes('সেপ্টেম্বর') || (t.date && t.date.includes('Sep')))) return true;
-          return false;
-        });
+    if (profileMonthFilter === 'ALL') {
+      const allCharges = profileTx
+        .filter((t: any) => t.type !== 'BILL PAYMENT' && t.type !== 'REVERTED')
+        .reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0);
+      const allPayments = profileTx
+        .filter((t: any) => t.type === 'BILL PAYMENT' && !t.isReverted && t.status !== 'REVERTED')
+        .reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0);
+      const profileDue = Number(profileMember.Due ?? profileMember.due ?? profileMember.baki ?? 0);
+      const netDue = profileDue > 0 ? profileDue : Math.max(0, allCharges - allPayments);
+      return {
+        totalCharges: Math.round(allCharges * 100) / 100,
+        totalPayments: Math.round(allPayments * 100) / 100,
+        netDue: Math.round(netDue * 100) / 100
+      };
+    }
+
+    const txsForMonth = profileTx.filter((t: any) => {
+      const m = t?.monthKey || getTxMonthKey(t?.date);
+      if (m === profileMonthFilter) return true;
+      if (profileMonthFilter === '2026-08' && (String(t?.items || '').includes('আগস্ট') || (t.date && t.date.includes('Aug')))) return true;
+      if (profileMonthFilter === '2026-09' && (String(t?.items || '').includes('সেপ্টেম্বর') || (t.date && t.date.includes('Sep')))) return true;
+      return false;
+    });
 
     const totalCharges = txsForMonth
-      .filter((t: any) => t.type !== 'BILL PAYMENT')
+      .filter((t: any) => t.type !== 'BILL PAYMENT' && t.type !== 'REVERTED')
       .reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0);
 
     const totalPayments = txsForMonth
-      .filter((t: any) => t.type === 'BILL PAYMENT')
+      .filter((t: any) => t.type === 'BILL PAYMENT' && !t.isReverted && t.status !== 'REVERTED')
       .reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0);
 
-    let netDue = 0;
-    if (profileMonthFilter === 'ALL') {
-      netDue = Number(profileMember.Due ?? profileMember.due ?? profileMember.baki ?? 0);
-      if (netDue === 0 && (totalCharges - totalPayments) > 0) {
-        netDue = Math.max(0, totalCharges - totalPayments);
-      }
-    } else {
-      netDue = Math.max(0, totalCharges - totalPayments);
-    }
+    const filteredMonthDue = getMemberFilteredBill(profileMember, 'ALL', profileMonthFilter);
+    const netDue = filteredMonthDue > 0 ? filteredMonthDue : Math.max(0, totalCharges - totalPayments);
 
     return {
       totalCharges: Math.round(totalCharges * 100) / 100,
       totalPayments: Math.round(totalPayments * 100) / 100,
       netDue: Math.round(netDue * 100) / 100
     };
-  }, [profileMember, profileTx, profileMonthFilter]);
+  }, [profileMember, profileTx, profileMonthFilter, allTxs]);
 
   // Pay Bill Modal state
   const [payBillMember, setPayBillMember] = useState<any | null>(null);
   const [payBillCategory, setPayBillCategory] = useState<'ALL' | 'CANTEEN' | 'UNIT_FUND' | 'OTHERS'>('ALL');
   const [payAmount, setPayAmount] = useState('');
-  const [payMethod, setPayMethod] = useState<'CASH' | 'UCB'>('CASH');
+  const [payMethod, setPayMethod] = useState<'CASH' | 'UCB'>('UCB');
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
   // Dynamic Payment Success Animation State
   const [paymentSuccessData, setPaymentSuccessData] = useState<{
@@ -808,6 +914,33 @@ export const MemberDB: React.FC = () => {
   // Deletion modals
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [txDeleteConfirmId, setTxDeleteConfirmId] = useState<any | null>(null);
+  const [deletedTxNotice, setDeletedTxNotice] = useState<{
+    description: string;
+    amount: number;
+    type: string;
+    date: string;
+  } | null>(null);
+  const [duePulseKey, setDuePulseKey] = useState<number>(0);
+
+  const playTrashPopSound = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(440, now);
+      osc.frequency.exponentialRampToValueAtTime(160, now + 0.2);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.24);
+    } catch {}
+  };
   // Contact Action Modal (Call / WhatsApp)
   const [contactActionMember, setContactActionMember] = useState<any | null>(null);
   const [copiedPhone, setCopiedPhone] = useState(false);
@@ -845,7 +978,9 @@ export const MemberDB: React.FC = () => {
   }, [allPaymentTxs, paymentMethodFilter, paymentSearch]);
 
   const totalPaymentsAmount = useMemo(() => {
-    return allPaymentTxs.reduce((sum: number, tx: any) => sum + Number(tx.amount || 0), 0);
+    return allPaymentTxs
+      .filter((tx: any) => !tx.isReverted && tx.status !== 'REVERTED')
+      .reduce((sum: number, tx: any) => sum + Number(tx.amount || 0), 0);
   }, [allPaymentTxs]);
 
   const getTelHref = (raw: any): string => {
@@ -1037,107 +1172,105 @@ export const MemberDB: React.FC = () => {
 
   // Calculate bill for a member given selected category and month
   const getMemberFilteredBill = (member: any, category: BillCategory, month: string) => {
+    const totalDue = getMemberTotalDue(member, category);
     const memberTxs = filterMemberTxs(member, allTxs);
 
     if (category === 'ALL' && month === 'ALL') {
-      const totalMemberDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
-      const allCharges = memberTxs
-        .filter((tx) => tx.type !== 'BILL PAYMENT')
-        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-      const allPayments = memberTxs
-        .filter((tx) => tx.type === 'BILL PAYMENT')
-        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-      const netTxBill = Math.max(0, allCharges - allPayments);
-      // Return transaction-based net bill across all months, or fallback to profile total due if no tx logs exist yet
-      return memberTxs.length > 0 ? netTxBill : totalMemberDue;
+      return totalDue;
+    }
+
+    if (month === 'ALL') {
+      return totalDue;
     }
 
     const matchingTxs = memberTxs.filter((tx) => {
       const cat = getTxCategory(tx);
       const catMatch = category === 'ALL' || cat === category;
       const txMonth = tx?.monthKey || getTxMonthKey(tx.date);
-      const monthMatch = month === 'ALL' || txMonth === month;
+      const monthMatch = txMonth === month;
       return catMatch && monthMatch;
     });
 
     const charges = matchingTxs
-      .filter((tx) => tx.type !== 'BILL PAYMENT')
+      .filter((tx) => tx.type !== 'BILL PAYMENT' && tx.type !== 'REVERTED')
       .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
 
-    const payments = matchingTxs
-      .filter((tx) => tx.type === 'BILL PAYMENT')
-      .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-
-    const txBill = Math.max(0, charges - payments);
-
-    if (month === 'ALL') {
-      if (category === 'CANTEEN') {
-        const unitFundDue = memberTxs
-          .filter((tx) => getTxCategory(tx) === 'UNIT_FUND')
-          .reduce((sum, tx) => sum + (tx.type === 'BILL PAYMENT' ? -Number(tx.amount || 0) : Number(tx.amount || 0)), 0);
-        const othersDue = memberTxs
-          .filter((tx) => getTxCategory(tx) === 'OTHERS')
-          .reduce((sum, tx) => sum + (tx.type === 'BILL PAYMENT' ? -Number(tx.amount || 0) : Number(tx.amount || 0)), 0);
-        const totalMemberDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
-        const baseCanteenDue = Math.max(0, totalMemberDue - Math.max(0, unitFundDue) - Math.max(0, othersDue));
-        return Math.max(txBill, baseCanteenDue);
-      }
-      return txBill > 0 ? txBill : Number(member.Due ?? member.due ?? member.baki ?? 0);
-    }
-
-    // When viewing a specific month (e.g. September 2026 / "2026-09")
-    const totalDue = getMemberTotalDue(member, category);
-    if (totalDue <= 0 && charges <= 0) return 0;
-
-    // FIFO payment accounting across months:
-    // Payments made in a later month (e.g. Oct) clear bills from earlier months (e.g. Sep)
-    const categoryTxs = category === 'ALL'
-      ? memberTxs
-      : memberTxs.filter((tx) => getTxCategory(tx) === category || (tx.type === 'BILL PAYMENT' && (tx.billType === 'ALL' || !tx.billType)));
-
-    const allPaymentsTotal = categoryTxs
-      .filter((tx) => tx.type === 'BILL PAYMENT')
-      .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-
-    const chargesBefore = categoryTxs
-      .filter((tx) => tx.type !== 'BILL PAYMENT' && (tx?.monthKey || getTxMonthKey(tx.date)) < month)
-      .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-
-    const paymentsAvailableForThisMonth = Math.max(0, allPaymentsTotal - chargesBefore);
-    const remainingUnpaidForMonth = Math.max(0, charges - paymentsAvailableForThisMonth);
-
+    // If transactions exist for this specific month, compute month's remaining unpaid charges
     if (matchingTxs.length > 0) {
-      return remainingUnpaidForMonth;
+      const categoryTxs = category === 'ALL'
+        ? memberTxs
+        : memberTxs.filter((tx) => getTxCategory(tx) === category || (tx.type === 'BILL PAYMENT' && (tx.billType === 'ALL' || !tx.billType)));
+
+      const allPaymentsTotal = categoryTxs
+        .filter((tx) => tx.type === 'BILL PAYMENT' && !tx.isReverted && tx.status !== 'REVERTED')
+        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+      const chargesBefore = categoryTxs
+        .filter((tx) => tx.type !== 'BILL PAYMENT' && tx.type !== 'REVERTED' && (tx?.monthKey || getTxMonthKey(tx.date)) < month)
+        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+      const paymentsAvailableForThisMonth = Math.max(0, allPaymentsTotal - chargesBefore);
+      return Math.max(0, charges - paymentsAvailableForThisMonth);
     }
+
+    // If viewing September 2026 and member has an outstanding ledger due from September / initial bills
+    if (month === '2026-09' && totalDue > 0) {
+      return totalDue;
+    }
+
     return 0;
   };
 
   // Helper to calculate Member's Total Due (পূর্ববর্তী সব বকেয়া + চলতি মাসের বিল - মোট পরিশোধ)
   const getMemberTotalDue = (member: any, category: BillCategory = 'ALL'): number => {
+    if (!member) return 0;
+    const profileDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
     const memberTxs = filterMemberTxs(member, allTxs);
 
-    const categoryFilteredTxs = category === 'ALL' 
-      ? memberTxs 
-      : memberTxs.filter((tx) => getTxCategory(tx) === category || (tx.type === 'BILL PAYMENT' && (tx.billType === 'ALL' || !tx.billType)));
+    if (category === 'ALL') {
+      const allCharges = memberTxs
+        .filter((tx) => tx.type !== 'BILL PAYMENT' && tx.type !== 'REVERTED')
+        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+      const allPayments = memberTxs
+        .filter((tx) => tx.type === 'BILL PAYMENT' && !tx.isReverted && tx.status !== 'REVERTED')
+        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+      const netTxDue = Math.max(0, allCharges - allPayments);
 
-    const allCharges = categoryFilteredTxs
-      .filter((tx) => tx.type !== 'BILL PAYMENT')
-      .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-
-    const allPayments = categoryFilteredTxs
-      .filter((tx) => tx.type === 'BILL PAYMENT')
-      .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-
-    const netTxDue = Math.max(0, allCharges - allPayments);
-    const profileDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
-
-    // If transactions exist in canteen_txs
-    if (categoryFilteredTxs.length > 0) {
-      if (allPayments >= allCharges) {
-        return Math.min(profileDue, netTxDue);
+      // The profileDue is the authoritative ledger balance updated across POS, Bill Payments, and Import.
+      if (profileDue > 0) {
+        return profileDue;
       }
-      return Math.max(profileDue, netTxDue);
+      return netTxDue;
     }
+
+    // Sub-category filters (CANTEEN, UNIT_FUND, OTHERS)
+    const unitFundTxs = memberTxs.filter((tx) => getTxCategory(tx) === 'UNIT_FUND');
+    const unitFundDue = Math.max(0, unitFundTxs.reduce((sum, tx) => sum + (tx.type === 'BILL PAYMENT' && !tx.isReverted && tx.status !== 'REVERTED' ? -Number(tx.amount || 0) : tx.type !== 'BILL PAYMENT' && tx.type !== 'REVERTED' ? Number(tx.amount || 0) : 0), 0));
+
+    const othersTxs = memberTxs.filter((tx) => getTxCategory(tx) === 'OTHERS');
+    const othersDue = Math.max(0, othersTxs.reduce((sum, tx) => sum + (tx.type === 'BILL PAYMENT' && !tx.isReverted && tx.status !== 'REVERTED' ? -Number(tx.amount || 0) : tx.type !== 'BILL PAYMENT' && tx.type !== 'REVERTED' ? Number(tx.amount || 0) : 0), 0));
+
+    if (category === 'UNIT_FUND') {
+      return unitFundDue;
+    }
+
+    if (category === 'OTHERS') {
+      return othersDue;
+    }
+
+    if (category === 'CANTEEN') {
+      const canteenCharges = memberTxs
+        .filter((tx) => getTxCategory(tx) === 'CANTEEN' && tx.type !== 'BILL PAYMENT' && tx.type !== 'REVERTED')
+        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+      const canteenPayments = memberTxs
+        .filter((tx) => (tx.billType === 'CANTEEN' || (!tx.billType && getTxCategory(tx) === 'CANTEEN')) && tx.type === 'BILL PAYMENT' && !tx.isReverted && tx.status !== 'REVERTED')
+        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+      const netCanteenTx = Math.max(0, canteenCharges - canteenPayments);
+
+      const baseCanteenDue = Math.max(0, profileDue - unitFundDue - othersDue);
+      return Math.max(baseCanteenDue, netCanteenTx);
+    }
+
     return profileDue;
   };
 
@@ -1147,7 +1280,7 @@ export const MemberDB: React.FC = () => {
     setPayBillCategory(selectedCategory);
     const totalDue = getMemberTotalDue(member, selectedCategory);
     setPayAmount(totalDue > 0 ? String(totalDue) : '');
-    setPayMethod('CASH');
+    setPayMethod('UCB');
   };
 
   // Helper to get effective DP with fallback to manager config or device cache
@@ -1181,7 +1314,14 @@ export const MemberDB: React.FC = () => {
   // Open Statement Modal
   const openStatement = (member: any) => {
     const effDp = getMemberEffectiveDp(member);
-    setStatementMember({ ...member, DP: effDp || member['DP'] || '' });
+    const effDue = getMemberTotalDue(member, 'ALL');
+    setStatementMember({ 
+      ...member, 
+      Due: effDue,
+      due: effDue,
+      baki: effDue,
+      DP: effDp || member['DP'] || '' 
+    });
     setStatementCategory('ALL');
     const runningMonth = getRunningMonthKey();
     setStatementMonth(selectedMonth !== 'ALL' ? selectedMonth : runningMonth);
@@ -1564,6 +1704,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
       const tx = {
         id: 'tx-pay-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
         date: formatCanteenDate(new Date()),
+        monthKey: getRunningMonthKey(),
         airman_id: payBillMember.airman_id,
         bdNo: payBillMember['BD No'] || payBillMember.airman_id,
         memberName: payeeName,
@@ -1574,8 +1715,45 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
         billType: payBillCategory,
         gateway: payMethod
       };
-      const txs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-      localStorage.setItem('canteen_txs', JSON.stringify([tx, ...txs]));
+
+      const rawStored = localStorage.getItem('canteen_txs');
+      let txs = rawStored ? JSON.parse(rawStored) : [];
+      
+      // Ensure member's prior bill/due exists before payment so history is NEVER lost
+      const memberPastTxs = filterMemberTxs(payBillMember, txs);
+      const existingDebits = memberPastTxs
+        .filter((t: any) => t.type !== 'BILL PAYMENT' && t.type !== 'REVERTED')
+        .reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0);
+      const existingPayments = memberPastTxs
+        .filter((t: any) => t.type === 'BILL PAYMENT' && !t.isReverted && t.status !== 'REVERTED')
+        .reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0);
+
+      const unloggedPriorDue = Math.max(0, currentDue - Math.max(0, existingDebits - existingPayments));
+      if (unloggedPriorDue > 0) {
+        const cleanBd = String(payBillMember['BD No'] || payBillMember.bdNo || payBillMember.airman_id || '').replace(/\D/g, '');
+        const initTx = {
+          id: `init-auto-due-${cleanBd || payBillMember.airman_id || Date.now()}`,
+          date: '28 Sep 26',
+          monthKey: '2026-09',
+          airman_id: payBillMember.airman_id,
+          bdNo: payBillMember['BD No'] || payBillMember.airman_id,
+          memberName: payeeName,
+          rank: payBillMember.Rank || payBillMember.rank || '',
+          items: 'বকেয়া বিল (সেপ্টেম্বর ২০২৬)',
+          soldItems: [],
+          amount: unloggedPriorDue,
+          type: 'INITIAL_BILL',
+          gateway: 'DUE',
+          billType: 'CANTEEN',
+          createdAt: new Date(2026, 8, 28, 12, 0, 0).toISOString()
+        };
+        txs = [...txs, initTx];
+      }
+
+      const updatedTxs = [tx, ...txs];
+      localStorage.setItem('canteen_txs', JSON.stringify(updatedTxs));
+      setAllTxs(updatedTxs);
+      await pushKeyToCloud('canteen_txs', updatedTxs);
       
       window.dispatchEvent(new Event('canteen_state_updated'));
       window.dispatchEvent(new Event('canteen_txs_updated'));
@@ -1610,11 +1788,11 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
       
       if (profileMember && profileMember.airman_id === updatedMember.airman_id) {
         setProfileMember(updatedMember);
-        setProfileTx([tx, ...profileTx]);
+        setProfileTx(filterMemberTxs(updatedMember, updatedTxs));
       }
       if (statementMember && statementMember.airman_id === updatedMember.airman_id) {
         setStatementMember(updatedMember);
-        setStatementTx([tx, ...statementTx]);
+        setStatementTx(filterMemberTxs(updatedMember, updatedTxs));
       }
     } finally {
       setIsSubmittingPayment(false);
@@ -1714,14 +1892,33 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
       }
     }
     
-    // 2. Remove transaction from localStorage and Supabase app_settings cloud sync
+    // 2. Handle transaction in localStorage and Supabase app_settings cloud sync
     const txIdStr = String(txToRemove.id);
-    recordDeletedTxId(txIdStr);
+    const isPayment = txToRemove.type === 'BILL PAYMENT';
     let newTxs: any[] = [];
     try {
       const rawTxs = localStorage.getItem('canteen_txs');
       const txs = rawTxs ? JSON.parse(rawTxs) : [];
-      newTxs = txs.filter((t: any) => String(t.id) !== txIdStr);
+      if (isPayment) {
+        // Keep payment in history with REVERTED / cancelled status so audit trail is NEVER deleted
+        newTxs = txs.map((t: any) => {
+          if (String(t.id) === txIdStr) {
+            return {
+              ...t,
+              status: 'REVERTED',
+              isReverted: true,
+              revertedAt: formatCanteenDate(new Date()),
+              items: String(t.items || '').includes('[বাতিল / REVERTED]') 
+                ? t.items 
+                : `[বাতিল / REVERTED] ${t.items || 'BILL PAYMENT'}`
+            };
+          }
+          return t;
+        });
+      } else {
+        recordDeletedTxId(txIdStr);
+        newTxs = txs.filter((t: any) => String(t.id) !== txIdStr);
+      }
       localStorage.setItem('canteen_txs', JSON.stringify(newTxs));
       await pushKeyToCloud('canteen_txs', newTxs);
     } catch (e) {
@@ -1753,13 +1950,34 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
     
     if (profileMember) {
       setProfileMember(updatedMember);
-      setProfileTx(prev => prev.filter(t => String(t.id) !== txIdStr));
+      if (isPayment) {
+        setProfileTx(prev => prev.map(t => String(t.id) === txIdStr ? {
+          ...t,
+          status: 'REVERTED',
+          isReverted: true,
+          revertedAt: formatCanteenDate(new Date()),
+          items: String(t.items || '').includes('[বাতিল / REVERTED]') 
+            ? t.items 
+            : `[বাতিল / REVERTED] ${t.items || 'BILL PAYMENT'}`
+        } : t));
+      } else {
+        setProfileTx(prev => prev.filter(t => String(t.id) !== txIdStr));
+      }
       setEditMemberData(prev => ({ ...prev, due: newDue }));
     }
 
     if (statementMember) {
       setStatementMember(updatedMember);
-      setStatementTx(prev => prev.filter(t => String(t.id) !== txIdStr));
+      if (isPayment) {
+        setStatementTx(prev => prev.map(t => String(t.id) === txIdStr ? {
+          ...t,
+          status: 'REVERTED',
+          isReverted: true,
+          revertedAt: formatCanteenDate(new Date())
+        } : t));
+      } else {
+        setStatementTx(prev => prev.filter(t => String(t.id) !== txIdStr));
+      }
     }
 
     // Update individual member local cache
@@ -1776,6 +1994,19 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
     window.dispatchEvent(new Event('canteen_txs_updated'));
     window.dispatchEvent(new Event('canteen_state_updated'));
     window.dispatchEvent(new Event('storage'));
+
+    // 6. Play dynamic audio feedback and show animated notification banner
+    playTrashPopSound();
+    setDeletedTxNotice({
+      description: txToRemove.items || txToRemove.description || 'রেকর্ড',
+      amount: amountToReverse,
+      type: txToRemove.type || 'RECORD',
+      date: txToRemove.date || ''
+    });
+    setDuePulseKey(prev => prev + 1);
+    setTimeout(() => {
+      setDeletedTxNotice(null);
+    }, 4500);
 
     setTxDeleteConfirmId(null);
   };
@@ -2224,13 +2455,21 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
     let count = 0;
     filteredMembers.forEach((m) => {
       const b = getMemberFilteredBill(m, selectedCategory, selectedMonth);
-      if (b > 0) {
+      const totalDue = getMemberTotalDue(m, selectedCategory);
+      const hasDueInScope = selectedMonth === 'ALL' ? totalDue > 0 : b > 0;
+      if (hasDueInScope) {
         sum += b;
         count++;
       }
     });
     return { totalFilteredBill: sum, countWithBills: count };
   }, [filteredMembers, selectedCategory, selectedMonth, allTxs]);
+
+  // When selectedMonth or selectedCategory changes, reset filterMode to AUTO
+  // so that if the new month has no due, 'ALL' is automatically selected; if it has due, 'DUE' is selected
+  useEffect(() => {
+    setFilterMode('AUTO');
+  }, [selectedMonth, selectedCategory]);
 
   // Determine if Due filter is active:
   // Default is AUTO: filters by Due if countWithBills > 0, otherwise shows All if Due is 0.
@@ -2243,7 +2482,8 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
   const displayedMemberList = useMemo(() => {
     const list = !isDueFilterActive ? filteredMembers : filteredMembers.filter((m) => {
       const b = getMemberFilteredBill(m, selectedCategory, selectedMonth);
-      return b > 0;
+      const totalDue = getMemberTotalDue(m, selectedCategory);
+      return selectedMonth === 'ALL' ? totalDue > 0 : b > 0;
     });
     return sortCanteenMembersByOfficeSeniority(list);
   }, [filteredMembers, isDueFilterActive, selectedCategory, selectedMonth, allTxs]);
@@ -2282,6 +2522,8 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
   const currentMonthCharges = totalMonthBill + unitFundBill + othersFundBill;
   if (memberTotalDue > currentMonthCharges) {
     previousDue = Math.max(0, Math.round((memberTotalDue - currentMonthCharges) * 100) / 100);
+  } else if (memberTotalDue > 0 && currentMonthCharges === 0) {
+    previousDue = memberTotalDue;
   } else {
     const prevDueTxs = statementTx.filter(tx => {
       const txMonth = tx?.monthKey || getTxMonthKey(tx.date);
@@ -2393,7 +2635,14 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
 
         {/* Card 2: Overall Total Due */}
         <div 
-          onClick={() => setFilterMode(isDueFilterActive ? 'ALL' : 'DUE')}
+          onClick={() => {
+            if (selectedMonth !== 'ALL') {
+              setSelectedMonth('ALL');
+              setFilterMode('DUE');
+            } else {
+              setFilterMode(isDueFilterActive ? 'ALL' : 'DUE');
+            }
+          }}
           className="bg-gradient-to-br from-rose-950/70 via-red-950/40 to-slate-900 border border-rose-500/40 hover:border-rose-400/80 rounded-xl p-2.5 sm:p-3 flex items-center justify-between shadow-md shadow-rose-950/20 transition-all cursor-pointer group min-w-0"
           title="সকল সদস্যের সর্বমোট প্রদেয় বকেয়া (Click to filter members with due)"
         >
@@ -2582,16 +2831,6 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
           >
             <FileSpreadsheet className="w-4 h-4" />
             <span>IMPORT BILLS</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setIsBatchSplitModalOpen(true)}
-            className="px-3.5 py-2.5 bg-gradient-to-r from-indigo-600 via-indigo-500 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white rounded-2xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 shadow-md shadow-indigo-500/25 border-t border-indigo-300/40 active:translate-y-0.5 transition-all cursor-pointer"
-            title="সকল সদস্যের আগস্ট ও সেপ্টেম্বর বিল বণ্টন ও সমন্বয় করুন"
-          >
-            <Sliders className="w-4 h-4" />
-            <span>AUG & SEP SPLIT</span>
           </button>
 
           <button
@@ -3229,27 +3468,57 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Contact</p>
                       <p className="text-sm font-bold text-white font-mono">{profileMember['Contact'] || 'Not Provided'}</p>
                     </div>
-                    <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700 flex flex-col justify-between">
+                    <div 
+                      key={duePulseKey}
+                      className={`bg-slate-800/80 p-3.5 rounded-2xl border flex flex-col justify-between transition-all duration-300 ${
+                        duePulseKey > 0 ? 'border-rose-500/60 shadow-lg shadow-rose-500/20 ring-1 ring-rose-500/30 animate-success-pop' : 'border-slate-700'
+                      }`}
+                    >
                       <div>
                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Due</p>
                         <p className={`text-xl font-black font-mono ${(profileMember.Due ?? profileMember.baki) === 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
                           ৳{profileMember.Due ?? profileMember.baki ?? 0}
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setSplitBillMember(profileMember)}
-                        className="mt-2 px-2.5 py-1 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white rounded-lg border border-indigo-500/30 text-[10px] font-bold transition-all flex items-center justify-center gap-1 active:scale-95 cursor-pointer"
-                        title="আগস্ট ও সেপ্টেম্বর বিল বণ্টন / সমন্বয় করুন"
-                      >
-                        <Sliders className="w-3 h-3" />
-                        <span>মাসভিত্তিক বিল বণ্টন</span>
-                      </button>
                     </div>
                   </div>
 
                   {/* Transaction History Section */}
                   <div className="space-y-3">
+                    {/* Dynamic Removal Notification Banner */}
+                    <AnimatePresence>
+                      {deletedTxNotice && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -16, scale: 0.95 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: -12, scale: 0.95 }}
+                          transition={{ type: 'spring', stiffness: 450, damping: 28 }}
+                          className="p-3 bg-gradient-to-r from-rose-950/80 via-slate-900 to-rose-950/70 border border-rose-500/40 rounded-2xl flex items-center justify-between shadow-lg shadow-rose-950/40 text-xs text-rose-200"
+                        >
+                          <div className="flex items-center space-x-2.5">
+                            <div className="w-8 h-8 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0 border border-rose-500/30">
+                              <Trash2 className="w-4 h-4 animate-bounce" />
+                            </div>
+                            <div>
+                              <p className="font-bold text-white text-[11px] leading-tight">
+                                ট্রানজ্যাকশন সফলভাবে অপসারিত হয়েছে!
+                              </p>
+                              <p className="text-[10px] text-rose-300 font-mono">
+                                {deletedTxNotice.description} (৳{deletedTxNotice.amount.toLocaleString()}) বকেয়া সমন্বয় সম্পন্ন।
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setDeletedTxNotice(null)}
+                            className="p-1 text-rose-400 hover:text-white rounded-lg hover:bg-rose-500/20 transition-colors"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                       <div className="flex items-center space-x-2">
                         <History className="w-4 h-4 text-indigo-400" />
@@ -3351,52 +3620,82 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                       <>
                         {/* Mobile Card View (sm:hidden) */}
                         <div className="sm:hidden space-y-2.5">
-                          {filteredProfileHistoryRows.map((row) => (
-                            <div key={row.rowId} className="bg-slate-800/90 p-3.5 rounded-2xl border border-slate-700/80 space-y-2.5">
-                              <div className="flex items-center justify-between text-[11px] font-mono">
-                                <span className="px-2 py-0.5 rounded-md bg-slate-900 text-indigo-300 font-bold border border-slate-700">
-                                  #{row.ser}
-                                </span>
-                                <span className="text-slate-400 font-bold">
-                                  {toEnglishDate(row.date)}
-                                </span>
-                                <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase border ${
-                                  row.type === 'BILL PAYMENT'
-                                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                                    : 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
-                                }`}>
-                                  {row.type || 'SALE'}
-                                </span>
-                              </div>
-
-                              <div className="text-xs font-bold text-white break-words">
-                                {row.description}
-                              </div>
-
-                              <div className="flex items-center justify-between pt-2 border-t border-slate-700/60">
-                                <div className="flex items-center space-x-2">
-                                  {row.qty !== '-' && (
-                                    <span className="text-[11px] font-mono font-bold text-slate-400 bg-slate-900/60 px-2 py-0.5 rounded-md border border-slate-700/50">
-                                      Qty: {row.qty}
-                                    </span>
-                                  )}
-                                  <span className="text-sm font-black font-mono text-rose-400">
-                                    ৳{row.amount}
+                          <AnimatePresence mode="popLayout">
+                            {filteredProfileHistoryRows.map((row) => (
+                              <motion.div 
+                                key={row.rowId || row.txId || row.ser}
+                                layout
+                                initial={{ opacity: 0, y: 8 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{
+                                  opacity: 0,
+                                  x: -70,
+                                  scale: 0.9,
+                                  backgroundColor: 'rgba(244, 63, 94, 0.25)',
+                                  transition: { duration: 0.35, ease: 'easeOut' }
+                                }}
+                                transition={{ duration: 0.22 }}
+                                className="bg-slate-800/90 p-3.5 rounded-2xl border border-slate-700/80 space-y-2.5"
+                              >
+                                <div className="flex items-center justify-between text-[11px] font-mono">
+                                  <span className="px-2 py-0.5 rounded-md bg-slate-900 text-indigo-300 font-bold border border-slate-700">
+                                    #{row.ser}
+                                  </span>
+                                  <span className="text-slate-400 font-bold">
+                                    {toEnglishDate(row.date)}
+                                  </span>
+                                  <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase border ${
+                                    row.type === 'BILL PAYMENT'
+                                      ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                      : row.type === 'REVERTED'
+                                      ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                                      : 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
+                                  }`}>
+                                    {row.type === 'REVERTED' ? 'REVERTED / বাতিল' : (row.type || 'SALE')}
                                   </span>
                                 </div>
 
-                                <button 
-                                  type="button"
-                                  onClick={() => setTxDeleteConfirmId(row.tx)} 
-                                  className="px-2.5 py-1 text-rose-400 hover:text-white bg-rose-500/10 hover:bg-rose-600 rounded-lg border border-rose-500/20 text-[11px] font-bold transition-colors flex items-center space-x-1"
-                                  title="Remove Record"
-                                >
-                                  <Trash2 className="w-3 h-3" />
-                                  <span>Delete</span>
-                                </button>
-                              </div>
-                            </div>
-                          ))}
+                                <div className={`text-xs font-bold ${row.type === 'REVERTED' ? 'text-slate-400 line-through' : 'text-white'} break-words`}>
+                                  {row.description}
+                                </div>
+
+                                <div className="flex items-center justify-between pt-2 border-t border-slate-700/60">
+                                  <div className="flex items-center space-x-2">
+                                    {row.qty !== '-' && (
+                                      <span className="text-[11px] font-mono font-bold text-slate-400 bg-slate-900/60 px-2 py-0.5 rounded-md border border-slate-700/50">
+                                        Qty: {row.qty}
+                                      </span>
+                                    )}
+                                    <span className={`text-sm font-black font-mono ${
+                                      row.type === 'REVERTED'
+                                        ? 'text-rose-400/70 line-through font-mono'
+                                        : row.type === 'BILL PAYMENT'
+                                        ? 'text-emerald-400'
+                                        : 'text-rose-400'
+                                    }`}>
+                                      ৳{row.amount}
+                                    </span>
+                                  </div>
+
+                                  {row.type !== 'REVERTED' ? (
+                                    <button 
+                                      type="button"
+                                      onClick={() => setTxDeleteConfirmId(row.tx)} 
+                                      className="px-2.5 py-1 text-rose-400 hover:text-white bg-rose-500/10 hover:bg-rose-600 rounded-lg border border-rose-500/20 text-[11px] font-bold transition-all active:scale-95 flex items-center space-x-1 cursor-pointer"
+                                      title={row.type === 'BILL PAYMENT' ? 'Revert Payment' : 'Remove Record'}
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                      <span>{row.type === 'BILL PAYMENT' ? 'Revert' : 'Delete'}</span>
+                                    </button>
+                                  ) : (
+                                    <span className="text-[10px] font-mono text-rose-400/80 font-bold bg-rose-950/40 px-2 py-0.5 rounded border border-rose-900/40">
+                                      বাতিলকৃত
+                                    </span>
+                                  )}
+                                </div>
+                              </motion.div>
+                            ))}
+                          </AnimatePresence>
                         </div>
 
                         {/* Desktop Table View (hidden sm:block) */}
@@ -3413,26 +3712,64 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                                   <th className="px-4 py-3 text-center">Action</th>
                                 </tr>
                               </thead>
-                              <tbody>
-                                {filteredProfileHistoryRows.map((row) => (
-                                  <tr key={row.rowId} className="border-b border-slate-700/50 last:border-0 hover:bg-slate-700/20">
-                                    <td className="px-4 py-2.5 font-mono">{row.ser}</td>
-                                    <td className="px-4 py-2.5 font-mono">{toEnglishDate(row.date)}</td>
-                                    <td className="px-4 py-2.5 font-bold">{row.description}</td>
-                                    <td className="px-4 py-2.5 text-center font-bold">{row.qty}</td>
-                                    <td className="px-4 py-2.5 text-right font-black text-rose-400">৳{row.amount}</td>
-                                    <td className="px-4 py-2.5 text-center">
-                                      <button 
-                                        type="button"
-                                        onClick={() => setTxDeleteConfirmId(row.tx)} 
-                                        className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer" 
-                                        title="Remove Record"
-                                      >
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                      </button>
-                                    </td>
-                                  </tr>
-                                ))}
+                              <tbody className="divide-y divide-slate-700/50">
+                                <AnimatePresence mode="popLayout">
+                                  {filteredProfileHistoryRows.map((row) => (
+                                    <motion.tr 
+                                      key={row.rowId || row.txId || row.ser} 
+                                      layout
+                                      initial={{ opacity: 0, y: 6 }}
+                                      animate={{ opacity: 1, y: 0 }}
+                                      exit={{
+                                        opacity: 0,
+                                        x: -80,
+                                        scale: 0.92,
+                                        backgroundColor: 'rgba(244, 63, 94, 0.25)',
+                                        transition: { duration: 0.35, ease: 'easeOut' }
+                                      }}
+                                      transition={{ duration: 0.22 }}
+                                      className={`hover:bg-slate-700/20 ${row.type === 'REVERTED' ? 'bg-rose-950/20' : ''}`}
+                                    >
+                                      <td className="px-4 py-2.5 font-mono">{row.ser}</td>
+                                      <td className="px-4 py-2.5 font-mono">{toEnglishDate(row.date)}</td>
+                                      <td className={`px-4 py-2.5 font-bold ${row.type === 'REVERTED' ? 'text-slate-400 line-through' : ''}`}>
+                                        {row.description}
+                                      </td>
+                                      <td className="px-4 py-2.5 text-center font-bold">
+                                        {row.type === 'REVERTED' ? (
+                                          <span className="px-1.5 py-0.5 rounded text-[9px] bg-rose-950/60 text-rose-400 border border-rose-900/50">বাতিল</span>
+                                        ) : (
+                                          row.qty
+                                        )}
+                                      </td>
+                                      <td className={`px-4 py-2.5 text-right font-black ${
+                                        row.type === 'REVERTED'
+                                          ? 'text-rose-400/70 line-through font-mono'
+                                          : row.type === 'BILL PAYMENT'
+                                          ? 'text-emerald-400 font-mono'
+                                          : 'text-rose-400 font-mono'
+                                      }`}>
+                                        ৳{row.amount}
+                                      </td>
+                                      <td className="px-4 py-2.5 text-center">
+                                        {row.type !== 'REVERTED' ? (
+                                          <button 
+                                            type="button"
+                                            onClick={() => setTxDeleteConfirmId(row.tx)} 
+                                            className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all active:scale-90 cursor-pointer" 
+                                            title={row.type === 'BILL PAYMENT' ? 'Revert Payment' : 'Remove Record'}
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        ) : (
+                                          <span className="text-[10px] text-rose-400/80 font-bold font-mono">
+                                            Reverted
+                                          </span>
+                                        )}
+                                      </td>
+                                    </motion.tr>
+                                  ))}
+                                </AnimatePresence>
                               </tbody>
                             </table>
                           </div>
@@ -3449,72 +3786,90 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
 
       {/* Statement Modal (Opened via Card Left-Side "STATEMENT" button) */}
       {statementMember && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 rounded-[2.5rem] w-full max-w-4xl shadow-2xl border border-slate-800 overflow-hidden flex flex-col max-h-[92vh]">
+        <div 
+          onClick={() => setStatementMember(null)}
+          className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-slate-900 rounded-[2rem] sm:rounded-[2.5rem] w-full max-w-4xl shadow-2xl border border-slate-800 overflow-hidden flex flex-col max-h-[92vh]"
+          >
             
             {/* Modal Header */}
-            <div className="p-5 border-b border-slate-800 bg-slate-900/90 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center space-x-3">
-                <div className="w-11 h-11 rounded-xl bg-slate-800 border border-indigo-500/40 flex items-center justify-center overflow-hidden shrink-0">
-                  {statementMember.DP ? (
-                    <img 
-                      src={resolveImageUrl(statementMember.DP)} 
-                      alt={statementMember['Surname']} 
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full object-cover"
-                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                    />
-                  ) : (
-                    <span className="font-black text-base text-indigo-400">
-                      {(statementMember['Surname'] || 'U').charAt(0)}
-                    </span>
-                  )}
+            <div className="p-4 sm:p-5 border-b border-slate-800 bg-slate-900/90 flex flex-col gap-3">
+              {/* Row 1: Member Info (Left) + Prominent Back/Close 'X' Button (Always at top right) */}
+              <div className="flex items-center justify-between gap-3 w-full">
+                <div className="flex items-center space-x-3 min-w-0 flex-1">
+                  <div className="w-11 h-11 rounded-2xl bg-slate-800 border border-indigo-500/40 flex items-center justify-center overflow-hidden shrink-0 shadow-inner">
+                    {statementMember.DP ? (
+                      <img 
+                        src={resolveImageUrl(statementMember.DP)} 
+                        alt={statementMember['Surname']} 
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover"
+                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                      />
+                    ) : (
+                      <span className="font-black text-base text-indigo-400">
+                        {(statementMember['Surname'] || 'U').charAt(0)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h2 className="text-base sm:text-lg font-black text-white truncate leading-tight">
+                      {statementMember['Rank']} {statementMember['Surname']}
+                    </h2>
+                    <p className="text-[11px] font-bold text-slate-400 font-mono truncate mt-0.5">
+                      Monthly Statement • {formatBengaliMonthYear(statementMonth)}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h2 className="text-lg font-black text-white">{statementMember['Rank']} {statementMember['Surname']}</h2>
-                  <p className="text-[11px] font-bold text-slate-400 font-mono">Monthly Statement • {formatBengaliMonthYear(statementMonth)}</p>
-                </div>
+
+                {/* Top-Right Back / Close 'X' Button - Always fixed at top right */}
+                <button 
+                  type="button"
+                  onClick={() => setStatementMember(null)} 
+                  className="w-10 h-10 rounded-2xl bg-slate-800/90 hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 border border-slate-700/80 hover:border-rose-500/40 flex items-center justify-center transition-all shrink-0 cursor-pointer shadow-md active:scale-90"
+                  title="বন্ধ করুন (Back / Close)"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
 
-              {/* Action Buttons: WhatsApp Send, Save Pic, Print Bill, Close */}
-              <div className="flex items-center space-x-2.5">
+              {/* Row 2: Action Buttons: WhatsApp Send, Save Pic, Print Bill */}
+              <div className="flex items-center gap-2 overflow-x-auto w-full pt-0.5 scrollbar-none">
                 {/* Send via WhatsApp Button */}
                 <button 
+                  type="button"
                   onClick={() => handleSendWhatsApp(statementMember, statementAggregatedItems, netPayable, totalMonthBill, previousDue, unitFundBill, othersFundBill, statementMonth)}
-                  className="flex items-center space-x-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md shadow-emerald-500/20 active:translate-y-0.5"
+                  className="flex items-center space-x-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md shadow-emerald-500/20 active:translate-y-0.5 whitespace-nowrap cursor-pointer"
                   title="Send Statement via WhatsApp"
                 >
-                  <MessageCircle className="w-4 h-4" />
+                  <MessageCircle className="w-4 h-4 shrink-0" />
                   <span>WHATSAPP</span>
                 </button>
 
                 {/* Save Picture Button using html2canvas */}
                 <button 
+                  type="button"
                   onClick={handleDownloadStatementPic}
                   disabled={isCapturingPic}
-                  className="flex items-center space-x-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md shadow-purple-500/20 active:translate-y-0.5 disabled:opacity-50"
+                  className="flex items-center space-x-1.5 px-3.5 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md shadow-purple-500/20 active:translate-y-0.5 disabled:opacity-50 whitespace-nowrap cursor-pointer"
                   title="ছবি হিসেবে সংরক্ষণ করুন (Save / Download Picture)"
                 >
-                  {isCapturingPic ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}
+                  {isCapturingPic ? <Loader2 className="w-4 h-4 animate-spin shrink-0" /> : <ImageIcon className="w-4 h-4 shrink-0" />}
                   <span>{isCapturingPic ? 'ছবি তৈরি হচ্ছে...' : 'ছবি ডাউনলোড'}</span>
                 </button>
 
                 {/* Print Bill / PDF */}
                 <button 
+                  type="button"
                   onClick={() => window.print()} 
-                  className="flex items-center space-x-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md shadow-indigo-500/20 active:translate-y-0.5"
+                  className="flex items-center space-x-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md shadow-indigo-500/20 active:translate-y-0.5 whitespace-nowrap cursor-pointer"
                   title="Print Bill / Save as PDF"
                 >
-                  <Printer className="w-4 h-4" />
+                  <Printer className="w-4 h-4 shrink-0" />
                   <span>PRINT BILL</span>
-                </button>
-
-                <button 
-                  onClick={() => setStatementMember(null)} 
-                  className="p-2 text-slate-400 hover:bg-slate-800 rounded-xl transition-colors ml-1 cursor-pointer"
-                  title="Close"
-                >
-                  <X className="w-5 h-5" />
                 </button>
               </div>
             </div>
@@ -3716,17 +4071,17 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                 <div className="flex space-x-2">
                   <button 
                     type="button"
-                    onClick={() => setPayMethod('CASH')}
-                    className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all ${payMethod === 'CASH' ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-800 text-slate-400'}`}
+                    onClick={() => setPayMethod('UCB')}
+                    className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer ${payMethod === 'UCB' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 ring-1 ring-indigo-400' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
                   >
-                    CASH
+                    UCB
                   </button>
                   <button 
                     type="button"
-                    onClick={() => setPayMethod('UCB')}
-                    className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all ${payMethod === 'UCB' ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-800 text-slate-400'}`}
+                    onClick={() => setPayMethod('CASH')}
+                    className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer ${payMethod === 'CASH' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 ring-1 ring-indigo-400' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
                   >
-                    UCB
+                    CASH
                   </button>
                 </div>
               </div>
@@ -3950,48 +4305,98 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
       )}
 
       {/* Delete Member Confirm Modal */}
-      {deleteConfirmId && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[80] flex items-center justify-center p-4">
-          <div className="bg-slate-900 rounded-3xl p-6 w-full max-w-sm shadow-xl border border-slate-800 animate-in zoom-in-95 text-center">
-            <div className="w-16 h-16 bg-rose-900/30 text-rose-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
-              <Trash2 className="w-8 h-8" />
-            </div>
-            <h3 className="text-lg font-black text-white uppercase tracking-tighter mb-2">Delete Member?</h3>
-            <p className="text-sm font-bold text-slate-400 mb-6">Are you sure you want to remove this member from Canteen database?</p>
-            
-            <div className="flex space-x-3">
-              <button onClick={() => setDeleteConfirmId(null)} className="flex-1 py-3 bg-slate-800 text-slate-200 rounded-xl text-xs font-black tracking-widest hover:bg-slate-700 transition-colors">
-                CANCEL
-              </button>
-              <button onClick={() => confirmDeleteMember(deleteConfirmId)} className="flex-1 py-3 bg-rose-600 text-white rounded-xl text-xs font-black tracking-widest hover:bg-rose-500 transition-colors shadow-md shadow-rose-500/30">
-                DELETE
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <AnimatePresence>
+        {deleteConfirmId && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-[80] flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.88, y: 20, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.88, y: 20, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 450, damping: 28 }}
+              className="bg-slate-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-slate-800 text-center relative overflow-hidden"
+            >
+              <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-rose-500 via-red-500 to-rose-500" />
+              <div className="w-16 h-16 bg-rose-900/30 text-rose-500 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-rose-500/30 shadow-inner">
+                <Trash2 className="w-8 h-8 animate-pulse" />
+              </div>
+              <h3 className="text-lg font-black text-white uppercase tracking-tighter mb-2">Delete Member?</h3>
+              <p className="text-sm font-bold text-slate-400 mb-6">Are you sure you want to remove this member from Canteen database?</p>
+              
+              <div className="flex space-x-3">
+                <button 
+                  type="button"
+                  onClick={() => setDeleteConfirmId(null)} 
+                  className="flex-1 py-3 bg-slate-800 text-slate-200 rounded-xl text-xs font-black tracking-widest hover:bg-slate-700 transition-colors cursor-pointer"
+                >
+                  CANCEL
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => confirmDeleteMember(deleteConfirmId)} 
+                  className="flex-1 py-3 bg-rose-600 text-white rounded-xl text-xs font-black tracking-widest hover:bg-rose-500 transition-all shadow-md shadow-rose-500/30 active:scale-95 cursor-pointer"
+                >
+                  DELETE
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Remove History Tx Confirm Modal */}
-      {txDeleteConfirmId && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[80] flex items-center justify-center p-4">
-          <div className="bg-slate-900 rounded-3xl p-6 w-full max-w-sm shadow-xl border border-slate-800 animate-in zoom-in-95 text-center">
-            <div className="w-16 h-16 bg-rose-900/30 text-rose-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
-              <Trash2 className="w-8 h-8" />
-            </div>
-            <h3 className="text-lg font-black text-white uppercase tracking-tighter mb-2">Remove Record?</h3>
-            <p className="text-sm font-bold text-slate-400 mb-6">Are you sure you want to remove this transaction record? Due will be reversed.</p>
-            
-            <div className="flex space-x-3">
-              <button onClick={() => setTxDeleteConfirmId(null)} className="flex-1 py-3 bg-slate-800 text-slate-200 rounded-xl text-xs font-black tracking-widest hover:bg-slate-700 transition-colors">
-                CANCEL
-              </button>
-              <button onClick={() => handleRemoveTx(txDeleteConfirmId)} className="flex-1 py-3 bg-rose-600 text-white rounded-xl text-xs font-black tracking-widest hover:bg-rose-500 transition-colors shadow-md shadow-rose-500/30">
-                REMOVE
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <AnimatePresence>
+        {txDeleteConfirmId && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-[80] flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 16, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.9, y: 16, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 450, damping: 28 }}
+              className="bg-slate-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-slate-800 text-center relative overflow-hidden"
+            >
+              <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-rose-500 via-amber-500 to-rose-500" />
+              <div className="w-16 h-16 bg-rose-900/30 text-rose-500 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-rose-500/30 shadow-inner">
+                <Trash2 className="w-8 h-8 animate-pulse" />
+              </div>
+              <h3 className="text-lg font-black text-white uppercase tracking-tighter mb-2">
+                {txDeleteConfirmId.type === 'BILL PAYMENT' ? 'Revert Payment?' : 'Remove Record?'}
+              </h3>
+              <p className="text-sm font-bold text-slate-400 mb-6">
+                {txDeleteConfirmId.type === 'BILL PAYMENT'
+                  ? `Are you sure you want to revert this payment of ৳${txDeleteConfirmId.amount}? Member Due will be restored, and it will remain recorded as a Reverted Payment in History.`
+                  : 'Are you sure you want to remove this transaction record? Due will be reversed.'}
+              </p>
+              
+              <div className="flex space-x-3">
+                <button 
+                  type="button"
+                  onClick={() => setTxDeleteConfirmId(null)} 
+                  className="flex-1 py-3 bg-slate-800 text-slate-200 rounded-xl text-xs font-black tracking-widest hover:bg-slate-700 transition-colors cursor-pointer"
+                >
+                  CANCEL
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => handleRemoveTx(txDeleteConfirmId)} 
+                  className="flex-1 py-3 bg-rose-600 text-white rounded-xl text-xs font-black tracking-widest hover:bg-rose-500 transition-all shadow-md shadow-rose-500/30 active:scale-95 cursor-pointer"
+                >
+                  {txDeleteConfirmId.type === 'BILL PAYMENT' ? 'REVERT PAYMENT' : 'REMOVE'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Contact Action Modal (Direct Phone Call / WhatsApp Message) */}
       {contactActionMember && (
@@ -4192,47 +4597,6 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
         />
       )}
 
-      {/* Single Member Month Bill Split Modal (August & September Bill Allocation) */}
-      {splitBillMember && (
-        <MonthBillSplitModal
-          isOpen={!!splitBillMember}
-          onClose={() => setSplitBillMember(null)}
-          member={splitBillMember}
-          allTxs={allTxs}
-          onSuccess={(updatedMember, updatedTxs) => {
-            setMembers((prev) =>
-              prev.map((m) =>
-                m.airman_id === updatedMember.airman_id || m['BD No'] === updatedMember['BD No']
-                  ? updatedMember
-                  : m
-              )
-            );
-            setAllTxs(updatedTxs);
-            if (profileMember && (profileMember.airman_id === updatedMember.airman_id || profileMember['BD No'] === updatedMember['BD No'])) {
-              setProfileMember(updatedMember);
-              setProfileTx(filterMemberTxs(updatedMember, updatedTxs));
-            }
-          }}
-        />
-      )}
-
-      {/* Batch Month Bill Split Modal (Bulk August & September Allocation for All Members) */}
-      {isBatchSplitModalOpen && (
-        <BatchMonthBillSplitModal
-          isOpen={isBatchSplitModalOpen}
-          onClose={() => setIsBatchSplitModalOpen(false)}
-          members={members}
-          allTxs={allTxs}
-          onSuccess={(updatedList) => {
-            setMembers(formatAndSortMembers(updatedList));
-            try {
-              const freshTxs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-              setAllTxs(freshTxs);
-            } catch {}
-          }}
-        />
-      )}
-
       {/* Printable Canteen Bill Modal (Office App Style Print Preview, PDF & Excel) */}
       {isPrintModalOpen && (
         <PrintableCanteenBillModal
@@ -4391,29 +4755,43 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                       {/* Right: Paid Amount, Gateway & Delete Action */}
                       <div className="flex items-center space-x-3 w-full sm:w-auto justify-between sm:justify-end shrink-0 pl-9 sm:pl-0">
                         <div className="text-right">
-                          <p className="text-sm sm:text-base font-black text-emerald-400 font-mono leading-tight">
-                            +৳{Number(tx.amount || 0).toLocaleString()}
+                          <p className={`text-sm sm:text-base font-black font-mono leading-tight ${
+                            tx.isReverted || tx.status === 'REVERTED' ? 'text-rose-400 line-through' : 'text-emerald-400'
+                          }`}>
+                            {tx.isReverted || tx.status === 'REVERTED' ? '৳' : '+৳'}{Number(tx.amount || 0).toLocaleString()}
                           </p>
                           <div className="flex items-center space-x-1.5 justify-end mt-0.5">
-                            <span className="px-2 py-0.2 rounded-full text-[9px] font-black uppercase bg-slate-800 text-slate-300 border border-slate-700 font-mono">
-                              {tx.gateway || 'CASH'}
-                            </span>
+                            {tx.isReverted || tx.status === 'REVERTED' ? (
+                              <span className="px-2 py-0.2 rounded-full text-[9px] font-black uppercase bg-rose-950/80 text-rose-300 border border-rose-500/40 font-mono">
+                                বাতিলকৃত / REVERTED
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.2 rounded-full text-[9px] font-black uppercase bg-slate-800 text-slate-300 border border-slate-700 font-mono">
+                                {tx.gateway || 'CASH'}
+                              </span>
+                            )}
                             <span className="text-[9px] text-slate-500 font-mono">
                               বর্তমান বকেয়া: ৳{currentMemberDue.toLocaleString()}
                             </span>
                           </div>
                         </div>
 
-                        {/* Delete Payment Button */}
-                        <button
-                          type="button"
-                          onClick={() => setPaymentToDelete({ ...tx, targetMember })}
-                          className="px-2.5 py-1.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 hover:text-white border border-rose-900/50 flex items-center space-x-1 text-xs font-bold transition-all cursor-pointer active:scale-95 shadow-xs"
-                          title="এই পেমেন্ট বাতিল করুন (সদস্যের বকেয়া আগের অবস্থায় ফিরে যাবে)"
-                        >
-                          <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-                          <span className="text-[11px]">Delete</span>
-                        </button>
+                        {/* Delete / Revert Status Button */}
+                        {tx.isReverted || tx.status === 'REVERTED' ? (
+                          <span className="px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-500 text-xs font-mono font-bold">
+                            বাতিলকৃত
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setPaymentToDelete({ ...tx, targetMember })}
+                            className="px-2.5 py-1.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 hover:text-white border border-rose-900/50 flex items-center space-x-1 text-xs font-bold transition-all cursor-pointer active:scale-95 shadow-xs"
+                            title="এই পেমেন্ট বাতিল করুন (সদস্যের বকেয়া আগের অবস্থায় ফিরে যাবে এবং হিস্টোরিতে সংরক্ষিত থাকবে)"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                            <span className="text-[11px]">Revert</span>
+                          </button>
+                        )}
                       </div>
                     </div>
                   );
@@ -4439,92 +4817,106 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
       )}
 
       {/* Payment Delete Confirmation Dialog */}
-      {paymentToDelete && (
-        <div className="fixed inset-0 z-[220] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
-          <div className="bg-slate-900 border border-rose-500/50 rounded-3xl w-full max-w-md p-6 shadow-2xl space-y-4 animate-scaleUp">
-            <div className="w-14 h-14 rounded-2xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 mx-auto">
-              <AlertCircle className="w-7 h-7 animate-pulse" />
-            </div>
-
-            <div className="text-center space-y-1.5">
-              <h3 className="text-lg font-black text-white uppercase tracking-tight">
-                পেমেন্ট বাতিল নিশ্চিত করুন
-              </h3>
-              <p className="text-xs text-slate-400">
-                আপনি কি নিশ্চিত যে আপনি এই পেমেন্ট রেকর্ডটি মুছে ফেলতে চান?
-              </p>
-            </div>
-
-            {/* Transaction Summary Card */}
-            <div className="p-4 bg-slate-950/80 rounded-2xl border border-slate-800 space-y-2 text-xs">
-              <div className="flex justify-between items-center text-slate-300">
-                <span className="text-slate-400">সদস্যের নাম:</span>
-                <span className="font-bold text-white">{paymentToDelete.memberName || 'সদস্য'}</span>
+      <AnimatePresence>
+        {paymentToDelete && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[220] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.88, y: 24, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.88, y: 24, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 450, damping: 28 }}
+              className="bg-slate-900 border border-rose-500/50 rounded-3xl w-full max-w-md p-6 shadow-2xl space-y-4 relative overflow-hidden"
+            >
+              <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-rose-500 via-amber-500 to-rose-500" />
+              <div className="w-14 h-14 rounded-2xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 mx-auto">
+                <AlertCircle className="w-7 h-7 animate-pulse" />
               </div>
-              <div className="flex justify-between items-center text-slate-300">
-                <span className="text-slate-400">বিডি নম্বর (BD No):</span>
-                <span className="font-mono font-bold text-white">BD/{String(paymentToDelete.bdNo || '').replace(/\D/g, '')}</span>
-              </div>
-              <div className="flex justify-between items-center text-slate-300">
-                <span className="text-slate-400">পরিশোধের তারিখ:</span>
-                <span className="font-mono text-indigo-300">{toEnglishDate(paymentToDelete.date)}</span>
-              </div>
-              <div className="flex justify-between items-center text-slate-300">
-                <span className="text-slate-400">পরিশোধের মাধ্যম:</span>
-                <span className="font-bold text-slate-200">{paymentToDelete.gateway || 'CASH'}</span>
-              </div>
-              <div className="flex justify-between items-center pt-2 border-t border-slate-800 text-sm">
-                <span className="font-bold text-slate-300">পরিশোধিত অর্থ (Amount):</span>
-                <span className="font-mono font-black text-emerald-400 text-base">
-                  ৳{Number(paymentToDelete.amount || 0).toLocaleString()}
-                </span>
-              </div>
-            </div>
 
-            {/* Consequence Notice */}
-            <div className="p-3 bg-rose-950/50 border border-rose-800/60 rounded-xl text-[11px] text-rose-200 space-y-1 leading-relaxed">
-              <p className="font-bold flex items-center gap-1.5 text-rose-300">
-                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                <span>বকেয়া পুনর্বহাল বিজ্ঞপ্তি:</span>
-              </p>
-              <p>
-                পেমেন্ট মুছে দিলে সদস্যের বকেয়া (Due) অবিলম্বে <strong>৳{Number(paymentToDelete.amount || 0).toLocaleString()} বৃদ্ধি পেয়ে পূর্বের অবস্থায় ফিরে যাবে</strong> এবং ক্লাউডেও স্বয়ংক্রিয়ভাবে আপডেট হবে।
-              </p>
-            </div>
+              <div className="text-center space-y-1.5">
+                <h3 className="text-lg font-black text-white uppercase tracking-tight">
+                  পেমেন্ট বাতিল নিশ্চিত করুন
+                </h3>
+                <p className="text-xs text-slate-400">
+                  আপনি কি নিশ্চিত যে আপনি এই পেমেন্ট রেকর্ডটি মুছে ফেলতে চান?
+                </p>
+              </div>
 
-            {/* Action Buttons */}
-            <div className="flex items-center space-x-3 pt-2">
-              <button
-                type="button"
-                disabled={isDeletingPayment}
-                onClick={() => setPaymentToDelete(null)}
-                className="flex-1 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50"
-              >
-                ফিরে যান (Cancel)
-              </button>
+              {/* Transaction Summary Card */}
+              <div className="p-4 bg-slate-950/80 rounded-2xl border border-slate-800 space-y-2 text-xs">
+                <div className="flex justify-between items-center text-slate-300">
+                  <span className="text-slate-400">সদস্যের নাম:</span>
+                  <span className="font-bold text-white">{paymentToDelete.memberName || 'সদস্য'}</span>
+                </div>
+                <div className="flex justify-between items-center text-slate-300">
+                  <span className="text-slate-400">বিডি নম্বর (BD No):</span>
+                  <span className="font-mono font-bold text-white">BD/{String(paymentToDelete.bdNo || '').replace(/\D/g, '')}</span>
+                </div>
+                <div className="flex justify-between items-center text-slate-300">
+                  <span className="text-slate-400">পরিশোধের তারিখ:</span>
+                  <span className="font-mono text-indigo-300">{toEnglishDate(paymentToDelete.date)}</span>
+                </div>
+                <div className="flex justify-between items-center text-slate-300">
+                  <span className="text-slate-400">পরিশোধের মাধ্যম:</span>
+                  <span className="font-bold text-slate-200">{paymentToDelete.gateway || 'CASH'}</span>
+                </div>
+                <div className="flex justify-between items-center pt-2 border-t border-slate-800 text-sm">
+                  <span className="font-bold text-slate-300">পরিশোধিত অর্থ (Amount):</span>
+                  <span className="font-mono font-black text-emerald-400 text-base">
+                    ৳{Number(paymentToDelete.amount || 0).toLocaleString()}
+                  </span>
+                </div>
+              </div>
 
-              <button
-                type="button"
-                disabled={isDeletingPayment}
-                onClick={handleConfirmDeletePayment}
-                className="flex-1 py-3 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1.5 shadow-lg shadow-rose-900/50 disabled:opacity-50"
-              >
-                {isDeletingPayment ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin text-white" />
-                    <span>মুছে ফেলা হচ্ছে...</span>
-                  </>
-                ) : (
-                  <>
-                    <Trash2 className="w-4 h-4" />
-                    <span>হ্যাঁ, বাতিল করুন</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+              {/* Consequence Notice */}
+              <div className="p-3 bg-rose-950/50 border border-rose-800/60 rounded-xl text-[11px] text-rose-200 space-y-1 leading-relaxed">
+                <p className="font-bold flex items-center gap-1.5 text-rose-300">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  <span>বকেয়া পুনর্বহাল বিজ্ঞপ্তি:</span>
+                </p>
+                <p>
+                  পেমেন্ট মুছে দিলে সদস্যের বকেয়া (Due) অবিলম্বে <strong>৳{Number(paymentToDelete.amount || 0).toLocaleString()} বৃদ্ধি পেয়ে পূর্বের অবস্থায় ফিরে যাবে</strong> এবং ক্লাউডেও স্বয়ংক্রিয়ভাবে আপডেট হবে।
+                </p>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center space-x-3 pt-2">
+                <button
+                  type="button"
+                  disabled={isDeletingPayment}
+                  onClick={() => setPaymentToDelete(null)}
+                  className="flex-1 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50 active:scale-95"
+                >
+                  ফিরে যান (Cancel)
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isDeletingPayment}
+                  onClick={handleConfirmDeletePayment}
+                  className="flex-1 py-3 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1.5 shadow-lg shadow-rose-900/50 disabled:opacity-50 active:scale-95"
+                >
+                  {isDeletingPayment ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span>মুছে ফেলা হচ্ছে...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-4 h-4" />
+                      <span>হ্যাঁ, বাতিল করুন</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

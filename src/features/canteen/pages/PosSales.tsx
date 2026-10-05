@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { Search, Plus, ShoppingCart, Minus, Trash2, CheckCircle2, X, History, Calendar, Package as PackageIcon, AlertTriangle, ChefHat, Filter } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl } from '../utils/canteenSettings';
@@ -1091,28 +1092,52 @@ export const PosSales: React.FC = () => {
 
     
       {/* Delete Confirmation Modal */}
-      {txDeleteConfirmId && (
-          <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
-              <div className="bg-slate-900 rounded-3xl p-6 w-full max-w-sm shadow-xl border border-slate-800 animate-in zoom-in-95">
-                  <div className="text-center">
-                      <div className="w-16 h-16 bg-rose-900/30 text-rose-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                          <Trash2 className="w-8 h-8" />
-                      </div>
-                      <h3 className="text-lg font-black text-white uppercase tracking-tighter mb-2">Remove Record?</h3>
-                      <p className="text-sm font-bold text-slate-400 mb-6">Are you sure you want to remove this history record? Member Due will be reversed, and both Catalog and RAW Material stocks (issue back) will be restored to store.</p>
-                      
-                      <div className="flex space-x-3">
-                          <button onClick={() => setTxDeleteConfirmId(null)} className="flex-1 py-3 bg-slate-800 text-slate-200 rounded-xl text-xs font-black tracking-widest hover:bg-slate-200 transition-colors">
-                              CANCEL
-                          </button>
-                          <button onClick={() => removeHistoryItem(txDeleteConfirmId)} className="flex-1 py-3 bg-rose-900/30 text-rose-500 rounded-xl text-xs font-black tracking-widest hover:bg-rose-600 hover:text-white transition-colors shadow-md shadow-rose-500/30">
-                              REMOVE
-                          </button>
-                      </div>
-                  </div>
+      <AnimatePresence>
+        {txDeleteConfirmId && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/75 backdrop-blur-md z-[60] flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.88, y: 20, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.88, y: 20, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 450, damping: 28 }}
+              className="bg-slate-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-slate-800 relative overflow-hidden"
+            >
+              <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-rose-500 via-amber-500 to-rose-500" />
+              <div className="text-center">
+                <div className="w-16 h-16 bg-rose-900/30 text-rose-500 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-rose-500/30 shadow-inner">
+                  <Trash2 className="w-8 h-8 animate-pulse" />
+                </div>
+                <h3 className="text-lg font-black text-white uppercase tracking-tighter mb-2">Remove Record?</h3>
+                <p className="text-sm font-bold text-slate-400 mb-6">
+                  Are you sure you want to remove this history record? Member Due will be reversed, and both Catalog and RAW Material stocks (issue back) will be restored to store.
+                </p>
+                
+                <div className="flex space-x-3">
+                  <button 
+                    type="button"
+                    onClick={() => setTxDeleteConfirmId(null)} 
+                    className="flex-1 py-3 bg-slate-800 text-slate-200 rounded-xl text-xs font-black tracking-widest hover:bg-slate-700 transition-colors cursor-pointer active:scale-95"
+                  >
+                    CANCEL
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => removeHistoryItem(txDeleteConfirmId)} 
+                    className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black tracking-widest transition-all shadow-md shadow-rose-600/30 active:scale-95 cursor-pointer"
+                  >
+                    REMOVE
+                  </button>
+                </div>
               </div>
-          </div>
-      )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
     {/* History Modal - Mobile-First & High Visibility */}
     {showHistoryModal && (

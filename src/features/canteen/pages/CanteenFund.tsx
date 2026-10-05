@@ -113,13 +113,13 @@ export const CanteenFund: React.FC = () => {
     };
   }, []);
 
-  // 1. Inflow from Bill Payments
+  // 1. Inflow from Bill Payments & Bazar Advance Returns
   const billPaymentCash = reports
-    .filter(r => r.type === 'BILL PAYMENT' && String(r.gateway || '').toUpperCase() === 'CASH')
+    .filter(r => (r.type === 'BILL PAYMENT' || r.type === 'BAZAR_RETURN' || r.type === 'ADVANCE_RETURN') && String(r.gateway || '').toUpperCase() === 'CASH')
     .reduce((a, b) => a + (Number(b.amount) || 0), 0);
 
   const billPaymentUCB = reports
-    .filter(r => r.type === 'BILL PAYMENT' && String(r.gateway || '').toUpperCase() === 'UCB')
+    .filter(r => (r.type === 'BILL PAYMENT' || r.type === 'BAZAR_RETURN' || r.type === 'ADVANCE_RETURN') && String(r.gateway || '').toUpperCase() === 'UCB')
     .reduce((a, b) => a + (Number(b.amount) || 0), 0);
 
   // 2. Outflow from Expenditures
@@ -148,8 +148,8 @@ export const CanteenFund: React.FC = () => {
   const totalFund = totalCash + totalUCB;
 
   // Lists for logs
-  const cashPayments = reports.filter(r => r.type === 'BILL PAYMENT' && String(r.gateway || '').toUpperCase() === 'CASH');
-  const ucbPayments = reports.filter(r => r.type === 'BILL PAYMENT' && String(r.gateway || '').toUpperCase() === 'UCB');
+  const cashPayments = reports.filter(r => (r.type === 'BILL PAYMENT' || r.type === 'BAZAR_RETURN' || r.type === 'ADVANCE_RETURN') && String(r.gateway || '').toUpperCase() === 'CASH');
+  const ucbPayments = reports.filter(r => (r.type === 'BILL PAYMENT' || r.type === 'BAZAR_RETURN' || r.type === 'ADVANCE_RETURN') && String(r.gateway || '').toUpperCase() === 'UCB');
 
   const cashExpenses = expenses.filter(e => String(e.paymentMethod || 'Cash').toLowerCase() === 'cash');
   const ucbExpenses = expenses.filter(e => String(e.paymentMethod || '').toLowerCase() === 'ucb');

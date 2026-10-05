@@ -351,8 +351,8 @@ export async function syncImportHistoryToTransactions(): Promise<any[]> {
             }
           }
 
-          const currentNetRecorded = memberDebits - memberPayments;
-          const missingDue = Math.round((totalMemberDue - Math.max(0, currentNetRecorded)) * 100) / 100;
+          // Ensure member's original bill is always preserved even if payments were made
+          const missingDue = Math.round((Math.max(0, totalMemberDue + memberPayments - memberDebits)) * 100) / 100;
 
           if (missingDue > 0) {
             const autoId = `init-auto-due-${cleanBd || airmanId || Math.random()}`;

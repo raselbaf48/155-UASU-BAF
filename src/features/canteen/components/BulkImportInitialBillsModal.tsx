@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import XLSX from 'xlsx-js-style';
 import { saveAs } from 'file-saver';
 import { 
@@ -2256,150 +2257,178 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
         </div>
 
         {/* Rollback / Remove Confirmation Dialog */}
-        {rollbackBatch && (
-          <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-md z-[90] flex items-center justify-center p-4">
-            <div className="bg-slate-900 border border-rose-500/30 rounded-3xl p-6 w-full max-w-lg shadow-2xl animate-in zoom-in-95 space-y-4">
-              <div className="flex items-start space-x-3.5">
-                <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0">
-                  <AlertTriangle className="w-6 h-6" />
-                </div>
-                <div>
-                  <h3 className="text-base font-black text-white uppercase tracking-tight">
-                    REMOVE & ROLLBACK IMPORT BATCH?
-                  </h3>
-                  <p className="text-xs text-slate-400 font-bold mt-0.5">
-                    ইম্পোর্ট হিস্টোরি ও বকেয়া রিভার্স নিশ্চিতকরণ
-                  </p>
-                </div>
-              </div>
-
-              {/* Batch Info Card */}
-              <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 text-xs space-y-1.5 font-bold">
-                <div className="flex justify-between text-slate-400">
-                  <span>তারিখ ও সময়:</span>
-                  <span className="text-white font-mono">{rollbackBatch.displayDate}</span>
-                </div>
-                <div className="flex justify-between text-slate-400">
-                  <span>ফাইল / উৎস:</span>
-                  <span className="text-white truncate max-w-[200px]">{rollbackBatch.sourceName}</span>
-                </div>
-                {rollbackBatch.targetMonth && (
-                  <div className="flex justify-between text-slate-400">
-                    <span>বিলের মাস:</span>
-                    <span className="text-indigo-400 font-mono">
-                      {rollbackBatch.lastMonth ? `${formatShortMonth(rollbackBatch.lastMonth)} & ` : ''}
-                      {formatShortMonth(rollbackBatch.targetMonth)}
-                    </span>
+        <AnimatePresence>
+          {rollbackBatch && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-slate-950/85 backdrop-blur-md z-[90] flex items-center justify-center p-4"
+            >
+              <motion.div 
+                initial={{ scale: 0.88, y: 24, opacity: 0 }}
+                animate={{ scale: 1, y: 0, opacity: 1 }}
+                exit={{ scale: 0.88, y: 24, opacity: 0 }}
+                transition={{ type: 'spring', stiffness: 450, damping: 28 }}
+                className="bg-slate-900 border border-rose-500/30 rounded-3xl p-6 w-full max-w-lg shadow-2xl space-y-4 relative overflow-hidden"
+              >
+                <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-amber-500 via-rose-500 to-red-600" />
+                <div className="flex items-start space-x-3.5">
+                  <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0">
+                    <AlertTriangle className="w-6 h-6 animate-pulse" />
                   </div>
-                )}
-                <div className="flex justify-between text-slate-400">
-                  <span>মোট সদস্য:</span>
-                  <span className="text-amber-400 font-mono">{rollbackBatch.totalMembers} জন</span>
+                  <div>
+                    <h3 className="text-base font-black text-white uppercase tracking-tight">
+                      REMOVE & ROLLBACK IMPORT BATCH?
+                    </h3>
+                    <p className="text-xs text-slate-400 font-bold mt-0.5">
+                      ইম্পোর্ট হিস্টোরি ও বকেয়া রিভার্স নিশ্চিতকরণ
+                    </p>
+                  </div>
                 </div>
-                <div className="flex justify-between text-slate-400">
-                  <span>মোট টাকার পরিমাণ:</span>
-                  <span className="text-emerald-400 font-mono">৳{rollbackBatch.totalAmount.toLocaleString()}</span>
-                </div>
-              </div>
 
-              <div className="p-3 bg-amber-950/40 border border-amber-500/30 rounded-xl text-amber-200 text-xs font-bold leading-relaxed">
-                ⚠️ <strong>মনোযোগ দিন:</strong> 'Revert Dues & Remove' চাপলে এই ব্যাচে অন্তর্ভুক্ত সকল সদস্যের বকেয়া এই ইম্পোর্টের পূর্বের অবস্থায় স্বয়ংক্রিয়ভাবে ফিরে যাবে এবং সংশ্লিষ্ট ট্রানজেকশন মুছে যাবে।
-              </div>
-
-              {/* Actions */}
-              <div className="flex flex-col sm:flex-row items-center justify-end gap-2.5 pt-2">
-                <button
-                  type="button"
-                  disabled={isRollingBack}
-                  onClick={() => setRollbackBatch(null)}
-                  className="w-full sm:w-auto px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-black uppercase transition-colors cursor-pointer"
-                >
-                  বাতিল (Cancel)
-                </button>
-
-                <button
-                  type="button"
-                  disabled={isRollingBack}
-                  onClick={() => handleRollbackBatch(rollbackBatch, true)}
-                  className="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-lg shadow-rose-600/30 flex items-center justify-center space-x-2 transition-all cursor-pointer"
-                >
-                  {isRollingBack ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>বকেয়া রিভার্স হচ্ছে...</span>
-                    </>
-                  ) : (
-                    <>
-                      <RotateCcw className="w-4 h-4" />
-                      <span>সকলের বকেয়া রিভার্স ও রিমুভ (Revert Dues & Remove)</span>
-                    </>
+                {/* Batch Info Card */}
+                <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 text-xs space-y-1.5 font-bold">
+                  <div className="flex justify-between text-slate-400">
+                    <span>তারিখ ও সময়:</span>
+                    <span className="text-white font-mono">{rollbackBatch.displayDate}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>ফাইল / উৎস:</span>
+                    <span className="text-white truncate max-w-[200px]">{rollbackBatch.sourceName}</span>
+                  </div>
+                  {rollbackBatch.targetMonth && (
+                    <div className="flex justify-between text-slate-400">
+                      <span>বিলের মাস:</span>
+                      <span className="text-indigo-400 font-mono">
+                        {rollbackBatch.lastMonth ? `${formatShortMonth(rollbackBatch.lastMonth)} & ` : ''}
+                        {formatShortMonth(rollbackBatch.targetMonth)}
+                      </span>
+                    </div>
                   )}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+                  <div className="flex justify-between text-slate-400">
+                    <span>মোট সদস্য:</span>
+                    <span className="text-amber-400 font-mono">{rollbackBatch.totalMembers} জন</span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>মোট টাকার পরিমাণ:</span>
+                    <span className="text-emerald-400 font-mono">৳{rollbackBatch.totalAmount.toLocaleString()}</span>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-amber-950/40 border border-amber-500/30 rounded-xl text-amber-200 text-xs font-bold leading-relaxed">
+                  ⚠️ <strong>মনোযোগ দিন:</strong> 'Revert Dues & Remove' চাপলে এই ব্যাচে অন্তর্ভুক্ত সকল সদস্যের বকেয়া এই ইম্পোর্টের পূর্বের অবস্থায় স্বয়ংক্রিয়ভাবে ফিরে যাবে এবং সংশ্লিষ্ট ট্রানজেকশন মুছে যাবে।
+                </div>
+
+                {/* Actions */}
+                <div className="flex flex-col sm:flex-row items-center justify-end gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    disabled={isRollingBack}
+                    onClick={() => setRollbackBatch(null)}
+                    className="w-full sm:w-auto px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-black uppercase transition-colors cursor-pointer active:scale-95"
+                  >
+                    বাতিল (Cancel)
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isRollingBack}
+                    onClick={() => handleRollbackBatch(rollbackBatch, true)}
+                    className="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-lg shadow-rose-600/30 flex items-center justify-center space-x-2 transition-all cursor-pointer active:scale-95"
+                  >
+                    {isRollingBack ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>বকেয়া রিভার্স হচ্ছে...</span>
+                      </>
+                    ) : (
+                      <>
+                        <RotateCcw className="w-4 h-4" />
+                        <span>সকলের বকেয়া রিভার্স ও রিমুভ (Revert Dues & Remove)</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Reset All Member Dues Confirmation Dialog */}
-        {showResetAllConfirm && (
-          <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-md z-[90] flex items-center justify-center p-4">
-            <div className="bg-slate-900 border border-rose-500/40 rounded-3xl p-6 w-full max-w-lg shadow-2xl animate-in zoom-in-95 space-y-4">
-              <div className="flex items-start space-x-3.5">
-                <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0">
-                  <AlertTriangle className="w-6 h-6" />
+        <AnimatePresence>
+          {showResetAllConfirm && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-slate-950/85 backdrop-blur-md z-[90] flex items-center justify-center p-4"
+            >
+              <motion.div 
+                initial={{ scale: 0.88, y: 24, opacity: 0 }}
+                animate={{ scale: 1, y: 0, opacity: 1 }}
+                exit={{ scale: 0.88, y: 24, opacity: 0 }}
+                transition={{ type: 'spring', stiffness: 450, damping: 28 }}
+                className="bg-slate-900 border border-rose-500/40 rounded-3xl p-6 w-full max-w-lg shadow-2xl space-y-4 relative overflow-hidden"
+              >
+                <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-red-600 via-rose-500 to-red-600" />
+                <div className="flex items-start space-x-3.5">
+                  <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0">
+                    <AlertTriangle className="w-6 h-6 animate-pulse" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-white uppercase tracking-tight">
+                      RESET ALL MEMBER DUES TO ৳০?
+                    </h3>
+                    <p className="text-xs text-slate-400 font-bold mt-0.5">
+                      সকল সদস্যের বকেয়া ও ইম্পোর্ট হিস্টোরি সম্পূর্ণ রিসেট
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-base font-black text-white uppercase tracking-tight">
-                    RESET ALL MEMBER DUES TO ৳০?
-                  </h3>
-                  <p className="text-xs text-slate-400 font-bold mt-0.5">
-                    সকল সদস্যের বকেয়া ও ইম্পোর্ট হিস্টোরি সম্পূর্ণ রিসেট
+
+                <div className="p-4 bg-slate-950/80 border border-slate-800 rounded-2xl text-xs space-y-2 font-bold leading-relaxed text-slate-300">
+                  <p>
+                    ⚠️ আপনি কি নিশ্চিত যে আপনি ডেটাবেজের <strong className="text-rose-400">সকল ৭৬ জন সদস্যের বকেয়া শূন্য (৳০)</strong> করতে চান এবং পূর্ববর্তী সকল প্রাথমিক বকেয়া ট্রানজেকশন ও ইম্পোর্ট হিস্টোরি ক্লিয়ার করতে চান?
+                  </p>
+                  <p className="text-[11px] text-amber-300">
+                    এটি করলে পুরো সিস্টেম সম্পূর্ণ ফ্রেশ অবস্থায় চলে আসবে এবং আপনি নতুন ৯-কলামের এক্সেল ফাইল দিয়ে নতুন করে বিল ইম্পোর্ট করতে পারবেন।
                   </p>
                 </div>
-              </div>
 
-              <div className="p-4 bg-slate-950/80 border border-slate-800 rounded-2xl text-xs space-y-2 font-bold leading-relaxed text-slate-300">
-                <p>
-                  ⚠️ আপনি কি নিশ্চিত যে আপনি ডেটাবেজের <strong className="text-rose-400">সকল ৭৬ জন সদস্যের বকেয়া শূন্য (৳০)</strong> করতে চান এবং পূর্ববর্তী সকল প্রাথমিক বকেয়া ট্রানজেকশন ও ইম্পোর্ট হিস্টোরি ক্লিয়ার করতে চান?
-                </p>
-                <p className="text-[11px] text-amber-300">
-                  এটি করলে পুরো সিস্টেম সম্পূর্ণ ফ্রেশ অবস্থায় চলে আসবে এবং আপনি নতুন ৯-কলামের এক্সেল ফাইল দিয়ে নতুন করে বিল ইম্পোর্ট করতে পারবেন।
-                </p>
-              </div>
+                {/* Actions */}
+                <div className="flex flex-col sm:flex-row items-center justify-end gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    disabled={isResettingAll}
+                    onClick={() => setShowResetAllConfirm(false)}
+                    className="w-full sm:w-auto px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-black uppercase transition-colors cursor-pointer active:scale-95"
+                  >
+                    বাতিল (Cancel)
+                  </button>
 
-              {/* Actions */}
-              <div className="flex flex-col sm:flex-row items-center justify-end gap-2.5 pt-2">
-                <button
-                  type="button"
-                  disabled={isResettingAll}
-                  onClick={() => setShowResetAllConfirm(false)}
-                  className="w-full sm:w-auto px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-black uppercase transition-colors cursor-pointer"
-                >
-                  বাতিল (Cancel)
-                </button>
-
-                <button
-                  type="button"
-                  disabled={isResettingAll}
-                  onClick={handleResetAllMembersDues}
-                  className="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-lg shadow-rose-600/30 flex items-center justify-center space-x-2 transition-all cursor-pointer"
-                >
-                  {isResettingAll ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>রিসেট হচ্ছে...</span>
-                    </>
-                  ) : (
-                    <>
-                      <RotateCcw className="w-4 h-4" />
-                      <span>হ্যাঁ, সকলের বকেয়া শূন্য করুন</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+                  <button
+                    type="button"
+                    disabled={isResettingAll}
+                    onClick={handleResetAllMembersDues}
+                    className="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-lg shadow-rose-600/30 flex items-center justify-center space-x-2 transition-all cursor-pointer active:scale-95"
+                  >
+                    {isResettingAll ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>রিসেট হচ্ছে...</span>
+                      </>
+                    ) : (
+                      <>
+                        <RotateCcw className="w-4 h-4" />
+                        <span>হ্যাঁ, সকলের বকেয়া শূন্য করুন</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
       </div>
     </div>
