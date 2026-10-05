@@ -115,3 +115,73 @@ export function sortCanteenMembersByOfficeSeniority(members: any[]): any[] {
     return numA - numB;
   });
 }
+
+/**
+ * Identify Commissioned Officers
+ */
+export const isOfficerMember = (member: any): boolean => {
+  const rank = String(member?.Rank || member?.rank || '').toUpperCase().trim();
+  const officerRanks = [
+    'AIR CHIEF MSHL', 'AIR MSHL', 'AVM', 'AIR CDRE', 'GP CAPT', 
+    'WG CDR', 'SQN LDR', 'FLT LT', 'FLG OFFR', 'FG OFFR', 'PLT OFFR'
+  ];
+  return officerRanks.some(r => rank.includes(r)) || /officer|commander|leader|captain/i.test(rank);
+};
+
+/**
+ * Identify Civilian Members (Civ, Cook, Staff, Unit Guest, Civilian)
+ */
+export const isCivilianMember = (member: any): boolean => {
+  if (isOfficerMember(member)) return false;
+  const rank = String(member?.Rank || member?.rank || '').toUpperCase().trim();
+  const role = String(member?.Role || member?.role || '').toUpperCase().trim();
+  const surname = String(member?.Surname || member?.name || '').toLowerCase().trim();
+  return (
+    rank === 'CIV' || 
+    rank.includes('CIV') || 
+    rank.includes('CIVILIAN') || 
+    rank.includes('বেসামরিক') || 
+    rank.includes('সিভিলিয়ান') || 
+    rank === '-' ||
+    role.includes('CIV') || 
+    role === 'COOK' ||
+    surname === 'unit guest' ||
+    surname.includes('guest')
+  );
+};
+
+/**
+ * Identify Airmen (JCOs, NCOs, ORs: MWO, SWO, WO, Sgt, Cpl, LAC, AC)
+ */
+export const isAirmanMember = (member: any): boolean => {
+  return !isOfficerMember(member) && !isCivilianMember(member);
+};
+
+/**
+ * Robust matcher to ensure 100% accurate link between canteen member and transaction records
+ */
+export const isTxBelongingToMember = (member: any, tx: any): boolean => {
+  if (!member || !tx) return false;
+  const mAirman = String(member.airman_id || member.airmanId || '').trim().toLowerCase();
+  const txAirman = String(tx.airman_id || tx.airmanId || '').trim().toLowerCase();
+  if (mAirman && txAirman && mAirman === txAirman) return true;
+
+  const mBdClean = String(member['BD No'] || member.bdNo || member.bd_no || member.airman_id || '').replace(/\D/g, '');
+  const txBdClean = String(tx.bdNo || tx['BD No'] || tx.bd_no || tx.airman_id || '').replace(/\D/g, '');
+  const mBdCleanNoZero = mBdClean.replace(/^0+/, '');
+  const txBdCleanNoZero = txBdClean.replace(/^0+/, '');
+  if (mBdClean && txBdClean && (mBdClean === txBdClean || (mBdCleanNoZero && mBdCleanNoZero === txBdCleanNoZero))) {
+    return true;
+  }
+
+  const mSurname = String(member['Surname'] || member.surname || '').trim().toLowerCase();
+  const mRank = String(member['Rank'] || member.rank || '').trim().toLowerCase();
+  if (mSurname && tx.memberName) {
+    const txName = String(tx.memberName).toLowerCase();
+    if (txName.includes(mSurname) && (!mRank || txName.includes(mRank))) {
+      return true;
+    }
+  }
+
+  return false;
+};

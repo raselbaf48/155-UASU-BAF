@@ -231,7 +231,7 @@ export const CanteenMemberDB: React.FC = () => {
     const payload = {
       airman_id: `airman-${cleanBd}`,
       "BD No": cleanBd,
-      "Rank": singleMember.rank.trim() || 'LAC',
+      "Rank": singleMember.rank === '-' ? '-' : (singleMember.rank.trim() || 'LAC'),
       "Surname": singleMember.surname.trim(),
       "Contact": singleMember.contact.trim(),
       "Role": singleMember.role || 'Member',
@@ -980,7 +980,9 @@ export const CanteenMemberDB: React.FC = () => {
                       className="w-full bg-slate-950 text-white rounded-xl px-4 py-3 text-sm font-bold border border-slate-700 focus:outline-none focus:ring-2 focus:ring-cyan-500"
                     >
                       {BAF_RANKS_WITH_BN.map(item => (
-                        <option key={item.rank} value={item.rank}>{item.rank} — {item.bn}</option>
+                        <option key={item.rank} value={item.rank}>
+                          {item.rank === '-' ? '- (পদবি ছাড়া / Without Rank)' : `${item.rank} — ${item.bn}`}
+                        </option>
                       ))}
                     </select>
                   </div>
@@ -1314,7 +1316,7 @@ export const CanteenMemberDB: React.FC = () => {
                     Rank / পদবি (English)
                   </label>
                   <select
-                    value={editMember['Rank'] || 'LAC'}
+                    value={editMember['Rank'] ?? '-'}
                     onChange={(e) => {
                       const newRank = e.target.value;
                       setEditMember({ 
@@ -1327,7 +1329,7 @@ export const CanteenMemberDB: React.FC = () => {
                   >
                     {BAF_RANKS_WITH_BN.map(item => (
                       <option key={item.rank} value={item.rank}>
-                        {item.rank} — {item.bn}
+                        {item.rank === '-' ? '- (পদবি ছাড়া / Without Rank)' : `${item.rank} — ${item.bn}`}
                       </option>
                     ))}
                   </select>

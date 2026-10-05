@@ -64,7 +64,12 @@ import {
   formatMemberNameBn,
   formatBengaliMonthYear
 } from '../utils/exportCanteenBillExcel';
-import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
+import { 
+  sortCanteenMembersByOfficeSeniority,
+  isCivilianMember,
+  isAirmanMember 
+} from '../utils/canteenSeniority';
+export { isCivilianMember, isAirmanMember };
 import { 
   getMemberBanglaName, 
   saveMemberBanglaName, 
@@ -451,7 +456,7 @@ export const MemberDB: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<BillCategory>('ALL');
   const [selectedMonth, setSelectedMonth] = useState<string>(() => getRunningMonthKey());
   const [filterMode, setFilterMode] = useState<'AUTO' | 'ALL' | 'DUE'>('AUTO');
-  const [rankTypeFilter, setRankTypeFilter] = useState<'OVERALL' | 'OFFICER' | 'AIRMEN'>('OVERALL');
+  const [rankTypeFilter, setRankTypeFilter] = useState<'OVERALL' | 'OFFICER' | 'AIRMEN' | 'CIVILIAN'>('OVERALL');
   const [viewMode, setViewMode] = useState<'BOX' | 'TABLE'>('BOX');
   const [, setBanglaVersion] = useState<number>(0);
 
@@ -494,19 +499,30 @@ export const MemberDB: React.FC = () => {
     return true;
   });
 
-  // Officer / Airmen counts
+  // Officer / Airmen / Civilian counts
   const officerCount = useMemo(() => members.filter(isOfficerMember).length, [members]);
-  const airmenCount = useMemo(() => members.filter(m => !isOfficerMember(m)).length, [members]);
+  const airmenCount = useMemo(() => members.filter(isAirmanMember).length, [members]);
+  const civilianCount = useMemo(() => members.filter(isCivilianMember).length, [members]);
   const overallCount = members.length;
 
   // Profile Modal state
   const [profileMember, setProfileMember] = useState<any | null>(null);
   const [profileTx, setProfileTx] = useState<any[]>([]);
+  const [isEditingBanglaName, setIsEditingBanglaName] = useState(false);
+  const [editBanglaNameVal, setEditBanglaNameVal] = useState('');
+  const [isSavingBanglaName, setIsSavingBanglaName] = useState(false);
 
   // Initial Bill Modals state
   const [isImportBillsModalOpen, setIsImportBillsModalOpen] = useState(false);
   const [importModalInitialTab, setImportModalInitialTab] = useState<'FILE' | 'PASTE' | 'HISTORY'>('FILE');
   const [initialBillMember, setInitialBillMember] = useState<any | null>(null);
+  const [importHistoryCount, setImportHistoryCount] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem('canteen_bill_import_history');
+      if (raw) return JSON.parse(raw).length;
+    } catch {}
+    return 0;
+  });
 
   // Statement Modal state
   const [statementMember, setStatementMember] = useState<any | null>(null);
@@ -606,16 +622,20 @@ export const MemberDB: React.FC = () => {
 
     sortedProfileTx.forEach((tx) => {
       if (tx.type === 'BILL PAYMENT') {
-        const isReverted = tx.isReverted || tx.status === 'REVERTED' || String(tx.items || '').includes('[বাতিল / REVERTED]');
+        const isReverted = tx.isReverted || tx.status === 'REVERTED' || String(tx.items || '').includes('[বাতিল');
+        const isCash = String(tx.gateway || '').toUpperCase() === 'CASH' || String(tx.items || '').toUpperCase().includes('CASH');
+        const methodStr = isCash ? 'Cash' : 'UCB';
+        const desc = isReverted 
+          ? `Bill Payment (বাতিল / REVERTED) - ${methodStr}`
+          : `Bill Payment - ${methodStr}`;
+
         rows.push({
           rowId: `${tx.id}_pay`,
           ser: currentSer++,
           tx,
           txId: tx.id,
           date: tx.date,
-          description: isReverted 
-            ? `BILL PAYMENT (বাতিল / REVERTED) - ${tx.gateway || 'CASH'} (বকেয়া পুনর্বহাল)`
-            : (tx.items || ('Payment Received - ' + (tx.gateway || 'CASH'))),
+          description: desc,
           qty: isReverted ? 'বাতিল' : '-',
           amount: tx.amount,
           type: isReverted ? 'REVERTED' : 'BILL PAYMENT'
@@ -735,6 +755,28 @@ export const MemberDB: React.FC = () => {
   const filteredProfileHistoryRows = useMemo(() => {
     return displayHistoryRows.map((r, idx) => ({ ...r, ser: idx + 1 }));
   }, [displayHistoryRows]);
+
+  // Overall financial summary for open profile member (Billed, Paid, Net Due)
+  const profileMemberStats = useMemo(() => {
+    if (!profileMember) return { totalBilled: 0, totalPaid: 0, netDue: 0 };
+    let billed = 0;
+    let paid = 0;
+    (profileTx || []).forEach((t: any) => {
+      if (!t) return;
+      const isReverted = t.isReverted || t.status === 'REVERTED' || String(t.items || '').includes('[বাতিল');
+      if (isReverted) return;
+      if (t.type === 'BILL PAYMENT') {
+        paid += Number(t.amount || 0);
+      } else {
+        billed += Number(t.amount || 0);
+      }
+    });
+    // Live ledger net due: Total Billed - Total Paid
+    const netDue = (profileTx && profileTx.length > 0)
+      ? Math.max(0, billed - paid)
+      : Number(profileMember.Due ?? profileMember.due ?? profileMember.baki ?? 0);
+    return { totalBilled: billed, totalPaid: paid, netDue };
+  }, [profileMember, profileTx]);
 
   // Pay Bill Modal state
   const [payBillMember, setPayBillMember] = useState<any | null>(null);
@@ -961,24 +1003,52 @@ export const MemberDB: React.FC = () => {
     };
   }, []);
 
-  // Keep open Profile and open Statement in real-time sync with transactions
+  // Sync import history batch count
+  useEffect(() => {
+    const updateImportBatchCount = () => {
+      try {
+        const raw = localStorage.getItem('canteen_bill_import_history');
+        if (raw) setImportHistoryCount(JSON.parse(raw).length);
+      } catch {}
+    };
+    pullKeyFromCloud('canteen_bill_import_history').then(data => {
+      if (Array.isArray(data)) {
+        setImportHistoryCount(data.length);
+        localStorage.setItem('canteen_bill_import_history', JSON.stringify(data));
+      }
+    }).catch(() => {});
+    window.addEventListener('canteen_bill_import_history_updated', updateImportBatchCount);
+    window.addEventListener('storage', updateImportBatchCount);
+    return () => {
+      window.removeEventListener('canteen_bill_import_history_updated', updateImportBatchCount);
+      window.removeEventListener('storage', updateImportBatchCount);
+    };
+  }, []);
+
+  // Keep open Profile and open Statement in real-time sync with transactions (merging all sources)
   useEffect(() => {
     if (profileMember) {
-      const localTxs = (() => {
+      const local = (() => {
         try { return JSON.parse(localStorage.getItem('canteen_txs') || '[]'); } catch { return []; }
       })();
-      const effectiveTxs = allTxs && allTxs.length >= localTxs.length ? allTxs : localTxs;
-      setProfileTx(filterMemberTxs(profileMember, effectiveTxs));
+      const txMap = new Map<string, any>();
+      (allTxs || []).forEach(t => { if (t?.id) txMap.set(String(t.id), t); });
+      local.forEach((t: any) => { if (t?.id) txMap.set(String(t.id), t); });
+      const mergedTxs = deduplicateCanteenTransactions(Array.from(txMap.values()));
+      setProfileTx(filterMemberTxs(profileMember, mergedTxs));
     }
   }, [allTxs, profileMember]);
 
   useEffect(() => {
     if (statementMember) {
-      const localTxs = (() => {
+      const local = (() => {
         try { return JSON.parse(localStorage.getItem('canteen_txs') || '[]'); } catch { return []; }
       })();
-      const effectiveTxs = allTxs && allTxs.length >= localTxs.length ? allTxs : localTxs;
-      setStatementTx(filterMemberTxs(statementMember, effectiveTxs));
+      const txMap = new Map<string, any>();
+      (allTxs || []).forEach(t => { if (t?.id) txMap.set(String(t.id), t); });
+      local.forEach((t: any) => { if (t?.id) txMap.set(String(t.id), t); });
+      const mergedTxs = deduplicateCanteenTransactions(Array.from(txMap.values()));
+      setStatementTx(filterMemberTxs(statementMember, mergedTxs));
     }
   }, [allTxs, statementMember]);
 
@@ -1076,6 +1146,10 @@ export const MemberDB: React.FC = () => {
   // Calculate bill for a member given selected category and month
   const getMemberFilteredBill = (member: any, category: BillCategory, month: string) => {
     const totalDue = getMemberTotalDue(member, category);
+    if (totalDue === 0) {
+      return 0;
+    }
+
     const memberTxs = filterMemberTxs(member, allTxs);
 
     if (category === 'ALL' && month === 'ALL') {
@@ -1102,7 +1176,7 @@ export const MemberDB: React.FC = () => {
     if (matchingTxs.length > 0) {
       const categoryTxs = category === 'ALL'
         ? memberTxs
-        : memberTxs.filter((tx) => getTxCategory(tx) === category || (tx.type === 'BILL PAYMENT' && (tx.billType === 'ALL' || !tx.billType)));
+        : memberTxs.filter((tx) => getTxCategory(tx) === category || (tx.type === 'BILL PAYMENT' && (tx.billType === 'ALL' || tx.billType === category || !tx.billType)));
 
       const allPaymentsTotal = categoryTxs
         .filter((tx) => tx.type === 'BILL PAYMENT' && !tx.isReverted && tx.status !== 'REVERTED')
@@ -1113,7 +1187,7 @@ export const MemberDB: React.FC = () => {
         .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
 
       const paymentsAvailableForThisMonth = Math.max(0, allPaymentsTotal - chargesBefore);
-      return Math.max(0, charges - paymentsAvailableForThisMonth);
+      return Math.min(totalDue, Math.max(0, charges - paymentsAvailableForThisMonth));
     }
 
     // If viewing September 2026 and member has an outstanding ledger due from September / initial bills
@@ -1139,11 +1213,11 @@ export const MemberDB: React.FC = () => {
         .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
       const netTxDue = Math.max(0, allCharges - allPayments);
 
-      // The profileDue is the authoritative ledger balance updated across POS, Bill Payments, and Import.
-      if (profileDue > 0) {
-        return profileDue;
+      // If transactions exist for this member, netTxDue is the accurate ledger balance
+      if (memberTxs.length > 0) {
+        return netTxDue;
       }
-      return netTxDue;
+      return profileDue;
     }
 
     // Sub-category filters (CANTEEN, UNIT_FUND, OTHERS)
@@ -1166,10 +1240,13 @@ export const MemberDB: React.FC = () => {
         .filter((tx) => getTxCategory(tx) === 'CANTEEN' && tx.type !== 'BILL PAYMENT' && tx.type !== 'REVERTED')
         .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
       const canteenPayments = memberTxs
-        .filter((tx) => (tx.billType === 'CANTEEN' || (!tx.billType && getTxCategory(tx) === 'CANTEEN')) && tx.type === 'BILL PAYMENT' && !tx.isReverted && tx.status !== 'REVERTED')
+        .filter((tx) => (tx.billType === 'CANTEEN' || tx.billType === 'ALL' || (!tx.billType && getTxCategory(tx) === 'CANTEEN')) && tx.type === 'BILL PAYMENT' && !tx.isReverted && tx.status !== 'REVERTED')
         .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
       const netCanteenTx = Math.max(0, canteenCharges - canteenPayments);
 
+      if (memberTxs.length > 0) {
+        return netCanteenTx;
+      }
       const baseCanteenDue = Math.max(0, profileDue - unitFundDue - othersDue);
       return Math.max(baseCanteenDue, netCanteenTx);
     }
@@ -1228,9 +1305,14 @@ export const MemberDB: React.FC = () => {
     const runningMonth = getRunningMonthKey();
     setStatementMonth(selectedMonth !== 'ALL' ? selectedMonth : runningMonth);
     try {
-      const local = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-      const sourceTxs = allTxs && allTxs.length >= local.length ? allTxs : local;
-      const memberTxs = filterMemberTxs(member, sourceTxs);
+      const local = (() => {
+        try { return JSON.parse(localStorage.getItem('canteen_txs') || '[]'); } catch { return []; }
+      })();
+      const txMap = new Map<string, any>();
+      (allTxs || []).forEach((t: any) => { if (t?.id) txMap.set(String(t.id), t); });
+      local.forEach((t: any) => { if (t?.id) txMap.set(String(t.id), t); });
+      const mergedTxs = deduplicateCanteenTransactions(Array.from(txMap.values()));
+      const memberTxs = filterMemberTxs(member, mergedTxs);
       setStatementTx(memberTxs);
     } catch (e) {
       setStatementTx([]);
@@ -1239,6 +1321,8 @@ export const MemberDB: React.FC = () => {
 
   // Open Profile Modal (Read-only view of member details and history)
   const openProfile = (member: any) => {
+    setIsEditingBanglaName(false);
+    setEditBanglaNameVal('');
     const effDp = getMemberEffectiveDp(member);
     const fullMember = {
       ...member,
@@ -1246,12 +1330,37 @@ export const MemberDB: React.FC = () => {
     };
     setProfileMember(fullMember);
     try {
-      const local = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-      const sourceTxs = allTxs && allTxs.length >= local.length ? allTxs : local;
-      const memberTxs = filterMemberTxs(member, sourceTxs);
+      const local = (() => {
+        try { return JSON.parse(localStorage.getItem('canteen_txs') || '[]'); } catch { return []; }
+      })();
+      const txMap = new Map<string, any>();
+      (allTxs || []).forEach((t: any) => { if (t?.id) txMap.set(String(t.id), t); });
+      local.forEach((t: any) => { if (t?.id) txMap.set(String(t.id), t); });
+      const mergedTxs = deduplicateCanteenTransactions(Array.from(txMap.values()));
+      const memberTxs = filterMemberTxs(member, mergedTxs);
       setProfileTx(memberTxs);
     } catch (e) {
       setProfileTx([]);
+    }
+  };
+
+  const handleSaveBanglaName = async () => {
+    if (!profileMember) return;
+    const trimmed = editBanglaNameVal.trim();
+    if (!trimmed) return;
+    setIsSavingBanglaName(true);
+    try {
+      const airmanId = profileMember.airman_id || `airman-${profileMember['BD No']}`;
+      const bdNo = String(profileMember['BD No'] || '').trim();
+      const surname = String(profileMember['Surname'] || '').trim();
+      const keys = [bdNo, surname, airmanId].filter(Boolean);
+      await saveMemberBanglaName(airmanId, trimmed, keys);
+      setBanglaVersion((v) => v + 1);
+      setIsEditingBanglaName(false);
+    } catch (err) {
+      console.warn('Failed to save Bangla name:', err);
+    } finally {
+      setIsSavingBanglaName(false);
     }
   };
 
@@ -1568,29 +1677,17 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
     setIsSubmittingPayment(true);
     try {
       const amount = Number(payAmount);
-      const currentDue = Number(payBillMember.Due ?? payBillMember.due ?? payBillMember.baki ?? 0);
-      const newDue = Math.max(0, currentDue - amount);
+      const totalDueBefore = getMemberTotalDue(payBillMember, 'ALL');
+      const newDue = Math.max(0, totalDueBefore - amount);
       
       // Update Supabase Canteen table 'Due' column
       await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', payBillMember.airman_id);
       
+      const isCash = String(payMethod).toUpperCase() === 'CASH';
+      const gatewayFormatted = isCash ? 'Cash' : 'UCB';
+      const paymentItemDesc = `Bill Payment - ${gatewayFormatted}`;
       const catLabel = payBillCategory === 'ALL' ? 'ALL BILLS' : payBillCategory.replace('_', ' ');
       const payeeName = `${payBillMember.Rank || payBillMember.rank || ''} ${payBillMember.Surname || payBillMember['Surname'] || payBillMember.name || ''}`.trim();
-
-      // Priority: First clear old due, then new/current month bill
-      const thisMonthBill = getMemberFilteredBill(payBillMember, payBillCategory, selectedMonth);
-      const oldDue = Math.max(0, currentDue - thisMonthBill);
-      const clearedOld = Math.min(amount, oldDue);
-      const clearedNew = Math.max(0, amount - clearedOld);
-
-      let breakdownNote = '';
-      if (clearedOld > 0 && clearedNew > 0) {
-        breakdownNote = ` (পুরনো বকেয়া পরিশোধ: ৳${clearedOld} + বর্তমান বিল: ৳${clearedNew})`;
-      } else if (clearedOld > 0) {
-        breakdownNote = ` (পুরনো বকেয়া পরিশোধ: ৳${clearedOld})`;
-      } else if (clearedNew > 0) {
-        breakdownNote = ` (বর্তমান বিল পরিশোধ: ৳${clearedNew})`;
-      }
 
       const tx = {
         id: 'tx-pay-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
@@ -1600,11 +1697,11 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
         bdNo: payBillMember['BD No'] || payBillMember.airman_id,
         memberName: payeeName,
         rank: payBillMember.Rank || payBillMember.rank || '',
-        items: `BILL PAYMENT - ${catLabel} (${payMethod})${breakdownNote}`,
+        items: paymentItemDesc,
         amount: amount,
         type: 'BILL PAYMENT',
         billType: payBillCategory,
-        gateway: payMethod
+        gateway: isCash ? 'CASH' : 'UCB'
       };
 
       const rawStored = localStorage.getItem('canteen_txs');
@@ -1633,19 +1730,24 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
         bdNo: String(payBillMember['BD No'] || payBillMember.airman_id || '').replace(/\D/g, ''),
         dp: resolveImageUrl(payBillMember.DP),
         paidAmount: amount,
-        previousDue: currentDue,
+        previousDue: totalDueBefore,
         newDue: newDue,
-        method: payMethod,
+        method: isCash ? 'CASH' : 'UCB',
         category: catLabel,
         txId: tx.id,
         date: tx.date,
-        breakdownNote
+        breakdownNote: paymentItemDesc
       });
 
       setPayBillMember(null);
       setPayAmount('');
       setMembers(prev => prev.map(m => m.airman_id === updatedMember.airman_id ? updatedMember : m));
       
+      if (globalMembersCache) {
+        globalMembersCache = globalMembersCache.map((m: any) => m.airman_id === updatedMember.airman_id ? updatedMember : m);
+        try { localStorage.setItem('canteen_members_cache', JSON.stringify(globalMembersCache)); } catch {}
+      }
+
       if (profileMember && profileMember.airman_id === updatedMember.airman_id) {
         setProfileMember(updatedMember);
         setProfileTx(filterMemberTxs(updatedMember, updatedTxs));
@@ -2129,9 +2231,10 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
   }, []);
 
   const filteredMembers = members.filter(m => {
-    // Top Officer / Airmen Filter
+    // Top Overall / Officer / Airmen / Civilian Filter
     if (rankTypeFilter === 'OFFICER' && !isOfficerMember(m)) return false;
-    if (rankTypeFilter === 'AIRMEN' && isOfficerMember(m)) return false;
+    if (rankTypeFilter === 'AIRMEN' && !isAirmanMember(m)) return false;
+    if (rankTypeFilter === 'CIVILIAN' && !isCivilianMember(m)) return false;
 
     const term = searchTerm.toLowerCase();
     const bdNo = String(m['BD No'] || '').toLowerCase();
@@ -2208,11 +2311,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
     .filter((tx) => getTxCategory(tx) === 'OTHERS' && tx.type !== 'BILL PAYMENT')
     .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
 
-  const currentMonthPayments = filteredStatementTxs
-    .filter((tx) => tx.type === 'BILL PAYMENT')
-    .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-
-  const memberTotalDue = Number(statementMember?.Due ?? statementMember?.due ?? statementMember?.baki ?? 0);
+  const memberTotalDue = statementMember ? getMemberTotalDue(statementMember, 'ALL') : 0;
 
   // বকেয়া বিল হিসাব:
   let previousDue = 0;
@@ -2222,16 +2321,25 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
   } else if (memberTotalDue > 0 && currentMonthCharges === 0) {
     previousDue = memberTotalDue;
   } else {
-    const prevDueTxs = statementTx.filter(tx => {
-      const txMonth = tx?.monthKey || getTxMonthKey(tx.date);
-      const isBefore = statementMonth !== 'ALL' && txMonth && txMonth < statementMonth;
-      return isBefore && (String(tx.items || '').includes('বকেয়া বিল') || tx.type === 'INITIAL_BILL');
-    });
-    const sumPrevInit = prevDueTxs.reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-    previousDue = Math.min(memberTotalDue, sumPrevInit);
+    previousDue = 0;
   }
 
-  const netPayable = memberTotalDue > 0 ? memberTotalDue : Math.max(0, totalMonthBill + previousDue + unitFundBill + othersFundBill - currentMonthPayments);
+  // All payments by member to check if settled
+  const allMemberPayments = (statementTx || [])
+    .filter((tx) => tx.type === 'BILL PAYMENT' && !tx.isReverted && tx.status !== 'REVERTED')
+    .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+  const currentMonthPayments = filteredStatementTxs
+    .filter((tx) => tx.type === 'BILL PAYMENT' && !tx.isReverted && tx.status !== 'REVERTED')
+    .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+  const effectivePayments = currentMonthPayments > 0
+    ? currentMonthPayments
+    : (memberTotalDue === 0 && allMemberPayments > 0 ? Math.min(totalMonthBill + previousDue + unitFundBill + othersFundBill, allMemberPayments) : 0);
+
+  const netPayable = memberTotalDue === 0
+    ? 0
+    : Math.max(0, totalMonthBill + previousDue + unitFundBill + othersFundBill - effectivePayments);
 
   const handleDownloadStatementPic = async () => {
     const el = document.getElementById('statement-paper-slip');
@@ -2368,21 +2476,21 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
         </div>
       </div>
 
-      {/* Top Filter: Overall, Officer, Airmen */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-900/90 border border-slate-800 rounded-2xl p-2 sm:p-2.5 shadow-sm">
-        <div className="flex items-center space-x-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800/80">
+      {/* Top Filter: Overall, Officer, Airmen, Civilian */}
+      <div className="w-full min-w-0 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 sm:gap-3 bg-slate-900/90 border border-slate-800 rounded-2xl p-2 sm:p-2.5 shadow-sm">
+        <div className="grid grid-cols-4 w-full sm:flex sm:w-auto items-center gap-1 sm:gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800/80">
           <button
             type="button"
             onClick={() => setRankTypeFilter('OVERALL')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center space-x-2 ${
+            className={`px-1.5 sm:px-3.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 sm:space-x-2 ${
               rankTypeFilter === 'OVERALL'
                 ? 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white shadow-md shadow-indigo-600/30'
-                : 'text-slate-400 hover:text-white'
+                : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
             }`}
           >
-            <Users className="w-3.5 h-3.5" />
+            <Users className="w-3.5 h-3.5 shrink-0 hidden xs:inline-block sm:inline-block" />
             <span>OVERALL</span>
-            <span className="px-1.5 py-0.2 rounded-md bg-white/15 text-[10px] font-mono font-bold">
+            <span className="px-1 py-0.2 rounded-md bg-white/15 text-[9px] sm:text-[10px] font-mono font-bold">
               {overallCount}
             </span>
           </button>
@@ -2390,15 +2498,15 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
           <button
             type="button"
             onClick={() => setRankTypeFilter('OFFICER')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center space-x-2 ${
+            className={`px-1.5 sm:px-3.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 sm:space-x-2 ${
               rankTypeFilter === 'OFFICER'
                 ? 'bg-gradient-to-r from-amber-600 to-orange-600 text-white shadow-md shadow-amber-600/30'
-                : 'text-slate-400 hover:text-white'
+                : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
             }`}
           >
-            <ShieldCheck className="w-3.5 h-3.5" />
+            <ShieldCheck className="w-3.5 h-3.5 shrink-0 hidden xs:inline-block sm:inline-block" />
             <span>OFFICER</span>
-            <span className="px-1.5 py-0.2 rounded-md bg-white/15 text-[10px] font-mono font-bold">
+            <span className="px-1 py-0.2 rounded-md bg-white/15 text-[9px] sm:text-[10px] font-mono font-bold">
               {officerCount}
             </span>
           </button>
@@ -2406,23 +2514,39 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
           <button
             type="button"
             onClick={() => setRankTypeFilter('AIRMEN')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center space-x-2 ${
+            className={`px-1.5 sm:px-3.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 sm:space-x-2 ${
               rankTypeFilter === 'AIRMEN'
                 ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-600/30'
-                : 'text-slate-400 hover:text-white'
+                : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
             }`}
           >
-            <User className="w-3.5 h-3.5" />
+            <User className="w-3.5 h-3.5 shrink-0 hidden xs:inline-block sm:inline-block" />
             <span>AIRMEN</span>
-            <span className="px-1.5 py-0.2 rounded-md bg-white/15 text-[10px] font-mono font-bold">
+            <span className="px-1 py-0.2 rounded-md bg-white/15 text-[9px] sm:text-[10px] font-mono font-bold">
               {airmenCount}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setRankTypeFilter('CIVILIAN')}
+            className={`px-1.5 sm:px-3.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 sm:space-x-2 ${
+              rankTypeFilter === 'CIVILIAN'
+                ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-md shadow-purple-600/30'
+                : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
+            }`}
+          >
+            <Coffee className="w-3.5 h-3.5 shrink-0 hidden xs:inline-block sm:inline-block" />
+            <span>CIVILIAN</span>
+            <span className="px-1 py-0.2 rounded-md bg-white/15 text-[9px] sm:text-[10px] font-mono font-bold">
+              {civilianCount}
             </span>
           </button>
         </div>
 
-        <div className="text-[11px] font-bold text-slate-400 px-2 flex items-center space-x-1.5">
-          <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
-          <span>
+        <div className="text-[11px] font-bold text-slate-400 px-1 sm:px-2 flex items-center space-x-1.5 shrink-0">
+          <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse shrink-0" />
+          <span className="truncate">
             Active Filter: <strong className="text-white uppercase">{rankTypeFilter}</strong> ({displayedMemberList.length} members shown)
           </span>
         </div>
@@ -2592,6 +2716,24 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
 
           <button
             type="button"
+            onClick={() => {
+              setImportModalInitialTab('HISTORY');
+              setIsImportBillsModalOpen(true);
+            }}
+            className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-2xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 border border-slate-700/80 shadow-sm active:translate-y-0.5 transition-all cursor-pointer"
+            title="ইম্পোর্ট হিস্টোরি ও ব্যাচ বিবরণী দেখুন (View Import History Batches)"
+          >
+            <History className="w-4 h-4 text-emerald-400" />
+            <span>ইম্পোর্ট হিস্টোরি</span>
+            {importHistoryCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-md bg-emerald-500/20 text-emerald-300 font-mono text-[10px] font-bold border border-emerald-500/30">
+                {importHistoryCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
             onClick={handleExportBills}
             className="px-4 py-2.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-500 text-white rounded-2xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 shadow-md shadow-indigo-500/25 border-t border-indigo-300/40 active:translate-y-0.5 transition-all cursor-pointer"
             title="Export Bill (Print Preview, PDF & Excel)"
@@ -2703,12 +2845,20 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center space-x-1.5 mb-1 flex-wrap gap-y-1">
-                        <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-indigo-500/15 border-t border-indigo-400/40 border-b-2 border-indigo-950 text-indigo-300 shadow-sm shrink-0 font-mono">
-                          {member['Rank']}
-                        </span>
-                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-950/70 border border-indigo-500/30 text-indigo-200 font-sans shrink-0">
-                          {getMemberBanglaRank(member) || formatRankBn(member['Rank'])}
-                        </span>
+                        {member['Rank'] && member['Rank'] !== '-' ? (
+                          <>
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-indigo-500/15 border-t border-indigo-400/40 border-b-2 border-indigo-950 text-indigo-300 shadow-sm shrink-0 font-mono">
+                              {member['Rank']}
+                            </span>
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-950/70 border border-indigo-500/30 text-indigo-200 font-sans shrink-0">
+                              {getMemberBanglaRank(member) || formatRankBn(member['Rank'])}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-slate-800 text-slate-400 border border-slate-700 shrink-0">
+                            -
+                          </span>
+                        )}
                         <span className="text-[10px] font-mono font-bold text-slate-400">
                           BD/{member['BD No'] || member.airman_id?.replace(/\D/g, '') || '-'}
                         </span>
@@ -2878,12 +3028,20 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                             )}
                           </div>
                           <div className="flex items-center space-x-2 whitespace-nowrap">
-                            <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-indigo-500/15 border border-indigo-400/30 text-indigo-300 font-mono shrink-0">
-                              {member['Rank']}
-                            </span>
-                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-950/80 border border-indigo-500/40 text-indigo-200 font-sans shrink-0">
-                              {getMemberBanglaRank(member) || formatRankBn(member['Rank'])}
-                            </span>
+                            {member['Rank'] && member['Rank'] !== '-' ? (
+                              <>
+                                <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-indigo-500/15 border border-indigo-400/30 text-indigo-300 font-mono shrink-0">
+                                  {member['Rank']}
+                                </span>
+                                <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-950/80 border border-indigo-500/40 text-indigo-200 font-sans shrink-0">
+                                  {getMemberBanglaRank(member) || formatRankBn(member['Rank'])}
+                                </span>
+                              </>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-md text-[10px] font-mono text-slate-400 bg-slate-800 border border-slate-700 shrink-0">
+                                -
+                              </span>
+                            )}
                             <span className="font-black text-white group-hover:text-indigo-300 transition-colors text-xs shrink-0">
                               {member['Surname']}
                             </span>
@@ -3011,14 +3169,68 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                 <div>
                   <div className="flex items-center space-x-2 flex-wrap">
                     <h2 className="text-xl font-black text-white flex items-center gap-1.5 flex-wrap">
-                      <span>{profileMember['Rank']}</span>
-                      <span className="text-indigo-300 font-sans text-sm font-bold">
-                        ({getMemberBanglaRank(profileMember) || formatRankBn(profileMember['Rank'])})
-                      </span>
+                      {profileMember['Rank'] && profileMember['Rank'] !== '-' && (
+                        <>
+                          <span>{profileMember['Rank']}</span>
+                          <span className="text-indigo-300 font-sans text-sm font-bold">
+                            ({getMemberBanglaRank(profileMember) || formatRankBn(profileMember['Rank'])})
+                          </span>
+                        </>
+                      )}
                       <span>{profileMember['Surname']}</span>
-                      <span className="text-emerald-400 font-sans text-sm font-bold">
-                        ({getMemberBanglaName(profileMember) || formatMemberNameBn(profileMember['Surname'])})
-                      </span>
+                      {!isEditingBanglaName ? (
+                        <span className="inline-flex items-center gap-1">
+                          <span className="text-emerald-400 font-sans text-sm font-bold">
+                            ({getMemberBanglaName(profileMember) || formatMemberNameBn(profileMember['Surname'])})
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsEditingBanglaName(true);
+                              setEditBanglaNameVal(getMemberBanglaName(profileMember) || formatMemberNameBn(profileMember['Surname']));
+                            }}
+                            className="p-1 hover:bg-slate-800 text-slate-400 hover:text-emerald-400 rounded-lg transition-colors cursor-pointer"
+                            title="বাংলা নাম পরিবর্তন করুন (Edit Bangla Name)"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 bg-slate-950 px-2 py-1 rounded-xl border border-emerald-500/40">
+                          <input
+                            type="text"
+                            value={editBanglaNameVal}
+                            onChange={(e) => setEditBanglaNameVal(e.target.value)}
+                            className="px-2 py-0.5 bg-slate-900 border border-emerald-500/50 rounded-lg text-emerald-300 text-xs font-bold font-sans focus:outline-none focus:ring-1 focus:ring-emerald-500 w-32"
+                            placeholder="বাংলা নাম..."
+                            autoFocus
+                            onKeyDown={async (e) => {
+                              if (e.key === 'Enter') {
+                                await handleSaveBanglaName();
+                              } else if (e.key === 'Escape') {
+                                setIsEditingBanglaName(false);
+                              }
+                            }}
+                          />
+                          <button
+                            type="button"
+                            onClick={handleSaveBanglaName}
+                            disabled={isSavingBanglaName}
+                            className="p-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                            title="সংরক্ষণ করুন (Save)"
+                          >
+                            {isSavingBanglaName ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsEditingBanglaName(false)}
+                            className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs transition-colors cursor-pointer"
+                            title="বাতিল (Cancel)"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      )}
                     </h2>
                   </div>
                   <p className="text-xs font-bold text-indigo-400 font-mono">BD No: {profileMember['BD No']}</p>
@@ -3041,29 +3253,46 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
             <div className="p-6 overflow-y-auto bg-slate-900/50 flex-1 space-y-6">
               {/* VIEW MODE: Read-only Member Profile & History */}
               <div className="space-y-6">
-                  {/* Basic Member Info Cards (Without Pay Bill Button) */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700">
+                  {/* Basic Member Info & Summary Cards */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    <div className="bg-slate-800/80 p-3 rounded-2xl border border-slate-700">
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Role / পদবি</p>
-                      <p className="text-sm font-black text-indigo-300 uppercase tracking-wide">
+                      <p className="text-xs font-black text-indigo-300 uppercase tracking-wide truncate">
                         {profileMember['Role'] || profileMember.role || 'Member'}
                       </p>
+                      <p className="text-[10px] font-bold text-slate-400 font-mono mt-0.5 truncate">
+                        {profileMember['Contact'] || 'No Contact'}
+                      </p>
                     </div>
-                    <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Contact</p>
-                      <p className="text-sm font-bold text-white font-mono">{profileMember['Contact'] || 'Not Provided'}</p>
+
+                    <div className="bg-slate-800/80 p-3 rounded-2xl border border-slate-700">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">মোট বিল (Billed)</p>
+                      <p className="text-base font-black font-mono text-amber-400">
+                        ৳{profileMemberStats.totalBilled.toLocaleString()}
+                      </p>
+                      <p className="text-[10px] text-slate-400 font-bold">কেনাকাটা ও ইম্পোর্ট</p>
                     </div>
+
+                    <div className="bg-slate-800/80 p-3 rounded-2xl border border-slate-700">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">মোট জমা (Paid)</p>
+                      <p className="text-base font-black font-mono text-emerald-400">
+                        ৳{profileMemberStats.totalPaid.toLocaleString()}
+                      </p>
+                      <p className="text-[10px] text-slate-400 font-bold">পরিশোধকৃত টাকা</p>
+                    </div>
+
                     <div 
                       key={duePulseKey}
-                      className={`bg-slate-800/80 p-3.5 rounded-2xl border flex flex-col justify-between transition-all duration-300 ${
+                      className={`bg-slate-800/80 p-3 rounded-2xl border flex flex-col justify-between transition-all duration-300 ${
                         duePulseKey > 0 ? 'border-rose-500/60 shadow-lg shadow-rose-500/20 ring-1 ring-rose-500/30 animate-success-pop' : 'border-slate-700'
                       }`}
                     >
                       <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Due</p>
-                        <p className={`text-xl font-black font-mono ${(profileMember.Due ?? profileMember.baki) === 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
-                          ৳{profileMember.Due ?? profileMember.baki ?? 0}
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">অবশিষ্ট বকেয়া (Due)</p>
+                        <p className={`text-base font-black font-mono ${profileMemberStats.netDue === 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
+                          ৳{profileMemberStats.netDue.toLocaleString()}
                         </p>
+                        <p className="text-[10px] text-slate-400 font-bold">বর্তমান বকেয়া</p>
                       </div>
                     </div>
                   </div>
@@ -3149,16 +3378,23 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                                   <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase border ${
                                     row.type === 'BILL PAYMENT'
                                       ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                      : row.type === 'INITIAL_BILL'
+                                      ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
                                       : row.type === 'REVERTED'
                                       ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
                                       : 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
                                   }`}>
-                                    {row.type === 'REVERTED' ? 'REVERTED / বাতিল' : (row.type || 'SALE')}
+                                    {row.type === 'REVERTED' ? 'REVERTED / বাতিল' : row.type === 'BILL PAYMENT' ? 'পরিশোধ / PAYMENT' : row.type === 'INITIAL_BILL' ? 'ইম্পোর্ট / প্রারম্ভিক বিল' : (row.type || 'খাবার / SALE')}
                                   </span>
                                 </div>
 
-                                <div className={`text-xs font-bold ${row.type === 'REVERTED' ? 'text-slate-400 line-through' : 'text-white'} break-words`}>
-                                  {row.description}
+                                <div className={`text-xs font-bold ${row.type === 'REVERTED' ? 'text-slate-400 line-through' : 'text-white'} break-words flex items-center gap-1.5 flex-wrap`}>
+                                  <span>{row.description}</span>
+                                  {row.type === 'INITIAL_BILL' && (
+                                    <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                                      ইম্পোর্ট বিল
+                                    </span>
+                                  )}
                                 </div>
 
                                 <div className="flex items-center justify-between pt-2 border-t border-slate-700/60">
@@ -3173,6 +3409,8 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                                         ? 'text-rose-400/70 line-through font-mono'
                                         : row.type === 'BILL PAYMENT'
                                         ? 'text-emerald-400'
+                                        : row.type === 'INITIAL_BILL'
+                                        ? 'text-amber-400'
                                         : 'text-rose-400'
                                     }`}>
                                       ৳{row.amount}
@@ -3235,7 +3473,14 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                                       <td className="px-4 py-2.5 font-mono">{row.ser}</td>
                                       <td className="px-4 py-2.5 font-mono">{toEnglishDate(row.date)}</td>
                                       <td className={`px-4 py-2.5 font-bold ${row.type === 'REVERTED' ? 'text-slate-400 line-through' : ''}`}>
-                                        {row.description}
+                                        <div className="flex items-center space-x-1.5 flex-wrap">
+                                          <span>{row.description}</span>
+                                          {row.type === 'INITIAL_BILL' && (
+                                            <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                                              ইম্পোর্ট বিল
+                                            </span>
+                                          )}
+                                        </div>
                                       </td>
                                       <td className="px-4 py-2.5 text-center font-bold">
                                         {row.type === 'REVERTED' ? (
@@ -3249,6 +3494,8 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                                           ? 'text-rose-400/70 line-through font-mono'
                                           : row.type === 'BILL PAYMENT'
                                           ? 'text-emerald-400 font-mono'
+                                          : row.type === 'INITIAL_BILL'
+                                          ? 'text-amber-400 font-mono'
                                           : 'text-rose-400 font-mono'
                                       }`}>
                                         ৳{row.amount}
@@ -3504,13 +3751,13 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                       </tr>
                     )}
 
-                    {currentMonthPayments > 0 && (
+                    {effectivePayments > 0 && (
                       <tr>
                         <td className="border border-black p-2.5 text-right font-bold text-emerald-800 bg-emerald-50/60" colSpan={3}>
                           পরিশোধিত বিল
                         </td>
                         <td className="border border-black p-2.5 text-right font-bold font-mono text-sm text-emerald-700">
-                          -৳{currentMonthPayments}
+                          -৳{effectivePayments}
                         </td>
                       </tr>
                     )}
@@ -4167,7 +4414,7 @@ ${previousDue > 0 ? `⏳ *বকেয়া বিল:* ৳${previousDue}\n` : ''}
                   }
                   const displayName = rank ? `${rank} ${cleanName}` : cleanName;
                   const cleanBd = String(tx.bdNo || targetMember?.['BD No'] || tx.airman_id || '').replace(/\D/g, '');
-                  const currentMemberDue = Number(targetMember?.Due ?? targetMember?.due ?? targetMember?.baki ?? 0);
+                  const currentMemberDue = targetMember ? getMemberTotalDue(targetMember, 'ALL') : 0;
 
                   return (
                     <div

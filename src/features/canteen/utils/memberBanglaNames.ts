@@ -1,6 +1,7 @@
 import { supabase } from '../../../supabase';
 import { pushKeyToCloud, pullKeyFromCloud } from './canteenCloudSync';
 import { formatRankBn, formatMemberNameBn } from './exportCanteenBillExcel';
+import { isCivilianMember } from './canteenSeniority';
 
 export const BANGLA_NAMES_STORAGE_KEY = 'canteen_member_bangla_names';
 
@@ -29,7 +30,8 @@ export const BAF_RANKS_WITH_BN: BafRankOption[] = [
   { rank: 'AC-1', bn: 'এসি-১' },
   { rank: 'AC-2', bn: 'এসি-২' },
   { rank: 'NC(E)', bn: 'এনসি(ই)' },
-  { rank: 'Civilian', bn: 'সিভিলিয়ান / বেসামরিক' }
+  { rank: 'Civilian', bn: 'সিভিলিয়ান' },
+  { rank: '-', bn: '-' }
 ];
 
 /**
@@ -53,7 +55,7 @@ export const DEFAULT_MEMBER_BANGLA_NAMES: Record<string, string> = {
   "BD/476023": "রাশেদ", "476023": "রাশেদ", "rashed": "রাশেদ",
   "BD/475268": "নিশাদ", "475268": "নিশাদ", "nishad": "নিশাদ",
 
-  // Civilians & Staff
+  // Civilians & Staff (Actual Bengali names as in database)
   "airman-1": "তানভীর", "1": "তানভীর", "tanvir": "তানভীর", "tanveer": "তানভীর",
   "airman-13": "শরীফ", "13": "শরীফ", "sharif": "শরীফ",
   "airman-12": "ইরফান", "12": "ইরফান", "irfan": "ইরফান",
@@ -273,6 +275,8 @@ export function getMemberBanglaName(memberOrId: any): string {
     const surnameLower = String(surname).trim().toLowerCase();
     const cleaned = cleanSurname(surname);
 
+
+
     // Direct ID match
     if (airmanId && names[airmanId]) return names[airmanId];
     if (airmanId && names[airmanId.toLowerCase()]) return names[airmanId.toLowerCase()];
@@ -406,6 +410,9 @@ export function getMemberBanglaRank(rankOrMember: any): string {
   const names = getAllMemberBanglaNames();
 
   if (typeof rankOrMember === 'object') {
+    const rawR = String(rankOrMember['Rank'] || rankOrMember.rank || '').trim();
+    if (rawR === '-') return '-';
+    if (isCivilianMember(rankOrMember)) return 'সিভিলিয়ান';
     if (rankOrMember.Rank_bn) return String(rankOrMember.Rank_bn).trim();
     if (rankOrMember.rankBn) return String(rankOrMember.rankBn).trim();
     if (rankOrMember.rank_bn) return String(rankOrMember.rank_bn).trim();
@@ -419,6 +426,8 @@ export function getMemberBanglaRank(rankOrMember: any): string {
   }
 
   const str = String(rankOrMember).trim();
+  if (str === '-') return '-';
+  if (str.toUpperCase().includes('CIV') || str.includes('বেসামরিক') || str.includes('সিভিলিয়ান')) return 'সিভিলিয়ান';
   if (names[`rank_${str}`]) return names[`rank_${str}`];
   return formatRankBn(str);
 }

@@ -235,7 +235,8 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
           let desc = tx.items || 'Canteen Item';
 
           if (isPayment) {
-              desc = tx.items || `Bill Payment (${tx.gateway || 'CASH'})`;
+              const isCash = String(tx.gateway || '').toUpperCase() === 'CASH' || String(tx.items || '').toUpperCase().includes('CASH');
+              desc = `Bill Payment - ${isCash ? 'Cash' : 'UCB'}`;
               qty = '-';
               unitPrice = '-';
           } else {

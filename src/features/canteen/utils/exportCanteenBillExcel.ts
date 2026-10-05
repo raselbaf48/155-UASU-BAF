@@ -2,7 +2,7 @@ import XLSX from 'xlsx-js-style';
 import { saveAs } from 'file-saver';
 import JSZip from 'jszip';
 import { getCanteenConfig } from './canteenSettings';
-import { sortCanteenMembersByOfficeSeniority } from './canteenSeniority';
+import { sortCanteenMembersByOfficeSeniority, isTxBelongingToMember } from './canteenSeniority';
 import { getTxCategory, getTxMonthKey, BillCategory } from '../pages/MemberDB';
 
 // Convert English numbers to Bengali numerals
@@ -47,7 +47,8 @@ export const formatRankBn = (rankStr?: string): string => {
   if (r === 'FLT LT' || r.includes('FLIGHT LIEUTENANT')) return 'ফ্লাঃ লেঃ';
   if (r === 'FLG OFFR' || r === 'FG OFFR' || r.includes('FLYING OFFICER')) return 'ফ্লাঃ অঃ';
   if (r === 'PLT OFFR' || r.includes('PILOT OFFICER')) return 'পাইলট অফিসার';
-  if (r === 'CIV' || r.includes('CIVILIAN')) return 'বেসামরিক';
+  if (r === '-') return '-';
+  if (r === 'CIV' || r.includes('CIVILIAN') || r.includes('বেসামরিক')) return 'সিভিলিয়ান';
 
   return rankStr;
 };
@@ -233,6 +234,9 @@ export interface ExportCanteenBillParams {
   allTxs: any[];
   selectedCategory: BillCategory;
   selectedMonth: string;
+  filterLabel?: string;
+  getBanglaName?: (m: any) => string;
+  getBanglaRank?: (m: any) => string;
 }
 
 export async function exportCanteenBillToExcel({
@@ -240,6 +244,9 @@ export async function exportCanteenBillToExcel({
   allTxs,
   selectedCategory,
   selectedMonth,
+  filterLabel,
+  getBanglaName,
+  getBanglaRank,
 }: ExportCanteenBillParams) {
   const cfg = getCanteenConfig();
   const unitName = '১৫৫ ইউএএসইউ বিএএফ';
@@ -274,8 +281,15 @@ export async function exportCanteenBillToExcel({
   // Row 2: Title "ক্যান্টিন বিলঃ ১৫৫ ইউএএসইউ বিএএফ"
   aoa.push(['', '', '', `${categoryTitle}ঃ ${unitName}`]);
 
-  // Row 3: Subtitle "মাসঃ জুন ২৫"
-  aoa.push(['', '', '', `মাসঃ ${titleMonthBn}`]);
+  // Row 3: Subtitle with group filter if specified
+  const filterTitleBn = filterLabel === 'OFFICER' 
+    ? ' (অফিসার)' 
+    : filterLabel === 'CIVILIAN' 
+    ? ' (সিভিলিয়ান)' 
+    : filterLabel === 'AIRMEN' 
+    ? ' (বিমানসেনা)' 
+    : '';
+  aoa.push(['', '', '', `মাসঃ ${titleMonthBn}${filterTitleBn}`]);
 
   // Row 4: Empty separator
   aoa.push([]);
@@ -304,116 +318,132 @@ export async function exportCanteenBillToExcel({
   let sumAdvance = 0;
   let sumRemainingDue = 0;
 
+  // Helper to determine if a transaction is a valid non-reverted payment
+  const isPaymentTx = (tx: any): boolean => {
+    if (!tx) return false;
+    const isPay = tx.type === 'BILL PAYMENT' || tx.type === 'PAYMENT';
+    if (!isPay) return false;
+    if (tx.isReverted || tx.status === 'REVERTED') return false;
+    if (String(tx.items || '').includes('[বাতিল / REVERTED]')) return false;
+    return true;
+  };
+
+  const isCategoryMatch = (tx: any, cat: BillCategory): boolean => {
+    if (cat === 'ALL') return true;
+    if (isPaymentTx(tx)) {
+      return tx.billType === 'ALL' || tx.billType === cat || !tx.billType;
+    }
+    return getTxCategory(tx) === cat;
+  };
+
+  const getMonthKeyOfTx = (tx: any): string => {
+    return tx.monthKey || getTxMonthKey(tx.date) || '';
+  };
+
   // 3. Process each member row
   sortedMembers.forEach((member, index) => {
-    const memberTxs = allTxs.filter(
-      (tx) => tx.airman_id === member.airman_id || (member['BD No'] && tx.bdNo === member['BD No'])
-    );
+    const memberTxs = allTxs.filter((tx) => isTxBelongingToMember(member, tx));
+    const memberCategoryTxs = memberTxs.filter((tx) => isCategoryMatch(tx, selectedCategory));
 
-    const rankFormatted = formatRankBn(member['Rank'] || member.rank || '');
+    const rankFormatted = (getBanglaRank ? getBanglaRank(member) : null) || formatRankBn(member['Rank'] || member.rank || '');
     const rawName = member['Surname'] || member['Full Name'] || member['Name'] || '';
-    const nameFormatted = formatMemberNameBn(rawName);
+    const nameFormatted = (getBanglaName ? getBanglaName(member) : null) || formatMemberNameBn(rawName) || rawName;
 
     let currentPeriodCharges = 0;
     let currentPeriodPayments = 0;
     let previousDue = 0;
     let previousAdvance = 0;
-
-    if (selectedMonth === 'ALL') {
-      const memberTotalDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
-      const memberTotalAdvance = Number(member.Advance ?? member.advance ?? member.ogrim ?? 0);
-      const charges = memberTxs
-        .filter((tx) => {
-          const cat = getTxCategory(tx);
-          const catMatch = selectedCategory === 'ALL' || cat === selectedCategory;
-          return catMatch && tx.type !== 'BILL PAYMENT';
-        })
-        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-
-      const payments = memberTxs
-        .filter((tx) => {
-          const cat = getTxCategory(tx);
-          const catMatch = selectedCategory === 'ALL' || cat === selectedCategory;
-          return catMatch && tx.type === 'BILL PAYMENT';
-        })
-        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-
-      currentPeriodCharges = Math.max(memberTotalDue, charges - payments);
-      currentPeriodPayments = payments;
-      previousDue = 0;
-      previousAdvance = memberTotalAdvance;
-    } else {
-      // Specific Month Selected
-      const currentMonthTxs = memberTxs.filter((tx) => {
-        const cat = getTxCategory(tx);
-        const catMatch = selectedCategory === 'ALL' || cat === selectedCategory;
-        const txMonth = getTxMonthKey(tx.date);
-        return catMatch && txMonth === selectedMonth;
-      });
-
-      currentPeriodCharges = currentMonthTxs
-        .filter((tx) => tx.type !== 'BILL PAYMENT')
-        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-
-      currentPeriodPayments = currentMonthTxs
-        .filter((tx) => tx.type === 'BILL PAYMENT')
-        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-
-      // Calculate previous due and advance before this month
-      const olderTxs = memberTxs.filter((tx) => {
-        const cat = getTxCategory(tx);
-        const catMatch = selectedCategory === 'ALL' || cat === selectedCategory;
-        const txMonth = getTxMonthKey(tx.date);
-        return catMatch && txMonth && txMonth < selectedMonth;
-      });
-
-      const olderCharges = olderTxs
-        .filter((tx) => tx.type !== 'BILL PAYMENT')
-        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-
-      const olderPayments = olderTxs
-        .filter((tx) => tx.type === 'BILL PAYMENT')
-        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-
-      const olderNet = olderCharges - olderPayments;
-      const memberTotalDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
-      const memberTotalAdvance = Number(member.Advance ?? member.advance ?? member.ogrim ?? 0);
-      const netThisMonth = Math.max(0, currentPeriodCharges - currentPeriodPayments);
-      const diff = Math.max(0, memberTotalDue - netThisMonth);
-
-      if (olderNet > 0) {
-        previousDue = Math.max(olderNet, diff);
-        previousAdvance = 0;
-      } else if (olderNet < 0) {
-        previousDue = 0;
-        previousAdvance = Math.abs(olderNet);
-      } else {
-        if (diff > 0) {
-          previousDue = diff;
-          previousAdvance = 0;
-        } else if (memberTotalAdvance > 0) {
-          previousAdvance = memberTotalAdvance;
-          previousDue = 0;
-        } else {
-          previousDue = 0;
-          previousAdvance = 0;
-        }
-      }
-    }
-
-    const totalBill = currentPeriodCharges + previousDue;
-    const paidBill = currentPeriodPayments;
-    const totalCredits = previousAdvance + paidBill;
-
+    let totalBill = 0;
+    let paidBill = 0;
     let advance = 0;
     let remainingDue = 0;
 
-    if (totalCredits >= totalBill) {
-      advance = totalCredits - totalBill;
-      remainingDue = 0;
+    const memberTotalDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
+    const memberTotalAdvance = Number(member.Advance ?? member.advance ?? member.ogrim ?? 0);
+
+    if (selectedMonth === 'ALL') {
+      const allCharges = memberCategoryTxs
+        .filter((tx) => !isPaymentTx(tx))
+        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+      const allPayments = memberCategoryTxs
+        .filter((tx) => isPaymentTx(tx))
+        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+      currentPeriodCharges = allCharges;
+      currentPeriodPayments = allPayments;
+      previousDue = 0;
+      previousAdvance = memberTotalAdvance;
+      totalBill = Math.max(memberTotalDue + allPayments, allCharges);
+      paidBill = allPayments;
+      remainingDue = memberTotalDue;
+      advance = memberTotalAdvance;
     } else {
-      remainingDue = totalBill - totalCredits;
-      advance = 0;
+      // Specific Month Selected (e.g. '2026-09', '2026-07', '2026-10')
+
+      // 1. Prior Period: strictly transactions dated prior to this month
+      const priorTxs = memberCategoryTxs.filter((tx) => {
+        const m = getMonthKeyOfTx(tx);
+        return m && m < selectedMonth;
+      });
+
+      const priorCharges = priorTxs
+        .filter((tx) => !isPaymentTx(tx))
+        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+      const priorPayments = priorTxs
+        .filter((tx) => isPaymentTx(tx))
+        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+      const priorNet = priorCharges - priorPayments;
+      if (priorNet > 0) {
+        previousDue = priorNet;
+        previousAdvance = 0;
+      } else if (priorNet < 0) {
+        previousDue = 0;
+        previousAdvance = Math.abs(priorNet);
+      } else {
+        previousDue = 0;
+        previousAdvance = 0;
+      }
+
+      // 2. Current Month Charges: transactions belonging specifically to selectedMonth
+      const currentMonthTxs = memberCategoryTxs.filter((tx) => getMonthKeyOfTx(tx) === selectedMonth);
+      currentPeriodCharges = currentMonthTxs
+        .filter((tx) => !isPaymentTx(tx))
+        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+      const currentMonthDirectPayments = currentMonthTxs
+        .filter((tx) => isPaymentTx(tx))
+        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+      totalBill = previousDue + currentPeriodCharges;
+
+      // 3. Realtime Payment Settlement:
+      const allPaymentsToDate = memberCategoryTxs
+        .filter((tx) => isPaymentTx(tx))
+        .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+      const paymentsAbsorbedByPriorMonths = Math.min(priorCharges, allPaymentsToDate);
+      const paymentsAvailableForThisMonth = Math.max(0, allPaymentsToDate - paymentsAbsorbedByPriorMonths);
+
+      if (totalBill > 0) {
+        paidBill = Math.min(totalBill, Math.max(currentMonthDirectPayments, paymentsAvailableForThisMonth));
+      } else {
+        paidBill = currentMonthDirectPayments;
+      }
+
+      currentPeriodPayments = paidBill;
+
+      const totalCredits = previousAdvance + paidBill;
+      if (totalCredits >= totalBill) {
+        advance = totalCredits - totalBill;
+        remainingDue = 0;
+      } else {
+        const rawDue = totalBill - totalCredits;
+        remainingDue = memberTotalDue === 0 ? 0 : Math.min(rawDue, memberTotalDue);
+        advance = 0;
+      }
     }
 
     // Accumulate sums
@@ -572,11 +602,13 @@ export async function exportCanteenBillToExcel({
 
   // 7. Create Workbook and Append Sheet
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'CANTEEN BILL (Airman)');
+  const sheetTitle = filterLabel && filterLabel !== 'OVERALL' ? `BILL (${filterLabel})` : 'CANTEEN BILL';
+  XLSX.utils.book_append_sheet(wb, ws, sheetTitle);
 
   // 8. Generate Excel binary buffer and trigger download
   const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-  const filename = `CANTEEN MANAGEMENT - ${titleMonthBn}.xlsx`;
+  const filterSuffix = filterLabel && filterLabel !== 'OVERALL' ? ` (${filterLabel})` : '';
+  const filename = `CANTEEN MANAGEMENT - ${titleMonthBn}${filterSuffix}.xlsx`;
 
   try {
     const zip = await JSZip.loadAsync(wbout);

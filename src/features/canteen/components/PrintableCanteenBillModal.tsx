@@ -1,9 +1,18 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Printer, X, FileSpreadsheet, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
+import { Printer, X, FileSpreadsheet, ChevronLeft, ChevronRight, Calendar, Users } from 'lucide-react';
 import { BillCategory, getTxCategory, getTxMonthKey } from '../pages/MemberDB';
 import { getCanteenConfig } from '../utils/canteenSettings';
-import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
+import { 
+  sortCanteenMembersByOfficeSeniority, 
+  isOfficerMember, 
+  isAirmanMember, 
+  isCivilianMember 
+} from '../utils/canteenSeniority';
+import { 
+  getMemberBanglaName, 
+  getMemberBanglaRank 
+} from '../utils/memberBanglaNames';
 import {
   toBengaliNum,
   formatRankBn,
@@ -11,6 +20,54 @@ import {
   getMonthNamesBn,
   exportCanteenBillToExcel
 } from '../utils/exportCanteenBillExcel';
+
+export type MemberRoleFilter = 'OVERALL' | 'OFFICER' | 'AIRMEN' | 'CIVILIAN';
+
+// Robust matcher to ensure 100% accurate link between canteen member and transaction records
+export const isTxBelongingToMember = (member: any, tx: any): boolean => {
+  if (!member || !tx) return false;
+  const mAirman = String(member.airman_id || member.airmanId || '').trim().toLowerCase();
+  const txAirman = String(tx.airman_id || tx.airmanId || '').trim().toLowerCase();
+  if (mAirman && txAirman && mAirman === txAirman) return true;
+
+  const mBdClean = String(member['BD No'] || member.bdNo || member.bd_no || member.airman_id || '').replace(/\D/g, '');
+  const txBdClean = String(tx.bdNo || tx['BD No'] || tx.bd_no || tx.airman_id || '').replace(/\D/g, '');
+  const mBdCleanNoZero = mBdClean.replace(/^0+/, '');
+  const txBdCleanNoZero = txBdClean.replace(/^0+/, '');
+  if (mBdClean && txBdClean && (mBdClean === txBdClean || (mBdCleanNoZero && mBdCleanNoZero === txBdCleanNoZero))) {
+    return true;
+  }
+
+  const mSurname = String(member['Surname'] || member.surname || '').trim().toLowerCase();
+  const mRank = String(member['Rank'] || member.rank || '').trim().toLowerCase();
+  if (mSurname && tx.memberName) {
+    const txName = String(tx.memberName).toLowerCase();
+    if (txName.includes(mSurname) && (!mRank || txName.includes(mRank))) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+// Helper to determine if a transaction is a valid non-reverted payment
+const isPaymentTx = (tx: any): boolean => {
+  if (!tx) return false;
+  const isPay = tx.type === 'BILL PAYMENT' || tx.type === 'PAYMENT';
+  if (!isPay) return false;
+  if (tx.isReverted || tx.status === 'REVERTED') return false;
+  if (String(tx.items || '').includes('[বাতিল / REVERTED]')) return false;
+  return true;
+};
+
+// Helper to check category match
+const isCategoryMatch = (tx: any, cat: BillCategory): boolean => {
+  if (cat === 'ALL') return true;
+  if (isPaymentTx(tx)) {
+    return tx.billType === 'ALL' || tx.billType === cat || !tx.billType;
+  }
+  return getTxCategory(tx) === cat;
+};
 
 interface PrintableCanteenBillModalProps {
   isOpen: boolean;
@@ -41,10 +98,54 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
 }) => {
   const [orientation, setOrientation] = useState<'landscape' | 'portrait'>('portrait');
   const [internalMonth, setInternalMonth] = useState<string>(selectedMonth);
+  const [roleFilter, setRoleFilter] = useState<MemberRoleFilter>('OVERALL');
+  const [banglaVersion, setBanglaVersion] = useState<number>(0);
+
+  // Live state synchronized with storage and cloud events for true realtime updates
+  const [liveTxs, setLiveTxs] = useState<any[]>(allTxs);
+  const [liveMembers, setLiveMembers] = useState<any[]>(members);
+
+  useEffect(() => {
+    setLiveTxs(allTxs);
+  }, [allTxs]);
+
+  useEffect(() => {
+    setLiveMembers(members);
+  }, [members]);
 
   useEffect(() => {
     setInternalMonth(selectedMonth);
   }, [selectedMonth]);
+
+  // Realtime update listener on payments, transactions, member updates, and bangla names
+  useEffect(() => {
+    const handleSync = () => {
+      setBanglaVersion((v) => v + 1);
+      try {
+        const rawTxs = localStorage.getItem('canteen_txs');
+        if (rawTxs) {
+          setLiveTxs(JSON.parse(rawTxs));
+        }
+        const rawMembers = localStorage.getItem('canteen_members');
+        if (rawMembers) {
+          setLiveMembers(JSON.parse(rawMembers));
+        }
+      } catch {}
+    };
+
+    window.addEventListener('canteen_txs_updated', handleSync);
+    window.addEventListener('canteen_state_updated', handleSync);
+    window.addEventListener('canteen_members_updated', handleSync);
+    window.addEventListener('canteen_member_bangla_names_updated', handleSync);
+    window.addEventListener('storage', handleSync);
+    return () => {
+      window.removeEventListener('canteen_txs_updated', handleSync);
+      window.removeEventListener('canteen_state_updated', handleSync);
+      window.removeEventListener('canteen_members_updated', handleSync);
+      window.removeEventListener('canteen_member_bangla_names_updated', handleSync);
+      window.removeEventListener('storage', handleSync);
+    };
+  }, []);
 
   const activeMonth = internalMonth || selectedMonth;
 
@@ -90,125 +191,146 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
     if (onMonthChange) onMonthChange(nextKey);
   };
 
+  // Group member counts for badge indicators
+  const officerCount = useMemo(() => liveMembers.filter(isOfficerMember).length, [liveMembers]);
+  const airmenCount = useMemo(() => liveMembers.filter(isAirmanMember).length, [liveMembers]);
+  const civilianCount = useMemo(() => liveMembers.filter(isCivilianMember).length, [liveMembers]);
+
+  // Filter members based on selected role filter
+  const filteredMembers = useMemo(() => {
+    if (roleFilter === 'OFFICER') {
+      return liveMembers.filter(isOfficerMember);
+    }
+    if (roleFilter === 'AIRMEN') {
+      return liveMembers.filter(isAirmanMember);
+    }
+    if (roleFilter === 'CIVILIAN') {
+      return liveMembers.filter(isCivilianMember);
+    }
+    return liveMembers;
+  }, [liveMembers, roleFilter]);
+
   // Sort members strictly according to Office Nominal Roll Seniority
   const sortedMembers = useMemo(() => {
-    return sortCanteenMembersByOfficeSeniority(members);
-  }, [members]);
+    return sortCanteenMembersByOfficeSeniority(filteredMembers);
+  }, [filteredMembers]);
+
+  // Helper to extract comparable YYYY-MM key from any transaction
+  const getMonthKeyOfTx = (tx: any): string => {
+    return tx.monthKey || getTxMonthKey(tx.date) || '';
+  };
 
   // Compute detailed financial calculations for every member
   const rows = useMemo(() => {
     return sortedMembers.map((member, index) => {
-      const memberTxs = allTxs.filter(
-        (tx) => tx.airman_id === member.airman_id || (member['BD No'] && tx.bdNo === member['BD No'])
-      );
+      // 100% reliable transaction matching by BD No, ID, or surname
+      const memberTxs = liveTxs.filter((tx) => isTxBelongingToMember(member, tx));
+      const memberCategoryTxs = memberTxs.filter((tx) => isCategoryMatch(tx, selectedCategory));
 
-      const rankFormatted = formatRankBn(member['Rank'] || member.rank || '');
+      const rankFormatted = getMemberBanglaRank(member) || formatRankBn(member['Rank'] || member.rank || '');
       const rawName = member['Surname'] || member['Full Name'] || member['Name'] || '';
-      const nameFormatted = formatMemberNameBn(rawName);
+      // Fetch Bengali name (Civilian members retain their real Bengali name e.g. তানভীর, শরীফ; Rank is সিভিলিয়ান)
+      const nameFormatted = getMemberBanglaName(member) || formatMemberNameBn(rawName) || rawName;
 
       let currentPeriodCharges = 0;
       let currentPeriodPayments = 0;
       let previousDue = 0;
       let previousAdvance = 0;
-
-      if (activeMonth === 'ALL') {
-        const memberTotalDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
-        const memberTotalAdvance = Number(member.Advance ?? member.advance ?? member.ogrim ?? 0);
-        const charges = memberTxs
-          .filter((tx) => {
-            const cat = getTxCategory(tx);
-            const catMatch = selectedCategory === 'ALL' || cat === selectedCategory;
-            return catMatch && tx.type !== 'BILL PAYMENT';
-          })
-          .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-
-        const payments = memberTxs
-          .filter((tx) => {
-            const cat = getTxCategory(tx);
-            const catMatch = selectedCategory === 'ALL' || cat === selectedCategory;
-            return catMatch && tx.type === 'BILL PAYMENT';
-          })
-          .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-
-        currentPeriodCharges = Math.max(memberTotalDue, charges - payments);
-        currentPeriodPayments = payments;
-        previousDue = 0;
-        previousAdvance = memberTotalAdvance;
-      } else {
-        // Specific Month
-        const currentMonthTxs = memberTxs.filter((tx) => {
-          const cat = getTxCategory(tx);
-          const catMatch = selectedCategory === 'ALL' || cat === selectedCategory;
-          const txMonth = getTxMonthKey(tx.date);
-          return catMatch && txMonth === activeMonth;
-        });
-
-        currentPeriodCharges = currentMonthTxs
-          .filter((tx) => tx.type !== 'BILL PAYMENT')
-          .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-
-        currentPeriodPayments = currentMonthTxs
-          .filter((tx) => tx.type === 'BILL PAYMENT')
-          .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-
-        // Previous dues & advances prior to this month
-        const olderTxs = memberTxs.filter((tx) => {
-          const cat = getTxCategory(tx);
-          const catMatch = selectedCategory === 'ALL' || cat === selectedCategory;
-          const txMonth = getTxMonthKey(tx.date);
-          return catMatch && txMonth && txMonth < activeMonth;
-        });
-
-        const olderCharges = olderTxs
-          .filter((tx) => tx.type !== 'BILL PAYMENT')
-          .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-
-        const olderPayments = olderTxs
-          .filter((tx) => tx.type === 'BILL PAYMENT')
-          .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-
-        const olderNet = olderCharges - olderPayments;
-        const memberTotalDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
-        const memberTotalAdvance = Number(member.Advance ?? member.advance ?? member.ogrim ?? 0);
-        const netThisMonth = Math.max(0, currentPeriodCharges - currentPeriodPayments);
-        const diff = Math.max(0, memberTotalDue - netThisMonth);
-
-        if (olderNet > 0) {
-          previousDue = Math.max(olderNet, diff);
-          previousAdvance = 0;
-        } else if (olderNet < 0) {
-          previousDue = 0;
-          previousAdvance = Math.abs(olderNet);
-        } else {
-          if (diff > 0) {
-            previousDue = diff;
-            previousAdvance = 0;
-          } else if (memberTotalAdvance > 0) {
-            previousAdvance = memberTotalAdvance;
-            previousDue = 0;
-          } else {
-            previousDue = 0;
-            previousAdvance = 0;
-          }
-        }
-      }
-
-      const totalBill = currentPeriodCharges + previousDue;
-      const paidBill = currentPeriodPayments;
-      const totalCredits = previousAdvance + paidBill;
-
+      let totalBill = 0;
+      let paidBill = 0;
       let advance = 0;
       let remainingDue = 0;
 
-      if (totalCredits >= totalBill) {
-        advance = totalCredits - totalBill;
-        remainingDue = 0;
+      const memberTotalDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
+      const memberTotalAdvance = Number(member.Advance ?? member.advance ?? member.ogrim ?? 0);
+
+      if (activeMonth === 'ALL') {
+        const allCharges = memberCategoryTxs
+          .filter((tx) => !isPaymentTx(tx))
+          .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+        const allPayments = memberCategoryTxs
+          .filter((tx) => isPaymentTx(tx))
+          .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+        currentPeriodCharges = allCharges;
+        currentPeriodPayments = allPayments;
+        previousDue = 0;
+        previousAdvance = memberTotalAdvance;
+        totalBill = Math.max(memberTotalDue + allPayments, allCharges);
+        paidBill = allPayments;
+        remainingDue = memberTotalDue;
+        advance = memberTotalAdvance;
       } else {
-        const rawDue = totalBill - totalCredits;
-        const profileDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
-        // If member already cleared their balance in a subsequent month (e.g. October payment for September), cap due at current ledger balance
-        remainingDue = profileDue === 0 ? 0 : Math.min(rawDue, profileDue);
-        advance = 0;
+        // Specific Month (e.g. '2026-09', '2026-07', '2026-10')
+
+        // 1. Prior Period: strictly transactions dated prior to this month
+        const priorTxs = memberCategoryTxs.filter((tx) => {
+          const m = getMonthKeyOfTx(tx);
+          return m && m < activeMonth;
+        });
+
+        const priorCharges = priorTxs
+          .filter((tx) => !isPaymentTx(tx))
+          .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+        const priorPayments = priorTxs
+          .filter((tx) => isPaymentTx(tx))
+          .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+        const priorNet = priorCharges - priorPayments;
+        if (priorNet > 0) {
+          previousDue = priorNet;
+          previousAdvance = 0;
+        } else if (priorNet < 0) {
+          previousDue = 0;
+          previousAdvance = Math.abs(priorNet);
+        } else {
+          previousDue = 0;
+          previousAdvance = 0;
+        }
+
+        // 2. Current Month Charges: transactions belonging specifically to activeMonth
+        const currentMonthTxs = memberCategoryTxs.filter((tx) => getMonthKeyOfTx(tx) === activeMonth);
+        currentPeriodCharges = currentMonthTxs
+          .filter((tx) => !isPaymentTx(tx))
+          .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+        // Direct payments recorded within this specific month
+        const currentMonthDirectPayments = currentMonthTxs
+          .filter((tx) => isPaymentTx(tx))
+          .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+        // Total bill for this month
+        totalBill = previousDue + currentPeriodCharges;
+
+        // 3. Realtime Payment Settlement:
+        // Include direct payments made during the month PLUS subsequent payments (e.g. October payments for September bill)
+        const allPaymentsToDate = memberCategoryTxs
+          .filter((tx) => isPaymentTx(tx))
+          .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+        const paymentsAbsorbedByPriorMonths = Math.min(priorCharges, allPaymentsToDate);
+        const paymentsAvailableForThisMonth = Math.max(0, allPaymentsToDate - paymentsAbsorbedByPriorMonths);
+
+        if (totalBill > 0) {
+          paidBill = Math.min(totalBill, Math.max(currentMonthDirectPayments, paymentsAvailableForThisMonth));
+        } else {
+          paidBill = currentMonthDirectPayments;
+        }
+
+        currentPeriodPayments = paidBill;
+
+        const totalCredits = previousAdvance + paidBill;
+        if (totalCredits >= totalBill) {
+          advance = totalCredits - totalBill;
+          remainingDue = 0;
+        } else {
+          const rawDue = totalBill - totalCredits;
+          // If member has already fully cleared balance in ledger (memberTotalDue === 0), reflect 0
+          remainingDue = memberTotalDue === 0 ? 0 : Math.min(rawDue, memberTotalDue);
+          advance = 0;
+        }
       }
 
       return {
@@ -225,7 +347,7 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
         remainingDue,
       };
     });
-  }, [sortedMembers, allTxs, selectedCategory, activeMonth]);
+  }, [sortedMembers, liveTxs, selectedCategory, activeMonth, banglaVersion]);
 
   // Overall totals
   const totals = useMemo(() => {
@@ -246,7 +368,8 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
 
   const handlePrint = () => {
     const originalTitle = document.title;
-    document.title = `CANTEEN_BILL_${unitName.replace(/\s+/g, '_')}_${titleMonthBn.replace(/\s+/g, '_')}`;
+    const filterSuffix = roleFilter === 'OFFICER' ? '_OFFICER' : roleFilter === 'AIRMEN' ? '_AIRMEN' : roleFilter === 'CIVILIAN' ? '_CIVILIAN' : '';
+    document.title = `CANTEEN_BILL_${unitName.replace(/\s+/g, '_')}_${titleMonthBn.replace(/\s+/g, '_')}${filterSuffix}`;
     setTimeout(() => {
       window.print();
       document.title = originalTitle;
@@ -255,10 +378,13 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
 
   const handleExportExcel = () => {
     exportCanteenBillToExcel({
-      members,
-      allTxs,
+      members: filteredMembers,
+      allTxs: liveTxs,
       selectedCategory,
       selectedMonth: activeMonth,
+      filterLabel: roleFilter !== 'OVERALL' ? roleFilter : undefined,
+      getBanglaName: (m) => getMemberBanglaName(m),
+      getBanglaRank: (m) => getMemberBanglaRank(m) || formatRankBn(m['Rank'] || m.rank || ''),
     });
   };
 
@@ -267,7 +393,7 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
   return createPortal(
     <div className="fixed inset-0 z-[100] flex flex-col bg-slate-950/80 backdrop-blur-md print:bg-white animate-fadeIn print:block print:static print:h-auto print:overflow-visible text-black">
       {/* Top Header Controls (Hidden on Print) */}
-      <div className="flex-none bg-slate-900 border-b border-slate-700 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0 shadow-2xl print:hidden z-10">
+      <div className="flex-none bg-slate-900 border-b border-slate-700 p-3 sm:p-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 sm:gap-4 shadow-2xl print:hidden z-10">
         <div className="flex items-center space-x-3 text-white">
           <button
             type="button"
@@ -312,6 +438,81 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
               title="পরবর্তী মাস (Next Month)"
             >
               <ChevronRight className="w-4 h-4 text-indigo-400" />
+            </button>
+          </div>
+
+          {/* Group Filter Selector: Responsive Grid on Mobile, Flex on Desktop - Airmen never pushed outside */}
+          <div className="grid grid-cols-4 w-full sm:flex sm:w-auto items-center bg-slate-800/90 p-1 rounded-xl border border-slate-700 shadow-inner gap-1">
+            <button
+              type="button"
+              onClick={() => setRoleFilter('OVERALL')}
+              className={`px-1.5 sm:px-2.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 shrink-0 ${
+                roleFilter === 'OVERALL'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-700/60'
+              }`}
+              title="সকল সদস্য (Overall - All Members)"
+            >
+              <span>Overall</span>
+              <span className={`text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                roleFilter === 'OVERALL' ? 'bg-indigo-800 text-indigo-100' : 'bg-slate-700 text-slate-300'
+              }`}>
+                {liveMembers.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setRoleFilter('OFFICER')}
+              className={`px-1.5 sm:px-2.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 shrink-0 ${
+                roleFilter === 'OFFICER'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-700/60'
+              }`}
+              title="শুধুমাত্র অফিসার (Officers Only)"
+            >
+              <span>Officer</span>
+              <span className={`text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                roleFilter === 'OFFICER' ? 'bg-indigo-800 text-indigo-100' : 'bg-slate-700 text-slate-300'
+              }`}>
+                {officerCount}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setRoleFilter('AIRMEN')}
+              className={`px-1.5 sm:px-2.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 shrink-0 ${
+                roleFilter === 'AIRMEN'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-700/60'
+              }`}
+              title="শুধুমাত্র বিমানসেনা (Airmen Only)"
+            >
+              <span>Airmen</span>
+              <span className={`text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                roleFilter === 'AIRMEN' ? 'bg-indigo-800 text-indigo-100' : 'bg-slate-700 text-slate-300'
+              }`}>
+                {airmenCount}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setRoleFilter('CIVILIAN')}
+              className={`px-1.5 sm:px-2.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1 shrink-0 ${
+                roleFilter === 'CIVILIAN'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-700/60'
+              }`}
+              title="শুধুমাত্র সিভিলিয়ান (Civilian Only)"
+            >
+              <span>Civilian</span>
+              <span className={`text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                roleFilter === 'CIVILIAN' ? 'bg-indigo-800 text-indigo-100' : 'bg-slate-700 text-slate-300'
+              }`}>
+                {civilianCount}
+              </span>
             </button>
           </div>
 
@@ -401,7 +602,7 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
             {/* Header: Centered Titles - ONLY Headlines are BOLD */}
             <div className="text-center mb-4 space-y-1">
               <h1 className="text-lg sm:text-xl font-bold tracking-wide text-black">
-                {categoryTitle}ঃ {unitName}
+                {categoryTitle}ঃ {unitName}{roleFilter === 'OFFICER' ? ' (অফিসার)' : roleFilter === 'AIRMEN' ? ' (বিমানসেনা)' : roleFilter === 'CIVILIAN' ? ' (সিভিলিয়ান)' : ''}
               </h1>
               <h2 className="text-sm sm:text-base font-bold text-black">
                 মাসঃ {titleMonthBn}

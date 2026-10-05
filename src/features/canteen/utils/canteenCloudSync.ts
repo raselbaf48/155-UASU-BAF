@@ -135,13 +135,15 @@ function mergeArrayData(localArr: any[], cloudArr: any[], keyField = 'id', keyNa
         String(t.items || '').includes('বকেয়া বিল');
       if (isInitial) {
         const cleanBd = String(t.bdNo || t.airman_id || '').replace(/\D/g, '');
-        const month = t.monthKey || t.date || '';
+        const month = t.monthKey || (t.date ? String(t.date).trim() : '');
         const bType = t.billType || 'CANTEEN';
         const k = `${cleanBd}_${month}_${bType}`;
-        if (cleanBd && seenInitial.has(k)) {
+        if (cleanBd && month && seenInitial.has(k)) {
           continue; // Drop duplicate
         }
-        seenInitial.add(k);
+        if (cleanBd && month) {
+          seenInitial.add(k);
+        }
       }
       deduped.push(t);
     }

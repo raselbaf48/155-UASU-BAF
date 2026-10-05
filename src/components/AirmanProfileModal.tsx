@@ -507,7 +507,7 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                 date: tx.date || '',
                 rawDate: parseTxDateToIso(tx.date || ''),
                 description: isPayment 
-                  ? (tx.description || (tx.gateway ? `Bill Payment (${tx.gateway})` : 'Bill Payment'))
+                  ? (tx.items || `Bill Payment - ${String(tx.gateway || '').toUpperCase() === 'CASH' ? 'Cash' : 'UCB'}`)
                   : (tx.items || tx.description || 'Canteen Purchase'),
                 type: isPayment ? 'BILL PAYMENT' : 'PURCHASE',
                 amount: Number(tx.amount || 0),
