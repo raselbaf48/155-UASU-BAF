@@ -346,13 +346,20 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
             const { deduplicated } = deduplicateRawItems([...localVal, ...cloudVal]);
             finalVal = deduplicated;
           } else if (key === 'canteen_daily_menu') {
-            if (localVal.length > 0 && cloudVal.length === 0) {
+            const localUpdated = typeof window !== 'undefined' ? localStorage.getItem('canteen_daily_menu_updated_at') : null;
+            const cloudUpdated = cloudKeyMap.get('canteen_daily_menu_updated_at');
+            const localTime = new Date(localUpdated || 0).getTime();
+            const cloudTime = new Date(cloudUpdated || 0).getTime();
+
+            // If local was curated recently or is newer than cloud, preserve local!
+            if (localTime >= cloudTime && Array.isArray(localVal) && localVal.length > 0) {
               finalVal = localVal;
-              queuePushKeyToCloud('canteen_daily_menu', localVal, 100);
-            } else if (cloudVal.length > 0 && localVal.length === 0) {
+              queuePushKeyToCloud('canteen_daily_menu', localVal, 50);
+              if (localUpdated) queuePushKeyToCloud('canteen_daily_menu_updated_at', localUpdated, 50);
+            } else if (Array.isArray(cloudVal) && cloudVal.length > 0) {
               finalVal = cloudVal;
             } else {
-              finalVal = mergeArrayData(localVal, cloudVal, 'id');
+              finalVal = (Array.isArray(localVal) && localVal.length > 0) ? localVal : (Array.isArray(cloudVal) ? cloudVal : []);
             }
           } else {
             const keyField = key === 'canteen_pre_orders' ? 'orderId' : (key === 'canteen_expense_last_unit_prices' ? 'key' : 'id');
@@ -370,7 +377,18 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
         }
 
         if (typeof window !== 'undefined') {
-          localStorage.setItem(key, JSON.stringify(finalVal));
+          if (key === 'canteen_daily_menu_updated_at') {
+            const localUpdated = localStorage.getItem('canteen_daily_menu_updated_at');
+            const localTime = new Date(localUpdated || 0).getTime();
+            const incomingTime = new Date(finalVal || 0).getTime();
+            if (localTime > incomingTime && localUpdated) {
+              finalVal = localUpdated;
+            }
+            const cleanStr = typeof finalVal === 'string' ? finalVal.replace(/^"|"$/g, '') : String(finalVal);
+            localStorage.setItem(key, cleanStr);
+          } else {
+            localStorage.setItem(key, JSON.stringify(finalVal));
+          }
           dispatchKeyUpdateEvent(key);
         }
       } else if (localVal !== null && localVal !== undefined) {
@@ -660,11 +678,13 @@ export function initCanteenCloudSync(): () => void {
                 const { deduplicated } = deduplicateRawItems([...parsed, ...currentLocal]);
                 mergedVal = deduplicated;
               } else if (key === 'canteen_daily_menu') {
-                if (currentLocal.length > 0 && parsed.length === 0) {
-                  mergedVal = currentLocal;
-                } else {
-                  mergedVal = mergeArrayData(currentLocal, parsed, 'id');
+                const localUpdated = typeof window !== 'undefined' ? localStorage.getItem('canteen_daily_menu_updated_at') : null;
+                const localTime = new Date(localUpdated || 0).getTime();
+                // If local was set within last 60 seconds and local has items, don't let incoming empty or stale cloud overwrite it
+                if (Date.now() - localTime < 60000 && Array.isArray(currentLocal) && currentLocal.length > 0) {
+                  return;
                 }
+                mergedVal = (Array.isArray(parsed) && parsed.length > 0) ? parsed : (Array.isArray(currentLocal) ? currentLocal : []);
               } else {
                 const keyField = key === 'canteen_pre_orders' ? 'orderId' : 'id';
                 mergedVal = mergeArrayData(currentLocal, parsed, keyField, key);
@@ -675,7 +695,19 @@ export function initCanteenCloudSync(): () => void {
               }
             }
 
-            localStorage.setItem(key, JSON.stringify(mergedVal));
+            if (key === 'canteen_daily_menu_updated_at') {
+              const localUpdated = typeof window !== 'undefined' ? localStorage.getItem('canteen_daily_menu_updated_at') : null;
+              const localTime = new Date(localUpdated || 0).getTime();
+              const incomingTime = new Date(mergedVal || 0).getTime();
+              if (localTime > incomingTime) {
+                // Incoming realtime event is older than local, ignore
+                return;
+              }
+              const cleanStr = typeof mergedVal === 'string' ? mergedVal.replace(/^"|"$/g, '') : String(mergedVal);
+              localStorage.setItem(key, cleanStr);
+            } else {
+              localStorage.setItem(key, JSON.stringify(mergedVal));
+            }
             dispatchKeyUpdateEvent(key);
             notifyStatus({ status: 'synced', lastSyncTime: new Date().toLocaleTimeString() });
           } catch (e) {

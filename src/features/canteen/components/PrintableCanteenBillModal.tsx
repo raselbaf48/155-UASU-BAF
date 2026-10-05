@@ -99,6 +99,7 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
   const [orientation, setOrientation] = useState<'landscape' | 'portrait'>('portrait');
   const [internalMonth, setInternalMonth] = useState<string>(selectedMonth);
   const [roleFilter, setRoleFilter] = useState<MemberRoleFilter>('OVERALL');
+  const [dueFilter, setDueFilter] = useState<'ALL' | 'DUE'>('ALL');
   const [banglaVersion, setBanglaVersion] = useState<number>(0);
 
   // Live state synchronized with storage and cloud events for true realtime updates
@@ -349,9 +350,24 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
     });
   }, [sortedMembers, liveTxs, selectedCategory, activeMonth, banglaVersion]);
 
-  // Overall totals
+  // Count of members who have outstanding due in this view
+  const dueCount = useMemo(() => {
+    return rows.filter((r) => r.remainingDue > 0).length;
+  }, [rows]);
+
+  // Filter rows based on dueFilter (All vs Due) and re-index Serial No (১, ২, ৩...)
+  const displayedRows = useMemo(() => {
+    const list = dueFilter === 'DUE' ? rows.filter((r) => r.remainingDue > 0) : rows;
+    return list.map((r, idx) => ({
+      ...r,
+      ser: idx + 1,
+      serBn: toBengaliNum(idx + 1),
+    }));
+  }, [rows, dueFilter]);
+
+  // Totals calculated strictly for the currently displayed rows
   const totals = useMemo(() => {
-    return rows.reduce(
+    return displayedRows.reduce(
       (acc, r) => {
         acc.previousDue += r.previousDue;
         acc.previousAdvance += r.previousAdvance;
@@ -364,16 +380,40 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
       },
       { previousDue: 0, previousAdvance: 0, canteenBill: 0, totalBill: 0, paidBill: 0, advance: 0, remainingDue: 0 }
     );
-  }, [rows]);
+  }, [displayedRows]);
 
   const handlePrint = () => {
     const originalTitle = document.title;
     const filterSuffix = roleFilter === 'OFFICER' ? '_OFFICER' : roleFilter === 'AIRMEN' ? '_AIRMEN' : roleFilter === 'CIVILIAN' ? '_CIVILIAN' : '';
-    document.title = `CANTEEN_BILL_${unitName.replace(/\s+/g, '_')}_${titleMonthBn.replace(/\s+/g, '_')}${filterSuffix}`;
+    const dueSuffix = dueFilter === 'DUE' ? '_DUE_ONLY' : '';
+    document.title = `CANTEEN_BILL_${unitName.replace(/\s+/g, '_')}_${titleMonthBn.replace(/\s+/g, '_')}${filterSuffix}${dueSuffix}`;
+
+    // Explicitly hide root so the browser never prints the background dashboard
+    const rootEl = document.getElementById('root');
+    const prevDisplay = rootEl ? rootEl.style.display : '';
+    if (rootEl) {
+      rootEl.style.setProperty('display', 'none', 'important');
+    }
+
+    const restoreRoot = () => {
+      if (rootEl) {
+        if (prevDisplay) {
+          rootEl.style.display = prevDisplay;
+        } else {
+          rootEl.style.removeProperty('display');
+        }
+      }
+      document.title = originalTitle;
+      window.removeEventListener('afterprint', restoreRoot);
+    };
+
+    window.addEventListener('afterprint', restoreRoot);
+
     setTimeout(() => {
       window.print();
-      document.title = originalTitle;
-    }, 100);
+      // Fallback restore in case afterprint does not fire in some browsers
+      setTimeout(restoreRoot, 1000);
+    }, 150);
   };
 
   const handleExportExcel = () => {
@@ -383,6 +423,7 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
       selectedCategory,
       selectedMonth: activeMonth,
       filterLabel: roleFilter !== 'OVERALL' ? roleFilter : undefined,
+      dueOnly: dueFilter === 'DUE',
       getBanglaName: (m) => getMemberBanglaName(m),
       getBanglaRank: (m) => getMemberBanglaRank(m) || formatRankBn(m['Rank'] || m.rank || ''),
     });
@@ -391,9 +432,9 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
   if (!isOpen) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex flex-col bg-slate-950/80 backdrop-blur-md print:bg-white animate-fadeIn print:block print:static print:h-auto print:overflow-visible text-black">
+    <div className="canteen-bill-modal-portal fixed inset-0 z-[100] flex flex-col bg-slate-950/80 backdrop-blur-md animate-fadeIn text-black">
       {/* Top Header Controls (Hidden on Print) */}
-      <div className="flex-none bg-slate-900 border-b border-slate-700 p-3 sm:p-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 sm:gap-4 shadow-2xl print:hidden z-10">
+      <div className="canteen-print-controls-bar flex-none bg-slate-900 border-b border-slate-700 p-3 sm:p-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 sm:gap-4 shadow-2xl print:hidden z-10">
         <div className="flex items-center space-x-3 text-white">
           <button
             type="button"
@@ -441,7 +482,7 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
             </button>
           </div>
 
-          {/* Group Filter Selector: Responsive Grid on Mobile, Flex on Desktop - Airmen never pushed outside */}
+          {/* Group Filter Selector: Overall / Officer / Airmen / Civilian */}
           <div className="grid grid-cols-4 w-full sm:flex sm:w-auto items-center bg-slate-800/90 p-1 rounded-xl border border-slate-700 shadow-inner gap-1">
             <button
               type="button"
@@ -516,6 +557,44 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
             </button>
           </div>
 
+          {/* Due Filter: All vs Due Only */}
+          <div className="flex items-center bg-slate-800/90 p-1 rounded-xl border border-slate-700 shadow-inner">
+            <button
+              type="button"
+              onClick={() => setDueFilter('ALL')}
+              className={`px-2.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
+                dueFilter === 'ALL'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-700/60'
+              }`}
+              title="সকল সদস্যের বিল (All Bills)"
+            >
+              <span>All</span>
+              <span className={`text-[9px] sm:text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                dueFilter === 'ALL' ? 'bg-indigo-800 text-indigo-100' : 'bg-slate-700 text-slate-300'
+              }`}>
+                {rows.length}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setDueFilter('DUE')}
+              className={`px-2.5 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
+                dueFilter === 'DUE'
+                  ? 'bg-rose-600 text-white shadow-xs'
+                  : 'text-rose-400 hover:text-white hover:bg-rose-950/40'
+              }`}
+              title="শুধুমাত্র বকেয়া থাকা সদস্য (Due Only)"
+            >
+              <span>Due</span>
+              <span className={`text-[9px] sm:text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                dueFilter === 'DUE' ? 'bg-rose-800 text-rose-100' : 'bg-rose-950/80 text-rose-300 border border-rose-500/30'
+              }`}>
+                {dueCount}
+              </span>
+            </button>
+          </div>
+
           {/* Page Orientation Selector */}
           <div className="flex items-center bg-slate-800/90 p-1 rounded-xl border border-slate-700">
             <button
@@ -569,17 +648,96 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
       </div>
 
       {/* Printable Content Area */}
-      <div className="flex-1 overflow-auto print:overflow-visible bg-slate-800/60 print:bg-white p-3 sm:p-6 print:p-0 flex justify-center print:block">
+      <div className="canteen-bill-print-area flex-1 overflow-auto print:overflow-visible bg-slate-800/60 print:bg-white p-3 sm:p-6 print:p-0 flex justify-center print:block">
         <style type="text/css">
           {`
             @media print {
-              @page { 
-                size: ${orientation}; 
-                margin: 5mm; 
+              /* 1. HIDE ENTIRE ROOT APPLICATION OUTSIDE THIS MODAL */
+              #root {
+                display: none !important;
+                visibility: hidden !important;
               }
-              body {
-                -webkit-print-color-adjust: exact;
-                print-color-adjust: exact;
+
+              /* 2. BODY & HTML RESETS */
+              html, body {
+                background: #ffffff !important;
+                background-color: #ffffff !important;
+                color: #000000 !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                width: 100% !important;
+                height: auto !important;
+                min-height: 0 !important;
+                overflow: visible !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+
+              @page { 
+                size: A4 ${orientation} !important; 
+                margin: 5mm 6mm !important; 
+              }
+
+              /* 3. PORTAL CONTAINER IN NORMAL PRINT FLOW */
+              .canteen-bill-modal-portal {
+                position: static !important;
+                display: block !important;
+                background: #ffffff !important;
+                background-color: #ffffff !important;
+                backdrop-filter: none !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                width: 100% !important;
+                height: auto !important;
+                min-height: 0 !important;
+                overflow: visible !important;
+              }
+
+              /* 4. HIDE HEADER CONTROLS */
+              .canteen-print-controls-bar,
+              .print\\:hidden {
+                display: none !important;
+                visibility: hidden !important;
+              }
+
+              /* 5. PAPER SHEET CONTAINER */
+              .canteen-bill-print-area {
+                display: block !important;
+                background: #ffffff !important;
+                background-color: #ffffff !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                overflow: visible !important;
+              }
+
+              #print-canteen-bill-content {
+                display: block !important;
+                position: static !important;
+                width: 100% !important;
+                max-width: 100% !important;
+                min-height: 0 !important;
+                margin: 0 auto !important;
+                padding: 0 !important;
+                box-shadow: none !important;
+                border: none !important;
+                background: #ffffff !important;
+                background-color: #ffffff !important;
+                color: #000000 !important;
+              }
+
+              table {
+                page-break-inside: auto !important;
+                width: 100% !important;
+              }
+              tr {
+                page-break-inside: avoid !important;
+                page-break-after: auto !important;
+              }
+              thead {
+                display: table-header-group !important;
+              }
+              tfoot {
+                display: table-footer-group !important;
               }
             }
 
@@ -602,7 +760,7 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
             {/* Header: Centered Titles - ONLY Headlines are BOLD */}
             <div className="text-center mb-4 space-y-1">
               <h1 className="text-lg sm:text-xl font-bold tracking-wide text-black">
-                {categoryTitle}ঃ {unitName}{roleFilter === 'OFFICER' ? ' (অফিসার)' : roleFilter === 'AIRMEN' ? ' (বিমানসেনা)' : roleFilter === 'CIVILIAN' ? ' (সিভিলিয়ান)' : ''}
+                {categoryTitle}ঃ {unitName}{roleFilter === 'OFFICER' ? ' (অফিসার)' : roleFilter === 'AIRMEN' ? ' (বিমানসেনা)' : roleFilter === 'CIVILIAN' ? ' (সিভিলিয়ান)' : ''}{dueFilter === 'DUE' ? ' (বকেয়া তালিকা)' : ''}
               </h1>
               <h2 className="text-sm sm:text-base font-bold text-black">
                 মাসঃ {titleMonthBn}
@@ -654,14 +812,14 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
                 </thead>
 
                 <tbody className="font-normal text-black">
-                  {rows.length === 0 ? (
+                  {displayedRows.length === 0 ? (
                     <tr>
-                      <td colSpan={10} className="p-6 text-center text-slate-700 font-normal border border-black">
-                        কোনো সদস্যের রেকর্ড পাওয়া যায়নি
+                      <td colSpan={10} className="p-8 text-center text-slate-700 font-normal border border-black">
+                        {dueFilter === 'DUE' ? 'এই মাসে কোনো বকেয়া নেই (No Due Members Found)' : 'কোনো সদস্যের রেকর্ড পাওয়া যায়নি'}
                       </td>
                     </tr>
                   ) : (
-                    rows.map((row) => (
+                    displayedRows.map((row) => (
                       <tr key={row.ser} className="border border-black hover:bg-slate-50 print:hover:bg-transparent font-normal">
                         <td className="p-1.5 border border-black font-normal text-center align-middle">{row.serBn}</td>
                         <td className="p-1.5 border border-black font-normal text-center align-middle">{row.rank}</td>

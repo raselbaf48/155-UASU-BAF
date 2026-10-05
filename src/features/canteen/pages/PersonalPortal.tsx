@@ -869,14 +869,14 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
                       <Clock className="w-7 h-7" />
                   </div>
                   <h4 className="text-base font-black text-white uppercase tracking-wider">
-                      প্রি-অর্ডার বর্তমানে বন্ধ আছে (Pre-Order Closed)
+                      Pre-Order Currently Closed
                   </h4>
                   <p className="text-xs text-slate-400 max-w-md leading-relaxed">
-                      সদস্যদের জন্য প্রি-অর্ডারের সক্রিয় সময়: <strong className="text-indigo-400">১৮:০০ - ০৮:০০ (সন্ধ্যা ৬টা থেকে সকাল ৮টা)</strong>। নির্ধারিত সময়ের বাইরে প্রি-অর্ডার সাময়িকভাবে বন্ধ থাকে।
+                      Pre-orders are accepted daily during active hours: <strong className="text-indigo-400">{preOrderWindow.startTime} - {preOrderWindow.endTime}</strong>.
                   </p>
                   <div className="inline-flex items-center space-x-2 px-4 py-2 rounded-full bg-slate-900 border border-slate-700/80 text-[11px] font-black text-indigo-300">
                       <Clock className="w-3.5 h-3.5" />
-                      <span>দৈনিক প্রি-অর্ডার সক্রিয় সময়: সন্ধ্যা ১৮:০০ থেকে পরদিন সকাল ০৮:০০ (1800 - 0800)</span>
+                      <span>Active Window: {preOrderWindow.startTime} to {preOrderWindow.endTime}</span>
                   </div>
               </div>
           ) : (

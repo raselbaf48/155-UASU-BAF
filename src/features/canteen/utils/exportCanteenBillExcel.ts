@@ -235,6 +235,7 @@ export interface ExportCanteenBillParams {
   selectedCategory: BillCategory;
   selectedMonth: string;
   filterLabel?: string;
+  dueOnly?: boolean;
   getBanglaName?: (m: any) => string;
   getBanglaRank?: (m: any) => string;
 }
@@ -245,6 +246,7 @@ export async function exportCanteenBillToExcel({
   selectedCategory,
   selectedMonth,
   filterLabel,
+  dueOnly,
   getBanglaName,
   getBanglaRank,
 }: ExportCanteenBillParams) {
@@ -281,7 +283,7 @@ export async function exportCanteenBillToExcel({
   // Row 2: Title "ক্যান্টিন বিলঃ ১৫৫ ইউএএসইউ বিএএফ"
   aoa.push(['', '', '', `${categoryTitle}ঃ ${unitName}`]);
 
-  // Row 3: Subtitle with group filter if specified
+  // Row 3: Subtitle with group filter and due filter if specified
   const filterTitleBn = filterLabel === 'OFFICER' 
     ? ' (অফিসার)' 
     : filterLabel === 'CIVILIAN' 
@@ -289,7 +291,8 @@ export async function exportCanteenBillToExcel({
     : filterLabel === 'AIRMEN' 
     ? ' (বিমানসেনা)' 
     : '';
-  aoa.push(['', '', '', `মাসঃ ${titleMonthBn}${filterTitleBn}`]);
+  const dueTitleBn = dueOnly ? ' (বকেয়া তালিকা)' : '';
+  aoa.push(['', '', '', `মাসঃ ${titleMonthBn}${filterTitleBn}${dueTitleBn}`]);
 
   // Row 4: Empty separator
   aoa.push([]);
@@ -317,6 +320,8 @@ export async function exportCanteenBillToExcel({
   let sumPaidBill = 0;
   let sumAdvance = 0;
   let sumRemainingDue = 0;
+
+  let serialCounter = 0;
 
   // Helper to determine if a transaction is a valid non-reverted payment
   const isPaymentTx = (tx: any): boolean => {
@@ -446,6 +451,13 @@ export async function exportCanteenBillToExcel({
       }
     }
 
+    // If dueOnly filter is active, skip members with zero remaining due
+    if (dueOnly && remainingDue <= 0) {
+      return;
+    }
+
+    serialCounter += 1;
+
     // Accumulate sums
     sumPreviousDue += previousDue;
     sumPreviousAdvance += previousAdvance;
@@ -456,7 +468,7 @@ export async function exportCanteenBillToExcel({
     sumRemainingDue += remainingDue;
 
     aoa.push([
-      toBengaliNum(index + 1),                              // ক্রমিক নং
+      toBengaliNum(serialCounter),                          // ক্রমিক নং
       rankFormatted,                                        // পদবী
       nameFormatted,                                        // নাম (বাংলায়)
       previousDue > 0 ? previousDue : '',                   // বকেয়া বিল (আগের মাস)

@@ -34,26 +34,44 @@ export const CANTEEN_DAILY_MENU_TIMESTAMP_KEY = 'canteen_daily_menu_updated_at';
 /**
  * Checks if the daily curated menu has passed the 12:00 PM (noon) auto-reset threshold.
  * Everyday at 12:00 PM, curated menu automatically resets.
- * If current time >= 12:00 PM and the menu was set before today 12:00 PM, it is expired.
- * If current time < 12:00 PM and the menu was set before yesterday 12:00 PM, it is expired.
+ * When a menu is curated at timestamp T, it remains active until the very next 12:00 PM noon.
  */
-export function isDailyMenuExpired(timestampMs?: number): boolean {
-  const now = new Date();
-  const threshold = new Date(now);
-  if (now.getHours() < 12) {
-    // If before 12:00 PM today, latest reset was yesterday 12:00 PM
-    threshold.setDate(threshold.getDate() - 1);
-  }
-  threshold.setHours(12, 0, 0, 0);
+export function isDailyMenuExpired(timestamp?: any): boolean {
+  try {
+    let raw = timestamp;
+    if (raw === undefined && typeof window !== 'undefined') {
+      raw = localStorage.getItem(CANTEEN_DAILY_MENU_TIMESTAMP_KEY);
+    }
+    if (!raw) return false;
 
-  let targetTs = timestampMs;
-  if (targetTs === undefined) {
-    const raw = localStorage.getItem(CANTEEN_DAILY_MENU_TIMESTAMP_KEY);
-    targetTs = raw ? new Date(raw).getTime() : 0;
-  }
+    // Safely unwrap JSON string if quoted
+    if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed) raw = parsed;
+      } catch {}
+    }
 
-  // If never set or set before the threshold, it is expired
-  return !targetTs || targetTs < threshold.getTime();
+    const setTime = typeof raw === 'number' ? raw : new Date(raw).getTime();
+    if (isNaN(setTime) || setTime <= 0) return false;
+
+    const now = Date.now();
+    // Safety guard: if set within the last 30 minutes, never expire it
+    if (now - setTime < 30 * 60 * 1000) return false;
+
+    // Determine the exact 12:00 PM (noon) boundary immediately succeeding setTime:
+    const nextNoon = new Date(setTime);
+    nextNoon.setHours(12, 0, 0, 0);
+    // If setTime was at or after 12:00 PM on that date, the next noon occurs on the following day
+    if (nextNoon.getTime() <= setTime) {
+      nextNoon.setDate(nextNoon.getDate() + 1);
+    }
+
+    // It is expired if and only if the current time has reached or passed that next noon
+    return now >= nextNoon.getTime();
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -76,10 +94,6 @@ export function getCuratedDailyMenu(): string[] {
     if (isDailyMenuExpired()) {
       localStorage.setItem(CANTEEN_DAILY_MENU_KEY, '[]');
       localStorage.setItem(CANTEEN_DAILY_MENU_TIMESTAMP_KEY, new Date().toISOString());
-      window.dispatchEvent(new Event('canteen_daily_menu_updated'));
-      window.dispatchEvent(new Event('canteen_menu_updated'));
-      window.dispatchEvent(new Event('canteen_state_updated'));
-      window.dispatchEvent(new Event('storage'));
       return [];
     }
 
@@ -91,15 +105,39 @@ export function getCuratedDailyMenu(): string[] {
 
 /**
  * Saves newly curated menu item IDs with fresh timestamp so it remains active until the next 12:00 PM.
+ * Syncs localStorage, dispatches local events, and instantly upserts to Cloud 'app_settings'.
  */
 export function saveCuratedDailyMenu(itemIds: string[]): void {
   try {
+    const timestamp = new Date().toISOString();
     localStorage.setItem(CANTEEN_DAILY_MENU_KEY, JSON.stringify(itemIds));
-    localStorage.setItem(CANTEEN_DAILY_MENU_TIMESTAMP_KEY, new Date().toISOString());
+    localStorage.setItem(CANTEEN_DAILY_MENU_TIMESTAMP_KEY, timestamp);
     window.dispatchEvent(new Event('canteen_daily_menu_updated'));
     window.dispatchEvent(new Event('canteen_menu_updated'));
     window.dispatchEvent(new Event('canteen_state_updated'));
     window.dispatchEvent(new Event('storage'));
+
+    // Directly push to Cloud Supabase app_settings table so it persists immediately
+    supabase
+      .from('app_settings')
+      .upsert([
+        {
+          setting_key: CANTEEN_DAILY_MENU_KEY,
+          setting_value: JSON.stringify(itemIds),
+          updated_at: timestamp
+        },
+        {
+          setting_key: CANTEEN_DAILY_MENU_TIMESTAMP_KEY,
+          setting_value: timestamp,
+          updated_at: timestamp
+        }
+      ], { onConflict: 'setting_key' })
+      .then(
+        ({ error }) => {
+          if (error) console.warn('Failed to push daily menu to cloud:', error);
+        },
+        (err) => console.warn('Network error pushing daily menu to cloud:', err)
+      );
   } catch (e) {
     console.error('Failed to save curated daily menu:', e);
   }
@@ -127,7 +165,7 @@ export function checkPreOrderWindow(config?: CanteenConfig): PreOrderTimeStatus 
       isEnabled: false,
       startTime,
       endTime,
-      message: 'প্রি-অর্ডার সার্ভিস বর্তমানে ম্যানেজার কর্তৃক বন্ধ রয়েছে'
+      message: 'Pre-order service is currently disabled by manager'
     };
   }
 
@@ -161,7 +199,7 @@ export function checkPreOrderWindow(config?: CanteenConfig): PreOrderTimeStatus 
         : (endMinutes - currentMinutes);
       const h = Math.floor(diff / 60);
       const m = diff % 60;
-      timeRemainingText = h > 0 ? `${h} ঘণ্টা ${m} মিনিট বাকি` : `${m} মিনিট বাকি`;
+      timeRemainingText = h > 0 ? `${h}h ${m}m remaining` : `${m}m remaining`;
     }
   }
 
@@ -169,7 +207,7 @@ export function checkPreOrderWindow(config?: CanteenConfig): PreOrderTimeStatus 
   if (isOpen) {
     message = `Pre-Order is OPEN (${startTime} - ${endTime})`;
   } else {
-    message = `Pre-Order Closed (সক্রিয় সময়: ${startTime} - ${endTime})`;
+    message = `Pre-Order Closed (${startTime} - ${endTime})`;
   }
 
   return {

@@ -850,6 +850,30 @@ export const ManagerDashboard: React.FC = () => {
       }[];
     }>();
 
+    // 1. Pre-seed with currently curated menu items so each curated menu has its row
+    if (Array.isArray(selectedItems)) {
+      selectedItems.forEach((itemId) => {
+        const catItem = catalog.find(c => c.id === itemId);
+        if (catItem) {
+          const key = catItem.id;
+          map.set(key, {
+            key,
+            id: catItem.id,
+            name: catItem.name,
+            category: catItem.category || 'SNACKS',
+            price: Number(catItem.price || 0),
+            image: catItem.DP || catItem.img || catItem.image || catItem.photo,
+            totalQty: 0,
+            pendingQty: 0,
+            completedQty: 0,
+            totalAmount: 0,
+            ordersCount: 0,
+            orders: []
+          });
+        }
+      });
+    }
+
     relevantOrders.forEach((order: any) => {
       if (!Array.isArray(order.items)) return;
       order.items.forEach((item: any) => {
@@ -906,7 +930,7 @@ export const ManagerDashboard: React.FC = () => {
     });
 
     return Array.from(map.values()).sort((a, b) => b.totalQty - a.totalQty);
-  }, [relevantOrders, catalog]);
+  }, [relevantOrders, catalog, selectedItems]);
 
   const filteredMenuSummary = useMemo(() => {
     return menuWiseSummary.filter(item => {
@@ -933,12 +957,12 @@ export const ManagerDashboard: React.FC = () => {
                       <X className="w-5 h-5 text-slate-400" />
                   </button>
                   
-                  <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center justify-between mb-5">
                       <div className="flex items-center space-x-3">
                           <ChefHat className="w-6 h-6 text-[#4f46e5]" />
                           <div>
                               <h2 className="text-xl font-black text-white uppercase tracking-widest">Curate Daily Menu</h2>
-                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">সিলেক্টেড: {selectedItems.length} টি আইটেম</p>
+                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Selected: {selectedItems.length} items</p>
                           </div>
                       </div>
                       <div className="flex items-center space-x-2 mr-10">
@@ -947,28 +971,15 @@ export const ManagerDashboard: React.FC = () => {
                               onClick={selectAllDailyItems}
                               className="px-2.5 py-1 bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-500/40 text-indigo-300 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer"
                           >
-                              সব সিলেক্ট ({catalog.length})
+                              Select All ({catalog.length})
                           </button>
                           <button
                               type="button"
                               onClick={clearAllDailyItems}
                               className="px-2.5 py-1 bg-rose-950/80 hover:bg-rose-900 border border-rose-500/40 text-rose-300 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer"
                           >
-                              খালি / রিসেট
+                              Clear All
                           </button>
-                      </div>
-                  </div>
-
-                  {/* Informational Guidance Banner */}
-                  <div className="mb-4 p-3 rounded-2xl bg-indigo-950/40 border border-indigo-500/30 text-xs space-y-1">
-                      <div className="flex items-center space-x-1.5 text-indigo-300 font-bold">
-                          <Clock className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                          <span>দৈনিক রিসেট ও সক্রিয় সময় নিয়মাবলী:</span>
-                      </div>
-                      <div className="text-[11px] text-slate-300 space-y-0.5 leading-relaxed">
-                          <p>• <strong>দুপুর ১২:০০ টায় (12:00 PM) অটো-রিসেট:</strong> প্রতিদিন দুপুর ১২:০০ টায় কিউরেটেড মেনু স্বয়ংক্রিয়ভাবে খালি (রিসেট) হয়। নতুন করে সেট করলে পুনরায় প্রদর্শিত হবে।</p>
-                          <p>• <strong>সদস্যদের সক্রিয় সময় (১৮:০০ - ০৮:০০):</strong> সদস্যরা সন্ধ্যা ৬টা থেকে সকাল ৮টা পর্যন্ত এই মেনু দেখতে ও প্রি-অর্ডার করতে পারবে। অন্য সময়ে <em>'Pre-Order Closed'</em> দেখাবে।</p>
-                          <p>• <strong>ম্যানেজার যেকোনো সময়:</strong> আপনি ২৪ ঘণ্টার যেকোনো সময় মেনু নির্ধারণ বা এডিট করতে পারবেন।</p>
                       </div>
                   </div>
 
@@ -1109,11 +1120,11 @@ export const ManagerDashboard: React.FC = () => {
                      <button 
                         type="button"
                         onClick={clearAllDailyItems}
-                        title="কিউরেটেড মেনু সম্পূর্ণ খালি / রিসেট করুন"
-                        className="px-3.5 py-2.5 bg-rose-950/70 hover:bg-rose-900/90 border border-rose-500/40 text-rose-300 rounded-xl text-xs font-black tracking-wider uppercase transition-all flex items-center space-x-1.5 active:scale-95 cursor-pointer shadow-md shadow-rose-950/30"
+                        title="Clear Curated Menu"
+                        className="px-3 py-2.5 bg-rose-950/70 hover:bg-rose-900/90 border border-rose-500/40 text-rose-300 rounded-xl text-xs font-black tracking-wider uppercase transition-all flex items-center space-x-1.5 active:scale-95 cursor-pointer shadow-md shadow-rose-950/30"
                      >
                         <RotateCcw className="w-3.5 h-3.5" />
-                        <span>রিসেট ({selectedItems.length})</span>
+                        <span>Reset</span>
                      </button>
                   )}
                   <button 
@@ -1124,22 +1135,6 @@ export const ManagerDashboard: React.FC = () => {
                      <span>CURATE MENU ({selectedItems.length})</span>
                   </button>
                </div>
-            </div>
-
-            {/* Informative Guidance Banner for 12:00 PM Auto-Reset and 18:00 - 08:00 Active Window */}
-            <div className="mb-5 p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs shadow-inner">
-               <div className="flex items-start sm:items-center space-x-2.5 text-slate-300 text-[11px] leading-relaxed">
-                  <div className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-400 shrink-0 mt-0.5 sm:mt-0">
-                     <Clock className="w-3.5 h-3.5" />
-                  </div>
-                  <div>
-                     <span className="font-bold text-white">🕒 দৈনিক রিসেট ও সক্রিয় সময়: </span>
-                     <span>প্রতিদিন দুপুর ১২:০০ টায় (12:00 PM) কিউরেটেড মেনু স্বয়ংক্রিয়ভাবে রিসেট হয়ে যায়। সদস্যরা সন্ধ্যা ১৮:০০ থেকে পরদিন সকাল ০৮:০০ (1800 - 0800) পর্যন্ত এই মেনু দেখতে পাবেন। ম্যানেজার যেকোনো সময় সেট ও পরিবর্তন করতে পারবেন।</span>
-                  </div>
-               </div>
-               <span className="text-[10px] font-black text-indigo-300 uppercase tracking-widest shrink-0 bg-indigo-950/80 px-2.5 py-1 rounded-lg border border-indigo-500/30 self-start sm:self-auto">
-                  ম্যানেজার: ২৪/৭
-               </span>
             </div>
 
             {/* Curated Menu Items */}
@@ -1190,9 +1185,9 @@ export const ManagerDashboard: React.FC = () => {
             )}
          </div>
 
-         {/* 2. TOTAL PRE ORDER BOX */}
-         <div className="bg-slate-900 rounded-[2rem] p-6 sm:p-8 shadow-xl border border-slate-800 flex flex-col">
-            <div className="flex items-center justify-between mb-6">
+         {/* 2. TOTAL PRE-ORDERS BOX */}
+         <div className="bg-slate-900 rounded-[2rem] p-6 sm:p-8 shadow-xl border border-slate-800 flex flex-col space-y-5">
+            <div className="flex items-center justify-between mb-2">
                <div className="flex items-center space-x-3">
                   <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
                      <Clock className="w-5 h-5" />
@@ -1211,337 +1206,124 @@ export const ManagerDashboard: React.FC = () => {
                </div>
             </div>
 
-            {/* Centered Stats Cards Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 text-center">
-               <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex flex-col items-center justify-center">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Today's Orders</p>
-                  <h4 className="text-2xl sm:text-3xl font-black text-white">{todaysPreOrders.length}</h4>
-               </div>
-
-               <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex flex-col items-center justify-center">
-                  <p className="text-[10px] font-black text-amber-400 uppercase tracking-widest mb-1">Pending</p>
-                  <h4 className="text-2xl sm:text-3xl font-black text-amber-400">
-                     {preOrders.filter(p => p.status === 'pending').length}
-                  </h4>
-               </div>
-
-               <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex flex-col items-center justify-center">
-                  <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-1">Completed</p>
-                  <h4 className="text-2xl sm:text-3xl font-black text-emerald-400">
-                     {preOrders.filter(p => p.status === 'completed').length}
-                  </h4>
-               </div>
-
-               <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex flex-col items-center justify-center">
-                  <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">Today's Value</p>
-                  <h4 className="text-2xl sm:text-3xl font-black text-indigo-400">
-                     ৳{todaysPreOrders.reduce((sum, po) => sum + (Number(po.total) || 0), 0)}
-                  </h4>
-               </div>
-            </div>
-         </div>
-
-         {/* 3. MENU-WISE PRE-ORDER SUMMARY */}
-         <div className="bg-slate-900 rounded-[2rem] p-6 sm:p-8 shadow-xl border border-slate-800 flex flex-col space-y-6">
-            {/* Header & Controls */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-               <div className="flex items-center space-x-3.5">
-                  <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shadow-inner">
-                     <Layers className="w-6 h-6" />
-                  </div>
-                  <div>
-                     <div className="flex items-center space-x-2">
-                        <h3 className="text-base font-black text-white tracking-widest uppercase">
-                           MENU-WISE PRE-ORDER SUMMARY
-                        </h3>
-                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-indigo-950 text-indigo-300 border border-indigo-500/40">
-                           {menuWiseSummary.length} Menus
-                        </span>
+            {/* Menu-wise Pre-Order Rows */}
+            <div className="space-y-3.5">
+               {menuWiseSummary.length === 0 ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">
+                     <div className="col-span-2 sm:col-span-1 bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex items-center justify-center space-x-3 text-left">
+                        <div className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-600 shrink-0">
+                           <Utensils className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0">
+                           <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Menu</p>
+                           <p className="text-xs font-bold text-slate-400">No Pre-Orders</p>
+                        </div>
                      </div>
-                     <p className="text-[11px] text-slate-400 font-medium">
-                        কোন মেনু কতটি প্রি-অর্ডার হয়েছে তার সারসংক্ষেপ ও সদস্য তালিকা
-                     </p>
+                     <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex flex-col items-center justify-center">
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Today's Orders</p>
+                        <h4 className="text-2xl sm:text-3xl font-black text-white">0</h4>
+                     </div>
+                     <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex flex-col items-center justify-center">
+                        <p className="text-[10px] font-black text-amber-400 uppercase tracking-widest mb-1">Pending</p>
+                        <h4 className="text-2xl sm:text-3xl font-black text-amber-400">0</h4>
+                     </div>
+                     <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex flex-col items-center justify-center">
+                        <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-1">Completed</p>
+                        <h4 className="text-2xl sm:text-3xl font-black text-emerald-400">0</h4>
+                     </div>
+                     <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex flex-col items-center justify-center">
+                        <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">Today's Value</p>
+                        <h4 className="text-2xl sm:text-3xl font-black text-indigo-400">৳0</h4>
+                     </div>
                   </div>
-               </div>
-
-               {/* Timeframe Switcher */}
-               <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
-                  <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 text-[11px] font-bold">
-                     <button
-                        type="button"
-                        onClick={() => setSummaryTimeframe('today')}
-                        className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
-                           summaryTimeframe === 'today'
-                              ? 'bg-indigo-600 text-white shadow-md'
-                              : 'text-slate-400 hover:text-white'
-                        }`}
-                     >
-                        আজকের ({todaysPreOrders.length})
-                     </button>
-                     <button
-                        type="button"
-                        onClick={() => setSummaryTimeframe('all')}
-                        className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
-                           summaryTimeframe === 'all'
-                              ? 'bg-indigo-600 text-white shadow-md'
-                              : 'text-slate-400 hover:text-white'
-                        }`}
-                     >
-                        সকল প্রি-অর্ডার ({preOrders.length})
-                     </button>
-                  </div>
-               </div>
-            </div>
-
-            {/* Quick Metrics Bar */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3 p-3.5 bg-slate-950/80 rounded-2xl border border-slate-800 text-xs">
-               <div className="flex items-center space-x-2 px-2 py-1">
-                  <div className="w-2 h-2 rounded-full bg-indigo-400"></div>
-                  <div>
-                     <p className="text-[10px] text-slate-400 uppercase font-black tracking-wider">মোট আইটেম</p>
-                     <p className="text-sm font-black text-white">{menuWiseSummary.length} টি</p>
-                  </div>
-               </div>
-               <div className="flex items-center space-x-2 px-2 py-1">
-                  <div className="w-2 h-2 rounded-full bg-cyan-400"></div>
-                  <div>
-                     <p className="text-[10px] text-slate-400 uppercase font-black tracking-wider">মোট অর্ডার সংখ্যা</p>
-                     <p className="text-sm font-black text-cyan-300">{totalSummaryUnits} pcs</p>
-                  </div>
-               </div>
-               <div className="flex items-center space-x-2 px-2 py-1">
-                  <div className="w-2 h-2 rounded-full bg-amber-400"></div>
-                  <div>
-                     <p className="text-[10px] text-amber-400/80 uppercase font-black tracking-wider">অপেক্ষমান (Pending)</p>
-                     <p className="text-sm font-black text-amber-400">{totalSummaryPendingUnits} pcs</p>
-                  </div>
-               </div>
-               <div className="flex items-center space-x-2 px-2 py-1">
-                  <div className="w-2 h-2 rounded-full bg-emerald-400"></div>
-                  <div>
-                     <p className="text-[10px] text-emerald-400/80 uppercase font-black tracking-wider">সম্পন্ন (Delivered)</p>
-                     <p className="text-sm font-black text-emerald-400">{totalSummaryCompletedUnits} pcs</p>
-                  </div>
-               </div>
-            </div>
-
-            {/* Filter Pills & Search Bar */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-               <div className="flex items-center space-x-2 overflow-x-auto pb-1 sm:pb-0">
-                  <button
-                     type="button"
-                     onClick={() => setSummaryFilter('all')}
-                     className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap ${
-                        summaryFilter === 'all'
-                           ? 'bg-indigo-600 text-white shadow-md'
-                           : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
-                     }`}
-                  >
-                     সব মেনু ({menuWiseSummary.length})
-                  </button>
-                  <button
-                     type="button"
-                     onClick={() => setSummaryFilter('pending')}
-                     className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap flex items-center space-x-1 ${
-                        summaryFilter === 'pending'
-                           ? 'bg-amber-600 text-white shadow-md'
-                           : 'bg-slate-950 text-amber-400 hover:text-amber-300 border border-slate-800'
-                     }`}
-                  >
-                     <span>🔥 পেন্ডিং ({menuWiseSummary.filter(m => m.pendingQty > 0).length})</span>
-                  </button>
-                  <button
-                     type="button"
-                     onClick={() => setSummaryFilter('completed')}
-                     className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap flex items-center space-x-1 ${
-                        summaryFilter === 'completed'
-                           ? 'bg-emerald-600 text-white shadow-md'
-                           : 'bg-slate-950 text-emerald-400 hover:text-emerald-300 border border-slate-800'
-                     }`}
-                  >
-                     <span>✅ সম্পন্ন ({menuWiseSummary.filter(m => m.completedQty > 0).length})</span>
-                  </button>
-               </div>
-
-               <div className="relative w-full sm:w-64">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                     type="text"
-                     placeholder="মেনু নাম দিয়ে খুঁজুন..."
-                     value={summarySearch}
-                     onChange={(e) => setSummarySearch(e.target.value)}
-                     className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all placeholder:text-slate-500"
-                  />
-               </div>
-            </div>
-
-            {/* Menu Cards Breakdown */}
-            {filteredMenuSummary.length === 0 ? (
-               <div className="py-12 px-4 rounded-2xl bg-slate-950/60 border border-slate-800/80 flex flex-col items-center justify-center text-center">
-                  <Layers className="w-10 h-10 text-slate-600 mb-2 opacity-30" />
-                  <p className="text-slate-400 text-xs font-bold uppercase tracking-wider">কোনো প্রি-অর্ডার পাওয়া যায়নি</p>
-                  <p className="text-slate-500 text-[11px] mt-1">নির্বাচিত ফিল্টারে এই মুহূর্তে কোনো প্রি-অর্ডার মেনু নেই</p>
-               </div>
-            ) : (
-               <div className="space-y-3.5">
-                  {filteredMenuSummary.map((item) => {
-                     const isExpanded = expandedMenuKey === item.key;
-                     const itemDp = resolveImageUrl(item.image);
+               ) : (
+                  menuWiseSummary.map((menu) => {
+                     const itemDp = resolveImageUrl(menu.image);
                      return (
-                        <div
-                           key={item.key}
-                           className="bg-slate-950/80 border border-slate-800 hover:border-slate-700 rounded-2xl overflow-hidden transition-all shadow-md"
-                        >
-                           {/* Card Main Info */}
-                           <div className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                              {/* Left: Image & Title */}
-                              <div className="flex items-center space-x-4 min-w-0">
-                                 <div className="w-14 h-14 rounded-2xl bg-slate-900 border border-slate-700/80 flex items-center justify-center overflow-hidden shrink-0 shadow-inner">
-                                    {itemDp ? (
-                                       <img
-                                          src={itemDp}
-                                          alt={item.name}
-                                          referrerPolicy="no-referrer"
-                                          className="w-full h-full object-cover"
-                                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                                       />
-                                    ) : (
-                                       <Utensils className="w-6 h-6 text-indigo-400" />
-                                    )}
-                                 </div>
-                                 <div className="min-w-0">
-                                    <div className="flex items-center space-x-2 mb-0.5">
-                                       <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest px-2 py-0.5 rounded-md bg-indigo-950 border border-indigo-500/30">
-                                          {item.category}
-                                       </span>
-                                       <span className="text-xs font-black text-emerald-400">
-                                          ৳{item.price} / pc
-                                       </span>
-                                    </div>
-                                    <h4 className="text-base font-black text-white uppercase tracking-tight truncate">
-                                       {item.name}
-                                    </h4>
-                                    <p className="text-[11px] text-slate-400 font-bold mt-0.5">
-                                       মোট মূল্য: <strong className="text-indigo-300">৳{item.totalAmount}</strong> ({item.ordersCount} টি অর্ডারে)
-                                    </p>
-                                 </div>
+                        <div key={menu.key} className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">
+                           {/* 1. Menu Box (Before Today's Orders) */}
+                           <div className="col-span-2 sm:col-span-1 bg-slate-950/90 border border-slate-800 hover:border-indigo-500/40 rounded-2xl p-3 sm:p-3.5 flex items-center space-x-3 text-left transition-all shadow-sm">
+                              <div className="w-11 h-11 rounded-xl bg-slate-900 border border-slate-700/80 flex items-center justify-center overflow-hidden shrink-0 shadow-inner">
+                                 {itemDp ? (
+                                    <img
+                                       src={itemDp}
+                                       alt={menu.name}
+                                       referrerPolicy="no-referrer"
+                                       className="w-full h-full object-cover"
+                                       onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                    />
+                                 ) : (
+                                    <Utensils className="w-6 h-6 text-indigo-400" />
+                                 )}
                               </div>
-
-                              {/* Right: Quantity Badges & Expand Button */}
-                              <div className="flex flex-wrap sm:flex-nowrap items-center gap-2.5 sm:gap-3 self-start sm:self-auto">
-                                 {/* Prominent Total Qty Badge */}
-                                 <div className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-900/60 to-purple-900/60 border border-indigo-500/40 text-center shadow-inner">
-                                    <p className="text-[9px] font-black text-indigo-300 uppercase tracking-widest">মোট অর্ডার</p>
-                                    <p className="text-lg sm:text-xl font-black text-white tracking-tight">{item.totalQty} <span className="text-xs font-bold text-indigo-300">pcs</span></p>
-                                 </div>
-
-                                 {/* Breakdown Status Pills */}
-                                 <div className="flex flex-col gap-1 text-[11px] font-bold">
-                                    {item.pendingQty > 0 ? (
-                                       <span className="px-2.5 py-1 rounded-lg bg-amber-950/70 border border-amber-500/40 text-amber-400 flex items-center space-x-1">
-                                          <span>🔥 পেন্ডিং:</span>
-                                          <strong className="text-white font-black">{item.pendingQty} pcs</strong>
-                                       </span>
-                                    ) : (
-                                       <span className="px-2 py-0.5 rounded-lg bg-slate-900 text-slate-500 text-[10px]">
-                                          পেন্ডিং নেই
-                                       </span>
-                                    )}
-                                    {item.completedQty > 0 && (
-                                       <span className="px-2.5 py-1 rounded-lg bg-emerald-950/70 border border-emerald-500/40 text-emerald-400 flex items-center space-x-1">
-                                          <span>✅ সম্পন্ন:</span>
-                                          <strong className="text-white font-black">{item.completedQty} pcs</strong>
-                                       </span>
-                                    )}
-                                 </div>
-
-                                 {/* Expand Toggle Button */}
-                                 <button
-                                    type="button"
-                                    onClick={() => setExpandedMenuKey(isExpanded ? null : item.key)}
-                                    className={`px-3 py-2.5 rounded-xl border text-xs font-black uppercase tracking-wider transition-all flex items-center space-x-1.5 cursor-pointer ${
-                                       isExpanded
-                                          ? 'bg-indigo-600 text-white border-indigo-500 shadow-md'
-                                          : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-700'
-                                    }`}
-                                 >
-                                    <span>সদস্য বিবরণী ({item.orders.length})</span>
-                                    {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                                 </button>
+                              <div className="min-w-0 flex-1">
+                                 <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest truncate">{menu.category || 'SNACKS'}</p>
+                                 <h4 className="text-xs sm:text-sm font-black text-white uppercase tracking-tight truncate" title={menu.name}>
+                                    {menu.name}
+                                 </h4>
+                                 <p className="text-[11px] font-bold text-emerald-400">৳{menu.price}</p>
                               </div>
                            </div>
 
-                           {/* Expanded Breakdown: Who Ordered this Menu */}
-                           {isExpanded && (
-                              <div className="border-t border-slate-800 bg-slate-900/90 p-4 sm:p-5 space-y-3 animate-in fade-in duration-200">
-                                 <div className="flex items-center justify-between">
-                                    <div className="flex items-center space-x-2 text-xs font-black text-slate-300 uppercase tracking-wider">
-                                       <Users className="w-3.5 h-3.5 text-indigo-400" />
-                                       <span>এই মেনু অর্ডারকারী সদস্যদের তালিকা ({item.orders.length} অর্ডার):</span>
-                                    </div>
-                                    <span className="text-[11px] text-slate-400">
-                                       মোট: {item.totalQty} pcs | ৳{item.totalAmount}
-                                    </span>
-                                 </div>
+                           {/* 2. Today's Orders */}
+                           <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex flex-col items-center justify-center">
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Today's Orders</p>
+                              <h4 className="text-2xl sm:text-3xl font-black text-white">{menu.totalQty}</h4>
+                           </div>
 
-                                 <div className="divide-y divide-slate-800/80 rounded-xl overflow-hidden border border-slate-800">
-                                    {item.orders.map((ord, idx) => (
-                                       <div
-                                          key={idx}
-                                          className="p-3 bg-slate-950/70 hover:bg-slate-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-                                       >
-                                          <div className="flex items-center space-x-3">
-                                             <div className="w-7 h-7 rounded-lg bg-indigo-950/80 border border-indigo-500/30 flex items-center justify-center text-indigo-300 font-black text-[11px]">
-                                                {idx + 1}
-                                             </div>
-                                             <div>
-                                                <p className="font-bold text-white text-xs">{ord.memberName}</p>
-                                                <p className="text-[10px] text-slate-400 font-medium">BD No: {ord.memberId} • {new Date(ord.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
-                                             </div>
-                                          </div>
+                           {/* 3. Pending */}
+                           <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex flex-col items-center justify-center">
+                              <p className="text-[10px] font-black text-amber-400 uppercase tracking-widest mb-1">Pending</p>
+                              <h4 className="text-2xl sm:text-3xl font-black text-amber-400">{menu.pendingQty}</h4>
+                           </div>
 
-                                          <div className="flex items-center space-x-3 self-end sm:self-auto">
-                                             <span className="px-2.5 py-1 rounded-md bg-slate-800 text-white font-black text-xs">
-                                                Qty: {ord.qty} pcs
-                                             </span>
-                                             <span className="font-black text-emerald-400 text-xs">
-                                                ৳{ord.total}
-                                             </span>
-                                             <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
-                                                ord.status === 'pending'
-                                                   ? 'bg-amber-950 text-amber-400 border border-amber-500/30'
-                                                   : 'bg-emerald-950 text-emerald-400 border border-emerald-500/30'
-                                             }`}>
-                                                {ord.status}
-                                             </span>
-                                             {ord.status === 'pending' && (
-                                                <button
-                                                   type="button"
-                                                   onClick={() => {
-                                                      handleCompletePreOrder(ord.rawOrder);
-                                                      alert('Order completed successfully!');
-                                                   }}
-                                                   title="Mark Done"
-                                                   className="px-2.5 py-1 bg-emerald-900/40 hover:bg-emerald-800/60 border border-emerald-500/30 text-emerald-300 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all flex items-center space-x-1 cursor-pointer"
-                                                >
-                                                   <CheckCircle2 className="w-3 h-3" />
-                                                   <span>Done</span>
-                                                </button>
-                                             )}
-                                          </div>
-                                       </div>
-                                    ))}
-                                 </div>
-                              </div>
-                           )}
+                           {/* 4. Completed */}
+                           <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex flex-col items-center justify-center">
+                              <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-1">Completed</p>
+                              <h4 className="text-2xl sm:text-3xl font-black text-emerald-400">{menu.completedQty}</h4>
+                           </div>
+
+                           {/* 5. Today's Value */}
+                           <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 flex flex-col items-center justify-center">
+                              <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">Today's Value</p>
+                              <h4 className="text-2xl sm:text-3xl font-black text-indigo-400">৳{menu.totalAmount}</h4>
+                           </div>
                         </div>
                      );
-                  })}
-               </div>
-            )}
+                  })
+               )}
+
+               {/* Multiple Menus Total Aggregate Row */}
+               {menuWiseSummary.length > 1 && (
+                  <div className="pt-2 border-t border-slate-800/80">
+                     <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">
+                        <div className="col-span-2 sm:col-span-1 bg-indigo-950/40 border border-indigo-500/40 rounded-2xl p-3 flex items-center justify-center space-x-2 text-indigo-300 font-black text-xs uppercase tracking-wider">
+                           <Layers className="w-4 h-4 text-indigo-400" />
+                           <span>TOTAL ({menuWiseSummary.length} Menus)</span>
+                        </div>
+                        <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-3 flex flex-col items-center justify-center">
+                           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Total Qty</p>
+                           <h4 className="text-xl font-black text-white">{totalSummaryUnits}</h4>
+                        </div>
+                        <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-3 flex flex-col items-center justify-center">
+                           <p className="text-[9px] font-black text-amber-400 uppercase tracking-widest">Total Pending</p>
+                           <h4 className="text-xl font-black text-amber-400">{totalSummaryPendingUnits}</h4>
+                        </div>
+                        <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-3 flex flex-col items-center justify-center">
+                           <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">Total Completed</p>
+                           <h4 className="text-xl font-black text-emerald-400">{totalSummaryCompletedUnits}</h4>
+                        </div>
+                        <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-3 flex flex-col items-center justify-center">
+                           <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">Total Value</p>
+                           <h4 className="text-xl font-black text-indigo-400">৳{totalSummaryRevenue}</h4>
+                        </div>
+                     </div>
+                  </div>
+               )}
+            </div>
          </div>
 
-         {/* 4. MANUAL PRE-ORDER BOX */}
+         {/* 3. MANUAL PRE-ORDER BOX */}
          <div className="bg-slate-900 rounded-[2rem] p-6 sm:p-8 shadow-xl border border-slate-800 flex flex-col">
             <div className="flex items-center space-x-3 mb-6">
                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
