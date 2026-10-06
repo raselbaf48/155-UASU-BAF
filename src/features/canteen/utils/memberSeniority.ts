@@ -52,6 +52,16 @@ export async function saveMemberSeniority(bdNo: string, seniority: number | null
   } catch (err) {
     console.warn('Note updating Biodata Register Seniority:', err);
   }
+
+  // Update Supabase 'Canteen_Member' table as well to keep both in complete sync
+  try {
+    await supabase
+      .from('Canteen_Member')
+      .update({ Seniority: seniority !== null && seniority !== undefined ? Number(seniority) : null })
+      .eq('BD No', cleanBd);
+  } catch (err) {
+    console.warn('Note updating Canteen_Member Seniority:', err);
+  }
 }
 
 /**
@@ -81,14 +91,21 @@ export async function saveBatchMemberSeniorities(
     console.warn('Note pushing canteen_member_seniority to cloud:', err);
   }
 
-  // Update Supabase 'Biodata Register' table for each
+  // Update Supabase 'Biodata Register' and 'Canteen_Member' tables for each
   for (const item of updates) {
     const cleanBd = String(item.bdNo || '').replace(/\D/g, '');
     if (!cleanBd) continue;
+    const senVal = item.seniority !== null && item.seniority !== undefined ? Number(item.seniority) : null;
     try {
       await supabase
         .from('Biodata Register')
-        .update({ Seniority: item.seniority !== null && item.seniority !== undefined ? Number(item.seniority) : null })
+        .update({ Seniority: senVal })
+        .eq('BD No', cleanBd);
+    } catch {}
+    try {
+      await supabase
+        .from('Canteen_Member')
+        .update({ Seniority: senVal })
         .eq('BD No', cleanBd);
     } catch {}
   }

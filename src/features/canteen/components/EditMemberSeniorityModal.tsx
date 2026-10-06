@@ -11,6 +11,7 @@ import { saveMemberSeniority, saveBatchMemberSeniorities } from '../utils/member
 import { getMemberBanglaName, getMemberBanglaRank } from '../utils/memberBanglaNames';
 import { formatRankBn, formatMemberNameBn } from '../utils/exportCanteenBillExcel';
 import { resolveImageUrl } from '../utils/canteenSettings';
+import { playCelebrationSound } from '../utils/audioFeedback';
 
 interface EditMemberSeniorityModalProps {
   isOpen: boolean;
@@ -93,6 +94,7 @@ export const EditMemberSeniorityModal: React.FC<EditMemberSeniorityModalProps> =
       }
 
       setSaveSuccess(true);
+      playCelebrationSound();
       setTimeout(() => {
         onSuccess(updatedMembers);
         onClose();

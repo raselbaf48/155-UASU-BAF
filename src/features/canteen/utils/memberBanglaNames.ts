@@ -227,17 +227,17 @@ let cachedBanglaNames: Record<string, string> | null = null;
  * Get all current Bengali names (merged local, default, and cached)
  */
 export function getAllMemberBanglaNames(): Record<string, string> {
-  if (cachedBanglaNames) return cachedBanglaNames;
-
   try {
-    const raw = localStorage.getItem(BANGLA_NAMES_STORAGE_KEY);
+    const raw = typeof window !== 'undefined' ? localStorage.getItem(BANGLA_NAMES_STORAGE_KEY) : null;
     const local = raw ? JSON.parse(raw) : {};
-    cachedBanglaNames = { ...DEFAULT_MEMBER_BANGLA_NAMES, ...local };
+    const merged = { ...DEFAULT_MEMBER_BANGLA_NAMES, ...local, ...(cachedBanglaNames || {}) };
+    cachedBanglaNames = merged;
+    return merged;
   } catch {
-    cachedBanglaNames = { ...DEFAULT_MEMBER_BANGLA_NAMES };
+    const fallback = { ...DEFAULT_MEMBER_BANGLA_NAMES, ...(cachedBanglaNames || {}) };
+    cachedBanglaNames = fallback;
+    return fallback;
   }
-
-  return cachedBanglaNames;
 }
 
 /**
@@ -261,12 +261,6 @@ export function getMemberBanglaName(memberOrId: any): string {
 
   // If passed an object
   if (typeof memberOrId === 'object') {
-    // 1. Explicit override if already attached to object
-    if (memberOrId.name_bn) return String(memberOrId.name_bn).trim();
-    if (memberOrId.nameBn) return String(memberOrId.nameBn).trim();
-    if (memberOrId.Surname_bn) return String(memberOrId.Surname_bn).trim();
-    if (memberOrId.bangla_name) return String(memberOrId.bangla_name).trim();
-
     const airmanId = memberOrId.airman_id ? String(memberOrId.airman_id).trim() : '';
     const bdNoRaw = memberOrId['BD No'] || memberOrId.bdNo || memberOrId.bd_no || '';
     const bdNo = String(bdNoRaw).trim();
@@ -275,28 +269,30 @@ export function getMemberBanglaName(memberOrId: any): string {
     const surnameLower = String(surname).trim().toLowerCase();
     const cleaned = cleanSurname(surname);
 
-
-
-    // Direct ID match
+    // 1. Direct ID / BD match from user-saved dictionary (highest priority for custom edits)
     if (airmanId && names[airmanId]) return names[airmanId];
     if (airmanId && names[airmanId.toLowerCase()]) return names[airmanId.toLowerCase()];
-
-    // Direct BD No match
     if (bdNo && names[bdNo]) return names[bdNo];
     if (bdNo && names[`BD/${bdNo}`]) return names[`BD/${bdNo}`];
     if (bdNoClean && names[bdNoClean]) return names[bdNoClean];
     if (bdNoClean && names[`BD/${bdNoClean}`]) return names[`BD/${bdNoClean}`];
 
-    // Surname exact match
+    // 2. Explicit override attached to object (from Cloud Supabase Canteen_Member Name_BN, name_bn, etc.)
+    const explicitBn = memberOrId.Name_BN || memberOrId['Name_BN'] || memberOrId.name_bn || memberOrId.nameBn || memberOrId.Surname_bn || memberOrId.bangla_name;
+    if (explicitBn && String(explicitBn).trim()) {
+      return String(explicitBn).trim();
+    }
+
+    // 3. Surname exact match in dictionary
     if (surnameLower && names[surnameLower]) return names[surnameLower];
     if (cleaned && names[cleaned]) return names[cleaned];
 
-    // Check Common Surname Dictionary
+    // 4. Check Common Surname Dictionary
     if (cleaned && COMMON_SURNAME_DICTIONARY[cleaned]) {
       return COMMON_SURNAME_DICTIONARY[cleaned];
     }
 
-    // Check word-by-word in cleaned surname
+    // 5. Check word-by-word in cleaned surname
     if (cleaned) {
       const parts = cleaned.split(' ');
       for (const p of parts) {
@@ -305,7 +301,7 @@ export function getMemberBanglaName(memberOrId: any): string {
       }
     }
 
-    // Fallback to comprehensive dictionary in exportCanteenBillExcel
+    // 6. Fallback to comprehensive dictionary in exportCanteenBillExcel
     if (surname) {
       const fmt = formatMemberNameBn(surname);
       if (fmt && fmt !== surname) return fmt;
@@ -335,7 +331,7 @@ export function getMemberBanglaName(memberOrId: any): string {
 }
 
 /**
- * Save or update a member's Bengali name in local storage and Supabase Cloud
+ * Save or update a member's Bengali name in local storage, memory, and Supabase Cloud
  */
 export async function saveMemberBanglaName(
   memberIdOrBd: string, 
@@ -349,6 +345,12 @@ export async function saveMemberBanglaName(
   if (trimmedKey) {
     current[trimmedKey] = trimmedVal;
     current[trimmedKey.toLowerCase()] = trimmedVal;
+    const cleanDigits = trimmedKey.replace(/\D/g, '');
+    if (cleanDigits) {
+      current[cleanDigits] = trimmedVal;
+      current[`BD/${cleanDigits}`] = trimmedVal;
+      current[`airman-${cleanDigits}`] = trimmedVal;
+    }
   }
 
   if (additionalKeys && Array.isArray(additionalKeys)) {
@@ -362,6 +364,7 @@ export async function saveMemberBanglaName(
           if (digits) {
             current[digits] = trimmedVal;
             current[`BD/${digits}`] = trimmedVal;
+            current[`airman-${digits}`] = trimmedVal;
           }
         }
       }
@@ -371,10 +374,60 @@ export async function saveMemberBanglaName(
   cachedBanglaNames = { ...current };
 
   try {
-    localStorage.setItem(BANGLA_NAMES_STORAGE_KEY, JSON.stringify(current));
-    window.dispatchEvent(new Event('canteen_member_bangla_names_updated'));
-    window.dispatchEvent(new Event('canteen_state_updated'));
-    window.dispatchEvent(new Event('storage'));
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(BANGLA_NAMES_STORAGE_KEY, JSON.stringify(current));
+
+      // Also update canteen_members_cache in localStorage so member cards update immediately!
+      const cleanBd = trimmedKey.replace(/\D/g, '');
+      try {
+        const rawCache = localStorage.getItem('canteen_members_cache');
+        if (rawCache) {
+          const membersList = JSON.parse(rawCache);
+          if (Array.isArray(membersList)) {
+            const updatedList = membersList.map((m: any) => {
+              const mBd = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
+              if (m.airman_id === trimmedKey || (cleanBd && mBd === cleanBd)) {
+                return {
+                  ...m,
+                  Name_BN: trimmedVal,
+                  name_bn: trimmedVal,
+                  nameBn: trimmedVal
+                };
+              }
+              return m;
+            });
+            localStorage.setItem('canteen_members_cache', JSON.stringify(updatedList));
+          }
+        }
+      } catch {}
+
+      window.dispatchEvent(new Event('canteen_member_bangla_names_updated'));
+      window.dispatchEvent(new Event('canteen_members_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
+    }
+
+    // Direct update to Canteen_Member table in Supabase
+    const cleanBdDigits = trimmedKey.replace(/\D/g, '');
+    const matchAirmanId = trimmedKey.startsWith('airman-') ? trimmedKey : (cleanBdDigits ? `airman-${cleanBdDigits}` : trimmedKey);
+    const updatePayload = {
+      Name_BN: trimmedVal,
+      name_bn: trimmedVal
+    };
+
+    if (cleanBdDigits) {
+      Promise.resolve(
+        supabase.from('Canteen_Member')
+          .update(updatePayload)
+          .or(`airman_id.eq.${matchAirmanId},BD No.eq.${cleanBdDigits}`)
+      ).catch(() => {});
+    } else {
+      Promise.resolve(
+        supabase.from('Canteen_Member')
+          .update(updatePayload)
+          .eq('airman_id', matchAirmanId)
+      ).catch(() => {});
+    }
 
     // Push to Supabase Cloud ('app_settings' table)
     await pushKeyToCloud(BANGLA_NAMES_STORAGE_KEY, current);
@@ -384,18 +437,56 @@ export async function saveMemberBanglaName(
 }
 
 /**
- * Fetch and sync latest Bengali names from Supabase Cloud
+ * Fetch and sync latest Bengali names from Supabase Cloud (both app_settings and Canteen_Member table)
  */
 export async function syncMemberBanglaNamesFromCloud(): Promise<Record<string, string>> {
   try {
     const cloudData = await pullKeyFromCloud(BANGLA_NAMES_STORAGE_KEY);
-    if (cloudData && typeof cloudData === 'object') {
-      const merged = { ...DEFAULT_MEMBER_BANGLA_NAMES, ...getAllMemberBanglaNames(), ...cloudData };
-      cachedBanglaNames = merged;
+    
+    // Also pull directly from Canteen_Member table so changes in Supabase Studio reflect instantly!
+    const dbDict: Record<string, string> = {};
+    try {
+      const { data: dbMembers } = await supabase
+        .from('Canteen_Member')
+        .select('airman_id, "BD No", Surname, Name_BN, Rank_BN, name_bn, rank_bn');
+
+      if (dbMembers && Array.isArray(dbMembers)) {
+        dbMembers.forEach((m: any) => {
+          const bd = String(m['BD No'] || '').replace(/\D/g, '');
+          const id = String(m.airman_id || '').trim();
+          const nBn = m.Name_BN || m.name_bn;
+          const rBn = m.Rank_BN || m.rank_bn;
+
+          if (nBn && String(nBn).trim()) {
+            const val = String(nBn).trim();
+            if (id) { dbDict[id] = val; dbDict[id.toLowerCase()] = val; }
+            if (bd) { dbDict[bd] = val; dbDict[`BD/${bd}`] = val; dbDict[`airman-${bd}`] = val; }
+            if (m.Surname) { dbDict[String(m.Surname).trim().toLowerCase()] = val; }
+          }
+          if (rBn && String(rBn).trim()) {
+            const val = String(rBn).trim();
+            if (id) dbDict[`rank_${id}`] = val;
+            if (bd) { dbDict[`rank_${bd}`] = val; dbDict[`rank_BD/${bd}`] = val; dbDict[`rank_airman-${bd}`] = val; }
+          }
+        });
+      }
+    } catch (e) {
+      console.warn('Error querying member bangla names from Canteen_Member:', e);
+    }
+
+    const merged = { 
+      ...DEFAULT_MEMBER_BANGLA_NAMES, 
+      ...getAllMemberBanglaNames(), 
+      ...(cloudData || {}),
+      ...dbDict
+    };
+    cachedBanglaNames = merged;
+    if (typeof window !== 'undefined') {
       localStorage.setItem(BANGLA_NAMES_STORAGE_KEY, JSON.stringify(merged));
       window.dispatchEvent(new Event('canteen_member_bangla_names_updated'));
-      return merged;
+      window.dispatchEvent(new Event('canteen_members_updated'));
     }
+    return merged;
   } catch (err) {
     console.warn('Failed to pull bangla names from cloud:', err);
   }
@@ -403,8 +494,8 @@ export async function syncMemberBanglaNamesFromCloud(): Promise<Record<string, s
 }
 
 /**
-  * Get Bengali Rank for a member object or rank string
-  */
+ * Get Bengali Rank for a member object or rank string
+ */
 export function getMemberBanglaRank(rankOrMember: any): string {
   if (!rankOrMember) return '';
   const names = getAllMemberBanglaNames();
@@ -413,14 +504,21 @@ export function getMemberBanglaRank(rankOrMember: any): string {
     const rawR = String(rankOrMember['Rank'] || rankOrMember.rank || '').trim();
     if (rawR === '-') return '-';
     if (isCivilianMember(rankOrMember)) return 'সিভিলিয়ান';
-    if (rankOrMember.Rank_bn) return String(rankOrMember.Rank_bn).trim();
-    if (rankOrMember.rankBn) return String(rankOrMember.rankBn).trim();
-    if (rankOrMember.rank_bn) return String(rankOrMember.rank_bn).trim();
 
     const airmanId = rankOrMember.airman_id ? String(rankOrMember.airman_id).trim() : '';
     const bdNo = String(rankOrMember['BD No'] || rankOrMember.bdNo || '').trim();
+    const bdClean = bdNo.replace(/\D/g, '');
+
+    // 1. Check user-saved dictionary overrides
     if (airmanId && names[`rank_${airmanId}`]) return names[`rank_${airmanId}`];
     if (bdNo && names[`rank_${bdNo}`]) return names[`rank_${bdNo}`];
+    if (bdClean && names[`rank_${bdClean}`]) return names[`rank_${bdClean}`];
+
+    // 2. Check explicit Rank_BN / rank_bn from cloud or object
+    const explicitRankBn = rankOrMember.Rank_BN || rankOrMember['Rank_BN'] || rankOrMember.Rank_bn || rankOrMember.rankBn || rankOrMember.rank_bn;
+    if (explicitRankBn && String(explicitRankBn).trim()) {
+      return String(explicitRankBn).trim();
+    }
 
     return formatRankBn(rankOrMember['Rank'] || rankOrMember.rank || '');
   }
@@ -433,8 +531,8 @@ export function getMemberBanglaRank(rankOrMember: any): string {
 }
 
 /**
-  * Save or update a member's Bengali Rank in local storage and Supabase Cloud
-  */
+ * Save or update a member's Bengali Rank in local storage and Supabase Cloud
+ */
 export async function saveMemberBanglaRank(
   memberIdOrBd: string,
   rankBn: string,
@@ -445,11 +543,26 @@ export async function saveMemberBanglaRank(
   const trimmedVal = String(rankBn).trim();
 
   current[trimmedKey] = trimmedVal;
+  const cleanDigits = String(memberIdOrBd).replace(/\D/g, '');
+  if (cleanDigits) {
+    current[`rank_${cleanDigits}`] = trimmedVal;
+    current[`rank_BD/${cleanDigits}`] = trimmedVal;
+    current[`rank_airman-${cleanDigits}`] = trimmedVal;
+  }
 
   if (additionalKeys && Array.isArray(additionalKeys)) {
     additionalKeys.forEach(k => {
       if (k) {
-        current[`rank_${String(k).trim()}`] = trimmedVal;
+        const clean = String(k).trim();
+        if (clean) {
+          current[`rank_${clean}`] = trimmedVal;
+          const digits = clean.replace(/\D/g, '');
+          if (digits) {
+            current[`rank_${digits}`] = trimmedVal;
+            current[`rank_BD/${digits}`] = trimmedVal;
+            current[`rank_airman-${digits}`] = trimmedVal;
+          }
+        }
       }
     });
   }
@@ -457,14 +570,61 @@ export async function saveMemberBanglaRank(
   cachedBanglaNames = { ...current };
 
   try {
-    localStorage.setItem(BANGLA_NAMES_STORAGE_KEY, JSON.stringify(current));
-    window.dispatchEvent(new Event('canteen_member_bangla_names_updated'));
-    window.dispatchEvent(new Event('canteen_state_updated'));
-    window.dispatchEvent(new Event('storage'));
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(BANGLA_NAMES_STORAGE_KEY, JSON.stringify(current));
+
+      // Also update canteen_members_cache in localStorage
+      try {
+        const rawCache = localStorage.getItem('canteen_members_cache');
+        if (rawCache) {
+          const membersList = JSON.parse(rawCache);
+          if (Array.isArray(membersList)) {
+            const updatedList = membersList.map((m: any) => {
+              const mBd = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
+              if (m.airman_id === memberIdOrBd || (cleanDigits && mBd === cleanDigits)) {
+                return {
+                  ...m,
+                  Rank_BN: trimmedVal,
+                  rank_bn: trimmedVal,
+                  rankBn: trimmedVal
+                };
+              }
+              return m;
+            });
+            localStorage.setItem('canteen_members_cache', JSON.stringify(updatedList));
+          }
+        }
+      } catch {}
+
+      window.dispatchEvent(new Event('canteen_member_bangla_names_updated'));
+      window.dispatchEvent(new Event('canteen_members_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
+    }
+
+    // Direct update to Canteen_Member table in Supabase
+    const matchAirmanId = String(memberIdOrBd).startsWith('airman-') ? memberIdOrBd : (cleanDigits ? `airman-${cleanDigits}` : memberIdOrBd);
+    const updatePayload = {
+      Rank_BN: trimmedVal,
+      rank_bn: trimmedVal
+    };
+
+    if (cleanDigits) {
+      Promise.resolve(
+        supabase.from('Canteen_Member')
+          .update(updatePayload)
+          .or(`airman_id.eq.${matchAirmanId},BD No.eq.${cleanDigits}`)
+      ).catch(() => {});
+    } else {
+      Promise.resolve(
+        supabase.from('Canteen_Member')
+          .update(updatePayload)
+          .eq('airman_id', matchAirmanId)
+      ).catch(() => {});
+    }
 
     await pushKeyToCloud(BANGLA_NAMES_STORAGE_KEY, current);
   } catch (err) {
     console.warn('Error saving Bengali rank:', err);
   }
 }
-

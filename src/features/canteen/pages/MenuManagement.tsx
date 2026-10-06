@@ -7,6 +7,7 @@ import { resolveImageUrl, getItemDisplayName } from '../utils/canteenSettings';
 import { queuePushKeyToCloud } from '../utils/canteenCloudSync';
 import { getCanteenMenuCache, fetchCanteenMenuOnce } from '../utils/canteenMenuData';
 import { calculateMenuItemStockInfo, getRawInventoryItems, getMenuRecipes } from '../utils/recipeManager';
+import { getMenuItemBanglaName, saveMenuItemBanglaName } from '../utils/menuBanglaNames';
 
 export const MenuManagement: React.FC = () => {
   const { t, i18n } = useTranslation();
@@ -17,15 +18,18 @@ export const MenuManagement: React.FC = () => {
       if (raw) return JSON.parse(raw);
       const cached = getCanteenMenuCache();
       if (cached && cached.length > 0) {
-        return cached.map((d: any) => ({
-          id: d.id,
-          meal: d.category || 'Snacks',
-          name_bn: d.name,
-          name_en: d.name,
-          price: d.price || 0,
-          max: d.stock || 50,
-          DP: d.DP || d.img || ''
-        }));
+        return cached.map((d: any) => {
+          const bn = d.name_bn || d['Name (BN)'] || d.nameBn || getMenuItemBanglaName(d) || d.name;
+          return {
+            id: d.id,
+            meal: d.category || 'Snacks',
+            name_bn: bn,
+            name_en: d.name || d.name_en || '',
+            price: d.price || 0,
+            max: d.stock || 50,
+            DP: d.DP || d.img || ''
+          };
+        });
       }
     } catch {}
     return [];
@@ -36,15 +40,18 @@ export const MenuManagement: React.FC = () => {
       try {
         const data = await fetchCanteenMenuOnce();
         if (data && data.length > 0) {
-          const mapped = data.map((d: any) => ({
-            id: d.id,
-            meal: d.category || 'Snacks',
-            name_bn: d.name,
-            name_en: d.name,
-            price: d.price || 0,
-            max: d.stock || 50,
-            DP: d.DP || d.img || ''
-          }));
+          const mapped = data.map((d: any) => {
+            const bn = d.name_bn || d['Name (BN)'] || d.nameBn || getMenuItemBanglaName(d) || d.name;
+            return {
+              id: d.id,
+              meal: d.category || 'Snacks',
+              name_bn: bn,
+              name_en: d.name || d.name_en || '',
+              price: d.price || 0,
+              max: d.stock || 50,
+              DP: d.DP || d.img || ''
+            };
+          });
           setItems(mapped);
           localStorage.setItem('canteen_menu_items_list', JSON.stringify(mapped));
         }

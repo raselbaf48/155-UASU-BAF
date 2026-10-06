@@ -389,8 +389,11 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
         othersFund = computeEffectiveCharges(othersFundTxs);
         currentPeriodCharges = canteenBill + unitFund + othersFund;
 
-        // Total bill for this month
-        totalBill = previousDue + currentPeriodCharges;
+        // Gross charges before deducting previous advance
+        const grossCharges = previousDue + currentPeriodCharges;
+
+        // Total bill for this month: due - previous advance
+        totalBill = Math.max(0, grossCharges - previousAdvance);
 
         // 3. Current Month Payments: payments that belong to activeMonth's payment cycle (25th of month to 24th of next month)
         const currentMonthPayments = memberTxs
@@ -400,12 +403,14 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
         paidBill = currentMonthPayments;
         currentPeriodPayments = paidBill;
 
-        const totalCredits = previousAdvance + paidBill;
-        if (totalCredits >= totalBill) {
-          advance = totalCredits - totalBill;
+        // Any unused previous advance carried over
+        const unusedPreviousAdvance = Math.max(0, previousAdvance - grossCharges);
+
+        if (paidBill >= totalBill) {
           remainingDue = 0;
+          advance = unusedPreviousAdvance + (paidBill - totalBill);
         } else {
-          const rawDue = totalBill - totalCredits;
+          const rawDue = totalBill - paidBill;
           // If member has already fully cleared balance in ledger (memberTotalDue === 0), reflect 0
           remainingDue = memberTotalDue === 0 ? 0 : Math.min(rawDue, memberTotalDue);
           advance = 0;

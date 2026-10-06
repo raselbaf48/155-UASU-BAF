@@ -591,7 +591,8 @@ export async function exportCanteenBillToExcel({
       const othersFund = computeEffectiveCharges(othersFundTxs);
       currentPeriodCharges = canteenBill + unitFund + othersFund;
 
-      totalBill = previousDue + currentPeriodCharges;
+      const grossCharges = previousDue + currentPeriodCharges;
+      totalBill = Math.max(0, grossCharges - previousAdvance);
 
       // 3. Current Month Payments: payments that belong to selectedMonth's payment cycle (25th of month to 24th of next month)
       const currentMonthPayments = memberCategoryTxs
@@ -601,12 +602,13 @@ export async function exportCanteenBillToExcel({
       paidBill = currentMonthPayments;
       currentPeriodPayments = paidBill;
 
-      const totalCredits = previousAdvance + paidBill;
-      if (totalCredits >= totalBill) {
-        advance = totalCredits - totalBill;
+      const unusedPreviousAdvance = Math.max(0, previousAdvance - grossCharges);
+
+      if (paidBill >= totalBill) {
         remainingDue = 0;
+        advance = unusedPreviousAdvance + (paidBill - totalBill);
       } else {
-        const rawDue = totalBill - totalCredits;
+        const rawDue = totalBill - paidBill;
         remainingDue = memberTotalDue === 0 ? 0 : Math.min(rawDue, memberTotalDue);
         advance = 0;
       }

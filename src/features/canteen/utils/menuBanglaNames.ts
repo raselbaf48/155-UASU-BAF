@@ -138,6 +138,12 @@ export function getMenuItemBanglaName(itemOrName: any): string {
   if (!itemOrName) return '';
 
   if (typeof itemOrName === 'object') {
+    if (itemOrName.Name_BN && String(itemOrName.Name_BN).trim()) {
+      return String(itemOrName.Name_BN).trim();
+    }
+    if (itemOrName['Name_BN'] && String(itemOrName['Name_BN']).trim()) {
+      return String(itemOrName['Name_BN']).trim();
+    }
     if (itemOrName.name_bn && String(itemOrName.name_bn).trim()) {
       return String(itemOrName.name_bn).trim();
     }

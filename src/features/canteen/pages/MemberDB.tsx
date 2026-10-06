@@ -42,13 +42,15 @@ import {
   Copy,
   Check,
   Sparkles,
+  Shield,
   ShieldCheck,
   ArrowRight,
   AlertCircle,
   Sliders,
   Share2,
   Award,
-  Hash
+  Hash,
+  Camera
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, fetchDirectImageUrl, getCanteenConfig, saveCanteenConfig } from '../utils/canteenSettings';
@@ -113,6 +115,7 @@ import {
   fetchCanteenMenuOnce, 
   getCanteenMenuCache 
 } from '../utils/canteenMenuData';
+import { playCelebrationSound } from '../utils/audioFeedback';
 import { FundBatchBillPage } from './FundBatchBillPage';
 
 export type BillCategory = 'ALL' | 'CANTEEN' | 'UNIT_FUND' | 'OTHERS';
@@ -694,6 +697,11 @@ export const MemberDB: React.FC = () => {
 
   // Seniority Edit Modal state
   const [seniorityEditMember, setSeniorityEditMember] = useState<any | null>(null);
+
+  // Profile Bengali Name & Photo Edit state
+  const [isEditingBanglaName, setIsEditingBanglaName] = useState(false);
+  const [editingBanglaNameVal, setEditingBanglaNameVal] = useState('');
+  const [isSavingBanglaName, setIsSavingBanglaName] = useState(false);
 
   // Initial Bill Modals state
   const [isImportBillsModalOpen, setIsImportBillsModalOpen] = useState(false);
@@ -1863,6 +1871,59 @@ export const MemberDB: React.FC = () => {
     }
   };
 
+  const handleProfilePhotoChange = async (file: File) => {
+    if (!profileMember || !file) return;
+    try {
+      const b64 = await processGalleryImage(file);
+      const cleanBd = String(profileMember['BD No'] || profileMember.airman_id || '').replace(/\D/g, '');
+      
+      // Update Supabase Canteen_Member table
+      await supabase.from('Canteen_Member').update({ DP: b64 }).eq('BD No', cleanBd);
+      
+      // Update device local storage cache
+      try {
+        const stored = localStorage.getItem(`canteen_member_${cleanBd}`);
+        const parsed = stored ? JSON.parse(stored) : {};
+        localStorage.setItem(`canteen_member_${cleanBd}`, JSON.stringify({ ...parsed, dp: b64 }));
+      } catch {}
+
+      const updatedM = { ...profileMember, DP: b64 };
+      setProfileMember(updatedM);
+      setMembers(prev => prev.map(m => String(m['BD No'] || m.airman_id).replace(/\D/g, '') === cleanBd ? { ...m, DP: b64 } : m));
+      globalMembersCache = members.map(m => String(m['BD No'] || m.airman_id).replace(/\D/g, '') === cleanBd ? { ...m, DP: b64 } : m);
+      try {
+        localStorage.setItem('canteen_members_cache', JSON.stringify(globalMembersCache));
+      } catch {}
+      playCelebrationSound();
+      showToast('সদস্যের ছবি সফলভাবে ক্লাউডে সংরক্ষিত হয়েছে!');
+    } catch (err) {
+      console.error('Error updating member DP:', err);
+      showToast('ছবি সংরক্ষণে সমস্যা হয়েছে।');
+    }
+  };
+
+  const handleSaveProfileBanglaName = async () => {
+    if (!profileMember) return;
+    const cleanBd = String(profileMember['BD No'] || profileMember.airman_id || '').replace(/\D/g, '');
+    const newName = editingBanglaNameVal.trim();
+    setIsSavingBanglaName(true);
+    try {
+      await saveMemberBanglaName(profileMember.airman_id, newName, [cleanBd, profileMember['Surname']]);
+      await supabase.from('Canteen_Member').update({ Name_BN: newName }).eq('BD No', cleanBd);
+      const updatedM = { ...profileMember, Name_BN: newName, name_bn: newName, nameBn: newName };
+      setProfileMember(updatedM);
+      setMembers(prev => prev.map(m => String(m['BD No'] || m.airman_id).replace(/\D/g, '') === cleanBd ? { ...m, Name_BN: newName, name_bn: newName, nameBn: newName } : m));
+      setIsEditingBanglaName(false);
+      playCelebrationSound();
+      showToast('বাংলা নাম সফলভাবে সংরক্ষিত হয়েছে!');
+    } catch (err) {
+      console.error('Error saving Bangla name:', err);
+      showToast('বাংলা নাম সংরক্ষণে সমস্যা হয়েছে।');
+    } finally {
+      setIsSavingBanglaName(false);
+    }
+  };
+
   // Build Aggregated Statement rows matching: দ্রব্যের নাম, পরিমাণ, দর, মোট
   const parseStatementAggregatedItems = (txs: any[]): StatementItemRow[] => {
     const itemMap = new Map<string, { itemName: string; qty: number; total: number; rates: number[] }>();
@@ -2708,22 +2769,48 @@ export const MemberDB: React.FC = () => {
     try {
       const { data: biodata } = await supabase.from('Biodata Register').select('*');
       if (biodata && biodata.length > 0) {
-        const { data: existingCanteen } = await supabase.from('Canteen_Member').select('airman_id, Due, DP, Role');
+        const { data: existingCanteen } = await supabase.from('Canteen_Member').select('*');
         const existingDueMap = new Map();
         const existingDpMap = new Map();
         const existingRoleMap = new Map();
+        const existingSeniorityMap = new Map();
+        const existingNameBnMap = new Map();
+        const existingRankBnMap = new Map();
         if (existingCanteen) {
           existingCanteen.forEach((m: any) => {
-            existingDueMap.set(m.airman_id, Number(m.Due ?? m.due ?? m.baki ?? 0));
-            existingDpMap.set(m.airman_id, m.DP || null);
-            existingRoleMap.set(m.airman_id, m.Role || 'Member');
+            const key = m.airman_id;
+            existingDueMap.set(key, Number(m.Due ?? m.due ?? m.baki ?? 0));
+            existingDpMap.set(key, m.DP || null);
+            existingRoleMap.set(key, m.Role || 'Member');
+            if (m.Seniority !== null && m.Seniority !== undefined) {
+              existingSeniorityMap.set(key, Number(m.Seniority));
+            }
+            if (m.Name_BN || m.name_bn) {
+              existingNameBnMap.set(key, m.Name_BN || m.name_bn);
+            }
+            if (m.Rank_BN || m.rank_bn) {
+              existingRankBnMap.set(key, m.Rank_BN || m.rank_bn);
+            }
           });
         }
+
+        const localSeniorityMap = getLocalSeniorityMap();
 
         const payload = biodata
           .filter((b: any) => b.airman_id && String(b['BD No'] || '').replace(/\D/g, '') !== '48456')
           .map((b: any) => {
+            const cleanBd = String(b['BD No'] || b.airman_id || '').replace(/\D/g, '');
             const currentDp = existingDpMap.get(b.airman_id) || getMemberEffectiveDp(b) || null;
+            const currentSeniority = existingSeniorityMap.has(b.airman_id)
+              ? existingSeniorityMap.get(b.airman_id)
+              : (localSeniorityMap[cleanBd] !== undefined
+                ? localSeniorityMap[cleanBd]
+                : (b.Seniority !== undefined && b.Seniority !== null
+                  ? Number(b.Seniority)
+                  : undefined));
+            const currentNameBn = existingNameBnMap.get(b.airman_id) || getMemberBanglaName(b) || null;
+            const currentRankBn = existingRankBnMap.get(b.airman_id) || getMemberBanglaRank(b) || null;
+
             return {
               airman_id: b.airman_id,
               "BD No": b['BD No'] || '',
@@ -2732,7 +2819,10 @@ export const MemberDB: React.FC = () => {
               "Contact": b['Mobile No'] || '',
               Due: existingDueMap.has(b.airman_id) ? existingDueMap.get(b.airman_id) : 0,
               DP: currentDp,
-              Role: existingRoleMap.get(b.airman_id) || 'Member'
+              Role: existingRoleMap.get(b.airman_id) || 'Member',
+              Seniority: currentSeniority ?? null,
+              Name_BN: currentNameBn,
+              Rank_BN: currentRankBn
             };
           });
 
@@ -2831,6 +2921,10 @@ export const MemberDB: React.FC = () => {
             const localSurname = String(localM.Surname || '').trim();
             const cloudContact = String(cloudM.Contact || cloudM['Mobile No'] || '').trim();
             const localContact = String(localM.Contact || localM['Mobile No'] || '').trim();
+            const cloudNameBn = String(cloudM.Name_BN || cloudM.name_bn || cloudM.nameBn || '').trim();
+            const localNameBn = String(localM.Name_BN || localM.name_bn || localM.nameBn || '').trim();
+            const cloudRankBn = String(cloudM.Rank_BN || cloudM.rank_bn || cloudM.rankBn || '').trim();
+            const localRankBn = String(localM.Rank_BN || localM.rank_bn || localM.rankBn || '').trim();
 
             const isDueDiff = Math.abs(cloudDue - localDue) > 0.01;
             const isDpDiff = Boolean(cloudDp && cloudDp !== localDp);
@@ -2838,14 +2932,22 @@ export const MemberDB: React.FC = () => {
             const isRankDiff = cloudRank !== localRank;
             const isNameDiff = cloudSurname !== localSurname;
             const isContactDiff = cloudContact !== localContact;
+            const isNameBnDiff = Boolean(cloudNameBn && cloudNameBn !== localNameBn);
+            const isRankBnDiff = Boolean(cloudRankBn && cloudRankBn !== localRankBn);
 
-            if (isDueDiff || isDpDiff || isRoleDiff || isRankDiff || isNameDiff || isContactDiff) {
+            if (isDueDiff || isDpDiff || isRoleDiff || isRankDiff || isNameDiff || isContactDiff || isNameBnDiff || isRankBnDiff) {
               hasAnyDifference = true;
               // Only update the changed member, preserving unchanged local fields
               const effectiveDp = isDpDiff ? cloudDp : (localM.DP || getMemberEffectiveDp(cloudM));
               updatedList.push({
                 ...localM,
                 ...cloudM,
+                Name_BN: cloudNameBn || localNameBn || undefined,
+                name_bn: cloudNameBn || localNameBn || undefined,
+                nameBn: cloudNameBn || localNameBn || undefined,
+                Rank_BN: cloudRankBn || localRankBn || undefined,
+                rank_bn: cloudRankBn || localRankBn || undefined,
+                rankBn: cloudRankBn || localRankBn || undefined,
                 Contact: cloudContact || localContact || '',
                 Role: cloudRole || localM.Role,
                 role: cloudRole || localM.Role,
@@ -4105,20 +4207,37 @@ export const MemberDB: React.FC = () => {
             {/* Modal Header */}
             <div className="p-6 border-b border-slate-800 bg-slate-900/90 flex items-center justify-between">
               <div className="flex items-center space-x-4">
-                <div className="w-14 h-14 rounded-2xl bg-slate-800 border-2 border-indigo-500/40 flex items-center justify-center overflow-hidden shrink-0 shadow">
-                  {profileMember.DP ? (
-                    <img 
-                      src={resolveImageUrl(profileMember.DP)} 
-                      alt={profileMember['Surname']} 
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full object-cover"
-                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                <div className="relative group w-14 h-14 rounded-2xl bg-slate-800 border-2 border-indigo-500/40 flex items-center justify-center shrink-0 shadow">
+                  <div className="w-full h-full rounded-2xl overflow-hidden flex items-center justify-center">
+                    {profileMember.DP ? (
+                      <img 
+                        src={resolveImageUrl(profileMember.DP)} 
+                        alt={profileMember['Surname']} 
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover"
+                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                      />
+                    ) : (
+                      <span className="font-black text-xl text-indigo-400">
+                        {(profileMember['Surname'] || 'U').charAt(0)}
+                      </span>
+                    )}
+                  </div>
+                  <label 
+                    className="absolute -bottom-1 -right-1 p-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg cursor-pointer shadow-md transition-all flex items-center justify-center z-10"
+                    title="ছবি পরিবর্তন / আপলোড করুন (Change Photo)"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      className="hidden" 
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleProfilePhotoChange(file);
+                      }}
                     />
-                  ) : (
-                    <span className="font-black text-xl text-indigo-400">
-                      {(profileMember['Surname'] || 'U').charAt(0)}
-                    </span>
-                  )}
+                  </label>
                 </div>
                 <div>
                   <div className="flex items-center space-x-2 flex-wrap">
@@ -4132,9 +4251,56 @@ export const MemberDB: React.FC = () => {
                         </>
                       )}
                       <span>{profileMember['Surname']}</span>
-                      <span className="text-emerald-400 font-sans text-sm font-bold">
-                        ({getMemberBanglaName(profileMember) || formatMemberNameBn(profileMember['Surname'])})
-                      </span>
+                      {!isEditingBanglaName ? (
+                        <div className="inline-flex items-center gap-1">
+                          <span className="text-emerald-400 font-sans text-sm font-bold">
+                            ({getMemberBanglaName(profileMember) || formatMemberNameBn(profileMember['Surname'])})
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsEditingBanglaName(true);
+                              setEditingBanglaNameVal(getMemberBanglaName(profileMember) || formatMemberNameBn(profileMember['Surname']) || '');
+                            }}
+                            className="p-1 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                            title="বাংলা নাম পরিবর্তন করুন (Edit Bangla Name)"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="inline-flex items-center gap-1 bg-slate-800 p-1 rounded-xl border border-emerald-500/40">
+                          <input
+                            type="text"
+                            value={editingBanglaNameVal}
+                            onChange={(e) => setEditingBanglaNameVal(e.target.value)}
+                            placeholder="বাংলা নাম লিখুন"
+                            className="px-2 py-0.5 bg-slate-900 border border-slate-700 rounded-lg text-xs font-bold text-emerald-300 focus:outline-none focus:border-emerald-400 font-sans w-32"
+                            autoFocus
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSaveProfileBanglaName();
+                              if (e.key === 'Escape') setIsEditingBanglaName(false);
+                            }}
+                          />
+                          <button
+                            type="button"
+                            onClick={handleSaveProfileBanglaName}
+                            disabled={isSavingBanglaName}
+                            className="p-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors cursor-pointer"
+                            title="সংরক্ষণ করুন"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsEditingBanglaName(false)}
+                            className="p-1 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
+                            title="বাতিল"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
                     </h2>
                   </div>
                   <p className="text-xs font-bold text-indigo-400 font-mono">BD No: {profileMember['BD No']}</p>
@@ -4241,10 +4407,15 @@ export const MemberDB: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/80 border border-slate-700/60 text-slate-300 text-[11px] font-bold">
-                      <Shield className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                      <span>জ্যেষ্ঠতা নির্ধারণ: Settings &gt; Member DB</span>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSeniorityEditMember(profileMember)}
+                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black transition-all cursor-pointer shadow-md active:scale-95"
+                      title="জ্যেষ্ঠতা নম্বর পরিবর্তন করুন"
+                    >
+                      <Award className="w-4 h-4 text-emerald-200 shrink-0" />
+                      <span>জ্যেষ্ঠতা পরিবর্তন</span>
+                    </button>
                   </div>
 
                   {/* Transaction History Section */}
@@ -5883,6 +6054,30 @@ export const MemberDB: React.FC = () => {
               </div>
             </div>
           </div>
+        )}
+
+        {/* Seniority Edit Modal */}
+        {seniorityEditMember && (
+          <EditMemberSeniorityModal
+            isOpen={Boolean(seniorityEditMember)}
+            onClose={() => setSeniorityEditMember(null)}
+            member={seniorityEditMember}
+            allMembers={members}
+            onSuccess={(updatedList) => {
+              setMembers(updatedList);
+              globalMembersCache = updatedList;
+              try {
+                localStorage.setItem('canteen_members_cache', JSON.stringify(updatedList));
+              } catch {}
+              if (profileMember) {
+                const refreshed = updatedList.find(
+                  (m) => String(m['BD No'] || m.airman_id).replace(/\D/g, '') === String(profileMember['BD No'] || profileMember.airman_id).replace(/\D/g, '')
+                );
+                if (refreshed) setProfileMember(refreshed);
+              }
+              showToast('জ্যেষ্ঠতা সফলভাবে হালনাগাদ করা হয়েছে!');
+            }}
+          />
         )}
 
       </AnimatePresence>

@@ -23,7 +23,8 @@ import {
   LayoutGrid,
   List,
   Award,
-  Edit3
+  Edit3,
+  Sparkles
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { supabase } from '../../../supabase';
@@ -41,6 +42,7 @@ import {
   BAF_RANKS_WITH_BN 
 } from '../utils/memberBanglaNames';
 import { getCanteenMembersCache, fetchCanteenMembersOnce, setCanteenMembersCache } from '../utils/canteenMenuData';
+import { playCelebrationSound } from '../utils/audioFeedback';
 
 // Export getRankWeight from canteenSeniority
 export { getRankWeight };
@@ -119,6 +121,12 @@ export const CanteenMemberDB: React.FC = () => {
 
   // Toast feedback
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [saveSuccessBanner, setSaveSuccessBanner] = useState<{
+    bdNo: string;
+    name: string;
+    rank: string;
+    nameBn?: string;
+  } | null>(null);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -299,6 +307,9 @@ export const CanteenMemberDB: React.FC = () => {
       finalDp = await fetchDirectImageUrl(finalDp);
     }
 
+    const nameBn = singleMember.nameBn?.trim() || '';
+    const rankBn = singleMember.rankBn?.trim() || '';
+
     const payload = {
       airman_id: `airman-${cleanBd}`,
       "BD No": cleanBd,
@@ -307,21 +318,25 @@ export const CanteenMemberDB: React.FC = () => {
       "Contact": singleMember.contact.trim(),
       "Role": singleMember.role || 'Member',
       DP: finalDp || null,
-      Due: 0
+      Due: 0,
+      Name_BN: nameBn,
+      name_bn: nameBn,
+      Rank_BN: rankBn,
+      rank_bn: rankBn
     };
 
     try {
-      if (singleMember.nameBn?.trim()) {
+      if (nameBn) {
         await saveMemberBanglaName(
           payload.airman_id || cleanBd,
-          singleMember.nameBn.trim(),
+          nameBn,
           [cleanBd, singleMember.surname.trim()]
         );
       }
-      if (singleMember.rankBn?.trim()) {
+      if (rankBn) {
         await saveMemberBanglaRank(
           payload.airman_id || cleanBd,
-          singleMember.rankBn.trim(),
+          rankBn,
           [cleanBd]
         );
       }
@@ -543,12 +558,21 @@ export const CanteenMemberDB: React.FC = () => {
 
     setIsSavingEdit(true);
     try {
-      const newAirmanId = `airman-${cleanBd}`;
-      const originalAirmanId = editMember.originalAirmanId || editMember.airman_id || newAirmanId;
+      const originalAirmanId = editMember.originalAirmanId || editMember.airman_id;
+      const originalBdClean = String(editMember.originalBdNo || originalAirmanId || '').replace(/\D/g, '');
+      const isBdChanged = Boolean(originalBdClean && cleanBd && originalBdClean !== cleanBd);
+
+      // Preserve existing airman_id (e.g. BD/473431) unless BD No was deliberately changed
+      const targetAirmanId = isBdChanged ? `airman-${cleanBd}` : (originalAirmanId || `airman-${cleanBd}`);
 
       const memberSeniority = editMember.Seniority !== undefined ? editMember.Seniority : editMember.seniority;
+      // Persist Bengali Name & Rank
+      const nameBn = String(editMember.nameBn !== undefined ? editMember.nameBn : (getMemberBanglaName(editMember) ?? '')).trim();
+      const rankBn = String(editMember.rankBn !== undefined ? editMember.rankBn : (getMemberBanglaRank(editMember) ?? '')).trim();
+
       const payload: any = {
-        airman_id: newAirmanId,
+        ...editMember,
+        airman_id: targetAirmanId,
         "BD No": cleanBd,
         "Rank": editMember['Rank'] || 'LAC',
         "Surname": String(editMember['Surname'] || '').trim(),
@@ -557,11 +581,20 @@ export const CanteenMemberDB: React.FC = () => {
         Due: Number(editMember.Due ?? editMember.due ?? editMember.baki ?? 0),
         DP: editMember.DP || null,
         Seniority: memberSeniority,
-        seniority: memberSeniority
+        seniority: memberSeniority,
+        Name_BN: nameBn,
+        name_bn: nameBn,
+        nameBn: nameBn,
+        Rank_BN: rankBn,
+        rank_bn: rankBn,
+        rankBn: rankBn,
+        active: editMember.active ?? true
       };
+      delete payload.originalAirmanId;
+      delete payload.originalBdNo;
 
-      // If BD No was modified, remove old airman_id record to prevent duplicates
-      if (originalAirmanId && originalAirmanId !== newAirmanId) {
+      // If BD No was actually modified, remove old airman_id record to prevent duplicates
+      if (isBdChanged && originalAirmanId && originalAirmanId !== targetAirmanId) {
         try {
           await supabase.from('Canteen_Member').delete().eq('airman_id', originalAirmanId);
         } catch (e) {
@@ -569,19 +602,16 @@ export const CanteenMemberDB: React.FC = () => {
         }
       }
 
-      // Persist Bengali Name & Rank
-      const nameBn = String(editMember.nameBn ?? getMemberBanglaName(editMember) ?? '').trim();
-      const rankBn = String(editMember.rankBn ?? getMemberBanglaRank(editMember) ?? '').trim();
       if (nameBn) {
         await saveMemberBanglaName(
-          newAirmanId,
+          targetAirmanId,
           nameBn,
           [cleanBd, payload.Surname]
         );
       }
       if (rankBn) {
         await saveMemberBanglaRank(
-          newAirmanId,
+          targetAirmanId,
           rankBn,
           [cleanBd]
         );
@@ -600,12 +630,28 @@ export const CanteenMemberDB: React.FC = () => {
       const { error } = await supabase.from('Canteen_Member').upsert([payload], { onConflict: 'airman_id' });
       if (error) throw error;
 
+      // Close Edit modal immediately
       setIsSavedEdit(true);
-      showToast(`Member #${cleanBd} updated successfully in Cloud!`);
+      setEditMember(null);
+
+      // Play audio feedback chime
+      playCelebrationSound();
+
+      // Trigger dynamic celebration animation
+      setSaveSuccessBanner({
+        bdNo: cleanBd,
+        name: payload.Surname,
+        rank: payload.Rank,
+        nameBn: nameBn || undefined
+      });
+      setTimeout(() => setSaveSuccessBanner(null), 4000);
 
       // Update local state and global in-memory cache
       const updated = sortMembers(members.map(m => {
-        if (m.airman_id === originalAirmanId || m.airman_id === newAirmanId) {
+        const mKey = String(m.airman_id || m['BD No']).trim();
+        const origKey = String(originalAirmanId || '').trim();
+        const targetKey = String(targetAirmanId).trim();
+        if (mKey === origKey || mKey === targetKey || String(m['BD No']).replace(/\D/g, '') === cleanBd) {
           return { ...m, ...payload };
         }
         return m;
@@ -624,15 +670,11 @@ export const CanteenMemberDB: React.FC = () => {
 
       window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: updated }));
       window.dispatchEvent(new Event('canteen_state_updated'));
-
-      setTimeout(() => {
-        setIsSavedEdit(false);
-        setIsSavingEdit(false);
-        setEditMember(null);
-      }, 700);
     } catch (err: any) {
       alert('Error updating member: ' + (err.message || err));
+    } finally {
       setIsSavingEdit(false);
+      setIsSavedEdit(false);
     }
   };
 
@@ -894,6 +936,7 @@ export const CanteenMemberDB: React.FC = () => {
                       setEditMember({ 
                         ...member, 
                         originalAirmanId: member.airman_id || `airman-${member['BD No']}`,
+                        originalBdNo: member['BD No'] || member.bdNo,
                         nameBn: bnName,
                         rankBn: bnRank
                       });
@@ -1021,6 +1064,7 @@ export const CanteenMemberDB: React.FC = () => {
                               setEditMember({ 
                                 ...member, 
                                 originalAirmanId: member.airman_id || `airman-${member['BD No']}`,
+                                originalBdNo: member['BD No'] || member.bdNo,
                                 nameBn: bnName,
                                 rankBn: bnRank
                               });
@@ -1711,6 +1755,46 @@ export const CanteenMemberDB: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* DYNAMIC CELEBRATION ANIMATION BANNER WITH SOUND */}
+      <AnimatePresence>
+        {saveSuccessBanner && (
+          <motion.div
+            initial={{ opacity: 0, y: -50, scale: 0.85 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -40, scale: 0.85 }}
+            transition={{ type: 'spring', stiffness: 500, damping: 25 }}
+            className="fixed top-8 left-1/2 -translate-x-1/2 z-[100] max-w-md w-[92%] bg-gradient-to-r from-emerald-950/95 via-slate-900/95 to-teal-950/95 border-2 border-emerald-400 rounded-3xl p-4 shadow-2xl shadow-emerald-950/80 flex items-center justify-between gap-3 overflow-hidden backdrop-blur-xl ring-2 ring-emerald-500/30"
+          >
+            <div className="flex items-center space-x-3.5 min-w-0">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-500/25 text-emerald-300 flex items-center justify-center shrink-0 border border-emerald-400/50 shadow-inner">
+                <Check className="w-6 h-6 animate-bounce" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 font-mono border border-emerald-500/30">
+                    #{saveSuccessBanner.bdNo}
+                  </span>
+                  <span className="text-xs font-black text-white truncate">
+                    {saveSuccessBanner.rank} {saveSuccessBanner.name}
+                  </span>
+                </div>
+                <p className="text-[11px] font-bold text-emerald-300 mt-1 flex items-center gap-1.5 truncate">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0 animate-spin" />
+                  <span>ক্লাউডে সফলভাবে সংরক্ষিত হয়েছে! {saveSuccessBanner.nameBn ? `(${saveSuccessBanner.nameBn})` : ''}</span>
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSaveSuccessBanner(null)}
+              className="p-1.5 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* DELETE CONFIRM MODAL */}
       <AnimatePresence>

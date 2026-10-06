@@ -241,7 +241,7 @@ export async function fetchCanteenMembersOnce(force = false): Promise<any[]> {
     try {
       const { data, error } = await supabase
         .from('Canteen_Member')
-        .select('airman_id, "BD No", Rank, Surname, Contact, Due, Role, DP');
+        .select('*');
       if (!error && data && data.length > 0) {
         const localSeniorityMap = getLocalSeniorityMap();
         const merged = data.map((m: any) => {
@@ -253,8 +253,18 @@ export async function fetchCanteenMembersOnce(force = false): Promise<any[]> {
               : (m.seniority !== undefined && m.seniority !== null && !isNaN(Number(m.seniority))
                 ? Number(m.seniority)
                 : undefined));
+
+          const nameBn = String(m.Name_BN || m['Name_BN'] || m.name_bn || m.nameBn || m.Surname_bn || m.bangla_name || '').trim();
+          const rankBn = String(m.Rank_BN || m['Rank_BN'] || m.rank_bn || m.rankBn || m.Rank_bn || '').trim();
+
           return {
             ...m,
+            Name_BN: nameBn || undefined,
+            name_bn: nameBn || undefined,
+            nameBn: nameBn || undefined,
+            Rank_BN: rankBn || undefined,
+            rank_bn: rankBn || undefined,
+            rankBn: rankBn || undefined,
             Seniority: sen,
             seniority: sen
           };
