@@ -284,8 +284,16 @@ export const PosSales: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
 
   const addToBasket = (item: any) => {
+      const stockInfo = calculateMenuItemStockInfo(item.id, item.name, rawInventory, recipesMap);
+      const available = stockInfo.availableStock;
+      if (available <= 0) {
+          return;
+      }
       const existing = basket.find(b => b.id === item.id);
       if (existing) {
+          if (existing.qty >= available) {
+              return;
+          }
           setBasket(basket.map(b => b.id === item.id ? { ...b, qty: b.qty + 1 } : b));
       } else {
           setBasket([...basket, { ...item, qty: 1 }]);
@@ -295,8 +303,13 @@ export const PosSales: React.FC = () => {
   const updateQty = (id: string, delta: number) => {
       setBasket(basket.map(b => {
           if (b.id === id) {
+              const stockInfo = calculateMenuItemStockInfo(b.id, b.name, rawInventory, recipesMap);
+              const available = stockInfo.availableStock;
               let newQty = b.qty + delta;
               if (newQty < 1) newQty = 1;
+              if (delta > 0 && newQty > available) {
+                  newQty = Math.max(1, available);
+              }
               return { ...b, qty: newQty };
           }
           return b;
@@ -1119,24 +1132,55 @@ export const PosSales: React.FC = () => {
               <div className="space-y-2.5 max-h-[550px] overflow-y-auto pr-1">
                 {filteredCatalog.map((item) => {
                   const inBasket = basket.find(b => b.id === item.id);
+                  const stockInfo = calculateMenuItemStockInfo(item.id, item.name, rawInventory, recipesMap);
+                  const isOutOfStock = stockInfo.availableStock <= 0;
+                  const isLowStock = stockInfo.availableStock < 5;
+
                   return (
                     <div 
                       key={item.id} 
-                      onClick={() => addToBasket(item)}
-                      className={`rounded-2xl p-3.5 flex items-center justify-between border transition-all bg-slate-900 cursor-pointer hover:border-indigo-500/50 group ${
-                        inBasket ? 'border-indigo-500 shadow-sm shadow-indigo-900/30' : 'border-slate-800'
+                      onClick={() => {
+                        if (!isOutOfStock) addToBasket(item);
+                      }}
+                      className={`rounded-2xl p-3.5 flex items-center justify-between border transition-all duration-300 relative select-none group ${
+                        isOutOfStock
+                          ? 'border-rose-600/80 bg-gradient-to-r from-rose-950/30 via-slate-900 to-slate-950 shadow-[0_0_18px_rgba(239,68,68,0.35),inset_0_0_12px_rgba(239,68,68,0.15)] ring-1 ring-rose-500/40 opacity-70 cursor-not-allowed'
+                          : isLowStock
+                          ? 'border-rose-500 shadow-[0_0_22px_rgba(239,68,68,0.5),inset_0_0_12px_rgba(239,68,68,0.18)] ring-2 ring-rose-500/50 bg-slate-900 cursor-pointer hover:-translate-y-0.5'
+                          : inBasket
+                          ? 'border-indigo-500 shadow-sm shadow-indigo-900/30 bg-slate-900 cursor-pointer hover:-translate-y-0.5'
+                          : 'border-slate-800 hover:border-indigo-500/50 bg-slate-900 cursor-pointer hover:-translate-y-0.5'
                       }`}
                     >
-                      <div className="flex items-center space-x-3 min-w-0 mr-2">
-                        <div className="w-11 h-11 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center shrink-0 overflow-hidden">
+                      <div className="flex items-center space-x-3 min-w-0 mr-2 flex-1">
+                        <div className={`w-11 h-11 rounded-xl border flex items-center justify-center shrink-0 overflow-hidden ${
+                          isOutOfStock ? 'border-rose-500/40 bg-rose-950/40 text-rose-400' : 'bg-slate-950 border-slate-800'
+                        }`}>
                           {item.DP ? (
                             <img src={resolveImageUrl(item.DP)} alt={item.name} className="w-full h-full object-cover" />
                           ) : (
                             <PackageIcon className="w-5 h-5 text-slate-400" />
                           )}
                         </div>
-                        <div className="min-w-0">
-                          <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">{item.category}</span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">{item.category}</span>
+
+                            {/* 3D Box Shape Stock Badge */}
+                            <div className={`px-2.5 py-0.5 rounded-lg text-[11px] font-black font-mono tracking-wider flex items-center gap-1 transition-all select-none shadow-[inset_0_1px_1px_rgba(255,255,255,0.4),0_3px_5px_-1px_rgba(0,0,0,0.6)] border-b-2 ${
+                              isLowStock 
+                                ? 'bg-gradient-to-b from-rose-500 to-rose-800 text-white border-rose-400 border-b-rose-950 shadow-[0_3px_10px_rgba(244,63,94,0.45)]' 
+                                : 'bg-gradient-to-b from-emerald-600 to-emerald-900 text-white border-emerald-400 border-b-emerald-950 shadow-[0_3px_8px_rgba(16,185,129,0.35)]'
+                            }`}>
+                              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isLowStock ? 'bg-white animate-ping' : 'bg-emerald-300'}`} />
+                              <span>Stock: {stockInfo.availableStock}</span>
+                              {isOutOfStock && (
+                                <span className="text-[9px] px-1 rounded bg-black/50 text-rose-200 font-bold ml-0.5">
+                                  শেষ
+                                </span>
+                              )}
+                            </div>
+                          </div>
                           <h4 className="text-xs sm:text-sm font-black text-white truncate group-hover:text-indigo-300 transition-colors">
                             {item.name}
                           </h4>
@@ -1147,15 +1191,25 @@ export const PosSales: React.FC = () => {
                         <span className="text-base font-black text-white font-mono">৳{item.price}</span>
                         <button
                           type="button"
+                          disabled={isOutOfStock}
                           onClick={(e) => {
                             e.stopPropagation();
-                            addToBasket(item);
+                            if (!isOutOfStock) addToBasket(item);
                           }}
-                          className={`w-9 h-9 rounded-xl flex items-center justify-center font-black transition-all cursor-pointer ${
-                            inBasket ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-indigo-600 hover:text-white'
+                          className={`w-9 h-9 rounded-xl flex items-center justify-center font-black transition-all ${
+                            isOutOfStock
+                              ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-rose-500/30 opacity-70'
+                              : inBasket 
+                              ? 'bg-indigo-600 text-white cursor-pointer shadow-sm shadow-indigo-600/30' 
+                              : 'bg-slate-800 text-slate-300 hover:bg-indigo-600 hover:text-white cursor-pointer'
                           }`}
+                          title={isOutOfStock ? 'স্টক নেই - বিক্রি বন্ধ' : 'Add to cart'}
                         >
-                          <Plus className="w-4 h-4" />
+                          {isOutOfStock ? (
+                            <X className="w-4 h-4 text-rose-400" />
+                          ) : (
+                            <Plus className="w-4 h-4" />
+                          )}
                         </button>
                       </div>
                     </div>
@@ -1301,19 +1355,32 @@ export const PosSales: React.FC = () => {
                 const itemRecipe = getRecipeForMenuItem(item.id, item.name, recipesMap);
                 const stockInfo = calculateMenuItemStockInfo(item.id, item.name, rawInventory, recipesMap);
 
+                const isOutOfStock = stockInfo.availableStock <= 0;
+                const isLowStock = stockInfo.availableStock < 5;
+
                 return (
                   <div 
                     key={i} 
-                    onClick={() => addToBasket(item)} 
-                    className={`rounded-2xl p-4 flex items-center justify-between border transition-all duration-300 bg-slate-900 cursor-pointer hover:-translate-y-1 hover:shadow-[0_15px_30px_-10px_rgba(79,70,229,0.3)] group ${
-                      inBasket 
-                        ? 'border-[#4f46e5] shadow-[0_10px_20px_-10px_rgba(79,70,229,0.2)]' 
-                        : 'border-slate-800 hover:border-indigo-500/50'
+                    onClick={() => {
+                      if (!isOutOfStock) addToBasket(item);
+                    }} 
+                    className={`rounded-2xl p-4 flex items-center justify-between border transition-all duration-300 relative select-none group ${
+                      isOutOfStock
+                        ? 'border-rose-600/80 bg-gradient-to-r from-rose-950/40 via-slate-900 to-slate-950 shadow-[0_0_22px_rgba(239,68,68,0.4),inset_0_0_15px_rgba(239,68,68,0.15)] ring-1 ring-rose-500/40 opacity-70 cursor-not-allowed'
+                        : isLowStock 
+                        ? 'border-rose-500 shadow-[0_0_25px_rgba(239,68,68,0.5),inset_0_0_15px_rgba(239,68,68,0.18)] ring-2 ring-rose-500/50 bg-slate-900 cursor-pointer hover:-translate-y-1' 
+                        : inBasket 
+                        ? 'border-[#4f46e5] shadow-[0_10px_20px_-10px_rgba(79,70,229,0.2)] bg-slate-900 cursor-pointer hover:-translate-y-1' 
+                        : 'border-slate-800 hover:border-indigo-500/50 bg-slate-900 cursor-pointer hover:-translate-y-1 hover:shadow-[0_15px_30px_-10px_rgba(79,70,229,0.3)]'
                     }`}
                   >
                     <div className="flex items-center space-x-4 min-w-0 flex-1 mr-2">
-                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-inner transition-colors duration-300 overflow-hidden shrink-0 border border-slate-800/80 ${
-                        inBasket ? 'bg-indigo-900/30 text-indigo-400' : 'bg-[#0f172a] text-slate-400 group-hover:bg-slate-800 group-hover:text-indigo-300'
+                      <div className={`w-13 h-13 rounded-2xl flex items-center justify-center shadow-inner transition-colors duration-300 overflow-hidden shrink-0 border ${
+                        isOutOfStock 
+                          ? 'border-rose-500/40 bg-rose-950/40 text-rose-400' 
+                          : inBasket 
+                          ? 'border-indigo-500/50 bg-indigo-900/30 text-indigo-400' 
+                          : 'border-slate-800/80 bg-[#0f172a] text-slate-400 group-hover:bg-slate-800 group-hover:text-indigo-300'
                       }`}>
                         {item.DP ? (
                           <img 
@@ -1328,17 +1395,25 @@ export const PosSales: React.FC = () => {
                         )}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center space-x-2 mb-0.5">
-                          <p className="text-[10px] font-black text-[#4f46e5] uppercase tracking-widest">{item.category}</p>
-                          <span className={`text-[10px] font-black px-2 py-0.5 rounded-md border flex items-center gap-1 ${
-                            stockInfo.availableStock > 0 
-                              ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40' 
-                              : 'bg-rose-950/80 text-rose-300 border-rose-500/40'
+                        <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                          <span className="text-[10px] font-black text-[#4f46e5] uppercase tracking-widest">{item.category}</span>
+                          
+                          {/* 3D Box Shape Stock Badge */}
+                          <div className={`px-3 py-1 rounded-xl text-xs sm:text-sm font-black font-mono tracking-wider flex items-center gap-1.5 transition-all duration-200 select-none shadow-[inset_0_1px_1px_rgba(255,255,255,0.4),0_4px_6px_-1px_rgba(0,0,0,0.6),0_2px_4px_-1px_rgba(0,0,0,0.4)] border-b-[3px] ${
+                            isLowStock 
+                              ? 'bg-gradient-to-b from-rose-500 via-rose-600 to-rose-800 text-white border-rose-400 border-b-rose-950 shadow-[0_4px_12px_rgba(244,63,94,0.5),inset_0_1px_1px_rgba(255,255,255,0.4)]' 
+                              : 'bg-gradient-to-b from-emerald-600 via-emerald-700 to-emerald-900 text-white border-emerald-400 border-b-emerald-950 shadow-[0_4px_10px_rgba(16,185,129,0.4),inset_0_1px_1px_rgba(255,255,255,0.4)]'
                           }`}>
-                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${stockInfo.availableStock > 0 ? 'bg-emerald-400' : 'bg-rose-400'}`} />
-                            <span>স্টকঃ {stockInfo.availableStock}</span>
-                          </span>
+                            <span className={`w-2 h-2 rounded-full shrink-0 shadow-xs ${isLowStock ? 'bg-white animate-ping' : 'bg-emerald-300'}`} />
+                            <span>Stock: {stockInfo.availableStock}</span>
+                            {isOutOfStock && (
+                              <span className="ml-1 text-[9px] px-1.5 py-0.5 rounded bg-black/50 text-rose-200 font-black tracking-normal">
+                                স্টক শেষ
+                              </span>
+                            )}
+                          </div>
                         </div>
+
                         <h3 className="font-black text-base text-white group-hover:text-indigo-400 transition-colors truncate">
                           {item.name}
                         </h3>
@@ -1362,18 +1437,26 @@ export const PosSales: React.FC = () => {
                       <p className="text-xl font-black tracking-tighter text-white font-mono">৳{item.price}</p>
                       
                       <button 
+                        type="button"
+                        disabled={isOutOfStock}
                         onClick={(e) => { 
                           e.stopPropagation(); 
-                          addToBasket(item); 
+                          if (!isOutOfStock) addToBasket(item); 
                         }} 
                         className={`w-10 h-10 rounded-xl flex items-center justify-center font-black shadow-sm transition-all duration-300 ${
-                          inBasket 
-                            ? 'bg-[#4f46e5] text-white hover:bg-[#4338ca] hover:scale-110 cursor-pointer' 
+                          isOutOfStock
+                            ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-rose-500/30 opacity-70'
+                            : inBasket 
+                            ? 'bg-[#4f46e5] text-white hover:bg-[#4338ca] hover:scale-110 cursor-pointer shadow-indigo-600/30' 
                             : 'bg-[#0f172a] text-white group-hover:bg-[#4f46e5] group-hover:scale-110 cursor-pointer'
                         }`}
-                        title="Add to basket"
+                        title={isOutOfStock ? 'স্টক নেই - বিক্রি করা যাবে না' : 'Add to basket'}
                       >
-                        <Plus className="w-5 h-5" />
+                        {isOutOfStock ? (
+                          <X className="w-5 h-5 text-rose-400" />
+                        ) : (
+                          <Plus className="w-5 h-5" />
+                        )}
                       </button>
                     </div>
                   </div>
@@ -1694,15 +1777,37 @@ export const PosSales: React.FC = () => {
               <div className="p-3 sm:p-4 overflow-y-auto space-y-2 flex-1 max-h-[420px]">
                 {filteredCatalog.map((item) => {
                   const inBasket = basket.find(b => b.id === item.id);
+                  const stockInfo = calculateMenuItemStockInfo(item.id, item.name, rawInventory, recipesMap);
+                  const isOutOfStock = stockInfo.availableStock <= 0;
+                  const isLowStock = stockInfo.availableStock < 5;
+
                   return (
                     <div
                       key={item.id}
-                      className={`p-3 rounded-xl border flex items-center justify-between gap-2 transition-all ${
-                        inBasket ? 'bg-indigo-950/30 border-indigo-500/60' : 'bg-slate-950/70 border-slate-800 hover:border-slate-700'
+                      className={`p-3 rounded-xl border flex items-center justify-between gap-2 transition-all select-none ${
+                        isOutOfStock
+                          ? 'border-rose-600/80 bg-rose-950/20 shadow-[0_0_15px_rgba(239,68,68,0.3)] ring-1 ring-rose-500/40 opacity-70'
+                          : isLowStock
+                          ? 'border-rose-500 shadow-[0_0_18px_rgba(239,68,68,0.45)] ring-1 ring-rose-500/50 bg-slate-950/80'
+                          : inBasket 
+                          ? 'bg-indigo-950/30 border-indigo-500/60' 
+                          : 'bg-slate-950/70 border-slate-800 hover:border-slate-700'
                       }`}
                     >
                       <div className="min-w-0 flex-1">
-                        <p className="text-xs font-black text-white truncate">{item.name}</p>
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <p className="text-xs font-black text-white truncate">{item.name}</p>
+
+                          {/* 3D Box Shape Stock Badge */}
+                          <div className={`px-2 py-0.5 rounded-lg text-[10px] font-black font-mono tracking-wider flex items-center gap-1 transition-all select-none shadow-[inset_0_1px_1px_rgba(255,255,255,0.4),0_2px_4px_-1px_rgba(0,0,0,0.6)] border-b-2 ${
+                            isLowStock 
+                              ? 'bg-gradient-to-b from-rose-500 to-rose-800 text-white border-rose-400 border-b-rose-950 shadow-[0_2px_8px_rgba(244,63,94,0.45)]' 
+                              : 'bg-gradient-to-b from-emerald-600 to-emerald-900 text-white border-emerald-400 border-b-emerald-950 shadow-[0_2px_6px_rgba(16,185,129,0.35)]'
+                          }`}>
+                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isLowStock ? 'bg-white animate-ping' : 'bg-emerald-300'}`} />
+                            <span>Stock: {stockInfo.availableStock}</span>
+                          </div>
+                        </div>
                         <p className="text-[11px] font-mono text-indigo-400 font-bold">৳{item.price}</p>
                       </div>
 
@@ -1711,16 +1816,35 @@ export const PosSales: React.FC = () => {
                           <div className="flex items-center space-x-1.5 bg-slate-900 rounded-lg border border-slate-700 p-0.5">
                             <button onClick={() => updateQty(item.id, -1)} className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800"><Minus className="w-3.5 h-3.5" /></button>
                             <span className="text-xs font-mono font-black text-white w-5 text-center">{inBasket.qty}</span>
-                            <button onClick={() => updateQty(item.id, 1)} className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800"><Plus className="w-3.5 h-3.5" /></button>
+                            <button 
+                              disabled={inBasket.qty >= stockInfo.availableStock}
+                              onClick={() => updateQty(item.id, 1)} 
+                              className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800 disabled:opacity-40"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         ) : (
                           <button
                             type="button"
-                            onClick={() => addToBasket(item)}
-                            className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-colors flex items-center space-x-1"
+                            disabled={isOutOfStock}
+                            onClick={() => {
+                              if (!isOutOfStock) addToBasket(item);
+                            }}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors flex items-center space-x-1 ${
+                              isOutOfStock
+                                ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-rose-500/30'
+                                : 'bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer shadow-sm'
+                            }`}
                           >
-                            <Plus className="w-3.5 h-3.5" />
-                            <span>যোগ</span>
+                            {isOutOfStock ? (
+                              <span>স্টক নেই</span>
+                            ) : (
+                              <>
+                                <Plus className="w-3.5 h-3.5" />
+                                <span>যোগ</span>
+                              </>
+                            )}
                           </button>
                         )}
                       </div>

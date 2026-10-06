@@ -136,7 +136,7 @@ export const MenuManagement: React.FC = () => {
                 <th className="px-6 py-4">Meal Type</th>
                 <th className="px-6 py-4">{t('item')}</th>
                 <th className="px-6 py-4 text-right">{t('price')}</th>
-                <th className="px-6 py-4 text-center">লাইভ মজুদ (Live Stock)</th>
+                <th className="px-6 py-4 text-center">Live Stock</th>
                 <th className="px-6 py-4 text-right">{t('action')}</th>
               </tr>
             </thead>
@@ -160,14 +160,19 @@ export const MenuManagement: React.FC = () => {
                      <td className="px-6 py-4 font-bold">{itemName}</td>
                      <td className="px-6 py-4 text-right font-bold text-emerald-600">{formatMoney(row.price, i18n.language)}</td>
                      <td className="px-6 py-4 text-center">
-                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-black border ${
-                           stockInfo.availableStock > 0 
-                             ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40' 
-                             : 'bg-rose-950/80 text-rose-300 border-rose-500/40'
+                        <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-black font-mono tracking-wider shadow-[inset_0_1px_1px_rgba(255,255,255,0.4),0_3px_5px_-1px_rgba(0,0,0,0.6)] border-b-2 ${
+                           stockInfo.availableStock < 5 
+                              ? 'bg-gradient-to-b from-rose-500 to-rose-800 text-white border-rose-400 border-b-rose-950 shadow-[0_3px_10px_rgba(244,63,94,0.45)]' 
+                              : 'bg-gradient-to-b from-emerald-600 to-emerald-900 text-white border-emerald-400 border-b-emerald-950 shadow-[0_3px_8px_rgba(16,185,129,0.35)]'
                         }`}>
-                           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${stockInfo.availableStock > 0 ? 'bg-emerald-400' : 'bg-rose-400'}`} />
-                           <span>{stockInfo.availableStock} টি</span>
-                        </span>
+                           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${stockInfo.availableStock < 5 ? 'bg-white animate-ping' : 'bg-emerald-300'}`} />
+                           <span>Stock: {stockInfo.availableStock}</span>
+                           {stockInfo.availableStock <= 0 && (
+                              <span className="ml-1 text-[9px] px-1 rounded bg-black/50 text-rose-200 font-bold">
+                                 শেষ
+                              </span>
+                           )}
+                        </div>
                      </td>
                      <td className="px-6 py-4 text-right">
                         <button onClick={() => handleDelete(row.id)} className="text-rose-500 hover:text-rose-400 font-bold text-xs bg-rose-900/30 px-3 py-1.5 rounded-lg transition-colors cursor-pointer">

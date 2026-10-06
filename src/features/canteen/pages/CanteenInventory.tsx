@@ -27,6 +27,7 @@ import {
   getRawItemSubUnitInfo,
   decodeNotesMeta,
   RAW_ITEMS_STORAGE_KEY,
+  deduplicateRawItems,
   calculateMenuItemStockInfo
 } from '../utils/recipeManager';
 
@@ -99,14 +100,22 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
             hasSubUnits: r.hasSubUnits ?? meta.hasSubUnits ?? Boolean(sub && sub !== r.unit)
           };
         });
-        const sortedRaw = parsedRaw.sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
+        const currentLocal = getRawInventoryItems();
+        const combined = [...currentLocal, ...parsedRaw];
+        const { deduplicated } = deduplicateRawItems(combined);
+        const sortedRaw = deduplicated.sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
         setAvailableRawItems(sortedRaw);
         try {
           localStorage.setItem(RAW_ITEMS_STORAGE_KEY, JSON.stringify(sortedRaw));
         } catch {}
+      } else {
+        const local = getRawInventoryItems();
+        setAvailableRawItems(local);
       }
     } catch (e) {
       console.warn('Failed to load raw items from DB in CanteenInventory:', e);
+      const local = getRawInventoryItems();
+      setAvailableRawItems(local);
     }
   };
 
@@ -156,6 +165,14 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     fetchRawItems();
     fetchItems();
 
+    // Listen to local/tab raw inventory updates for instant REALTIME reflection across tabs & modals
+    const handleRawSync = () => {
+      const fresh = getRawInventoryItems();
+      setAvailableRawItems(fresh);
+    };
+    window.addEventListener('canteen_raw_inventory_updated', handleRawSync);
+    window.addEventListener('storage', handleRawSync);
+
     // Realtime channel for Canteen_Menu with unique channel name
     const menuChannel = supabase
       .channel(`canteen_menu_realtime_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`)
@@ -173,6 +190,8 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       .subscribe();
 
     return () => {
+      window.removeEventListener('canteen_raw_inventory_updated', handleRawSync);
+      window.removeEventListener('storage', handleRawSync);
       supabase.removeChannel(menuChannel);
       supabase.removeChannel(inventoryChannel);
     };
@@ -201,12 +220,13 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
   const [historySearchTerm, setHistorySearchTerm] = useState('');
 
   const handleOpenItemModal = (item: any) => {
+    const rawList = getRawInventoryItems();
+    setAvailableRawItems(rawList);
     setSelectedItemForModal(item);
     setModalTab('EDIT');
     setModalNotice('');
     setHistorySearchTerm('');
     const existingRecipe = getRecipeForMenuItem(item.id, item.name);
-    const rawList = availableRawItems.length > 0 ? availableRawItems : getRawInventoryItems();
     const normalizedRecipe = existingRecipe.map(ing => {
       const raw = rawList.find(r => r.id === ing.rawItemId || (r.name && ing.rawItemName && r.name.toLowerCase() === ing.rawItemName.toLowerCase()));
       if (raw) {
@@ -305,7 +325,8 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
   };
 
   const handleModalIngredientRawChange = (index: number, rawId: string) => {
-    const raw = availableRawItems.find(r => r.id === rawId);
+    const rawList = availableRawItems.length > 0 ? availableRawItems : getRawInventoryItems();
+    const raw = rawList.find(r => r.id === rawId);
     if (!raw) return;
     const sub = getRawItemSubUnitInfo(raw);
     const defaultUnit = sub.hasSubUnit && sub.subUnit ? sub.subUnit : (raw.unit || 'pcs');
@@ -566,9 +587,10 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
 
   // Quick Recipe Modal Controls
   const handleOpenQuickRecipe = (item: any) => {
+    const rawList = getRawInventoryItems();
+    setAvailableRawItems(rawList);
     setQuickRecipeItem(item);
     const existing = getRecipeForMenuItem(item.id, item.name);
-    const rawList = availableRawItems.length > 0 ? availableRawItems : getRawInventoryItems();
     const normalized = existing.map(ing => {
       const raw = rawList.find(r => r.id === ing.rawItemId || (r.name && ing.rawItemName && r.name.toLowerCase() === ing.rawItemName.toLowerCase()));
       if (raw) {
@@ -615,7 +637,8 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
   };
 
   const handleQuickIngredientRawChange = (index: number, rawId: string) => {
-    const raw = availableRawItems.find(r => r.id === rawId);
+    const rawList = availableRawItems.length > 0 ? availableRawItems : getRawInventoryItems();
+    const raw = rawList.find(r => r.id === rawId);
     if (!raw) return;
     const sub = getRawItemSubUnitInfo(raw);
     const defaultUnit = sub.hasSubUnit && sub.subUnit ? sub.subUnit : (raw.unit || 'pcs');
@@ -785,16 +808,25 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
             const profit = priceNum - displayCost;
             const profitPct = priceNum > 0 ? Math.round((profit / priceNum) * 100) : (profit > 0 ? 100 : (profit < 0 ? -100 : 0));
 
+            const isOutOfStock = stockInfo.availableStock <= 0;
+            const isLowStock = stockInfo.availableStock < 5;
+
             return (
                <div 
                   key={item.id} 
                   onClick={() => handleOpenItemModal(item)}
-                  className="relative bg-gradient-to-b from-slate-800/90 via-slate-900 to-slate-950 rounded-3xl p-5 border-t border-t-slate-600/60 border-x border-x-slate-700/60 border-b-4 border-b-slate-950 shadow-[0_12px_24px_-4px_rgba(0,0,0,0.65),0_4px_8px_-2px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.12),inset_0_-2px_4px_0_rgba(0,0,0,0.4)] hover:-translate-y-1.5 hover:shadow-[0_20px_35px_-6px_rgba(0,0,0,0.8),0_0_22px_0_rgba(79,70,229,0.3),inset_0_1px_0_0_rgba(255,255,255,0.2)] hover:border-b-indigo-900 transition-all duration-300 cursor-pointer group flex flex-col justify-between"
+                  className={`relative rounded-3xl p-5 border-t border-x border-b-4 transition-all duration-300 cursor-pointer group flex flex-col justify-between ${
+                     isLowStock
+                        ? "bg-gradient-to-b from-rose-950/40 via-slate-900 to-slate-950 border-rose-500/90 border-b-rose-950 shadow-[0_0_25px_rgba(239,68,68,0.45),inset_0_0_15px_rgba(239,68,68,0.18)] ring-2 ring-rose-500/50 hover:shadow-[0_0_35px_rgba(239,68,68,0.65)] hover:-translate-y-1.5"
+                        : "bg-gradient-to-b from-slate-800/90 via-slate-900 to-slate-950 border-t-slate-600/60 border-x-slate-700/60 border-b-slate-950 shadow-[0_12px_24px_-4px_rgba(0,0,0,0.65),0_4px_8px_-2px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.12),inset_0_-2px_4px_0_rgba(0,0,0,0.4)] hover:-translate-y-1.5 hover:shadow-[0_20px_35px_-6px_rgba(0,0,0,0.8),0_0_22px_0_rgba(79,70,229,0.3),inset_0_1px_0_0_rgba(255,255,255,0.2)] hover:border-b-indigo-900"
+                  }`}
                >
                   <div>
                      {/* Top Row: Avatar & Category / Ingredients */}
                      <div className="flex items-start justify-between">
-                        <div className="w-14 h-14 rounded-2xl bg-indigo-950/70 border border-indigo-500/30 flex items-center justify-center text-indigo-400 font-black text-lg overflow-hidden shrink-0 shadow-inner group-hover:scale-105 transition-transform duration-300">
+                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center font-black text-lg overflow-hidden shrink-0 shadow-inner group-hover:scale-105 transition-transform duration-300 border ${
+                           isLowStock ? "bg-rose-950/60 border-rose-500/40 text-rose-400" : "bg-indigo-950/70 border-indigo-500/30 text-indigo-400"
+                        }`}>
                            {item.DP ? (
                               <img 
                                  src={resolveImageUrl(item.DP)} 
@@ -828,14 +860,20 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                            </h3>
                         </div>
                         <div className="shrink-0">
-                           <span className={`px-2.5 py-1 rounded-xl text-[11px] font-black tracking-tight border flex items-center gap-1.5 shadow-xs whitespace-nowrap ${
-                              stockInfo.availableStock > 0 
-                                 ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40' 
-                                 : 'bg-rose-950/80 text-rose-300 border-rose-500/40'
+                           {/* 3D Box Shape Stock Badge */}
+                           <div className={`px-3 py-1 rounded-xl text-xs sm:text-sm font-black font-mono tracking-wider flex items-center gap-1.5 transition-all select-none shadow-[inset_0_1px_1px_rgba(255,255,255,0.4),0_4px_6px_-1px_rgba(0,0,0,0.6),0_2px_4px_-1px_rgba(0,0,0,0.4)] border-b-[3px] whitespace-nowrap ${
+                              isLowStock 
+                                 ? 'bg-gradient-to-b from-rose-500 via-rose-600 to-rose-800 text-white border-rose-400 border-b-rose-950 shadow-[0_4px_12px_rgba(244,63,94,0.5),inset_0_1px_1px_rgba(255,255,255,0.4)]' 
+                                 : 'bg-gradient-to-b from-emerald-600 via-emerald-700 to-emerald-900 text-white border-emerald-400 border-b-emerald-950 shadow-[0_4px_10px_rgba(16,185,129,0.4),inset_0_1px_1px_rgba(255,255,255,0.4)]'
                            }`}>
-                              <span className={`w-2 h-2 rounded-full shrink-0 ${stockInfo.availableStock > 0 ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
-                              <span>মজুদঃ {stockInfo.availableStock} টি</span>
-                           </span>
+                              <span className={`w-2 h-2 rounded-full shrink-0 shadow-xs ${isLowStock ? 'bg-white animate-ping' : 'bg-emerald-300'}`} />
+                              <span>Stock: {stockInfo.availableStock}</span>
+                              {isOutOfStock && (
+                                 <span className="ml-1 text-[9px] px-1.5 py-0.5 rounded bg-black/50 text-rose-200 font-black tracking-normal">
+                                    শেষ
+                                 </span>
+                              )}
+                           </div>
                         </div>
                      </div>
 
@@ -1080,19 +1118,22 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                                     <div className="flex items-center justify-between">
                                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
                                           <span className={`w-2 h-2 rounded-full ${stockInfo.availableStock > 0 ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`}></span>
-                                          <span>লাইভ মজুদ স্টক (Available Stock)</span>
+                                          <span>Live Stock (Available Stock)</span>
                                        </span>
-                                       <span className={`px-2.5 py-0.5 rounded-lg text-xs font-black font-mono border ${
-                                          stockInfo.availableStock > 0 ? 'bg-emerald-950 text-emerald-300 border-emerald-500/30' : 'bg-rose-950 text-rose-300 border-rose-500/30'
+                                       <div className={`px-3 py-1 rounded-xl text-xs font-black font-mono tracking-wider shadow-[inset_0_1px_1px_rgba(255,255,255,0.4),0_3px_5px_-1px_rgba(0,0,0,0.6)] border-b-2 ${
+                                          stockInfo.availableStock < 5 
+                                             ? 'bg-gradient-to-b from-rose-500 to-rose-800 text-white border-rose-400 border-b-rose-950 shadow-[0_3px_10px_rgba(244,63,94,0.45)]' 
+                                             : 'bg-gradient-to-b from-emerald-600 to-emerald-900 text-white border-emerald-400 border-b-emerald-950 shadow-[0_3px_8px_rgba(16,185,129,0.35)]'
                                        }`}>
-                                          {stockInfo.availableStock > 0 ? `${stockInfo.availableStock} টি তৈরি সম্ভব` : 'স্টক শেষ (০ টি)'}
-                                       </span>
+                                          <span>Stock: {stockInfo.availableStock}</span>
+                                          {stockInfo.availableStock <= 0 && <span className="ml-1 text-[9px] px-1 rounded bg-black/50 text-rose-200">শেষ</span>}
+                                       </div>
                                     </div>
                                     {stockInfo.limitingIngredient && stockInfo.isRecipeBased && (
                                        <div className="p-2.5 rounded-xl bg-amber-950/40 border border-amber-500/30 text-[11px] text-amber-200">
                                           <span className="font-bold">সীমিত কাঁচামাল: </span>
                                           <span className="font-mono font-black">{stockInfo.limitingIngredient.rawItemName}</span>
-                                          <span> (মজুদ: {stockInfo.limitingIngredient.currentStock} {stockInfo.limitingIngredient.stockUnit} দিয়ে সর্বোচ্চ </span>
+                                          <span> (Stock: {stockInfo.limitingIngredient.currentStock} {stockInfo.limitingIngredient.stockUnit} দিয়ে সর্বোচ্চ </span>
                                           <span className="font-bold text-amber-300">{stockInfo.limitingIngredient.portions} টি</span>
                                           <span> তৈরি করা যাবে)</span>
                                        </div>
@@ -1177,9 +1218,9 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                                                  <option value="" disabled className="bg-slate-900 text-slate-400">
                                                     -- Select Ingredient --
                                                  </option>
-                                                 {availableRawItems.map(r => (
-                                                    <option key={r.id} value={r.id} className="bg-slate-900 text-white">
-                                                       {r.name}
+                                                 {availableRawItems.map((r, rIdx) => (
+                                                    <option key={`${r.id}_${rIdx}`} value={r.id} className="bg-slate-900 text-white">
+                                                       {r.name}{r.nameBn && r.nameBn !== r.name ? ` (${r.nameBn})` : ''}
                                                     </option>
                                                  ))}
                                               </select>
@@ -1430,9 +1471,9 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                                         <option value="" disabled className="bg-slate-900 text-slate-400">
                                            -- Select Ingredient --
                                         </option>
-                                        {availableRawItems.map(r => (
-                                           <option key={r.id} value={r.id} className="bg-slate-900 text-white">
-                                              {r.name}
+                                        {availableRawItems.map((r, rIdx) => (
+                                           <option key={`${r.id}_${rIdx}`} value={r.id} className="bg-slate-900 text-white">
+                                              {r.name}{r.nameBn && r.nameBn !== r.name ? ` (${r.nameBn})` : ''}
                                            </option>
                                         ))}
                                      </select>

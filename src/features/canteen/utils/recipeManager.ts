@@ -1465,7 +1465,8 @@ export const normalizeRawItemName = (name: string): string => {
   if (s.includes('pasta') || s.includes('পাস্তা')) return 'pasta';
   if (s.includes('biscuit') || s.includes('বিস্কুট')) return 'biscuit';
   if (s.includes('box') || s.includes('one time') || s.includes('ওয়ান টাইম')) return 'one-time-box';
-  return s.replace(/[^a-z0-9]/g, '');
+  const cleaned = s.replace(/[^a-z0-9\u0980-\u09FF]/g, '');
+  return cleaned || s.trim();
 };
 
 // Helper to encode metadata safely into notes so Supabase doesn't reject columns
@@ -1483,10 +1484,35 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
     : (items && Array.isArray(items.deduplicated) ? items.deduplicated : []);
 
   const seenKeys = new Map<string, RawInventoryItem>();
+  const idToGroupMap = new Map<string, string>();
+  const canonicalToGroupMap = new Map<string, string>();
   const removedIds: string[] = [];
 
   for (const item of actualItems) {
-    const key = normalizeRawItemName(item.name);
+    if (!item) continue;
+    const cleanId = String(item.id || '').trim();
+    const idKey = cleanId ? cleanId.toLowerCase() : '';
+    const normKey = normalizeRawItemName(item.name || item.nameBn || '');
+    const isStandardCanonical = [
+      'egg', 'tea-bag', 'sandwich-bread', 'cucumber', 'oil', 'sugar', 'onion',
+      'chicken', 'rice', 'dal', 'milk-powder', 'noodles', 'garlic', 'ginger',
+      'turmeric', 'chili-powder', 'salt', 'gas-cylinder', 'coffee', 'black-salt'
+    ].includes(normKey);
+
+    // Group items together if they share the exact same ID or canonical name
+    let key: string | undefined = undefined;
+    if (idKey && idToGroupMap.has(idKey)) {
+      key = idToGroupMap.get(idKey);
+    } else if (isStandardCanonical && canonicalToGroupMap.has(normKey)) {
+      key = canonicalToGroupMap.get(normKey);
+    }
+
+    if (!key) {
+      // First time seeing this item
+      key = isStandardCanonical ? `canon_${normKey}` : (idKey ? `id_${idKey}` : (normKey ? `name_${normKey}` : `item_${Math.random()}`));
+      if (idKey) idToGroupMap.set(idKey, key);
+      if (isStandardCanonical) canonicalToGroupMap.set(normKey, key);
+    }
     const u = (item.unit || '').toLowerCase().trim();
     const subCatLower = (item.subCategory || '').toLowerCase().trim();
     const meta = decodeNotesMeta(item.notes);
@@ -1708,7 +1734,69 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
 
     return it;
   });
-  return { deduplicated, removedIds };
+
+  // Strict final uniqueness filter: guarantees 100% unique item IDs across the entire result
+  const finalUniqueIdSet = new Set<string>();
+  const strictlyUnique: RawInventoryItem[] = [];
+  for (const it of deduplicated) {
+    const itId = String(it.id || '').trim().toLowerCase();
+    if (!itId) {
+      const generatedId = `raw-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      strictlyUnique.push({ ...it, id: generatedId });
+    } else if (!finalUniqueIdSet.has(itId)) {
+      finalUniqueIdSet.add(itId);
+      strictlyUnique.push(it);
+    } else {
+      // Duplicate ID encountered! Exclude to prevent React duplicate key collisions
+      removedIds.push(it.id);
+    }
+  }
+
+  return { deduplicated: strictlyUnique, removedIds };
+};
+
+export const DELETED_RAW_ITEMS_STORAGE_KEY = 'canteen_deleted_raw_items_keys_v1';
+
+export const getDeletedRawItemKeys = (): Set<string> => {
+  try {
+    const stored = localStorage.getItem(DELETED_RAW_ITEMS_STORAGE_KEY);
+    if (stored) {
+      const arr = JSON.parse(stored);
+      if (Array.isArray(arr)) return new Set(arr);
+    }
+  } catch {}
+  return new Set();
+};
+
+export const markRawItemAsDeleted = (itemOrId: string | RawInventoryItem): void => {
+  try {
+    const deleted = getDeletedRawItemKeys();
+    if (typeof itemOrId === 'string') {
+      deleted.add(itemOrId.toLowerCase().trim());
+      deleted.add(normalizeRawItemName(itemOrId));
+    } else {
+      if (itemOrId.id) deleted.add(itemOrId.id.toLowerCase().trim());
+      if (itemOrId.name) deleted.add(normalizeRawItemName(itemOrId.name));
+      if (itemOrId.nameBn) deleted.add(normalizeRawItemName(itemOrId.nameBn));
+    }
+    localStorage.setItem(DELETED_RAW_ITEMS_STORAGE_KEY, JSON.stringify(Array.from(deleted)));
+  } catch (e) {
+    console.warn('Failed to mark raw item as deleted:', e);
+  }
+};
+
+export const unmarkRawItemAsDeleted = (itemOrId: string | RawInventoryItem): void => {
+  try {
+    const deleted = getDeletedRawItemKeys();
+    if (typeof itemOrId === 'string') {
+      deleted.delete(itemOrId.toLowerCase().trim());
+      deleted.delete(normalizeRawItemName(itemOrId));
+    } else {
+      if (itemOrId.id) deleted.delete(itemOrId.id.toLowerCase().trim());
+      if (itemOrId.name) deleted.delete(normalizeRawItemName(itemOrId.name));
+    }
+    localStorage.setItem(DELETED_RAW_ITEMS_STORAGE_KEY, JSON.stringify(Array.from(deleted)));
+  } catch {}
 };
 
 export const getRawInventoryItems = (): RawInventoryItem[] => {
@@ -1724,18 +1812,29 @@ export const getRawInventoryItems = (): RawInventoryItem[] => {
       }
     }
 
-    const { deduplicated, removedIds } = deduplicateRawItems(itemsToProcess);
+    let { deduplicated, removedIds } = deduplicateRawItems(itemsToProcess);
 
-    // Merge newly added essential raw items (Garlic, Ginger, Spices, etc.) if missing from inventory
+    // Merge newly added essential raw items if missing from inventory AND not explicitly deleted by user
     let hasAdded = false;
+    const deletedKeys = getDeletedRawItemKeys();
     const currentKeys = new Set(deduplicated.map(it => normalizeRawItemName(it.name)));
+    const currentIds = new Set(deduplicated.map(it => String(it.id || '').toLowerCase().trim()));
     for (const init of INITIAL_RAW_ITEMS) {
       const k = normalizeRawItemName(init.name);
-      if (!currentKeys.has(k)) {
+      const initId = String(init.id || '').toLowerCase().trim();
+      const isDeleted = deletedKeys.has(k) || (initId && deletedKeys.has(initId));
+      if (!isDeleted && !currentKeys.has(k) && !currentIds.has(initId)) {
         deduplicated.push(init);
         currentKeys.add(k);
+        currentIds.add(initId);
         hasAdded = true;
       }
+    }
+
+    if (hasAdded) {
+      const reDedup = deduplicateRawItems(deduplicated);
+      deduplicated = reDedup.deduplicated;
+      removedIds = [...removedIds, ...reDedup.removedIds];
     }
 
     // Always sync clean state back to localStorage if sanitized or modified

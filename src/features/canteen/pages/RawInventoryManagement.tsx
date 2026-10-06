@@ -21,7 +21,10 @@ import {
   getEffectiveRawUnitCost,
   getRawItemSubUnitInfo,
   getRecipeForMenuItem,
-  isReadymadeItem
+  isReadymadeItem,
+  markRawItemAsDeleted,
+  unmarkRawItemAsDeleted,
+  DELETED_RAW_ITEMS_STORAGE_KEY
 } from '../utils/recipeManager';
 import { queuePushKeyToCloud } from '../utils/canteenCloudSync';
 import { SaveButton } from '../components/SaveButton';
@@ -1302,8 +1305,9 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
 
     if (editingItem) {
       // Edit mode
-      setItems(prev => prev.map(i => {
-        if (i.id === editingItem.id) {
+      setItems(prev => {
+        const updatedList = prev.map(i => {
+          if (i.id === editingItem.id) {
           const unit = newItemData.unit || i.unit || 'kg';
           const u = unit.toLowerCase().trim();
           const isPcs = ['pcs', 'pc', 'piece', 'টি', 'টা'].includes(u);
@@ -1399,8 +1403,11 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
           return updated;
         }
         return i;
-      }));
-      setEditingItem(null);
+      });
+      saveRawInventoryItems(updatedList);
+      return updatedList;
+    });
+    setEditingItem(null);
     } else {
       // Add new
       const parsedStock = (newItemData.currentStock !== '' && newItemData.currentStock !== undefined && !isNaN(Number(newItemData.currentStock)))
@@ -1476,7 +1483,12 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
         DP: effectiveDp,
         image: effectiveDp
       };
-      setItems(prev => [newItem, ...prev]);
+      unmarkRawItemAsDeleted(newItem);
+      setItems(prev => {
+        const next = [newItem, ...prev.filter(i => i.id !== newItem.id)];
+        saveRawInventoryItems(next);
+        return next;
+      });
 
       // Directly sync new item to Supabase Canteen_Inventory table
       const newDbItem = {
@@ -1600,6 +1612,9 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
     const target = itemToDelete;
     setIsDeletingItem(true);
     try {
+      // Mark as deleted in persistent blacklist to prevent re-seeding from initial items
+      markRawItemAsDeleted(target);
+
       const remainingItems = items.filter(i => i.id !== target.id);
       setItems(remainingItems);
       lastSavedItemsJsonRef.current = JSON.stringify(remainingItems);
@@ -1617,6 +1632,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
       window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
       setItemToDelete(null);
       setShowAddModal(false);
+      setEditingItem(null);
     } catch (err) {
       console.error('Error deleting raw item:', err);
     } finally {
@@ -1630,6 +1646,9 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
   };
 
   const confirmResetToDefault = () => {
+    try {
+      localStorage.removeItem(DELETED_RAW_ITEMS_STORAGE_KEY);
+    } catch {}
     const { deduplicated } = deduplicateRawItems(INITIAL_RAW_ITEMS);
     setItems(deduplicated);
     lastSavedItemsJsonRef.current = JSON.stringify(deduplicated);
@@ -2090,7 +2109,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-              {filteredItems.map(item => {
+              {filteredItems.map((item, idx) => {
                 const isLow = item.currentStock <= item.minStockAlert;
                 const isZero = item.currentStock <= 0;
                 const itemValue = item.currentStock * item.unitCost;
@@ -2102,7 +2121,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
 
                 return (
                   <div
-                    key={item.id}
+                    key={`${item.id}_${idx}`}
                     onClick={() => {
                       if (!readOnly) handleEditItem(item);
                     }}
@@ -2347,7 +2366,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                     </td>
                   </tr>
                 ) : (
-                  filteredItems.map(item => {
+                  filteredItems.map((item, idx) => {
                     const isLow = item.currentStock <= item.minStockAlert;
                     const isZero = item.currentStock <= 0;
                     const itemValue = item.currentStock * item.unitCost;
@@ -2359,7 +2378,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
 
                     return (
                       <tr 
-                        key={item.id} 
+                        key={`${item.id}_${idx}`} 
                         onClick={() => {
                           if (!readOnly) handleEditItem(item);
                         }}
@@ -3166,7 +3185,6 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                       type="button"
                       onClick={() => {
                         handleDeleteItem(editingItem);
-                        setShowAddModal(false);
                       }}
                       className="px-3.5 py-2 bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white rounded-xl text-xs font-bold transition-colors border border-rose-500/20 flex items-center space-x-1.5 cursor-pointer"
                     >
@@ -3382,8 +3400,8 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                     }}
                     className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500 font-semibold"
                   >
-                    {items.map(it => (
-                      <option key={it.id} value={it.id}>
+                    {items.map((it, itIdx) => (
+                      <option key={`${it.id}_${itIdx}`} value={it.id}>
                         {it.name} ({it.nameBn}) — Stock: {it.currentStock} {it.unit}
                       </option>
                     ))}
@@ -3554,8 +3572,8 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                     onChange={(e) => setSelectedItemId(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500 font-semibold"
                   >
-                    {items.map(it => (
-                      <option key={it.id} value={it.id}>
+                    {items.map((it, itIdx) => (
+                      <option key={`${it.id}_${itIdx}`} value={it.id}>
                         {it.name} ({it.nameBn}) — Stock: {it.currentStock} {it.unit}
                       </option>
                     ))}
@@ -4001,7 +4019,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
 
       {/* Delete Item Confirmation Popup Modal */}
       {itemToDelete && (
-        <div className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[350] bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-gradient-to-b from-slate-900 to-slate-950 border border-slate-700/80 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
             <div className="text-center space-y-2">
               <div className="w-14 h-14 rounded-2xl bg-rose-500/20 border border-rose-500/40 text-rose-400 flex items-center justify-center mx-auto shadow-[0_0_20px_rgba(239,68,68,0.3)]">
@@ -4106,3 +4124,6 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
           </div>
         </div>
       )}
+    </div>
+  );
+};
