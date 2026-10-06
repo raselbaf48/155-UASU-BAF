@@ -1,6 +1,7 @@
 import { supabase } from '../../../supabase';
 import { deduplicateRawItems } from './recipeManager';
 import { resolveImageUrl, getCanteenConfig } from './canteenSettings';
+import { normalizeCanteenMembersSeniority, sortCanteenMembersByOfficeSeniority } from './canteenSeniority';
 import { 
   getCanteenMembersCache, 
   setCanteenMembersCache, 
@@ -634,6 +635,12 @@ export async function syncCanteenMembersFromCloud(forceFull = false): Promise<vo
         const localSurname = String(localM.Surname || '').trim();
         const cloudContact = String(cloudM.Contact || cloudM['Mobile No'] || '').trim();
         const localContact = String(localM.Contact || localM['Mobile No'] || '').trim();
+        const cloudSeniority = (cloudM as any).Seniority !== undefined && (cloudM as any).Seniority !== null ? Number((cloudM as any).Seniority) : undefined;
+        const localSeniority = (localM as any).Seniority !== undefined && (localM as any).Seniority !== null ? Number((localM as any).Seniority) : undefined;
+        const cloudRankBn = String((cloudM as any).Rank_BN || (cloudM as any).rank_bn || '').trim();
+        const localRankBn = String((localM as any).Rank_BN || (localM as any).rank_bn || '').trim();
+        const cloudNameBn = String((cloudM as any).Name_BN || (cloudM as any).name_bn || '').trim();
+        const localNameBn = String((localM as any).Name_BN || (localM as any).name_bn || '').trim();
 
         const isChanged = (
           Math.abs(cloudDue - localDue) > 0.01 ||
@@ -641,7 +648,10 @@ export async function syncCanteenMembersFromCloud(forceFull = false): Promise<vo
           cloudRole !== localRole ||
           cloudRank !== localRank ||
           cloudSurname !== localSurname ||
-          (cloudContact && cloudContact !== localContact)
+          (cloudContact && cloudContact !== localContact) ||
+          cloudSeniority !== localSeniority ||
+          cloudRankBn !== localRankBn ||
+          cloudNameBn !== localNameBn
         );
 
         if (isChanged) {
@@ -650,7 +660,14 @@ export async function syncCanteenMembersFromCloud(forceFull = false): Promise<vo
           const updated = { 
             ...localM, 
             ...cloudM,
-            Contact: mergedContact
+            Contact: mergedContact,
+            Seniority: cloudSeniority !== undefined ? cloudSeniority : localSeniority,
+            seniority: cloudSeniority !== undefined ? cloudSeniority : localSeniority,
+            Rank_BN: cloudRankBn || localRankBn,
+            rank_bn: cloudRankBn || localRankBn,
+            rankBn: cloudRankBn || localRankBn,
+            Name_BN: cloudNameBn || localNameBn,
+            name_bn: cloudNameBn || localNameBn
           };
           mergedList.push(updated);
           if (cleanBd) {
@@ -660,7 +677,9 @@ export async function syncCanteenMembersFromCloud(forceFull = false): Promise<vo
               rank: updated.Rank || '',
               surname: updated.Surname || '',
               contact: mergedContact,
-              bdNo: cleanBd
+              bdNo: cleanBd,
+              seniority: updated.Seniority,
+              rankBn: updated.Rank_BN
             }));
           }
           if (cloudDp && cloudDp !== localDp) {
@@ -673,8 +692,10 @@ export async function syncCanteenMembersFromCloud(forceFull = false): Promise<vo
     }
 
     if (hasDelta) {
-      localStorage.setItem('canteen_members_cache', JSON.stringify(mergedList));
-      window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: mergedList }));
+      const finalSorted = normalizeCanteenMembersSeniority(sortCanteenMembersByOfficeSeniority(mergedList));
+      localStorage.setItem('canteen_members_cache', JSON.stringify(finalSorted));
+      setCanteenMembersCache(finalSorted);
+      window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: finalSorted }));
       window.dispatchEvent(new Event('canteen_state_updated'));
     }
   } catch (err) {

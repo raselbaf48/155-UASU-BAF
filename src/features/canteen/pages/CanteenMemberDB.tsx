@@ -143,13 +143,14 @@ export const CanteenMemberDB: React.FC = () => {
       })
       .map((m: any) => {
         const cleanBd = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
-        const manualSen = (cleanBd && localSeniorityMap[cleanBd] !== undefined)
-          ? localSeniorityMap[cleanBd]
-          : (m.Seniority !== undefined && m.Seniority !== null && !isNaN(Number(m.Seniority))
-            ? Number(m.Seniority)
-            : (m.seniority !== undefined && m.seniority !== null && !isNaN(Number(m.seniority))
-              ? Number(m.seniority)
-              : undefined));
+        const cloudSen = (m.Seniority !== undefined && m.Seniority !== null && !isNaN(Number(m.Seniority)))
+          ? Number(m.Seniority)
+          : ((m.seniority !== undefined && m.seniority !== null && !isNaN(Number(m.seniority)))
+            ? Number(m.seniority)
+            : undefined);
+        const manualSen = cloudSen !== undefined ? cloudSen : (cleanBd ? localSeniorityMap[cleanBd] : undefined);
+        const cloudRankBn = String(m.Rank_BN || m['Rank_BN'] || m.rank_bn || m.rankBn || '').trim();
+        const rankBn = cloudRankBn || getMemberBanglaRank(m);
         return {
           ...m,
           airman_id: m.airman_id || `airman-${m['BD No']}`,
@@ -161,7 +162,10 @@ export const CanteenMemberDB: React.FC = () => {
           Due: Number(m.Due ?? m.due ?? m.baki ?? 0),
           DP: m.DP || '',
           seniority: manualSen,
-          Seniority: manualSen
+          Seniority: manualSen,
+          Rank_BN: rankBn,
+          rank_bn: rankBn,
+          rankBn: rankBn
         };
       });
 

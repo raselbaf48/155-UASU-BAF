@@ -58,7 +58,7 @@ export async function saveMemberSeniority(bdNo: string, seniority: number | null
     await supabase
       .from('Canteen_Member')
       .update({ Seniority: seniority !== null && seniority !== undefined ? Number(seniority) : null })
-      .eq('BD No', cleanBd);
+      .or(`BD No.eq.${cleanBd},airman_id.eq.${cleanBd},airman_id.eq.BD/${cleanBd},airman_id.eq.airman-${cleanBd}`);
   } catch (err) {
     console.warn('Note updating Canteen_Member Seniority:', err);
   }
@@ -106,25 +106,25 @@ export async function saveBatchMemberSeniorities(
       await supabase
         .from('Canteen_Member')
         .update({ Seniority: senVal })
-        .eq('BD No', cleanBd);
+        .or(`BD No.eq.${cleanBd},airman_id.eq.${cleanBd},airman_id.eq.BD/${cleanBd},airman_id.eq.airman-${cleanBd}`);
     } catch {}
   }
 }
 
 /**
- * Fetch seniority mappings from both Cloud KV and 'Biodata Register' table
+ * Fetch seniority mappings directly from 'Canteen_Member' table in Supabase
  */
 export async function fetchAllMemberSeniorities(): Promise<Record<string, number>> {
   const merged: Record<string, number> = { ...getLocalSeniorityMap() };
 
-  // 1. Pull from Biodata Register table
+  // 1. Pull directly from Canteen_Member table (Primary source of truth for Canteen)
   try {
     const { data, error } = await supabase
-      .from('Biodata Register')
-      .select('"BD No", Seniority');
+      .from('Canteen_Member')
+      .select('airman_id, "BD No", Seniority');
     if (!error && Array.isArray(data)) {
       data.forEach((row: any) => {
-        const bd = String(row['BD No'] || '').replace(/\D/g, '');
+        const bd = String(row['BD No'] || row.airman_id || '').replace(/\D/g, '');
         const s = row.Seniority;
         if (bd && s !== null && s !== undefined && !isNaN(Number(s))) {
           merged[bd] = Number(s);
@@ -132,10 +132,10 @@ export async function fetchAllMemberSeniorities(): Promise<Record<string, number
       });
     }
   } catch (err) {
-    console.warn('Note fetching Biodata Register seniorities:', err);
+    console.warn('Note fetching Canteen_Member seniorities:', err);
   }
 
-  // 2. Pull from Canteen Cloud KV
+  // 2. Pull from Canteen Cloud KV as secondary fallback
   try {
     const cloudKv = await pullKeyFromCloud('canteen_member_seniority');
     if (cloudKv && typeof cloudKv === 'object') {

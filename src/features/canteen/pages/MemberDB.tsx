@@ -729,6 +729,14 @@ export const MemberDB: React.FC = () => {
   const [showManagerModal, setShowManagerModal] = useState<boolean>(false);
   const [managerSearchTerm, setManagerSearchTerm] = useState<string>('');
   const [managerAssignSuccess, setManagerAssignSuccess] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage((current) => (current === msg ? null : current));
+    }, 3500);
+  };
 
   useEffect(() => {
     const handleSettingsUpdate = (e: any) => {
@@ -2740,13 +2748,14 @@ export const MemberDB: React.FC = () => {
 
       const effectiveDp = getMemberEffectiveDp(m);
       const localSeniorityMap = getLocalSeniorityMap();
-      const manualSen = (cleanBd && localSeniorityMap[cleanBd] !== undefined)
-        ? localSeniorityMap[cleanBd]
-        : ((m.Seniority !== undefined && m.Seniority !== null && !isNaN(Number(m.Seniority)))
-          ? Number(m.Seniority)
-          : ((m.seniority !== undefined && m.seniority !== null && !isNaN(Number(m.seniority)))
-            ? Number(m.seniority)
-            : undefined));
+      const cloudSen = (m.Seniority !== undefined && m.Seniority !== null && !isNaN(Number(m.Seniority)))
+        ? Number(m.Seniority)
+        : ((m.seniority !== undefined && m.seniority !== null && !isNaN(Number(m.seniority)))
+          ? Number(m.seniority)
+          : undefined);
+      const manualSen = cloudSen !== undefined ? cloudSen : (cleanBd ? localSeniorityMap[cleanBd] : undefined);
+      const cloudRankBn = String(m.Rank_BN || m['Rank_BN'] || m.rank_bn || m.rankBn || '').trim();
+      const rankBn = cloudRankBn || getMemberBanglaRank(m);
 
       uniqueList.push({
         ...m,
@@ -2756,7 +2765,10 @@ export const MemberDB: React.FC = () => {
         baki: Number(m.Due ?? m.due ?? m.baki ?? 0),
         DP: effectiveDp || m.DP || '',
         Seniority: manualSen,
-        seniority: manualSen
+        seniority: manualSen,
+        Rank_BN: rankBn,
+        rank_bn: rankBn,
+        rankBn: rankBn
       });
     }
 
@@ -6081,6 +6093,16 @@ export const MemberDB: React.FC = () => {
         )}
 
       </AnimatePresence>
+
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-[9999] bg-slate-900 border border-slate-700 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3">
+          <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+          <span className="text-xs font-semibold">{toastMessage}</span>
+          <button type="button" onClick={() => setToastMessage(null)} className="text-slate-400 hover:text-white ml-2 cursor-pointer">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
     </div>
   );
 };

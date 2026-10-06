@@ -23,6 +23,7 @@ import defaultMenuItemsData from '../data/defaultMenuItems.json';
 import { getMenuItemBanglaName } from './menuBanglaNames';
 import { getLocalSeniorityMap } from './memberSeniority';
 import { sortCanteenMembersByOfficeSeniority, normalizeCanteenMembersSeniority } from './canteenSeniority';
+import { getMemberBanglaRank } from './memberBanglaNames';
 
 export const DEFAULT_CANTEEN_MENU_ITEMS: CanteenMenuItem[] = (defaultMenuItemsData as any[]).map((it) => ({
   id: it.id,
@@ -246,16 +247,16 @@ export async function fetchCanteenMembersOnce(force = false): Promise<any[]> {
         const localSeniorityMap = getLocalSeniorityMap();
         const merged = data.map((m: any) => {
           const bd = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
-          const sen = (bd && localSeniorityMap[bd] !== undefined)
-            ? localSeniorityMap[bd]
-            : (m.Seniority !== undefined && m.Seniority !== null && !isNaN(Number(m.Seniority))
-              ? Number(m.Seniority)
-              : (m.seniority !== undefined && m.seniority !== null && !isNaN(Number(m.seniority))
-                ? Number(m.seniority)
-                : undefined));
+          const cloudSen = (m.Seniority !== undefined && m.Seniority !== null && !isNaN(Number(m.Seniority)))
+            ? Number(m.Seniority)
+            : ((m.seniority !== undefined && m.seniority !== null && !isNaN(Number(m.seniority)))
+              ? Number(m.seniority)
+              : undefined);
+          const sen = cloudSen !== undefined ? cloudSen : (bd ? localSeniorityMap[bd] : undefined);
 
           const nameBn = String(m.Name_BN || m['Name_BN'] || m.name_bn || m.nameBn || m.Surname_bn || m.bangla_name || '').trim();
-          const rankBn = String(m.Rank_BN || m['Rank_BN'] || m.rank_bn || m.rankBn || m.Rank_bn || '').trim();
+          const rawRankBn = String(m.Rank_BN || m['Rank_BN'] || m.rank_bn || m.rankBn || m.Rank_bn || '').trim();
+          const rankBn = rawRankBn || getMemberBanglaRank(m);
 
           return {
             ...m,
