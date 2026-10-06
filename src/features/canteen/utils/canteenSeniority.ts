@@ -108,12 +108,193 @@ export function sortCanteenMembersByOfficeSeniority(members: any[]): any[] {
       return weightA - weightB;
     }
 
+    // 2. Custom manual seniority within the rank (identical to Biodata Register)
+    const sA = (a.Seniority !== undefined && a.Seniority !== null && a.Seniority !== '' && !isNaN(Number(a.Seniority)))
+      ? Number(a.Seniority)
+      : ((a.seniority !== undefined && a.seniority !== null && a.seniority !== '' && !isNaN(Number(a.seniority))) ? Number(a.seniority) : null);
+
+    const sB = (b.Seniority !== undefined && b.Seniority !== null && b.Seniority !== '' && !isNaN(Number(b.Seniority)))
+      ? Number(b.Seniority)
+      : ((b.seniority !== undefined && b.seniority !== null && b.seniority !== '' && !isNaN(Number(b.seniority))) ? Number(b.seniority) : null);
+
+    if (sA !== null && sB !== null && sA !== sB) {
+      return sA - sB;
+    }
+    if (sA !== null && sB === null) return -1;
+    if (sA === null && sB !== null) return 1;
+
+    // 3. Fallback within the same rank: strictly by BD Number (lower BD No = more senior)
     const bdAStr = String(a['BD No'] || a.bdNo || a.airman_id || '').replace(/\D/g, '');
     const bdBStr = String(b['BD No'] || b.bdNo || b.airman_id || '').replace(/\D/g, '');
     const numA = parseInt(bdAStr, 10) || 9999999;
     const numB = parseInt(bdBStr, 10) || 9999999;
     return numA - numB;
   });
+}
+
+/**
+ * Ensures all members have sequential 1..N seniority numbers
+ * based on their current rank order and seniority / BD No order.
+ */
+export function normalizeCanteenMembersSeniority(members: any[]): any[] {
+  const sorted = sortCanteenMembersByOfficeSeniority(members);
+  return sorted.map((member, index) => ({
+    ...member,
+    seniority: index + 1,
+    Seniority: index + 1
+  }));
+}
+
+/**
+ * Calculates the valid seniority bounds (min and max) that a member
+ * of a given rank can occupy in the unit.
+ */
+export function getCanteenRankSeniorityRange(
+  members: any[],
+  rank: string
+): { minSeniority: number; maxSeniority: number; totalInRank: number } {
+  const normalized = normalizeCanteenMembersSeniority(members);
+  const matching = normalized.filter((m) => String(m.Rank || m.rank || '').trim() === String(rank || '').trim());
+  if (matching.length === 0) {
+    const rankWeight = getRankWeight(rank);
+    let insertionPos = 1;
+    for (const m of normalized) {
+      const mWeight = getRankWeight(m.Rank || m.rank);
+      if (mWeight < rankWeight) {
+        insertionPos = (m.seniority || 0) + 1;
+      }
+    }
+    return { minSeniority: insertionPos, maxSeniority: insertionPos, totalInRank: 0 };
+  }
+
+  const seniorities = matching.map((m) => m.seniority || 0);
+  return {
+    minSeniority: Math.min(...seniorities),
+    maxSeniority: Math.max(...seniorities),
+    totalInRank: matching.length,
+  };
+}
+
+/**
+ * Resolves a requested seniority number into a valid unit seniority position
+ * that never violates military rank hierarchy, exactly as in office app's Biodata Register:
+ * - If user gives 1 (or <= minSeniority), they become the seniormost of that rank.
+ * - If user gives a rank-relative position (1..totalInRank) that is less than minSeniority,
+ *   it maps to that position within the rank (e.g. 1st of rank -> minSeniority).
+ * - Clamps strictly between minSeniority and maxSeniority of that rank.
+ */
+export function resolveCanteenTargetSeniority(
+  members: any[],
+  rank: string,
+  inputSeniority: number
+): {
+  resolvedSeniority: number;
+  relativeRankIndex: number;
+  minRankSeniority: number;
+  maxRankSeniority: number;
+  totalInRank: number;
+} {
+  const range = getCanteenRankSeniorityRange(members, rank);
+  const { minSeniority, maxSeniority, totalInRank } = range;
+
+  if (totalInRank === 0) {
+    return {
+      resolvedSeniority: minSeniority,
+      relativeRankIndex: 1,
+      minRankSeniority: minSeniority,
+      maxRankSeniority: maxSeniority,
+      totalInRank: 0,
+    };
+  }
+
+  let resolved = inputSeniority;
+
+  // If user entered a rank-relative number (e.g. 1 for 1st in rank, 2 for 2nd in rank)
+  if (inputSeniority >= 1 && inputSeniority <= totalInRank && inputSeniority < minSeniority) {
+    resolved = minSeniority + inputSeniority - 1;
+  } else {
+    // Clamp to valid range for this rank (never jump higher ranks or fall below lower ranks)
+    resolved = Math.max(minSeniority, Math.min(inputSeniority, maxSeniority));
+  }
+
+  const relativeIndex = resolved - minSeniority + 1;
+
+  return {
+    resolvedSeniority: resolved,
+    relativeRankIndex: relativeIndex,
+    minRankSeniority: minSeniority,
+    maxRankSeniority: maxSeniority,
+    totalInRank,
+  };
+}
+
+/**
+ * Reorders a canteen member's seniority within the allowed bounds of their rank:
+ * Higher ranks (above this rank) and lower ranks (below this rank) remain undisturbed.
+ * Intermediate members of the same rank shift smoothly up or down.
+ */
+export function reorderCanteenMemberSeniority(
+  members: any[],
+  targetBdOrId: string,
+  newSeniority: number
+): { updatedMembers: any[]; changedMembers: any[] } {
+  const baseList = normalizeCanteenMembersSeniority(members);
+  const cleanTargetBd = String(targetBdOrId || '').replace(/\D/g, '');
+  const targetIndex = baseList.findIndex(
+    (m) =>
+      (m.airman_id && String(m.airman_id).toLowerCase() === String(targetBdOrId).toLowerCase()) ||
+      (cleanTargetBd && String(m['BD No'] || m.bdNo || '').replace(/\D/g, '') === cleanTargetBd)
+  );
+
+  if (targetIndex === -1) {
+    return { updatedMembers: baseList, changedMembers: [] };
+  }
+
+  const target = baseList[targetIndex];
+  const oldSeniority = target.seniority || (targetIndex + 1);
+  const rank = target.Rank || target.rank || '';
+
+  const { resolvedSeniority } = resolveCanteenTargetSeniority(baseList, rank, newSeniority);
+
+  if (oldSeniority === resolvedSeniority) {
+    return { updatedMembers: baseList, changedMembers: [] };
+  }
+
+  const changedMembers: any[] = [];
+
+  const adjustedList = baseList.map((m) => {
+    const isTarget =
+      (m.airman_id && String(m.airman_id).toLowerCase() === String(targetBdOrId).toLowerCase()) ||
+      (cleanTargetBd && String(m['BD No'] || m.bdNo || '').replace(/\D/g, '') === cleanTargetBd);
+
+    if (isTarget) {
+      const updated = { ...m, seniority: resolvedSeniority, Seniority: resolvedSeniority };
+      changedMembers.push(updated);
+      return updated;
+    }
+
+    const currentSen = m.seniority || 0;
+    if (oldSeniority > resolvedSeniority) {
+      // Moving up in seniority (e.g. from 20 -> 10)
+      if (currentSen >= resolvedSeniority && currentSen < oldSeniority) {
+        const updated = { ...m, seniority: currentSen + 1, Seniority: currentSen + 1 };
+        changedMembers.push(updated);
+        return updated;
+      }
+    } else {
+      // Moving down in seniority (e.g. from 10 -> 20)
+      if (currentSen <= resolvedSeniority && currentSen > oldSeniority) {
+        const updated = { ...m, seniority: currentSen - 1, Seniority: currentSen - 1 };
+        changedMembers.push(updated);
+        return updated;
+      }
+    }
+
+    return m;
+  });
+
+  const finalSorted = normalizeCanteenMembersSeniority(adjustedList);
+  return { updatedMembers: finalSorted, changedMembers };
 }
 
 /**

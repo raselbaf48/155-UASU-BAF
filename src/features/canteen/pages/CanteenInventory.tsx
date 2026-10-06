@@ -30,10 +30,22 @@ import {
   deduplicateRawItems,
   calculateMenuItemStockInfo
 } from '../utils/recipeManager';
+import {
+  getMenuItemBanglaName,
+  saveMenuItemBanglaName,
+  fetchMenuBanglaNamesFromCloud
+} from '../utils/menuBanglaNames';
 
 export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = false}) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [items, setItems] = useState<any[]>(() => getCanteenMenuCache());
+  const [items, setItems] = useState<any[]>(() => {
+    const cached = getCanteenMenuCache();
+    return cached.map(it => ({
+      ...it,
+      nameBn: it.nameBn || it.name_bn || it['Name (BN)'] || getMenuItemBanglaName(it) || '',
+      name_bn: it.nameBn || it.name_bn || it['Name (BN)'] || getMenuItemBanglaName(it) || ''
+    }));
+  });
   const [loading, setLoading] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [isSavingAdd, setIsSavingAdd] = useState(false);
@@ -45,6 +57,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
   
   const [newItem, setNewItem] = useState({
     name: '',
+    nameBn: '',
     category: 'SNACKS',
     price: 0,
     cost: 0,
@@ -207,6 +220,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
   const [modalTab, setModalTab] = useState<'EDIT' | 'HISTORY'>('EDIT');
   const [modalFormData, setModalFormData] = useState({
     name: '',
+    nameBn: '',
     category: 'SNACKS',
     price: 0,
     cost: 0,
@@ -258,8 +272,10 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     const initialRawItem = normalizedRecipe.length > 0 
       ? formatRecipeRawItemsString(normalizedRecipe, rawList) 
       : (item['Raw Item'] ?? item.rawItem ?? '');
+    const initialBnName = item.nameBn || item.name_bn || item['Name (BN)'] || getMenuItemBanglaName(item) || '';
     setModalFormData({
       name: item.name || '',
+      nameBn: initialBnName,
       category: item.category || 'SNACKS',
       price: Number(item.price) || 0,
       cost: initialCost,
@@ -384,7 +400,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     const rawItemValue = finalRecipe.length > 0
       ? formatRecipeRawItemsString(finalRecipe, availableRawItems)
       : (modalFormData.rawItem !== undefined ? modalFormData.rawItem.trim() : '');
-    const payload = {
+    const payload: any = {
       name: modalFormData.name.trim(),
       category: modalFormData.category,
       price: parsedPrice,
@@ -392,6 +408,10 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       'Raw Item': rawItemValue,
       DP: finalDp || null
     };
+
+    if (modalFormData.nameBn && modalFormData.nameBn.trim()) {
+      payload.name_bn = modalFormData.nameBn.trim();
+    }
 
     setIsSavingModal(true);
 
@@ -401,9 +421,19 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       console.warn('Supabase update warning:', e);
     }
 
+    // Save Bengali name to dictionary, cloud sync & localStorage
+    if (modalFormData.nameBn !== undefined) {
+      saveMenuItemBanglaName(
+        { id: selectedItemForModal.id, name: modalFormData.name.trim() },
+        modalFormData.nameBn.trim()
+      );
+    }
+
     setItems(prev => prev.map(i => i.id === selectedItemForModal.id ? { 
       ...i, 
       ...payload,
+      nameBn: modalFormData.nameBn?.trim(),
+      name_bn: modalFormData.nameBn?.trim(),
       cost: parsedCost,
       rawItem: rawItemValue
     } : i));
@@ -442,8 +472,10 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     const existingRec = getRecipeForMenuItem(item.id, item.name);
     const rawList = availableRawItems.length > 0 ? availableRawItems : getRawInventoryItems();
     const recipeCost = calculateMenuItemCost(existingRec, rawList).totalCost;
+    const initialBnName = item.nameBn || item.name_bn || item['Name (BN)'] || getMenuItemBanglaName(item) || '';
     setNewItem({
       name: item.name,
+      nameBn: initialBnName,
       category: item.category,
       price: item.price,
       cost: existingRec.length > 0 ? recipeCost : Number(item.Cost ?? item.cost ?? 0),
@@ -468,7 +500,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       const itemRecipeCost = calculateMenuItemCost(itemRecipe, availableRawItems).totalCost;
       const parsedCost = itemRecipe.length > 0 ? itemRecipeCost : (Number(newItem.cost) >= 0 ? Number(newItem.cost) : 0);
       const rawItemValue = itemRecipe.length > 0 ? formatRecipeRawItemsString(itemRecipe, availableRawItems) : (newItem.rawItem?.trim() || '');
-      const payload = {
+      const payload: any = {
           name: newItem.name.trim(),
           category: newItem.category,
           price: parsedPrice,
@@ -476,6 +508,9 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
           'Raw Item': rawItemValue,
           DP: finalDp || null
       };
+      if (newItem.nameBn && newItem.nameBn.trim()) {
+        payload.name_bn = newItem.nameBn.trim();
+      }
 
       setIsSavingAdd(true);
 
@@ -484,7 +519,12 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
           const { error } = await supabase.from('Canteen_Menu').update(payload).eq('id', editingId);
           if (!error) {
               // Realtime update local state
-              setItems(prev => prev.map(i => i.id === editingId ? { ...i, ...payload } : i));
+              setItems(prev => prev.map(i => i.id === editingId ? { 
+                ...i, 
+                ...payload, 
+                nameBn: newItem.nameBn?.trim(), 
+                name_bn: newItem.nameBn?.trim() 
+              } : i));
           } else {
               alert("Error updating item: " + error.message);
           }
@@ -494,15 +534,32 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
           if (!error) {
               if (data && data[0]) {
                 targetId = data[0].id;
-                setItems(prev => [data[0], ...prev]);
+                setItems(prev => [{ 
+                  ...data[0], 
+                  nameBn: newItem.nameBn?.trim(), 
+                  name_bn: newItem.nameBn?.trim() 
+                }, ...prev]);
               } else {
                 fetchItems();
               }
           } else {
               const generatedId = Math.random().toString();
               targetId = generatedId;
-              setItems([{ ...payload, id: generatedId }, ...items]);
+              setItems([{ 
+                ...payload, 
+                id: generatedId, 
+                nameBn: newItem.nameBn?.trim(), 
+                name_bn: newItem.nameBn?.trim() 
+              }, ...items]);
           }
+      }
+
+      // Save Bengali name to dictionary, cloud sync & localStorage
+      if (newItem.nameBn !== undefined) {
+        saveMenuItemBanglaName(
+          { id: targetId || undefined, name: newItem.name.trim() },
+          newItem.nameBn.trim()
+        );
       }
 
       // Save Recipe Ingredients
@@ -858,6 +915,11 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                            <h3 className="font-black text-white text-lg tracking-tight uppercase group-hover:text-indigo-300 transition-colors truncate" title={item.name}>
                               {item.name}
                            </h3>
+                           {Boolean(item.nameBn || item.name_bn || getMenuItemBanglaName(item)) && (
+                              <p className="text-xs text-slate-400 font-medium truncate mt-0.5" title={item.nameBn || item.name_bn || getMenuItemBanglaName(item)}>
+                                 {item.nameBn || item.name_bn || getMenuItemBanglaName(item)}
+                              </p>
+                           )}
                         </div>
                         <div className="shrink-0">
                            {/* 3D Box Shape Stock Badge */}
@@ -981,14 +1043,39 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                         <div className="space-y-4">
                            
 
-                           <div>
-                              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Name</label>
-                              <input 
-                                 type="text" 
-                                 value={modalFormData.name ?? ""}
-                                 onChange={(e) => setModalFormData(prev => ({ ...prev, name: e.target.value }))}
-                                 className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                              />
+                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div>
+                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                                    Menu Name (EN) / নাম (ইংরেজি)
+                                 </label>
+                                 <input 
+                                    type="text" 
+                                    value={modalFormData.name ?? ""}
+                                    onChange={(e) => {
+                                       const newEn = e.target.value;
+                                       setModalFormData(prev => ({ 
+                                          ...prev, 
+                                          name: newEn,
+                                          nameBn: prev.nameBn || getMenuItemBanglaName(newEn)
+                                       }));
+                                    }}
+                                    placeholder="e.g. SPECIAL SAMOSA"
+                                    className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                 />
+                              </div>
+                              <div>
+                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1 flex items-center justify-between">
+                                    <span>Name (BN) / নাম (বাংলা)</span>
+                                    <span className="text-[9px] text-emerald-400 font-semibold normal-case">স্বয়ংক্রিয় / সম্পাদনযোগ্য</span>
+                                 </label>
+                                 <input 
+                                    type="text" 
+                                    value={modalFormData.nameBn ?? ""}
+                                    onChange={(e) => setModalFormData(prev => ({ ...prev, nameBn: e.target.value }))}
+                                    placeholder="যেমন: স্পেশাল সমুচা"
+                                    className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                 />
+                              </div>
                            </div>
 
                            <div className="grid grid-cols-2 gap-3">
@@ -1597,15 +1684,39 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                </div>
 
                <div className="flex-1 overflow-y-auto space-y-4 pr-1">
-                  <div>
-                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Item Name</label>
-                     <input 
-                        type="text" 
-                        value={newItem.name ?? ""}
-                        onChange={(e) => setNewItem(prev => ({ ...prev, name: e.target.value }))}
-                        className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                        placeholder="e.g. SPECIAL SAMOSA"
-                     />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                     <div>
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                           Menu Name (EN) / নাম (ইংরেজি)
+                        </label>
+                        <input 
+                           type="text" 
+                           value={newItem.name ?? ""}
+                           onChange={(e) => {
+                              const newEn = e.target.value;
+                              setNewItem(prev => ({ 
+                                 ...prev, 
+                                 name: newEn,
+                                 nameBn: prev.nameBn || getMenuItemBanglaName(newEn)
+                              }));
+                           }}
+                           className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                           placeholder="e.g. SPECIAL SAMOSA"
+                        />
+                     </div>
+                     <div>
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1 flex items-center justify-between">
+                           <span>Name (BN) / নাম (বাংলা)</span>
+                           <span className="text-[9px] text-emerald-400 font-semibold normal-case">স্বয়ংক্রিয় / সম্পাদনযোগ্য</span>
+                        </label>
+                        <input 
+                           type="text" 
+                           value={newItem.nameBn ?? ""}
+                           onChange={(e) => setNewItem(prev => ({ ...prev, nameBn: e.target.value }))}
+                           className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                           placeholder="যেমন: স্পেশাল সমুচা"
+                        />
+                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">

@@ -2195,27 +2195,6 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                               <CheckCircle2 className="w-3 h-3" /> OK
                             </span>
                           )}
-
-                          {!readOnly && (
-                            <div className="flex items-center gap-1 ml-1" onClick={(e) => e.stopPropagation()}>
-                              <button
-                                type="button"
-                                onClick={() => handleEditItem(item)}
-                                className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors cursor-pointer shadow-sm"
-                                title="Edit Item (সম্পাদনা করুন)"
-                              >
-                                <Edit2 className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setItemToDelete(item)}
-                                className="p-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/20 transition-all cursor-pointer shadow-sm active:scale-95"
-                                title="Delete Item (আইটেম ডিলিট করুন)"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          )}
                         </div>
                       </div>
 

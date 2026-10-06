@@ -3,6 +3,9 @@ import { supabase } from '../../../supabase';
 export interface CanteenMenuItem {
   id: string;
   name: string;
+  name_en?: string;
+  name_bn?: string;
+  nameBn?: string;
   category: string;
   price: number;
   stock?: number;
@@ -17,10 +20,14 @@ export interface CanteenMenuItem {
 }
 
 import defaultMenuItemsData from '../data/defaultMenuItems.json';
+import { getMenuItemBanglaName } from './menuBanglaNames';
 
 export const DEFAULT_CANTEEN_MENU_ITEMS: CanteenMenuItem[] = (defaultMenuItemsData as any[]).map((it) => ({
   id: it.id,
   name: it.name,
+  name_en: it.name,
+  name_bn: it.name_bn || getMenuItemBanglaName(it),
+  nameBn: it.name_bn || getMenuItemBanglaName(it),
   category: it.category || 'SNACKS',
   price: Number(it.price) || 0,
   Cost: Number(it.Cost ?? it.cost ?? 0),

@@ -77,16 +77,18 @@ export function generateStatementCanvas(data: StatementCanvasData): HTMLCanvasEl
   const headerHeight = 110;
 
   // Calculate table rows count
-  let summaryRowsCount = 2; // মোট বিল, সর্বমোট প্রদেয় বিল
+  let summaryRowsCount = 1; // সর্বমোট প্রদেয় বিল
+  if (totalMonthBill > 0) summaryRowsCount++;
   if (previousDue > 0) summaryRowsCount++;
   if (unitFundBill > 0) summaryRowsCount++;
   if (othersFundBill > 0) summaryRowsCount++;
   if (effectivePayments > 0) summaryRowsCount++;
 
-  const itemsCount = Math.max(1, items.length);
+  const itemsCount = items && items.length > 0 ? items.length : 1;
   const totalTableRows = 3 + itemsCount + summaryRowsCount;
   const tableHeight = totalTableRows * rowHeight;
-  const cardHeight = headerHeight + tableHeight + 40;
+  const footerHeight = 24; // Clean padding below table (signatures removed as requested)
+  const cardHeight = headerHeight + tableHeight + footerHeight;
 
   // Retina Scale for razor sharp text
   const scale = 2;
@@ -239,9 +241,7 @@ export function generateStatementCanvas(data: StatementCanvasData): HTMLCanvasEl
   };
 
   // Data Rows - Normal white background (all 4 columns visible: দ্রব্যের নাম, পরিমাণ, দর, মোট)
-  if (items.length === 0) {
-    drawItemRow(`ক্যান্টিন বিল (${monthText})`, 1, totalMonthBill, totalMonthBill);
-  } else {
+  if (items && items.length > 0) {
     items.forEach((item) => {
       const isGeneric = isGenericCanteenBill(item.itemName);
       const displayName = isGeneric ? `ক্যান্টিন বিল (${monthText})` : formatItemNameBn(item.itemName);
@@ -249,6 +249,18 @@ export function generateStatementCanvas(data: StatementCanvasData): HTMLCanvasEl
       const rate = item.rate > 0 ? item.rate : Math.round(item.total / qty);
       drawItemRow(displayName, qty, rate, item.total);
     });
+  } else if (totalMonthBill > 0) {
+    drawItemRow(`ক্যান্টিন বিল (${monthText})`, 1, totalMonthBill, totalMonthBill);
+  } else {
+    // Merge all 4 columns: এই মাসে কোনো ক্যান্টিন বিল নেই
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(tableX, currentY, tableWidth, rowHeight);
+    drawBorder(tableX, currentY, tableWidth, rowHeight);
+    ctx.fillStyle = '#000000';
+    ctx.font = `bold 14px ${BENGALI_SUTONNY_FONT}`;
+    ctx.textAlign = 'center';
+    ctx.fillText('এই মাসে কোনো ক্যান্টিন বিল নেই', tableX + tableWidth / 2, currentY + rowHeight / 2 + 1);
+    currentY += rowHeight;
   }
 
   // Summary Rows Helper - Normal white background
@@ -280,8 +292,10 @@ export function generateStatementCanvas(data: StatementCanvasData): HTMLCanvasEl
     currentY += rowHeight;
   };
 
-  // 1. মোট বিল
-  drawSummaryRow('মোট বিল', `৳${toBengaliNum(totalMonthBill)}`, '#000000');
+  // 1. মোট ক্যান্টিন বিল (only if > 0)
+  if (totalMonthBill > 0) {
+    drawSummaryRow('মোট ক্যান্টিন বিল', `৳${toBengaliNum(totalMonthBill)}`, '#000000');
+  }
 
   // 2. বকেয়া বিল (if > 0)
   if (previousDue > 0) {
@@ -308,7 +322,7 @@ export function generateStatementCanvas(data: StatementCanvasData): HTMLCanvasEl
 
   // Outer border around whole table for clean crisp outline
   ctx.strokeStyle = '#000000';
-  ctx.lineWidth = 2.5;
+  ctx.lineWidth = 2;
   ctx.strokeRect(tableX, headerHeight, tableWidth, currentY - headerHeight);
 
   return canvas;

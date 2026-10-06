@@ -42,7 +42,9 @@ export const CANTEEN_CLOUD_KEYS = [
   'canteen_expense_last_unit_prices',
   'canteen_recent_members',
   'canteen_raw_inventory_items_v2',
-  'canteen_bill_import_history'
+  'canteen_bill_import_history',
+  'canteen_member_seniority',
+  'canteen_menu_bangla_names'
 ] as const;
 
 export type CanteenCloudKey = typeof CANTEEN_CLOUD_KEYS[number];

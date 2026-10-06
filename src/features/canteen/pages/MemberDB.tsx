@@ -46,7 +46,9 @@ import {
   ArrowRight,
   AlertCircle,
   Sliders,
-  Share2
+  Share2,
+  Award,
+  Hash
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, fetchDirectImageUrl, getCanteenConfig, saveCanteenConfig } from '../utils/canteenSettings';
@@ -56,6 +58,7 @@ import { SaveButton } from '../components/SaveButton';
 import { BulkImportInitialBillsModal } from '../components/BulkImportInitialBillsModal';
 import { SetInitialBillModal } from '../components/SetInitialBillModal';
 import { PrintableCanteenBillModal } from '../components/PrintableCanteenBillModal';
+import { EditMemberSeniorityModal } from '../components/EditMemberSeniorityModal';
 import { restoreRawStockForSaleCancellation } from '../utils/recipeManager';
 import { pushKeyToCloud, pullKeyFromCloud, recordDeletedTxId, getDeletedTxIds } from '../utils/canteenCloudSync';
 import { syncImportHistoryToTransactions, deduplicateCanteenTransactions } from '../utils/importHistoryTxs';
@@ -65,7 +68,8 @@ import {
   formatMemberNameBn,
   formatBengaliMonthYear,
   toBengaliNum,
-  getPaymentCycleMonthKey
+  getPaymentCycleMonthKey,
+  isPaymentTx
 } from '../utils/exportCanteenBillExcel';
 import {
   generateStatementCanvasBlob,
@@ -76,10 +80,18 @@ import {
 import { saveAs } from 'file-saver';
 import { 
   sortCanteenMembersByOfficeSeniority,
+  normalizeCanteenMembersSeniority,
+  getCanteenRankSeniorityRange,
+  resolveCanteenTargetSeniority,
   isCivilianMember,
   isAirmanMember 
 } from '../utils/canteenSeniority';
 export { isCivilianMember, isAirmanMember };
+import {
+  getLocalSeniorityMap,
+  saveMemberSeniority,
+  fetchAllMemberSeniorities
+} from '../utils/memberSeniority';
 import { WhatsAppMessageTemplateBox } from '../components/WhatsAppMessageTemplateBox';
 import {
   buildWhatsAppBillMessage,
@@ -287,6 +299,50 @@ export const getTxMonthKey = (dateStr: any): string => {
   } catch {}
 
   return '';
+};
+
+// Accurately determine the effective month (YYYY-MM) for any transaction.
+// Explicit monthKey and month names in items description are strictly preserved
+// and NEVER wrongly overwritten by payment dates or cycles.
+export const getTxEffectiveMonth = (tx: any): string => {
+  if (!tx) return '';
+  const itemsStr = String(tx.items || '');
+  if (itemsStr) {
+    if (itemsStr.includes('সেপ্টেম্বর') || itemsStr.toLowerCase().includes('sep')) {
+      const yrMatch = itemsStr.match(/202\d/) || itemsStr.match(/২০২[০-৯]/);
+      let yr = '2026';
+      if (yrMatch) yr = yrMatch[0].replace(/[০-৯]/g, d => String('০১২৩৪৫৬৭৮৯'.indexOf(d)));
+      return `${yr}-09`;
+    }
+    if (itemsStr.includes('আগস্ট') || itemsStr.toLowerCase().includes('aug')) {
+      const yrMatch = itemsStr.match(/202\d/) || itemsStr.match(/২০২[০-৯]/);
+      let yr = '2026';
+      if (yrMatch) yr = yrMatch[0].replace(/[০-৯]/g, d => String('০১২৩৪৫৬৭৮৯'.indexOf(d)));
+      return `${yr}-08`;
+    }
+    if (itemsStr.includes('অক্টোবর') || itemsStr.toLowerCase().includes('oct')) {
+      const yrMatch = itemsStr.match(/202\d/) || itemsStr.match(/২০২[০-৯]/);
+      let yr = '2026';
+      if (yrMatch) yr = yrMatch[0].replace(/[০-৯]/g, d => String('০১২৩৪৫৬৭৮৯'.indexOf(d)));
+      return `${yr}-10`;
+    }
+    if (itemsStr.includes('নভেম্বর') || itemsStr.toLowerCase().includes('nov')) return '2026-11';
+    if (itemsStr.includes('ডিসেম্বর') || itemsStr.toLowerCase().includes('dec')) return '2026-12';
+    if (itemsStr.includes('জুলাই') || itemsStr.toLowerCase().includes('jul')) return '2026-07';
+  }
+
+  // If explicit valid monthKey is stored, strictly honor it
+  if (tx.monthKey && /^\d{4}-\d{2}$/.test(String(tx.monthKey).trim())) {
+    return String(tx.monthKey).trim();
+  }
+
+  // Payment date cycle fallback only if monthKey is not stored
+  const isPay = isPaymentTx(tx);
+  if (isPay) {
+    const cycle = getPaymentCycleMonthKey(tx?.date || tx?.timestamp || tx?.created_at || tx?.createdAt);
+    if (cycle) return cycle;
+  }
+  return getTxMonthKey(tx?.date || tx?.timestamp || tx?.created_at || tx?.createdAt);
 };
 
 // Extract YYYY-MM of the current running month
@@ -499,15 +555,26 @@ export const formatCompactMonth = (monthKey: string): string => {
 
 // Categorize transaction into CANTEEN, UNIT_FUND, or OTHERS
 export const getTxCategory = (tx: any): 'CANTEEN' | 'UNIT_FUND' | 'OTHERS' => {
+  if (!tx) return 'CANTEEN';
   if (tx.billType) {
     const b = String(tx.billType).toUpperCase();
     if (b === 'UNIT_FUND' || b.includes('UNIT')) return 'UNIT_FUND';
     if (b === 'OTHERS' || b.includes('OTHER')) return 'OTHERS';
-    return 'CANTEEN';
+    if (b === 'CANTEEN') return 'CANTEEN';
   }
-  const desc = String(tx.items || tx.type || '').toLowerCase();
-  if (desc.includes('unit fund') || desc.includes('unit_fund') || desc.includes('ইউনিট ফান্ড')) return 'UNIT_FUND';
-  if (desc.includes('others') || desc.includes('other bill') || desc.includes('অন্যান্য')) return 'OTHERS';
+  if (tx.category) {
+    const c = String(tx.category).toUpperCase();
+    if (c === 'UNIT_FUND' || c.includes('UNIT')) return 'UNIT_FUND';
+    if (c === 'OTHERS' || c.includes('OTHER')) return 'OTHERS';
+    if (c === 'CANTEEN') return 'CANTEEN';
+  }
+  const txId = String(tx.id || '').toLowerCase();
+  if (txId.includes('unit_fund') || txId.includes('unit-fund') || txId.includes('unitfund')) return 'UNIT_FUND';
+  if (txId.includes('others') || txId.includes('other-fund')) return 'OTHERS';
+
+  const desc = String(tx.items || tx.type || tx.description || tx.note || '').toLowerCase();
+  if (desc.includes('unit fund') || desc.includes('unit_fund') || desc.includes('ইউনিট ফান্ড') || desc.includes('unit fund bill')) return 'UNIT_FUND';
+  if (desc.includes('others') || desc.includes('other bill') || desc.includes('অন্যান্য') || desc.includes('others fund')) return 'OTHERS';
   return 'CANTEEN';
 };
 
@@ -624,6 +691,9 @@ export const MemberDB: React.FC = () => {
   // Profile Modal state
   const [profileMember, setProfileMember] = useState<any | null>(null);
   const [profileTx, setProfileTx] = useState<any[]>([]);
+
+  // Seniority Edit Modal state
+  const [seniorityEditMember, setSeniorityEditMember] = useState<any | null>(null);
 
   // Initial Bill Modals state
   const [isImportBillsModalOpen, setIsImportBillsModalOpen] = useState(false);
@@ -1602,10 +1672,7 @@ export const MemberDB: React.FC = () => {
     const matchingTxs = memberTxs.filter((tx) => {
       const cat = getTxCategory(tx);
       const catMatch = category === 'ALL' || cat === category;
-      const isPay = tx?.type === 'BILL PAYMENT' || tx?.type === 'PAYMENT';
-      const txMonth = isPay
-        ? (getPaymentCycleMonthKey(tx?.date || tx?.timestamp || tx?.created_at || tx?.createdAt) || tx?.monthKey || '')
-        : (tx?.monthKey || getTxMonthKey(tx.date));
+      const txMonth = getTxEffectiveMonth(tx);
       const monthMatch = txMonth === month;
       return catMatch && monthMatch;
     });
@@ -1623,10 +1690,7 @@ export const MemberDB: React.FC = () => {
         .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
 
       const beforeTxs = categoryTxs.filter((tx) => {
-        const isPay = tx?.type === 'BILL PAYMENT' || tx?.type === 'PAYMENT';
-        const m = isPay
-          ? (getPaymentCycleMonthKey(tx?.date || tx?.timestamp || tx?.created_at || tx?.createdAt) || tx?.monthKey || '')
-          : (tx?.monthKey || getTxMonthKey(tx.date));
+        const m = getTxEffectiveMonth(tx);
         return m < month;
       });
       const chargesBefore = calculateEffectiveCharges(beforeTxs);
@@ -1847,6 +1911,9 @@ export const MemberDB: React.FC = () => {
       if (cat === 'UNIT_FUND' || cat === 'OTHERS') return;
 
       const itemsStr = String(tx.items || '').trim();
+      const itemsStrLower = itemsStr.toLowerCase();
+      if (itemsStrLower.includes('unit fund') || itemsStrLower.includes('ইউনিট ফান্ড') || itemsStrLower.includes('others') || itemsStrLower.includes('অন্যান্য')) return;
+
       // Skip previous due initial bill - it is displayed in the বকেয়া বিল summary row
       if (itemsStr.includes('বকেয়া বিল')) return;
 
@@ -1948,7 +2015,7 @@ export const MemberDB: React.FC = () => {
           rec.total += subTotal;
           if (itemRate > 0) rec.rates.push(itemRate);
         });
-      } else {
+      } else if (itemsStr.trim().length > 0 && Number(tx.amount || 0) > 0) {
         const name = itemsStr.trim();
         const total = Number(tx.amount || 0);
         let rate = lookupCatalogPrice(name, menuCatalog);
@@ -2281,12 +2348,14 @@ export const MemberDB: React.FC = () => {
       
       const isCash = String(payMethod).toUpperCase() === 'CASH';
       const gatewayFormatted = isCash ? 'Cash' : 'UCB';
-      const paymentItemDesc = `Bill Payment - ${gatewayFormatted}`;
       const catLabel = payBillCategory === 'ALL' ? 'ALL BILLS' : payBillCategory.replace('_', ' ');
       const payeeName = `${payBillMember.Rank || payBillMember.rank || ''} ${payBillMember.Surname || payBillMember['Surname'] || payBillMember.name || ''}`.trim();
 
       const now = new Date();
-      const paymentMonthCycle = getPaymentCycleMonthKey(now);
+      // If paying while filtering by a specific month (e.g. '2026-09'), assign payment directly to that month!
+      const paymentMonthCycle = (selectedMonth && selectedMonth !== 'ALL') ? selectedMonth : getPaymentCycleMonthKey(now);
+      const monthLabelBn = formatBengaliMonthYear(paymentMonthCycle);
+      const paymentItemDesc = `Bill Payment - ${gatewayFormatted} (${monthLabelBn})`;
 
       const tx = {
         id: 'tx-pay-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
@@ -2608,18 +2677,27 @@ export const MemberDB: React.FC = () => {
       if (airmanId) seen.add(`airman_${airmanId}`);
 
       const effectiveDp = getMemberEffectiveDp(m);
+      const localSeniorityMap = getLocalSeniorityMap();
+      const manualSen = (m.Seniority !== undefined && m.Seniority !== null && !isNaN(Number(m.Seniority)))
+        ? Number(m.Seniority)
+        : ((m.seniority !== undefined && m.seniority !== null && !isNaN(Number(m.seniority)))
+          ? Number(m.seniority)
+          : (localSeniorityMap[cleanBd] !== undefined ? localSeniorityMap[cleanBd] : undefined));
+
       uniqueList.push({
         ...m,
         Role: m.Role ?? m.role ?? 'Member',
         role: m.Role ?? m.role ?? 'Member',
         Due: Number(m.Due ?? m.due ?? m.baki ?? 0),
         baki: Number(m.Due ?? m.due ?? m.baki ?? 0),
-        DP: effectiveDp || m.DP || ''
+        DP: effectiveDp || m.DP || '',
+        Seniority: manualSen,
+        seniority: manualSen
       });
     }
 
-    // Sort strictly by Office Nominal Roll Seniority & BAF Hierarchy
-    return sortCanteenMembersByOfficeSeniority(uniqueList);
+    // Sort strictly by Office Nominal Roll Seniority & BAF Hierarchy and normalize sequential 1..N numbers
+    return normalizeCanteenMembersSeniority(uniqueList);
   };
 
   // Auto-sync Biodata silently in background ONLY if Canteen_Member is completely empty
@@ -2808,6 +2886,31 @@ export const MemberDB: React.FC = () => {
     // 1. Initial check (lightweight delta sync)
     fetchMembers(false);
 
+    // Fetch and sync seniority rankings from Cloud KV & Biodata Register table
+    fetchAllMemberSeniorities().then((cloudMap) => {
+      if (cloudMap && Object.keys(cloudMap).length > 0) {
+        setMembers((prev) => {
+          if (!prev || prev.length === 0) return prev;
+          let changed = false;
+          const updated = prev.map((m) => {
+            const bd = String(m['BD No'] || m.bdNo || m.airman_id || '').replace(/\D/g, '');
+            if (bd && cloudMap[bd] !== undefined && m.Seniority !== cloudMap[bd]) {
+              changed = true;
+              return { ...m, Seniority: cloudMap[bd], seniority: cloudMap[bd] };
+            }
+            return m;
+          });
+          if (!changed) return prev;
+          const sorted = normalizeCanteenMembersSeniority(updated);
+          globalMembersCache = sorted;
+          try {
+            localStorage.setItem('canteen_members_cache', JSON.stringify(sorted));
+          } catch {}
+          return sorted;
+        });
+      }
+    }).catch(() => {});
+
     // 2. Safety timeout
     const safetyTimer = setTimeout(() => {
       setLoading(false);
@@ -2936,7 +3039,7 @@ export const MemberDB: React.FC = () => {
       const totalDue = getMemberTotalDue(m, selectedCategory);
       return selectedMonth === 'ALL' ? totalDue > 0 : b > 0;
     });
-    return sortCanteenMembersByOfficeSeniority(list);
+    return normalizeCanteenMembersSeniority(list);
   }, [filteredMembers, isDueFilterActive, selectedCategory, selectedMonth, allTxs, searchTerm]);
 
   const handleExportBills = () => {
@@ -2946,7 +3049,7 @@ export const MemberDB: React.FC = () => {
   // Statement rows calculation for Statement modal
   const filteredStatementTxs = useMemo(() => {
     return statementTx.filter((tx) => {
-      const txMonth = tx?.monthKey || getTxMonthKey(tx.date);
+      const txMonth = getTxEffectiveMonth(tx);
       return statementMonth === 'ALL' || txMonth === statementMonth;
     });
   }, [statementTx, statementMonth]);
@@ -2956,16 +3059,8 @@ export const MemberDB: React.FC = () => {
   }, [filteredStatementTxs, menuCatalog]);
 
   const totalMonthBill = useMemo(() => {
-    const itemTotal = statementAggregatedItems.reduce((sum, r) => sum + r.total, 0);
-    if (itemTotal > 0) return itemTotal;
-    if (statementMember) {
-      const filtered = getMemberFilteredBill(statementMember, 'ALL', statementMonth);
-      if (filtered > 0) return filtered;
-      const totalDue = getMemberTotalDue(statementMember, 'ALL');
-      if (totalDue > 0) return totalDue;
-    }
-    return 0;
-  }, [statementAggregatedItems, statementMember, statementMonth, allTxs]);
+    return statementAggregatedItems.reduce((sum, r) => sum + r.total, 0);
+  }, [statementAggregatedItems]);
 
   const unitFundBill = useMemo(() => {
     return filteredStatementTxs
@@ -2992,18 +3087,12 @@ export const MemberDB: React.FC = () => {
     previousDue = 0;
   }
 
-  // All payments by member to check if settled
-  const allMemberPayments = (statementTx || [])
-    .filter((tx) => tx.type === 'BILL PAYMENT' && !tx.isReverted && tx.status !== 'REVERTED')
-    .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-
+  // Payments belonging strictly to this statement month according to 25th-24th billing cycle
   const currentMonthPayments = filteredStatementTxs
-    .filter((tx) => tx.type === 'BILL PAYMENT' && !tx.isReverted && tx.status !== 'REVERTED')
+    .filter((tx) => isPaymentTx(tx) && !tx.isReverted && tx.status !== 'REVERTED')
     .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
 
-  const effectivePayments = currentMonthPayments > 0
-    ? currentMonthPayments
-    : (memberTotalDue === 0 && allMemberPayments > 0 ? Math.min(totalMonthBill + previousDue + unitFundBill + othersFundBill, allMemberPayments) : 0);
+  const effectivePayments = currentMonthPayments;
 
   const netPayable = memberTotalDue === 0
     ? 0
@@ -3053,6 +3142,9 @@ export const MemberDB: React.FC = () => {
     statementAggregatedItems, 
     totalMonthBill, 
     previousDue, 
+    unitFundBill,
+    othersFundBill,
+    effectivePayments,
     netPayable
   ]);
 
@@ -3682,6 +3774,18 @@ export const MemberDB: React.FC = () => {
                         <span className="text-[10px] font-mono font-bold text-slate-400">
                           BD/{member['BD No'] || member.airman_id?.replace(/\D/g, '') || '-'}
                         </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSeniorityEditMember(member);
+                          }}
+                          className="px-2 py-0.5 rounded-md text-[10px] font-mono font-black bg-emerald-500/15 hover:bg-emerald-500/30 border border-emerald-400/40 text-emerald-300 shadow-xs cursor-pointer transition-all active:scale-95 inline-flex items-center space-x-1 shrink-0"
+                          title="Seniority / জ্যেষ্ঠতা নম্বর (Click to edit)"
+                        >
+                          <Award className="w-2.5 h-2.5 text-emerald-400" />
+                          <span>#{member.seniority || member.Seniority || (i + 1)}</span>
+                        </button>
                         {String(member['BD No']).trim() === String(canteenConfig?.managerBdNo).trim() && (
                           <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-indigo-500/25 border border-indigo-400/50 text-indigo-300 font-mono shadow-sm">
                             Manager
@@ -3697,6 +3801,25 @@ export const MemberDB: React.FC = () => {
                         </span>
                       </div>
                     </div>
+                  </div>
+
+                  {/* Top-Right: TOTAL DUE */}
+                  <div 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setInitialBillMember(member);
+                    }}
+                    className="text-right shrink-0 pl-2 cursor-pointer group/due"
+                    title="সর্বমোট বকেয়া (Click to set/edit Total Due)"
+                  >
+                    <p className="text-[10px] font-black text-slate-400 tracking-widest uppercase mb-0.5">
+                      TOTAL DUE
+                    </p>
+                    <p className={`text-xl font-black font-mono tracking-tight leading-none ${
+                      totalDue > 0 ? 'text-rose-400 group-hover/due:text-rose-300' : 'text-emerald-400 group-hover/due:text-emerald-300'
+                    }`}>
+                      ৳{totalDue.toLocaleString()}
+                    </p>
                   </div>
                 </div>
 
@@ -3795,7 +3918,8 @@ export const MemberDB: React.FC = () => {
             <table className="w-full text-left text-xs text-slate-300">
               <thead className="bg-slate-950/90 text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-800">
                 <tr>
-                  <th className="px-4 py-3.5 text-center w-12 font-mono">#</th>
+                  <th className="px-3 py-3.5 text-center w-10 font-mono">#</th>
+                  <th className="px-3 py-3.5 text-center font-mono w-24">Seniority</th>
                   <th className="px-4 py-3.5">Rank & Name</th>
                   <th className="px-4 py-3.5 font-mono">BD No</th>
                   <th className="px-4 py-3.5">Role</th>
@@ -3831,7 +3955,17 @@ export const MemberDB: React.FC = () => {
                           : 'bg-slate-800/40 hover:bg-slate-800/80'
                       }`}
                     >
-                      <td className="px-4 py-3 text-center text-slate-500 font-mono font-bold">{i + 1}</td>
+                      <td className="px-3 py-3 text-center text-slate-500 font-mono font-bold">{i + 1}</td>
+                      <td className="px-3 py-3 text-center" onClick={(e) => { e.stopPropagation(); setSeniorityEditMember(member); }}>
+                        <button
+                          type="button"
+                          className="font-mono font-black text-xs px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/30 transition-all cursor-pointer group/sen active:scale-95 inline-flex items-center space-x-1"
+                          title="Click to Edit Seniority / জ্যেষ্ঠতা নম্বর পরিবর্তন করুন"
+                        >
+                          <span>#{member.seniority || member.Seniority || (i + 1)}</span>
+                          <Edit3 className="w-2.5 h-2.5 opacity-60 group-hover/sen:opacity-100" />
+                        </button>
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center space-x-3">
                           <div className="w-9 h-9 rounded-xl bg-slate-950 border border-slate-700/80 flex items-center justify-center font-black text-xs text-indigo-400 overflow-hidden shrink-0 shadow-inner">
@@ -3953,6 +4087,14 @@ export const MemberDB: React.FC = () => {
                             title="Set Initial Bill / প্রারম্ভিক বকেয়া"
                           >
                             <Coins className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSeniorityEditMember(member)}
+                            className="p-1.5 bg-slate-800 hover:bg-emerald-500/20 text-slate-400 hover:text-emerald-300 rounded-lg text-[11px] font-black uppercase border border-slate-700 transition-all cursor-pointer"
+                            title="Edit Seniority / জ্যেষ্ঠতা নির্ধারণ"
+                          >
+                            <Award className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </td>
@@ -4085,6 +4227,40 @@ export const MemberDB: React.FC = () => {
                         <p className="text-[10px] text-slate-400 font-bold">বর্তমান বকেয়া</p>
                       </div>
                     </div>
+                  </div>
+
+                  {/* Seniority Order Setting Card (Synced with Cloud & Office Biodata Register) */}
+                  <div className="p-4 bg-emerald-950/30 border border-emerald-500/30 rounded-2xl flex items-center justify-between flex-wrap gap-3 shadow-inner">
+                    <div className="flex items-center space-x-3.5">
+                      <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0 shadow-sm">
+                        <Award className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="flex items-center space-x-2 flex-wrap">
+                          <p className="text-xs font-black text-white uppercase tracking-wider">
+                            Seniority / জ্যেষ্ঠতা নম্বর:
+                          </p>
+                          <span className="font-mono text-emerald-400 font-black text-sm px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-400/30">
+                            #{profileMember.seniority || profileMember.Seniority || '-'}
+                          </span>
+                          <span className="text-[10px] font-mono font-bold bg-indigo-950/80 text-indigo-300 px-2 py-0.5 rounded border border-indigo-500/30">
+                            {profileMember['Rank'] || 'Rank'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-emerald-300/80 font-medium mt-0.5">
+                          অফিস Biodata Register ও ক্যান্টিন ডাটাবেজে সামরিক পদমর্যাদার ক্রম অনুযায়ী সুবিন্যস্ত।
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setSeniorityEditMember(profileMember)}
+                      className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 shadow-md shadow-emerald-900/30 transition-all cursor-pointer active:scale-95"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>Change Seniority / ক্রম পরিবর্তন</span>
+                    </button>
                   </div>
 
                   {/* Transaction History Section */}
@@ -4492,12 +4668,12 @@ export const MemberDB: React.FC = () => {
               </div>
             </div>
 
-            {/* Statement Content Area - Exact replica of Pic 2 with Sutonny Mj font */}
-            <div className="p-4 sm:p-6 overflow-y-auto bg-slate-950/40 flex-1 print:p-0 print:bg-white print:overflow-visible flex justify-center">
+            {/* Statement Content Area - Authentic paper slip presentation */}
+            <div className="p-3 sm:p-6 pb-12 overflow-y-auto overflow-x-auto bg-slate-950/70 flex-1 print:p-0 print:bg-white print:overflow-visible">
               <div 
                 id="statement-paper-slip" 
                 style={{ fontFamily: "'SutonnyMJ', 'SutonnyOMJ', 'Noto Serif Bengali', 'Tiro Bangla', 'SolaimanLipi', 'Kalpurush', serif" }}
-                className="bg-white rounded-none sm:rounded-2xl p-6 sm:p-8 text-black w-full max-w-md mx-auto shadow-sm"
+                className="bg-white rounded-2xl p-6 sm:p-8 pb-8 sm:pb-10 text-black w-full max-w-lg mx-auto shadow-2xl border border-slate-200/90 print:border-none print:shadow-none print:rounded-none my-2 sm:my-4 transition-all"
               >
                 
                 {/* Header Banner matching Pic 2 */}
@@ -4538,20 +4714,7 @@ export const MemberDB: React.FC = () => {
                     </tr>
 
                     {/* Items Rows - All 4 columns visible: দ্রব্যের নাম, পরিমাণ, দর, মোট */}
-                    {statementAggregatedItems.length === 0 ? (
-                      <tr className="bg-white">
-                        <td className="border border-black p-3 text-left font-bold bg-white">
-                          ক্যান্টিন বিল ({formatBengaliMonthYear(statementMonth)})
-                        </td>
-                        <td className="border border-black p-3 text-center font-bold bg-white">১</td>
-                        <td className="border border-black p-3 text-center font-bold bg-white">
-                          ৳{toBengaliNum(totalMonthBill)}
-                        </td>
-                        <td className="border border-black p-3 text-center font-bold bg-white">
-                          ৳{toBengaliNum(totalMonthBill)}
-                        </td>
-                      </tr>
-                    ) : (
+                    {statementAggregatedItems.length > 0 ? (
                       statementAggregatedItems.map((item, idx) => {
                         const isGeneric = isGenericCanteenBill(item.itemName);
                         const displayName = isGeneric ? `ক্যান্টিন বিল (${formatBengaliMonthYear(statementMonth)})` : formatItemNameBn(item.itemName);
@@ -4570,17 +4733,25 @@ export const MemberDB: React.FC = () => {
                           </tr>
                         );
                       })
+                    ) : (
+                      <tr className="bg-white">
+                        <td colSpan={4} className="border border-black p-3.5 text-center font-bold text-slate-800 bg-white tracking-wide text-sm sm:text-base">
+                          এই মাসে কোনো ক্যান্টিন বিল নেই
+                        </td>
+                      </tr>
                     )}
 
                     {/* Summary Rows - Normal white cells, no alternating grey */}
-                    <tr className="bg-white">
-                      <td className="border border-black p-3 text-right font-black bg-white" colSpan={3}>
-                        মোট বিল
-                      </td>
-                      <td className="border border-black p-3 text-center font-black bg-white">
-                        ৳{toBengaliNum(totalMonthBill)}
-                      </td>
-                    </tr>
+                    {totalMonthBill > 0 && (
+                      <tr className="bg-white">
+                        <td className="border border-black p-3 text-right font-black bg-white" colSpan={3}>
+                          মোট ক্যান্টিন বিল
+                        </td>
+                        <td className="border border-black p-3 text-center font-black bg-white">
+                          ৳{toBengaliNum(totalMonthBill)}
+                        </td>
+                      </tr>
+                    )}
 
                     {/* বকেয়া বিল (যদি ০ থাকে তাহলে Hide থাকবে) */}
                     {previousDue > 0 && (
@@ -5197,6 +5368,33 @@ export const MemberDB: React.FC = () => {
           selectedCategory={selectedCategory}
           selectedMonth={selectedMonth}
           onMonthChange={setSelectedMonth}
+        />
+      )}
+
+      {/* Edit Member Seniority Modal (Office App Biodata Register Style) */}
+      {seniorityEditMember && (
+        <EditMemberSeniorityModal
+          isOpen={!!seniorityEditMember}
+          onClose={() => setSeniorityEditMember(null)}
+          member={seniorityEditMember}
+          allMembers={members}
+          onSuccess={(updatedMembers) => {
+            setMembers(updatedMembers);
+            globalMembersCache = updatedMembers;
+            try {
+              localStorage.setItem('canteen_members_cache', JSON.stringify(updatedMembers));
+            } catch {}
+            if (profileMember) {
+              const pBd = String(profileMember['BD No'] || profileMember.bdNo || profileMember.airman_id || '').replace(/\D/g, '');
+              const refreshedP = updatedMembers.find((m) => {
+                const mBd = String(m['BD No'] || m.bdNo || m.airman_id || '').replace(/\D/g, '');
+                return (pBd && mBd === pBd) || (m.airman_id && profileMember.airman_id && m.airman_id === profileMember.airman_id);
+              });
+              if (refreshedP) {
+                setProfileMember(refreshedP);
+              }
+            }
+          }}
         />
       )}
 

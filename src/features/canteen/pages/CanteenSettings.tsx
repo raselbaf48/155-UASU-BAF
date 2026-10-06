@@ -14,7 +14,7 @@ import { pullAllCanteenDataFromCloud } from '../utils/canteenCloudSync';
 import { getCanteenMembersCache, fetchCanteenMembersOnce } from '../utils/canteenMenuData';
 import { supabase } from '../../../supabase';
 import { SaveButton } from '../components/SaveButton';
-import { MemberDB } from './MemberDB';
+import { CanteenMemberDB } from './CanteenMemberDB';
 
 export type CanteenSettingSection = 'identity' | 'timing' | 'member_db' | 'cloudsync';
 
@@ -634,7 +634,7 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
           {/* DEDICATED PAGE 3: MEMBER DATABASE (Full, responsive MemberDB without hanging) */}
           {activeSection === 'member_db' && (
             <div className="space-y-6 animate-in fade-in">
-              <MemberDB />
+              <CanteenMemberDB />
             </div>
           )}
 

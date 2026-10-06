@@ -28,7 +28,7 @@ import { pushKeyToCloud, pullKeyFromCloud, recordDeletedTxId } from '../utils/ca
 import { formatCanteenDate } from '../utils/dateUtils';
 import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
 import { formatBengaliMonthYear, getPaymentCycleMonthKey } from '../utils/exportCanteenBillExcel';
-import { getTxMonthKey } from '../pages/MemberDB';
+import { getTxMonthKey, getTxEffectiveMonth } from '../pages/MemberDB';
 import { deduplicateCanteenTransactions, getFormattedDateForMonth } from '../utils/importHistoryTxs';
 import JSZip from 'jszip';
 
@@ -107,6 +107,7 @@ export interface BillImportBatchItem {
   surname: string;
   targetMonth?: string;
   lastMonth?: string;
+  advanceMonth?: string;
   dueLastMonth: number;
   advanceLastMonth: number;
   dueThisMonth: number;
@@ -149,6 +150,7 @@ export interface ParsedBillRow {
   bdNo: string;
   targetMonth: string;      // This Month (e.g. 2026-10 or 2026-09)
   lastMonth: string;        // Last Month (e.g. 2026-09 or 2026-08)
+  advanceMonth?: string;    // Advance month
   dueLastMonth: number;     // Due (Last Month)
   advanceLastMonth: number; // Advance (Last Month)
   dueThisMonth: number;     // Due (This Month)
@@ -461,10 +463,14 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
       const isUnitFund = /\b(unit\s*fund|uf|ইউনিট\s*ফান্ড)\b/i.test(lowerRem);
       const isOthers = /\b(others?|অন্যান্য)\b/i.test(lowerRem);
 
+      let advanceMonth = currentLastMonth;
       if (amounts.length === 1) {
         const amt = amounts[0];
         if (isAdvance) {
           advanceLastMonth = amt;
+          // When a single advance is listed under a month heading (e.g. "Aug Sgt Rubel 115 Advance"),
+          // unless 'last'/'prev' keyword is explicitly mentioned, the advance belongs to currentTargetMonth!
+          advanceMonth = isPrev ? currentLastMonth : currentTargetMonth;
         } else if (isUnitFund) {
           unitFund = amt;
         } else if (isOthers) {
@@ -478,6 +484,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
         if (amounts.length >= 3) {
           dueLastMonth = amounts[0];
           advanceLastMonth = amounts[1];
+          advanceMonth = currentLastMonth;
           dueThisMonth = amounts[2];
           if (amounts.length >= 4) unitFund = amounts[3];
           if (amounts.length >= 5) othersFund = amounts[4];
@@ -485,6 +492,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
           if (isAdvance && isDue) {
             dueThisMonth = amounts[0];
             advanceLastMonth = amounts[1];
+            advanceMonth = currentLastMonth;
           } else {
             dueLastMonth = amounts[0];
             dueThisMonth = amounts[1];
@@ -519,6 +527,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
         bdNo: detectedBd,
         targetMonth: currentTargetMonth,
         lastMonth: currentLastMonth,
+        advanceMonth,
         dueLastMonth,
         advanceLastMonth,
         dueThisMonth,
@@ -884,6 +893,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
         bdNo: detectedBd,
         targetMonth: activeTargetMonth,
         lastMonth: activeLastMonth,
+        advanceMonth: activeLastMonth,
         dueLastMonth,
         advanceLastMonth,
         dueThisMonth,
@@ -1444,19 +1454,20 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
             });
           }
 
-          // 2. Advance (Last Month) Transaction
+          // 2. Advance Transaction
           if (row.advanceLastMonth > 0) {
-            const txId = `tx-import-${Date.now()}-${cleanBdNo}-advLast-${Math.floor(Math.random() * 1000)}`;
+            const advMonth = row.advanceMonth || (row.dueThisMonth === 0 && row.dueLastMonth === 0 ? rowTargetMonth : rowLastMonth);
+            const txId = `tx-import-${Date.now()}-${cleanBdNo}-adv-${Math.floor(Math.random() * 1000)}`;
             newTxIds.push(txId);
             newTxs.push({
               id: txId,
-              date: getFormattedDateForMonth(rowTargetMonth, 25),
-              monthKey: rowTargetMonth,
+              date: getFormattedDateForMonth(advMonth, 25),
+              monthKey: advMonth,
               airman_id: cleanAirmanId,
               bdNo: targetMember['BD No'] || targetMember.bdNo || (cleanBdNo ? `BD/${cleanBdNo}` : ''),
               memberName: fullMemberName,
               rank: targetMember['Rank'] || targetMember.rank || '',
-              items: `অগ্রীম জমা / Advance (${formatBengaliMonthYear(rowTargetMonth)})`,
+              items: `অগ্রীম জমা / Advance (${formatBengaliMonthYear(advMonth)})`,
               soldItems: [],
               amount: row.advanceLastMonth,
               type: 'BILL PAYMENT',
@@ -1552,11 +1563,146 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
         }
       }
 
-      // Update Supabase Canteen_Member table in parallel chunks of 15
+      // 1. Save and merge transactions with existing ledger:
+      // STRICT SELECTIVE REPLACEMENT:
+      // Only replace older transactions matching the EXACT same member AND EXACT same month AND EXACT same category as newly added!
+      // All other months (e.g. Asad & Rubel's Sep due when Aug advance is imported), POS sales, and other members remain 100% intact!
+      let mergedTxs: any[] = [];
+      if (newTxs.length > 0) {
+        try {
+          const existingTxs: any[] = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+
+          const getTxSubCat = (t: any): string => {
+            const isAdv = t.gateway === 'ADVANCE' || String(t.items || '').includes('অগ্রীম') || String(t.items || '').toLowerCase().includes('advance');
+            if (isAdv) return 'ADVANCE';
+            if (t.billType === 'UNIT_FUND' || String(t.items || '').includes('ইউনিট ফান্ড')) return 'UNIT_FUND';
+            if (t.billType === 'OTHERS' || String(t.items || '').includes('অন্যান্য ফান্ড')) return 'OTHERS';
+            return 'CANTEEN';
+          };
+
+          const newImportKeys = new Set<string>();
+          newTxs.forEach((nt) => {
+            const cleanBd = String(nt.bdNo || nt.airman_id || '').replace(/\D/g, '');
+            const mKey = nt.monthKey || getTxEffectiveMonth(nt);
+            const cat = getTxSubCat(nt);
+            if (cleanBd && mKey) {
+              newImportKeys.add(`${cleanBd}__${mKey}__${cat}`);
+            }
+          });
+
+          const keptExistingTxs = existingTxs.filter((t: any) => {
+            if (!t || !t.id) return false;
+            // Real POS sale items must NEVER be replaced by imports
+            if (t.type === 'SALE' || (Array.isArray(t.soldItems) && t.soldItems.length > 0)) {
+              return true;
+            }
+            const isImportableOrInitial = t.type === 'INITIAL_BILL' ||
+              t.type === 'AMOUNT_CHANGE' ||
+              t.isAmountChange ||
+              String(t.id).startsWith('tx-import-') ||
+              String(t.id).startsWith('init-') ||
+              (t.type === 'BILL PAYMENT' && (t.gateway === 'ADVANCE' || String(t.id).startsWith('tx-import-')));
+
+            if (!isImportableOrInitial) {
+              return true; // Keep other normal payments
+            }
+
+            const cleanBd = String(t.bdNo || t.airman_id || '').replace(/\D/g, '');
+            const mKey = t.monthKey || getTxEffectiveMonth(t);
+            const cat = getTxSubCat(t);
+
+            const matchKey = `${cleanBd}__${mKey}__${cat}`;
+            if (newImportKeys.has(matchKey)) {
+              // Exact replacement: this older bill/advance for this member and month is cleanly replaced by the new one
+              return false;
+            }
+            // Retain transactions for all other months completely intact!
+            return true;
+          });
+
+          mergedTxs = deduplicateCanteenTransactions([...keptExistingTxs, ...newTxs]);
+          localStorage.setItem('canteen_txs', JSON.stringify(mergedTxs));
+          await pushKeyToCloud('canteen_txs', mergedTxs);
+        } catch (e) {
+          console.warn('Failed to merge and push initial bill transactions:', e);
+        }
+      }
+
+      // 2. Recompute each affected member's Due & Advance from their full ledger in mergedTxs
       const updatedMembersToSync = Array.from(uniqueMembersMap.values()).filter((m) => {
-        return batchItems.some((b) => b.airman_id === m.airman_id);
+        return batchItems.some((b) => b.airman_id === m.airman_id || String(b.bdNo).replace(/\D/g, '') === String(m['BD No'] || m.bdNo || '').replace(/\D/g, ''));
       });
 
+      if (mergedTxs.length > 0) {
+        for (const m of updatedMembersToSync) {
+          const cleanBd = String(m['BD No'] || m.bdNo || m.airman_id || '').replace(/\D/g, '');
+          const memberAllTxs = mergedTxs.filter((t: any) => {
+            if (!t) return false;
+            const tBd = String(t.bdNo || t.airman_id || '').replace(/\D/g, '');
+            if (cleanBd && tBd && cleanBd === tBd) return true;
+            if (m.airman_id && t.airman_id && String(m.airman_id).toLowerCase() === String(t.airman_id).toLowerCase()) return true;
+            return false;
+          });
+
+          let salesCharges = 0;
+          const initialTxsByGroup = new Map<string, any[]>();
+          memberAllTxs.forEach((tx: any) => {
+            if (!tx || tx.type === 'BILL PAYMENT' || tx.type === 'REVERTED' || tx.isReverted) return;
+            const isInit = tx.type === 'INITIAL_BILL' || 
+              tx.type === 'AMOUNT_CHANGE' ||
+              tx.isAmountChange ||
+              String(tx.id || '').startsWith('tx-init-') || 
+              String(tx.id || '').startsWith('init-') || 
+              String(tx.items || '').includes('ক্যান্টিন বিল') || 
+              String(tx.items || '').includes('বকেয়া বিল') ||
+              String(tx.items || '').includes('ইউনিট ফান্ড') ||
+              String(tx.items || '').includes('অন্যান্য ফান্ড');
+            if (!isInit) {
+              salesCharges += Number(tx.amount || 0);
+            } else {
+              const mKey = tx.monthKey || getTxEffectiveMonth(tx) || 'DEFAULT';
+              const cKey = tx.billType || (String(tx.items || '').includes('ইউনিট ফান্ড') ? 'UNIT_FUND' : (String(tx.items || '').includes('অন্যান্য ফান্ড') ? 'OTHERS' : 'CANTEEN'));
+              const groupKey = `${mKey}__${cKey}`;
+              if (!initialTxsByGroup.has(groupKey)) initialTxsByGroup.set(groupKey, []);
+              initialTxsByGroup.get(groupKey)!.push(tx);
+            }
+          });
+
+          let initCharges = 0;
+          initialTxsByGroup.forEach((group) => {
+            const sorted = [...group].sort((a, b) => {
+              const timeA = new Date(a.created_at || a.createdAt || a.timestamp || 0).getTime() || 0;
+              const timeB = new Date(b.created_at || b.createdAt || b.timestamp || 0).getTime() || 0;
+              return timeB - timeA;
+            });
+            initCharges += Number(sorted[0].amount || 0);
+          });
+
+          const totalCharges = salesCharges + initCharges;
+          const totalCredits = memberAllTxs
+            .filter((tx: any) => (tx.type === 'BILL PAYMENT' || tx.gateway === 'ADVANCE') && !tx.isReverted && tx.status !== 'REVERTED')
+            .reduce((sum: number, tx: any) => sum + Number(tx.amount || 0), 0);
+
+          let finalDue = 0;
+          let finalAdv = 0;
+          if (totalCharges >= totalCredits) {
+            finalDue = totalCharges - totalCredits;
+            finalAdv = 0;
+          } else {
+            finalDue = 0;
+            finalAdv = totalCredits - totalCharges;
+          }
+
+          m.Due = finalDue;
+          m.due = finalDue;
+          m.baki = finalDue;
+          m.Advance = finalAdv;
+          m.advance = finalAdv;
+          m.ogrim = finalAdv;
+        }
+      }
+
+      // 3. Update Supabase Canteen_Member table in parallel chunks of 15
       for (let i = 0; i < updatedMembersToSync.length; i += 15) {
         const chunk = updatedMembersToSync.slice(i, i + 15);
         await Promise.all(
@@ -1567,51 +1713,6 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
               .eq('airman_id', m.airman_id);
           })
         );
-      }
-
-      // Save transactions to Cloud (canteen_txs)
-      if (newTxs.length > 0) {
-        try {
-          const existingTxs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-          const txMap = new Map<string, any>();
-          const affectedCleanBds = new Set(newTxs.map(t => String(t.bdNo || t.airman_id || '').replace(/\D/g, '')));
-          const affectedMonths = new Set<string>([targetMonth, lastMonth].filter(Boolean));
-          newTxs.forEach((t) => {
-            if (t.monthKey) affectedMonths.add(t.monthKey);
-          });
-          batchItems.forEach((b) => {
-            if (b.targetMonth) affectedMonths.add(b.targetMonth);
-            if (b.lastMonth) affectedMonths.add(b.lastMonth);
-          });
-          
-          existingTxs.forEach((t: any) => { 
-            if (!t || !t.id) return;
-            const tBd = String(t.bdNo || t.airman_id || '').replace(/\D/g, '');
-            const tMonth = t.monthKey || getTxMonthKey(t.date);
-            const isInitial = t.type === 'INITIAL_BILL' || 
-              String(t.items || '').includes('ক্যান্টিন বিল') || 
-              String(t.items || '').includes('বকেয়া বিল') ||
-              String(t.items || '').includes('ইউনিট ফান্ড') ||
-              String(t.items || '').includes('অন্যান্য ফান্ড') ||
-              String(t.id).startsWith('init-auto-due-') ||
-              String(t.id).startsWith('init-due-') ||
-              String(t.id).startsWith('tx-import-');
-            
-            // If importing this month or last month, remove any older initial/imported bills for these affected members to avoid duplicates!
-            if (tBd && affectedCleanBds.has(tBd) && isInitial) {
-              if (affectedMonths.has(tMonth) || String(t.id).startsWith('init-')) {
-                return; // Drop old bill so it is cleanly replaced by the new imported one
-              }
-            }
-            txMap.set(String(t.id), t); 
-          });
-          newTxs.forEach((t: any) => { if (t && t.id) txMap.set(String(t.id), t); });
-          const mergedTxs = deduplicateCanteenTransactions(Array.from(txMap.values()));
-          localStorage.setItem('canteen_txs', JSON.stringify(mergedTxs));
-          await pushKeyToCloud('canteen_txs', mergedTxs);
-        } catch (e) {
-          console.warn('Failed to append initial bill transactions to cloud:', e);
-        }
       }
 
       // Save History Batch
