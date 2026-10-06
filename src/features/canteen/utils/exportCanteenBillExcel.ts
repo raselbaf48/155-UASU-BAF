@@ -18,7 +18,7 @@ export const formatRankBn = (rankStr?: string): string => {
 
   // If already Bengali
   if (r.includes('মাঃওঃঅঃ') || r.includes('মাস্টার ওয়ারেন্ট') || r.includes('মাস্টার ওয়ারেন্ট')) return 'মাঃওঃঅঃ';
-  if (r.includes('সিঃওঃঅঃ') || r.includes('সিনিয়র ওয়ারেন্ট') || r.includes('সিনিয়র ওয়ারেন্ট')) return 'সিঃওঃঅঃ';
+  if (r.includes('সিঃ ওঃ অঃ') || r.includes('সিঃওঃঅঃ') || r.includes('সিনিয়র ওয়ারেন্ট') || r.includes('সিনিয়র ওয়ারেন্ট')) return 'সিঃ ওঃ অঃ';
   if (r.includes('ওঃঅঃ') || r.includes('ওয়ারেন্ট') || r.includes('ওয়ারেন্ট')) return 'ওঃঅঃ';
   if (r.includes('সার্জেন্ট') || r.includes('সার্জেণ্ট')) return 'সার্জেন্ট';
   if (r.includes('কর্পোরাল')) return 'কর্পোরাল';
@@ -27,7 +27,7 @@ export const formatRankBn = (rankStr?: string): string => {
 
   // Warrant Officers (JCOs)
   if (r === 'MWO' || r.includes('MASTER WARRANT')) return 'মাঃওঃঅঃ';
-  if (r === 'SWO' || r.includes('SENIOR WARRANT')) return 'সিঃওঃঅঃ';
+  if (r === 'SWO' || r.includes('SENIOR WARRANT')) return 'সিঃ ওঃ অঃ';
   if (r === 'WO' || r.includes('WARRANT')) return 'ওঃঅঃ';
 
   // Airmen NCOs & ORs

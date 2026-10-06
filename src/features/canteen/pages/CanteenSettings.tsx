@@ -4,11 +4,13 @@ import {
   ShieldCheck, Phone, ArrowLeft, ChevronRight, 
   Cloud, Download, Upload, RefreshCw, Coffee, 
   Database, Settings, Sparkles, X, History,
-  Layers, Check, Clock, Trash2, ArrowRight
+  Layers, Check, Clock, Trash2, ArrowRight,
+  Languages, Globe
 } from 'lucide-react';
 import { 
   getCanteenConfig, saveCanteenConfig, resolveImageUrl, 
-  fetchCanteenConfigFromCloud, checkPreOrderWindow, CanteenConfig 
+  fetchCanteenConfigFromCloud, checkPreOrderWindow, CanteenConfig,
+  ItemDisplayLanguage
 } from '../utils/canteenSettings';
 import { pullAllCanteenDataFromCloud } from '../utils/canteenCloudSync';
 import { getCanteenMembersCache, fetchCanteenMembersOnce } from '../utils/canteenMenuData';
@@ -16,7 +18,7 @@ import { supabase } from '../../../supabase';
 import { SaveButton } from '../components/SaveButton';
 import { CanteenMemberDB } from './CanteenMemberDB';
 
-export type CanteenSettingSection = 'identity' | 'timing' | 'member_db' | 'cloudsync';
+export type CanteenSettingSection = 'identity' | 'display_lang' | 'timing' | 'member_db' | 'cloudsync';
 
 interface SectionMeta {
   id: CanteenSettingSection;
@@ -242,6 +244,18 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
       icon: <Coffee className="w-5 h-5 text-amber-400" />,
       color: 'text-amber-400 bg-amber-500/10 border-amber-500/30',
       badge: settings.name || 'CAFE UAV'
+    },
+    {
+      id: 'display_lang',
+      label: 'Item Display Language (প্রদর্শনের ভাষা)',
+      description: 'Set whether Menu & Raw Inventory display item names in Bangla (বাংলা) or English',
+      icon: <Languages className="w-5 h-5 text-purple-400" />,
+      color: 'text-purple-400 bg-purple-500/10 border-purple-500/30',
+      badge: (settings.itemDisplayLanguage || 'bn') === 'en' 
+        ? 'English Only' 
+        : (settings.itemDisplayLanguage || 'bn') === 'both' 
+          ? 'Bilingual (উভয় ভাষা)' 
+          : 'Bangla (বাংলা)'
     },
     {
       id: 'timing',
@@ -473,6 +487,363 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
                   idleText="Save Identity Settings"
                   savingText="Saving..."
                   savedText="Identity Saved Successfully! ✓"
+                  className="w-full py-4 text-xs font-black tracking-widest cursor-pointer"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* DEDICATED PAGE: MENU & INVENTORY DISPLAY LANGUAGE */}
+          {activeSection === 'display_lang' && (
+            <div className="bg-slate-900 rounded-[2.5rem] p-6 md:p-10 shadow-sm border border-slate-800 space-y-8 animate-in fade-in">
+              <div className="border-b border-slate-800 pb-5">
+                <div className="flex items-center space-x-3">
+                  <div className="w-12 h-12 rounded-2xl bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center justify-center shrink-0">
+                    <Languages className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl md:text-2xl font-black text-white tracking-tight flex items-center gap-2">
+                      <span>MENU & INVENTORY DISPLAY LANGUAGE</span>
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-1">
+                      মেনু এবং ইনভেন্টরি পেজে আইটেমের নাম বাংলায় (বাংলা) দেখাবে নাকি ইংরেজিতে (English) তা এখান থেকে সেট করুন
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Master Presets (3 Big Interactive Cards) */}
+              <div className="space-y-3">
+                <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest block">
+                  পছন্দের ভাষা নির্বাচন করুন (SELECT DISPLAY LANGUAGE)
+                </label>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Option 1: Bangla First / Only */}
+                  {(() => {
+                    const isSelected = (settings.itemDisplayLanguage || 'bn') === 'bn' && 
+                                       (settings.menuDisplayLanguage || 'bn') === 'bn' && 
+                                       (settings.inventoryDisplayLanguage || 'bn') === 'bn';
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const updated: CanteenConfig = {
+                            ...settings,
+                            itemDisplayLanguage: 'bn',
+                            menuDisplayLanguage: 'bn',
+                            inventoryDisplayLanguage: 'bn'
+                          };
+                          setSettings(updated);
+                          saveCanteenConfig(updated);
+                          showSavedFeedback();
+                        }}
+                        className={`p-5 rounded-3xl border text-left transition-all cursor-pointer relative flex flex-col justify-between ${
+                          isSelected
+                            ? 'bg-purple-950/50 border-purple-500 text-white shadow-xl shadow-purple-950/40 ring-1 ring-purple-500'
+                            : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-850'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="text-2xl">🇧🇩</span>
+                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-black uppercase ${
+                              isSelected ? 'bg-purple-500 text-white' : 'bg-slate-800 text-slate-400'
+                            }`}>
+                              {isSelected ? 'সক্রিয় (ACTIVE)' : 'সুপারিশকৃত'}
+                            </span>
+                          </div>
+                          <h4 className="text-base font-black text-white mb-1">
+                            বাংলায় প্রদর্শন (Bangla)
+                          </h4>
+                          <p className="text-xs text-slate-400 leading-relaxed mb-3">
+                            মেনু এবং কাঁচামাল ইনভেন্টরির সকল আইটেমের নাম স্পষ্ট অক্ষরে বাংলায় প্রদর্শিত হবে।
+                          </p>
+                        </div>
+                        <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 text-[11px] font-medium text-emerald-400">
+                          যেমন: ডিম অমলেট, আলু, মুরগির মাংস
+                        </div>
+                      </button>
+                    );
+                  })()}
+
+                  {/* Option 2: English Only */}
+                  {(() => {
+                    const isSelected = (settings.itemDisplayLanguage || 'bn') === 'en' && 
+                                       (settings.menuDisplayLanguage || 'bn') === 'en' && 
+                                       (settings.inventoryDisplayLanguage || 'bn') === 'en';
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const updated: CanteenConfig = {
+                            ...settings,
+                            itemDisplayLanguage: 'en',
+                            menuDisplayLanguage: 'en',
+                            inventoryDisplayLanguage: 'en'
+                          };
+                          setSettings(updated);
+                          saveCanteenConfig(updated);
+                          showSavedFeedback();
+                        }}
+                        className={`p-5 rounded-3xl border text-left transition-all cursor-pointer relative flex flex-col justify-between ${
+                          isSelected
+                            ? 'bg-purple-950/50 border-purple-500 text-white shadow-xl shadow-purple-950/40 ring-1 ring-purple-500'
+                            : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-850'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="text-2xl">🇬🇧</span>
+                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-black uppercase ${
+                              isSelected ? 'bg-purple-500 text-white' : 'bg-slate-800 text-slate-400'
+                            }`}>
+                              {isSelected ? 'ACTIVE' : 'STANDARD'}
+                            </span>
+                          </div>
+                          <h4 className="text-base font-black text-white mb-1">
+                            English Only (ইংরেজি)
+                          </h4>
+                          <p className="text-xs text-slate-400 leading-relaxed mb-3">
+                            All Menu and Raw Inventory items will be presented in English only.
+                          </p>
+                        </div>
+                        <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 text-[11px] font-medium text-indigo-400">
+                          Example: EGG MUMLET, POTATO, CHICKEN
+                        </div>
+                      </button>
+                    );
+                  })()}
+
+                  {/* Option 3: Bilingual (BN + EN) */}
+                  {(() => {
+                    const isSelected = (settings.itemDisplayLanguage || 'bn') === 'both' && 
+                                       (settings.menuDisplayLanguage || 'bn') === 'both' && 
+                                       (settings.inventoryDisplayLanguage || 'bn') === 'both';
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const updated: CanteenConfig = {
+                            ...settings,
+                            itemDisplayLanguage: 'both',
+                            menuDisplayLanguage: 'both',
+                            inventoryDisplayLanguage: 'both'
+                          };
+                          setSettings(updated);
+                          saveCanteenConfig(updated);
+                          showSavedFeedback();
+                        }}
+                        className={`p-5 rounded-3xl border text-left transition-all cursor-pointer relative flex flex-col justify-between ${
+                          isSelected
+                            ? 'bg-purple-950/50 border-purple-500 text-white shadow-xl shadow-purple-950/40 ring-1 ring-purple-500'
+                            : 'bg-slate-950/60 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-850'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="text-2xl">🌐</span>
+                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-black uppercase ${
+                              isSelected ? 'bg-purple-500 text-white' : 'bg-slate-800 text-slate-400'
+                            }`}>
+                              {isSelected ? 'ACTIVE' : 'BILINGUAL'}
+                            </span>
+                          </div>
+                          <h4 className="text-base font-black text-white mb-1">
+                            উভয় ভাষা (Bilingual)
+                          </h4>
+                          <p className="text-xs text-slate-400 leading-relaxed mb-3">
+                            বাংলা ও ইংরেজি উভয় নামই একসাথে শিরোনাম ও বন্ধনীতে প্রদর্শিত হবে।
+                          </p>
+                        </div>
+                        <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 text-[11px] font-medium text-purple-300 truncate">
+                          যেমন: ডিম অমলেট (EGG MUMLET), আলু (POTATO)
+                        </div>
+                      </button>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* Granular Individual Controls */}
+              <div className="bg-slate-950/70 border border-slate-800 rounded-3xl p-6 space-y-6">
+                <div>
+                  <h4 className="text-sm font-black text-white flex items-center gap-2">
+                    <Globe className="w-4 h-4 text-purple-400" />
+                    <span>স্বতন্ত্র কাস্টমাইজেশন (SEPARATE SETTINGS FOR MENU & INVENTORY)</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    আপনি চাইলে মেনু এবং ইনভেন্টরির জন্য আলাদা আলাদাও ভাষা নির্ধারণ করতে পারেন
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Menu Setting */}
+                  <div className="bg-slate-900 border border-slate-800/80 rounded-2xl p-4 space-y-3">
+                    <div>
+                      <span className="text-xs font-black text-indigo-300 uppercase tracking-wide block">
+                        🍔 CANTEEN MENU ITEMS
+                      </span>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        মেনু কার্ড ও আইটেম তালিকা প্রদর্শনের ভাষা
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-950 rounded-xl border border-slate-800">
+                      {(['bn', 'en', 'both'] as ItemDisplayLanguage[]).map((mode) => {
+                        const active = (settings.menuDisplayLanguage || settings.itemDisplayLanguage || 'bn') === mode;
+                        return (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => {
+                              const updated: CanteenConfig = {
+                                ...settings,
+                                menuDisplayLanguage: mode
+                              };
+                              setSettings(updated);
+                              saveCanteenConfig(updated);
+                              showSavedFeedback();
+                            }}
+                            className={`py-2 px-1 text-center rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                              active
+                                ? 'bg-indigo-600 text-white shadow-md'
+                                : 'text-slate-400 hover:text-white hover:bg-slate-850'
+                            }`}
+                          >
+                            {mode === 'bn' ? 'বাংলা (BN)' : mode === 'en' ? 'English (EN)' : 'উভয় (Both)'}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Inventory Setting */}
+                  <div className="bg-slate-900 border border-slate-800/80 rounded-2xl p-4 space-y-3">
+                    <div>
+                      <span className="text-xs font-black text-emerald-300 uppercase tracking-wide block">
+                        📦 RAW INVENTORY ITEMS
+                      </span>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        কাঁচামাল ইনভেন্টরি ও বক্স/টেবিল ভিউয়ের ভাষা
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-950 rounded-xl border border-slate-800">
+                      {(['bn', 'en', 'both'] as ItemDisplayLanguage[]).map((mode) => {
+                        const active = (settings.inventoryDisplayLanguage || settings.itemDisplayLanguage || 'bn') === mode;
+                        return (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => {
+                              const updated: CanteenConfig = {
+                                ...settings,
+                                inventoryDisplayLanguage: mode
+                              };
+                              setSettings(updated);
+                              saveCanteenConfig(updated);
+                              showSavedFeedback();
+                            }}
+                            className={`py-2 px-1 text-center rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                              active
+                                ? 'bg-emerald-600 text-white shadow-md'
+                                : 'text-slate-400 hover:text-white hover:bg-slate-850'
+                            }`}
+                          >
+                            {mode === 'bn' ? 'বাংলা (BN)' : mode === 'en' ? 'English (EN)' : 'উভয় (Both)'}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Interactive Live Preview Box */}
+              <div className="bg-slate-950/80 border border-purple-500/30 rounded-3xl p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-black text-purple-400 uppercase tracking-widest flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                    <span>লাইভ প্রিভিউ (LIVE PREVIEW IN CANTEEN)</span>
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-500">
+                    Realtime simulation
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Sample Menu Card Preview */}
+                  {(() => {
+                    const menuMode = settings.menuDisplayLanguage || settings.itemDisplayLanguage || 'bn';
+                    const sampleMenu = {
+                      name: 'COLD COFFEE',
+                      nameBn: 'কোল্ড কফি'
+                    };
+                    const sampleMenuName = menuMode === 'bn' 
+                      ? sampleMenu.nameBn 
+                      : menuMode === 'en' 
+                        ? sampleMenu.name 
+                        : `${sampleMenu.nameBn} (${sampleMenu.name})`;
+                    return (
+                      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center space-x-3.5 shadow-md">
+                        <div className="w-12 h-12 rounded-xl bg-indigo-950/70 border border-indigo-500/30 text-indigo-400 flex items-center justify-center font-black text-sm shrink-0">
+                          ☕
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">
+                            Menu Item Card
+                          </span>
+                          <h4 className="text-base font-black text-white truncate text-indigo-300">
+                            {sampleMenuName}
+                          </h4>
+                          <span className="text-xs font-mono font-bold text-emerald-400">৳30 • In Stock</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Sample Inventory Box Preview */}
+                  {(() => {
+                    const invMode = settings.inventoryDisplayLanguage || settings.itemDisplayLanguage || 'bn';
+                    const sampleInv = {
+                      name: 'POTATO',
+                      nameBn: 'গোল আলু'
+                    };
+                    const sampleInvName = invMode === 'bn' 
+                      ? sampleInv.nameBn 
+                      : invMode === 'en' 
+                        ? sampleInv.name 
+                        : `${sampleInv.name} (${sampleInv.nameBn})`;
+                    return (
+                      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center space-x-3.5 shadow-md">
+                        <div className="w-12 h-12 rounded-xl bg-slate-950 border border-slate-800 text-amber-400 flex items-center justify-center font-black text-sm shrink-0">
+                          🥔
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest block">
+                            Inventory Box Card
+                          </span>
+                          <h4 className="text-base font-black text-white truncate text-amber-300">
+                            {sampleInvName}
+                          </h4>
+                          <span className="text-xs font-mono font-bold text-slate-400">Stock: 45 kg • OK</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* Save Button */}
+              <div className="pt-4 border-t border-slate-800">
+                <SaveButton
+                  type="button"
+                  onClick={handleSaveAll}
+                  isSaving={isSaving}
+                  isSaved={saveSuccess}
+                  idleText="Save Language Settings to Cloud"
+                  savingText="Saving Language..."
+                  savedText="Language Settings Saved & Synced! ✓"
                   className="w-full py-4 text-xs font-black tracking-widest cursor-pointer"
                 />
               </div>

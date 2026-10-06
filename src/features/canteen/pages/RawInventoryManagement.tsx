@@ -29,6 +29,7 @@ import {
 import { queuePushKeyToCloud } from '../utils/canteenCloudSync';
 import { SaveButton } from '../components/SaveButton';
 import { formatCanteenDate } from '../utils/dateUtils';
+import { getCanteenConfig, getItemDisplayName, CanteenConfig } from '../utils/canteenSettings';
 
 export type { RawInventoryItem, RawStockLog, InventoryItemType };
 
@@ -747,6 +748,20 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
     return getRawInventoryItems();
   });
 
+  const [canteenConfig, setCanteenConfig] = useState<CanteenConfig>(() => getCanteenConfig());
+
+  useEffect(() => {
+    const handleCfgUpdate = (e: any) => {
+      setCanteenConfig(e.detail || getCanteenConfig());
+    };
+    window.addEventListener('canteen_settings_updated', handleCfgUpdate);
+    window.addEventListener('storage', handleCfgUpdate);
+    return () => {
+      window.removeEventListener('canteen_settings_updated', handleCfgUpdate);
+      window.removeEventListener('storage', handleCfgUpdate);
+    };
+  }, []);
+
   const [logs, setLogs] = useState<RawStockLog[]>(() => {
     try {
       const stored = localStorage.getItem(LOGS_STORAGE_KEY);
@@ -946,11 +961,13 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
     try {
       localStorage.setItem(STORAGE_KEY, jsonStr);
       isSelfDispatchingRef.current = true;
-      try {
-        window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
-      } finally {
-        isSelfDispatchingRef.current = false;
-      }
+      setTimeout(() => {
+        try {
+          window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+        } finally {
+          isSelfDispatchingRef.current = false;
+        }
+      }, 0);
     } catch (e) {
       console.warn('Failed to save raw items:', e);
     }
@@ -998,11 +1015,13 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
     try {
       localStorage.setItem(LOGS_STORAGE_KEY, jsonStr);
       isSelfDispatchingRef.current = true;
-      try {
-        window.dispatchEvent(new Event('canteen_raw_stock_logs_updated'));
-      } finally {
-        isSelfDispatchingRef.current = false;
-      }
+      setTimeout(() => {
+        try {
+          window.dispatchEvent(new Event('canteen_raw_stock_logs_updated'));
+        } finally {
+          isSelfDispatchingRef.current = false;
+        }
+      }, 0);
     } catch (e) {
       console.warn('Failed to save raw stock logs:', e);
     }
@@ -1105,8 +1124,12 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
 
         return true;
       })
-      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-  }, [items, inventoryTypeFilter, searchTerm, stockStatusFilter]);
+      .sort((a, b) => {
+        const nameA = getItemDisplayName(a, 'inventory', canteenConfig).primary;
+        const nameB = getItemDisplayName(b, 'inventory', canteenConfig).primary;
+        return nameA.localeCompare(nameB);
+      });
+  }, [items, inventoryTypeFilter, searchTerm, stockStatusFilter, canteenConfig]);
 
   // Open Restock Modal for specific item
   const handleOpenRestock = (item?: RawInventoryItem) => {
@@ -1628,8 +1651,10 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
 
       queuePushKeyToCloud('canteen_raw_inventory_items_v2', remainingItems);
       
-      // Dispatch update event immediately so recipes and menu recalculate
-      window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+      // Dispatch update event safely so recipes and menu recalculate without blocking render
+      setTimeout(() => {
+        window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+      }, 0);
       setItemToDelete(null);
       setShowAddModal(false);
       setEditingItem(null);
@@ -1653,7 +1678,9 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
     setItems(deduplicated);
     lastSavedItemsJsonRef.current = JSON.stringify(deduplicated);
     saveRawInventoryItems(deduplicated);
-    window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+    setTimeout(() => {
+      window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+    }, 0);
     setShowResetConfirmModal(false);
   };
 
@@ -1687,7 +1714,9 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
 
       setQuickDpToast('আইটেমের ছবি (DP) ক্লাউডে সফলভাবে সংরক্ষিত হয়েছে!');
       setTimeout(() => setQuickDpToast(null), 3500);
-      window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+      setTimeout(() => {
+        window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+      }, 0);
     } catch (e) {
       console.error('Failed to quick update DP:', e);
     } finally {
@@ -2169,14 +2198,23 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                             )}
                           </div>
                           <div className="min-w-0">
-                            <h4 className="font-extrabold text-white text-base truncate flex items-center gap-1.5 group-hover:text-indigo-300 transition-colors" title={item.name}>
-                              <span>{item.name}</span>
-                            </h4>
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <p className="text-xs text-slate-400 font-medium truncate" title={item.nameBn}>
-                                {item.nameBn}
-                              </p>
-                            </div>
+                            {(() => {
+                              const nameDisplay = getItemDisplayName(item, 'inventory', canteenConfig);
+                              return (
+                                <>
+                                  <h4 className="font-extrabold text-white text-base truncate flex items-center gap-1.5 group-hover:text-indigo-300 transition-colors" title={nameDisplay.full}>
+                                    <span>{nameDisplay.primary}</span>
+                                  </h4>
+                                  {Boolean(nameDisplay.secondary) && (
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <p className="text-xs text-slate-400 font-medium truncate" title={nameDisplay.secondary}>
+                                        {nameDisplay.secondary}
+                                      </p>
+                                    </div>
+                                  )}
+                                </>
+                              );
+                            })()}
                           </div>
                         </div>
 
@@ -2398,34 +2436,49 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                                 </button>
                               )}
                             </div>
-                            <div>
-                              <div className="font-extrabold text-white text-sm flex items-center gap-2">
-                                <span>{item.name}</span>
-                                {(item.itemType === 'READY_MADE' || isReadymadeItem(item)) ? (
-                                  <span className="text-[10px] font-black px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                                    🥐 রেডিমেট
-                                  </span>
-                                ) : (
-                                  <span className="text-[10px] font-black px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                                    🌾 কাঁচামাল
-                                  </span>
-                                )}
-                                {isLow && (
-                                  <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-300 font-bold">
-                                    <AlertTriangle className="w-2.5 h-2.5" /> Low
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-xs text-slate-400 font-medium flex items-center gap-1.5 flex-wrap">
-                                <span>{item.nameBn}</span>
-                                {hasSubUnitDisplay && (
-                                  <span className="text-[10px] font-black px-1.5 py-0.2 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded inline-flex items-center gap-1" title={`১ ${item.unit} = ${subInfo.packSize} ${subInfo.subUnit}`}>
-                                    <Boxes className="w-2.5 h-2.5" />
-                                    <span>{subInfo.packSize} {subInfo.subUnit} / {item.unit}</span>
-                                  </span>
-                                )}
-                              </div>
-                            </div>
+                            {(() => {
+                              const nameDisplay = getItemDisplayName(item, 'inventory', canteenConfig);
+                              return (
+                                <div>
+                                  <div className="font-extrabold text-white text-sm flex items-center gap-2">
+                                    <span>{nameDisplay.primary}</span>
+                                    {(item.itemType === 'READY_MADE' || isReadymadeItem(item)) ? (
+                                      <span className="text-[10px] font-black px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                        🥐 রেডিমেট
+                                      </span>
+                                    ) : (
+                                      <span className="text-[10px] font-black px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                                        🌾 কাঁচামাল
+                                      </span>
+                                    )}
+                                    {isLow && (
+                                      <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-300 font-bold">
+                                        <AlertTriangle className="w-2.5 h-2.5" /> Low
+                                      </span>
+                                    )}
+                                  </div>
+                                  {Boolean(nameDisplay.secondary) && (
+                                    <div className="text-xs text-slate-400 font-medium flex items-center gap-1.5 flex-wrap">
+                                      <span>{nameDisplay.secondary}</span>
+                                      {hasSubUnitDisplay && (
+                                        <span className="text-[10px] font-black px-1.5 py-0.2 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded inline-flex items-center gap-1" title={`১ ${item.unit} = ${subInfo.packSize} ${subInfo.subUnit}`}>
+                                          <Boxes className="w-2.5 h-2.5" />
+                                          <span>{subInfo.packSize} {subInfo.subUnit} / {item.unit}</span>
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                  {!nameDisplay.secondary && hasSubUnitDisplay && (
+                                    <div className="text-xs text-slate-400 font-medium flex items-center gap-1.5 flex-wrap mt-0.5">
+                                      <span className="text-[10px] font-black px-1.5 py-0.2 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded inline-flex items-center gap-1" title={`১ ${item.unit} = ${subInfo.packSize} ${subInfo.subUnit}`}>
+                                        <Boxes className="w-2.5 h-2.5" />
+                                        <span>{subInfo.packSize} {subInfo.subUnit} / {item.unit}</span>
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </div>
                         </td>
 

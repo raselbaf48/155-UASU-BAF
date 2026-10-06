@@ -1425,8 +1425,9 @@ export const MemberDB: React.FC = () => {
     const handleMembersUpdated = (e: any) => {
       const updated = e?.detail || getCanteenMembersCache();
       if (Array.isArray(updated) && updated.length > 0) {
-        globalMembersCache = updated;
-        setMembers(updated);
+        const sorted = formatAndSortMembers(updated);
+        globalMembersCache = sorted;
+        setMembers(sorted);
         setLoading(false);
       }
     };
@@ -2678,11 +2679,13 @@ export const MemberDB: React.FC = () => {
 
       const effectiveDp = getMemberEffectiveDp(m);
       const localSeniorityMap = getLocalSeniorityMap();
-      const manualSen = (m.Seniority !== undefined && m.Seniority !== null && !isNaN(Number(m.Seniority)))
-        ? Number(m.Seniority)
-        : ((m.seniority !== undefined && m.seniority !== null && !isNaN(Number(m.seniority)))
-          ? Number(m.seniority)
-          : (localSeniorityMap[cleanBd] !== undefined ? localSeniorityMap[cleanBd] : undefined));
+      const manualSen = (cleanBd && localSeniorityMap[cleanBd] !== undefined)
+        ? localSeniorityMap[cleanBd]
+        : ((m.Seniority !== undefined && m.Seniority !== null && !isNaN(Number(m.Seniority)))
+          ? Number(m.Seniority)
+          : ((m.seniority !== undefined && m.seniority !== null && !isNaN(Number(m.seniority)))
+            ? Number(m.seniority)
+            : undefined));
 
       uniqueList.push({
         ...m,
@@ -3774,18 +3777,13 @@ export const MemberDB: React.FC = () => {
                         <span className="text-[10px] font-mono font-bold text-slate-400">
                           BD/{member['BD No'] || member.airman_id?.replace(/\D/g, '') || '-'}
                         </span>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSeniorityEditMember(member);
-                          }}
-                          className="px-2 py-0.5 rounded-md text-[10px] font-mono font-black bg-emerald-500/15 hover:bg-emerald-500/30 border border-emerald-400/40 text-emerald-300 shadow-xs cursor-pointer transition-all active:scale-95 inline-flex items-center space-x-1 shrink-0"
-                          title="Seniority / জ্যেষ্ঠতা নম্বর (Click to edit)"
+                        <span
+                          className="px-2 py-0.5 rounded-md text-[10px] font-mono font-black bg-emerald-500/15 border border-emerald-400/40 text-emerald-300 shadow-xs inline-flex items-center space-x-1 shrink-0"
+                          title="Seniority / জ্যেষ্ঠতা নম্বর (পরিবর্তন করতে Settings > Member DB ব্যবহার করুন)"
                         >
                           <Award className="w-2.5 h-2.5 text-emerald-400" />
                           <span>#{member.seniority || member.Seniority || (i + 1)}</span>
-                        </button>
+                        </span>
                         {String(member['BD No']).trim() === String(canteenConfig?.managerBdNo).trim() && (
                           <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-indigo-500/25 border border-indigo-400/50 text-indigo-300 font-mono shadow-sm">
                             Manager
@@ -3956,15 +3954,13 @@ export const MemberDB: React.FC = () => {
                       }`}
                     >
                       <td className="px-3 py-3 text-center text-slate-500 font-mono font-bold">{i + 1}</td>
-                      <td className="px-3 py-3 text-center" onClick={(e) => { e.stopPropagation(); setSeniorityEditMember(member); }}>
-                        <button
-                          type="button"
-                          className="font-mono font-black text-xs px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/30 transition-all cursor-pointer group/sen active:scale-95 inline-flex items-center space-x-1"
-                          title="Click to Edit Seniority / জ্যেষ্ঠতা নম্বর পরিবর্তন করুন"
+                      <td className="px-3 py-3 text-center">
+                        <span
+                          className="font-mono font-black text-xs px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 inline-flex items-center space-x-1"
+                          title="Seniority / জ্যেষ্ঠতা নম্বর (পরিবর্তন করতে Settings > Member DB ব্যবহার করুন)"
                         >
                           <span>#{member.seniority || member.Seniority || (i + 1)}</span>
-                          <Edit3 className="w-2.5 h-2.5 opacity-60 group-hover/sen:opacity-100" />
-                        </button>
+                        </span>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center space-x-3">
@@ -4087,14 +4083,6 @@ export const MemberDB: React.FC = () => {
                             title="Set Initial Bill / প্রারম্ভিক বকেয়া"
                           >
                             <Coins className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setSeniorityEditMember(member)}
-                            className="p-1.5 bg-slate-800 hover:bg-emerald-500/20 text-slate-400 hover:text-emerald-300 rounded-lg text-[11px] font-black uppercase border border-slate-700 transition-all cursor-pointer"
-                            title="Edit Seniority / জ্যেষ্ঠতা নির্ধারণ"
-                          >
-                            <Award className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </td>
@@ -4253,14 +4241,10 @@ export const MemberDB: React.FC = () => {
                       </div>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => setSeniorityEditMember(profileMember)}
-                      className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 shadow-md shadow-emerald-900/30 transition-all cursor-pointer active:scale-95"
-                    >
-                      <Edit3 className="w-3.5 h-3.5" />
-                      <span>Change Seniority / ক্রম পরিবর্তন</span>
-                    </button>
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/80 border border-slate-700/60 text-slate-300 text-[11px] font-bold">
+                      <Shield className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>জ্যেষ্ঠতা নির্ধারণ: Settings &gt; Member DB</span>
+                    </div>
                   </div>
 
                   {/* Transaction History Section */}
@@ -4672,7 +4656,7 @@ export const MemberDB: React.FC = () => {
             <div className="p-3 sm:p-6 pb-12 overflow-y-auto overflow-x-auto bg-slate-950/70 flex-1 print:p-0 print:bg-white print:overflow-visible">
               <div 
                 id="statement-paper-slip" 
-                style={{ fontFamily: "'SutonnyMJ', 'SutonnyOMJ', 'Noto Serif Bengali', 'Tiro Bangla', 'SolaimanLipi', 'Kalpurush', serif" }}
+                style={{ fontFamily: "'SuttonyMJ', 'SutonnyMJ', 'SutonnyOMJ', 'Sutonny MJ', 'Noto Serif Bengali', 'Tiro Bangla', 'SolaimanLipi', 'Kalpurush', serif" }}
                 className="bg-white rounded-2xl p-6 sm:p-8 pb-8 sm:pb-10 text-black w-full max-w-lg mx-auto shadow-2xl border border-slate-200/90 print:border-none print:shadow-none print:rounded-none my-2 sm:my-4 transition-all"
               >
                 
@@ -5371,32 +5355,6 @@ export const MemberDB: React.FC = () => {
         />
       )}
 
-      {/* Edit Member Seniority Modal (Office App Biodata Register Style) */}
-      {seniorityEditMember && (
-        <EditMemberSeniorityModal
-          isOpen={!!seniorityEditMember}
-          onClose={() => setSeniorityEditMember(null)}
-          member={seniorityEditMember}
-          allMembers={members}
-          onSuccess={(updatedMembers) => {
-            setMembers(updatedMembers);
-            globalMembersCache = updatedMembers;
-            try {
-              localStorage.setItem('canteen_members_cache', JSON.stringify(updatedMembers));
-            } catch {}
-            if (profileMember) {
-              const pBd = String(profileMember['BD No'] || profileMember.bdNo || profileMember.airman_id || '').replace(/\D/g, '');
-              const refreshedP = updatedMembers.find((m) => {
-                const mBd = String(m['BD No'] || m.bdNo || m.airman_id || '').replace(/\D/g, '');
-                return (pBd && mBd === pBd) || (m.airman_id && profileMember.airman_id && m.airman_id === profileMember.airman_id);
-              });
-              if (refreshedP) {
-                setProfileMember(refreshedP);
-              }
-            }
-          }}
-        />
-      )}
 
       {/* Payment History Modal */}
       {isPaymentHistoryOpen && (

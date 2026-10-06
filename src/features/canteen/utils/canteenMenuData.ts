@@ -21,6 +21,8 @@ export interface CanteenMenuItem {
 
 import defaultMenuItemsData from '../data/defaultMenuItems.json';
 import { getMenuItemBanglaName } from './menuBanglaNames';
+import { getLocalSeniorityMap } from './memberSeniority';
+import { sortCanteenMembersByOfficeSeniority, normalizeCanteenMembersSeniority } from './canteenSeniority';
 
 export const DEFAULT_CANTEEN_MENU_ITEMS: CanteenMenuItem[] = (defaultMenuItemsData as any[]).map((it) => ({
   id: it.id,
@@ -103,12 +105,25 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
         try {
           const { data, error } = await supabase.from('Canteen_Menu').select('*');
           if (!error && data && data.length > 0) {
-            inMemoryMenuCache = data;
+            const hydrated = data.map((it: any) => {
+              const bn = it.name_bn || it.nameBn || it['Name (BN)'] || getMenuItemBanglaName(it) || '';
+              return {
+                ...it,
+                name_bn: bn,
+                nameBn: bn,
+                'Name (BN)': bn
+              };
+            });
+            inMemoryMenuCache = hydrated;
             if (typeof window !== 'undefined') {
-              localStorage.setItem('canteen_menu_cache', JSON.stringify(data));
-              window.dispatchEvent(new CustomEvent('canteen_menu_updated', { detail: data }));
+              try {
+                localStorage.setItem('canteen_menu_cache', JSON.stringify(hydrated));
+              } catch {}
+              setTimeout(() => {
+                window.dispatchEvent(new CustomEvent('canteen_menu_updated', { detail: hydrated }));
+              }, 0);
             }
-            return data;
+            return hydrated;
           }
         } catch (e) {
           console.warn('[CanteenMenuData] Background menu refresh error:', e);
@@ -132,12 +147,25 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
     try {
       const { data, error } = await supabase.from('Canteen_Menu').select('*');
       if (!error && data && data.length > 0) {
-        inMemoryMenuCache = data;
+        const hydrated = data.map((it: any) => {
+          const bn = it.name_bn || it.nameBn || it['Name (BN)'] || getMenuItemBanglaName(it) || '';
+          return {
+            ...it,
+            name_bn: bn,
+            nameBn: bn,
+            'Name (BN)': bn
+          };
+        });
+        inMemoryMenuCache = hydrated;
         if (typeof window !== 'undefined') {
-          localStorage.setItem('canteen_menu_cache', JSON.stringify(data));
-          window.dispatchEvent(new CustomEvent('canteen_menu_updated', { detail: data }));
+          try {
+            localStorage.setItem('canteen_menu_cache', JSON.stringify(hydrated));
+          } catch {}
+          setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('canteen_menu_updated', { detail: hydrated }));
+          }, 0);
         }
-        return data;
+        return hydrated;
       }
     } catch (e) {
       console.warn('[CanteenMenuData] Error fetching menu from cloud:', e);
@@ -185,7 +213,9 @@ export function setCanteenMembersCache(members: any[]): void {
   if (typeof window !== 'undefined') {
     try {
       localStorage.setItem('canteen_members_cache', JSON.stringify(members));
-      window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: members }));
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: members }));
+      }, 0);
     } catch (e) {
       console.warn('[CanteenMenuData] LocalStorage save warning:', e);
     }
@@ -213,11 +243,23 @@ export async function fetchCanteenMembersOnce(force = false): Promise<any[]> {
         .from('Canteen_Member')
         .select('airman_id, "BD No", Rank, Surname, Contact, Due, Role, DP');
       if (!error && data && data.length > 0) {
-        const sorted = data.sort((a: any, b: any) => {
-          const bdA = Number(String(a['BD No'] || a.airman_id || '').replace(/\D/g, '')) || 0;
-          const bdB = Number(String(b['BD No'] || b.airman_id || '').replace(/\D/g, '')) || 0;
-          return bdA - bdB;
+        const localSeniorityMap = getLocalSeniorityMap();
+        const merged = data.map((m: any) => {
+          const bd = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
+          const sen = (bd && localSeniorityMap[bd] !== undefined)
+            ? localSeniorityMap[bd]
+            : (m.Seniority !== undefined && m.Seniority !== null && !isNaN(Number(m.Seniority))
+              ? Number(m.Seniority)
+              : (m.seniority !== undefined && m.seniority !== null && !isNaN(Number(m.seniority))
+                ? Number(m.seniority)
+                : undefined));
+          return {
+            ...m,
+            Seniority: sen,
+            seniority: sen
+          };
         });
+        const sorted = normalizeCanteenMembersSeniority(sortCanteenMembersByOfficeSeniority(merged));
         setCanteenMembersCache(sorted);
         return sorted;
       }

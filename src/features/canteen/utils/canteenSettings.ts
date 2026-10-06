@@ -1,4 +1,13 @@
 import { supabase } from '../../../supabase';
+import { getMenuItemBanglaName } from './menuBanglaNames';
+
+export type ItemDisplayLanguage = 'bn' | 'en' | 'both';
+
+export interface DisplayedItemName {
+  primary: string;
+  secondary?: string;
+  full: string;
+}
 
 export interface CanteenConfig {
   name: string;
@@ -12,6 +21,9 @@ export interface CanteenConfig {
   preOrderEnabled?: boolean;
   preOrderStartTime?: string; // HH:mm (24-hour format) e.g. "08:00"
   preOrderEndTime?: string;   // HH:mm (24-hour format) e.g. "16:00"
+  itemDisplayLanguage?: ItemDisplayLanguage; // Master: 'bn' | 'en' | 'both'
+  menuDisplayLanguage?: ItemDisplayLanguage; // Menu specific: 'bn' | 'en' | 'both'
+  inventoryDisplayLanguage?: ItemDisplayLanguage; // Inventory specific: 'bn' | 'en' | 'both'
 }
 
 export const DEFAULT_CANTEEN_CONFIG: CanteenConfig = {
@@ -25,8 +37,56 @@ export const DEFAULT_CANTEEN_CONFIG: CanteenConfig = {
   footer: 'Official Canteen of UAV | Integrity and Service',
   preOrderEnabled: true,
   preOrderStartTime: '18:00',
-  preOrderEndTime: '08:00'
+  preOrderEndTime: '08:00',
+  itemDisplayLanguage: 'bn',
+  menuDisplayLanguage: 'bn',
+  inventoryDisplayLanguage: 'bn'
 };
+
+/**
+ * Returns formatted item name based on current or provided display language setting.
+ * - 'bn': Displays Bengali name primarily.
+ * - 'en': Displays English name primarily.
+ * - 'both': Displays primary with secondary subtitle/parentheses.
+ */
+export function getItemDisplayName(
+  item: any,
+  type: 'menu' | 'inventory' = 'menu',
+  config?: CanteenConfig
+): DisplayedItemName {
+  if (!item) return { primary: '', full: '' };
+  const cfg = config || getCanteenConfig();
+  const lang: ItemDisplayLanguage = 
+    (type === 'menu' ? cfg.menuDisplayLanguage : cfg.inventoryDisplayLanguage) 
+    || cfg.itemDisplayLanguage 
+    || 'bn';
+
+  const enName = String(item.name || item.name_en || '').trim();
+  let bnName = String(item.nameBn || item.name_bn || item['Name (BN)'] || '').trim();
+  
+  if (!bnName && type === 'menu') {
+    bnName = getMenuItemBanglaName(item);
+  }
+
+  if (lang === 'en') {
+    const primary = enName || bnName;
+    return { primary, full: primary };
+  } else if (lang === 'both') {
+    if (bnName && enName && bnName.toLowerCase() !== enName.toLowerCase()) {
+      return { 
+        primary: bnName, 
+        secondary: enName, 
+        full: `${bnName} (${enName})` 
+      };
+    }
+    const val = bnName || enName;
+    return { primary: val, full: val };
+  } else {
+    // Default 'bn'
+    const primary = bnName || enName;
+    return { primary, full: primary };
+  }
+}
 
 export const CANTEEN_DAILY_MENU_KEY = 'canteen_daily_menu';
 export const CANTEEN_DAILY_MENU_TIMESTAMP_KEY = 'canteen_daily_menu_updated_at';

@@ -5,7 +5,7 @@ import {
   ArrowUpRight, ArrowDownLeft, Filter, Layers 
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
-import { resolveImageUrl, getCanteenConfig, checkPreOrderWindow, getCuratedDailyMenu, CanteenConfig, PreOrderTimeStatus } from '../utils/canteenSettings';
+import { resolveImageUrl, getCanteenConfig, checkPreOrderWindow, getCuratedDailyMenu, CanteenConfig, PreOrderTimeStatus, getItemDisplayName } from '../utils/canteenSettings';
 import { getCanteenMenuCache, fetchCanteenMenuOnce } from '../utils/canteenMenuData';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { calculateMenuItemStockInfo, getRawInventoryItems, getMenuRecipes } from '../utils/recipeManager';
@@ -720,7 +720,7 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
                                                   </span>
                                               )}
                                           </div>
-                                          <p className="text-sm font-black text-white uppercase tracking-tight truncate">{item.name}</p>
+                                          <p className="text-sm font-black text-white uppercase tracking-tight truncate">{getItemDisplayName(item, 'menu', canteenConfig).primary}</p>
                                           <div className="flex items-center space-x-2 mt-0.5">
                                               <p className="text-xs font-black text-emerald-400">
                                                   ৳{item.price ? item.price : 0}

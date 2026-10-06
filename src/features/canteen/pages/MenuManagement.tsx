@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { formatMoney } from '../i18n';
 import { Coffee, Plus, Calendar, X, Utensils } from 'lucide-react';
 import { supabase } from '../../../supabase';
-import { resolveImageUrl } from '../utils/canteenSettings';
+import { resolveImageUrl, getItemDisplayName } from '../utils/canteenSettings';
 import { queuePushKeyToCloud } from '../utils/canteenCloudSync';
 import { getCanteenMenuCache, fetchCanteenMenuOnce } from '../utils/canteenMenuData';
 import { calculateMenuItemStockInfo, getRawInventoryItems, getMenuRecipes } from '../utils/recipeManager';
@@ -143,7 +143,7 @@ export const MenuManagement: React.FC = () => {
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50 text-slate-200 dark:text-slate-300">
               {items.map((row) => {
                   const itemDp = resolveImageUrl(row.DP || row.img || row.image);
-                  const itemName = i18n.language === 'bn' ? (row.name_bn || row.name_en) : (row.name_en || row.name_bn);
+                  const itemName = getItemDisplayName(row, 'menu').primary || (i18n.language === 'bn' ? (row.name_bn || row.name_en) : (row.name_en || row.name_bn));
                   const stockInfo = calculateMenuItemStockInfo(row.id, itemName, rawInventory, recipesMap);
                   return (
                   <tr key={row.id} className="hover:bg-slate-800 dark:hover:bg-slate-800/20 transition-colors">

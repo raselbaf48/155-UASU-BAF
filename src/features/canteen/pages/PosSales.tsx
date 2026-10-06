@@ -7,7 +7,7 @@ import {
   ShieldCheck, RefreshCw, ChevronDown, ChevronUp, CheckCheck
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
-import { resolveImageUrl } from '../utils/canteenSettings';
+import { resolveImageUrl, getItemDisplayName, getCanteenConfig, CanteenConfig } from '../utils/canteenSettings';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { deductRawStockForSales, restoreRawStockForSaleCancellation, getRecipeForMenuItem, getRawInventoryItems, calculateMenuItemStockInfo, getMenuRecipes } from '../utils/recipeManager';
 import { pushKeyToCloud, recordDeletedTxId } from '../utils/canteenCloudSync';
@@ -60,6 +60,8 @@ export const PosSales: React.FC = () => {
   const [showBatchMenuModal, setShowBatchMenuModal] = useState(false);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
 
+  const [canteenConfig, setCanteenConfig] = useState<CanteenConfig>(() => getCanteenConfig());
+
   // Live Raw Inventory & Recipe states for realtime available stock calculation
   const [rawInventory, setRawInventory] = useState<any[]>(() => getRawInventoryItems());
   const [recipesMap, setRecipesMap] = useState<any>(() => getMenuRecipes());
@@ -69,13 +71,20 @@ export const PosSales: React.FC = () => {
       setRawInventory(getRawInventoryItems());
       setRecipesMap(getMenuRecipes());
     };
+    const handleCfgUpdate = (e: any) => {
+      setCanteenConfig(e.detail || getCanteenConfig());
+    };
+    window.addEventListener('canteen_settings_updated', handleCfgUpdate);
     window.addEventListener('canteen_raw_inventory_updated', handleSyncStock);
     window.addEventListener('canteen_menu_recipes_updated', handleSyncStock);
     window.addEventListener('storage', handleSyncStock);
+    window.addEventListener('storage', handleCfgUpdate);
     return () => {
+      window.removeEventListener('canteen_settings_updated', handleCfgUpdate);
       window.removeEventListener('canteen_raw_inventory_updated', handleSyncStock);
       window.removeEventListener('canteen_menu_recipes_updated', handleSyncStock);
       window.removeEventListener('storage', handleSyncStock);
+      window.removeEventListener('storage', handleCfgUpdate);
     };
   }, []);
 
@@ -1586,7 +1595,7 @@ export const PosSales: React.FC = () => {
                           </div>
                         )}
                         <div className="min-w-0 flex-1">
-                          <p className="text-xs font-black text-white leading-tight truncate">{item.name}</p>
+                          <p className="text-xs font-black text-white leading-tight truncate">{getItemDisplayName(item, 'menu', canteenConfig).primary}</p>
                           <p className="text-[10px] font-bold text-slate-400 mt-1">৳{item.price} x {item.qty}</p>
                         </div>
                       </div>
@@ -1796,7 +1805,7 @@ export const PosSales: React.FC = () => {
                     >
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 mb-0.5">
-                          <p className="text-xs font-black text-white truncate">{item.name}</p>
+                          <p className="text-xs font-black text-white truncate">{getItemDisplayName(item, 'menu', canteenConfig).primary}</p>
 
                           {/* 3D Box Shape Stock Badge */}
                           <div className={`px-2 py-0.5 rounded-lg text-[10px] font-black font-mono tracking-wider flex items-center gap-1 transition-all select-none shadow-[inset_0_1px_1px_rgba(255,255,255,0.4),0_2px_4px_-1px_rgba(0,0,0,0.6)] border-b-2 ${
@@ -1958,7 +1967,7 @@ export const PosSales: React.FC = () => {
                   basket.map((item) => (
                     <div key={item.id} className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between gap-2">
                       <div className="min-w-0 flex-1">
-                        <p className="text-xs font-bold text-white truncate">{item.name}</p>
+                        <p className="text-xs font-bold text-white truncate">{getItemDisplayName(item, 'menu', canteenConfig).primary}</p>
                         <p className="text-[11px] font-mono text-slate-400">৳{item.price} x {item.qty} = ৳{item.price * item.qty}</p>
                       </div>
                       <div className="flex items-center space-x-1.5 shrink-0">

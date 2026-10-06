@@ -40,7 +40,7 @@ export function isGenericCanteenBill(rawName?: string): boolean {
 }
 
 // SutonnyMJ serif font fallback chain for authentic Bengali typography
-export const BENGALI_SUTONNY_FONT = '"SutonnyMJ", "SutonnyOMJ", "Noto Serif Bengali", "Tiro Bangla", "SolaimanLipi", "Kalpurush", serif';
+export const BENGALI_SUTONNY_FONT = '"SuttonyMJ", "SutonnyMJ", "SutonnyOMJ", "Sutonny MJ", "Noto Serif Bengali", "Tiro Bangla", "SolaimanLipi", "Kalpurush", serif';
 
 /**
  * Generates an exact high-resolution canvas matching Pic 2.
@@ -67,11 +67,11 @@ export function generateStatementCanvas(data: StatementCanvasData): HTMLCanvasEl
   const monthText = formatBengaliMonthYear(statementMonth);
   const memberFullName = `${rank} ${name}`.trim();
 
-  // Layout measurements (logical pixels at 1x)
+  // Layout measurements (logical pixels at 1x) - tight padding, no excess space
   const cardWidth = 460;
-  const paddingX = 24;
+  const paddingX = 16;
   const tableX = paddingX;
-  const tableWidth = cardWidth - paddingX * 2; // 412px
+  const tableWidth = cardWidth - paddingX * 2; // 428px
 
   const rowHeight = 40;
   const headerHeight = 110;

@@ -62,7 +62,7 @@ export const getRankWeight = (rankStr?: string): number => {
 
   // 2. JCOs (Junior Commissioned Officers come after Officers)
   if (upper === 'MWO' || upper.includes('MASTER WARRANT') || upper.includes('মাঃওঃঅঃ')) return 20;
-  if (upper === 'SWO' || upper.includes('SENIOR WARRANT') || upper.includes('সিঃওঃঅঃ')) return 21;
+  if (upper === 'SWO' || upper.includes('SENIOR WARRANT') || upper.includes('সিঃওঃঅঃ') || upper.includes('সিঃ ওঃ অঃ')) return 21;
   if (upper === 'WO' || upper.includes('WARRANT') || upper.includes('ওঃঅঃ')) return 22;
 
   // 3. Airmen NCOs & ORs (come after JCOs)

@@ -1,8 +1,34 @@
 @import "tailwindcss";
 
-/* Sutonny Mj / Bengali Serif font for Statement slip */
-#statement-paper-slip, #statement-paper-slip * {
-  font-family: 'SutonnyMJ', 'SutonnyOMJ', 'Noto Serif Bengali', 'Tiro Bangla', 'SolaimanLipi', 'Kalpurush', serif !important;
+/* SuttonyMJ / SutonnyMJ Bengali font definitions */
+@font-face {
+  font-family: 'SuttonyMJ';
+  src: local('SuttonyMJ'), local('SutonnyMJ'), local('SutonnyOMJ'), local('Sutonny MJ'), local('Sutonny_MJ'), local('Suttony_MJ');
+}
+
+@font-face {
+  font-family: 'SutonnyMJ';
+  src: local('SutonnyMJ'), local('SuttonyMJ'), local('SutonnyOMJ'), local('Sutonny MJ'), local('Sutonny_MJ'), local('Suttony_MJ');
+}
+
+:root {
+  --font-bengali: 'SuttonyMJ', 'SutonnyMJ', 'SutonnyOMJ', 'Sutonny MJ', 'Noto Serif Bengali', 'Tiro Bangla', 'SolaimanLipi', 'Kalpurush', serif;
+}
+
+/* Fallback for all Bengali text across the application to render in SuttonyMJ */
+body, button, input, select, textarea, table, th, td {
+  font-family: 'Inter', 'SuttonyMJ', 'SutonnyMJ', 'SutonnyOMJ', 'Sutonny MJ', 'Noto Serif Bengali', 'Tiro Bangla', 'SolaimanLipi', 'Kalpurush', sans-serif, serif;
+}
+
+#statement-paper-slip, #statement-paper-slip *,
+.sutonny-font, .sutonny-font *,
+.sutonny-mj, .sutonny-mj *,
+.font-sutonny, .font-sutonny *,
+.font-bangla, .font-bangla *,
+.font-bengali, .font-bengali *,
+[lang="bn"], [lang="bn"] *,
+#print-canteen-bill-content, #print-canteen-bill-content * {
+  font-family: 'SuttonyMJ', 'SutonnyMJ', 'SutonnyOMJ', 'Sutonny MJ', 'Noto Serif Bengali', 'Tiro Bangla', 'SolaimanLipi', 'Kalpurush', serif !important;
 }
 
 @media print {

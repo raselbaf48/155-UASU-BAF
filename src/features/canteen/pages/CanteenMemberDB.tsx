@@ -21,14 +21,18 @@ import {
   Check,
   FileText,
   LayoutGrid,
-  List
+  List,
+  Award,
+  Edit3
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, fetchDirectImageUrl, getCanteenConfig } from '../utils/canteenSettings';
 import { processGalleryImage } from '../utils/imageUpload';
 import { SaveButton } from '../components/SaveButton';
-import { sortCanteenMembersByOfficeSeniority, getRankWeight } from '../utils/canteenSeniority';
+import { sortCanteenMembersByOfficeSeniority, normalizeCanteenMembersSeniority, getRankWeight } from '../utils/canteenSeniority';
+import { EditMemberSeniorityModal } from '../components/EditMemberSeniorityModal';
+import { saveMemberSeniority, getLocalSeniorityMap } from '../utils/memberSeniority';
 import { 
   getMemberBanglaName, 
   saveMemberBanglaName,
@@ -106,6 +110,9 @@ export const CanteenMemberDB: React.FC = () => {
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [isSavedEdit, setIsSavedEdit] = useState(false);
 
+  // Seniority Management Modal State
+  const [seniorityEditMember, setSeniorityEditMember] = useState<any | null>(null);
+
   // Delete Member Confirm State
   const [deleteConfirmMember, setDeleteConfirmMember] = useState<any | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -118,26 +125,39 @@ export const CanteenMemberDB: React.FC = () => {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Helper to format & sort members
+  // Helper to format & sort members with strictly normalized seniority numbers
   const sortMembers = (data: any[]) => {
+    const localSeniorityMap = getLocalSeniorityMap();
     const formatted = data
       .filter((m: any) => {
         const bd = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
         return bd !== '48456';
       })
-      .map((m: any) => ({
-        ...m,
-        airman_id: m.airman_id || `airman-${m['BD No']}`,
-        "BD No": String(m['BD No'] || '').trim(),
-        "Rank": String(m['Rank'] || 'LAC').trim(),
-        "Surname": String(m['Surname'] || '').trim(),
-        "Contact": String(m['Contact'] || m['Mobile No'] || '').trim(),
-        Role: m.Role ?? m.role ?? 'Member',
-        Due: Number(m.Due ?? m.due ?? m.baki ?? 0),
-        DP: m.DP || ''
-      }));
+      .map((m: any) => {
+        const cleanBd = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
+        const manualSen = (cleanBd && localSeniorityMap[cleanBd] !== undefined)
+          ? localSeniorityMap[cleanBd]
+          : (m.Seniority !== undefined && m.Seniority !== null && !isNaN(Number(m.Seniority))
+            ? Number(m.Seniority)
+            : (m.seniority !== undefined && m.seniority !== null && !isNaN(Number(m.seniority))
+              ? Number(m.seniority)
+              : undefined));
+        return {
+          ...m,
+          airman_id: m.airman_id || `airman-${m['BD No']}`,
+          "BD No": String(m['BD No'] || '').trim(),
+          "Rank": String(m['Rank'] || 'LAC').trim(),
+          "Surname": String(m['Surname'] || '').trim(),
+          "Contact": String(m['Contact'] || m['Mobile No'] || '').trim(),
+          Role: m.Role ?? m.role ?? 'Member',
+          Due: Number(m.Due ?? m.due ?? m.baki ?? 0),
+          DP: m.DP || '',
+          seniority: manualSen,
+          Seniority: manualSen
+        };
+      });
 
-    return sortCanteenMembersByOfficeSeniority(formatted);
+    return normalizeCanteenMembersSeniority(sortCanteenMembersByOfficeSeniority(formatted));
   };
 
   // Fetch Members from Supabase Cloud (Protected against infinite loops)
@@ -526,7 +546,8 @@ export const CanteenMemberDB: React.FC = () => {
       const newAirmanId = `airman-${cleanBd}`;
       const originalAirmanId = editMember.originalAirmanId || editMember.airman_id || newAirmanId;
 
-      const payload = {
+      const memberSeniority = editMember.Seniority !== undefined ? editMember.Seniority : editMember.seniority;
+      const payload: any = {
         airman_id: newAirmanId,
         "BD No": cleanBd,
         "Rank": editMember['Rank'] || 'LAC',
@@ -534,7 +555,9 @@ export const CanteenMemberDB: React.FC = () => {
         "Contact": String(editMember['Contact'] || '').trim(),
         "Role": editMember['Role'] || 'Member',
         Due: Number(editMember.Due ?? editMember.due ?? editMember.baki ?? 0),
-        DP: editMember.DP || null
+        DP: editMember.DP || null,
+        Seniority: memberSeniority,
+        seniority: memberSeniority
       };
 
       // If BD No was modified, remove old airman_id record to prevent duplicates
@@ -562,6 +585,15 @@ export const CanteenMemberDB: React.FC = () => {
           rankBn,
           [cleanBd]
         );
+      }
+
+      // Persist Seniority if available
+      if (memberSeniority !== undefined && memberSeniority !== null) {
+        try {
+          await saveMemberSeniority(cleanBd, Number(memberSeniority));
+        } catch (e) {
+          console.warn('Note saving seniority:', e);
+        }
       }
 
       // Upsert to Supabase Cloud
@@ -771,7 +803,7 @@ export const CanteenMemberDB: React.FC = () => {
         </div>
       ) : viewMode === 'BOX' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filteredMembers.map((member) => {
+          {filteredMembers.map((member, i) => {
             const memberDp = resolveImageUrl(member.DP);
             const totalDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
 
@@ -799,12 +831,23 @@ export const CanteenMemberDB: React.FC = () => {
 
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center space-x-1.5 mb-1 flex-wrap gap-y-1">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSeniorityEditMember(member);
+                          }}
+                          className="font-mono text-emerald-400 font-black text-[10px] px-1.5 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-400/30 hover:bg-emerald-500/30 hover:scale-105 active:scale-95 transition-all cursor-pointer shadow-xs"
+                          title="Seniority / জ্যেষ্ঠতা নম্বর (Click to edit)"
+                        >
+                          #{member.seniority || member.Seniority || (i + 1)}
+                        </button>
                         <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-indigo-500/15 border border-indigo-500/30 text-indigo-300">
                           {member['Rank']}
                           {getMemberBanglaRank(member) ? ` (${getMemberBanglaRank(member)})` : ''}
                         </span>
                         <span className="text-[10px] font-bold text-slate-400 font-mono">
-                          #{member['BD No']}
+                          BD: {member['BD No']}
                         </span>
                         {member.Role && (
                           <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase border ${
@@ -880,7 +923,7 @@ export const CanteenMemberDB: React.FC = () => {
             <table className="w-full text-left text-xs text-slate-300">
               <thead className="bg-slate-950/90 text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-800">
                 <tr>
-                  <th className="px-4 py-3.5 text-center w-12 font-mono">#</th>
+                  <th className="px-3 py-3.5 text-center font-mono w-20">Seniority</th>
                   <th className="px-4 py-3.5">Rank & Name</th>
                   <th className="px-4 py-3.5 font-mono">BD No</th>
                   <th className="px-4 py-3.5">Role</th>
@@ -899,7 +942,19 @@ export const CanteenMemberDB: React.FC = () => {
                       key={member.airman_id || i}
                       className="hover:bg-slate-800/50 transition-colors group"
                     >
-                      <td className="px-4 py-3 text-center text-slate-500 font-mono font-bold">{i + 1}</td>
+                      <td className="px-3 py-3 text-center">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSeniorityEditMember(member);
+                          }}
+                          className="font-mono text-emerald-400 font-black text-xs px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-400/30 hover:bg-emerald-500/30 hover:scale-105 active:scale-95 transition-all cursor-pointer shadow-xs"
+                          title="Click to Edit Seniority / জ্যেষ্ঠতা নম্বর পরিবর্তন করুন"
+                        >
+                          #{member.seniority || member.Seniority || (i + 1)}
+                        </button>
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center space-x-3">
                           <div className="w-9 h-9 rounded-xl bg-slate-950 border border-slate-700/80 flex items-center justify-center font-black text-xs text-cyan-400 overflow-hidden shrink-0 shadow-inner">
@@ -1431,6 +1486,37 @@ export const CanteenMemberDB: React.FC = () => {
             </div>
 
             <div className="space-y-4">
+              {/* Seniority Order Setting Card (Synced with Cloud & Office Biodata Register) */}
+              <div className="p-3.5 bg-emerald-950/40 border border-emerald-500/30 rounded-2xl flex items-center justify-between flex-wrap gap-2.5 shadow-inner">
+                <div className="flex items-center space-x-3">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0 shadow-sm">
+                    <Award className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="flex items-center space-x-2 flex-wrap">
+                      <label className="text-[10px] font-black text-slate-300 uppercase tracking-wider">
+                        Seniority / জ্যেষ্ঠতা নম্বর:
+                      </label>
+                      <span className="font-mono text-emerald-400 font-black text-sm px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-400/30">
+                        #{editMember.seniority || editMember.Seniority || '-'}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-emerald-300/80 font-medium mt-0.5">
+                      অফিস Biodata Register ও ক্যান্টিন ডাটাবেজে পদমর্যাদার ক্রম অনুযায়ী সুবিন্যস্ত।
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSeniorityEditMember(editMember)}
+                  className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 shadow-sm transition-all cursor-pointer active:scale-95"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>Change Seniority / ক্রম পরিবর্তন</span>
+                </button>
+              </div>
+
               {/* Line 1: Rank (English) on Left, Rank in Bangla on Right - SIDE BY SIDE */}
               <div className="grid grid-cols-2 gap-2.5">
                 <div>
@@ -1673,6 +1759,29 @@ export const CanteenMemberDB: React.FC = () => {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Edit Member Seniority Modal (Office App Biodata Register Style) */}
+      {seniorityEditMember && (
+        <EditMemberSeniorityModal
+          isOpen={!!seniorityEditMember}
+          onClose={() => setSeniorityEditMember(null)}
+          member={seniorityEditMember}
+          allMembers={members}
+          onSuccess={(updatedMembers) => {
+            setMembers(updatedMembers);
+            setCanteenMembersCache(updatedMembers);
+            if (editMember) {
+              const fresh = updatedMembers.find((m: any) => 
+                (editMember['BD No'] && m['BD No'] === editMember['BD No']) || 
+                (editMember.airman_id && m.airman_id === editMember.airman_id)
+              );
+              if (fresh) {
+                setEditMember(fresh);
+              }
+            }
+          }}
+        />
+      )}
     </div>
   );
 };

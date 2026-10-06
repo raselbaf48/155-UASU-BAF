@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Printer, X, FileSpreadsheet, ChevronLeft, ChevronRight, Calendar, Users, Loader2, CheckCircle2 } from 'lucide-react';
-import { toBlob as htmlToImageToBlob } from 'html-to-image';
+import { toBlob as htmlToImageToBlob, toCanvas as htmlToImageToCanvas } from 'html-to-image';
 import html2canvas from 'html2canvas';
 import { saveAs } from 'file-saver';
 import { BillCategory, getTxCategory, getTxMonthKey } from '../pages/MemberDB';
@@ -576,25 +576,71 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
       // 2. High-resolution canvas capture of the bill table container (scale 2 for crisp retina text)
       let blob: Blob | null = null;
 
-      // Determine required full dimensions so all 10 columns are rendered completely without clipping
+      // Determine required full dimensions so all columns are rendered completely without clipping or excess blank space
       const tableEl = element.querySelector('table');
-      const tableScrollWidth = tableEl ? tableEl.scrollWidth : 0;
-      const targetWidth = Math.max(
-        element.scrollWidth,
-        element.offsetWidth,
-        tableScrollWidth + 48,
-        orientation === 'landscape' ? 1200 : 960
-      );
-      const targetHeight = Math.max(
-        element.scrollHeight,
-        element.offsetHeight
-      );
+      const tableContentWidth = tableEl
+        ? Math.ceil(Math.max(tableEl.scrollWidth, tableEl.offsetWidth, tableEl.getBoundingClientRect().width))
+        : Math.ceil(element.scrollWidth);
 
-      // Method A: html-to-image (Uses browser's native engine, completely immune to CSS oklch parser bugs)
-      // Setting skipFonts: true and fontEmbedCSS: '' prevents reading cross-origin remote stylesheet rules (avoiding cssRules SecurityError)
+      // Clean 20px padding on left & right (no arbitrary 1200 or 960 width)
+      const capturePaddingX = 20;
+      const targetWidth = Math.ceil(tableContentWidth + capturePaddingX * 2);
+      const targetHeight = Math.ceil(element.scrollHeight || element.offsetHeight);
+
+      // Helper to trim excess white space from right side of canvas
+      const trimCanvasRight = (sourceCanvas: HTMLCanvasElement): HTMLCanvasElement => {
+        try {
+          const ctx = sourceCanvas.getContext('2d');
+          if (!ctx) return sourceCanvas;
+          const w = sourceCanvas.width;
+          const h = sourceCanvas.height;
+          const imgData = ctx.getImageData(0, 0, w, h);
+          const data = imgData.data;
+
+          let rightmostX = 0;
+          for (let x = w - 1; x >= 0; x--) {
+            let colHasContent = false;
+            for (let y = 0; y < h; y += 2) {
+              const idx = (y * w + x) * 4;
+              const r = data[idx];
+              const g = data[idx + 1];
+              const b = data[idx + 2];
+              const a = data[idx + 3];
+              if (a > 30 && (r < 248 || g < 248 || b < 248)) {
+                colHasContent = true;
+                rightmostX = x;
+                break;
+              }
+            }
+            if (colHasContent) break;
+          }
+
+          if (rightmostX > 50) {
+            const scaleFactor = w > 1000 ? 2 : 1;
+            const rightPad = capturePaddingX * scaleFactor;
+            const newW = Math.min(w, rightmostX + rightPad);
+            if (newW < w - 10) {
+              const trimmed = document.createElement('canvas');
+              trimmed.width = newW;
+              trimmed.height = h;
+              const tCtx = trimmed.getContext('2d');
+              if (tCtx) {
+                tCtx.fillStyle = '#ffffff';
+                tCtx.fillRect(0, 0, newW, h);
+                tCtx.drawImage(sourceCanvas, 0, 0, newW, h, 0, 0, newW, h);
+                return trimmed;
+              }
+            }
+          }
+        } catch (trimErr) {
+          console.warn('Right whitespace trim note:', trimErr);
+        }
+        return sourceCanvas;
+      };
+
+      // Method A: html-to-image toCanvas (Crisp retina, native rendering, then trim right margin)
       try {
-        blob = await htmlToImageToBlob(element, {
-          quality: 0.95,
+        const rawCanvas = await htmlToImageToCanvas(element, {
           pixelRatio: 2,
           backgroundColor: '#ffffff',
           skipFonts: true,
@@ -606,6 +652,9 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
             width: `${targetWidth}px`,
             minWidth: `${targetWidth}px`,
             maxWidth: `${targetWidth}px`,
+            paddingLeft: `${capturePaddingX}px`,
+            paddingRight: `${capturePaddingX}px`,
+            boxSizing: 'border-box',
             margin: '0',
             transform: 'none',
             boxShadow: 'none',
@@ -617,6 +666,11 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
             return true;
           }
         });
+
+        if (rawCanvas) {
+          const finalCanvas = trimCanvasRight(rawCanvas);
+          blob = await new Promise<Blob | null>((resolve) => finalCanvas.toBlob(resolve, 'image/png'));
+        }
       } catch (imgErr) {
         console.warn('html-to-image capture attempt failed, trying fallback:', imgErr);
       }
@@ -669,7 +723,7 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
             return createStyleProxy(s);
           };
 
-          const canvas = await html2canvas(element, {
+          const rawCanvas = await html2canvas(element, {
             scale: 2,
             backgroundColor: '#ffffff',
             useCORS: true,
@@ -682,6 +736,17 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
                 clonedTarget.style.width = `${targetWidth}px`;
                 clonedTarget.style.minWidth = `${targetWidth}px`;
                 clonedTarget.style.maxWidth = `${targetWidth}px`;
+                clonedTarget.style.paddingLeft = `${capturePaddingX}px`;
+                clonedTarget.style.paddingRight = `${capturePaddingX}px`;
+                clonedTarget.style.boxSizing = 'border-box';
+                clonedTarget.style.margin = '0';
+              }
+              const clonedTable = clonedTarget ? clonedTarget.querySelector('table') : null;
+              if (clonedTable) {
+                clonedTable.style.width = '100%';
+                clonedTable.style.minWidth = '100%';
+                clonedTable.style.maxWidth = '100%';
+                clonedTable.style.margin = '0 auto';
               }
               if (clonedDoc.defaultView) {
                 const clonedOrig = clonedDoc.defaultView.getComputedStyle;
@@ -705,7 +770,8 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
               });
             }
           });
-          blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+          const finalCanvas = trimCanvasRight(rawCanvas);
+          blob = await new Promise<Blob | null>((resolve) => finalCanvas.toBlob(resolve, 'image/png'));
         } finally {
           window.getComputedStyle = originalGetComputedStyle;
         }
@@ -1105,7 +1171,7 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
             }
 
             .sutonny-font, .sutonny-font * {
-              font-family: 'SutonnyMJ', 'SutonnyOMJ', 'Noto Serif Bengali', 'Tiro Bangla', 'SolaimanLipi', 'Kalpurush', serif !important;
+              font-family: 'SuttonyMJ', 'SutonnyMJ', 'SutonnyOMJ', 'Sutonny MJ', 'Noto Serif Bengali', 'Tiro Bangla', 'SolaimanLipi', 'Kalpurush', serif !important;
             }
           `}
         </style>
@@ -1157,7 +1223,7 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
                     <th className="p-1.5 border border-black font-bold text-center align-middle whitespace-nowrap w-16">
                       পদবী
                     </th>
-                    <th className="p-1.5 border border-black font-bold text-center align-middle w-28">
+                    <th className="p-1.5 border border-black font-bold text-center align-middle min-w-[110px] w-auto">
                       নাম
                     </th>
                     {showColPreviousDue && (

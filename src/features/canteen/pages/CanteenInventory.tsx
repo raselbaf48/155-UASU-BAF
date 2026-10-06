@@ -8,7 +8,7 @@ import {
   Upload
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
-import { resolveImageUrl, fetchDirectImageUrl } from '../utils/canteenSettings';
+import { resolveImageUrl, fetchDirectImageUrl, getCanteenConfig, getItemDisplayName, CanteenConfig } from '../utils/canteenSettings';
 import { getCanteenMenuCache, fetchCanteenMenuOnce } from '../utils/canteenMenuData';
 import { processGalleryImage } from '../utils/imageUpload';
 import { SaveButton } from '../components/SaveButton';
@@ -38,6 +38,20 @@ import {
 
 export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = false}) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [canteenConfig, setCanteenConfig] = useState<CanteenConfig>(() => getCanteenConfig());
+
+  useEffect(() => {
+    const handleCfgUpdate = (e: any) => {
+      setCanteenConfig(e.detail || getCanteenConfig());
+    };
+    window.addEventListener('canteen_settings_updated', handleCfgUpdate);
+    window.addEventListener('storage', handleCfgUpdate);
+    return () => {
+      window.removeEventListener('canteen_settings_updated', handleCfgUpdate);
+      window.removeEventListener('storage', handleCfgUpdate);
+    };
+  }, []);
+
   const [items, setItems] = useState<any[]>(() => {
     const cached = getCanteenMenuCache();
     return cached.map(it => ({
@@ -787,14 +801,20 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
   const filteredItems = useMemo(() => {
     return items
       .filter(item => {
+        const bnName = (item.nameBn || item.name_bn || getMenuItemBanglaName(item) || '').toLowerCase();
         const matchesSearch = (item.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+                              bnName.includes(searchTerm.toLowerCase()) ||
                               (item.category || '').toLowerCase().includes(searchTerm.toLowerCase());
         const itemCategory = (item.category || 'SNACKS').toUpperCase();
         const matchesCategory = selectedCategory === 'ALL' || itemCategory === selectedCategory;
         return matchesSearch && matchesCategory;
       })
-      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-  }, [items, searchTerm, selectedCategory]);
+      .sort((a, b) => {
+        const nameA = getItemDisplayName(a, 'menu', canteenConfig).primary;
+        const nameB = getItemDisplayName(b, 'menu', canteenConfig).primary;
+        return nameA.localeCompare(nameB);
+      });
+  }, [items, searchTerm, selectedCategory, canteenConfig]);
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300 pb-10">
@@ -912,14 +932,21 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                      {/* Item Name & Live Available Stock Badge */}
                      <div className="mt-4 flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
-                           <h3 className="font-black text-white text-lg tracking-tight uppercase group-hover:text-indigo-300 transition-colors truncate" title={item.name}>
-                              {item.name}
-                           </h3>
-                           {Boolean(item.nameBn || item.name_bn || getMenuItemBanglaName(item)) && (
-                              <p className="text-xs text-slate-400 font-medium truncate mt-0.5" title={item.nameBn || item.name_bn || getMenuItemBanglaName(item)}>
-                                 {item.nameBn || item.name_bn || getMenuItemBanglaName(item)}
-                              </p>
-                           )}
+                           {(() => {
+                              const nameDisplay = getItemDisplayName(item, 'menu', canteenConfig);
+                              return (
+                                 <div className="flex items-baseline gap-2 flex-wrap">
+                                    <h3 className="font-black text-white text-base sm:text-lg tracking-tight uppercase group-hover:text-indigo-300 transition-colors truncate" title={nameDisplay.full}>
+                                       {nameDisplay.primary}
+                                    </h3>
+                                    {Boolean(nameDisplay.secondary) && (
+                                       <span className="text-xs sm:text-sm text-emerald-400 font-bold truncate" title={nameDisplay.secondary}>
+                                          ({nameDisplay.secondary})
+                                       </span>
+                                    )}
+                                 </div>
+                              );
+                           })()}
                         </div>
                         <div className="shrink-0">
                            {/* 3D Box Shape Stock Badge */}
@@ -990,7 +1017,10 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                      </div>
                      <div>
                         <h3 className="text-lg font-black text-white uppercase tracking-tight">
-                           {modalFormData.name || selectedItemForModal.name}
+                           {(() => {
+                              const display = getItemDisplayName({ ...selectedItemForModal, ...modalFormData }, 'menu', canteenConfig);
+                              return display.full || modalFormData.name || selectedItemForModal.name;
+                           })()}
                         </h3>
                         <p className="text-[11px] font-bold text-slate-400">
                            {selectedItemForModal.category} • PRICE: ৳{modalFormData.price}

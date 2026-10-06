@@ -52,21 +52,28 @@ export const ManagerDashboard: React.FC = () => {
   const [canteenConfig, setCanteenConfig] = useState<CanteenConfig>(() => getCanteenConfig());
 
   useEffect(() => {
+    let isMounted = true;
     const handleStorage = (e: StorageEvent) => {
       if (e.key === 'canteen_settings') {
-        setCanteenConfig(getCanteenConfig());
+        setTimeout(() => {
+          if (isMounted) setCanteenConfig(getCanteenConfig());
+        }, 0);
       }
     };
     const handleSettingsUpdated = (e: any) => {
-      if (e.detail) {
-        setCanteenConfig(e.detail);
-      } else {
-        setCanteenConfig(getCanteenConfig());
-      }
+      setTimeout(() => {
+        if (!isMounted) return;
+        if (e.detail) {
+          setCanteenConfig(e.detail);
+        } else {
+          setCanteenConfig(getCanteenConfig());
+        }
+      }, 0);
     };
     window.addEventListener('storage', handleStorage);
     window.addEventListener('canteen_settings_updated', handleSettingsUpdated);
     return () => {
+      isMounted = false;
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener('canteen_settings_updated', handleSettingsUpdated);
     };
@@ -87,6 +94,7 @@ export const ManagerDashboard: React.FC = () => {
   const [recipesMap, setRecipesMap] = useState<any>(() => getMenuRecipes());
 
   useEffect(() => {
+    let isMounted = true;
     fetchMembers();
     fetchCatalog();
     loadDailyMenu();
@@ -94,15 +102,19 @@ export const ManagerDashboard: React.FC = () => {
     
     // Set up an interval to refresh pre-orders and check curated menu 12:00 PM auto-reset
     const interval = setInterval(() => {
+      if (!isMounted) return;
       loadDailyMenu();
       loadPreOrders();
     }, 10000);
 
     const handleSync = () => {
-      loadDailyMenu();
-      loadPreOrders();
-      setRawInventory(getRawInventoryItems());
-      setRecipesMap(getMenuRecipes());
+      setTimeout(() => {
+        if (!isMounted) return;
+        loadDailyMenu();
+        loadPreOrders();
+        setRawInventory(getRawInventoryItems());
+        setRecipesMap(getMenuRecipes());
+      }, 0);
     };
 
     window.addEventListener('canteen_daily_menu_updated', handleSync);
@@ -113,6 +125,7 @@ export const ManagerDashboard: React.FC = () => {
     window.addEventListener('canteen_menu_recipes_updated', handleSync);
 
     return () => {
+      isMounted = false;
       clearInterval(interval);
       window.removeEventListener('canteen_daily_menu_updated', handleSync);
       window.removeEventListener('canteen_pre_orders_updated', handleSync);

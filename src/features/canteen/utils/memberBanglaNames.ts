@@ -22,7 +22,7 @@ export const BAF_RANKS_WITH_BN: BafRankOption[] = [
   { rank: 'Flg Offr', bn: 'ফ্লাঃ অঃ' },
   { rank: 'Plt Offr', bn: 'পাইলট অফিসার' },
   { rank: 'MWO', bn: 'মাঃওঃঅঃ (মাস্টার ওয়ারেন্ট অফিসার)' },
-  { rank: 'SWO', bn: 'সিঃওঃঅঃ (সিনিয়র ওয়ারেন্ট অফিসার)' },
+  { rank: 'SWO', bn: 'সিঃ ওঃ অঃ (সিনিয়র ওয়ারেন্ট অফিসার)' },
   { rank: 'WO', bn: 'ওঃঅঃ (ওয়ারেন্ট অফিসার)' },
   { rank: 'Sgt', bn: 'সার্জেন্ট' },
   { rank: 'Cpl', bn: 'কর্পোরাল' },

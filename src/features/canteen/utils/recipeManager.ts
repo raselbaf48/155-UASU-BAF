@@ -1862,8 +1862,10 @@ export const saveRawInventoryItems = (items: RawInventoryItem[]): void => {
   try {
     const { deduplicated } = deduplicateRawItems(items);
     localStorage.setItem(RAW_ITEMS_STORAGE_KEY, JSON.stringify(deduplicated));
-    window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
-    window.dispatchEvent(new Event('storage'));
+    setTimeout(() => {
+      window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+      window.dispatchEvent(new Event('storage'));
+    }, 0);
 
     // Push to Supabase app_settings cloud table for multi-device sync
     const payloadSetting = {
@@ -2531,11 +2533,13 @@ export const deductRawStockForSales = (
     }
     const mergedLogs = [...newLogs, ...existingLogs].slice(0, 500);
     localStorage.setItem(RAW_LOGS_STORAGE_KEY, JSON.stringify(mergedLogs));
-    window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
-    window.dispatchEvent(new Event('canteen_raw_stock_logs_updated'));
-    window.dispatchEvent(new Event('canteen_raw_logs_updated'));
-    window.dispatchEvent(new Event('canteen_state_updated'));
-    window.dispatchEvent(new Event('storage'));
+    setTimeout(() => {
+      window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+      window.dispatchEvent(new Event('canteen_raw_stock_logs_updated'));
+      window.dispatchEvent(new Event('canteen_raw_logs_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
+    }, 0);
   } catch (e) {
     console.warn('Failed to append raw stock logs:', e);
   }
@@ -2771,10 +2775,12 @@ export const autoRestockFromExpense = (input: AutoRestockExpenseInput): {
     }
     const mergedLogs = [...newLogs, ...existingLogs].slice(0, 500);
     localStorage.setItem(RAW_LOGS_STORAGE_KEY, JSON.stringify(mergedLogs));
-    window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
-    window.dispatchEvent(new Event('canteen_raw_stock_logs_updated'));
-    window.dispatchEvent(new Event('canteen_state_updated'));
-    window.dispatchEvent(new Event('storage'));
+    setTimeout(() => {
+      window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+      window.dispatchEvent(new Event('canteen_raw_stock_logs_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
+    }, 0);
   } catch (e) {
     console.warn('Failed to append raw restock log:', e);
   }
@@ -2897,11 +2903,13 @@ export const restoreRawStockForSaleCancellation = (
     }
     const mergedLogs = [...newLogs, ...existingLogs].slice(0, 500);
     localStorage.setItem(RAW_LOGS_STORAGE_KEY, JSON.stringify(mergedLogs));
-    window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
-    window.dispatchEvent(new Event('canteen_raw_stock_logs_updated'));
-    window.dispatchEvent(new Event('canteen_raw_logs_updated'));
-    window.dispatchEvent(new Event('canteen_state_updated'));
-    window.dispatchEvent(new Event('storage'));
+    setTimeout(() => {
+      window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+      window.dispatchEvent(new Event('canteen_raw_stock_logs_updated'));
+      window.dispatchEvent(new Event('canteen_raw_logs_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
+    }, 0);
   } catch (e) {
     console.warn('Failed to append raw stock restoration logs:', e);
   }
