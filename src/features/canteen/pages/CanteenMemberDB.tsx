@@ -36,7 +36,7 @@ import {
   saveMemberBanglaRank,
   BAF_RANKS_WITH_BN 
 } from '../utils/memberBanglaNames';
-import { getCanteenMembersCache, fetchCanteenMembersOnce } from '../utils/canteenMenuData';
+import { getCanteenMembersCache, fetchCanteenMembersOnce, setCanteenMembersCache } from '../utils/canteenMenuData';
 
 // Export getRankWeight from canteenSeniority
 export { getRankWeight };
@@ -81,6 +81,7 @@ export const CanteenMemberDB: React.FC = () => {
   const [singleMember, setSingleMember] = useState({
     bdNo: '',
     rank: 'LAC',
+    rankBn: 'এলএসি',
     surname: '',
     nameBn: '',
     contact: '',
@@ -139,18 +140,44 @@ export const CanteenMemberDB: React.FC = () => {
     return sortCanteenMembersByOfficeSeniority(formatted);
   };
 
-  // Fetch Members from Supabase Cloud
+  // Fetch Members from Supabase Cloud (Protected against infinite loops)
+  const isFetchingRef = useRef(false);
   const fetchMembersFromCloud = async (showLoader = false) => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
     if (showLoader && members.length === 0) setLoading(true);
     try {
       const data = await fetchCanteenMembersOnce(showLoader);
       if (data && data.length > 0) {
-        const sorted = sortMembers(data);
-        setMembers(sorted);
+        setMembers((prevMembers) => {
+          const currentContactMap = new Map<string, string>();
+          (prevMembers || []).forEach(m => {
+            const k = String(m.airman_id || m['BD No'] || '').trim();
+            const c = String(m.Contact || m['Mobile No'] || '').trim();
+            if (k && c) currentContactMap.set(k, c);
+          });
+
+          const mergedData = data.map((cloudM: any) => {
+            const k = String(cloudM.airman_id || cloudM['BD No'] || '').trim();
+            const existingContact = currentContactMap.get(k) || '';
+            const cloudContact = String(cloudM.Contact || cloudM['Mobile No'] || '').trim();
+            return {
+              ...cloudM,
+              Contact: cloudContact || existingContact || ''
+            };
+          });
+
+          const sorted = sortMembers(mergedData);
+          try {
+            localStorage.setItem('canteen_members_cache', JSON.stringify(sorted));
+          } catch {}
+          return sorted;
+        });
       }
     } catch (err) {
       console.warn('Error fetching Canteen members:', err);
     } finally {
+      isFetchingRef.current = false;
       setLoading(false);
     }
   };
@@ -158,13 +185,16 @@ export const CanteenMemberDB: React.FC = () => {
   useEffect(() => {
     fetchMembersFromCloud();
 
-    const handleSync = () => fetchMembersFromCloud(false);
+    const handleSync = (e: any) => {
+      if (e?.detail && Array.isArray(e.detail) && e.detail.length > 0) {
+        setMembers(sortMembers(e.detail));
+        setLoading(false);
+      }
+    };
     window.addEventListener('canteen_members_updated', handleSync);
-    window.addEventListener('canteen_state_updated', handleSync);
 
     return () => {
       window.removeEventListener('canteen_members_updated', handleSync);
-      window.removeEventListener('canteen_state_updated', handleSync);
     };
   }, []);
 
@@ -268,23 +298,40 @@ export const CanteenMemberDB: React.FC = () => {
           [cleanBd, singleMember.surname.trim()]
         );
       }
+      if (singleMember.rankBn?.trim()) {
+        await saveMemberBanglaRank(
+          payload.airman_id || cleanBd,
+          singleMember.rankBn.trim(),
+          [cleanBd]
+        );
+      }
       const { error } = await supabase.from('Canteen_Member').upsert([payload], { onConflict: 'airman_id' });
       if (error) throw error;
 
       setIsSavedSingle(true);
       showToast(`Member #${cleanBd} (${payload.Surname}) saved to Cloud!`);
 
-      // Update local cache
+      // Update local cache and global in-memory cache
       const updated = sortMembers([payload, ...members.filter(m => m.airman_id !== payload.airman_id)]);
       setMembers(updated);
+      setCanteenMembersCache(updated);
       localStorage.setItem('canteen_members_cache', JSON.stringify(updated));
-      window.dispatchEvent(new Event('canteen_members_updated'));
+      localStorage.setItem(`canteen_member_${cleanBd}`, JSON.stringify({
+        dp: payload.DP || '',
+        due: 0,
+        rank: payload.Rank,
+        surname: payload.Surname,
+        contact: payload.Contact,
+        bdNo: cleanBd
+      }));
+      window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: updated }));
+      window.dispatchEvent(new Event('canteen_state_updated'));
 
       setTimeout(() => {
         setIsSavedSingle(false);
         setIsSavingSingle(false);
         setShowAddModal(false);
-        setSingleMember({ bdNo: '', rank: 'LAC', surname: '', contact: '', role: 'Member', dp: '' });
+        setSingleMember({ bdNo: '', rank: 'LAC', rankBn: 'এলএসি', surname: '', nameBn: '', contact: '', role: 'Member', dp: '' });
       }, 900);
     } catch (err: any) {
       alert('Error saving to Supabase Cloud: ' + (err.message || err));
@@ -476,50 +523,81 @@ export const CanteenMemberDB: React.FC = () => {
 
     setIsSavingEdit(true);
     try {
+      const newAirmanId = `airman-${cleanBd}`;
+      const originalAirmanId = editMember.originalAirmanId || editMember.airman_id || newAirmanId;
+
       const payload = {
-        airman_id: editMember.airman_id || `airman-${cleanBd}`,
+        airman_id: newAirmanId,
         "BD No": cleanBd,
         "Rank": editMember['Rank'] || 'LAC',
-        "Surname": editMember['Surname'],
-        "Contact": editMember['Contact'] || '',
+        "Surname": String(editMember['Surname'] || '').trim(),
+        "Contact": String(editMember['Contact'] || '').trim(),
         "Role": editMember['Role'] || 'Member',
+        Due: Number(editMember.Due ?? editMember.due ?? editMember.baki ?? 0),
         DP: editMember.DP || null
       };
+
+      // If BD No was modified, remove old airman_id record to prevent duplicates
+      if (originalAirmanId && originalAirmanId !== newAirmanId) {
+        try {
+          await supabase.from('Canteen_Member').delete().eq('airman_id', originalAirmanId);
+        } catch (e) {
+          console.warn('Note deleting old member row:', e);
+        }
+      }
 
       // Persist Bengali Name & Rank
       const nameBn = String(editMember.nameBn ?? getMemberBanglaName(editMember) ?? '').trim();
       const rankBn = String(editMember.rankBn ?? getMemberBanglaRank(editMember) ?? '').trim();
       if (nameBn) {
         await saveMemberBanglaName(
-          payload.airman_id || cleanBd,
+          newAirmanId,
           nameBn,
-          [cleanBd, editMember['Surname']]
+          [cleanBd, payload.Surname]
         );
       }
       if (rankBn) {
         await saveMemberBanglaRank(
-          payload.airman_id || cleanBd,
+          newAirmanId,
           rankBn,
           [cleanBd]
         );
       }
 
-      const { error } = await supabase.from('Canteen_Member').update(payload).eq('airman_id', payload.airman_id);
+      // Upsert to Supabase Cloud
+      const { error } = await supabase.from('Canteen_Member').upsert([payload], { onConflict: 'airman_id' });
       if (error) throw error;
 
       setIsSavedEdit(true);
       showToast(`Member #${cleanBd} updated successfully in Cloud!`);
 
-      const updated = sortMembers(members.map(m => m.airman_id === payload.airman_id ? { ...m, ...payload } : m));
+      // Update local state and global in-memory cache
+      const updated = sortMembers(members.map(m => {
+        if (m.airman_id === originalAirmanId || m.airman_id === newAirmanId) {
+          return { ...m, ...payload };
+        }
+        return m;
+      }));
       setMembers(updated);
+      setCanteenMembersCache(updated);
       localStorage.setItem('canteen_members_cache', JSON.stringify(updated));
-      window.dispatchEvent(new Event('canteen_members_updated'));
+      localStorage.setItem(`canteen_member_${cleanBd}`, JSON.stringify({
+        dp: payload.DP || '',
+        due: payload.Due,
+        rank: payload.Rank,
+        surname: payload.Surname,
+        contact: payload.Contact,
+        bdNo: cleanBd
+      }));
+
+      window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: updated }));
+      window.dispatchEvent(new Event('canteen_state_updated'));
 
       setTimeout(() => {
         setIsSavedEdit(false);
         setIsSavingEdit(false);
         setEditMember(null);
-      }, 800);
+      }, 700);
     } catch (err: any) {
       alert('Error updating member: ' + (err.message || err));
       setIsSavingEdit(false);
@@ -538,8 +616,10 @@ export const CanteenMemberDB: React.FC = () => {
       showToast(`Member #${deleteConfirmMember['BD No']} removed from Cloud.`);
       const updated = members.filter(m => m.airman_id !== deleteConfirmMember.airman_id);
       setMembers(updated);
+      setCanteenMembersCache(updated);
       localStorage.setItem('canteen_members_cache', JSON.stringify(updated));
-      window.dispatchEvent(new Event('canteen_members_updated'));
+      window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: updated }));
+      window.dispatchEvent(new Event('canteen_state_updated'));
 
       setDeleteConfirmMember(null);
     } catch (err: any) {
@@ -700,8 +780,8 @@ export const CanteenMemberDB: React.FC = () => {
                 key={member.airman_id}
                 className="bg-gradient-to-b from-slate-900 via-slate-900/90 to-slate-950 rounded-3xl p-5 border border-slate-800/80 shadow-md hover:border-slate-700 transition-all flex flex-col justify-between space-y-4 group"
               >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center space-x-3.5">
+                <div className="flex items-start">
+                  <div className="flex items-center space-x-3.5 flex-1 min-w-0">
                     {/* Avatar */}
                     <div className="w-13 h-13 rounded-2xl bg-slate-950 border border-slate-700/80 flex items-center justify-center font-black text-xl text-cyan-400 overflow-hidden shrink-0 shadow-inner">
                       {memberDp ? (
@@ -717,7 +797,7 @@ export const CanteenMemberDB: React.FC = () => {
                       )}
                     </div>
 
-                    <div>
+                    <div className="flex-1 min-w-0">
                       <div className="flex items-center space-x-1.5 mb-1 flex-wrap gap-y-1">
                         <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-indigo-500/15 border border-indigo-500/30 text-indigo-300">
                           {member['Rank']}
@@ -753,23 +833,11 @@ export const CanteenMemberDB: React.FC = () => {
                       </div>
                       {member['Contact'] && (
                         <p className="text-[11px] text-slate-400 font-mono flex items-center gap-1 mt-0.5">
-                          <Phone className="w-3 h-3 text-slate-500" />
-                          <span>{member['Contact']}</span>
+                          <Phone className="w-3 h-3 text-slate-500 shrink-0" />
+                          <span className="truncate">{member['Contact']}</span>
                         </p>
                       )}
                     </div>
-                  </div>
-
-                  {/* Due amount tag */}
-                  <div className="text-right flex flex-col items-end">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">TOTAL DUE</p>
-                    <span className={`px-2.5 py-1 rounded-xl border text-base font-black font-mono leading-none ${
-                      totalDue === 0 
-                        ? 'bg-slate-950/80 border-slate-700/80 text-emerald-400' 
-                        : 'bg-rose-950/80 border-rose-500/60 text-rose-300 shadow-sm shadow-rose-950/30'
-                    }`}>
-                      ৳{totalDue.toLocaleString()}
-                    </span>
                   </div>
                 </div>
 
@@ -777,11 +845,16 @@ export const CanteenMemberDB: React.FC = () => {
                 <div className="pt-3 border-t border-slate-800/80 flex items-center space-x-2">
                   <button
                     type="button"
-                    onClick={() => setEditMember({ 
-                      ...member, 
-                      nameBn: getMemberBanglaName(member),
-                      rankBn: getMemberBanglaRank(member)
-                    })}
+                    onClick={() => {
+                      const bnName = getMemberBanglaName(member);
+                      const bnRank = getMemberBanglaRank(member);
+                      setEditMember({ 
+                        ...member, 
+                        originalAirmanId: member.airman_id || `airman-${member['BD No']}`,
+                        nameBn: bnName,
+                        rankBn: bnRank
+                      });
+                    }}
                     className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer border border-slate-700/60"
                   >
                     <Edit2 className="w-3.5 h-3.5 text-cyan-400" />
@@ -887,11 +960,16 @@ export const CanteenMemberDB: React.FC = () => {
                         <div className="flex items-center justify-center space-x-1.5">
                           <button
                             type="button"
-                            onClick={() => setEditMember({ 
-                              ...member, 
-                              nameBn: getMemberBanglaName(member),
-                              rankBn: getMemberBanglaRank(member)
-                            })}
+                            onClick={() => {
+                              const bnName = getMemberBanglaName(member);
+                              const bnRank = getMemberBanglaRank(member);
+                              setEditMember({ 
+                                ...member, 
+                                originalAirmanId: member.airman_id || `airman-${member['BD No']}`,
+                                nameBn: bnName,
+                                rankBn: bnRank
+                              });
+                            }}
                             className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-300 hover:text-white rounded-lg text-[11px] font-black uppercase flex items-center space-x-1 border border-slate-700 transition-all cursor-pointer"
                             title="Edit Profile"
                           >
@@ -974,31 +1052,24 @@ export const CanteenMemberDB: React.FC = () => {
 
             {/* TAB 1: SINGLE MEMBER FORM */}
             {addMode === 'single' && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* BD No */}
+              <div className="space-y-3.5">
+                {/* Line 1: Rank (English) on Left, Rank in Bangla on Right - SIDE BY SIDE */}
+                <div className="grid grid-cols-2 gap-2.5">
                   <div>
-                    <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider block mb-1.5">
-                      BD No <span className="text-rose-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. 474455"
-                      value={singleMember.bdNo}
-                      onChange={(e) => setSingleMember({ ...singleMember, bdNo: e.target.value })}
-                      className="w-full bg-slate-950 text-white rounded-xl px-4 py-3 text-sm font-bold border border-slate-700 focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                    />
-                  </div>
-
-                  {/* Rank */}
-                  <div>
-                    <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider block mb-1.5">
-                      Rank <span className="text-rose-500">*</span>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
+                      Rank / পদবি (English) <span className="text-rose-500">*</span>
                     </label>
                     <select
                       value={singleMember.rank}
-                      onChange={(e) => setSingleMember({ ...singleMember, rank: e.target.value })}
-                      className="w-full bg-slate-950 text-white rounded-xl px-4 py-3 text-sm font-bold border border-slate-700 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                      onChange={(e) => {
+                        const newRank = e.target.value;
+                        setSingleMember({ 
+                          ...singleMember, 
+                          rank: newRank,
+                          rankBn: getMemberBanglaRank(newRank)
+                        });
+                      }}
+                      className="w-full bg-slate-950 text-white rounded-xl px-2.5 py-2.5 text-xs font-bold border border-slate-700 focus:outline-none focus:ring-1 focus:ring-cyan-500"
                     >
                       {BAF_RANKS_WITH_BN.map(item => (
                         <option key={item.rank} value={item.rank}>
@@ -1008,70 +1079,101 @@ export const CanteenMemberDB: React.FC = () => {
                     </select>
                   </div>
 
-                  {/* Surname */}
                   <div>
-                    <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider block mb-1.5">
-                      Surname / Full Name <span className="text-rose-500">*</span>
+                    <label className="text-[10px] font-black text-emerald-400 uppercase tracking-wider block mb-1">
+                      পদবি বাংলায় (Rank in BN)
                     </label>
                     <input
                       type="text"
-                      placeholder="e.g. Nishad"
-                      value={singleMember.surname}
-                      onChange={(e) => setSingleMember({ ...singleMember, surname: e.target.value })}
-                      className="w-full bg-slate-950 text-white rounded-xl px-4 py-3 text-sm font-bold border border-slate-700 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                      placeholder="e.g. উইং কমাঃ..."
+                      value={singleMember.rankBn}
+                      onChange={(e) => setSingleMember({ ...singleMember, rankBn: e.target.value })}
+                      className="w-full bg-slate-950 text-emerald-300 placeholder-slate-600 rounded-xl px-2.5 py-2.5 text-xs font-bold border border-emerald-500/40 focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500 shadow-inner font-sans"
+                    />
+                  </div>
+                </div>
+
+                {/* Line 2: BD No on Left, Role on Right - SIDE BY SIDE */}
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
+                      BD No / সার্ভিস নং <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 474455"
+                      value={singleMember.bdNo}
+                      onChange={(e) => setSingleMember({ ...singleMember, bdNo: e.target.value })}
+                      className="w-full bg-slate-950 text-white rounded-xl px-2.5 py-2.5 text-xs font-bold font-mono border border-slate-700 focus:outline-none focus:ring-1 focus:ring-cyan-500"
                     />
                   </div>
 
-                  {/* Bangla Name */}
                   <div>
-                    <label className="text-[11px] font-black text-emerald-400 uppercase tracking-wider block mb-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
+                      Role in Canteen
+                    </label>
+                    <select
+                      value={singleMember.role}
+                      onChange={(e) => setSingleMember({ ...singleMember, role: e.target.value })}
+                      className="w-full bg-slate-950 text-white rounded-xl px-2.5 py-2.5 text-xs font-bold border border-slate-700 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                    >
+                      {['Member', 'Manager', 'Staff', 'Cook', 'Cashier'].map((role) => (
+                        <option key={role} value={role}>{role}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Line 3: Surname / Name (English) on Left, Bangla Name on Right - SIDE BY SIDE */}
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
+                      Surname / Name (EN) <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Nishad, Sonia..."
+                      value={singleMember.surname}
+                      onChange={(e) => {
+                        const newSurname = e.target.value;
+                        const autoBn = getMemberBanglaName({ Surname: newSurname, "BD No": singleMember.bdNo });
+                        setSingleMember({ 
+                          ...singleMember, 
+                          surname: newSurname,
+                          nameBn: (!singleMember.nameBn || singleMember.nameBn === getMemberBanglaName({ Surname: singleMember.surname })) ? (autoBn || singleMember.nameBn || '') : singleMember.nameBn
+                        });
+                      }}
+                      className="w-full bg-slate-950 text-white rounded-xl px-2.5 py-2.5 text-xs font-bold border border-slate-700 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-black text-emerald-400 uppercase tracking-wider block mb-1">
                       বাংলা নাম (Bangla Name)
                     </label>
                     <input
                       type="text"
-                      placeholder="e.g. তানভীর, মেহেদী, নিশাদ..."
+                      placeholder="e.g. নিশাদ, সোনিয়া..."
                       value={singleMember.nameBn}
                       onChange={(e) => setSingleMember({ ...singleMember, nameBn: e.target.value })}
-                      className="w-full bg-slate-950 text-emerald-300 placeholder-slate-600 rounded-xl px-4 py-3 text-sm font-bold border border-emerald-500/40 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="w-full bg-slate-950 text-emerald-300 placeholder-slate-600 rounded-xl px-2.5 py-2.5 text-xs font-bold border border-emerald-500/40 focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500 shadow-inner font-sans"
                     />
                   </div>
+                </div>
 
-                  {/* Contact */}
-                  <div>
-                    <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider block mb-1.5">
-                      Contact / Phone Number
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. 01712345678"
-                      value={singleMember.contact}
-                      onChange={(e) => setSingleMember({ ...singleMember, contact: e.target.value })}
-                      className="w-full bg-slate-950 text-white rounded-xl px-4 py-3 text-sm font-bold border border-slate-700 focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                    />
-                  </div>
-
-                  {/* Role */}
-                  <div className="sm:col-span-2">
-                    <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider block mb-1.5">
-                      Role in Canteen
-                    </label>
-                    <div className="grid grid-cols-4 gap-2">
-                      {['Member', 'Manager', 'Staff', 'Cook'].map((role) => (
-                        <button
-                          key={role}
-                          type="button"
-                          onClick={() => setSingleMember({ ...singleMember, role })}
-                          className={`py-2 px-3 rounded-xl text-xs font-black uppercase transition-all cursor-pointer ${
-                            singleMember.role === role
-                              ? 'bg-cyan-600 text-white shadow-xs'
-                              : 'bg-slate-950 text-slate-400 border border-slate-800 hover:text-white'
-                          }`}
-                        >
-                          {role}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                {/* Line 4: Contact */}
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
+                    Contact / Phone Number
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 01712345678"
+                    value={singleMember.contact}
+                    onChange={(e) => setSingleMember({ ...singleMember, contact: e.target.value })}
+                    className="w-full bg-slate-950 text-white rounded-xl px-3 py-2.5 text-xs font-bold border border-slate-700 font-mono focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                  />
+                </div>
 
                   {/* Photo Import / Upload (No URL box) */}
                   <div className="sm:col-span-2 space-y-2">
@@ -1120,22 +1222,21 @@ export const CanteenMemberDB: React.FC = () => {
                       )}
                     </div>
                   </div>
-                </div>
 
-                <div className="pt-4 border-t border-slate-800">
-                  <SaveButton
-                    type="button"
-                    onClick={handleSaveSingleMember}
-                    isSaving={isSavingSingle}
-                    isSaved={isSavedSingle}
-                    idleText="Save Member to Cloud"
-                    savingText="Saving to Cloud..."
-                    savedText="Member Saved to Cloud! ✓"
-                    className="w-full py-3.5 text-xs font-black tracking-widest cursor-pointer"
-                  />
+                  <div className="pt-4 border-t border-slate-800">
+                    <SaveButton
+                      type="button"
+                      onClick={handleSaveSingleMember}
+                      isSaving={isSavingSingle}
+                      isSaved={isSavedSingle}
+                      idleText="Save Member to Cloud"
+                      savingText="Saving to Cloud..."
+                      savedText="Member Saved to Cloud! ✓"
+                      className="w-full py-3.5 text-xs font-black tracking-widest cursor-pointer"
+                    />
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
             {/* TAB 2: MULTIPLE MEMBERS (EXCEL FORMAT) */}
             {addMode === 'excel' && (
@@ -1330,8 +1431,8 @@ export const CanteenMemberDB: React.FC = () => {
             </div>
 
             <div className="space-y-4">
-              {/* Line 1: Rank (English) on Left, Rank in Bangla on Right */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Line 1: Rank (English) on Left, Rank in Bangla on Right - SIDE BY SIDE */}
+              <div className="grid grid-cols-2 gap-2.5">
                 <div>
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
                     Rank / পদবি (English)
@@ -1346,7 +1447,7 @@ export const CanteenMemberDB: React.FC = () => {
                         rankBn: getMemberBanglaRank(newRank)
                       });
                     }}
-                    className="w-full bg-slate-950 text-white rounded-xl px-3 py-2 text-xs font-bold border border-slate-700 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                    className="w-full bg-slate-950 text-white rounded-xl px-2.5 py-2.5 text-xs font-bold border border-slate-700 focus:outline-none focus:ring-1 focus:ring-cyan-500"
                   >
                     {BAF_RANKS_WITH_BN.map(item => (
                       <option key={item.rank} value={item.rank}>
@@ -1359,55 +1460,104 @@ export const CanteenMemberDB: React.FC = () => {
                 <div>
                   <label className="text-[10px] font-black text-emerald-400 uppercase tracking-wider block mb-1 flex items-center justify-between">
                     <span>পদবি বাংলায় (Rank in Bangla)</span>
-                    <span className="text-[9px] text-slate-400 font-normal">স্বয়ংক্রিয় বা কাস্টম</span>
                   </label>
                   <input
                     type="text"
-                    placeholder="e.g. উইং কমাঃ, স্কোঃ লীঃ, ফ্লাঃ লেঃ, ফ্লাঃ অঃ..."
+                    placeholder="e.g. উইং কমাঃ..."
                     value={editMember.rankBn ?? getMemberBanglaRank(editMember)}
                     onChange={(e) => setEditMember({ ...editMember, rankBn: e.target.value })}
-                    className="w-full bg-slate-950 text-emerald-300 placeholder-slate-600 rounded-xl px-3 py-2.5 text-xs font-bold border border-emerald-500/40 focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500 shadow-inner"
+                    className="w-full bg-slate-950 text-emerald-300 placeholder-slate-600 rounded-xl px-2.5 py-2.5 text-xs font-bold border border-emerald-500/40 focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500 shadow-inner font-sans"
                   />
                 </div>
               </div>
 
-              {/* Line 2: Surname (English) on Left, Bangla Name on Right */}
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
-                  Surname / Name (English)
-                </label>
-                <input
-                  type="text"
-                  value={editMember['Surname'] || ''}
-                  onChange={(e) => setEditMember({ ...editMember, Surname: e.target.value })}
-                  className="w-full bg-slate-950 text-white rounded-xl px-3 py-2.5 text-xs font-bold border border-slate-700"
-                />
-              </div>
-
-              {/* Line 3: Contact & Role */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Line 2: BD No on Left, Role on Right - SIDE BY SIDE */}
+              <div className="grid grid-cols-2 gap-2.5">
                 <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">Contact</label>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
+                    BD No / সার্ভিস নং
+                  </label>
                   <input
                     type="text"
-                    value={editMember['Contact'] || ''}
-                    onChange={(e) => setEditMember({ ...editMember, Contact: e.target.value })}
-                    className="w-full bg-slate-950 text-white rounded-xl px-3 py-2.5 text-xs font-bold border border-slate-700 font-mono"
+                    placeholder="e.g. 17, 9241, 474455..."
+                    value={editMember['BD No'] || ''}
+                    onChange={(e) => {
+                      const clean = e.target.value.replace(/^BD\/?/i, '').trim();
+                      setEditMember({ 
+                        ...editMember, 
+                        "BD No": clean,
+                        airman_id: `airman-${clean}`
+                      });
+                    }}
+                    className="w-full bg-slate-950 text-white placeholder-slate-600 rounded-xl px-2.5 py-2.5 text-xs font-bold font-mono border border-slate-700 focus:outline-none focus:ring-1 focus:ring-cyan-500"
                   />
                 </div>
 
                 <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">Role</label>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
+                    Role / ভূমিকা
+                  </label>
                   <select
                     value={editMember['Role'] || 'Member'}
                     onChange={(e) => setEditMember({ ...editMember, Role: e.target.value })}
-                    className="w-full bg-slate-950 text-white rounded-xl px-3 py-2.5 text-xs font-bold border border-slate-700"
+                    className="w-full bg-slate-950 text-white rounded-xl px-2.5 py-2.5 text-xs font-bold border border-slate-700 focus:outline-none focus:ring-1 focus:ring-cyan-500"
                   >
                     {['Member', 'Manager', 'Staff', 'Cook', 'Cashier'].map(r => (
                       <option key={r} value={r}>{r}</option>
                     ))}
                   </select>
                 </div>
+              </div>
+
+              {/* Line 3: Surname / Name (English) on Left, Bangla Name on Right - SIDE BY SIDE */}
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
+                    Surname / Name (EN)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Sonia, Shohana..."
+                    value={editMember['Surname'] || ''}
+                    onChange={(e) => {
+                      const newSurname = e.target.value;
+                      const autoBn = getMemberBanglaName({ ...editMember, Surname: newSurname });
+                      setEditMember({ 
+                        ...editMember, 
+                        Surname: newSurname,
+                        nameBn: (!editMember.nameBn || editMember.nameBn === getMemberBanglaName(editMember)) ? (autoBn || editMember.nameBn || '') : editMember.nameBn
+                      });
+                    }}
+                    className="w-full bg-slate-950 text-white rounded-xl px-2.5 py-2.5 text-xs font-bold border border-slate-700 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black text-emerald-400 uppercase tracking-wider block mb-1">
+                    নাম বাংলায় (Name in BN)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. সোনিয়া, শোহানা..."
+                    value={editMember.nameBn ?? getMemberBanglaName(editMember)}
+                    onChange={(e) => setEditMember({ ...editMember, nameBn: e.target.value })}
+                    className="w-full bg-slate-950 text-emerald-300 placeholder-slate-600 rounded-xl px-2.5 py-2.5 text-xs font-bold border border-emerald-500/40 focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500 shadow-inner font-sans"
+                  />
+                </div>
+              </div>
+
+              {/* Line 4: Contact */}
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
+                  Contact / মোবাইল নং
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. 017xxxxxxxx, 018xxxxxxxx..."
+                  value={editMember['Contact'] || ''}
+                  onChange={(e) => setEditMember({ ...editMember, Contact: e.target.value })}
+                  className="w-full bg-slate-950 text-white placeholder-slate-600 rounded-xl px-3 py-2.5 text-xs font-bold border border-slate-700 font-mono focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                />
               </div>
 
               {/* Photo: Import Icon only, NO URL box */}

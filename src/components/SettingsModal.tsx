@@ -805,11 +805,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
         </div>
       )}
-      {/* Single Pane View for All Screens */}
-      <div className="w-full max-w-3xl h-full sm:h-[85vh] bg-white dark:bg-[#1e293b] border-0 sm:border border-slate-200 dark:border-slate-700 sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden relative">
+      {/* Responsive Layout: Sidebar + Detail Pane on desktop, Single View on mobile */}
+      <div className="w-full max-w-4xl h-full sm:h-[85vh] bg-white dark:bg-[#1e293b] border-0 sm:border border-slate-200 dark:border-slate-700 sm:rounded-3xl shadow-2xl flex flex-col sm:flex-row overflow-hidden relative">
         
-        {/* Menu View (Shown when no activeSection is selected) */}
-        <div className={`w-full h-full bg-slate-50 dark:bg-slate-900 flex-col shrink-0 ${!activeSection ? 'flex' : 'hidden'}`}>
+        {/* Menu View (Shown when no activeSection on mobile, always shown in sidebar on desktop) */}
+        <div className={`w-full sm:w-72 h-full bg-slate-50 dark:bg-slate-900 flex-col shrink-0 sm:border-r border-slate-200 dark:border-slate-700/60 ${!activeSection ? 'flex' : 'hidden sm:flex'}`}>
           <div className="p-6 pb-2 flex items-center justify-between">
             <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
               <Settings className="w-6 h-6 text-emerald-500" />
@@ -817,52 +817,61 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </h2>
             <button
               onClick={onClose}
-              className="p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 transition-colors cursor-pointer"
+              className="p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 transition-colors cursor-pointer sm:hidden"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
-          <div className="flex-col overflow-y-auto flex-1 px-4 pb-4 sm:pb-6 gap-2 sm:gap-3 mt-4 scrollbar-hide">
-            {sections.map(sec => (
-              <button
-                key={sec.id}
-                onClick={() => {
-                  if (sec.id === 'users' && onOpenUserManagement) {
-                    onOpenUserManagement();
-                  } else {
-                    setActiveSection(sec.id as SettingSection);
-                  }
-                }}
-                className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all cursor-pointer text-left mb-3 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 shadow-sm font-medium hover:shadow-md`}
-              >
-                <div className="text-slate-500 dark:text-slate-400">
-                  {sec.icon}
-                </div>
-                <span className="text-base flex-1">{sec.label}</span>
-                <ChevronRight className="w-5 h-5 text-slate-400" />
-              </button>
-            ))}
+          <div className="flex-col overflow-y-auto flex-1 px-3 pb-4 sm:pb-6 gap-1 mt-3 scrollbar-hide">
+            {sections.map(sec => {
+              const isCurrent = (activeSection || 'appearance') === sec.id;
+              return (
+                <button
+                  key={sec.id}
+                  onClick={() => {
+                    if (sec.id === 'users' && onOpenUserManagement) {
+                      onOpenUserManagement();
+                    } else {
+                      setActiveSection(sec.id as SettingSection);
+                    }
+                  }}
+                  className={`w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl transition-all cursor-pointer text-left mb-1.5 border font-semibold text-sm ${
+                    isCurrent
+                      ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border-indigo-500/40 shadow-sm'
+                      : 'bg-white dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border-slate-200 dark:border-slate-700/60'
+                  }`}
+                >
+                  <div className={isCurrent ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 dark:text-slate-400'}>
+                    {sec.icon}
+                  </div>
+                  <span className="text-sm flex-1 truncate">{sec.label}</span>
+                  <ChevronRight className={`w-4 h-4 transition-transform ${isCurrent ? 'text-indigo-500 translate-x-0.5' : 'text-slate-400'}`} />
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        {/* Detail View (Shown when an activeSection is selected) */}
-        <div className={`flex-1 w-full h-full bg-white dark:bg-[#1e293b] flex-col relative overflow-hidden ${!activeSection ? 'hidden' : 'flex'}`}>
+        {/* Detail View (Shown when an activeSection is selected on mobile, always shown on desktop) */}
+        <div className={`flex-1 w-full h-full bg-white dark:bg-[#1e293b] flex-col relative overflow-hidden ${!activeSection ? 'hidden sm:flex' : 'flex'}`}>
           {/* Header */}
-          <div className="flex items-center justify-between px-4 sm:px-8 py-4 sm:py-6 border-b border-slate-200 dark:border-slate-700/50 bg-white dark:bg-[#1e293b]">
+          <div className="flex items-center justify-between px-4 sm:px-8 py-4 sm:py-5 border-b border-slate-200 dark:border-slate-700/50 bg-white dark:bg-[#1e293b]">
             <div className="flex items-center gap-3">
               <button 
                 onClick={() => setActiveSection(null)}
-                className="p-2 -ml-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 transition-colors"
+                className="p-2 -ml-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 transition-colors sm:hidden cursor-pointer"
+                title="Back to Settings list"
               >
                 <ArrowLeft className="w-5 h-5" />
               </button>
               <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-              {getSectionTitle(activeSection || 'appearance')}
+                {getSectionTitle(activeSection || 'appearance')}
               </h3>
             </div>
             <button
               onClick={onClose}
               className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 transition-colors cursor-pointer"
+              title="Close Settings"
             >
               <X className="w-5 h-5" />
             </button>
@@ -874,7 +883,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="flex-1 overflow-y-auto p-6 sm:p-8">
                 <div className="max-w-3xl mx-auto space-y-8">
                   {/* Appearance */}
-                  {activeSection === 'appearance' && (
+                  {(activeSection === 'appearance' || !activeSection) && (
                     <div className="space-y-6 animate-fadeIn">
                       <div className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-6">
                         <h4 className="text-base font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
@@ -1266,7 +1275,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               
               
               
-              {activeSection === 'appNotice' && (role === 'SUPER_ADMIN' || role === 'OWNER') && (
+              {activeSection === 'appNotice' && (role === 'SUPER_ADMIN' || role === 'OWNER' || role === 'ADMIN') && (
             <div className="space-y-6 animate-fadeIn max-w-2xl">
                     {appConfig.notice.isActive && (
                       <div className="p-4 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700/60 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm animate-fadeIn">
@@ -1372,7 +1381,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
 
         
-        {activeSection === 'maintenanceMode' && (role === 'SUPER_ADMIN' || role === 'OWNER') && (
+        {activeSection === 'maintenanceMode' && (role === 'SUPER_ADMIN' || role === 'OWNER' || role === 'ADMIN') && (
             <div className="space-y-6 animate-fadeIn max-w-2xl">
                     {appConfig.maintenance.isActive && (
                       <div className="p-4 bg-red-50 dark:bg-red-950/40 border border-red-300 dark:border-red-700/60 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm animate-fadeIn">

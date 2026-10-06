@@ -630,18 +630,26 @@ export async function syncCanteenMembersFromCloud(forceFull = false): Promise<vo
         const localRank = String(localM.Rank || '').trim();
         const cloudSurname = String(cloudM.Surname || '').trim();
         const localSurname = String(localM.Surname || '').trim();
+        const cloudContact = String(cloudM.Contact || cloudM['Mobile No'] || '').trim();
+        const localContact = String(localM.Contact || localM['Mobile No'] || '').trim();
 
         const isChanged = (
           Math.abs(cloudDue - localDue) > 0.01 ||
           cloudDp !== localDp ||
           cloudRole !== localRole ||
           cloudRank !== localRank ||
-          cloudSurname !== localSurname
+          cloudSurname !== localSurname ||
+          (cloudContact && cloudContact !== localContact)
         );
 
         if (isChanged) {
           hasDelta = true;
-          const updated = { ...localM, ...cloudM };
+          const mergedContact = cloudContact || localContact || '';
+          const updated = { 
+            ...localM, 
+            ...cloudM,
+            Contact: mergedContact
+          };
           mergedList.push(updated);
           if (cleanBd) {
             localStorage.setItem(`canteen_member_${cleanBd}`, JSON.stringify({
@@ -649,7 +657,7 @@ export async function syncCanteenMembersFromCloud(forceFull = false): Promise<vo
               due: Number(updated.Due) || 0,
               rank: updated.Rank || '',
               surname: updated.Surname || '',
-              contact: updated.Contact || '',
+              contact: mergedContact,
               bdNo: cleanBd
             }));
           }

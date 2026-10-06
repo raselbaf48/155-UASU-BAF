@@ -49,7 +49,7 @@ import {
   Share2
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
-import { resolveImageUrl, fetchDirectImageUrl, getCanteenConfig } from '../utils/canteenSettings';
+import { resolveImageUrl, fetchDirectImageUrl, getCanteenConfig, saveCanteenConfig } from '../utils/canteenSettings';
 import { processGalleryImage } from '../utils/imageUpload';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { SaveButton } from '../components/SaveButton';
@@ -648,6 +648,41 @@ export const MemberDB: React.FC = () => {
   const [whatsAppNotice, setWhatsAppNotice] = useState<string | null>(null);
   const [canteenConfig, setCanteenConfig] = useState<any>(() => getCanteenConfig());
   const [showWhatsAppTemplateBox, setShowWhatsAppTemplateBox] = useState<boolean>(false);
+  const [showManagerModal, setShowManagerModal] = useState<boolean>(false);
+  const [managerSearchTerm, setManagerSearchTerm] = useState<string>('');
+  const [managerAssignSuccess, setManagerAssignSuccess] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleSettingsUpdate = (e: any) => {
+      if (e?.detail) {
+        setCanteenConfig(e.detail);
+      }
+    };
+    window.addEventListener('canteen_settings_updated', handleSettingsUpdate);
+    return () => window.removeEventListener('canteen_settings_updated', handleSettingsUpdate);
+  }, []);
+
+  const handleAssignManager = (targetMember: any) => {
+    const rank = targetMember['Rank'] || 'LAC';
+    const surname = targetMember['Surname'] || '';
+    const fullName = `${rank} ${surname}`.trim();
+    const bd = String(targetMember['BD No'] || targetMember.airman_id?.replace(/\D/g, '') || '').trim();
+    const contact = String(targetMember['Contact'] || targetMember['Mobile No'] || canteenConfig?.phone || '').trim();
+    const dp = targetMember.DP || canteenConfig?.adminImage || '';
+
+    const updated = {
+      ...canteenConfig,
+      managerName: fullName,
+      managerBdNo: bd,
+      phone: contact || canteenConfig?.phone,
+      adminImage: dp || canteenConfig?.adminImage
+    };
+
+    setCanteenConfig(updated);
+    saveCanteenConfig(updated);
+    setManagerAssignSuccess(`${fullName} (${bd ? `BD: ${bd}` : ''}) কে সক্রিয় ক্যান্টিন ম্যানেজার হিসেবে নির্ধারণ করা হয়েছে!`);
+    setTimeout(() => setManagerAssignSuccess(null), 4000);
+  };
 
   useEffect(() => {
     syncWhatsAppTemplateConfigFromCloud().catch(() => {});
@@ -2730,6 +2765,7 @@ export const MemberDB: React.FC = () => {
               updatedList.push({
                 ...localM,
                 ...cloudM,
+                Contact: cloudContact || localContact || '',
                 Role: cloudRole || localM.Role,
                 role: cloudRole || localM.Role,
                 Due: cloudDue,
@@ -3158,8 +3194,20 @@ export const MemberDB: React.FC = () => {
               </p>
             </div>
 
-            {/* Action Buttons: WhatsApp Template Toggle & Payment History */}
+            {/* Action Buttons: Manager, WhatsApp Template Toggle & Payment History */}
             <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={() => setShowManagerModal(true)}
+                className="flex items-center justify-center space-x-1.5 px-3.5 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md active:scale-95 border bg-indigo-950/70 hover:bg-indigo-900/90 text-indigo-300 hover:text-white border-indigo-700/60"
+                title="ক্যান্টিন ম্যানেজার নির্ধারণ ও বিবরণ"
+              >
+                <ShieldCheck className="w-4 h-4 text-indigo-400" />
+                <span>
+                  Manager: {canteenConfig?.managerName ? canteenConfig.managerName.split(' ')[0] : 'Assign'}
+                </span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => setShowWhatsAppTemplateBox(true)}
@@ -3183,6 +3231,19 @@ export const MemberDB: React.FC = () => {
               </button>
             </div>
           </div>
+
+      {/* Manager Assignment Notification Banner */}
+      {managerAssignSuccess && (
+        <div className="p-3 bg-indigo-950/90 border border-indigo-500/50 rounded-xl flex items-center justify-between text-xs text-indigo-200 animate-fadeIn">
+          <div className="flex items-center space-x-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{managerAssignSuccess}</span>
+          </div>
+          <button onClick={() => setManagerAssignSuccess(null)} className="text-indigo-400 hover:text-white p-1">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Delete / Success Notification Banner */}
       {paymentDeleteSuccessMsg && (
@@ -3621,6 +3682,11 @@ export const MemberDB: React.FC = () => {
                         <span className="text-[10px] font-mono font-bold text-slate-400">
                           BD/{member['BD No'] || member.airman_id?.replace(/\D/g, '') || '-'}
                         </span>
+                        {String(member['BD No']).trim() === String(canteenConfig?.managerBdNo).trim() && (
+                          <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-indigo-500/25 border border-indigo-400/50 text-indigo-300 font-mono shadow-sm">
+                            Manager
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-baseline space-x-1.5 flex-wrap gap-y-0.5">
                         <h3 className="font-black text-white text-base leading-snug group-hover:text-indigo-300 transition-colors break-words" title={`${member['Rank']} ${member['Surname']}`}>
@@ -3631,23 +3697,6 @@ export const MemberDB: React.FC = () => {
                         </span>
                       </div>
                     </div>
-                  </div>
-
-                  {/* Total Due: Big & Clear Top-Right */}
-                  <div
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setInitialBillMember(member);
-                    }}
-                    className="group/duetop cursor-pointer flex flex-col items-end shrink-0 pl-1"
-                    title="Click to set/edit Total Due"
-                  >
-                    <span className="text-[9px] font-black text-slate-400 tracking-wider uppercase mb-0.5 group-hover/duetop:text-indigo-300 transition-colors">
-                      TOTAL DUE
-                    </span>
-                    <span className={`text-xl sm:text-2xl font-black font-mono tracking-tight leading-none ${totalDue === 0 ? 'text-emerald-400' : 'text-rose-500'}`}>
-                      ৳{totalDue.toLocaleString()}
-                    </span>
                   </div>
                 </div>
 
@@ -3964,6 +4013,22 @@ export const MemberDB: React.FC = () => {
 
               {/* Header Right Actions */}
               <div className="flex items-center space-x-2">
+                {String(profileMember['BD No']).trim() === String(canteenConfig?.managerBdNo).trim() ? (
+                  <span className="px-2.5 py-1.5 rounded-xl bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
+                    <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Active Manager</span>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleAssignManager(profileMember)}
+                    className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white border border-slate-700 text-[10px] font-black uppercase tracking-wider flex items-center gap-1 transition-all cursor-pointer shadow-xs active:scale-95"
+                    title="এই সদস্যকে ক্যান্টিন ম্যানেজার নির্ধারণ করুন"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Make Manager</span>
+                  </button>
+                )}
                 <button 
                   onClick={() => setProfileMember(null)} 
                   className="p-2.5 text-slate-400 hover:bg-slate-800 rounded-xl transition-colors ml-1 cursor-pointer" 
@@ -5488,6 +5553,181 @@ export const MemberDB: React.FC = () => {
           </motion.div>
         )}
 
+        {/* Manager Management Modal (Moved from Settings to Member DB - PIN removed) */}
+        {showManagerModal && (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[160] flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-xl shadow-2xl animate-in zoom-in-95 max-h-[90vh] flex flex-col space-y-5">
+              {/* Modal Header */}
+              <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center shrink-0">
+                    <ShieldCheck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-white uppercase tracking-tight">
+                      CANTEEN MANAGER MANAGEMENT
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      সক্রিয় ক্যান্টিন ম্যানেজার নির্বাচন ও তথ্য বিবরণী
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowManagerModal(false)}
+                  className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 cursor-pointer transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Current Active Manager Card */}
+              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 flex items-center space-x-4">
+                <div className="w-16 h-16 rounded-2xl bg-slate-800 border-2 border-indigo-500/50 flex items-center justify-center overflow-hidden shrink-0 shadow-md">
+                  {canteenConfig?.adminImage ? (
+                    <img
+                      src={resolveImageUrl(canteenConfig.adminImage)}
+                      alt={canteenConfig.managerName || 'Manager'}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover"
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                    />
+                  ) : (
+                    <span className="font-black text-white text-2xl">
+                      {(canteenConfig?.managerName || 'M').charAt(0)}
+                    </span>
+                  )}
+                </div>
+
+                <div className="space-y-1 min-w-0 flex-1">
+                  <div className="flex items-center space-x-2">
+                    <span className="px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 text-[9px] font-black uppercase tracking-wider">
+                      CURRENT ACTIVE MANAGER
+                    </span>
+                    {canteenConfig?.managerBdNo && (
+                      <span className="text-[10px] font-mono text-slate-400">
+                        BD: {canteenConfig.managerBdNo}
+                      </span>
+                    )}
+                  </div>
+                  <h4 className="text-base font-black text-white truncate">
+                    {canteenConfig?.managerName || 'No Manager Set Yet'}
+                  </h4>
+                  <div className="text-xs text-slate-300 font-mono">
+                    {canteenConfig?.phone ? (
+                      <span className="text-emerald-400 flex items-center gap-1">
+                        <Phone className="w-3 h-3" />
+                        <span>{canteenConfig.phone}</span>
+                      </span>
+                    ) : (
+                      <span className="text-slate-500 italic">No contact phone</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Member Selection Section */}
+              <div className="flex-1 overflow-hidden flex flex-col space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-black text-slate-300 uppercase tracking-wider">
+                    SELECT NEW MANAGER FROM MEMBER DATABASE
+                  </label>
+                  <span className="text-[10px] font-mono text-slate-400 font-bold">
+                    {members.length} Members
+                  </span>
+                </div>
+
+                {/* Search Box */}
+                <div className="relative">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={managerSearchTerm}
+                    onChange={(e) => setManagerSearchTerm(e.target.value)}
+                    placeholder="Search by BD No, Rank, or Surname..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                  />
+                  {managerSearchTerm && (
+                    <button
+                      type="button"
+                      onClick={() => setManagerSearchTerm('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+
+                {/* Filtered Members List */}
+                <div className="flex-1 overflow-y-auto max-h-60 divide-y divide-slate-800/80 rounded-2xl border border-slate-800/80 bg-slate-950/50 p-2 space-y-1">
+                  {members
+                    .filter((m) => {
+                      if (!managerSearchTerm.trim()) return true;
+                      const term = managerSearchTerm.toLowerCase().trim();
+                      const bd = String(m['BD No'] || '').toLowerCase();
+                      const name = String(m['Surname'] || '').toLowerCase();
+                      const rank = String(m['Rank'] || '').toLowerCase();
+                      return bd.includes(term) || name.includes(term) || rank.includes(term);
+                    })
+                    .slice(0, 60)
+                    .map((m) => {
+                      const isCurrent = String(m['BD No']).trim() === String(canteenConfig?.managerBdNo).trim();
+                      return (
+                        <div key={m.airman_id || m['BD No']} className="p-2.5 flex items-center justify-between gap-3 hover:bg-slate-900/70 rounded-xl transition-colors">
+                          <div className="flex items-center space-x-3 min-w-0">
+                            <div className="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-xs text-indigo-400 overflow-hidden shrink-0">
+                              {m.DP ? (
+                                <img src={resolveImageUrl(m.DP)} alt="" className="w-full h-full object-cover" />
+                              ) : (
+                                (m['Surname'] || 'U').charAt(0)
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-white truncate">
+                                {m['Rank']} {m['Surname']}
+                              </p>
+                              <p className="text-[10px] font-mono text-slate-400">
+                                BD: {m['BD No']} {m.Contact ? `• ${m.Contact}` : ''}
+                              </p>
+                            </div>
+                          </div>
+
+                          {isCurrent ? (
+                            <span className="px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 text-[10px] font-black uppercase shrink-0">
+                              Active Manager
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleAssignManager(m);
+                                setShowManagerModal(false);
+                              }}
+                              className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer shadow-xs active:scale-95 shrink-0"
+                            >
+                              Set as Manager
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+
+              {/* Footer info */}
+              <div className="pt-2 border-t border-slate-800 flex justify-between items-center text-[10px] text-slate-500">
+                <span>ম্যানেজার পরিবর্তন তথ্য রিয়েল-টাইমে ক্লাউডে সংরক্ষিত হবে।</span>
+                <button
+                  type="button"
+                  onClick={() => setShowManagerModal(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold cursor-pointer transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
       </AnimatePresence>
     </div>
