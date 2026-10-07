@@ -113,6 +113,85 @@ const CATEGORIES = [
   'Misc'
 ];
 
+// Helper to extract "YYYY-MM" key from various date formats
+const getYearMonthKey = (val: any): string => {
+  if (!val) return '';
+  let str = String(val).trim();
+  const iso = str.match(/^(\d{4})[-\/](\d{1,2})/);
+  if (iso) {
+    return `${iso[1]}-${String(parseInt(iso[2], 10)).padStart(2, '0')}`;
+  }
+  const monMatch = str.match(/\b([A-Za-z]{3,9})\s+(\d{2,4})\b/);
+  if (monMatch) {
+    const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+    const mIdx = months.indexOf(monMatch[1].slice(0, 3).toLowerCase());
+    if (mIdx >= 0) {
+      let yr = parseInt(monMatch[2], 10);
+      if (yr < 100) yr += 2000;
+      return `${yr}-${String(mIdx + 1).padStart(2, '0')}`;
+    }
+  }
+  const dmy = str.match(/^(\d{1,2})[-\/\.](\d{1,2})[-\/\.](\d{2,4})/);
+  if (dmy) {
+    let yr = parseInt(dmy[3], 10);
+    if (yr < 100) yr += 2000;
+    return `${yr}-${String(parseInt(dmy[2], 10)).padStart(2, '0')}`;
+  }
+  const d = new Date(str);
+  if (!isNaN(d.getTime())) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
+  return '';
+};
+
+// Convert canteen date string ("DD Mon YY" or similar) to YYYY-MM-DD for native HTML5 date input
+const toInputDateValue = (str: string): string => {
+  if (!str) {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  const monMatch = str.match(/^(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{2,4})/);
+  if (monMatch) {
+    const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+    const mIdx = months.indexOf(monMatch[2].slice(0, 3).toLowerCase());
+    if (mIdx >= 0) {
+      let yr = parseInt(monMatch[3], 10);
+      if (yr < 100) yr += 2000;
+      const day = String(parseInt(monMatch[1], 10)).padStart(2, '0');
+      return `${yr}-${String(mIdx + 1).padStart(2, '0')}-${day}`;
+    }
+  }
+  const dmy = str.match(/^(\d{1,2})[-\/\.](\d{1,2})[-\/\.](\d{2,4})/);
+  if (dmy) {
+    let yr = parseInt(dmy[3], 10);
+    if (yr < 100) yr += 2000;
+    const day = String(parseInt(dmy[1], 10)).padStart(2, '0');
+    return `${yr}-${String(parseInt(dmy[2], 10)).padStart(2, '0')}-${day}`;
+  }
+  const d = new Date(str);
+  if (!isNaN(d.getTime())) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  const today = new Date();
+  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+};
+
+// Format YYYY-MM key to English readable month label (e.g. "October 2026")
+const formatMonthKeyLabel = (key: string): string => {
+  if (!key || key === 'ALL') return 'সব মাস (All Records)';
+  const parts = key.split('-');
+  if (parts.length >= 2) {
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10) - 1;
+    const d = new Date(y, m, 1);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+    }
+  }
+  return key;
+};
+
 export const Expenditures: React.FC = () => {
   // Main states
   const [expenses, setExpenses] = useState<ExpenseRecord[]>(() => {
@@ -152,11 +231,36 @@ export const Expenditures: React.FC = () => {
   // Civilian History Modal
   const [viewingHistoryCiv, setViewingHistoryCiv] = useState<CivilianPerson | null>(null);
 
-  // Civilian Advance month filter (default running month)
-  const runningMonthLabel = useMemo(() => {
-    return new Date().toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  // Civilian Advance month filter (default running month, e.g. "2026-10")
+  const runningMonthKey = useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   }, []);
-  const [civMonthFilter, setCivMonthFilter] = useState<string>(runningMonthLabel);
+
+  const [civMonthFilter, setCivMonthFilter] = useState<string>(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
+
+  // Unique month options for the combined Month filter
+  const availableMonthOptions = useMemo(() => {
+    const set = new Set<string>();
+    set.add(runningMonthKey);
+    const now = new Date();
+    for (let i = 1; i <= 6; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      set.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    }
+    advances.forEach(a => {
+      const k = getYearMonthKey(a.date);
+      if (k) set.add(k);
+    });
+    expenses.forEach(e => {
+      const k = getYearMonthKey(e.date);
+      if (k) set.add(k);
+    });
+    return Array.from(set).sort().reverse();
+  }, [advances, expenses, runningMonthKey]);
 
   // Main UI Mode / Modal States
   const [showAddForm, setShowAddForm] = useState(false);
@@ -745,7 +849,7 @@ export const Expenditures: React.FC = () => {
     const validRows = itemRows.filter(r => r.desc.trim() && (parseFloat(r.amount as any) > 0 || (parseFloat(r.qty as any) > 0 && parseFloat(r.unitPrice as any) > 0)));
 
     if (validRows.length === 0) {
-      alert('Please enter at least one valid item name and amount.');
+      showToast('⚠️ Please enter at least one valid item name and amount.');
       return;
     }
 
@@ -876,7 +980,7 @@ export const Expenditures: React.FC = () => {
         console.warn('Background sync warning:', err);
       });
     } catch (err: any) {
-      alert(`Failed to save: ${err?.message || 'Error occurred'}`);
+      showToast(`⚠️ Failed to save: ${err?.message || 'Error occurred'}`);
     } finally {
       setIsSaving(false);
     }
@@ -887,7 +991,7 @@ export const Expenditures: React.FC = () => {
     const personToUse = targetPerson || advPerson;
     const amt = targetAmount !== undefined ? targetAmount : parseFloat(String(advAmount));
     if (isNaN(amt) || amt <= 0) {
-      alert('Please enter a valid advance amount (> 0).');
+      showToast('⚠️ Please enter a valid advance amount (> 0).');
       return;
     }
 
@@ -921,7 +1025,7 @@ export const Expenditures: React.FC = () => {
       setAdvAmount('');
       setAdvPurpose('Daily Bazar Advance');
     } catch (err: any) {
-      alert(`Failed to issue advance: ${err?.message || 'Error'}`);
+      showToast(`⚠️ Failed to issue advance: ${err?.message || 'Error'}`);
     }
   };
 
@@ -998,7 +1102,7 @@ export const Expenditures: React.FC = () => {
       setSettleReturn('');
       setSettleNotes('');
     } catch (err: any) {
-      alert(`Settle failed: ${err?.message || 'Error'}`);
+      showToast(`⚠️ Settle failed: ${err?.message || 'Error'}`);
     }
   };
 
@@ -1033,7 +1137,7 @@ export const Expenditures: React.FC = () => {
       showToast(`✅ Expense updated successfully!`);
       setEditingExpense(null);
     } catch (err: any) {
-      alert(`Failed to update: ${err?.message || 'Error'}`);
+      showToast(`⚠️ Failed to update: ${err?.message || 'Error'}`);
     } finally {
       setIsSaving(false);
     }
@@ -1082,7 +1186,7 @@ export const Expenditures: React.FC = () => {
       });
       pushKeyToCloud(ADVANCES_KEY, reconciledAdvances).catch(() => {});
     } catch (err: any) {
-      alert(`Delete failed: ${err?.message || 'Error'}`);
+      showToast(`⚠️ Delete failed: ${err?.message || 'Error'}`);
     }
   };
 
@@ -2051,160 +2155,6 @@ export const Expenditures: React.FC = () => {
         </div>
       )}
 
-      {/* ADD ADVANCE MODAL ("alada box asbe", "Pic er moto", "Default e amount thakbe na", "Preset e 500, 1000, 1500, 2000 thakbe") */}
-      <AnimatePresence>
-        {showAddAdvanceModal && (
-          <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-5">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-slate-900 border border-amber-500/40 rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden"
-            >
-              {/* Header */}
-              <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/80">
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30">
-                    <Plus className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-black text-white uppercase tracking-tight">
-                      ADD ADVANCE (অগ্রিম প্রদান)
-                    </h3>
-                    <p className="text-[11px] text-slate-400 font-bold">
-                      Civilian / Staff বাজার খরচের জন্য নতুন অগ্রিম প্রদান করুন
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setShowAddAdvanceModal(false)}
-                  className="p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800 hover:bg-slate-700 transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* Form Content */}
-              <div className="p-5 sm:p-6 space-y-4">
-                {/* Person */}
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1.5">
-                    RECIPIENT / PERSON (কাকে অগ্রিম দেওয়া হচ্ছে)
-                  </label>
-                  <select
-                    value={advPerson}
-                    onChange={(e) => setAdvPerson(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-emerald-300 focus:outline-none focus:ring-1 focus:ring-amber-500"
-                  >
-                    {civilians.map(c => (
-                      <option key={c.id} value={c.name}>{c.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Date */}
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1.5">
-                    DATE (তারিখ)
-                  </label>
-                  <input
-                    type="text"
-                    value={advDate}
-                    onChange={(e) => setAdvDate(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white font-mono focus:outline-none"
-                  />
-                </div>
-
-                {/* Amount with Presets ("Default e amount thakbe na", "Preset e 500, 1000, 1500, 2000 thakbe") */}
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
-                      ADVANCE AMOUNT (অগ্রিম টাকা ৳)
-                    </label>
-                    <span className="text-[10px] text-amber-400/80 font-bold">
-                      {advAmount ? `৳${Number(advAmount).toLocaleString()}` : 'Default: Empty'}
-                    </span>
-                  </div>
-
-                  <div className="relative">
-                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-black text-amber-400 font-mono">
-                      ৳
-                    </span>
-                    <input
-                      type="number"
-                      placeholder="টাকার পরিমাণ লিখুন (যেমন: 1000)"
-                      value={advAmount}
-                      onChange={(e) => setAdvAmount(e.target.value === '' ? '' : parseFloat(e.target.value))}
-                      className="w-full bg-slate-950 border border-amber-500/50 rounded-xl pl-9 pr-4 py-3 text-sm font-black text-amber-300 font-mono focus:outline-none focus:ring-2 focus:ring-amber-500"
-                      autoFocus
-                    />
-                  </div>
-
-                  {/* Preset Buttons: 500, 1000, 1500, 2000 */}
-                  <div className="flex items-center space-x-2 mt-2.5">
-                    <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">
-                      Preset:
-                    </span>
-                    {[500, 1000, 1500, 2000].map(val => (
-                      <button
-                        key={val}
-                        type="button"
-                        onClick={() => setAdvAmount(val)}
-                        className={`flex-1 py-1.5 rounded-xl text-xs font-mono font-black transition-all cursor-pointer ${
-                          advAmount === val
-                            ? 'bg-amber-500 text-slate-950 shadow-md ring-2 ring-amber-400'
-                            : 'bg-slate-950 text-amber-300 hover:bg-slate-800 hover:text-white border border-slate-800'
-                        }`}
-                      >
-                        ৳{val}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Purpose */}
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1.5">
-                    PURPOSE / NOTE (উদ্দেশ্য / বিবরণ)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Daily Bazar Advance"
-                    value={advPurpose}
-                    onChange={(e) => setAdvPurpose(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white focus:outline-none"
-                  />
-                </div>
-
-                {/* Action Buttons */}
-                <div className="pt-3 flex items-center space-x-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowAddAdvanceModal(false)}
-                    className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-black uppercase transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      await handleSaveNewAdvance();
-                      setShowAddAdvanceModal(false);
-                    }}
-                    className="flex-1 py-3 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-amber-600/30 flex items-center justify-center space-x-2 cursor-pointer active:scale-95"
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span>Confirm Add Advance</span>
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
       {/* ADVANCE BREAKDOWN MODAL ("কার কাছে কতো টাকা দেওয়া আছে" - 2 Columns Grid) */}
       <AnimatePresence>
         {showAdvanceBreakdownModal && (
@@ -2244,32 +2194,86 @@ export const Expenditures: React.FC = () => {
 
               {/* Modal Body: 2 Columns Grid for Civilians ("Advanc e click korle suhdu Civ der box asbe") */}
               <div className="flex-1 overflow-y-auto p-5 space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-1">
-                  <span className="text-xs font-black text-slate-300 uppercase tracking-wider">
-                    CIVILIAN MEMBERS ({civilians.length})
-                  </span>
-                  <div className="flex items-center space-x-2">
-                    <span className={`text-xs font-mono font-black px-3 py-1 rounded-xl border ${
-                      metrics.availableAdvance < 0 
-                        ? 'text-rose-400 bg-rose-500/10 border-rose-500/30' 
-                        : 'text-amber-400 bg-amber-500/10 border-amber-500/20'
-                    }`}>
-                      উপলব্ধ মোট অগ্রিম: {metrics.availableAdvance < 0 ? `-৳${Math.abs(metrics.availableAdvance).toLocaleString()}` : `৳${metrics.availableAdvance.toLocaleString()}`}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-800/80">
+                  <div className="flex items-center space-x-3 flex-wrap gap-y-2">
+                    <span className="text-xs font-black text-slate-300 uppercase tracking-wider">
+                      CIVILIAN MEMBERS ({civilians.length})
                     </span>
+
+                    {/* COMBINED MONTH SELECTOR ("opore combined akta Month er box thakbe default e Running mont select thakbe , je month select korbo oi month onujayi data filtr korbe") */}
+                    <div className="flex items-center space-x-2 bg-slate-950 border border-amber-500/40 rounded-xl px-3 py-1.5 shadow-sm">
+                      <Calendar className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span className="text-[10px] font-black uppercase text-amber-400 tracking-wider">মাস ফিল্টার:</span>
+                      <select
+                        value={civMonthFilter}
+                        onChange={(e) => setCivMonthFilter(e.target.value)}
+                        className="bg-transparent text-xs font-black text-amber-300 focus:outline-none cursor-pointer"
+                      >
+                        <option value="ALL" className="bg-slate-900 text-white">সব মাস (All Records)</option>
+                        {availableMonthOptions.map(mKey => (
+                          <option key={mKey} value={mKey} className="bg-slate-900 text-white">
+                            {formatMonthKeyLabel(mKey)}{mKey === runningMonthKey ? ' (চলতি মাস)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
+
+                  {/* Summary for selected month */}
+                  {(() => {
+                    const mAdvs = advances.filter(a => {
+                      if (civMonthFilter === 'ALL') return true;
+                      return getYearMonthKey(a.date) === civMonthFilter;
+                    });
+                    const mExps = expenses.filter(e => {
+                      if (String(e.paymentMethod || '').toLowerCase() === 'due') return false;
+                      if (civMonthFilter === 'ALL') return true;
+                      return getYearMonthKey(e.date) === civMonthFilter;
+                    });
+                    const mTotAdv = mAdvs.reduce((s, a) => s + (Number(a.amount) || 0), 0);
+                    const mTotExp = mExps.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+                    const mBal = mTotAdv - mTotExp;
+
+                    return (
+                      <div className="flex items-center space-x-2 flex-wrap">
+                        <div className="flex items-center space-x-1.5 bg-slate-950/80 border border-slate-800 rounded-xl px-2.5 py-1 text-xs">
+                          <span className="text-slate-400">অগ্রিম:</span>
+                          <span className="font-mono font-black text-amber-400">৳{mTotAdv.toLocaleString()}</span>
+                        </div>
+                        <div className="flex items-center space-x-1.5 bg-slate-950/80 border border-slate-800 rounded-xl px-2.5 py-1 text-xs">
+                          <span className="text-slate-400">খরচ:</span>
+                          <span className="font-mono font-black text-slate-200">৳{mTotExp.toLocaleString()}</span>
+                        </div>
+                        <span className={`text-xs font-mono font-black px-3 py-1 rounded-xl border ${
+                          mBal < 0 
+                            ? 'text-rose-400 bg-rose-500/10 border-rose-500/30' 
+                            : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+                        }`}>
+                          ব্যালেন্স: {mBal < 0 ? `-৳${Math.abs(mBal).toLocaleString()}` : `৳${mBal.toLocaleString()}`}
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {civilians.map(civ => {
-                    const civAdvs = advances.filter(a => matchesCivilian(a.personName, civ));
+                    // Filter advances by selected month if not ALL
+                    const civAdvs = advances.filter(a => {
+                      if (!matchesCivilian(a.personName, civ)) return false;
+                      if (civMonthFilter === 'ALL') return true;
+                      return getYearMonthKey(a.date) === civMonthFilter;
+                    });
                     const activeAdvs = civAdvs.filter(a => a.status === 'ACTIVE');
                     const totalCivAdv = civAdvs.reduce((s, a) => s + (Number(a.amount) || 0), 0);
 
-                    // Exclude shop Due expenses from civilian advance spending
-                    const civExpenses = expenses.filter(e => 
-                      matchesCivilian(e.detailedPerson, civ) &&
-                      String(e.paymentMethod || '').toLowerCase() !== 'due'
-                    );
+                    // Exclude shop Due expenses from civilian advance spending, filter by month
+                    const civExpenses = expenses.filter(e => {
+                      if (!matchesCivilian(e.detailedPerson, civ)) return false;
+                      if (String(e.paymentMethod || '').toLowerCase() === 'due') return false;
+                      if (civMonthFilter === 'ALL') return true;
+                      return getYearMonthKey(e.date) === civMonthFilter;
+                    });
                     const totalCivExp = civExpenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
                     const civBalance = totalCivAdv - totalCivExp;
 
@@ -2279,7 +2283,7 @@ export const Expenditures: React.FC = () => {
                         className="bg-slate-950/90 border border-slate-800 hover:border-amber-500/40 rounded-3xl p-5 space-y-4 transition-all shadow-md flex flex-col justify-between"
                       >
                         <div className="space-y-3">
-                          {/* Top Row: Pic, Rank & Name, pase Month & History */}
+                          {/* Top Row: Pic, Rank & Name, pase History button (Month removed from individual cards as requested) */}
                           <div className="flex items-start justify-between gap-3 pb-3 border-b border-slate-800/80">
                             {/* Left: Pic + Rank & Name */}
                             <div className="flex items-center space-x-3 min-w-0">
@@ -2314,22 +2318,15 @@ export const Expenditures: React.FC = () => {
                               </div>
                             </div>
 
-                            {/* Right: pase Month (default running month) & History */}
+                            {/* Right: History button (Individual month removed, combined month is at top) */}
                             <div className="flex flex-col items-end space-y-1.5 shrink-0">
-                              {/* Month (Default: running month) */}
-                              <div className="flex items-center space-x-1 bg-slate-900 border border-slate-700/80 px-2 py-1 rounded-xl text-[10px] font-bold text-slate-300">
-                                <Calendar className="w-3 h-3 text-amber-400" />
-                                <span>{civMonthFilter}</span>
-                              </div>
-
-                              {/* History button */}
                               <button
                                 type="button"
                                 onClick={() => setViewingHistoryCiv(civ)}
-                                className="px-2.5 py-1 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center space-x-1 border border-indigo-500/30 transition-all cursor-pointer active:scale-95"
+                                className="px-3 py-1.5 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center space-x-1 border border-indigo-500/30 transition-all cursor-pointer active:scale-95"
                                 title="View transaction history"
                               >
-                                <History className="w-3 h-3 text-indigo-400" />
+                                <History className="w-3.5 h-3.5 text-indigo-400" />
                                 <span>History</span>
                               </button>
                             </div>
@@ -2388,8 +2385,11 @@ export const Expenditures: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => {
-                              setAdvPerson(civ.name);
+                              const personTitle = civ.rank ? `${civ.rank} ${civ.surname || civ.name}`.trim() : civ.name;
+                              setAdvPerson(personTitle);
                               setAdvAmount('');
+                              setAdvDate(formatCanteenDate(new Date()));
+                              setAdvPurpose('Daily Bazar Advance');
                               setShowAddAdvanceModal(true);
                             }}
                             className="flex-1 py-2.5 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center space-x-1.5 shadow-md shadow-amber-600/30 cursor-pointer active:scale-95"
@@ -2426,6 +2426,173 @@ export const Expenditures: React.FC = () => {
                       </div>
                     );
                   })}
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ADD ADVANCE MODAL ("aitar opore asbe", "Add Advance : Civ Tanvir", "Dt (Box e click korle calender show hbe), Amount, Purpose") */}
+      <AnimatePresence>
+        {showAddAdvanceModal && (
+          <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[80] flex items-center justify-center p-3 sm:p-5">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-slate-900 border border-amber-500/50 rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden"
+            >
+              {/* Header: Headline formatted exactly as requested: "Add Advance : Civ Tanvir" */}
+              <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/80">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30">
+                    <Plus className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-amber-300 uppercase tracking-tight">
+                      Add Advance : {advPerson}
+                    </h3>
+                    <p className="text-[11px] text-slate-400 font-bold">
+                      {advPerson} এর জন্য বাজার অগ্রিম ক্যাশ প্রদান ভাউচার
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowAddAdvanceModal(false)}
+                  className="p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800 hover:bg-slate-700 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Form Content: Dt (clickable opens calendar), Amount, Purpose */}
+              <div className="p-5 sm:p-6 space-y-4">
+                {/* 1. DATE / তারিখ (Box click opens calendar) */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                      DATE (তারিখ)
+                    </label>
+                    <span className="text-[10px] font-mono font-bold text-amber-400">
+                      {formatCanteenDate(advDate)}
+                    </span>
+                  </div>
+                  <div 
+                    onClick={() => {
+                      const el = document.getElementById('adv-date-picker-input') as HTMLInputElement;
+                      if (el) {
+                        try { el.showPicker(); } catch { el.focus(); }
+                      }
+                    }}
+                    className="relative flex items-center justify-between bg-slate-950 border border-slate-700 hover:border-amber-500 rounded-xl px-3.5 py-2.5 cursor-pointer group transition-all"
+                  >
+                    <div className="flex items-center space-x-2.5">
+                      <Calendar className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" />
+                      <span className="text-xs font-bold text-white font-mono">
+                        {formatCanteenDate(advDate)}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-bold group-hover:text-amber-400 flex items-center space-x-1">
+                      <span>ক্যালেন্ডার খুলুন</span>
+                    </span>
+                    <input
+                      id="adv-date-picker-input"
+                      type="date"
+                      value={toInputDateValue(advDate)}
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          setAdvDate(formatCanteenDate(e.target.value));
+                        }
+                      }}
+                      className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                    />
+                  </div>
+                </div>
+
+                {/* 2. ADVANCE AMOUNT (Default empty, Presets: 500, 1000, 1500, 2000) */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                      AMOUNT (টাকার পরিমাণ ৳)
+                    </label>
+                    <span className="text-[10px] text-amber-400/80 font-bold">
+                      {advAmount ? `৳${Number(advAmount).toLocaleString()}` : 'Default: খালি'}
+                    </span>
+                  </div>
+
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-black text-amber-400 font-mono">
+                      ৳
+                    </span>
+                    <input
+                      type="number"
+                      placeholder="টাকার পরিমাণ লিখুন (যেমন: 1000)"
+                      value={advAmount}
+                      onChange={(e) => setAdvAmount(e.target.value === '' ? '' : parseFloat(e.target.value))}
+                      className="w-full bg-slate-950 border border-amber-500/50 rounded-xl pl-9 pr-4 py-3 text-sm font-black text-amber-300 font-mono focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      autoFocus
+                    />
+                  </div>
+
+                  {/* Preset Buttons */}
+                  <div className="flex items-center space-x-2 mt-2.5">
+                    <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">
+                      Preset:
+                    </span>
+                    {[500, 1000, 1500, 2000].map(val => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => setAdvAmount(val)}
+                        className={`flex-1 py-1.5 rounded-xl text-xs font-mono font-black transition-all cursor-pointer ${
+                          advAmount === val
+                            ? 'bg-amber-500 text-slate-950 shadow-md ring-2 ring-amber-400'
+                            : 'bg-slate-950 text-amber-300 hover:bg-slate-800 hover:text-white border border-slate-800'
+                        }`}
+                      >
+                        ৳{val}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 3. PURPOSE / NOTE */}
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1.5">
+                    PURPOSE / NOTE (উদ্দেশ্য / বিবরণ)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="যেমন: Daily Bazar Advance"
+                    value={advPurpose}
+                    onChange={(e) => setAdvPurpose(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  />
+                </div>
+
+                {/* Action Buttons */}
+                <div className="pt-3 flex items-center space-x-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddAdvanceModal(false)}
+                    className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-black uppercase transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await handleSaveNewAdvance();
+                      setShowAddAdvanceModal(false);
+                    }}
+                    className="flex-1 py-3 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-amber-600/30 flex items-center justify-center space-x-2 cursor-pointer active:scale-95"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Confirm Add Advance</span>
+                  </button>
                 </div>
               </div>
             </motion.div>
