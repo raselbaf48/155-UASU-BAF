@@ -313,6 +313,17 @@ export const Expenditures: React.FC = () => {
   const [settleReturn, setSettleReturn] = useState<number | ''>('');
   const [settleNotes, setSettleNotes] = useState('');
 
+  // Civilian Balance Settle Context State ("Sattle Balance : Civ Tanvir")
+  const [settlingCivContext, setSettlingCivContext] = useState<{
+    civ: CivilianPerson;
+    displayName: string;
+    issuedAmount: number;
+    channel: 'CASH';
+    totalExpense: number;
+    addBalance: number;
+    returnBalance: number;
+  } | null>(null);
+
   // Edit Expense State
   const [editingExpense, setEditingExpense] = useState<ExpenseRecord | null>(null);
 
@@ -523,28 +534,35 @@ export const Expenditures: React.FC = () => {
     const activeAdvances = advances.filter(a => a.status === 'ACTIVE');
     const totalActiveAdvance = activeAdvances.reduce((sum, a) => sum + (Number(a.amount) || 0), 0);
     
-    // Dynamic active spent: compute actual non-due spending in realtime directly from expenses!
-    // This ensures deleting or editing any expense immediately updates Available Advance without stale data.
-    const activePersonNames = new Set<string>(
-      activeAdvances.map(a => String(a.personName || '')).filter(p => p.trim().length > 0)
-    );
+    // Dynamic active spent & available advance:
+    // Calculates net available advance across civilians in realtime.
+    // If a civilian has active advances or unsettled balance, their balance is included.
+    // Settled accounts (advance equals expenses) balance to 0 and do not generate phantom deficits.
+    let netAvailableAdvance = 0;
     let totalActiveSpent = 0;
-    activePersonNames.forEach(pName => {
-      totalActiveSpent += getActualSpentForPerson(pName, civilians, expenses);
-    });
 
-    // Also include any civilian staff spending if not already covered
     civilians.forEach(civ => {
-      if (!Array.from(activePersonNames).some(p => matchesCivilian(p, civ))) {
-        const civSpent = getActualSpentForPerson(civ.name, civilians, expenses);
-        if (civSpent > 0) {
-          totalActiveSpent += civSpent;
-        }
+      const civAdvs = advances.filter(a => matchesCivilian(a.personName, civ));
+      const hasActive = civAdvs.some(a => a.status === 'ACTIVE');
+      const totalAdv = civAdvs.reduce((s, a) => s + (Number(a.amount) || 0), 0);
+      
+      const civExps = expenses.filter(e => {
+        if (!matchesCivilian(e.detailedPerson, civ)) return false;
+        if (String(e.paymentMethod || '').toLowerCase() === 'due') return false;
+        if (e.desc && e.desc.includes('Advance Settle Payout')) return false;
+        return true;
+      });
+      const totalExp = civExps.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+      const bal = totalAdv - totalExp;
+
+      if (hasActive || bal !== 0) {
+        netAvailableAdvance += bal;
+        totalActiveSpent += totalExp;
       }
     });
 
     // DO NOT clamp with Math.max(0, ...) so negative balance (ঘাটতি) is accurately displayed in realtime!
-    const availableAdvance = totalActiveAdvance - totalActiveSpent;
+    const availableAdvance = netAvailableAdvance;
 
     return { 
       total, 
@@ -1029,53 +1047,100 @@ export const Expenditures: React.FC = () => {
     }
   };
 
-  // Settle / Return Bazar Advance
-  // "Sattle korle cash e in/Out hbe"
-  const handleConfirmSettleAdvance = async () => {
-    if (!settlingAdvance) return;
-    const spent = parseFloat(String(settleSpent)) || 0;
-    const initialAdvAmt = Number(settlingAdvance.amount) || 0;
-    const netBal = initialAdvAmt - spent;
-    const isCashIn = netBal > 0;
-    const isCashOut = netBal < 0;
-    const absBal = Math.abs(netBal);
+  // Settle Civilian Balance ("Sattle Balance : Civ Tanvir")
+  // "Total Expense amount jodi Issued amount er theke beshi hoy tahole Add Balance hbe (issued Amount er soman korte joto lage), Confirm dile Cash theke oi amount ta tanvir er acc e add hoye jbe"
+  // "ar jodi total Expense amount jodi Issued amount er theke kom hoy tahole Return Balance hbe (Total expense Amount er soman korte joto lage), Confirm dile tanvir er acc oi amount ta e add hoye jbe Cash a add hoye jbe"
+  const handleExecuteSettlement = async () => {
+    if (!settlingCivContext) return;
+    const { civ, displayName, issuedAmount, totalExpense, addBalance, returnBalance } = settlingCivContext;
 
     try {
-      const updatedAdvances = advances.map(a => {
-        if (a.id === settlingAdvance.id) {
-          return {
-            ...a,
-            spentAmount: spent,
-            returnAmount: isCashIn ? absBal : 0,
-            status: 'SETTLED' as const,
-            settledDate: formatCanteenDate(new Date()),
-            notes: (settleNotes.trim() || a.notes || '') + (isCashIn ? ` [Cash In: ৳${absBal} returned]` : isCashOut ? ` [Cash Out: ৳${absBal} paid]` : ` [Balanced: ৳0]`)
-          };
-        }
-        return a;
-      });
+      playSuccessSound();
 
-      // If Cash Out (person spent more from own pocket, canteen owes them):
-      // Record cash payment in expenses so canteen cash book accurately reflects Cash Out
-      let updatedExpenses = expenses;
-      if (isCashOut && absBal > 0) {
-        const cashOutExp: ExpenseRecord = {
-          id: `exp-${Date.now()}-settle-${Math.random().toString(36).substring(2, 5)}`,
+      let updatedAdvances = [...advances];
+
+      if (totalExpense > issuedAmount) {
+        // Case 1: Total Expense > Issued Amount
+        // Add Balance: Cash theke oi amount ta tanvir er acc e add hoye jbe
+        const topUpAdv: BazarAdvance = {
+          id: `adv-${Date.now()}-settle-topup-${civ.id}`,
           date: formatCanteenDate(new Date()),
-          desc: `Advance Settle Payout to ${settlingAdvance.personName} (বকেয়া ক্যাশ পরিশোধ)`,
-          category: 'Staff/Civ Expense',
-          paymentMethod: 'Cash',
-          amount: absBal,
-          detailedPerson: settlingAdvance.personName,
-          isCustom: true
+          personName: displayName,
+          amount: addBalance,
+          spentAmount: addBalance,
+          returnAmount: 0,
+          channel: 'CASH',
+          purpose: `Bazar Settle Top-up (Cash Balance Added)`,
+          status: 'SETTLED',
+          settledDate: formatCanteenDate(new Date()),
+          notes: `Settled with Cash: +৳${addBalance} paid from Cash to ${displayName}'s account`
         };
-        updatedExpenses = [cashOutExp, ...expenses];
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedExpenses));
-        setExpenses(updatedExpenses);
-        try {
-          await pushKeyToCloud(STORAGE_KEY, updatedExpenses);
-        } catch {}
-        window.dispatchEvent(new CustomEvent('canteen_expenses_updated', { detail: updatedExpenses }));
+
+        // Mark existing active advances for this person as SETTLED
+        updatedAdvances = updatedAdvances.map(a => {
+          if (matchesCivilian(a.personName, civ) && a.status === 'ACTIVE') {
+            return {
+              ...a,
+              status: 'SETTLED' as const,
+              spentAmount: a.amount,
+              returnAmount: 0,
+              settledDate: formatCanteenDate(new Date()),
+              notes: (a.notes || '') + ' [Settled]'
+            };
+          }
+          return a;
+        });
+
+        // Add topUpAdv so total advances equals total expenses
+        updatedAdvances = [topUpAdv, ...updatedAdvances];
+        showToast(`✅ Sattle Complete! Cash থেকে ৳${addBalance.toLocaleString()} ${displayName} এর অ্যাকাউন্টে যোগ হয়েছে।`);
+
+      } else if (issuedAmount > totalExpense) {
+        // Case 2: Issued Amount > Total Expense
+        // Return Balance: Tanvir er acc theke Cash a add hoye jbe
+        let remSpent = totalExpense;
+        let remReturn = returnBalance;
+
+        updatedAdvances = updatedAdvances.map(a => {
+          if (matchesCivilian(a.personName, civ) && a.status === 'ACTIVE') {
+            const advAmt = Number(a.amount) || 0;
+            const allocatedSpent = Math.min(advAmt, remSpent);
+            remSpent = Math.max(0, remSpent - allocatedSpent);
+
+            const allocatedReturn = Math.min(advAmt - allocatedSpent, remReturn);
+            remReturn = Math.max(0, remReturn - allocatedReturn);
+
+            return {
+              ...a,
+              status: 'SETTLED' as const,
+              spentAmount: allocatedSpent,
+              returnAmount: allocatedReturn,
+              settledDate: formatCanteenDate(new Date()),
+              notes: (a.notes || '') + ` [Settled: ৳${allocatedReturn} returned to Cash]`
+            };
+          }
+          return a;
+        });
+
+        showToast(`✅ Sattle Complete! ৳${returnBalance.toLocaleString()} উদ্বৃত্ত টাকা Cash এ যুক্ত হয়েছে।`);
+
+      } else {
+        // Case 3: Exactly equal
+        updatedAdvances = updatedAdvances.map(a => {
+          if (matchesCivilian(a.personName, civ) && a.status === 'ACTIVE') {
+            return {
+              ...a,
+              status: 'SETTLED' as const,
+              spentAmount: a.amount,
+              returnAmount: 0,
+              settledDate: formatCanteenDate(new Date()),
+              notes: (a.notes || '') + ' [Settled]'
+            };
+          }
+          return a;
+        });
+
+        showToast(`✅ Sattle Complete! ${displayName} এর হিসাব সম্পূর্ণ সমন্বয় (৳০) হয়েছে।`);
       }
 
       localStorage.setItem(ADVANCES_KEY, JSON.stringify(updatedAdvances));
@@ -1089,18 +1154,7 @@ export const Expenditures: React.FC = () => {
       window.dispatchEvent(new Event('canteen_state_updated'));
       window.dispatchEvent(new Event('storage'));
 
-      const msg = isCashIn
-        ? `✅ Advance settled! ৳${absBal.toLocaleString()} Cash In (আমি ব্যাক পেয়েছি) হিসেবে গ্রহণ করা হয়েছে।`
-        : isCashOut
-        ? `✅ Advance settled! ৳${absBal.toLocaleString()} Cash Out (আমার কাছে পাবে - ক্যাশ পরিশোধ করা হয়েছে)।`
-        : `✅ Advance settled! সম্পূর্ণ হিসাব সমন্বয় করা হয়েছে (৳০)।`;
-
-      playSuccessSound();
-      showToast(msg);
-      setSettlingAdvance(null);
-      setSettleSpent('');
-      setSettleReturn('');
-      setSettleNotes('');
+      setSettlingCivContext(null);
     } catch (err: any) {
       showToast(`⚠️ Settle failed: ${err?.message || 'Error'}`);
     }
@@ -2398,24 +2452,22 @@ export const Expenditures: React.FC = () => {
                             <span>Add</span>
                           </button>
 
-                          {/* Sattle button */}
+                          {/* Sattle button ("Pic 4 dekho jar balace Sattle korbo tar nam asbe Sattle Balance : Civ Tanvir") */}
                           <button
                             type="button"
                             onClick={() => {
-                              const targetAdv = activeAdvs[0] || {
-                                id: `adv-${Date.now()}-${civ.id}`,
-                                date: formatCanteenDate(new Date()),
-                                personName: civ.name,
-                                amount: totalCivAdv,
-                                spentAmount: totalCivExp,
-                                returnAmount: 0,
+                              const personTitle = civ.rank ? `${civ.rank} ${civ.surname || civ.name}`.trim() : (civ.surname || civ.name);
+                              const addBal = totalCivExp > totalCivAdv ? totalCivExp - totalCivAdv : 0;
+                              const retBal = totalCivAdv > totalCivExp ? totalCivAdv - totalCivExp : 0;
+                              setSettlingCivContext({
+                                civ,
+                                displayName: personTitle,
+                                issuedAmount: totalCivAdv,
                                 channel: 'CASH',
-                                purpose: 'Bazar Advance Settlement',
-                                status: 'ACTIVE' as const
-                              };
-                              setSettlingAdvance(targetAdv);
-                              setSettleSpent(totalCivExp);
-                              setSettleReturn(civBalance > 0 ? civBalance : 0);
+                                totalExpense: totalCivExp,
+                                addBalance: addBal,
+                                returnBalance: retBal
+                              });
                             }}
                             className="flex-1 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center space-x-1.5 shadow-md shadow-indigo-600/30 cursor-pointer active:scale-95"
                           >
@@ -2474,30 +2526,13 @@ export const Expenditures: React.FC = () => {
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
-                      DATE (তারিখ)
+                      DATE (তারিখ - বক্সে ক্লিক করলে ক্যালেন্ডার ওপেন হবে)
                     </label>
                     <span className="text-[10px] font-mono font-bold text-amber-400">
                       {formatCanteenDate(advDate)}
                     </span>
                   </div>
-                  <div 
-                    onClick={() => {
-                      const el = document.getElementById('adv-date-picker-input') as HTMLInputElement;
-                      if (el) {
-                        try { el.showPicker(); } catch { el.focus(); }
-                      }
-                    }}
-                    className="relative flex items-center justify-between bg-slate-950 border border-slate-700 hover:border-amber-500 rounded-xl px-3.5 py-2.5 cursor-pointer group transition-all"
-                  >
-                    <div className="flex items-center space-x-2.5">
-                      <Calendar className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" />
-                      <span className="text-xs font-bold text-white font-mono">
-                        {formatCanteenDate(advDate)}
-                      </span>
-                    </div>
-                    <span className="text-[10px] text-slate-400 font-bold group-hover:text-amber-400 flex items-center space-x-1">
-                      <span>ক্যালেন্ডার খুলুন</span>
-                    </span>
+                  <div className="relative">
                     <input
                       id="adv-date-picker-input"
                       type="date"
@@ -2507,7 +2542,12 @@ export const Expenditures: React.FC = () => {
                           setAdvDate(formatCanteenDate(e.target.value));
                         }
                       }}
-                      className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                      onClick={(e) => {
+                        try {
+                          (e.currentTarget as any).showPicker?.();
+                        } catch {}
+                      }}
+                      className="w-full bg-slate-950 border border-slate-700 hover:border-amber-500 focus:border-amber-500 rounded-xl px-4 py-3 text-xs font-mono font-bold text-white focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer [color-scheme:dark]"
                     />
                   </div>
                 </div>
@@ -2600,150 +2640,136 @@ export const Expenditures: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* SETTLE ADVANCE MODAL */}
+      {/* SETTLE BALANCE MODAL ("Sattle Balance : Civ Tanvir") */}
       <AnimatePresence>
-        {settlingAdvance && (
-          <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-[60] flex items-center justify-center p-4">
+        {settlingCivContext && (
+          <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-[85] flex items-center justify-center p-4">
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md shadow-2xl p-6 space-y-4"
+              className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md shadow-2xl overflow-hidden"
             >
-              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                <div className="flex items-center space-x-2">
-                  <CheckSquare className="w-5 h-5 text-indigo-400" />
-                  <h3 className="text-base font-black text-white uppercase tracking-tight">
-                    SETTLE BAZAR ADVANCE
-                  </h3>
+              {/* Header: "Sattle Balance : Civ Tanvir" */}
+              <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/80">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30">
+                    <CheckSquare className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-white uppercase tracking-tight">
+                      Sattle Balance : {settlingCivContext.displayName}
+                    </h3>
+                    <p className="text-[11px] text-slate-400 font-bold">
+                      অগ্রিম ও প্রকৃত বাজার খরচের ব্যালেন্স সমন্বয়
+                    </p>
+                  </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setSettlingAdvance(null)}
-                  className="p-1.5 text-slate-400 hover:text-white rounded-lg bg-slate-800"
+                  onClick={() => setSettlingCivContext(null)}
+                  className="p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800 hover:bg-slate-700 transition-colors cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
-              <div className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800 text-xs space-y-1">
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Person:</span>
-                  <span className="font-bold text-white">{settlingAdvance.personName}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Issued Advance:</span>
-                  <span className="font-mono font-black text-amber-400">৳{settlingAdvance.amount.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Channel:</span>
-                  <span className="font-bold text-white">{settlingAdvance.channel}</span>
-                </div>
-              </div>
+              {/* Body: niche box e Issued Amount, Channel, Total Expense (not Editable) */}
+              <div className="p-6 space-y-4">
+                <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-3">
+                  {/* Issued Amount */}
+                  <div className="flex items-center justify-between pb-2.5 border-b border-slate-800/80">
+                    <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">
+                      Issued Amount
+                    </span>
+                    <span className="font-mono font-black text-base text-amber-400">
+                      ৳{settlingCivContext.issuedAmount.toLocaleString()}
+                    </span>
+                  </div>
 
-              <div className="space-y-3 text-xs font-bold">
-                <div>
-                  <label className="text-slate-400 block mb-1">Spent In Bazar (প্রকৃত বাজার খরচ ৳)</label>
-                  <input
-                    type="number"
-                    value={settleSpent}
-                    onChange={(e) => {
-                      const sp = parseFloat(e.target.value) || 0;
-                      setSettleSpent(sp);
-                      const ret = Math.max(0, settlingAdvance.amount - sp);
-                      setSettleReturn(ret);
-                    }}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono"
-                  />
-                </div>
+                  {/* Channel */}
+                  <div className="flex items-center justify-between pb-2.5 border-b border-slate-800/80">
+                    <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">
+                      Channel
+                    </span>
+                    <span className="font-bold text-xs px-2.5 py-1 rounded-lg bg-slate-800 text-white font-mono border border-slate-700">
+                      {settlingCivContext.channel}
+                    </span>
+                  </div>
 
-                <div>
-                  <label className="text-slate-400 block mb-1">Returned Cash / Balance (ফেরত টাকা ৳)</label>
-                  <input
-                    type="number"
-                    value={settleReturn}
-                    onChange={(e) => setSettleReturn(parseFloat(e.target.value) || 0)}
-                    className="w-full bg-slate-950 border border-emerald-500/40 rounded-xl px-3 py-2 text-emerald-400 font-mono font-black"
-                  />
-                </div>
-
-                {/* Cash In or Cash Out Result Box */}
-                {(() => {
-                  const sp = typeof settleSpent === 'number' ? settleSpent : parseFloat(String(settleSpent)) || 0;
-                  const advAmt = Number(settlingAdvance.amount) || 0;
-                  const bal = advAmt - sp;
-                  const isCashIn = bal > 0;
-                  const isCashOut = bal < 0;
-                  const absBal = Math.abs(bal);
-
-                  return (
-                    <div className={`p-3.5 rounded-2xl border text-xs space-y-1.5 transition-all ${
-                      isCashIn 
-                        ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-200' 
-                        : isCashOut 
-                        ? 'bg-rose-950/40 border-rose-500/50 text-rose-200' 
-                        : 'bg-slate-950 border-slate-800 text-slate-300'
-                    }`}>
-                      <div className="flex items-center justify-between font-black">
-                        <span className="uppercase tracking-wider">
-                          {isCashIn ? '🟢 CASH IN (আমি ব্যাক পাবো)' : isCashOut ? '🔴 CASH OUT (আমার কাছে পাবে)' : '⚪ BALANCED (হিসাব সমান)'}
-                        </span>
-                        <span className="font-mono text-sm">
-                          {isCashIn ? `+ ৳${absBal.toLocaleString()}` : isCashOut ? `- ৳${absBal.toLocaleString()}` : '৳০'}
-                        </span>
-                      </div>
-                      <p className="text-[11px] opacity-80">
-                        {isCashIn 
-                          ? `${settlingAdvance.personName} বাজার খরচের উদ্বৃত্ত ৳${absBal.toLocaleString()} ক্যাশ ফেরত দিবে (Cash In)।` 
-                          : isCashOut 
-                          ? `অগ্রিমের চেয়ে ৳${absBal.toLocaleString()} বেশি খরচ হয়েছে। ক্যাশ থেকে তাকে পরিশোধ করা হবে (Cash Out)।` 
-                          : 'অগ্রিম এবং খরচ সম্পূর্ণ সমান রয়েছে।'}
-                      </p>
+                  {/* Total Expense (not Editable) */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-xs text-slate-400 font-bold uppercase tracking-wider block">
+                        Total Expense
+                      </span>
+                      <span className="text-[10px] text-slate-500 font-bold">
+                        (not Editable)
+                      </span>
                     </div>
-                  );
-                })()}
-
-                <div>
-                  <label className="text-slate-400 block mb-1">Settlement Note (মন্তব্য)</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Broiler and vegetables purchased, cash returned"
-                    value={settleNotes}
-                    onChange={(e) => setSettleNotes(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white"
-                  />
+                    <span className="font-mono font-black text-base text-slate-200">
+                      ৳{settlingCivContext.totalExpense.toLocaleString()}
+                    </span>
+                  </div>
                 </div>
-              </div>
 
-              <div className="pt-2 flex items-center space-x-3">
-                <button
-                  type="button"
-                  onClick={() => setSettlingAdvance(null)}
-                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-black uppercase transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmSettleAdvance}
-                  className={`flex-1 py-2.5 rounded-xl text-xs font-black uppercase transition-all shadow-md active:scale-95 cursor-pointer ${
-                    (() => {
-                      const sp = typeof settleSpent === 'number' ? settleSpent : parseFloat(String(settleSpent)) || 0;
-                      const bal = (Number(settlingAdvance.amount) || 0) - sp;
-                      return bal < 0 
-                        ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/30' 
-                        : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30';
-                    })()
-                  }`}
-                >
-                  {(() => {
-                    const sp = typeof settleSpent === 'number' ? settleSpent : parseFloat(String(settleSpent)) || 0;
-                    const bal = (Number(settlingAdvance.amount) || 0) - sp;
-                    if (bal > 0) return `Confirm Settle (Cash In: +৳${bal.toLocaleString()})`;
-                    if (bal < 0) return `Confirm Settle (Cash Out: -৳${Math.abs(bal).toLocaleString()})`;
-                    return 'Confirm Settle (৳০)';
-                  })()}
-                </button>
+                {/* Total Expense amount jodi Issued amount er theke beshi hoy -> Add Balance */}
+                {settlingCivContext.totalExpense > settlingCivContext.issuedAmount ? (
+                  <div className="p-4 rounded-2xl bg-rose-950/30 border border-rose-500/40 text-xs space-y-2">
+                    <div className="flex items-center justify-between font-black">
+                      <span className="text-rose-300 uppercase tracking-wider">
+                        Add Balance
+                      </span>
+                      <span className="font-mono text-base text-rose-400 font-black">
+                        + ৳{settlingCivContext.addBalance.toLocaleString()}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-rose-300/90 font-medium leading-relaxed">
+                      Issued Amount এর সমান করতে <strong>৳{settlingCivContext.addBalance.toLocaleString()}</strong> লাগবে। Confirm দিলে Cash থেকে এই টাকা <strong>{settlingCivContext.displayName}</strong> এর অ্যাকাউন্টে যোগ হয়ে হিসাব সমান (৳০) হয়ে যাবে।
+                    </p>
+                  </div>
+                ) : settlingCivContext.totalExpense < settlingCivContext.issuedAmount ? (
+                  /* ar jodi total Expense amount jodi Issued amount er theke kom hoy -> Return Balance */
+                  <div className="p-4 rounded-2xl bg-emerald-950/30 border border-emerald-500/40 text-xs space-y-2">
+                    <div className="flex items-center justify-between font-black">
+                      <span className="text-emerald-300 uppercase tracking-wider">
+                        Return Balance
+                      </span>
+                      <span className="font-mono text-base text-emerald-400 font-black">
+                        - ৳{settlingCivContext.returnBalance.toLocaleString()}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-emerald-300/90 font-medium leading-relaxed">
+                      Total Expense এর সমান করতে <strong>৳{settlingCivContext.returnBalance.toLocaleString()}</strong> ফেরত দিতে হবে। Confirm দিলে এই টাকা <strong>{settlingCivContext.displayName}</strong> এর হাত থেকে Cash এ যুক্ত হয়ে হিসাব সমান (৳০) হয়ে যাবে।
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 text-xs space-y-1.5">
+                    <div className="flex items-center justify-between font-black">
+                      <span className="text-slate-300 uppercase tracking-wider">
+                        Balance: ৳০ (হিসাব সমান)
+                      </span>
+                      <span className="font-mono text-base text-slate-200">
+                        ৳০
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      Issued Amount এবং Total Expense সম্পূর্ণ সমান রয়েছে।
+                    </p>
+                  </div>
+                )}
+
+                {/* niche confirm er pase kiso thakbe na */}
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={handleExecuteSettlement}
+                    className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white rounded-2xl text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-emerald-600/30 flex items-center justify-center space-x-2 cursor-pointer active:scale-95"
+                  >
+                    <CheckSquare className="w-4 h-4" />
+                    <span>Confirm</span>
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>
