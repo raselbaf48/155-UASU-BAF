@@ -30,16 +30,20 @@ export interface CivilianPerson {
 
 export const matchesCivilian = (
   personStr: string | null | undefined, 
-  civ: { name?: string; surname?: string } | null | undefined
+  civ: { name?: string; surname?: string; id?: string } | string | null | undefined
 ): boolean => {
   if (!personStr || !civ) return false;
-  const target = String(personStr).trim().toLowerCase();
-  const cName = String(civ.name || '').trim().toLowerCase();
-  const cSurname = String(civ.surname || '').trim().toLowerCase();
+  const clean = (s: string) => s.toLowerCase().replace(/^(civ|civilian|mr|md|chef|cook|staff)\.?\s+/i, '').trim();
+  const target = clean(personStr);
+  const cName = typeof civ === 'string' ? clean(civ) : clean(civ.name || '');
+  const cSurname = typeof civ === 'string' ? '' : clean(civ.surname || '');
   
-  if (cName && target === cName) return true;
-  if (cSurname && cSurname.length >= 2 && target.includes(cSurname)) return true;
-  if (cName && target.includes(cName)) return true;
+  if (target && cName && target === cName) return true;
+  if (target && cSurname && target === cSurname) return true;
+  if (target && cSurname && cSurname.length >= 2 && target.includes(cSurname)) return true;
+  if (target && cName && cName.length >= 2 && target.includes(cName)) return true;
+  if (cName && target.length >= 2 && cName.includes(target)) return true;
+  if (cSurname && target.length >= 2 && cSurname.includes(target)) return true;
   return false;
 };
 
@@ -230,6 +234,7 @@ export const Expenditures: React.FC = () => {
 
   // Civilian History Modal
   const [viewingHistoryCiv, setViewingHistoryCiv] = useState<CivilianPerson | null>(null);
+  const [civHistoryTab, setCivHistoryTab] = useState<'ADVANCE' | 'EXPENSE'>('ADVANCE');
 
   // Civilian Advance month filter (default running month, e.g. "2026-10")
   const runningMonthKey = useMemo(() => {
@@ -463,7 +468,26 @@ export const Expenditures: React.FC = () => {
       } catch {}
       try {
         const rawAdv = localStorage.getItem(ADVANCES_KEY);
-        setAdvances(rawAdv ? JSON.parse(rawAdv) : []);
+        if (rawAdv) {
+          const parsedAdv: BazarAdvance[] = JSON.parse(rawAdv);
+          let changed = false;
+          const healed = parsedAdv.map(a => {
+            const hasReturn = Number(a.returnAmount) > 0;
+            const hasSettledNote = Boolean(a.notes && a.notes.includes('[Settled]'));
+            const hasSettledDate = Boolean(a.settledDate);
+            if ((hasReturn || hasSettledNote || hasSettledDate) && a.status !== 'SETTLED') {
+              changed = true;
+              return { ...a, status: 'SETTLED' as const };
+            }
+            return a;
+          });
+          if (changed) {
+            localStorage.setItem(ADVANCES_KEY, JSON.stringify(healed));
+          }
+          setAdvances(healed);
+        } else {
+          setAdvances([]);
+        }
       } catch {}
       setRawItems(getRawInventoryItems());
     };
@@ -517,6 +541,9 @@ export const Expenditures: React.FC = () => {
     let bakeDue = 0;
 
     expenses.forEach(e => {
+      const isRefund = e.category === 'Refund' || e.paymentMethod === 'Refund' || String(e.desc || '').toLowerCase().includes('cash refund') || String(e.desc || '').toLowerCase().includes('উদ্বৃত্ত ফেরত');
+      if (isRefund) return;
+
       const amt = Number(e.amount) || 0;
       total += amt;
 
@@ -532,37 +559,35 @@ export const Expenditures: React.FC = () => {
       }
     });
 
-    const activeAdvances = advances.filter(a => a.status === 'ACTIVE');
+    const activeAdvances = advances.filter(a => {
+      const isSettled = a.status === 'SETTLED' || Number(a.returnAmount) > 0 || (a.notes && a.notes.includes('[Settled]')) || Boolean(a.settledDate);
+      return String(a.status || 'ACTIVE').toUpperCase() === 'ACTIVE' && !isSettled;
+    });
     const totalActiveAdvance = activeAdvances.reduce((sum, a) => sum + (Number(a.amount) || 0), 0);
     
     // Dynamic active spent & available advance:
     // Calculates net available advance across civilians in realtime.
-    // If a civilian has active advances or unsettled balance, their balance is included.
-    // Settled accounts (advance equals expenses) balance to 0 and do not generate phantom deficits.
+    // Only civilians with ACTIVE unsettled advances have an outstanding balance.
+    // Once settled, their active balance is ৳0.
     let netAvailableAdvance = 0;
     let totalActiveSpent = 0;
 
     civilians.forEach(civ => {
-      const civAdvs = advances.filter(a => matchesCivilian(a.personName, civ));
-      const hasActive = civAdvs.some(a => a.status === 'ACTIVE');
-      const totalAdv = civAdvs.reduce((s, a) => s + (Number(a.amount) || 0), 0);
-      
-      const civExps = expenses.filter(e => {
-        if (!matchesCivilian(e.detailedPerson, civ)) return false;
-        if (String(e.paymentMethod || '').toLowerCase() === 'due') return false;
-        if (e.desc && e.desc.includes('Advance Settle Payout')) return false;
-        return true;
+      const civActiveAdvs = advances.filter(a => {
+        const isSettled = a.status === 'SETTLED' || Number(a.returnAmount) > 0 || (a.notes && a.notes.includes('[Settled]')) || Boolean(a.settledDate);
+        return matchesCivilian(a.personName, civ) && String(a.status || 'ACTIVE').toUpperCase() === 'ACTIVE' && !isSettled;
       });
-      const totalExp = civExps.reduce((s, e) => s + (Number(e.amount) || 0), 0);
-      const bal = totalAdv - totalExp;
+      if (civActiveAdvs.length === 0) return;
 
-      if (hasActive || bal !== 0) {
-        netAvailableAdvance += bal;
-        totalActiveSpent += totalExp;
-      }
+      const totalActiveAdv = civActiveAdvs.reduce((s, a) => s + (Number(a.amount) || 0), 0);
+      const totalActiveSp = civActiveAdvs.reduce((s, a) => s + (Number(a.spentAmount) || 0), 0);
+      const totalActiveRet = civActiveAdvs.reduce((s, a) => s + (Number(a.returnAmount) || 0), 0);
+      const bal = totalActiveAdv - totalActiveSp - totalActiveRet;
+
+      netAvailableAdvance += bal;
+      totalActiveSpent += totalActiveSp;
     });
 
-    // DO NOT clamp with Math.max(0, ...) so negative balance (ঘাটতি) is accurately displayed in realtime!
     const availableAdvance = netAvailableAdvance;
 
     return { 
@@ -1079,7 +1104,9 @@ export const Expenditures: React.FC = () => {
 
         // Mark existing active advances for this person as SETTLED
         updatedAdvances = updatedAdvances.map(a => {
-          if (matchesCivilian(a.personName, civ) && a.status === 'ACTIVE') {
+          const isMatch = matchesCivilian(a.personName, civ) || matchesCivilian(a.personName, displayName);
+          const isActive = String(a.status || 'ACTIVE').toUpperCase() === 'ACTIVE';
+          if (isMatch && isActive) {
             return {
               ...a,
               status: 'SETTLED' as const,
@@ -1103,7 +1130,9 @@ export const Expenditures: React.FC = () => {
         let remReturn = returnBalance;
 
         updatedAdvances = updatedAdvances.map(a => {
-          if (matchesCivilian(a.personName, civ) && a.status === 'ACTIVE') {
+          const isMatch = matchesCivilian(a.personName, civ) || matchesCivilian(a.personName, displayName);
+          const isActive = String(a.status || 'ACTIVE').toUpperCase() === 'ACTIVE';
+          if (isMatch && isActive) {
             const advAmt = Number(a.amount) || 0;
             const allocatedSpent = Math.min(advAmt, remSpent);
             remSpent = Math.max(0, remSpent - allocatedSpent);
@@ -1123,12 +1152,64 @@ export const Expenditures: React.FC = () => {
           return a;
         });
 
+        // Record refund to Expense History as requested:
+        // "Cash Advance er balance sattle kore dile jodi balace add hoy tahole oiya Advance History te asbe, jodi refund hoye tahole Expense History te jbe"
+        if (returnBalance > 0) {
+          try {
+            const refundExp: ExpenseRecord = {
+              id: `exp-${Date.now()}-settle-refund-${civ.id}`,
+              date: formatCanteenDate(new Date()),
+              desc: `Cash Refund: ${displayName} (অব্যবহৃত ক্যাশ ফেরত)`,
+              category: 'Refund',
+              paymentMethod: 'Refund',
+              amount: returnBalance,
+              detailedPerson: displayName,
+            };
+            const rawCurrentExp = localStorage.getItem(STORAGE_KEY);
+            const currentExps: ExpenseRecord[] = rawCurrentExp ? JSON.parse(rawCurrentExp) : expenses;
+            const updatedExps = [refundExp, ...currentExps.filter(e => e.id !== refundExp.id)];
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedExps));
+            setExpenses(updatedExps);
+            pushKeyToCloud(STORAGE_KEY, updatedExps).catch(() => {});
+            window.dispatchEvent(new CustomEvent('canteen_expenses_updated', { detail: updatedExps }));
+          } catch (eErr) {
+            console.warn('Could not save refund expense:', eErr);
+          }
+        }
+
+        // Also record return into canteen_txs so Capital fund records and logs reflect return immediately
+        if (returnBalance > 0) {
+          try {
+            const returnTx = {
+              id: `tx-adv-ret-${Date.now()}-${civ.id}`,
+              date: formatCanteenDate(new Date()),
+              memberName: displayName,
+              airman_id: civ.id,
+              type: 'ADVANCE_RETURN',
+              items: `Advance Return (Settle Balance from ${displayName})`,
+              gateway: 'CASH',
+              amount: returnBalance,
+              timestamp: Date.now()
+            };
+            const rawCurrent = localStorage.getItem('canteen_txs');
+            const currentTxs = rawCurrent ? JSON.parse(rawCurrent) : [];
+            const updatedTxs = [returnTx, ...currentTxs];
+            localStorage.setItem('canteen_txs', JSON.stringify(updatedTxs));
+            pushKeyToCloud('canteen_txs', updatedTxs).catch(() => {});
+            window.dispatchEvent(new Event('canteen_txs_updated'));
+          } catch (txErr) {
+            console.warn('Could not save advance return to canteen_txs:', txErr);
+          }
+        }
+
         showToast(`✅ Sattle Complete! ৳${returnBalance.toLocaleString()} উদ্বৃত্ত টাকা Cash এ যুক্ত হয়েছে।`);
 
       } else {
         // Case 3: Exactly equal
         updatedAdvances = updatedAdvances.map(a => {
-          if (matchesCivilian(a.personName, civ) && a.status === 'ACTIVE') {
+          const isMatch = matchesCivilian(a.personName, civ) || matchesCivilian(a.personName, displayName);
+          const isActive = String(a.status || 'ACTIVE').toUpperCase() === 'ACTIVE';
+          if (isMatch && isActive) {
             return {
               ...a,
               status: 'SETTLED' as const,
@@ -2283,11 +2364,19 @@ export const Expenditures: React.FC = () => {
                   {/* Summary for selected month */}
                   {(() => {
                     const mAdvs = advances.filter(a => {
+                      if (a.status !== 'ACTIVE') return false;
                       if (civMonthFilter === 'ALL') return true;
                       return getYearMonthKey(a.date) === civMonthFilter;
                     });
                     const mExps = expenses.filter(e => {
                       if (String(e.paymentMethod || '').toLowerCase() === 'due') return false;
+                      if (e.desc && e.desc.includes('Advance Settle Payout')) return false;
+                      if (e.category === 'Refund' || e.paymentMethod === 'Refund' || String(e.desc || '').toLowerCase().includes('cash refund') || String(e.desc || '').toLowerCase().includes('উদ্বৃত্ত ফেরত')) return false;
+                      const civHasActive = advances.some(a => {
+                        const isSettled = a.status === 'SETTLED' || Number(a.returnAmount) > 0 || (a.notes && a.notes.includes('[Settled]')) || Boolean(a.settledDate);
+                        return String(a.status || 'ACTIVE').toUpperCase() === 'ACTIVE' && !isSettled && matchesCivilian(a.personName, { name: e.detailedPerson });
+                      });
+                      if (!civHasActive) return false;
                       if (civMonthFilter === 'ALL') return true;
                       return getYearMonthKey(e.date) === civMonthFilter;
                     });
@@ -2325,18 +2414,30 @@ export const Expenditures: React.FC = () => {
                       if (civMonthFilter === 'ALL') return true;
                       return getYearMonthKey(a.date) === civMonthFilter;
                     });
-                    const activeAdvs = civAdvs.filter(a => a.status === 'ACTIVE');
-                    const totalCivAdv = civAdvs.reduce((s, a) => s + (Number(a.amount) || 0), 0);
+                    const activeAdvs = civAdvs.filter(a => {
+                      const isSettled = a.status === 'SETTLED' || Number(a.returnAmount) > 0 || (a.notes && a.notes.includes('[Settled]')) || Boolean(a.settledDate);
+                      return String(a.status || 'ACTIVE').toUpperCase() === 'ACTIVE' && !isSettled;
+                    });
+                    const hasActive = activeAdvs.length > 0;
 
                     // Exclude shop Due expenses from civilian advance spending, filter by month
                     const civExpenses = expenses.filter(e => {
                       if (!matchesCivilian(e.detailedPerson, civ)) return false;
                       if (String(e.paymentMethod || '').toLowerCase() === 'due') return false;
+                      if (e.desc && e.desc.includes('Advance Settle Payout')) return false;
+                      if (e.category === 'Refund' || e.paymentMethod === 'Refund' || String(e.desc || '').toLowerCase().includes('cash refund') || String(e.desc || '').toLowerCase().includes('উদ্বৃত্ত ফেরত')) return false;
                       if (civMonthFilter === 'ALL') return true;
                       return getYearMonthKey(e.date) === civMonthFilter;
                     });
-                    const totalCivExp = civExpenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
-                    const civBalance = totalCivAdv - totalCivExp;
+
+                    // Active advances only: if settled, active amount & balance are 0
+                    const totalCivAdv = hasActive
+                      ? activeAdvs.reduce((s, a) => s + (Number(a.amount) || 0), 0)
+                      : 0;
+                    const totalCivExp = hasActive
+                      ? civExpenses.reduce((s, e) => s + (Number(e.amount) || 0), 0)
+                      : 0;
+                    const civBalance = hasActive ? (totalCivAdv - totalCivExp) : 0;
 
                     return (
                       <div
@@ -2459,10 +2560,15 @@ export const Expenditures: React.FC = () => {
                             <span>Add</span>
                           </button>
 
-                          {/* Sattle button ("Pic 4 dekho jar balace Sattle korbo tar nam asbe Sattle Balance : Civ Tanvir") */}
+                          {/* Sattle button */}
                           <button
                             type="button"
+                            disabled={!hasActive && civBalance === 0}
                             onClick={() => {
+                              if (!hasActive && civBalance === 0) {
+                                showToast(`ℹ️ ${civ.name} এর হিসাব ইতিমধ্যেই সমন্বয় করা আছে (ব্যালেন্স ৳০)।`);
+                                return;
+                              }
                               const personTitle = civ.rank ? `${civ.rank} ${civ.surname || civ.name}`.trim() : (civ.surname || civ.name);
                               const addBal = totalCivExp > totalCivAdv ? totalCivExp - totalCivAdv : 0;
                               const retBal = totalCivAdv > totalCivExp ? totalCivAdv - totalCivExp : 0;
@@ -2476,10 +2582,14 @@ export const Expenditures: React.FC = () => {
                                 returnBalance: retBal
                               });
                             }}
-                            className="flex-1 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center space-x-1.5 shadow-md shadow-indigo-600/30 cursor-pointer active:scale-95"
+                            className={`flex-1 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center space-x-1.5 transition-all ${
+                              hasActive || civBalance !== 0
+                                ? 'bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white shadow-md shadow-indigo-600/30 cursor-pointer active:scale-95'
+                                : 'bg-slate-800/80 text-slate-500 border border-slate-700/60 cursor-not-allowed opacity-60'
+                            }`}
                           >
                             <CheckSquare className="w-3.5 h-3.5" />
-                            <span>Sattle</span>
+                            <span>{hasActive || civBalance !== 0 ? 'Sattle' : 'Settled'}</span>
                           </button>
                         </div>
                       </div>
@@ -3095,14 +3205,29 @@ export const Expenditures: React.FC = () => {
                 {/* Summary Strip */}
                 {(() => {
                   const civAdvs = advances.filter(a => matchesCivilian(a.personName, viewingHistoryCiv));
-                  // Exclude shop Due expenses from civilian advance spending
+                  const activeCivAdvs = civAdvs.filter(a => {
+                    const isSettled = a.status === 'SETTLED' || Number(a.returnAmount) > 0 || (a.notes && a.notes.includes('[Settled]')) || Boolean(a.settledDate);
+                    return String(a.status || 'ACTIVE').toUpperCase() === 'ACTIVE' && !isSettled;
+                  });
+                  const hasActive = activeCivAdvs.length > 0;
+
+                  // Exclude shop Due expenses and Refunds from civilian advance spending
                   const civExps = expenses.filter(e => 
                     matchesCivilian(e.detailedPerson, viewingHistoryCiv) &&
-                    String(e.paymentMethod || '').toLowerCase() !== 'due'
+                    String(e.paymentMethod || '').toLowerCase() !== 'due' &&
+                    e.category !== 'Refund' &&
+                    e.paymentMethod !== 'Refund' &&
+                    !String(e.desc || '').toLowerCase().includes('cash refund') &&
+                    !String(e.desc || '').toLowerCase().includes('উদ্বৃত্ত ফেরত')
                   );
                   const totalAdv = civAdvs.reduce((s, a) => s + (Number(a.amount) || 0), 0);
                   const totalExp = civExps.reduce((s, e) => s + (Number(e.amount) || 0), 0);
-                  const bal = totalAdv - totalExp;
+                  
+                  // Active unspent balance remaining in staff's hand:
+                  // If all advances are settled, active balance is ৳0
+                  const bal = hasActive
+                    ? activeCivAdvs.reduce((s, a) => s + (Number(a.amount || 0) - Number(a.spentAmount || 0) - Number(a.returnAmount || 0)), 0)
+                    : 0;
 
                   return (
                     <div className="grid grid-cols-3 gap-2.5 text-center text-xs font-bold">
@@ -3117,99 +3242,198 @@ export const Expenditures: React.FC = () => {
                       <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800">
                         <span className="text-slate-400 block text-[10px] mb-1">অবশিষ্ট ব্যালেন্স</span>
                         <span className={`font-mono font-black text-sm ${bal > 0 ? 'text-emerald-400' : bal < 0 ? 'text-rose-400' : 'text-slate-400'}`}>
-                          {bal > 0 ? `+৳${bal.toLocaleString()}` : bal < 0 ? `-৳${Math.abs(bal).toLocaleString()}` : '৳০'}
+                          {hasActive 
+                            ? (bal > 0 ? `+৳${bal.toLocaleString()}` : bal < 0 ? `-৳${Math.abs(bal).toLocaleString()}` : '৳০') 
+                            : '৳০ (সমন্বিত)'}
                         </span>
                       </div>
                     </div>
                   );
                 })()}
 
-                {/* Section: Advances History */}
-                <div className="space-y-2">
-                  <h4 className="text-xs font-black text-amber-400 uppercase tracking-wider flex items-center space-x-1.5">
-                    <Clock className="w-3.5 h-3.5" />
-                    <span>Advance History</span>
-                  </h4>
-                  {advances.filter(a => matchesCivilian(a.personName, viewingHistoryCiv)).length === 0 ? (
-                    <p className="text-xs text-slate-500 italic p-3 bg-slate-950 rounded-xl text-center">কোনো অগ্রিম রেকর্ড নেই</p>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {advances.filter(a => matchesCivilian(a.personName, viewingHistoryCiv)).map(a => (
-                        <div key={a.id} className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between text-xs hover:border-slate-700 transition-colors">
-                          <div>
-                            <div className="flex items-center space-x-2">
-                              <span className="font-mono text-slate-400 text-[11px]">{a.date}</span>
-                              <span className="font-mono font-black text-amber-400">৳{Number(a.amount).toLocaleString()}</span>
-                              <span className={`text-[10px] px-1.5 py-0.2 rounded font-bold ${a.status === 'ACTIVE' ? 'bg-amber-500/10 text-amber-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
-                                {a.status}
-                              </span>
-                            </div>
-                            <p className="text-[11px] text-slate-400 mt-0.5">{a.purpose || 'Daily Bazar Advance'}</p>
-                          </div>
-                          <div className="flex items-center space-x-2.5">
-                            {Number(a.spentAmount) > 0 && (
-                              <span className="text-[10px] font-mono text-slate-400">খরচ: ৳{a.spentAmount}</span>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => setDeleteTargetAdvance(a)}
-                              className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
-                              title="Delete advance record"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                {/* Tabs: Advance History & Expense History side-by-side */}
+                {(() => {
+                  const expenseList = expenses.filter(e => matchesCivilian(e.detailedPerson, viewingHistoryCiv));
+                  
+                  // Also include any settled advance returns if not already present in expenseList
+                  // "Cash Advance er balance sattle kore dile jodi balace add hoy tahole oiya Advance History te asbe , jodi refund hoye tahole Expense History te jbe"
+                  const returnItemsFromAdvs = advances
+                    .filter(a => matchesCivilian(a.personName, viewingHistoryCiv) && Number(a.returnAmount) > 0)
+                    .filter(a => {
+                      const retAmt = Number(a.returnAmount);
+                      return !expenseList.some(e => 
+                        (e.category === 'Refund' || e.paymentMethod === 'Refund' || String(e.desc || '').toLowerCase().includes('cash refund')) &&
+                        Math.abs(Number(e.amount) - retAmt) < 0.01
+                      );
+                    })
+                    .map((a, idx) => ({
+                      id: `ret-${a.id || idx}`,
+                      date: a.settledDate || a.date,
+                      desc: `Cash Refund: ${a.personName || viewingHistoryCiv?.name || 'Staff'} (উদ্বৃত্ত ক্যাশ ফেরত)`,
+                      category: 'Refund',
+                      amount: Number(a.returnAmount) || 0,
+                      isDueExp: false,
+                      isRefund: true,
+                      dueShop: undefined,
+                      rawExpenseId: undefined
+                    }));
 
-                {/* Section: Expenses History */}
-                <div className="space-y-2">
-                  <h4 className="text-xs font-black text-emerald-400 uppercase tracking-wider flex items-center space-x-1.5">
-                    <FileText className="w-3.5 h-3.5" />
-                    <span>Expense History</span>
-                  </h4>
-                  {expenses.filter(e => matchesCivilian(e.detailedPerson, viewingHistoryCiv)).length === 0 ? (
-                    <p className="text-xs text-slate-500 italic p-3 bg-slate-950 rounded-xl text-center">কোনো খরচের ভাউচার নেই</p>
-                  ) : (
-                    <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
-                      {expenses.filter(e => matchesCivilian(e.detailedPerson, viewingHistoryCiv)).map(e => {
-                        const isDueExp = String(e.paymentMethod || '').toLowerCase() === 'due';
-                        return (
-                          <div key={e.id} className="p-2.5 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between text-xs">
-                            <div>
-                              <div className="flex items-center space-x-2 flex-wrap">
-                                <span className="font-mono text-slate-400 text-[11px]">{e.date}</span>
-                                <span className="font-bold text-white">{e.desc}</span>
-                                <span className="text-[10px] text-slate-500">({e.category || 'Grocery'})</span>
-                                {isDueExp && (
-                                  <span className="text-[9px] px-1.5 py-0.5 rounded font-black bg-amber-500/10 text-amber-300 border border-amber-500/20">
-                                    বকেয়া [{e.dueShop || 'দোকান বিল'}] - অগ্রিম নয়
-                                  </span>
-                                )}
-                              </div>
+                  const allCivExpenseItems = [
+                    ...expenseList.map(e => ({
+                      id: e.id,
+                      date: e.date,
+                      desc: e.desc,
+                      category: e.category,
+                      amount: Number(e.amount) || 0,
+                      isDueExp: String(e.paymentMethod || '').toLowerCase() === 'due',
+                      isRefund: e.category === 'Refund' || e.paymentMethod === 'Refund' || String(e.desc || '').toLowerCase().includes('cash refund') || String(e.desc || '').toLowerCase().includes('উদ্বৃত্ত ফেরত'),
+                      dueShop: e.dueShop,
+                      rawExpenseId: e.id
+                    })),
+                    ...returnItemsFromAdvs
+                  ].sort((a, b) => parseExpenseDate(b.date) - parseExpenseDate(a.date));
+
+                  return (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-2 gap-2 p-1 bg-slate-950 rounded-2xl border border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => setCivHistoryTab('ADVANCE')}
+                          className={`py-2 px-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center space-x-2 cursor-pointer ${
+                            civHistoryTab === 'ADVANCE'
+                              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+                              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900 border border-transparent'
+                          }`}
+                        >
+                          <Clock className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Advance History</span>
+                          <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${civHistoryTab === 'ADVANCE' ? 'bg-amber-500/30 text-amber-200' : 'bg-slate-800 text-slate-400'}`}>
+                            {advances.filter(a => matchesCivilian(a.personName, viewingHistoryCiv)).length}
+                          </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setCivHistoryTab('EXPENSE')}
+                          className={`py-2 px-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center space-x-2 cursor-pointer ${
+                            civHistoryTab === 'EXPENSE'
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
+                              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900 border border-transparent'
+                          }`}
+                        >
+                          <FileText className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Expense History</span>
+                          <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${civHistoryTab === 'EXPENSE' ? 'bg-emerald-500/30 text-emerald-200' : 'bg-slate-800 text-slate-400'}`}>
+                            {allCivExpenseItems.length}
+                          </span>
+                        </button>
+                      </div>
+
+                      {/* Tab Content: Advance History */}
+                      {civHistoryTab === 'ADVANCE' && (
+                        <div className="space-y-2 animate-fadeIn">
+                          <h4 className="text-xs font-black text-amber-400 uppercase tracking-wider flex items-center space-x-1.5">
+                            <Clock className="w-3.5 h-3.5" />
+                            <span>Advance History</span>
+                          </h4>
+                          {advances.filter(a => matchesCivilian(a.personName, viewingHistoryCiv)).length === 0 ? (
+                            <p className="text-xs text-slate-500 italic p-3 bg-slate-950 rounded-xl text-center">কোনো অগ্রিম রেকর্ড নেই</p>
+                          ) : (
+                            <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                              {advances.filter(a => matchesCivilian(a.personName, viewingHistoryCiv)).map(a => (
+                                <div key={a.id} className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between text-xs hover:border-slate-700 transition-colors">
+                                  <div>
+                                    <div className="flex items-center space-x-2">
+                                      <span className="font-mono text-slate-400 text-[11px]">{a.date}</span>
+                                      <span className="font-mono font-black text-amber-400">৳{Number(a.amount).toLocaleString()}</span>
+                                      <span className={`text-[10px] px-1.5 py-0.2 rounded font-bold ${a.status === 'ACTIVE' ? 'bg-amber-500/10 text-amber-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
+                                        {a.status}
+                                      </span>
+                                    </div>
+                                    <p className="text-[11px] text-slate-400 mt-0.5">{a.purpose || 'Daily Bazar Advance'}</p>
+                                    {a.notes && <p className="text-[10px] text-slate-500 italic mt-0.5">{a.notes}</p>}
+                                  </div>
+                                  <div className="flex items-center space-x-2.5">
+                                    {Number(a.spentAmount) > 0 && (
+                                      <span className="text-[10px] font-mono text-slate-400">খরচ: ৳{a.spentAmount}</span>
+                                    )}
+                                    {Number(a.returnAmount) > 0 && (
+                                      <span className="text-[10px] font-mono text-emerald-400 font-bold">ফেরত: ৳{a.returnAmount}</span>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => setDeleteTargetAdvance(a)}
+                                      className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                                      title="Delete advance record"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
                             </div>
-                            <div className="flex items-center space-x-2">
-                              <span className={`font-mono font-black ${isDueExp ? 'text-amber-400' : 'text-emerald-400'}`}>
-                                ৳{Number(e.amount).toLocaleString()}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => setDeleteTargetId(e.id)}
-                                className="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
-                                title="Delete expense record"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Tab Content: Expense History */}
+                      {civHistoryTab === 'EXPENSE' && (
+                        <div className="space-y-2 animate-fadeIn">
+                          <h4 className="text-xs font-black text-emerald-400 uppercase tracking-wider flex items-center space-x-1.5">
+                            <FileText className="w-3.5 h-3.5" />
+                            <span>Expense History</span>
+                          </h4>
+                          {allCivExpenseItems.length === 0 ? (
+                            <p className="text-xs text-slate-500 italic p-3 bg-slate-950 rounded-xl text-center">কোনো খরচের ভাউচার নেই</p>
+                          ) : (
+                            <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                              {allCivExpenseItems.map(item => {
+                                const isRefund = item.isRefund;
+                                const isDueExp = item.isDueExp;
+                                return (
+                                  <div key={item.id} className="p-2.5 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between text-xs">
+                                    <div>
+                                      <div className="flex items-center space-x-2 flex-wrap">
+                                        <span className="font-mono text-slate-400 text-[11px]">{item.date}</span>
+                                        <span className="font-bold text-white">{item.desc}</span>
+                                        <span className="text-[10px] text-slate-500">({item.category || (isRefund ? 'Refund' : 'Grocery')})</span>
+                                        {isRefund && (
+                                          <span className="text-[9px] px-1.5 py-0.5 rounded font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                            ক্যাশ রিফান্ড [ফেরত]
+                                          </span>
+                                        )}
+                                        {isDueExp && (
+                                          <span className="text-[9px] px-1.5 py-0.5 rounded font-black bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                                            বকেয়া [{item.dueShop || 'দোকান বিল'}] - অগ্রিম নয়
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                      <span className={`font-mono font-black ${isRefund ? 'text-cyan-400' : isDueExp ? 'text-amber-400' : 'text-emerald-400'}`}>
+                                        {isRefund ? `+ ৳${item.amount.toLocaleString()} (ফেরত)` : `৳${item.amount.toLocaleString()}`}
+                                      </span>
+                                      {item.rawExpenseId && (
+                                        <button
+                                          type="button"
+                                          onClick={() => setDeleteTargetId(item.rawExpenseId!)}
+                                          className="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                                          title="Delete expense record"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
                             </div>
-                          </div>
-                        );
-                      })}
+                          )}
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
+                  );
+                })()}
               </div>
             </motion.div>
           </div>

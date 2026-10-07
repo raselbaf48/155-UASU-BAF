@@ -76,6 +76,8 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
     } catch { return []; }
   });
 
+  const [canteenConfig, setCanteenConfig] = useState(() => getCanteenConfig());
+
   // In-App Software Update Check right on Login Screen
   const [updateAvailable, setUpdateAvailable] = useState<AppVersionRecord | null>(null);
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState<boolean>(false);
@@ -136,11 +138,21 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
     };
     window.addEventListener('baf_portal_preference_changed', handlePortalChanged);
 
+    const handleCfgUpdate = (e: any) => {
+      setCanteenConfig(e?.detail || getCanteenConfig());
+    };
+    window.addEventListener('canteen_settings_updated', handleCfgUpdate);
+    window.addEventListener('storage', handleCfgUpdate);
+
     // Warm up Canteen data and member DPs in the background
     syncCanteenMembersFromCloud(false);
     pullAllCanteenDataFromCloud();
 
-    return () => window.removeEventListener('baf_portal_preference_changed', handlePortalChanged);
+    return () => {
+      window.removeEventListener('baf_portal_preference_changed', handlePortalChanged);
+      window.removeEventListener('canteen_settings_updated', handleCfgUpdate);
+      window.removeEventListener('storage', handleCfgUpdate);
+    };
   }, []);
 
   const handlePortalChange = (newPortal: PortalType) => {
@@ -511,7 +523,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                   <span>{isResetMode ? 'PASSWORD RECOVERY' : (activeTab === 'Canteen' ? 'CANTEEN LOGIN PORTAL' : 'USER LOGIN PORTAL')}</span>
                 </div>
                 <h1 className="text-xl sm:text-2xl font-black tracking-tight text-white flex items-center justify-center space-x-2">
-                  <span>{activeTab === 'Canteen' ? 'Canteen Management' : '155 UASU BAF'}</span>
+                  <span>{activeTab === 'Canteen' ? (canteenConfig.name || 'CAFE UAV') : '155 UASU BAF'}</span>
                 </h1>
                 {updateAvailable && (
                   <button

@@ -28,7 +28,7 @@ export interface CanteenConfig {
 }
 
 export const DEFAULT_CANTEEN_CONFIG: CanteenConfig = {
-  name: '🍽️ Cafe UAV 🍽️',
+  name: 'CAFE UAV',
   logoUrl: 'https://i.postimg.cc/gcqqCXCL/Logo-(1).png',
   managerName: 'LAC Nishad',
   adminImage: 'https://lh3.googleusercontent.com/pw/AP1GczPXDD5Dohq-6TWemgeYREoimsS-iXc6KjQoxxRgI0hjRf2tESul2P6eQYmPbFDBUzcP7tRKaBH8HkHHoBqJb83Ng8bbo5mKFhfT4YkiEcEVrCc3Nd39=s800',

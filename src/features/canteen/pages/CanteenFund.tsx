@@ -4,7 +4,7 @@ import {
   X, RefreshCw, CheckCircle2, AlertCircle, Building2, Briefcase, PieChart, Layers
 } from 'lucide-react';
 import { formatCanteenDate } from '../utils/dateUtils';
-import { ExpenseRecord } from './Expenditures';
+import { ExpenseRecord, BazarAdvance } from './Expenditures';
 import { UnitFundSection } from './UnitFundSection';
 import { OthersFundSection } from './OthersFundSection';
 import { AllFundsOverviewSection } from './AllFundsOverviewSection';
@@ -21,6 +21,7 @@ export interface FundTransfer {
 const TRANSFERS_KEY = 'canteen_fund_transfers';
 const TXS_KEY = 'canteen_txs';
 const EXPENSES_KEY = 'canteen_expenses';
+const ADVANCES_KEY = 'canteen_bazar_advances';
 
 export type ActiveFundType = 'CANTEEN' | 'UNIT' | 'OTHERS' | 'OVERVIEW';
 
@@ -33,6 +34,7 @@ export const CanteenFund: React.FC = () => {
   const [reports, setReports] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
   const [transfers, setTransfers] = useState<FundTransfer[]>([]);
+  const [advances, setAdvances] = useState<BazarAdvance[]>([]);
   
   const [activeTab, setActiveTab] = useState<'ALL' | 'CASH' | 'UCB' | 'TRANSFERS' | 'EXPENSES'>('ALL');
 
@@ -70,6 +72,14 @@ export const CanteenFund: React.FC = () => {
     }
 
     try {
+      const rawAdvs = localStorage.getItem(ADVANCES_KEY);
+      const advs = rawAdvs ? JSON.parse(rawAdvs) : [];
+      setAdvances(Array.isArray(advs) ? advs : []);
+    } catch (_err) {
+      setAdvances([]);
+    }
+
+    try {
       const uInflows = JSON.parse(localStorage.getItem('baf_unit_fund_inflows') || '[]');
       const uExpenses = JSON.parse(localStorage.getItem('baf_unit_fund_expenses') || '[]');
       const inSum = uInflows.reduce((s: number, i: any) => s + (Number(i.amount) || 0), 0);
@@ -97,6 +107,7 @@ export const CanteenFund: React.FC = () => {
     window.addEventListener('canteen_txs_updated', handleSync);
     window.addEventListener('canteen_expenses_updated', handleSync);
     window.addEventListener('canteen_transfers_updated', handleSync);
+    window.addEventListener('canteen_bazar_advances_updated', handleSync);
     window.addEventListener('canteen_state_updated', handleSync);
     window.addEventListener('unit_fund_updated', handleSync);
     window.addEventListener('others_fund_updated', handleSync);
@@ -106,6 +117,7 @@ export const CanteenFund: React.FC = () => {
       window.removeEventListener('canteen_txs_updated', handleSync);
       window.removeEventListener('canteen_expenses_updated', handleSync);
       window.removeEventListener('canteen_transfers_updated', handleSync);
+      window.removeEventListener('canteen_bazar_advances_updated', handleSync);
       window.removeEventListener('canteen_state_updated', handleSync);
       window.removeEventListener('unit_fund_updated', handleSync);
       window.removeEventListener('others_fund_updated', handleSync);
@@ -147,19 +159,47 @@ export const CanteenFund: React.FC = () => {
   const totalUCB = billPaymentUCB - expenseUCB + cashToUcbTotal - ucbToCashTotal;
   const totalFund = totalCash + totalUCB;
 
+  // Outstanding Staff Advance Calculation:
+  // Active advances currently held by staff (unspent advance balance of ACTIVE advances only).
+  // Once an advance is settled, its remaining active balance is ৳0 and it is excluded.
+  const staffAdvanceAmount = useMemo(() => {
+    const activeAdvances = advances.filter(a => {
+      const isSettled = a.status === 'SETTLED' || Number(a.returnAmount) > 0 || (a.notes && a.notes.includes('[Settled]')) || Boolean(a.settledDate);
+      return a.status === 'ACTIVE' && !isSettled;
+    });
+    return activeAdvances.reduce((sum, a) => {
+      const advAmt = Number(a.amount) || 0;
+      const spent = Number(a.spentAmount) || 0;
+      const returned = Number(a.returnAmount) || 0;
+      const unspent = Math.max(0, advAmt - spent - returned);
+      return sum + unspent;
+    }, 0);
+  }, [advances]);
+
+  // Manager holds all cash minus active advance in hands of staff
+  const managerCash = Math.max(0, totalCash - staffAdvanceAmount);
+
   // Lists for logs
   const cashPayments = reports.filter(r => (r.type === 'BILL PAYMENT' || r.type === 'BAZAR_RETURN' || r.type === 'ADVANCE_RETURN') && String(r.gateway || '').toUpperCase() === 'CASH');
   const ucbPayments = reports.filter(r => (r.type === 'BILL PAYMENT' || r.type === 'BAZAR_RETURN' || r.type === 'ADVANCE_RETURN') && String(r.gateway || '').toUpperCase() === 'UCB');
 
-  const cashExpenses = expenses.filter(e => String(e.paymentMethod || 'Cash').toLowerCase() === 'cash');
-  const ucbExpenses = expenses.filter(e => String(e.paymentMethod || '').toLowerCase() === 'ucb');
+  const cashExpenses = expenses.filter(e => {
+    const m = String(e.paymentMethod || 'Cash').toLowerCase();
+    const d = String(e.desc || '').toLowerCase();
+    return m === 'cash' && !d.includes('advance settle payout') && !d.includes('cash advance');
+  });
+  const ucbExpenses = expenses.filter(e => {
+    const m = String(e.paymentMethod || '').toLowerCase();
+    const d = String(e.desc || '').toLowerCase();
+    return m === 'ucb' && !d.includes('advance settle payout') && !d.includes('cash advance');
+  });
 
   // Unified All Fund Logs list ("Capital e Fund logs e akta all option add korba jekhane sob dekha jbe")
   const allLogs = useMemo(() => {
     interface UnifiedLogItem {
       id: string;
       date: string;
-      logType: 'INFLOW' | 'EXPENSE' | 'TRANSFER';
+      logType: 'INFLOW' | 'EXPENSE' | 'TRANSFER' | 'CASH_ADVANCE' | 'CASH_REFUND';
       title: string;
       subtitle?: string;
       channel: string;
@@ -178,12 +218,15 @@ export const CanteenFund: React.FC = () => {
       if (amt <= 0) return;
       const dStr = r.date || '';
       const dVal = new Date(dStr).getTime() || 0;
+      const isRefund = r.type === 'BAZAR_RETURN' || r.type === 'ADVANCE_RETURN';
       items.push({
         id: `inflow-${r.id || idx}`,
         date: dStr,
-        logType: 'INFLOW',
-        title: r.memberName || r.airman_id || 'Collection',
-        subtitle: r.items || (r.type === 'BAZAR_RETURN' ? 'Bazar Return' : r.type === 'ADVANCE_RETURN' ? 'Advance Return' : 'Bill Payment') + (r.bdNo ? ` (BD-${r.bdNo})` : ''),
+        logType: isRefund ? 'CASH_REFUND' : 'INFLOW',
+        title: isRefund ? `Cash Refund: ${r.memberName || 'Staff'}` : (r.memberName || r.airman_id || 'Collection'),
+        subtitle: isRefund 
+          ? `Advance Return / Settle Surplus • Returned to Cash (${r.memberName || ''})`
+          : (r.items || 'Bill Payment') + (r.bdNo ? ` (BD-${r.bdNo})` : ''),
         channel: gw,
         amount: amt,
         rawDate: dVal
@@ -194,16 +237,22 @@ export const CanteenFund: React.FC = () => {
     expenses.forEach((e, idx) => {
       const method = String(e.paymentMethod || 'Cash').toLowerCase();
       if (method !== 'cash' && method !== 'ucb') return;
+      const descLower = String(e.desc || '').toLowerCase();
+      if (e.category === 'Refund' || descLower.includes('cash refund') || descLower.includes('উদ্বৃত্ত ফেরত')) return;
       const amt = Number(e.amount) || 0;
       if (amt <= 0) return;
       const dStr = e.date || '';
       const dVal = new Date(dStr).getTime() || 0;
+      const isAdvanceDesc = descLower.includes('advance') || descLower.includes('অগ্রিম');
+
       items.push({
         id: `exp-${e.id || idx}`,
         date: dStr,
-        logType: 'EXPENSE',
-        title: e.desc || 'Expense Item',
-        subtitle: `${e.detailedPerson ? `Staff: ${e.detailedPerson}` : 'Canteen Expense'} • ${e.category || 'General'}`,
+        logType: isAdvanceDesc ? 'CASH_ADVANCE' : 'EXPENSE',
+        title: isAdvanceDesc ? `Cash Advance: ${e.detailedPerson || 'Staff'}` : (e.desc || 'Expense Item'),
+        subtitle: isAdvanceDesc
+          ? `Staff Advance • ${e.desc || ''}`
+          : `${e.detailedPerson ? `Staff: ${e.detailedPerson}` : 'Canteen Expense'} • ${e.category || 'General'}`,
         channel: method.toUpperCase(),
         amount: amt,
         rawDate: dVal
@@ -228,8 +277,67 @@ export const CanteenFund: React.FC = () => {
       });
     });
 
+    // 4. Staff Advances & Settle Return History
+    // "Cash advance er log expence hbe na oita Cash Advance hbe, back asle oita Cash Refund hbe"
+    advances.forEach((a, idx) => {
+      // 4a. Advance Add / Issue
+      if (Number(a.amount) > 0 && !a.id.includes('settle-topup')) {
+        const dStr = a.date || '';
+        const dVal = new Date(dStr).getTime() || 0;
+        items.push({
+          id: `adv-add-${a.id || idx}`,
+          date: dStr,
+          logType: 'CASH_ADVANCE',
+          title: `Cash Advance: ${a.personName || 'Staff'}`,
+          subtitle: `Staff Advance Issued • ${a.purpose || 'Daily Bazar Advance'} (${a.status || 'ACTIVE'})`,
+          channel: 'CASH',
+          amount: Number(a.amount) || 0,
+          rawDate: dVal
+        });
+      }
+
+      // 4b. Settle Return to Cash (if not already recorded in reports)
+      if (Number(a.returnAmount) > 0) {
+        const alreadyInReports = reports.some(r => 
+          (r.type === 'ADVANCE_RETURN' || r.type === 'BAZAR_RETURN') && 
+          (r.memberName === a.personName || String(r.items || '').includes(a.personName)) &&
+          Math.abs(Number(r.amount) - Number(a.returnAmount)) < 0.01
+        );
+        if (!alreadyInReports) {
+          const dStr = a.settledDate || a.date || '';
+          const dVal = new Date(dStr).getTime() || 0;
+          items.push({
+            id: `adv-return-${a.id || idx}`,
+            date: dStr,
+            logType: 'CASH_REFUND',
+            title: `Cash Refund: ${a.personName || 'Staff'}`,
+            subtitle: `Advance Return / Settle Surplus • ${a.notes || 'Surplus returned to Cash'}`,
+            channel: 'CASH',
+            amount: Number(a.returnAmount) || 0,
+            rawDate: dVal
+          });
+        }
+      }
+
+      // 4c. Settle Top-up (Deficit Payout from Cash)
+      if (a.id.includes('settle-topup') || a.purpose?.includes('Settle Top-up')) {
+        const dStr = a.date || '';
+        const dVal = new Date(dStr).getTime() || 0;
+        items.push({
+          id: `adv-topup-${a.id || idx}`,
+          date: dStr,
+          logType: 'CASH_ADVANCE',
+          title: `Cash Advance (Top-Up): ${a.personName || 'Staff'}`,
+          subtitle: `Settle Deficit Paid • ${a.notes || 'Paid from Cash to staff'}`,
+          channel: 'CASH',
+          amount: Number(a.amount) || 0,
+          rawDate: dVal
+        });
+      }
+    });
+
     return items.sort((a, b) => b.rawDate - a.rawDate);
-  }, [reports, expenses, transfers]);
+  }, [reports, expenses, transfers, advances]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -450,7 +558,36 @@ export const CanteenFund: React.FC = () => {
           <h3 className={`text-4xl font-black tracking-tighter ${totalCash >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
             ৳{totalCash.toLocaleString('en-US')}
           </h3>
-          <div className="text-[10px] text-slate-400 font-medium mt-2 flex flex-col space-y-0.5">
+
+          {/* Cash Location Breakdown: Manager vs Staff */}
+          <div className="mt-4 pt-3 border-t border-emerald-800/40 space-y-2">
+            <div className="flex items-center justify-between text-[9px] font-black tracking-widest text-emerald-300/80 uppercase">
+              <span>ক্যাশ বণ্টন (LOCATION BREAKDOWN)</span>
+              <span className="font-mono text-emerald-400 text-[10px]">মোট ৳{totalCash.toLocaleString('en-US')}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="bg-slate-950/80 p-3 rounded-2xl border border-emerald-800/40 shadow-inner">
+                <span className="text-[10px] text-slate-400 block font-bold mb-1">ম্যানেজার (Manager)</span>
+                <span className="font-mono font-black text-emerald-300 text-base">
+                  ৳{managerCash.toLocaleString('en-US')}
+                </span>
+                <span className="text-[9px] text-slate-500 block mt-1 font-medium leading-tight">
+                  ক্যাশ - স্টাফ অগ্রিম
+                </span>
+              </div>
+              <div className="bg-slate-950/80 p-3 rounded-2xl border border-emerald-800/40 shadow-inner">
+                <span className="text-[10px] text-slate-400 block font-bold mb-1">স্টাফ অগ্রিম (Staff)</span>
+                <span className="font-mono font-black text-amber-400 text-base">
+                  ৳{staffAdvanceAmount.toLocaleString('en-US')}
+                </span>
+                <span className="text-[9px] text-slate-500 block mt-1 font-medium leading-tight">
+                  হাতে থাকা অগ্রিম
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="text-[10px] text-slate-400 font-medium mt-3 pt-2 border-t border-emerald-900/30 flex flex-col space-y-0.5">
             <span className="text-emerald-400/90 font-bold">+ বিল কালেকশন: ৳{billPaymentCash.toLocaleString('en-US')}</span>
             <span className="text-rose-400/90 font-bold">- খরচ বিয়োগ: ৳{expenseCash.toLocaleString('en-US')}</span>
             {(cashToUcbTotal > 0 || ucbToCashTotal > 0) && (
@@ -554,7 +691,15 @@ export const CanteenFund: React.FC = () => {
                     <tr key={item.id} className="border-b border-slate-800/50 hover:bg-slate-800/50 transition-colors">
                       <td className="p-4 font-mono text-slate-400">{formatCanteenDate(item.date)}</td>
                       <td className="p-4">
-                        {item.logType === 'INFLOW' ? (
+                        {item.logType === 'CASH_REFUND' ? (
+                          <span className="px-2 py-0.5 rounded text-[8px] font-black tracking-widest uppercase bg-emerald-950/70 text-emerald-300 border border-emerald-500/40">
+                            + CASH REFUND
+                          </span>
+                        ) : item.logType === 'CASH_ADVANCE' ? (
+                          <span className="px-2 py-0.5 rounded text-[8px] font-black tracking-widest uppercase bg-amber-950/70 text-amber-400 border border-amber-500/40">
+                            - CASH ADVANCE
+                          </span>
+                        ) : item.logType === 'INFLOW' ? (
                           <span className="px-2 py-0.5 rounded text-[8px] font-black tracking-widest uppercase bg-emerald-950/60 text-emerald-400 border border-emerald-500/30">
                             + INFLOW
                           </span>
@@ -584,19 +729,29 @@ export const CanteenFund: React.FC = () => {
                             ? 'bg-emerald-900/30 text-emerald-400 border border-emerald-800/40'
                             : item.channel.includes('UCB') && !item.channel.includes('→')
                             ? 'bg-blue-900/30 text-blue-400 border border-blue-800/40'
-                            : 'bg-indigo-900/30 text-indigo-400 border border-indigo-800/40'
+                            : item.channel.includes('→')
+                            ? 'bg-indigo-900/30 text-indigo-400 border border-indigo-800/40'
+                            : 'bg-slate-800 text-slate-300'
                         }`}>
                           {item.channel}
                         </span>
                       </td>
                       <td className={`p-4 text-right font-black font-mono text-xs ${
-                        item.logType === 'INFLOW' 
+                        item.logType === 'INFLOW' || item.logType === 'CASH_REFUND'
                           ? 'text-emerald-400' 
+                          : item.logType === 'CASH_ADVANCE'
+                          ? 'text-amber-400'
                           : item.logType === 'EXPENSE' 
                           ? 'text-rose-400' 
                           : 'text-indigo-400'
                       }`}>
-                        {item.logType === 'INFLOW' ? `+৳${item.amount.toLocaleString('en-US')}` : item.logType === 'EXPENSE' ? `-৳${item.amount.toLocaleString('en-US')}` : `৳${item.amount.toLocaleString('en-US')}`}
+                        {item.logType === 'INFLOW' || item.logType === 'CASH_REFUND'
+                          ? `+৳${item.amount.toLocaleString('en-US')}` 
+                          : item.logType === 'CASH_ADVANCE'
+                          ? `-৳${item.amount.toLocaleString('en-US')}`
+                          : item.logType === 'EXPENSE' 
+                          ? `-৳${item.amount.toLocaleString('en-US')}` 
+                          : `৳${item.amount.toLocaleString('en-US')}`}
                       </td>
                     </tr>
                   ))
@@ -630,8 +785,15 @@ export const CanteenFund: React.FC = () => {
                       <td className="p-4">
                         <span className="text-indigo-400 font-bold">{tx.memberName || tx.airman_id}</span>
                         {tx.bdNo && <span className="text-slate-500 text-[10px] ml-1.5 font-mono">(BD-{tx.bdNo})</span>}
+                        {(tx.type === 'ADVANCE_RETURN' || tx.type === 'BAZAR_RETURN') && (
+                          <span className="ml-2 px-1.5 py-0.5 rounded text-[8px] font-black uppercase bg-emerald-950 text-emerald-300 border border-emerald-500/40">
+                            CASH REFUND
+                          </span>
+                        )}
                       </td>
-                      <td className="p-4 text-slate-400">{tx.items || 'Bill Payment'}</td>
+                      <td className="p-4 text-slate-400">
+                        {(tx.type === 'ADVANCE_RETURN' || tx.type === 'BAZAR_RETURN') ? 'Advance Return (ফেরত ক্যাশ)' : (tx.items || 'Bill Payment')}
+                      </td>
                       <td className="p-4">
                         <span className={`px-2 py-1 rounded text-[8px] font-black tracking-widest uppercase ${activeTab === 'CASH' ? 'bg-emerald-900/30 text-emerald-400 border border-emerald-800/40' : 'bg-blue-900/30 text-blue-400 border border-blue-800/40'}`}>
                           {tx.gateway}
