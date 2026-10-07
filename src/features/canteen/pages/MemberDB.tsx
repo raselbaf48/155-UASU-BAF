@@ -112,6 +112,7 @@ import {
 import { 
   fetchCanteenMembersOnce, 
   getCanteenMembersCache, 
+  setCanteenMembersCache,
   fetchCanteenMenuOnce, 
   getCanteenMenuCache 
 } from '../utils/canteenMenuData';
@@ -6107,6 +6108,10 @@ export const MemberDB: React.FC = () => {
               try {
                 localStorage.setItem('canteen_members_cache', JSON.stringify(updatedList));
               } catch {}
+              setCanteenMembersCache(updatedList);
+              window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: updatedList }));
+              window.dispatchEvent(new Event('canteen_state_updated'));
+              window.dispatchEvent(new Event('storage'));
               if (profileMember) {
                 const refreshed = updatedList.find(
                   (m) => String(m['BD No'] || m.airman_id).replace(/\D/g, '') === String(profileMember['BD No'] || profileMember.airman_id).replace(/\D/g, '')

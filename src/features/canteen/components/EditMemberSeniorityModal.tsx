@@ -12,6 +12,7 @@ import { getMemberBanglaName, getMemberBanglaRank } from '../utils/memberBanglaN
 import { formatRankBn, formatMemberNameBn } from '../utils/exportCanteenBillExcel';
 import { resolveImageUrl } from '../utils/canteenSettings';
 import { playCelebrationSound } from '../utils/audioFeedback';
+import { setCanteenMembersCache } from '../utils/canteenMenuData';
 
 interface EditMemberSeniorityModalProps {
   isOpen: boolean;
@@ -93,12 +94,19 @@ export const EditMemberSeniorityModal: React.FC<EditMemberSeniorityModalProps> =
         await saveMemberSeniority(cleanBd, targetResolved.resolvedSeniority);
       }
 
+      // Realtime cache update and event dispatch across entire canteen app
+      setCanteenMembersCache(updatedMembers);
+      window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: updatedMembers }));
+      window.dispatchEvent(new CustomEvent('canteen_seniority_updated', { detail: { targetBdOrId, newSeniority: targetResolved.resolvedSeniority, updatedMembers } }));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
+
       setSaveSuccess(true);
       playCelebrationSound();
       setTimeout(() => {
         onSuccess(updatedMembers);
         onClose();
-      }, 700);
+      }, 500);
     } catch (err: any) {
       console.error('Error saving member seniority:', err);
       setErrorMessage(err?.message || 'জ্যেষ্ঠতা নম্বর সংরক্ষণ করতে সমস্যা হয়েছে।');
@@ -124,11 +132,18 @@ export const EditMemberSeniorityModal: React.FC<EditMemberSeniorityModalProps> =
         return m;
       });
       const reSorted = normalizeCanteenMembersSeniority(updated);
+
+      setCanteenMembersCache(reSorted);
+      window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: reSorted }));
+      window.dispatchEvent(new CustomEvent('canteen_seniority_updated', { detail: { targetBdOrId: cleanBd, updatedMembers: reSorted } }));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
+
       setSaveSuccess(true);
       setTimeout(() => {
         onSuccess(reSorted);
         onClose();
-      }, 600);
+      }, 500);
     } catch (err: any) {
       setErrorMessage('রিসেট করতে ব্যর্থ হয়েছে।');
     } finally {

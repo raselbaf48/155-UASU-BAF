@@ -1,3 +1,5 @@
+import { getLocalSeniorityMap } from './memberSeniority';
+
 export function getCleanBdNo(val: any): string {
   if (!val) return '';
   return String(val).replace(/\D/g, '');
@@ -177,6 +179,7 @@ export function sortCanteenMembersByOfficeSeniority(members: any[]): any[] {
   if (!Array.isArray(members) || members.length <= 1) return members || [];
 
   const deduplicated = deduplicateCanteenMembers(members);
+  const localMap = getLocalSeniorityMap();
 
   return deduplicated.sort((a, b) => {
     const rankA = a.Rank || a.rank || '';
@@ -189,9 +192,29 @@ export function sortCanteenMembersByOfficeSeniority(members: any[]): any[] {
       return weightA - weightB;
     }
 
-    // 2. Within the same rank: strictly maintain seniority by BD Number (lower BD No = more senior / comes first)
+    // 2. Custom Seniority (Explicit seniority assigned from EditMemberSeniorityModal or database)
     const bdAStr = String(a['BD No'] || a.bdNo || a.airman_id || '').replace(/\D/g, '');
     const bdBStr = String(b['BD No'] || b.bdNo || b.airman_id || '').replace(/\D/g, '');
+
+    const rawSenA = a.seniority !== undefined && a.seniority !== null && !isNaN(Number(a.seniority))
+      ? Number(a.seniority)
+      : (a.Seniority !== undefined && a.Seniority !== null && !isNaN(Number(a.Seniority))
+        ? Number(a.Seniority)
+        : (bdAStr && localMap[bdAStr] !== undefined ? localMap[bdAStr] : undefined));
+
+    const rawSenB = b.seniority !== undefined && b.seniority !== null && !isNaN(Number(b.seniority))
+      ? Number(b.seniority)
+      : (b.Seniority !== undefined && b.Seniority !== null && !isNaN(Number(b.Seniority))
+        ? Number(b.Seniority)
+        : (bdBStr && localMap[bdBStr] !== undefined ? localMap[bdBStr] : undefined));
+
+    if (rawSenA !== undefined && rawSenB !== undefined && rawSenA !== rawSenB) {
+      return rawSenA - rawSenB;
+    }
+    if (rawSenA !== undefined && rawSenB === undefined) return -1;
+    if (rawSenA === undefined && rawSenB !== undefined) return 1;
+
+    // 3. Within the same rank with no differing custom seniority: lower BD Number = more senior / comes first
     const numA = parseInt(bdAStr, 10);
     const numB = parseInt(bdBStr, 10);
 

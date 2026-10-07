@@ -2238,6 +2238,9 @@ export const CanteenMemberDB: React.FC = () => {
           onSuccess={(updatedMembers) => {
             setMembers(updatedMembers);
             setCanteenMembersCache(updatedMembers);
+            window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: updatedMembers }));
+            window.dispatchEvent(new Event('canteen_state_updated'));
+            window.dispatchEvent(new Event('storage'));
             if (editMember) {
               const fresh = updatedMembers.find((m: any) => 
                 (editMember['BD No'] && m['BD No'] === editMember['BD No']) || 
