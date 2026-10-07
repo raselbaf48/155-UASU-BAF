@@ -329,6 +329,7 @@ export const Expenditures: React.FC = () => {
 
   // Delete Confirmation State
   const [deleteTargetId, setDeleteTargetId] = useState<string | number | null>(null);
+  const [deleteTargetAdvance, setDeleteTargetAdvance] = useState<BazarAdvance | null>(null);
 
   // UI state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -1244,20 +1245,26 @@ export const Expenditures: React.FC = () => {
     }
   };
 
-  // Delete an advance record
-  const handleDeleteAdvance = (advId: string) => {
-    if (!window.confirm('Are you sure you want to delete this advance record? (এই অগ্রিম রেকর্ডটি মুছে ফেলতে চান?)')) return;
-    playSuccessSound();
-    const updated = advances.filter(a => a.id !== advId);
-    setAdvances(updated);
-    localStorage.setItem(ADVANCES_KEY, JSON.stringify(updated));
-    showToast('✅ Advance record deleted successfully! (অগ্রিমের রেকর্ড সফলভাবে মুছে ফেলা হয়েছে)');
-    window.dispatchEvent(new Event('canteen_bazar_advances_updated'));
-    window.dispatchEvent(new Event('canteen_state_updated'));
-    window.dispatchEvent(new Event('storage'));
-    pushKeyToCloud(ADVANCES_KEY, updated).catch(err => {
-      console.warn('Could not sync advance deletion to cloud:', err);
-    });
+  // Delete an advance record with confirmation popup
+  const handleConfirmDeleteAdvance = async () => {
+    if (!deleteTargetAdvance) return;
+    const targetAdv = deleteTargetAdvance;
+    try {
+      playSuccessSound();
+      setDeleteTargetAdvance(null);
+      const updated = advances.filter(a => a.id !== targetAdv.id);
+      setAdvances(updated);
+      localStorage.setItem(ADVANCES_KEY, JSON.stringify(updated));
+      showToast(`✅ Advance ৳${Number(targetAdv.amount).toLocaleString()} deleted successfully!`);
+      window.dispatchEvent(new Event('canteen_bazar_advances_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
+      pushKeyToCloud(ADVANCES_KEY, updated).catch(err => {
+        console.warn('Could not sync advance deletion to cloud:', err);
+      });
+    } catch (err: any) {
+      showToast(`⚠️ Delete failed: ${err?.message || 'Error'}`);
+    }
   };
 
   return (
@@ -2935,10 +2942,10 @@ export const Expenditures: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* DELETE CONFIRMATION DIALOG */}
+      {/* DELETE EXPENSE CONFIRMATION DIALOG */}
       <AnimatePresence>
         {deleteTargetId && (
-          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
@@ -2961,14 +2968,71 @@ export const Expenditures: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setDeleteTargetId(null)}
-                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-black uppercase transition-colors"
+                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-black uppercase transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
                   onClick={handleConfirmDelete}
-                  className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black uppercase transition-colors"
+                  className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black uppercase transition-colors cursor-pointer"
+                >
+                  Confirm Delete
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* DELETE ADVANCE CONFIRMATION DIALOG */}
+      <AnimatePresence>
+        {deleteTargetAdvance && (
+          <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-slate-900 border border-rose-500/40 rounded-3xl w-full max-w-sm shadow-2xl p-6 space-y-4 text-center"
+            >
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto border border-rose-500/30">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-white uppercase tracking-tight">
+                  DELETE ADVANCE RECORD?
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  Are you sure you want to delete this advance record?
+                </p>
+                <div className="mt-3 p-3 rounded-2xl bg-slate-950 border border-slate-800 text-xs font-bold space-y-1 text-left">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Person:</span>
+                    <span className="text-white">{deleteTargetAdvance.personName}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Date:</span>
+                    <span className="font-mono text-slate-300">{deleteTargetAdvance.date}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Amount:</span>
+                    <span className="font-mono font-black text-amber-400">৳{Number(deleteTargetAdvance.amount).toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setDeleteTargetAdvance(null)}
+                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-black uppercase transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmDeleteAdvance}
+                  className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black uppercase transition-colors shadow-lg shadow-rose-600/30 cursor-pointer"
                 >
                   Confirm Delete
                 </button>
@@ -3064,7 +3128,7 @@ export const Expenditures: React.FC = () => {
                 <div className="space-y-2">
                   <h4 className="text-xs font-black text-amber-400 uppercase tracking-wider flex items-center space-x-1.5">
                     <Clock className="w-3.5 h-3.5" />
-                    <span>অগ্রিম গ্রহণের ইতিহাস (Advances)</span>
+                    <span>Advance History</span>
                   </h4>
                   {advances.filter(a => matchesCivilian(a.personName, viewingHistoryCiv)).length === 0 ? (
                     <p className="text-xs text-slate-500 italic p-3 bg-slate-950 rounded-xl text-center">কোনো অগ্রিম রেকর্ড নেই</p>
@@ -3088,7 +3152,7 @@ export const Expenditures: React.FC = () => {
                             )}
                             <button
                               type="button"
-                              onClick={() => handleDeleteAdvance(a.id)}
+                              onClick={() => setDeleteTargetAdvance(a)}
                               className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
                               title="Delete advance record"
                             >
@@ -3105,7 +3169,7 @@ export const Expenditures: React.FC = () => {
                 <div className="space-y-2">
                   <h4 className="text-xs font-black text-emerald-400 uppercase tracking-wider flex items-center space-x-1.5">
                     <FileText className="w-3.5 h-3.5" />
-                    <span>খরচের ভাউচার ইতিহাস (Expenses)</span>
+                    <span>Expense History</span>
                   </h4>
                   {expenses.filter(e => matchesCivilian(e.detailedPerson, viewingHistoryCiv)).length === 0 ? (
                     <p className="text-xs text-slate-500 italic p-3 bg-slate-950 rounded-xl text-center">কোনো খরচের ভাউচার নেই</p>
@@ -3127,9 +3191,19 @@ export const Expenditures: React.FC = () => {
                                 )}
                               </div>
                             </div>
-                            <span className={`font-mono font-black ${isDueExp ? 'text-amber-400' : 'text-emerald-400'}`}>
-                              ৳{Number(e.amount).toLocaleString()}
-                            </span>
+                            <div className="flex items-center space-x-2">
+                              <span className={`font-mono font-black ${isDueExp ? 'text-amber-400' : 'text-emerald-400'}`}>
+                                ৳{Number(e.amount).toLocaleString()}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setDeleteTargetId(e.id)}
+                                className="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                                title="Delete expense record"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </div>
                         );
                       })}

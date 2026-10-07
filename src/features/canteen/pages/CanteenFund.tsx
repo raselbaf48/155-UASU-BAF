@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Wallet, Landmark, CreditCard, Receipt, ArrowRightLeft, 
   X, RefreshCw, CheckCircle2, AlertCircle, Building2, Briefcase, PieChart, Layers
@@ -34,7 +34,7 @@ export const CanteenFund: React.FC = () => {
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
   const [transfers, setTransfers] = useState<FundTransfer[]>([]);
   
-  const [activeTab, setActiveTab] = useState<'CASH' | 'UCB' | 'TRANSFERS' | 'EXPENSES'>('CASH');
+  const [activeTab, setActiveTab] = useState<'ALL' | 'CASH' | 'UCB' | 'TRANSFERS' | 'EXPENSES'>('ALL');
 
   // Transfer Modal State
   const [showTransferModal, setShowTransferModal] = useState(false);
@@ -153,6 +153,83 @@ export const CanteenFund: React.FC = () => {
 
   const cashExpenses = expenses.filter(e => String(e.paymentMethod || 'Cash').toLowerCase() === 'cash');
   const ucbExpenses = expenses.filter(e => String(e.paymentMethod || '').toLowerCase() === 'ucb');
+
+  // Unified All Fund Logs list ("Capital e Fund logs e akta all option add korba jekhane sob dekha jbe")
+  const allLogs = useMemo(() => {
+    interface UnifiedLogItem {
+      id: string;
+      date: string;
+      logType: 'INFLOW' | 'EXPENSE' | 'TRANSFER';
+      title: string;
+      subtitle?: string;
+      channel: string;
+      amount: number;
+      rawDate: number;
+    }
+
+    const items: UnifiedLogItem[] = [];
+
+    // 1. Inflows (Cash & UCB)
+    reports.forEach((r, idx) => {
+      const isCollection = r.type === 'BILL PAYMENT' || r.type === 'BAZAR_RETURN' || r.type === 'ADVANCE_RETURN';
+      if (!isCollection) return;
+      const gw = String(r.gateway || 'CASH').toUpperCase();
+      const amt = Number(r.amount) || 0;
+      if (amt <= 0) return;
+      const dStr = r.date || '';
+      const dVal = new Date(dStr).getTime() || 0;
+      items.push({
+        id: `inflow-${r.id || idx}`,
+        date: dStr,
+        logType: 'INFLOW',
+        title: r.memberName || r.airman_id || 'Collection',
+        subtitle: r.items || (r.type === 'BAZAR_RETURN' ? 'Bazar Return' : r.type === 'ADVANCE_RETURN' ? 'Advance Return' : 'Bill Payment') + (r.bdNo ? ` (BD-${r.bdNo})` : ''),
+        channel: gw,
+        amount: amt,
+        rawDate: dVal
+      });
+    });
+
+    // 2. Expenses (Cash & UCB)
+    expenses.forEach((e, idx) => {
+      const method = String(e.paymentMethod || 'Cash').toLowerCase();
+      if (method !== 'cash' && method !== 'ucb') return;
+      const amt = Number(e.amount) || 0;
+      if (amt <= 0) return;
+      const dStr = e.date || '';
+      const dVal = new Date(dStr).getTime() || 0;
+      items.push({
+        id: `exp-${e.id || idx}`,
+        date: dStr,
+        logType: 'EXPENSE',
+        title: e.desc || 'Expense Item',
+        subtitle: `${e.detailedPerson ? `Staff: ${e.detailedPerson}` : 'Canteen Expense'} • ${e.category || 'General'}`,
+        channel: method.toUpperCase(),
+        amount: amt,
+        rawDate: dVal
+      });
+    });
+
+    // 3. Transfers
+    transfers.forEach((t, idx) => {
+      const amt = Number(t.amount) || 0;
+      if (amt <= 0) return;
+      const dStr = t.date || '';
+      const dVal = new Date(dStr).getTime() || 0;
+      items.push({
+        id: `tr-${t.id || idx}`,
+        date: dStr,
+        logType: 'TRANSFER',
+        title: `Transfer: ${t.from} → ${t.to}`,
+        subtitle: t.note || 'Inter-fund transfer',
+        channel: `${t.from} → ${t.to}`,
+        amount: amt,
+        rawDate: dVal
+      });
+    });
+
+    return items.sort((a, b) => b.rawDate - a.rawDate);
+  }, [reports, expenses, transfers]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -420,6 +497,12 @@ export const CanteenFund: React.FC = () => {
           
           <div className="flex bg-slate-800 rounded-xl p-1 overflow-x-auto">
             <button 
+              onClick={() => setActiveTab('ALL')}
+              className={`px-4 py-2 text-[10px] font-black tracking-widest uppercase rounded-lg transition-colors whitespace-nowrap ${activeTab === 'ALL' ? 'bg-amber-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
+            >
+              ALL LOGS ({allLogs.length})
+            </button>
+            <button 
               onClick={() => setActiveTab('CASH')}
               className={`px-4 py-2 text-[10px] font-black tracking-widest uppercase rounded-lg transition-colors whitespace-nowrap ${activeTab === 'CASH' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}
             >
@@ -447,6 +530,80 @@ export const CanteenFund: React.FC = () => {
         </div>
         
         <div className="overflow-x-auto">
+          {/* TAB 0: ALL Fund Logs */}
+          {activeTab === 'ALL' && (
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-900/50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-800">
+                  <th className="p-4">Date</th>
+                  <th className="p-4">Type</th>
+                  <th className="p-4">Description / Entity</th>
+                  <th className="p-4">Channel / Account</th>
+                  <th className="p-4 text-right">Amount</th>
+                </tr>
+              </thead>
+              <tbody className="text-xs text-slate-300 font-medium">
+                {allLogs.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="p-8 text-center text-slate-400 font-bold">
+                      No fund activity logs found
+                    </td>
+                  </tr>
+                ) : (
+                  allLogs.map((item) => (
+                    <tr key={item.id} className="border-b border-slate-800/50 hover:bg-slate-800/50 transition-colors">
+                      <td className="p-4 font-mono text-slate-400">{formatCanteenDate(item.date)}</td>
+                      <td className="p-4">
+                        {item.logType === 'INFLOW' ? (
+                          <span className="px-2 py-0.5 rounded text-[8px] font-black tracking-widest uppercase bg-emerald-950/60 text-emerald-400 border border-emerald-500/30">
+                            + INFLOW
+                          </span>
+                        ) : item.logType === 'EXPENSE' ? (
+                          <span className="px-2 py-0.5 rounded text-[8px] font-black tracking-widest uppercase bg-rose-950/60 text-rose-400 border border-rose-500/30">
+                            - EXPENSE
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded text-[8px] font-black tracking-widest uppercase bg-indigo-950/60 text-indigo-400 border border-indigo-500/30">
+                            ⇄ TRANSFER
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-4">
+                        <div className="font-bold text-white uppercase text-xs">
+                          {item.title}
+                        </div>
+                        {item.subtitle && (
+                          <div className="text-[10px] text-slate-400 font-normal mt-0.5">
+                            {item.subtitle}
+                          </div>
+                        )}
+                      </td>
+                      <td className="p-4">
+                        <span className={`px-2 py-1 rounded text-[8px] font-black tracking-widest uppercase ${
+                          item.channel.includes('CASH') && !item.channel.includes('→')
+                            ? 'bg-emerald-900/30 text-emerald-400 border border-emerald-800/40'
+                            : item.channel.includes('UCB') && !item.channel.includes('→')
+                            ? 'bg-blue-900/30 text-blue-400 border border-blue-800/40'
+                            : 'bg-indigo-900/30 text-indigo-400 border border-indigo-800/40'
+                        }`}>
+                          {item.channel}
+                        </span>
+                      </td>
+                      <td className={`p-4 text-right font-black font-mono text-xs ${
+                        item.logType === 'INFLOW' 
+                          ? 'text-emerald-400' 
+                          : item.logType === 'EXPENSE' 
+                          ? 'text-rose-400' 
+                          : 'text-indigo-400'
+                      }`}>
+                        {item.logType === 'INFLOW' ? `+৳${item.amount.toLocaleString('en-US')}` : item.logType === 'EXPENSE' ? `-৳${item.amount.toLocaleString('en-US')}` : `৳${item.amount.toLocaleString('en-US')}`}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          )}
           {/* TAB 1 & 2: Cash / UCB Inflow */}
           {(activeTab === 'CASH' || activeTab === 'UCB') && (
             <table className="w-full text-left border-collapse">
