@@ -5,7 +5,7 @@ import {
   Cloud, Download, Upload, RefreshCw, Coffee, 
   Database, Settings, Sparkles, X, History,
   Layers, Check, Clock, Trash2, ArrowRight,
-  Languages, Globe
+  Languages, Globe, RotateCcw
 } from 'lucide-react';
 import { 
   getCanteenConfig, saveCanteenConfig, resolveImageUrl, 
@@ -259,11 +259,11 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
     },
     {
       id: 'timing',
-      label: 'Pre-Order Timing & Schedule',
-      description: 'Configure active hours for menu appearance & automatic pre-order cutoff',
+      label: 'Pre-Order Schedule',
+      description: 'Configure auto-reset time & pre-order active window',
       icon: <Clock className="w-5 h-5 text-emerald-400" />,
       color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30',
-      badge: `${settings.preOrderStartTime || '08:00'} - ${settings.preOrderEndTime || '16:00'}`
+      badge: `Reset: ${settings.dailyResetTime || '15:00'}`
     },
     {
       id: 'member_db',
@@ -283,8 +283,34 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
     }
   ];
 
+  const handleSelectSection = (secId: CanteenSettingSection) => {
+    setActiveSection(secId);
+    const mainEl = document.getElementById('canteen-main-content');
+    if (mainEl) {
+      mainEl.scrollTop = 0;
+    }
+    try {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    } catch {
+      window.scrollTo(0, 0);
+    }
+  };
+
+  const handleBackToMenu = () => {
+    setActiveSection(null);
+    const mainEl = document.getElementById('canteen-main-content');
+    if (mainEl) {
+      mainEl.scrollTop = 0;
+    }
+    try {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    } catch {
+      window.scrollTo(0, 0);
+    }
+  };
+
   return (
-    <div className="w-full max-w-5xl mx-auto space-y-6 animate-in fade-in duration-300 pb-16">
+    <div className="w-full max-w-5xl mx-auto space-y-6 pb-16">
       
       {/* Toast Feedback */}
       {saveSuccess && (
@@ -338,8 +364,8 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
               <button
                 key={sec.id}
                 type="button"
-                onClick={() => setActiveSection(sec.id)}
-                className="w-full bg-slate-900/90 hover:bg-slate-800/90 border border-slate-800 hover:border-indigo-500/50 rounded-2xl p-4 sm:p-5 flex items-center justify-between group transition-all duration-200 cursor-pointer shadow-sm hover:shadow-md"
+                onClick={() => handleSelectSection(sec.id)}
+                className="w-full bg-slate-900/90 hover:bg-slate-800/90 border border-slate-800 hover:border-indigo-500/50 rounded-2xl p-4 sm:p-5 flex items-center justify-between group transition-transform active:scale-[0.99] touch-manipulation cursor-pointer shadow-sm hover:shadow-md"
               >
                 <div className="flex items-center space-x-4 min-w-0">
                   <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 border ${sec.color} shadow-sm`}>
@@ -368,40 +394,63 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
         </div>
       ) : (
         /* TOP VIEW 2: WHEN AN OPTION IS CLICKED, ONLY THAT OPTION COMES ON A SEPARATE PAGE ("Je option a click korbo sudhu oita alada page a asbe") */
-        <div className="space-y-6 animate-in fade-in duration-200">
+        <div className="space-y-6">
           {/* Subpage Top Bar with Back to Settings button */}
-          <div className="flex items-center justify-between gap-3 bg-slate-900/90 backdrop-blur-xl p-4 sm:p-5 rounded-2xl border border-slate-800 shadow-xl">
-            <div className="flex items-center space-x-3 min-w-0">
-              <button
-                type="button"
-                onClick={() => setActiveSection(null)}
-                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 rounded-xl text-xs font-black tracking-wider uppercase transition-all flex items-center gap-2 cursor-pointer active:scale-95 shrink-0"
-              >
-                <ArrowLeft className="w-4 h-4 text-indigo-400" />
-                <span>Back to Settings</span>
-              </button>
-              <div className="h-6 w-px bg-slate-800 shrink-0 hidden sm:block" />
-              <h3 className="text-base sm:text-lg font-black text-white uppercase tracking-tight truncate">
-                {sections.find(s => s.id === activeSection)?.label}
-              </h3>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {onClose && (
+          <div className="bg-slate-900/90 backdrop-blur-xl p-4 sm:p-5 rounded-2xl border border-slate-800 shadow-xl space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center space-x-3 min-w-0">
                 <button
                   type="button"
-                  onClick={onClose}
-                  className="px-3.5 py-2 bg-slate-800/80 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer hover:text-white"
+                  onClick={handleBackToMenu}
+                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 rounded-xl text-xs font-black tracking-wider uppercase transition-transform active:scale-95 flex items-center gap-2 cursor-pointer shrink-0 touch-manipulation"
                 >
-                  Exit
+                  <ArrowLeft className="w-4 h-4 text-indigo-400" />
+                  <span>Back to Settings</span>
                 </button>
-              )}
+                <div className="h-6 w-px bg-slate-800 shrink-0 hidden sm:block" />
+                <h3 className="text-base sm:text-lg font-black text-white uppercase tracking-tight truncate">
+                  {sections.find(s => s.id === activeSection)?.label}
+                </h3>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {onClose && (
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="px-3.5 py-2 bg-slate-800/80 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer hover:text-white"
+                  >
+                    Exit
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Instant Option Switching Tabs */}
+            <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none pt-1 border-t border-slate-800/80">
+              {sections.map(s => {
+                const isCurrent = activeSection === s.id;
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => handleSelectSection(s.id)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center space-x-1.5 ${
+                      isCurrent 
+                        ? 'bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-400' 
+                        : 'bg-slate-950/70 text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-slate-800'
+                    }`}
+                  >
+                    <span>{s.label}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
           {/* DEDICATED PAGE 1: CANTEEN IDENTITY & PROFILE */}
           {activeSection === 'identity' && (
-            <div className="bg-slate-900 rounded-[2.5rem] p-6 md:p-10 shadow-sm border border-slate-800 space-y-7 animate-in fade-in">
+            <div className="bg-slate-900 rounded-[2.5rem] p-6 md:p-10 shadow-sm border border-slate-800 space-y-7">
               <div className="border-b border-slate-800 pb-4">
                 <h3 className="text-xl font-black text-white flex items-center gap-2">
                   <Coffee className="w-6 h-6 text-amber-400" />
@@ -495,7 +544,7 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
 
           {/* DEDICATED PAGE: MENU & INVENTORY DISPLAY LANGUAGE */}
           {activeSection === 'display_lang' && (
-            <div className="bg-slate-900 rounded-[2.5rem] p-6 md:p-10 shadow-sm border border-slate-800 space-y-8 animate-in fade-in">
+            <div className="bg-slate-900 rounded-[2.5rem] p-6 md:p-10 shadow-sm border border-slate-800 space-y-8">
               <div className="border-b border-slate-800 pb-5">
                 <div className="flex items-center space-x-3">
                   <div className="w-12 h-12 rounded-2xl bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center justify-center shrink-0">
@@ -850,16 +899,16 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
             </div>
           )}
 
-          {/* DEDICATED PAGE 2: PRE-ORDER TIMING & SCHEDULE */}
+          {/* DEDICATED PAGE 2: PRE-ORDER SCHEDULE & AUTO-RESET */}
           {activeSection === 'timing' && (
-            <div className="bg-slate-900 rounded-[2.5rem] p-6 md:p-10 shadow-sm border border-slate-800 space-y-7 animate-in fade-in">
+            <div className="bg-slate-900 rounded-[2.5rem] p-6 md:p-10 shadow-sm border border-slate-800 space-y-7">
               <div className="border-b border-slate-800 pb-4">
                 <h3 className="text-xl font-black text-white flex items-center gap-2">
                   <Clock className="w-6 h-6 text-emerald-400" />
-                  <span>PRE-ORDER TIMING & SCHEDULE</span>
+                  <span>PRE-ORDER SCHEDULE</span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-1">
-                  Configure when canteen pre-order window opens and automatically cuts off
+                  প্রতিদিনের কিউরেটেড মেনু ও প্রি-অর্ডার রিসেটের সময় এবং প্রি-অর্ডারের সময়সূচি নির্ধারণ করুন
                 </p>
               </div>
 
@@ -906,15 +955,89 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
                 );
               })()}
 
-              {/* Time Configuration Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-950/60 p-6 rounded-3xl border border-slate-800">
+              {/* 1. DAILY AUTO-RESET TIME (স্বয়ংক্রিয় রিসেট সময় - মেনু ও প্রি-অর্ডার) */}
+              <div className="bg-slate-950/80 p-6 sm:p-7 rounded-3xl border border-indigo-500/30 shadow-lg space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <label className="text-sm font-black text-indigo-400 uppercase tracking-wider flex items-center space-x-2">
+                      <RotateCcw className="w-4 h-4 text-indigo-400" />
+                      <span>DAILY AUTO-RESET TIME (স্বয়ংক্রিয় রিসেট সময়)</span>
+                    </label>
+                    <p className="text-xs text-slate-400 mt-1">
+                      প্রতিদিন এই সময়ে কিউরেটেড মেনু এবং জমাকৃত সমস্ত প্রি-অর্ডার স্বয়ংক্রিয়ভাবে রিসেট হয়ে শূন্য (Reset) হয়ে যাবে।
+                    </p>
+                  </div>
+                  <div className="px-3.5 py-1.5 bg-indigo-500/20 border border-indigo-500/40 rounded-xl text-xs font-black text-indigo-300 self-start sm:self-auto font-mono">
+                    সক্রিয় রিসেট: {settings.dailyResetTime || '15:00'}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center pt-2">
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest block">
+                      রিসেট সময় নির্ধারণ করুন (SELECT RESET TIME)
+                    </label>
+                    <input
+                      type="time"
+                      value={settings.dailyResetTime || '15:00'}
+                      onChange={(e) => {
+                        const updated = { ...settings, dailyResetTime: e.target.value };
+                        setSettings(updated);
+                        saveCanteenConfig(updated);
+                      }}
+                      className="w-full bg-slate-900 border border-slate-700 focus:border-indigo-500 rounded-2xl px-5 py-3.5 text-base font-bold text-white outline-none transition-all shadow-inner"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest block">
+                      কুইক রিসেট প্রিসেট (QUICK PRESETS)
+                    </label>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {[
+                        { label: '3:00 PM (বিকেল ৩টা)', time: '15:00' },
+                        { label: '4:00 PM (বিকেল ৪টা)', time: '16:00' },
+                        { label: '2:00 PM (দুপুর ২টা)', time: '14:00' },
+                        { label: '12:00 PM (দুপুর ১২টা)', time: '12:00' },
+                        { label: '3:00 AM (ভোর ৩টা)', time: '03:00' },
+                        { label: '11:59 PM (রাত ১২টা)', time: '23:59' },
+                      ].map((preset) => {
+                        const isSelected = (settings.dailyResetTime || '15:00') === preset.time;
+                        return (
+                          <button
+                            key={preset.time}
+                            type="button"
+                            onClick={() => {
+                              const updated = { ...settings, dailyResetTime: preset.time };
+                              setSettings(updated);
+                              saveCanteenConfig(updated);
+                              showSavedFeedback();
+                            }}
+                            className={`p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer text-left ${
+                              isSelected
+                                ? 'bg-indigo-950/80 border-indigo-500 text-indigo-300 shadow-sm ring-1 ring-indigo-500/50'
+                                : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-850'
+                            }`}
+                          >
+                            <p className="truncate">{preset.label}</p>
+                            <p className="text-[10px] font-mono text-slate-500 mt-0.5">{preset.time}</p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. PRE-ORDER ACTIVE TIMING (SHOW / HIDE HOURS) */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-950/60 p-6 sm:p-7 rounded-3xl border border-slate-800 shadow-md">
                 <div className="space-y-2">
                   <label className="text-xs font-black text-emerald-400 uppercase tracking-wider flex items-center space-x-1.5">
                     <Clock className="w-4 h-4" />
-                    <span>PRE-ORDER START TIME (APPEAR)</span>
+                    <span>PRE-ORDER START TIME (কখন থেকে শো হবে)</span>
                   </label>
                   <p className="text-[11px] text-slate-400 font-medium">
-                    Menu items will automatically appear for airmen & members starting at this time.
+                    এই নির্ধারিত সময়ে ম্যানেজার ও মেম্বার ইন্টারফেসে মেনু দৃশ্যমান হবে এবং প্রি-অর্ডার শুরু হবে।
                   </p>
                   <input
                     type="time"
@@ -931,10 +1054,10 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
                 <div className="space-y-2">
                   <label className="text-xs font-black text-rose-400 uppercase tracking-wider flex items-center space-x-1.5">
                     <Clock className="w-4 h-4" />
-                    <span>PRE-ORDER END TIME (AUTO CUTOFF)</span>
+                    <span>PRE-ORDER END TIME (অটো কাটঅফ / বন্ধ হবে)</span>
                   </label>
                   <p className="text-[11px] text-slate-400 font-medium">
-                    Menu automatically disappears and locks. Outside this time, no pre-orders are taken.
+                    এই সময়ের পর প্রি-অর্ডার বন্ধ হয়ে যাবে এবং বাইরে থাকা অবস্থায় নতুন প্রি-অর্ডার নেওয়া হবে না।
                   </p>
                   <input
                     type="time"
@@ -949,7 +1072,7 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
                 </div>
               </div>
 
-              {/* Quick Presets */}
+              {/* 3. QUICK SHIFT PRESETS (কুইক শিফট টাইমিং) */}
               <div className="space-y-3">
                 <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest block">
                   QUICK PRESETS (কুইক শিফট টাইমিং)
@@ -1004,14 +1127,14 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
 
           {/* DEDICATED PAGE 3: MEMBER DATABASE (Full, responsive MemberDB without hanging) */}
           {activeSection === 'member_db' && (
-            <div className="space-y-6 animate-in fade-in">
+            <div className="space-y-6">
               <CanteenMemberDB />
             </div>
           )}
 
           {/* DEDICATED PAGE 4: DATABASE CLOUD SYNC */}
           {activeSection === 'cloudsync' && (
-            <div className="bg-slate-900 rounded-[2.5rem] p-6 md:p-10 shadow-sm border border-slate-800 space-y-8 animate-in fade-in">
+            <div className="bg-slate-900 rounded-[2.5rem] p-6 md:p-10 shadow-sm border border-slate-800 space-y-8">
               {/* Header Box */}
               <div className="flex flex-col items-center justify-center p-6 text-center">
                 <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-blue-900/50 to-indigo-900/40 border border-blue-500/30 flex items-center justify-center mb-4 shadow-xl shadow-blue-500/10">

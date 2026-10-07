@@ -1003,7 +1003,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                     No matching members found
                   </div>
                 ) : (
-                  filteredMembers.map((m) => {
+                  filteredMembers.map((m, i) => {
                     const airmanId = String(m.airman_id || m['BD No']);
                     const isAlreadyBilledThisMonth = isUnitFund && membersWithUnitFundThisMonth.has(airmanId);
                     const isSelected = selectedAirmanIds.has(airmanId);
@@ -1012,7 +1012,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
 
                     return (
                       <div
-                        key={airmanId}
+                        key={airmanId || `fund_m_${m['BD No'] || i}_${i}`}
                         onClick={() => handleToggleMember(airmanId)}
                         className={`p-3 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
                           isAlreadyBilledThisMonth

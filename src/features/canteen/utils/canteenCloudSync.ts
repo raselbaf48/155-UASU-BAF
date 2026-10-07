@@ -1,6 +1,6 @@
 import { supabase } from '../../../supabase';
 import { deduplicateRawItems } from './recipeManager';
-import { resolveImageUrl, getCanteenConfig } from './canteenSettings';
+import { resolveImageUrl, getCanteenConfig, isTimestampPastResetThreshold } from './canteenSettings';
 import { normalizeCanteenMembersSeniority, sortCanteenMembersByOfficeSeniority } from './canteenSeniority';
 import { 
   getCanteenMembersCache, 
@@ -388,18 +388,35 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
             const localTime = new Date(localUpdated || 0).getTime();
             const cloudTime = new Date(cloudUpdated || 0).getTime();
 
-            // If local was curated recently or is newer than cloud, preserve local!
-            if (localTime >= cloudTime && Array.isArray(localVal) && localVal.length > 0) {
+            const isCloudExpired = isTimestampPastResetThreshold(cloudUpdated);
+            const isLocalExpired = isTimestampPastResetThreshold(localUpdated);
+
+            // If expired past daily 3:00, reset to empty
+            if (isCloudExpired && isLocalExpired) {
+              finalVal = [];
+              queuePushKeyToCloud('canteen_daily_menu', [], 50);
+            } else if (!isLocalExpired && localTime >= cloudTime && Array.isArray(localVal) && localVal.length > 0) {
               finalVal = localVal;
               queuePushKeyToCloud('canteen_daily_menu', localVal, 50);
               if (localUpdated) queuePushKeyToCloud('canteen_daily_menu_updated_at', localUpdated, 50);
-            } else if (Array.isArray(cloudVal) && cloudVal.length > 0) {
+            } else if (!isCloudExpired && Array.isArray(cloudVal) && cloudVal.length > 0) {
               finalVal = cloudVal;
             } else {
-              finalVal = (Array.isArray(localVal) && localVal.length > 0) ? localVal : (Array.isArray(cloudVal) ? cloudVal : []);
+              finalVal = [];
+            }
+          } else if (key === 'canteen_pre_orders') {
+            const validCloud = Array.isArray(cloudVal)
+              ? cloudVal.filter((o: any) => o?.timestamp && !isTimestampPastResetThreshold(o.timestamp))
+              : [];
+            const validLocal = Array.isArray(localVal)
+              ? localVal.filter((o: any) => o?.timestamp && !isTimestampPastResetThreshold(o.timestamp))
+              : [];
+            finalVal = mergeArrayData(validLocal, validCloud, 'orderId', key);
+            if (finalVal.length !== (Array.isArray(cloudVal) ? cloudVal.length : 0)) {
+              queuePushKeyToCloud('canteen_pre_orders', finalVal, 50);
             }
           } else {
-            const keyField = key === 'canteen_pre_orders' ? 'orderId' : (key === 'canteen_expense_last_unit_prices' ? 'key' : 'id');
+            const keyField = key === 'canteen_expense_last_unit_prices' ? 'key' : 'id';
             finalVal = mergeArrayData(localVal, cloudVal, keyField, key);
             if (key === 'canteen_txs') {
               const deletedIds = getDeletedTxIds();
@@ -755,13 +772,26 @@ export function initCanteenCloudSync(): () => void {
               } else if (key === 'canteen_daily_menu') {
                 const localUpdated = typeof window !== 'undefined' ? localStorage.getItem('canteen_daily_menu_updated_at') : null;
                 const localTime = new Date(localUpdated || 0).getTime();
-                // If local was set within last 60 seconds and local has items, don't let incoming empty or stale cloud overwrite it
-                if (Date.now() - localTime < 60000 && Array.isArray(currentLocal) && currentLocal.length > 0) {
-                  return;
+                if (isTimestampPastResetThreshold(localUpdated)) {
+                  mergedVal = [];
+                } else if (Array.isArray(parsed) && parsed.length === 0) {
+                  mergedVal = [];
+                } else {
+                  if (Date.now() - localTime < 15000 && Array.isArray(currentLocal) && currentLocal.length > 0) {
+                    return;
+                  }
+                  mergedVal = Array.isArray(parsed) ? parsed : [];
                 }
-                mergedVal = (Array.isArray(parsed) && parsed.length > 0) ? parsed : (Array.isArray(currentLocal) ? currentLocal : []);
+              } else if (key === 'canteen_pre_orders') {
+                const validIncoming = Array.isArray(parsed)
+                  ? parsed.filter((o: any) => o?.timestamp && !isTimestampPastResetThreshold(o.timestamp))
+                  : [];
+                const validLocal = Array.isArray(currentLocal)
+                  ? currentLocal.filter((o: any) => o?.timestamp && !isTimestampPastResetThreshold(o.timestamp))
+                  : [];
+                mergedVal = mergeArrayData(validLocal, validIncoming, 'orderId', key);
               } else {
-                const keyField = key === 'canteen_pre_orders' ? 'orderId' : 'id';
+                const keyField = key === 'canteen_expense_last_unit_prices' ? 'key' : 'id';
                 mergedVal = mergeArrayData(currentLocal, parsed, keyField, key);
                 if (key === 'canteen_txs') {
                   const deletedIds = getDeletedTxIds();

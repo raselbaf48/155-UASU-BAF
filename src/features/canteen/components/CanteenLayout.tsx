@@ -968,7 +968,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
          )}
 
          {/* Content View - Zero Black Screen, Instant Tab Display */}
-         <div className="flex-1 overflow-y-auto p-4 sm:p-8 bg-slate-900">
+         <div id="canteen-main-content" className="flex-1 overflow-y-auto p-4 sm:p-8 bg-slate-900">
            <div className="w-full">
              {renderContent()}
            </div>

@@ -28,7 +28,8 @@ import {
   decodeNotesMeta,
   RAW_ITEMS_STORAGE_KEY,
   deduplicateRawItems,
-  calculateMenuItemStockInfo
+  calculateMenuItemStockInfo,
+  isReadymadeItem
 } from '../utils/recipeManager';
 import {
   getMenuItemBanglaName,
@@ -117,8 +118,10 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
           const sub = r['Sub Unit'] ?? r.subUnit ?? r.sub_unit ?? meta.subUnit;
           const pSize = Number(r.packSize) || Number(meta.packSize) || (['kg', 'কেজি'].includes((r.unit || '').toLowerCase()) ? 1000 : (['liter', 'ltr', 'লিটার'].includes((r.unit || '').toLowerCase()) ? 1000 : 1));
           const dpUrl = r.DP || r.dp || meta.dp || r.image || undefined;
+          const resolvedType = r.itemType || meta.itemType || (isReadymadeItem(r) ? 'READY_MADE' : 'RAW');
           return {
             ...r,
+            itemType: resolvedType,
             dp: dpUrl,
             DP: dpUrl,
             image: dpUrl,

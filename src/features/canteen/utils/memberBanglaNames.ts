@@ -20,17 +20,15 @@ export const BAF_RANKS_WITH_BN: BafRankOption[] = [
   { rank: 'Sqn Ldr', bn: 'স্কোঃ লীঃ' },
   { rank: 'Flt Lt', bn: 'ফ্লাঃ লেঃ' },
   { rank: 'Flg Offr', bn: 'ফ্লাঃ অঃ' },
-  { rank: 'Plt Offr', bn: 'পাইলট অফিসার' },
-  { rank: 'MWO', bn: 'মাঃওঃঅঃ (মাস্টার ওয়ারেন্ট অফিসার)' },
-  { rank: 'SWO', bn: 'সিঃ ওঃ অঃ (সিনিয়র ওয়ারেন্ট অফিসার)' },
-  { rank: 'WO', bn: 'ওঃঅঃ (ওয়ারেন্ট অফিসার)' },
+  { rank: 'MWO', bn: 'মাঃ ওঃ অঃ' },
+  { rank: 'SWO', bn: 'সিঃ ওঃ অঃ' },
+  { rank: 'WO', bn: 'ওঃ অঃ' },
   { rank: 'Sgt', bn: 'সার্জেন্ট' },
   { rank: 'Cpl', bn: 'কর্পোরাল' },
   { rank: 'LAC', bn: 'এলএসি' },
   { rank: 'AC-1', bn: 'এসি-১' },
   { rank: 'AC-2', bn: 'এসি-২' },
-  { rank: 'NC(E)', bn: 'এনসি(ই)' },
-  { rank: 'Civilian', bn: 'সিভিলিয়ান' },
+  { rank: 'Civ', bn: 'সিভিলিয়ান' },
   { rank: '-', bn: '-' }
 ];
 

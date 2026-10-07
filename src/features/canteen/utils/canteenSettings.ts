@@ -21,6 +21,7 @@ export interface CanteenConfig {
   preOrderEnabled?: boolean;
   preOrderStartTime?: string; // HH:mm (24-hour format) e.g. "08:00"
   preOrderEndTime?: string;   // HH:mm (24-hour format) e.g. "16:00"
+  dailyResetTime?: string;    // HH:mm (24-hour format) e.g. "15:00" (Default: 15:00 / 3:00 PM)
   itemDisplayLanguage?: ItemDisplayLanguage; // Master: 'bn' | 'en' | 'both'
   menuDisplayLanguage?: ItemDisplayLanguage; // Menu specific: 'bn' | 'en' | 'both'
   inventoryDisplayLanguage?: ItemDisplayLanguage; // Inventory specific: 'bn' | 'en' | 'both'
@@ -38,6 +39,7 @@ export const DEFAULT_CANTEEN_CONFIG: CanteenConfig = {
   preOrderEnabled: true,
   preOrderStartTime: '18:00',
   preOrderEndTime: '08:00',
+  dailyResetTime: '15:00',
   itemDisplayLanguage: 'bn',
   menuDisplayLanguage: 'bn',
   inventoryDisplayLanguage: 'bn'
@@ -90,21 +92,73 @@ export function getItemDisplayName(
 
 export const CANTEEN_DAILY_MENU_KEY = 'canteen_daily_menu';
 export const CANTEEN_DAILY_MENU_TIMESTAMP_KEY = 'canteen_daily_menu_updated_at';
+export const CANTEEN_PRE_ORDERS_KEY = 'canteen_pre_orders';
 
 /**
- * Checks if the daily curated menu has passed the 12:00 PM (noon) auto-reset threshold.
- * Everyday at 12:00 PM, curated menu automatically resets.
- * When a menu is curated at timestamp T, it remains active until the very next 12:00 PM noon.
+ * Computes the epoch timestamp of the most recent reset boundary in Asia/Dhaka time.
  */
-export function isDailyMenuExpired(timestamp?: any): boolean {
-  try {
-    let raw = timestamp;
-    if (raw === undefined && typeof window !== 'undefined') {
-      raw = localStorage.getItem(CANTEEN_DAILY_MENU_TIMESTAMP_KEY);
-    }
-    if (!raw) return false;
+export function getLastResetTimeDhaka(resetStr: string = '15:00'): number {
+  const parts = (resetStr || '15:00').split(':').map(v => parseInt(v, 10));
+  const rHour = isNaN(parts[0]) ? 15 : parts[0];
+  const rMin = isNaN(parts[1]) ? 0 : parts[1];
 
-    // Safely unwrap JSON string if quoted
+  const now = new Date();
+  
+  // Format current date in Asia/Dhaka (BST, UTC+6)
+  let year = now.getFullYear();
+  let month = now.getMonth();
+  let day = now.getDate();
+  let hour = now.getHours();
+  let minute = now.getMinutes();
+
+  try {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Dhaka',
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+      hour12: false
+    });
+    const partsObj: Record<string, string> = {};
+    formatter.formatToParts(now).forEach(p => { partsObj[p.type] = p.value; });
+
+    year = parseInt(partsObj.year, 10);
+    month = parseInt(partsObj.month, 10) - 1;
+    day = parseInt(partsObj.day, 10);
+    hour = parseInt(partsObj.hour, 10);
+    minute = parseInt(partsObj.minute, 10);
+  } catch {}
+
+  // In Dhaka time, is current time past or equal to rHour:rMin?
+  const isPastResetToday = (hour > rHour) || (hour === rHour && minute >= rMin);
+
+  let resetDay = day;
+  let resetMonth = month;
+  let resetYear = year;
+
+  if (!isPastResetToday) {
+    const prevDay = new Date(Date.UTC(year, month, day - 1));
+    resetYear = prevDay.getUTCFullYear();
+    resetMonth = prevDay.getUTCMonth();
+    resetDay = prevDay.getUTCDate();
+  }
+
+  // Dhaka is UTC+6 -> UTC hour is rHour - 6
+  return Date.UTC(resetYear, resetMonth, resetDay, rHour - 6, rMin, 0, 0);
+}
+
+/**
+ * Checks if a given timestamp has passed the daily auto-reset threshold.
+ * Uses the configured dailyResetTime from Canteen Settings (default: 15:00 / 3:00 PM).
+ * Everyday at that time, Curated Daily Menu and Pre-Orders automatically reset.
+ */
+export function isTimestampPastResetThreshold(timestamp?: any, customResetTime?: string): boolean {
+  try {
+    if (!timestamp) return true;
+    let raw = timestamp;
     if (typeof raw === 'string') {
       try {
         const parsed = JSON.parse(raw);
@@ -113,32 +167,57 @@ export function isDailyMenuExpired(timestamp?: any): boolean {
     }
 
     const setTime = typeof raw === 'number' ? raw : new Date(raw).getTime();
-    if (isNaN(setTime) || setTime <= 0) return false;
+    if (isNaN(setTime) || setTime <= 0) return true;
 
     const now = Date.now();
-    // Safety guard: if set within the last 30 minutes, never expire it
-    if (now - setTime < 30 * 60 * 1000) return false;
+    // Safety guard: if set within the last 15 seconds (just saved by user), do not expire immediately
+    if (now - setTime < 15 * 1000) return false;
 
-    // Determine the exact 12:00 PM (noon) boundary immediately succeeding setTime:
-    const nextNoon = new Date(setTime);
-    nextNoon.setHours(12, 0, 0, 0);
-    // If setTime was at or after 12:00 PM on that date, the next noon occurs on the following day
-    if (nextNoon.getTime() <= setTime) {
-      nextNoon.setDate(nextNoon.getDate() + 1);
+    // Get the configured reset time from canteen settings (default 15:00 / 3:00 PM)
+    let resetStr = customResetTime;
+    if (!resetStr && typeof window !== 'undefined') {
+      try {
+        const cfg = getCanteenConfig();
+        resetStr = cfg.dailyResetTime || '15:00';
+      } catch {}
     }
+    if (!resetStr) resetStr = '15:00';
 
-    // It is expired if and only if the current time has reached or passed that next noon
-    return now >= nextNoon.getTime();
+    const lastReset = getLastResetTimeDhaka(resetStr);
+    return setTime <= lastReset + 1000;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Checks if the daily curated menu has passed the daily 3:00 auto-reset threshold.
+ */
+export function isDailyMenuExpired(timestamp?: any): boolean {
+  try {
+    let raw = timestamp;
+    if (raw === undefined && typeof window !== 'undefined') {
+      raw = localStorage.getItem(CANTEEN_DAILY_MENU_TIMESTAMP_KEY);
+    }
+    if (!raw) {
+      if (typeof window !== 'undefined') {
+        const currentMenu = localStorage.getItem(CANTEEN_DAILY_MENU_KEY);
+        if (currentMenu && currentMenu !== '[]') return true;
+      }
+      return false;
+    }
+    return isTimestampPastResetThreshold(raw);
   } catch {
     return false;
   }
 }
 
 /**
- * Loads the curated menu item IDs, automatically resetting to [] if 12:00 PM threshold has passed.
+ * Loads the curated menu item IDs, automatically resetting to [] if 3:00 threshold has passed.
  */
 export function getCuratedDailyMenu(): string[] {
   try {
+    if (typeof window === 'undefined') return [];
     const rawMenu = localStorage.getItem(CANTEEN_DAILY_MENU_KEY);
     if (!rawMenu) return [];
 
@@ -150,10 +229,28 @@ export function getCuratedDailyMenu(): string[] {
     }
     if (!Array.isArray(parsed) || parsed.length === 0) return [];
 
-    // Check expiration against daily 12:00 PM threshold
+    // Check expiration against daily 3:00 threshold
     if (isDailyMenuExpired()) {
       localStorage.setItem(CANTEEN_DAILY_MENU_KEY, '[]');
       localStorage.setItem(CANTEEN_DAILY_MENU_TIMESTAMP_KEY, new Date().toISOString());
+      
+      // Also push reset to Cloud so cloud does not hold stale items
+      supabase.from('app_settings').upsert([
+        {
+          setting_key: CANTEEN_DAILY_MENU_KEY,
+          setting_value: '[]',
+          updated_at: new Date().toISOString()
+        },
+        {
+          setting_key: CANTEEN_DAILY_MENU_TIMESTAMP_KEY,
+          setting_value: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }
+      ], { onConflict: 'setting_key' }).then(() => {}, () => {});
+
+      window.dispatchEvent(new Event('canteen_daily_menu_updated'));
+      window.dispatchEvent(new Event('canteen_menu_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
       return [];
     }
 
@@ -164,7 +261,48 @@ export function getCuratedDailyMenu(): string[] {
 }
 
 /**
- * Saves newly curated menu item IDs with fresh timestamp so it remains active until the next 12:00 PM.
+ * Loads active pre-orders, automatically filtering out orders that passed the daily 3:00 reset.
+ */
+export function getCleanActivePreOrders(): any[] {
+  try {
+    if (typeof window === 'undefined') return [];
+    const raw = localStorage.getItem(CANTEEN_PRE_ORDERS_KEY);
+    if (!raw) return [];
+
+    let parsed: any[] = [];
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+    if (!Array.isArray(parsed) || parsed.length === 0) return [];
+
+    // Filter out orders that passed the daily 3:00 reset boundary
+    const active = parsed.filter(order => {
+      if (!order || !order.timestamp) return false;
+      return !isTimestampPastResetThreshold(order.timestamp);
+    });
+
+    if (active.length !== parsed.length) {
+      localStorage.setItem(CANTEEN_PRE_ORDERS_KEY, JSON.stringify(active));
+      supabase.from('app_settings').upsert({
+        setting_key: CANTEEN_PRE_ORDERS_KEY,
+        setting_value: JSON.stringify(active),
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'setting_key' }).then(() => {}, () => {});
+
+      window.dispatchEvent(new Event('canteen_pre_orders_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+    }
+
+    return active;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Saves newly curated menu item IDs with fresh timestamp so it remains active until the next 3:00 reset.
  * Syncs localStorage, dispatches local events, and instantly upserts to Cloud 'app_settings'.
  */
 export function saveCuratedDailyMenu(itemIds: string[]): void {
@@ -215,9 +353,8 @@ export interface PreOrderTimeStatus {
 export function checkPreOrderWindow(config?: CanteenConfig): PreOrderTimeStatus {
   const cfg = config || getCanteenConfig();
   const isEnabled = cfg.preOrderEnabled !== false;
-  // Default to 18:00 - 08:00 (Evening 6 PM to Morning 8 AM)
-  const startTime = cfg.preOrderStartTime || '18:00';
-  const endTime = cfg.preOrderEndTime || '08:00';
+  const startTime = cfg.preOrderStartTime || '08:00';
+  const endTime = cfg.preOrderEndTime || '16:00';
 
   if (!isEnabled) {
     return {
@@ -225,30 +362,46 @@ export function checkPreOrderWindow(config?: CanteenConfig): PreOrderTimeStatus 
       isEnabled: false,
       startTime,
       endTime,
-      message: 'Pre-order service is currently disabled by manager'
+      message: 'প্রি-অর্ডার সার্ভিস বর্তমানে বন্ধ আছে (Service Disabled)',
+      timeRemainingText: ''
     };
   }
 
-  const now = new Date();
-  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  // Get current minutes in Asia/Dhaka time zone
+  let currentMinutes = 0;
+  try {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Dhaka',
+      hour: 'numeric',
+      minute: 'numeric',
+      hour12: false
+    });
+    const parts = formatter.formatToParts(new Date());
+    const h = parseInt(parts.find(p => p.type === 'hour')?.value || '0', 10);
+    const m = parseInt(parts.find(p => p.type === 'minute')?.value || '0', 10);
+    currentMinutes = h * 60 + m;
+  } catch {
+    const now = new Date();
+    currentMinutes = now.getHours() * 60 + now.getMinutes();
+  }
 
   const [startH, startM] = startTime.split(':').map(Number);
   const [endH, endM] = endTime.split(':').map(Number);
 
-  const startMinutes = (isNaN(startH) ? 18 : startH) * 60 + (isNaN(startM) ? 0 : startM);
-  const endMinutes = (isNaN(endH) ? 8 : endH) * 60 + (isNaN(endM) ? 0 : endM);
+  const startMinutes = (isNaN(startH) ? 8 : startH) * 60 + (isNaN(startM) ? 0 : startM);
+  const endMinutes = (isNaN(endH) ? 16 : endH) * 60 + (isNaN(endM) ? 0 : endM);
 
   let isOpen = false;
   let timeRemainingText = '';
 
   if (startMinutes <= endMinutes) {
-    // Normal window within same day
+    // Normal daytime window (e.g. 08:00 to 16:00)
     isOpen = currentMinutes >= startMinutes && currentMinutes < endMinutes;
     if (isOpen) {
       const diff = endMinutes - currentMinutes;
       const h = Math.floor(diff / 60);
       const m = diff % 60;
-      timeRemainingText = h > 0 ? `${h}h ${m}m remaining` : `${m} minutes remaining`;
+      timeRemainingText = h > 0 ? `${h}h ${m}m remaining` : `${m}m remaining`;
     }
   } else {
     // Overnight window (e.g. 18:00 to 08:00)
@@ -267,7 +420,7 @@ export function checkPreOrderWindow(config?: CanteenConfig): PreOrderTimeStatus 
   if (isOpen) {
     message = `Pre-Order is OPEN (${startTime} - ${endTime})`;
   } else {
-    message = `Pre-Order Closed (${startTime} - ${endTime})`;
+    message = `Pre-Order is CLOSED (${startTime} - ${endTime})`;
   }
 
   return {

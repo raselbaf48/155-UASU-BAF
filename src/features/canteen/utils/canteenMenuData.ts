@@ -22,7 +22,7 @@ export interface CanteenMenuItem {
 import defaultMenuItemsData from '../data/defaultMenuItems.json';
 import { getMenuItemBanglaName } from './menuBanglaNames';
 import { getLocalSeniorityMap } from './memberSeniority';
-import { sortCanteenMembersByOfficeSeniority, normalizeCanteenMembersSeniority } from './canteenSeniority';
+import { sortCanteenMembersByOfficeSeniority, normalizeCanteenMembersSeniority, deduplicateCanteenMembers } from './canteenSeniority';
 import { getMemberBanglaRank } from './memberBanglaNames';
 
 export const DEFAULT_CANTEEN_MENU_ITEMS: CanteenMenuItem[] = (defaultMenuItemsData as any[]).map((it) => ({
@@ -189,7 +189,7 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
  */
 export function getCanteenMembersCache(): any[] {
   if (inMemoryMembersCache && inMemoryMembersCache.length > 0) {
-    return inMemoryMembersCache;
+    return deduplicateCanteenMembers(inMemoryMembersCache);
   }
   if (typeof window === 'undefined') return [];
   try {
@@ -197,8 +197,9 @@ export function getCanteenMembersCache(): any[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        inMemoryMembersCache = parsed;
-        return parsed;
+        const clean = deduplicateCanteenMembers(parsed);
+        inMemoryMembersCache = clean;
+        return clean;
       }
     }
   } catch {}
@@ -244,8 +245,27 @@ export async function fetchCanteenMembersOnce(force = false): Promise<any[]> {
         .from('Canteen_Member')
         .select('*');
       if (!error && data && data.length > 0) {
+        // Filter out obsolete small temporary BD numbers if a real military BD record exists for the same member
+        const cleanedData = data.filter((m: any) => {
+          const bdNum = parseInt(String(m['BD No'] || '').replace(/\D/g, ''), 10);
+          if (!isNaN(bdNum) && bdNum < 50) {
+            const surname = String(m.Surname || '').trim().toLowerCase();
+            const rank = String(m.Rank || '').trim().toLowerCase();
+            if (surname && rank) {
+              const hasRealBd = data.some((other: any) => {
+                const otherBdNum = parseInt(String(other['BD No'] || '').replace(/\D/g, ''), 10);
+                const otherSurname = String(other.Surname || '').trim().toLowerCase();
+                const otherRank = String(other.Rank || '').trim().toLowerCase();
+                return otherSurname === surname && otherRank === rank && otherBdNum >= 100;
+              });
+              if (hasRealBd) return false;
+            }
+          }
+          return true;
+        });
+
         const localSeniorityMap = getLocalSeniorityMap();
-        const merged = data.map((m: any) => {
+        const merged = cleanedData.map((m: any) => {
           const bd = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
           const cloudSen = (m.Seniority !== undefined && m.Seniority !== null && !isNaN(Number(m.Seniority)))
             ? Number(m.Seniority)

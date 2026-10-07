@@ -5,7 +5,7 @@ import {
   ArrowUpRight, ArrowDownLeft, Filter, Layers 
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
-import { resolveImageUrl, getCanteenConfig, checkPreOrderWindow, getCuratedDailyMenu, CanteenConfig, PreOrderTimeStatus, getItemDisplayName } from '../utils/canteenSettings';
+import { resolveImageUrl, getCanteenConfig, checkPreOrderWindow, getCuratedDailyMenu, getCleanActivePreOrders, CanteenConfig, PreOrderTimeStatus, getItemDisplayName } from '../utils/canteenSettings';
 import { getCanteenMenuCache, fetchCanteenMenuOnce } from '../utils/canteenMenuData';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { calculateMenuItemStockInfo, getRawInventoryItems, getMenuRecipes } from '../utils/recipeManager';
@@ -184,10 +184,9 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
         return false;
       };
 
-      const preOrdersStr = localStorage.getItem('canteen_pre_orders') || '[]';
       let preOrders: any[] = [];
       try { 
-          const rawOrders = JSON.parse(preOrdersStr);
+          const rawOrders = getCleanActivePreOrders();
           // Auto-consolidate any duplicate pending pre-orders for the same member & item
           const nonPending: any[] = [];
           const pendingMap: Record<string, any> = {};
@@ -658,15 +657,20 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
                       <Clock className="w-7 h-7" />
                   </div>
                   <h4 className="text-base font-black text-white uppercase tracking-wider">
-                      Pre-Order Currently Closed
+                      {!preOrderWindow.isEnabled ? 'Pre-Order Service Disabled' : 'Pre-Order Currently Closed'}
                   </h4>
                   <p className="text-xs text-slate-400 max-w-md leading-relaxed">
-                      Pre-orders are accepted daily during active hours: <strong className="text-indigo-400">{preOrderWindow.startTime} - {preOrderWindow.endTime}</strong>.
+                      {!preOrderWindow.isEnabled 
+                          ? 'ম্যানেজার কর্তৃক প্রি-অর্ডার সার্ভিস সাময়িকভাবে বন্ধ রাখা হয়েছে।' 
+                          : <>Pre-orders are accepted daily during active hours: <strong className="text-indigo-400">{preOrderWindow.startTime} - {preOrderWindow.endTime}</strong>.</>
+                      }
                   </p>
-                  <div className="inline-flex items-center space-x-2 px-4 py-2 rounded-full bg-slate-900 border border-slate-700/80 text-[11px] font-black text-indigo-300">
-                      <Clock className="w-3.5 h-3.5" />
-                      <span>Active Window: {preOrderWindow.startTime} to {preOrderWindow.endTime}</span>
-                  </div>
+                  {preOrderWindow.isEnabled && (
+                      <div className="inline-flex items-center space-x-2 px-4 py-2 rounded-full bg-slate-900 border border-slate-700/80 text-[11px] font-black text-indigo-300">
+                          <Clock className="w-3.5 h-3.5" />
+                          <span>Active Window: {preOrderWindow.startTime} to {preOrderWindow.endTime}</span>
+                      </div>
+                  )}
               </div>
           ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

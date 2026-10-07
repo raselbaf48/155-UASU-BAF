@@ -16,6 +16,7 @@ import {
   Phone,
   Image as ImageIcon,
   Shield,
+  ShieldCheck,
   Loader2,
   Save,
   Check,
@@ -28,7 +29,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { supabase } from '../../../supabase';
-import { resolveImageUrl, fetchDirectImageUrl, getCanteenConfig } from '../utils/canteenSettings';
+import { resolveImageUrl, fetchDirectImageUrl, getCanteenConfig, saveCanteenConfig, CanteenConfig } from '../utils/canteenSettings';
 import { processGalleryImage } from '../utils/imageUpload';
 import { SaveButton } from '../components/SaveButton';
 import { sortCanteenMembersByOfficeSeniority, normalizeCanteenMembersSeniority, getRankWeight } from '../utils/canteenSeniority';
@@ -43,6 +44,7 @@ import {
 } from '../utils/memberBanglaNames';
 import { getCanteenMembersCache, fetchCanteenMembersOnce, setCanteenMembersCache } from '../utils/canteenMenuData';
 import { playCelebrationSound } from '../utils/audioFeedback';
+import { queuePushKeyToCloud } from '../utils/canteenCloudSync';
 
 // Export getRankWeight from canteenSeniority
 export { getRankWeight };
@@ -59,9 +61,14 @@ export interface ExcelMemberRow {
 
 export const CanteenMemberDB: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [roleFilter, setRoleFilter] = useState<'ALL' | 'OFFICER' | 'JCO' | 'AIRMEN' | 'STAFF'>('ALL');
+  const [roleFilter, setRoleFilter] = useState<'ALL' | 'OFFICER' | 'AIRMEN' | 'CIV'>('ALL');
   const [viewMode, setViewMode] = useState<'BOX' | 'TABLE'>('BOX');
   
+  // Active Canteen Manager State (Managed directly from Member DB)
+  const [canteenConfig, setCanteenConfig] = useState<CanteenConfig>(() => getCanteenConfig());
+  const [showManagerModal, setShowManagerModal] = useState(false);
+  const [managerSearchTerm, setManagerSearchTerm] = useState('');
+
   const [members, setMembers] = useState<any[]>(() => {
     const cached = getCanteenMembersCache();
     if (cached && cached.length > 0) return cached;
@@ -79,11 +86,34 @@ export const CanteenMemberDB: React.FC = () => {
     return !(cached && cached.length > 0);
   });
 
+  // Calculate total counts for filter pills: All, Officer, Airmen, Civ
+  const roleCounts = useMemo(() => {
+    let officerCount = 0;
+    let airmenCount = 0;
+    let civCount = 0;
+    members.forEach((m) => {
+      const weight = getRankWeight(m['Rank']);
+      if (weight >= 1 && weight <= 11) {
+        officerCount++;
+      } else if (weight >= 20 && weight <= 39) {
+        airmenCount++;
+      } else {
+        civCount++;
+      }
+    });
+    return {
+      ALL: members.length,
+      OFFICER: officerCount,
+      AIRMEN: airmenCount,
+      CIV: civCount,
+    };
+  }, [members]);
+
   // Add Member Modal State
   const [showAddModal, setShowAddModal] = useState(false);
   const [addMode, setAddMode] = useState<'single' | 'excel'>('single');
 
-  // Single Member Form State
+  // Single Member Form State (No role required - all are members except selected manager)
   const [singleMember, setSingleMember] = useState({
     bdNo: '',
     rank: 'LAC',
@@ -91,7 +121,6 @@ export const CanteenMemberDB: React.FC = () => {
     surname: '',
     nameBn: '',
     contact: '',
-    role: 'Member',
     dp: ''
   });
   const [isSavingSingle, setIsSavingSingle] = useState(false);
@@ -133,11 +162,35 @@ export const CanteenMemberDB: React.FC = () => {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
+  // Real-time checks for BD Number Uniqueness
+  const isDuplicateAddBd = useMemo(() => {
+    const clean = String(singleMember.bdNo || '').replace(/\D/g, '').trim();
+    if (!clean) return false;
+    return members.some(m => String(m['BD No'] || '').replace(/\D/g, '') === clean);
+  }, [singleMember.bdNo, members]);
+
+  const isDuplicateEditBd = useMemo(() => {
+    if (!editMember) return false;
+    const clean = String(editMember['BD No'] || '').replace(/\D/g, '').trim();
+    if (!clean) return false;
+    const originalAirmanId = editMember.originalAirmanId || editMember.airman_id;
+    const originalBdClean = String(editMember.originalBdNo || originalAirmanId || '').replace(/\D/g, '');
+    return members.some(m => {
+      const origAid = String(originalAirmanId || '').toLowerCase();
+      const mAid = String(m.airman_id || '').toLowerCase();
+      if (origAid && mAid && origAid === mAid) return false;
+      const mBd = String(m['BD No'] || '').replace(/\D/g, '');
+      if (originalBdClean && mBd === originalBdClean) return false;
+      return mBd === clean;
+    });
+  }, [editMember, members]);
+
   // Helper to format & sort members with strictly normalized seniority numbers
   const sortMembers = (data: any[]) => {
     const localSeniorityMap = getLocalSeniorityMap();
-    const formatted = data
+    const formatted = (data || [])
       .filter((m: any) => {
+        if (!m) return false;
         const bd = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
         return bd !== '48456';
       })
@@ -153,8 +206,8 @@ export const CanteenMemberDB: React.FC = () => {
         const rankBn = cloudRankBn || getMemberBanglaRank(m);
         return {
           ...m,
-          airman_id: m.airman_id || `airman-${m['BD No']}`,
-          "BD No": String(m['BD No'] || '').trim(),
+          airman_id: m.airman_id || (cleanBd ? `airman-${cleanBd}` : `mem_${Math.random().toString(36).slice(2)}`),
+          "BD No": String(m['BD No'] || cleanBd || '').trim(),
           "Rank": String(m['Rank'] || 'LAC').trim(),
           "Surname": String(m['Surname'] || '').trim(),
           "Contact": String(m['Contact'] || m['Mobile No'] || '').trim(),
@@ -225,23 +278,51 @@ export const CanteenMemberDB: React.FC = () => {
     };
     window.addEventListener('canteen_members_updated', handleSync);
 
+    const handleSettingsUpdate = (e: any) => {
+      if (e?.detail) setCanteenConfig(e.detail);
+      else setCanteenConfig(getCanteenConfig());
+    };
+    window.addEventListener('canteen_settings_updated', handleSettingsUpdate);
+
     return () => {
       window.removeEventListener('canteen_members_updated', handleSync);
+      window.removeEventListener('canteen_settings_updated', handleSettingsUpdate);
     };
   }, []);
 
-  // Filter members by search and role
+  const handleAssignManager = (targetMember: any) => {
+    const rank = targetMember['Rank'] || 'LAC';
+    const surname = targetMember['Surname'] || '';
+    const fullName = `${rank && rank !== '-' ? rank + ' ' : ''}${surname}`.trim();
+    const bd = String(targetMember['BD No'] || targetMember.airman_id?.replace(/\D/g, '') || '').trim();
+    const contact = String(targetMember['Contact'] || targetMember['Mobile No'] || canteenConfig?.phone || '').trim();
+    const dp = targetMember.DP || canteenConfig?.adminImage || '';
+
+    const updated: CanteenConfig = {
+      ...canteenConfig,
+      managerName: fullName,
+      managerBdNo: bd,
+      phone: contact || canteenConfig?.phone,
+      adminImage: dp || canteenConfig?.adminImage
+    };
+
+    setCanteenConfig(updated);
+    saveCanteenConfig(updated);
+    showToast(`${fullName} (${bd ? `BD: ${bd}` : ''}) কে সক্রিয় ক্যান্টিন ম্যানেজার নির্ধারণ করা হয়েছে!`);
+  };
+
+  // Filter members by search and role (All, Officer, Airmen, Civ)
   const filteredMembers = useMemo(() => {
-    return members.filter((m) => {
+    const list = members.filter((m) => {
       if (!searchTerm.trim()) {
         if (roleFilter === 'ALL') return true;
         const weight = getRankWeight(m['Rank']);
-        if (roleFilter === 'OFFICER') return weight >= 1 && weight <= 10;
-        if (roleFilter === 'JCO') return weight >= 20 && weight <= 29;
-        if (roleFilter === 'AIRMEN') return weight >= 30 && weight <= 39;
-        if (roleFilter === 'STAFF') {
+        if (roleFilter === 'OFFICER') return weight >= 1 && weight <= 11;
+        if (roleFilter === 'AIRMEN') return weight >= 20 && weight <= 39;
+        if (roleFilter === 'CIV') {
           const r = String(m['Role'] || '').toLowerCase();
-          return r.includes('staff') || r.includes('cook') || r.includes('manager') || r.includes('cashier');
+          const rk = String(m['Rank'] || '').toLowerCase();
+          return weight >= 40 || r.includes('civ') || r.includes('staff') || r.includes('cook') || rk.includes('civ');
         }
         return true;
       }
@@ -267,13 +348,25 @@ export const CanteenMemberDB: React.FC = () => {
 
       if (roleFilter === 'ALL') return true;
       const weight = getRankWeight(m['Rank']);
-      if (roleFilter === 'OFFICER') return weight >= 1 && weight <= 10;
-      if (roleFilter === 'JCO') return weight >= 20 && weight <= 29;
-      if (roleFilter === 'AIRMEN') return weight >= 30 && weight <= 39;
-      if (roleFilter === 'STAFF') {
+      if (roleFilter === 'OFFICER') return weight >= 1 && weight <= 11;
+      if (roleFilter === 'AIRMEN') return weight >= 20 && weight <= 39;
+      if (roleFilter === 'CIV') {
         const r = String(m['Role'] || '').toLowerCase();
-        return r.includes('staff') || r.includes('cook') || r.includes('manager') || r.includes('cashier');
+        const rk = String(m['Rank'] || '').toLowerCase();
+        return weight >= 40 || r.includes('civ') || r.includes('staff') || r.includes('cook') || rk.includes('civ');
       }
+      return true;
+    });
+
+    // Enforce 100% strictly unique keys in filtered list
+    const seenKeys = new Set<string>();
+    return list.filter((m) => {
+      const cleanBd = String(m['BD No'] || '').replace(/\D/g, '');
+      const aid = String(m.airman_id || (cleanBd ? `airman-${cleanBd}` : '')).trim().toLowerCase();
+      const key = aid || (cleanBd ? `bd_${cleanBd}` : `s_${m.Surname}`);
+      if (!key) return true;
+      if (seenKeys.has(key)) return false;
+      seenKeys.add(key);
       return true;
     });
   }, [members, searchTerm, roleFilter]);
@@ -299,9 +392,27 @@ export const CanteenMemberDB: React.FC = () => {
 
   // Save Single Member to Cloud
   const handleSaveSingleMember = async () => {
-    const cleanBd = singleMember.bdNo.replace(/^BD\/?/i, '').trim();
-    if (!cleanBd || !singleMember.surname.trim()) {
-      alert('Please enter both BD No and Surname.');
+    const cleanBd = singleMember.bdNo.replace(/\D/g, '').trim();
+    if (!cleanBd) {
+      alert('অনুগ্রহ করে সঠিক বিডি নম্বর দিন (শুধুমাত্র সংখ্যা)।');
+      return;
+    }
+    if (!singleMember.surname.trim()) {
+      alert('সদস্যের নাম (Surname) প্রদান করা বাধ্যতামূলক।');
+      return;
+    }
+
+    // Check BD Uniqueness: No 2 members can have the same BD number
+    const isDuplicate = members.some(m => String(m['BD No'] || '').replace(/\D/g, '') === cleanBd);
+    if (isDuplicate) {
+      alert(`বিডি নম্বর #${cleanBd} ইতিমধ্যে একজন সদস্যের জন্য নিবন্ধিত আছে! একই BD নম্বর দুইবার ব্যবহার করা যাবে না।`);
+      return;
+    }
+
+    // Check Mobile Number: Optional, but if provided must be exactly 11 numeric digits
+    const cleanContact = String(singleMember.contact || '').replace(/\D/g, '').trim();
+    if (cleanContact.length > 0 && cleanContact.length !== 11) {
+      alert(`মোবাইল নম্বর প্রদান করলে অবশ্যই সঠিক ১১ ডিজিটের হতে হবে (যেমন: 017xxxxxxxx)। বর্তমানে ${cleanContact.length} ডিজিট রয়েছে।`);
       return;
     }
 
@@ -314,68 +425,81 @@ export const CanteenMemberDB: React.FC = () => {
     const nameBn = singleMember.nameBn?.trim() || '';
     const rankBn = singleMember.rankBn?.trim() || '';
 
-    const payload = {
+    const newLocalMember = {
       airman_id: `airman-${cleanBd}`,
       "BD No": cleanBd,
       "Rank": singleMember.rank === '-' ? '-' : (singleMember.rank.trim() || 'LAC'),
       "Surname": singleMember.surname.trim(),
-      "Contact": singleMember.contact.trim(),
-      "Role": singleMember.role || 'Member',
+      "Contact": cleanContact,
+      "Role": 'Member',
       DP: finalDp || null,
       Due: 0,
       Name_BN: nameBn,
-      name_bn: nameBn,
       Rank_BN: rankBn,
-      rank_bn: rankBn
+      active: true
     };
 
-    try {
-      if (nameBn) {
-        await saveMemberBanglaName(
-          payload.airman_id || cleanBd,
-          nameBn,
-          [cleanBd, singleMember.surname.trim()]
-        );
-      }
-      if (rankBn) {
-        await saveMemberBanglaRank(
-          payload.airman_id || cleanBd,
-          rankBn,
-          [cleanBd]
-        );
-      }
-      const { error } = await supabase.from('Canteen_Member').upsert([payload], { onConflict: 'airman_id' });
-      if (error) throw error;
+    // 1. Immediate Local Save
+    const updated = sortMembers([
+      newLocalMember,
+      ...members.filter(m => {
+        const mBd = String(m['BD No'] || '').replace(/\D/g, '');
+        const mAid = String(m.airman_id || '').trim().toLowerCase();
+        return mAid !== newLocalMember.airman_id.toLowerCase() && (!cleanBd || mBd !== cleanBd);
+      })
+    ]);
+    setMembers(updated);
+    setCanteenMembersCache(updated);
+    localStorage.setItem('canteen_members_cache', JSON.stringify(updated));
+    localStorage.setItem(`canteen_member_${cleanBd}`, JSON.stringify({
+      dp: newLocalMember.DP || '',
+      due: 0,
+      rank: newLocalMember.Rank,
+      surname: newLocalMember.Surname,
+      contact: newLocalMember.Contact,
+      bdNo: cleanBd
+    }));
+    queuePushKeyToCloud('canteen_members_cache', updated);
+    window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: updated }));
+    window.dispatchEvent(new Event('canteen_state_updated'));
 
-      setIsSavedSingle(true);
-      showToast(`Member #${cleanBd} (${payload.Surname}) saved to Cloud!`);
+    setIsSavedSingle(true);
+    showToast(`Member #${cleanBd} (${newLocalMember.Surname}) saved successfully!`);
 
-      // Update local cache and global in-memory cache
-      const updated = sortMembers([payload, ...members.filter(m => m.airman_id !== payload.airman_id)]);
-      setMembers(updated);
-      setCanteenMembersCache(updated);
-      localStorage.setItem('canteen_members_cache', JSON.stringify(updated));
-      localStorage.setItem(`canteen_member_${cleanBd}`, JSON.stringify({
-        dp: payload.DP || '',
-        due: 0,
-        rank: payload.Rank,
-        surname: payload.Surname,
-        contact: payload.Contact,
-        bdNo: cleanBd
-      }));
-      window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: updated }));
-      window.dispatchEvent(new Event('canteen_state_updated'));
-
-      setTimeout(() => {
-        setIsSavedSingle(false);
-        setIsSavingSingle(false);
-        setShowAddModal(false);
-        setSingleMember({ bdNo: '', rank: 'LAC', rankBn: 'এলএসি', surname: '', nameBn: '', contact: '', role: 'Member', dp: '' });
-      }, 900);
-    } catch (err: any) {
-      alert('Error saving to Supabase Cloud: ' + (err.message || err));
+    setTimeout(() => {
+      setIsSavedSingle(false);
       setIsSavingSingle(false);
-    }
+      setShowAddModal(false);
+      setSingleMember({ bdNo: '', rank: 'LAC', rankBn: 'এলএসি', surname: '', nameBn: '', contact: '', dp: '' });
+    }, 600);
+
+    // 2. Background Cloud Sync (sanitized payload only)
+    (async () => {
+      try {
+        if (nameBn) {
+          await saveMemberBanglaName(newLocalMember.airman_id, nameBn, [cleanBd, singleMember.surname.trim()]);
+        }
+        if (rankBn) {
+          await saveMemberBanglaRank(newLocalMember.airman_id, rankBn, [cleanBd]);
+        }
+        const supabaseRecord = {
+          airman_id: newLocalMember.airman_id,
+          "BD No": cleanBd,
+          Rank: newLocalMember.Rank,
+          Surname: newLocalMember.Surname,
+          Contact: newLocalMember.Contact,
+          Role: newLocalMember.Role,
+          DP: newLocalMember.DP,
+          Due: 0,
+          Name_BN: nameBn || null,
+          Rank_BN: rankBn || null,
+          active: true
+        };
+        await supabase.from('Canteen_Member').upsert([supabaseRecord], { onConflict: 'airman_id' });
+      } catch (cloudErr) {
+        console.warn('Background sync note for new member:', cloudErr);
+      }
+    })();
   };
 
   // Download Sample Excel Template
@@ -463,6 +587,7 @@ export const CanteenMemberDB: React.FC = () => {
   // Normalize raw parsed rows from Excel
   const processRawRows = (data: any[]) => {
     const parsed: ExcelMemberRow[] = [];
+    const seenBdsInFile = new Set<string>();
 
     data.forEach((row, idx) => {
       // Find keys case-insensitively
@@ -476,14 +601,28 @@ export const CanteenMemberDB: React.FC = () => {
         return '';
       };
 
-      const bdNo = findVal(['bd no', 'bdno', 'bd', 'id', 'service no']).replace(/^BD\/?/i, '').trim();
+      const bdNo = findVal(['bd no', 'bdno', 'bd', 'id', 'service no']).replace(/\D/g, '').trim();
       const rank = findVal(['rank', 'designation']) || 'LAC';
       const surname = findVal(['surname', 'name', 'full name', 'member name']) || '';
-      const contact = findVal(['contact', 'mobile', 'phone', 'mobile no']) || '';
+      const contact = findVal(['contact', 'mobile', 'phone', 'mobile no']).replace(/\D/g, '').trim();
       const role = findVal(['role', 'type']) || 'Member';
 
-      const isValid = Boolean(bdNo && surname);
-      const error = !bdNo ? 'Missing BD No' : !surname ? 'Missing Surname/Name' : undefined;
+      let error: string | undefined = undefined;
+      if (!bdNo) {
+        error = 'সঠিক নিউমেরিক BD নম্বর আবশ্যক';
+      } else if (!surname) {
+        error = 'সদস্যের নাম (Surname) আবশ্যক';
+      } else if (contact && contact.length !== 11) {
+        error = `মোবাইল নম্বর ১১ ডিজিটের হতে হবে (রয়েছে ${contact.length})`;
+      } else if (seenBdsInFile.has(bdNo)) {
+        error = `ফাইলে একই BD নম্বর (#${bdNo}) একাধিকবার রয়েছে`;
+      } else if (members.some(m => String(m['BD No'] || '').replace(/\D/g, '') === bdNo)) {
+        error = `বিডি নম্বর #${bdNo} ইতিমধ্যে সিস্টেমে নিবন্ধিত আছে`;
+      }
+
+      if (bdNo) seenBdsInFile.add(bdNo);
+
+      const isValid = !error;
 
       parsed.push({
         bdNo,
@@ -551,36 +690,62 @@ export const CanteenMemberDB: React.FC = () => {
     }
   };
 
-  // Save Edited Member
+  // Save Edited Member (Local-First, then Cloud sync)
   const handleSaveEditMember = async () => {
     if (!editMember) return;
-    const cleanBd = String(editMember['BD No'] || '').replace(/^BD\/?/i, '').trim();
-    if (!cleanBd || !editMember['Surname']) {
-      alert('BD No and Surname are required.');
+    const cleanBd = String(editMember['BD No'] || '').replace(/\D/g, '').trim();
+    if (!cleanBd) {
+      alert('অনুগ্রহ করে সঠিক বিডি নম্বর দিন (শুধুমাত্র সংখ্যা)।');
+      return;
+    }
+    if (!editMember['Surname']) {
+      alert('সদস্যের নাম (Surname) প্রদান করা বাধ্যতামূলক।');
+      return;
+    }
+
+    const originalAirmanId = editMember.originalAirmanId || editMember.airman_id;
+    const originalBdClean = String(editMember.originalBdNo || originalAirmanId || '').replace(/\D/g, '');
+
+    // Check BD Uniqueness: cannot conflict with another member's BD No
+    const isDuplicate = members.some(m => {
+      const origAid = String(originalAirmanId || '').toLowerCase();
+      const mAid = String(m.airman_id || '').toLowerCase();
+      if (origAid && mAid && origAid === mAid) return false;
+      const mBd = String(m['BD No'] || '').replace(/\D/g, '');
+      if (originalBdClean && mBd === originalBdClean) return false;
+      return mBd === cleanBd;
+    });
+    if (isDuplicate) {
+      alert(`বিডি নম্বর #${cleanBd} ইতিমধ্যে অন্য একজন সদস্যের জন্য নিবন্ধিত আছে! একই BD নম্বর দুইবার ব্যবহার করা যাবে না।`);
+      return;
+    }
+
+    // Check Mobile Number: Optional, but if provided must be exactly 11 numeric digits
+    const cleanContact = String(editMember['Contact'] || '').replace(/\D/g, '').trim();
+    if (cleanContact.length > 0 && cleanContact.length !== 11) {
+      alert(`মোবাইল নম্বর প্রদান করলে অবশ্যই সঠিক ১১ ডিজিটের হতে হবে (যেমন: 017xxxxxxxx)। বর্তমানে ${cleanContact.length} ডিজিট রয়েছে।`);
       return;
     }
 
     setIsSavingEdit(true);
     try {
-      const originalAirmanId = editMember.originalAirmanId || editMember.airman_id;
-      const originalBdClean = String(editMember.originalBdNo || originalAirmanId || '').replace(/\D/g, '');
       const isBdChanged = Boolean(originalBdClean && cleanBd && originalBdClean !== cleanBd);
 
-      // Preserve existing airman_id (e.g. BD/473431) unless BD No was deliberately changed
+      // Preserve existing airman_id unless BD No was deliberately changed
       const targetAirmanId = isBdChanged ? `airman-${cleanBd}` : (originalAirmanId || `airman-${cleanBd}`);
 
       const memberSeniority = editMember.Seniority !== undefined ? editMember.Seniority : editMember.seniority;
-      // Persist Bengali Name & Rank
       const nameBn = String(editMember.nameBn !== undefined ? editMember.nameBn : (getMemberBanglaName(editMember) ?? '')).trim();
       const rankBn = String(editMember.rankBn !== undefined ? editMember.rankBn : (getMemberBanglaRank(editMember) ?? '')).trim();
 
-      const payload: any = {
+      // 1. Prepare clean local member object with all metadata
+      const updatedLocalMember: any = {
         ...editMember,
         airman_id: targetAirmanId,
         "BD No": cleanBd,
         "Rank": editMember['Rank'] || 'LAC',
         "Surname": String(editMember['Surname'] || '').trim(),
-        "Contact": String(editMember['Contact'] || '').trim(),
+        "Contact": cleanContact,
         "Role": editMember['Role'] || 'Member',
         Due: Number(editMember.Due ?? editMember.due ?? editMember.baki ?? 0),
         DP: editMember.DP || null,
@@ -594,91 +759,148 @@ export const CanteenMemberDB: React.FC = () => {
         rankBn: rankBn,
         active: editMember.active ?? true
       };
-      delete payload.originalAirmanId;
-      delete payload.originalBdNo;
+      delete updatedLocalMember.originalAirmanId;
+      delete updatedLocalMember.originalBdNo;
 
-      // If BD No was actually modified, remove old airman_id record to prevent duplicates
-      if (isBdChanged && originalAirmanId && originalAirmanId !== targetAirmanId) {
-        try {
-          await supabase.from('Canteen_Member').delete().eq('airman_id', originalAirmanId);
-        } catch (e) {
-          console.warn('Note deleting old member row:', e);
-        }
+      // 2. IMMEDIATE LOCAL SAVE (First save to local / cache immediately!)
+      // Ensure the old record is completely removed when BD No or ID changes
+      const remainingMembers = members.filter(m => {
+        const mAid = String(m.airman_id || '').trim().toLowerCase();
+        const mBd = String(m['BD No'] || '').replace(/\D/g, '');
+        if (originalAirmanId && mAid === String(originalAirmanId).toLowerCase()) return false;
+        if (originalBdClean && (mBd === originalBdClean || mAid === `airman-${originalBdClean}`)) return false;
+        if (cleanBd && (mBd === cleanBd || mAid === `airman-${cleanBd}`)) return false;
+        return true;
+      });
+
+      const finalLocalList = sortMembers([updatedLocalMember, ...remainingMembers]);
+
+      setMembers(finalLocalList);
+      setCanteenMembersCache(finalLocalList);
+      localStorage.setItem('canteen_members_cache', JSON.stringify(finalLocalList));
+      localStorage.setItem(`canteen_member_${cleanBd}`, JSON.stringify({
+        dp: updatedLocalMember.DP || '',
+        due: updatedLocalMember.Due,
+        rank: updatedLocalMember.Rank,
+        surname: updatedLocalMember.Surname,
+        contact: updatedLocalMember.Contact,
+        bdNo: cleanBd
+      }));
+
+      // If BD changed, remove obsolete local storage keys of the old BD No
+      if (isBdChanged && originalBdClean) {
+        localStorage.removeItem(`canteen_member_${originalBdClean}`);
+        localStorage.removeItem(`member_bangla_name_${originalBdClean}`);
+        localStorage.removeItem(`member_bangla_rank_${originalBdClean}`);
+        localStorage.removeItem(`member_seniority_${originalBdClean}`);
       }
 
-      if (nameBn) {
-        await saveMemberBanglaName(
-          targetAirmanId,
-          nameBn,
-          [cleanBd, payload.Surname]
-        );
-      }
-      if (rankBn) {
-        await saveMemberBanglaRank(
-          targetAirmanId,
-          rankBn,
-          [cleanBd]
-        );
-      }
+      // Queue push to cloud app_settings cache
+      queuePushKeyToCloud('canteen_members_cache', finalLocalList);
 
-      // Persist Seniority if available
-      if (memberSeniority !== undefined && memberSeniority !== null) {
-        try {
-          await saveMemberSeniority(cleanBd, Number(memberSeniority));
-        } catch (e) {
-          console.warn('Note saving seniority:', e);
-        }
-      }
+      window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: finalLocalList }));
+      window.dispatchEvent(new Event('canteen_state_updated'));
 
-      // Upsert to Supabase Cloud
-      const { error } = await supabase.from('Canteen_Member').upsert([payload], { onConflict: 'airman_id' });
-      if (error) throw error;
-
-      // Close Edit modal immediately
+      // Close modal and show feedback immediately
       setIsSavedEdit(true);
       setEditMember(null);
-
-      // Play audio feedback chime
       playCelebrationSound();
-
-      // Trigger dynamic celebration animation
       setSaveSuccessBanner({
         bdNo: cleanBd,
-        name: payload.Surname,
-        rank: payload.Rank,
+        name: updatedLocalMember.Surname,
+        rank: updatedLocalMember.Rank,
         nameBn: nameBn || undefined
       });
       setTimeout(() => setSaveSuccessBanner(null), 4000);
 
-      // Update local state and global in-memory cache
-      const updated = sortMembers(members.map(m => {
-        const mKey = String(m.airman_id || m['BD No']).trim();
-        const origKey = String(originalAirmanId || '').trim();
-        const targetKey = String(targetAirmanId).trim();
-        if (mKey === origKey || mKey === targetKey || String(m['BD No']).replace(/\D/g, '') === cleanBd) {
-          return { ...m, ...payload };
-        }
-        return m;
-      }));
-      setMembers(updated);
-      setCanteenMembersCache(updated);
-      localStorage.setItem('canteen_members_cache', JSON.stringify(updated));
-      localStorage.setItem(`canteen_member_${cleanBd}`, JSON.stringify({
-        dp: payload.DP || '',
-        due: payload.Due,
-        rank: payload.Rank,
-        surname: payload.Surname,
-        contact: payload.Contact,
-        bdNo: cleanBd
-      }));
+      // 3. BACKGROUND CLOUD SYNC (Pore niyom onujayi cloud e save hbe)
+      // Prepare strictly sanitized payload matching ONLY the Supabase Canteen_Member columns!
+      const supabasePayload: any = {
+        airman_id: targetAirmanId,
+        "BD No": cleanBd,
+        Rank: String(updatedLocalMember.Rank || 'LAC').trim(),
+        Surname: String(updatedLocalMember.Surname || '').trim(),
+        Contact: String(updatedLocalMember.Contact || '').trim(),
+        Role: String(updatedLocalMember.Role || 'Member').trim(),
+        Due: Number(updatedLocalMember.Due ?? 0),
+        DP: updatedLocalMember.DP || null,
+        Seniority: memberSeniority !== undefined && memberSeniority !== null ? Number(memberSeniority) : null,
+        Name_BN: nameBn || null,
+        Rank_BN: rankBn || null,
+        Flight: updatedLocalMember.Flight || updatedLocalMember.flight || 'Admin',
+        Trade: updatedLocalMember.Trade || updatedLocalMember.trade || '',
+        Address: updatedLocalMember.Address || updatedLocalMember.address || '',
+        is_officer: Boolean(updatedLocalMember.is_officer),
+        active: updatedLocalMember.active ?? true
+      };
 
-      window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: updated }));
-      window.dispatchEvent(new Event('canteen_state_updated'));
+      // Execute Cloud Save asynchronously
+      (async () => {
+        try {
+          // If BD was changed, DELETE the obsolete old member from Supabase first
+          if (isBdChanged) {
+            try {
+              if (originalAirmanId) {
+                await supabase.from('Canteen_Member').delete().eq('airman_id', originalAirmanId);
+                await supabase.from('Canteen').delete().eq('airman_id', originalAirmanId);
+              }
+              if (originalBdClean) {
+                await supabase.from('Canteen_Member').delete().eq('BD No', originalBdClean);
+                await supabase.from('Canteen_Member').delete().eq('airman_id', `airman-${originalBdClean}`);
+                await supabase.from('Canteen').delete().eq('BD No', originalBdClean);
+                await supabase.from('Canteen').delete().eq('airman_id', `airman-${originalBdClean}`);
+              }
+            } catch (delErr) {
+              console.warn('Note deleting old member row on BD change:', delErr);
+            }
+          }
+
+          if (nameBn) {
+            await saveMemberBanglaName(targetAirmanId, nameBn, [cleanBd, updatedLocalMember.Surname]);
+          }
+          if (rankBn) {
+            await saveMemberBanglaRank(targetAirmanId, rankBn, [cleanBd]);
+          }
+          if (memberSeniority !== undefined && memberSeniority !== null) {
+            await saveMemberSeniority(cleanBd, Number(memberSeniority));
+          }
+
+          // Upsert to Supabase FIRST
+          const { error: upsertErr } = await supabase
+            .from('Canteen_Member')
+            .upsert([supabasePayload], { onConflict: 'airman_id' });
+
+          if (upsertErr) {
+            console.error('Supabase Canteen_Member background sync error:', upsertErr);
+          }
+
+          // Also keep Canteen table in sync if present
+          try {
+            await supabase
+              .from('Canteen')
+              .upsert([{
+                airman_id: targetAirmanId,
+                "BD No": cleanBd,
+                Rank: supabasePayload.Rank,
+                Surname: supabasePayload.Surname,
+                Name: supabasePayload.Surname,
+                Contact: supabasePayload.Contact,
+                Role: supabasePayload.Role,
+                Due: supabasePayload.Due,
+                DP: supabasePayload.DP
+              }], { onConflict: 'airman_id' });
+          } catch {}
+        } catch (cloudErr) {
+          console.warn('Background cloud sync note:', cloudErr);
+        }
+      })();
+
     } catch (err: any) {
+      console.error('Error saving member:', err);
       alert('Error updating member: ' + (err.message || err));
     } finally {
       setIsSavingEdit(false);
-      setIsSavedEdit(false);
+      setTimeout(() => setIsSavedEdit(false), 2000);
     }
   };
 
@@ -762,6 +984,62 @@ export const CanteenMemberDB: React.FC = () => {
         </div>
       </div>
 
+      {/* Current Manager Banner Card (Only place to view & change Canteen Manager) */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 border border-indigo-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-lg">
+        <div className="flex items-center space-x-3.5 min-w-0 flex-1">
+          {/* Manager Avatar */}
+          <div className="w-13 h-13 rounded-2xl bg-slate-950 border-2 border-indigo-500/50 flex items-center justify-center font-black text-xl text-indigo-400 overflow-hidden shrink-0 shadow-md">
+            {canteenConfig?.adminImage ? (
+              <img
+                src={resolveImageUrl(canteenConfig.adminImage)}
+                alt={canteenConfig.managerName || 'Manager'}
+                referrerPolicy="no-referrer"
+                className="w-full h-full object-cover"
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              />
+            ) : (
+              <span>{(canteenConfig?.managerName || 'M').charAt(0)}</span>
+            )}
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center space-x-2 flex-wrap">
+              <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-indigo-500/25 border border-indigo-400/40 text-indigo-300">
+                CURRENT MANAGER
+              </span>
+              {canteenConfig?.managerBdNo && (
+                <span className="text-xs font-mono font-bold text-slate-300">
+                  BD: {canteenConfig.managerBdNo}
+                </span>
+              )}
+            </div>
+            <h3 className="text-base font-black text-white truncate leading-tight mt-0.5">
+              {canteenConfig?.managerName || 'No Manager Assigned Yet'}
+            </h3>
+            {canteenConfig?.phone && (
+              <p className="text-[11px] text-emerald-400 font-mono flex items-center gap-1 mt-0.5">
+                <Phone className="w-3 h-3 text-emerald-400" />
+                <span>{canteenConfig.phone}</span>
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Change Manager Button */}
+        <button
+          type="button"
+          onClick={() => {
+            setManagerSearchTerm('');
+            setShowManagerModal(true);
+          }}
+          className="w-full sm:w-auto px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center space-x-2 shadow-md shadow-indigo-950 transition-all cursor-pointer active:scale-95 shrink-0 border border-indigo-400/30"
+          title="Change Active Canteen Manager"
+        >
+          <ShieldCheck className="w-4 h-4 text-indigo-200" />
+          <span>Change Manager</span>
+        </button>
+      </div>
+
       {/* Search & Filter Bar */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 md:p-4 space-y-3 shadow-md">
         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
@@ -777,20 +1055,30 @@ export const CanteenMemberDB: React.FC = () => {
             />
           </div>
 
-          {/* Role Filter Pills */}
+          {/* Role Filter Pills: All, Officer, Airmen, Civ with Total Numbers */}
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-none">
-            {(['ALL', 'OFFICER', 'JCO', 'AIRMEN', 'STAFF'] as const).map((r) => (
+            {([
+              { id: 'ALL', label: 'All', count: roleCounts.ALL },
+              { id: 'OFFICER', label: 'Officer', count: roleCounts.OFFICER },
+              { id: 'AIRMEN', label: 'Airmen', count: roleCounts.AIRMEN },
+              { id: 'CIV', label: 'Civ', count: roleCounts.CIV },
+            ] as const).map((r) => (
               <button
-                key={r}
+                key={r.id}
                 type="button"
-                onClick={() => setRoleFilter(r)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer ${
-                  roleFilter === r
+                onClick={() => setRoleFilter(r.id)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer flex items-center space-x-1.5 ${
+                  roleFilter === r.id
                     ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30 ring-1 ring-cyan-400/50'
                     : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-750 border border-slate-700/60'
                 }`}
               >
-                {r === 'ALL' ? 'All' : r === 'OFFICER' ? 'Officers' : r === 'JCO' ? 'JCOs' : r === 'AIRMEN' ? 'Airmen' : 'Staff'}
+                <span>{r.label}</span>
+                <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-md ${
+                  roleFilter === r.id ? 'bg-black/30 text-white font-bold' : 'bg-slate-900/80 text-slate-400 font-bold'
+                }`}>
+                  {r.count}
+                </span>
               </button>
             ))}
           </div>
@@ -855,76 +1143,99 @@ export const CanteenMemberDB: React.FC = () => {
 
             return (
               <div
-                key={member.airman_id}
+                key={member.airman_id || `box-${member['BD No'] || i}-${i}`}
                 className="bg-gradient-to-b from-slate-900 via-slate-900/90 to-slate-950 rounded-3xl p-5 border border-slate-800/80 shadow-md hover:border-slate-700 transition-all flex flex-col justify-between space-y-4 group"
               >
                 <div className="flex items-start">
-                  <div className="flex items-center space-x-3.5 flex-1 min-w-0">
-                    {/* Avatar */}
-                    <div className="w-13 h-13 rounded-2xl bg-slate-950 border border-slate-700/80 flex items-center justify-center font-black text-xl text-cyan-400 overflow-hidden shrink-0 shadow-inner">
-                      {memberDp ? (
-                        <img
-                          src={memberDp}
-                          alt={member['Surname']}
-                          referrerPolicy="no-referrer"
-                          className="w-full h-full object-cover"
-                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                        />
-                      ) : (
-                        <span>{(member['Surname'] || 'U').charAt(0)}</span>
-                      )}
-                    </div>
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center space-x-1.5 mb-1 flex-wrap gap-y-1">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSeniorityEditMember(member);
-                          }}
-                          className="font-mono text-emerald-400 font-black text-[10px] px-1.5 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-400/30 hover:bg-emerald-500/30 hover:scale-105 active:scale-95 transition-all cursor-pointer shadow-xs"
-                          title="Seniority / জ্যেষ্ঠতা নম্বর (Click to edit)"
-                        >
-                          #{member.seniority || member.Seniority || (i + 1)}
-                        </button>
-                        <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-indigo-500/15 border border-indigo-500/30 text-indigo-300">
-                          {member['Rank']}
-                          {getMemberBanglaRank(member) ? ` (${getMemberBanglaRank(member)})` : ''}
-                        </span>
-                        <span className="text-[10px] font-bold text-slate-400 font-mono">
-                          BD: {member['BD No']}
-                        </span>
-                        {member.Role && (
-                          <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase border ${
-                            member.Role.toLowerCase() === 'manager'
-                              ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
-                              : member.Role.toLowerCase() === 'staff' || member.Role.toLowerCase() === 'cook'
-                              ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
-                              : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                          }`}>
-                            {member.Role}
-                          </span>
+                  <div className="flex items-start space-x-4 flex-1 min-w-0">
+                    {/* Left Column: Pic with #1 directly under it */}
+                    <div className="flex flex-col items-center shrink-0 space-y-1.5">
+                      {/* Avatar / Picture */}
+                      <div className="w-14 h-14 rounded-2xl bg-slate-950 border border-slate-700/80 flex items-center justify-center font-black text-xl text-cyan-400 overflow-hidden shrink-0 shadow-inner">
+                        {memberDp ? (
+                          <img
+                            src={memberDp}
+                            alt={member['Surname']}
+                            referrerPolicy="no-referrer"
+                            className="w-full h-full object-cover"
+                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                          />
+                        ) : (
+                          <span>{(member['Surname'] || 'U').charAt(0)}</span>
                         )}
                       </div>
-                      <div className="flex items-baseline space-x-1.5 flex-wrap">
-                        <h3 className="font-black text-white text-base leading-snug group-hover:text-cyan-300 transition-colors">
-                          {member['Surname']}
-                        </h3>
+
+                      {/* #1 (Pic er niche) */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSeniorityEditMember(member);
+                        }}
+                        className="font-mono text-emerald-400 font-black text-xs px-2.5 py-0.5 rounded-lg bg-emerald-500/15 border border-emerald-400/40 hover:bg-emerald-500/30 hover:scale-105 active:scale-95 transition-all cursor-pointer shadow-xs"
+                        title="Seniority / জ্যেষ্ঠতা নম্বর (Click to edit)"
+                      >
+                        #{member.seniority || member.Seniority || (i + 1)}
+                      </button>
+                    </div>
+
+                    {/* Right Column: Member Information */}
+                    <div className="flex-1 min-w-0 flex flex-col justify-center space-y-1">
+                      {/* Line 1: OIC / Manager er dan pase BD/9241 (NEVER show "MEMBER" badge) */}
+                      <div className="flex items-center space-x-2 flex-wrap gap-y-1">
                         {(() => {
-                          const bn = getMemberBanglaName(member);
-                          return bn ? (
-                            <span className="text-emerald-400 font-bold text-xs font-sans">
-                              ({bn})
-                            </span>
-                          ) : null;
+                          const mBd = String(member['BD No'] || '').replace(/\D/g, '').trim();
+                          const isMgr = mBd && mBd === String(canteenConfig?.managerBdNo || '').replace(/\D/g, '').trim();
+                          const roleStr = String(member.Role || '').trim().toLowerCase();
+                          const isOic = roleStr === 'oic';
+
+                          if (isMgr) {
+                            return (
+                              <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-purple-500/25 text-purple-300 border border-purple-400/50 shadow-xs shrink-0">
+                                Manager
+                              </span>
+                            );
+                          }
+                          if (isOic) {
+                            return (
+                              <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-400/50 shadow-xs shrink-0">
+                                OIC
+                              </span>
+                            );
+                          }
+                          // Never show "Member" badge!
+                          return null;
+                        })()}
+                        <span className="text-xs font-mono font-black text-slate-300 bg-slate-950 px-2 py-0.5 rounded-md border border-slate-800 shrink-0">
+                          BD/{String(member['BD No'] || '').replace(/\D/g, '') || member['BD No'] || '-'}
+                        </span>
+                      </div>
+
+                      {/* Line 2: er niche Wg Crd Aftab (Rank & English Surname) */}
+                      <div className="text-sm md:text-base font-black text-white leading-tight group-hover:text-cyan-300 transition-colors truncate">
+                        {member['Rank'] && member['Rank'] !== '-' ? `${member['Rank']} ` : ''}{member['Surname']}
+                      </div>
+
+                      {/* Line 3: tar niche bangla te উইং কমাঃ আফতাব */}
+                      <div className="text-xs font-bold text-emerald-400 font-sans leading-tight truncate">
+                        {(() => {
+                          const bnRank = getMemberBanglaRank(member);
+                          const bnName = getMemberBanglaName(member);
+                          if (bnRank && bnName) return `${bnRank} ${bnName}`;
+                          if (bnName) return bnName;
+                          if (bnRank) return bnRank;
+                          return <span className="text-slate-600 text-[11px]">-</span>;
                         })()}
                       </div>
-                      {member['Contact'] && (
-                        <p className="text-[11px] text-slate-400 font-mono flex items-center gap-1 mt-0.5">
-                          <Phone className="w-3 h-3 text-slate-500 shrink-0" />
+
+                      {/* Line 4: er niche Number */}
+                      {member['Contact'] ? (
+                        <p className="text-[11px] text-slate-400 font-mono flex items-center gap-1.5 pt-0.5">
+                          <Phone className="w-3 h-3 text-cyan-400/70 shrink-0" />
                           <span className="truncate">{member['Contact']}</span>
                         </p>
+                      ) : (
+                        <p className="text-[11px] text-slate-600 font-mono pt-0.5">-</p>
                       )}
                     </div>
                   </div>
@@ -986,7 +1297,7 @@ export const CanteenMemberDB: React.FC = () => {
 
                   return (
                     <tr 
-                      key={member.airman_id || i}
+                      key={member.airman_id || `row-${member['BD No'] || i}-${i}`}
                       className="hover:bg-slate-800/50 transition-colors group"
                     >
                       <td className="px-3 py-3 text-center">
@@ -1036,15 +1347,28 @@ export const CanteenMemberDB: React.FC = () => {
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase border ${
-                          member.Role?.toLowerCase() === 'manager'
-                            ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
-                            : member.Role?.toLowerCase() === 'staff' || member.Role?.toLowerCase() === 'cook'
-                            ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
-                            : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                        }`}>
-                          {member.Role || 'Member'}
-                        </span>
+                        {(() => {
+                          const mBd = String(member['BD No'] || '').replace(/\D/g, '').trim();
+                          const isMgr = mBd && mBd === String(canteenConfig?.managerBdNo || '').replace(/\D/g, '').trim();
+                          const roleStr = String(member.Role || '').trim().toLowerCase();
+                          const isOic = roleStr === 'oic';
+
+                          if (isMgr) {
+                            return (
+                              <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase bg-purple-500/25 text-purple-300 border border-purple-400/50">
+                                Manager
+                              </span>
+                            );
+                          }
+                          if (isOic) {
+                            return (
+                              <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase bg-amber-500/20 text-amber-300 border border-amber-400/50">
+                                OIC
+                              </span>
+                            );
+                          }
+                          return <span className="text-slate-600 font-mono text-xs">-</span>;
+                        })()}
                       </td>
                       <td className="px-4 py-3 font-mono text-slate-400 text-xs">
                         {member['Contact'] || '-'}
@@ -1196,35 +1520,28 @@ export const CanteenMemberDB: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Line 2: BD No on Left, Role on Right - SIDE BY SIDE */}
-                <div className="grid grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
-                      BD No / সার্ভিস নং <span className="text-rose-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. 474455"
-                      value={singleMember.bdNo}
-                      onChange={(e) => setSingleMember({ ...singleMember, bdNo: e.target.value })}
-                      className="w-full bg-slate-950 text-white rounded-xl px-2.5 py-2.5 text-xs font-bold font-mono border border-slate-700 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
-                      Role in Canteen
-                    </label>
-                    <select
-                      value={singleMember.role}
-                      onChange={(e) => setSingleMember({ ...singleMember, role: e.target.value })}
-                      className="w-full bg-slate-950 text-white rounded-xl px-2.5 py-2.5 text-xs font-bold border border-slate-700 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-                    >
-                      {['Member', 'Manager', 'Staff', 'Cook', 'Cashier'].map((role) => (
-                        <option key={role} value={role}>{role}</option>
-                      ))}
-                    </select>
-                  </div>
+                {/* Line 2: BD No (Only numeric digits, no role input needed) */}
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
+                    BD No / সার্ভিস নং <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="e.g. 474455 (শুধুমাত্র সংখ্যা)"
+                    value={singleMember.bdNo}
+                    onChange={(e) => setSingleMember({ ...singleMember, bdNo: e.target.value.replace(/\D/g, '') })}
+                    className={`w-full bg-slate-950 text-white rounded-xl px-2.5 py-2.5 text-xs font-bold font-mono border focus:outline-none focus:ring-1 ${
+                      isDuplicateAddBd 
+                        ? 'border-rose-500/80 focus:ring-rose-500' 
+                        : 'border-slate-700 focus:ring-cyan-500'
+                    }`}
+                  />
+                  {isDuplicateAddBd && (
+                    <p className="text-[10px] font-bold text-rose-400 mt-1 flex items-center gap-1 animate-pulse">
+                      ⚠️ এই BD নম্বর (#{singleMember.bdNo}) ইতিমধ্যে ব্যবহৃত হয়েছে!
+                    </p>
+                  )}
                 </div>
 
                 {/* Line 3: Surname / Name (English) on Left, Bangla Name on Right - SIDE BY SIDE */}
@@ -1264,18 +1581,39 @@ export const CanteenMemberDB: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Line 4: Contact */}
+                {/* Line 4: Contact (Optional, but if given must be 11 numeric digits) */}
                 <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
-                    Contact / Phone Number
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1 flex items-center justify-between">
+                    <span>Contact / মোবাইল নং <span className="text-slate-500 font-normal text-[10px]">(ঐচ্ছিক / Optional)</span></span>
+                    <span className="text-[10px] font-mono text-slate-400">
+                      {singleMember.contact ? `${singleMember.contact.length}/11` : 'Optional'}
+                    </span>
                   </label>
                   <input
-                    type="text"
-                    placeholder="e.g. 01712345678"
+                    type="tel"
+                    inputMode="numeric"
+                    maxLength={11}
+                    placeholder="e.g. 01712345678 (প্রদান করলে ১১ ডিজিট)"
                     value={singleMember.contact}
-                    onChange={(e) => setSingleMember({ ...singleMember, contact: e.target.value })}
-                    className="w-full bg-slate-950 text-white rounded-xl px-3 py-2.5 text-xs font-bold border border-slate-700 font-mono focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                    onChange={(e) => setSingleMember({ ...singleMember, contact: e.target.value.replace(/\D/g, '').slice(0, 11) })}
+                    className={`w-full bg-slate-950 text-white rounded-xl px-3 py-2.5 text-xs font-bold border font-mono focus:outline-none focus:ring-1 ${
+                      singleMember.contact.length === 11
+                        ? 'border-emerald-500/60 focus:ring-emerald-500 text-emerald-300'
+                        : singleMember.contact.length > 0
+                        ? 'border-amber-500/60 focus:ring-amber-500'
+                        : 'border-slate-700 focus:ring-cyan-500'
+                    }`}
                   />
+                  {singleMember.contact.length > 0 && singleMember.contact.length < 11 && (
+                    <p className="text-[10px] font-bold text-amber-400 mt-1 flex items-center gap-1">
+                      ⚠️ মোবাইল নম্বর অবশ্যই ১১ ডিজিটের হতে হবে (বর্তমানে {singleMember.contact.length} ডিজিট)
+                    </p>
+                  )}
+                  {singleMember.contact.length === 11 && (
+                    <p className="text-[10px] font-bold text-emerald-400 mt-1 flex items-center gap-1">
+                      ✓ সঠিক ১১ ডিজিটের মোবাইল নম্বর
+                    </p>
+                  )}
                 </div>
 
                   {/* Photo Import / Upload (No URL box) */}
@@ -1330,12 +1668,13 @@ export const CanteenMemberDB: React.FC = () => {
                     <SaveButton
                       type="button"
                       onClick={handleSaveSingleMember}
+                      disabled={isSavingSingle || isDuplicateAddBd || !singleMember.surname.trim() || !singleMember.bdNo || (singleMember.contact.trim().length > 0 && singleMember.contact.replace(/\D/g, '').length !== 11)}
                       isSaving={isSavingSingle}
                       isSaved={isSavedSingle}
                       idleText="Save Member to Cloud"
                       savingText="Saving to Cloud..."
                       savedText="Member Saved to Cloud! ✓"
-                      className="w-full py-3.5 text-xs font-black tracking-widest cursor-pointer"
+                      className="w-full py-3.5 text-xs font-black tracking-widest cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     />
                   </div>
                 </div>
@@ -1520,14 +1859,37 @@ export const CanteenMemberDB: React.FC = () => {
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 rounded-3xl p-6 md:p-8 w-full max-w-lg shadow-2xl border border-slate-800 space-y-5 animate-in zoom-in-95">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <h3 className="text-base font-black text-white uppercase tracking-tight flex items-center gap-2">
-                <Edit2 className="w-4 h-4 text-cyan-400" />
-                <span>Edit Member #{editMember['BD No']}</span>
-              </h3>
+              <div className="flex items-center space-x-2.5 min-w-0 flex-1 pr-2">
+                <div className="w-8 h-8 rounded-xl bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shrink-0">
+                  <Edit2 className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs font-black text-slate-300 uppercase tracking-wider">
+                      Edit Member:
+                    </span>
+                    <span className="text-sm font-black text-white truncate">
+                      {editMember['Rank'] && editMember['Rank'] !== '-' ? `${editMember['Rank']} ` : ''}
+                      {editMember['Surname'] || ''}
+                    </span>
+                    {(() => {
+                      const bn = editMember.nameBn || getMemberBanglaName(editMember);
+                      return bn ? (
+                        <span className="text-xs font-bold text-emerald-400 font-sans">
+                          ({bn})
+                        </span>
+                      ) : null;
+                    })()}
+                  </div>
+                  <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                    BD No: BD/{String(editMember['BD No'] || '').replace(/\D/g, '') || editMember['BD No'] || '-'}
+                  </p>
+                </div>
+              </div>
               <button
                 type="button"
                 onClick={() => setEditMember(null)}
-                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1572,7 +1934,7 @@ export const CanteenMemberDB: React.FC = () => {
                     Rank / পদবি (English)
                   </label>
                   <select
-                    value={editMember['Rank'] ?? '-'}
+                    value={editMember['Rank'] === 'Civilian' || editMember['Rank'] === 'CIV' ? 'Civ' : (editMember['Rank'] ?? '-')}
                     onChange={(e) => {
                       const newRank = e.target.value;
                       setEditMember({ 
@@ -1605,42 +1967,35 @@ export const CanteenMemberDB: React.FC = () => {
                 </div>
               </div>
 
-              {/* Line 2: BD No on Left, Role on Right - SIDE BY SIDE */}
-              <div className="grid grid-cols-2 gap-2.5">
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
-                    BD No / সার্ভিস নং
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. 17, 9241, 474455..."
-                    value={editMember['BD No'] || ''}
-                    onChange={(e) => {
-                      const clean = e.target.value.replace(/^BD\/?/i, '').trim();
-                      setEditMember({ 
-                        ...editMember, 
-                        "BD No": clean,
-                        airman_id: `airman-${clean}`
-                      });
-                    }}
-                    className="w-full bg-slate-950 text-white placeholder-slate-600 rounded-xl px-2.5 py-2.5 text-xs font-bold font-mono border border-slate-700 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
-                    Role / ভূমিকা
-                  </label>
-                  <select
-                    value={editMember['Role'] || 'Member'}
-                    onChange={(e) => setEditMember({ ...editMember, Role: e.target.value })}
-                    className="w-full bg-slate-950 text-white rounded-xl px-2.5 py-2.5 text-xs font-bold border border-slate-700 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-                  >
-                    {['Member', 'Manager', 'Staff', 'Cook', 'Cashier'].map(r => (
-                      <option key={r} value={r}>{r}</option>
-                    ))}
-                  </select>
-                </div>
+              {/* Line 2: BD No (Only numeric digits) */}
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
+                  BD No / সার্ভিস নং <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="e.g. 10580 (শুধুমাত্র সংখ্যা)"
+                  value={editMember['BD No'] || ''}
+                  onChange={(e) => {
+                    const clean = e.target.value.replace(/\D/g, '');
+                    setEditMember({ 
+                      ...editMember, 
+                      "BD No": clean,
+                      airman_id: `airman-${clean}`
+                    });
+                  }}
+                  className={`w-full bg-slate-950 text-white placeholder-slate-600 rounded-xl px-2.5 py-2.5 text-xs font-bold font-mono border focus:outline-none focus:ring-1 ${
+                    isDuplicateEditBd 
+                      ? 'border-rose-500/80 focus:ring-rose-500' 
+                      : 'border-slate-700 focus:ring-cyan-500'
+                  }`}
+                />
+                {isDuplicateEditBd && (
+                  <p className="text-[10px] font-bold text-rose-400 mt-1 flex items-center gap-1 animate-pulse">
+                    ⚠️ এই BD নম্বর (#{editMember['BD No']}) অন্য একজন সদস্যের রয়েছে!
+                  </p>
+                )}
               </div>
 
               {/* Line 3: Surname / Name (English) on Left, Bangla Name on Right - SIDE BY SIDE */}
@@ -1680,18 +2035,42 @@ export const CanteenMemberDB: React.FC = () => {
                 </div>
               </div>
 
-              {/* Line 4: Contact */}
+              {/* Line 4: Contact (Optional, but if given must be 11 numeric digits) */}
               <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1">
-                  Contact / মোবাইল নং
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1 flex items-center justify-between">
+                  <span>Contact / মোবাইল নং <span className="text-slate-500 font-normal text-[10px]">(ঐচ্ছিক / Optional)</span></span>
+                  <span className="text-[10px] font-mono text-slate-400">
+                    {editMember['Contact'] ? `${String(editMember['Contact']).replace(/\D/g, '').length}/11` : 'Optional'}
+                  </span>
                 </label>
                 <input
-                  type="text"
-                  placeholder="e.g. 017xxxxxxxx, 018xxxxxxxx..."
+                  type="tel"
+                  inputMode="numeric"
+                  maxLength={11}
+                  placeholder="e.g. 017xxxxxxxx (প্রদান করলে ১১ ডিজিট)"
                   value={editMember['Contact'] || ''}
-                  onChange={(e) => setEditMember({ ...editMember, Contact: e.target.value })}
-                  className="w-full bg-slate-950 text-white placeholder-slate-600 rounded-xl px-3 py-2.5 text-xs font-bold border border-slate-700 font-mono focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                  onChange={(e) => {
+                    const cleanNum = e.target.value.replace(/\D/g, '').slice(0, 11);
+                    setEditMember({ ...editMember, Contact: cleanNum });
+                  }}
+                  className={`w-full bg-slate-950 text-white placeholder-slate-600 rounded-xl px-3 py-2.5 text-xs font-bold border font-mono focus:outline-none focus:ring-1 ${
+                    String(editMember['Contact'] || '').replace(/\D/g, '').length === 11
+                      ? 'border-emerald-500/60 focus:ring-emerald-500 text-emerald-300'
+                      : String(editMember['Contact'] || '').length > 0
+                      ? 'border-amber-500/60 focus:ring-amber-500'
+                      : 'border-slate-700 focus:ring-cyan-500'
+                  }`}
                 />
+                {String(editMember['Contact'] || '').replace(/\D/g, '').length > 0 && String(editMember['Contact'] || '').replace(/\D/g, '').length < 11 && (
+                  <p className="text-[10px] font-bold text-amber-400 mt-1 flex items-center gap-1">
+                    ⚠️ মোবাইল নম্বর অবশ্যই ১১ ডিজিটের হতে হবে (বর্তমানে {String(editMember['Contact'] || '').replace(/\D/g, '').length} ডিজিট)
+                  </p>
+                )}
+                {String(editMember['Contact'] || '').replace(/\D/g, '').length === 11 && (
+                  <p className="text-[10px] font-bold text-emerald-400 mt-1 flex items-center gap-1">
+                    ✓ সঠিক ১১ ডিজিটের মোবাইল নম্বর
+                  </p>
+                )}
               </div>
 
               {/* Photo: Import Icon only, NO URL box */}
@@ -1748,12 +2127,13 @@ export const CanteenMemberDB: React.FC = () => {
               <SaveButton
                 type="button"
                 onClick={handleSaveEditMember}
+                disabled={isSavingEdit || isDuplicateEditBd || !editMember['Surname']?.trim() || !editMember['BD No'] || (String(editMember['Contact'] || '').trim().length > 0 && String(editMember['Contact'] || '').replace(/\D/g, '').length !== 11)}
                 isSaving={isSavingEdit}
                 isSaved={isSavedEdit}
-                idleText="Save Changes to Cloud"
-                savingText="Saving to Cloud..."
-                savedText="Saved to Cloud! ✓"
-                className="w-full py-3 text-xs font-black tracking-widest cursor-pointer"
+                idleText="Save"
+                savingText="Saving..."
+                savedText="Saved! ✓"
+                className="w-full py-3 text-xs font-black tracking-widest cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               />
             </div>
           </div>
@@ -1785,7 +2165,7 @@ export const CanteenMemberDB: React.FC = () => {
                 </div>
                 <p className="text-[11px] font-bold text-emerald-300 mt-1 flex items-center gap-1.5 truncate">
                   <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0 animate-spin" />
-                  <span>Saved successfully to Cloud! {saveSuccessBanner.nameBn ? `(${saveSuccessBanner.nameBn})` : ''}</span>
+                  <span>Saved successfully! {saveSuccessBanner.nameBn ? `(${saveSuccessBanner.nameBn})` : ''}</span>
                 </p>
               </div>
             </div>
@@ -1869,6 +2249,182 @@ export const CanteenMemberDB: React.FC = () => {
             }
           }}
         />
+      )}
+
+      {/* CANTEEN MANAGER SELECTION MODAL */}
+      {showManagerModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-xl shadow-2xl animate-in zoom-in-95 max-h-[90vh] flex flex-col space-y-5">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center shrink-0">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-white uppercase tracking-tight">
+                    CANTEEN MANAGER SELECTION
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Select active Canteen Manager from member list
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowManagerModal(false)}
+                className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 cursor-pointer transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Current Active Manager Card */}
+            <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 flex items-center space-x-4">
+              <div className="w-14 h-14 rounded-2xl bg-slate-800 border-2 border-indigo-500/50 flex items-center justify-center overflow-hidden shrink-0 shadow-md">
+                {canteenConfig?.adminImage ? (
+                  <img
+                    src={resolveImageUrl(canteenConfig.adminImage)}
+                    alt={canteenConfig.managerName || 'Manager'}
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-cover"
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                  />
+                ) : (
+                  <span className="font-black text-white text-xl">
+                    {(canteenConfig?.managerName || 'M').charAt(0)}
+                  </span>
+                )}
+              </div>
+
+              <div className="space-y-1 min-w-0 flex-1">
+                <div className="flex items-center space-x-2">
+                  <span className="px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 text-[9px] font-black uppercase tracking-wider">
+                    CURRENT ACTIVE MANAGER
+                  </span>
+                  {canteenConfig?.managerBdNo && (
+                    <span className="text-[10px] font-mono text-slate-400">
+                      BD: {canteenConfig.managerBdNo}
+                    </span>
+                  )}
+                </div>
+                <h4 className="text-base font-black text-white truncate">
+                  {canteenConfig?.managerName || 'No Manager Set Yet'}
+                </h4>
+                <div className="text-xs text-slate-300 font-mono">
+                  {canteenConfig?.phone ? (
+                    <span className="text-emerald-400 flex items-center gap-1">
+                      <Phone className="w-3 h-3" />
+                      <span>{canteenConfig.phone}</span>
+                    </span>
+                  ) : (
+                    <span className="text-slate-500 italic">No contact phone</span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Member Selection Section */}
+            <div className="flex-1 overflow-hidden flex flex-col space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-black text-slate-300 uppercase tracking-wider">
+                  SELECT NEW MANAGER FROM MEMBER DATABASE
+                </label>
+                <span className="text-[10px] font-mono text-slate-400 font-bold">
+                  {members.length} Members
+                </span>
+              </div>
+
+              {/* Search Box */}
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={managerSearchTerm}
+                  onChange={(e) => setManagerSearchTerm(e.target.value)}
+                  placeholder="Search by BD No, Rank, or Surname..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-bold"
+                />
+                {managerSearchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setManagerSearchTerm('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs font-bold"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+
+              {/* Filtered Members List */}
+              <div className="flex-1 overflow-y-auto max-h-60 divide-y divide-slate-800/80 rounded-2xl border border-slate-800/80 bg-slate-950/50 p-2 space-y-1">
+                {members
+                  .filter((m) => {
+                    if (!managerSearchTerm.trim()) return true;
+                    const term = managerSearchTerm.toLowerCase().trim();
+                    const bd = String(m['BD No'] || '').toLowerCase();
+                    const name = String(m['Surname'] || '').toLowerCase();
+                    const rank = String(m['Rank'] || '').toLowerCase();
+                    return bd.includes(term) || name.includes(term) || rank.includes(term);
+                  })
+                  .slice(0, 60)
+                  .map((m, i) => {
+                    const isCurrent = String(m['BD No']).trim() === String(canteenConfig?.managerBdNo).trim();
+                    return (
+                      <div key={m.airman_id || `mgr_m_${m['BD No'] || i}_${i}`} className="p-2.5 flex items-center justify-between gap-3 hover:bg-slate-900/70 rounded-xl transition-colors">
+                        <div className="flex items-center space-x-3 min-w-0">
+                          <div className="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-xs text-indigo-400 overflow-hidden shrink-0">
+                            {m.DP ? (
+                              <img src={resolveImageUrl(m.DP)} alt="" className="w-full h-full object-cover" />
+                            ) : (
+                              (m['Surname'] || 'U').charAt(0)
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold text-white truncate">
+                              {m['Rank'] && m['Rank'] !== '-' ? `${m['Rank']} ` : ''}{m['Surname']}
+                            </p>
+                            <p className="text-[10px] font-mono text-slate-400">
+                              BD: {m['BD No']} {m.Contact ? `• ${m.Contact}` : ''}
+                            </p>
+                          </div>
+                        </div>
+
+                        {isCurrent ? (
+                          <span className="px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 text-[10px] font-black uppercase shrink-0">
+                            Active Manager
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleAssignManager(m);
+                              setShowManagerModal(false);
+                            }}
+                            className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer shadow-xs active:scale-95 shrink-0"
+                          >
+                            Set as Manager
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="pt-2 border-t border-slate-800 flex justify-between items-center text-[10px] text-slate-500">
+              <span>Manager change will sync in real-time across the app.</span>
+              <button
+                type="button"
+                onClick={() => setShowManagerModal(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold cursor-pointer transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

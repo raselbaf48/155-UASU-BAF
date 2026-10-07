@@ -26,6 +26,21 @@ export interface RawInventoryItem {
 }
 
 /**
+ * Removes any English words, English characters, or English in parentheses
+ * so that the Bengali name contains only pure Bengali text without any English mix.
+ */
+export function cleanPureBanglaName(str: string): string {
+  if (!str) return '';
+  let cleaned = str.replace(/\s*\([a-zA-Z0-9\s\/\-_.,]+\)/g, '');
+  cleaned = cleaned.replace(/\s*\(\s*[a-zA-Z\s\/]+\s*([^\x00-\x7F]+)\s*\)/g, ' ($1)');
+  cleaned = cleaned.replace(/[a-zA-Z]+/g, '');
+  cleaned = cleaned.replace(/\s*\(\s*\)/g, '');
+  cleaned = cleaned.replace(/\s*\/\s*$/, '').replace(/^\s*\/\s*/, '');
+  cleaned = cleaned.replace(/\s{2,}/g, ' ').trim();
+  return cleaned || str;
+}
+
+/**
  * Checks if an item is a ready-made item (direct purchase & resale without cooking/process)
  * Examples: Butter Ban, Sandwich, Swarma, Singara, Puri, Hotel Porota, Biscuit, Dry Cake, Hotel Banana, etc.
  */
@@ -33,6 +48,10 @@ export const isReadymadeItem = (item: RawInventoryItem | any): boolean => {
   if (!item) return false;
   if (item.itemType === 'READY_MADE') return true;
   if (item.itemType === 'RAW') return false;
+
+  const meta = decodeNotesMeta(item.notes);
+  if (meta?.itemType === 'READY_MADE') return true;
+  if (meta?.itemType === 'RAW') return false;
 
   // Smart fallback keyword matching for existing items without explicit itemType
   const text = `${item.name || ''} ${item.nameBn || ''} ${item.category || ''} ${item.notes || ''}`.toLowerCase();
@@ -310,7 +329,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-4',
     name: 'Milk Powder',
-    nameBn: 'গুঁড়া দুধ (Dano/Diploma)',
+    nameBn: 'গুঁড়া দুধ',
     category: 'Dairy & Beverages',
     subCategory: 'Kg - gm',
     unit: 'kg',
@@ -327,7 +346,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-5',
     name: 'Tea Bag',
-    nameBn: 'টি ব্যাগ (Tea Bag)',
+    nameBn: 'টি ব্যাগ',
     category: 'Dairy & Beverages',
     subCategory: 'Packet - Pcs',
     unit: 'packet',
@@ -344,7 +363,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-6',
     name: 'Noodles',
-    nameBn: 'কাঁচা নুডলস (Raw Maggi/Egg)',
+    nameBn: 'কাঁচা নুডলস',
     category: 'Dry Food & Snacks',
     subCategory: 'Packet - Pcs',
     unit: 'packet',
@@ -408,7 +427,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-10',
     name: 'Pasta',
-    nameBn: 'কাঁচা পাস্তা (Macaroni/Spiral)',
+    nameBn: 'কাঁচা পাস্তা',
     category: 'Dry Food & Snacks',
     subCategory: 'Kg - gm',
     unit: 'kg',
@@ -493,7 +512,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-16',
     name: 'LPG',
-    nameBn: 'এলপিজি গ্যাস (LPG)',
+    nameBn: 'এলপিজি গ্যাস',
     category: 'Fuel & Utilities',
     subCategory: 'Gas Cylinder',
     unit: 'cylinder',
@@ -507,7 +526,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-17',
     name: 'Tomato Sauce',
-    nameBn: 'টমেটো সস (Tometo Sos)',
+    nameBn: 'টমেটো সস',
     category: 'Oil & Spices',
     subCategory: 'Ltr - ml',
     unit: 'bottle',
@@ -524,7 +543,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-18',
     name: 'Maggi Masala',
-    nameBn: 'ম্যাগি মসলা (Maggi Mosla)',
+    nameBn: 'ম্যাগি মসলা',
     category: 'Oil & Spices',
     subCategory: 'Packet - Pcs',
     unit: 'packet',
@@ -541,7 +560,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-19',
     name: 'Green Chili',
-    nameBn: 'কাঁচা মরিচ (Green Chili)',
+    nameBn: 'কাঁচা মরিচ',
     category: 'Vegetables',
     subCategory: 'Kg - gm',
     unit: 'kg',
@@ -559,7 +578,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-20',
     name: 'Coffee',
-    nameBn: 'কফি পাউডার (Coffee)',
+    nameBn: 'কফি পাউডার',
     category: 'Dairy & Beverages',
     subCategory: 'Packet - Pcs',
     unit: 'packet',
@@ -576,7 +595,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-21',
     name: 'Dry Cake',
-    nameBn: 'ড্রাই কেক (Dry Cake)',
+    nameBn: 'ড্রাই কেক',
     category: 'Dry Food & Snacks',
     subCategory: 'Packet - Pcs',
     unit: 'packet',
@@ -593,7 +612,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-22',
     name: 'Swarma Bread',
-    nameBn: 'শার্মা ব্রেড / রুটি (Swarma)',
+    nameBn: 'শার্মা ব্রেড / রুটি',
     category: 'Frozen Foods',
     unit: 'pcs',
     currentStock: 80,
@@ -606,7 +625,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-23',
     name: 'Butter Ban',
-    nameBn: 'বাটার বন (Butter Ban)',
+    nameBn: 'বাটার বন',
     category: 'Dry Food & Snacks',
     unit: 'pcs',
     currentStock: 70,
@@ -619,7 +638,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-24',
     name: 'Sandwich Bread',
-    nameBn: 'স্যান্ডউইচ ব্রেড (Sandwitch)',
+    nameBn: 'স্যান্ডউইচ ব্রেড',
     category: 'Dry Food & Snacks',
     subCategory: 'Packet - Pcs',
     unit: 'packet',
@@ -636,7 +655,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-25',
     name: 'Burger Bun',
-    nameBn: 'বার্গার বান (Burger)',
+    nameBn: 'বার্গার বান',
     category: 'Dry Food & Snacks',
     unit: 'pcs',
     currentStock: 60,
@@ -649,7 +668,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-26',
     name: 'Hotel Porota',
-    nameBn: 'হোটেল পরোটা (Hotel Porota)',
+    nameBn: 'হোটেল পরোটা',
     category: 'Frozen Foods',
     itemType: 'READY_MADE',
     unit: 'pcs',
@@ -663,7 +682,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-singara',
     name: 'Singara',
-    nameBn: 'গরম সিঙ্গারা (Singara)',
+    nameBn: 'গরম সিঙ্গারা',
     category: 'Dry Food & Snacks',
     itemType: 'READY_MADE',
     unit: 'pcs',
@@ -677,7 +696,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-puri',
     name: 'Puri',
-    nameBn: 'ডাল পুরি / আলু পুরি (Puri)',
+    nameBn: 'ডাল পুরি / আলু পুরি',
     category: 'Dry Food & Snacks',
     itemType: 'READY_MADE',
     unit: 'pcs',
@@ -691,7 +710,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-hotel-banana',
     name: 'Hotel Banana',
-    nameBn: 'হোটেল কলা / পাকা কলা (Banana)',
+    nameBn: 'হোটেল কলা / পাকা কলা',
     category: 'Vegetables',
     itemType: 'READY_MADE',
     unit: 'pcs',
@@ -705,7 +724,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-swarma-ready',
     name: 'Swarma',
-    nameBn: 'চিকেন শর্মা (Chicken Swarma)',
+    nameBn: 'চিকেন শর্মা',
     category: 'Frozen Foods',
     itemType: 'READY_MADE',
     unit: 'pcs',
@@ -719,7 +738,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-sandwich-ready',
     name: 'Sanwitch',
-    nameBn: 'চিকেন স্যান্ডউইচ (Sandwich)',
+    nameBn: 'চিকেন স্যান্ডউইচ',
     category: 'Dry Food & Snacks',
     itemType: 'READY_MADE',
     unit: 'pcs',
@@ -733,7 +752,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-normal-biscuit',
     name: 'Normal Biscuit',
-    nameBn: 'নরমাল বিস্কুট (Normal Biscuit)',
+    nameBn: 'নরমাল বিস্কুট',
     category: 'Dry Food & Snacks',
     itemType: 'READY_MADE',
     unit: 'packet',
@@ -747,7 +766,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-27',
     name: 'Salt',
-    nameBn: 'খাবার লবণ (Salt)',
+    nameBn: 'খাবার লবণ',
     category: 'Oil & Spices',
     subCategory: 'Kg - gm',
     unit: 'kg',
@@ -764,7 +783,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-28',
     name: 'Lemon',
-    nameBn: 'কাঁচা লেবু (Lemon)',
+    nameBn: 'কাঁচা লেবু',
     category: 'Vegetables',
     unit: 'pcs',
     currentStock: 100,
@@ -778,7 +797,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-29',
     name: 'Garlic',
-    nameBn: 'রসুন (Garlic)',
+    nameBn: 'রসুন',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 15,
@@ -795,7 +814,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-30',
     name: 'Ginger',
-    nameBn: 'আদা (Ginger)',
+    nameBn: 'আদা',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 12,
@@ -812,7 +831,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-31',
     name: 'Turmeric Powder',
-    nameBn: 'হলুদ গুঁড়া (Holud Gura)',
+    nameBn: 'হলুদ গুঁড়া',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 10,
@@ -828,7 +847,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-32',
     name: 'Chili Powder',
-    nameBn: 'মরিচের গুঁড়া (Morich Gura)',
+    nameBn: 'মরিচের গুঁড়া',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 10,
@@ -844,7 +863,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-33',
     name: 'Coriander Powder',
-    nameBn: 'ধনে গুঁড়া (Dhone Gura)',
+    nameBn: 'ধনে গুঁড়া',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 8,
@@ -860,7 +879,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-34',
     name: 'Cumin Powder',
-    nameBn: 'জিরা গুঁড়া ও গোটা জিরা (Jeera)',
+    nameBn: 'জিরা গুঁড়া ও গোটা জিরা',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 8,
@@ -876,7 +895,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-35',
     name: 'Garam Masala',
-    nameBn: 'গরম মসলা গুঁড়া (Garam Masala)',
+    nameBn: 'গরম মসলা গুঁড়া',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 5,
@@ -892,7 +911,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-36',
     name: 'Cardamom',
-    nameBn: 'সবুজ এলাচ (Elachi)',
+    nameBn: 'সবুজ এলাচ',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 2,
@@ -908,7 +927,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-37',
     name: 'Cinnamon',
-    nameBn: 'দারুচিনি (Daruchini)',
+    nameBn: 'দারুচিনি',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 4,
@@ -924,7 +943,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-38',
     name: 'Cloves',
-    nameBn: 'লবঙ্গ (Lobongo)',
+    nameBn: 'লবঙ্গ',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 2,
@@ -940,7 +959,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-39',
     name: 'Bay Leaf',
-    nameBn: 'তেজপাতা (Tej Pata)',
+    nameBn: 'তেজপাতা',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 5,
@@ -956,7 +975,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-40',
     name: 'Black Pepper',
-    nameBn: 'গোলমরিচ (Golmorich)',
+    nameBn: 'গোলমরিচ',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 3,
@@ -972,7 +991,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-41',
     name: 'Panch Phoron',
-    nameBn: 'পাঁচফোড়ন (Panch Phoron)',
+    nameBn: 'পাঁচফোড়ন',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 5,
@@ -988,7 +1007,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-42',
     name: 'Mustard Oil',
-    nameBn: 'সরিষার তেল (Mustard Oil)',
+    nameBn: 'সরিষার তেল',
     category: 'Oil & Spices',
     unit: 'liter',
     currentStock: 15,
@@ -1004,7 +1023,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-43',
     name: 'Cucumber',
-    nameBn: 'শসা (Cucumber / সালাদ)',
+    nameBn: 'শসা',
     category: 'Vegetables',
     subCategory: 'Kg - gm',
     unit: 'kg',
@@ -1022,7 +1041,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-44',
     name: 'Black Salt',
-    nameBn: 'বিট লবণ (Black Salt / Bit Lobon)',
+    nameBn: 'বিট লবণ',
     category: 'Oil & Spices',
     subCategory: 'Kg - gm',
     unit: 'kg',
@@ -1572,8 +1591,10 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
       subUnit = undefined;
     }
 
+    const pureBn = cleanPureBanglaName(item.nameBn || '');
     const normalizedItem: RawInventoryItem = {
       ...item,
+      nameBn: pureBn || item.nameBn || item.name,
       unit: (isCase || key === 'egg') ? 'case' : item.unit,
       subCategory: isPcs ? (item.subCategory || 'Pcs') : subCategory,
       hasSubUnits: isPcs ? false : hasSubUnits,
@@ -1665,9 +1686,11 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
         removedIds.push(existing.id);
         const mergedUnit = normalizedItem.unit || existing.unit || 'kg';
         const mergedIsPcs = ['pcs', 'pc', 'piece', 'টি', 'টা'].includes(mergedUnit.toLowerCase().trim());
+        const mergedItemType = existing.itemType || normalizedItem.itemType || (isReadymadeItem(normalizedItem) ? 'READY_MADE' : 'RAW');
         seenKeys.set(key, {
           ...existing,
           ...normalizedItem,
+          itemType: mergedItemType,
           name: preferredName,
           nameBn: preferredNameBn,
           category: chosenCategory,
@@ -1681,19 +1704,21 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
         removedIds.push(item.id);
         const mergedUnit = existing.unit || normalizedItem.unit || 'kg';
         const mergedIsPcs = ['pcs', 'pc', 'piece', 'টি', 'টা'].includes(mergedUnit.toLowerCase().trim());
+        const mergedItemType = existing.itemType || normalizedItem.itemType || (isReadymadeItem(existing) ? 'READY_MADE' : 'RAW');
         seenKeys.set(key, {
-          ...existing,
           ...normalizedItem,
+          ...existing,
+          itemType: mergedItemType,
           name: preferredName,
           nameBn: preferredNameBn,
           category: chosenCategory,
           subCategory: chosenSubCategory,
-          currentStock: (normalizedItem.currentStock !== undefined && normalizedItem.currentStock !== null) ? normalizedItem.currentStock : existing.currentStock,
-          minStockAlert: (normalizedItem.minStockAlert !== undefined && normalizedItem.minStockAlert !== null) ? normalizedItem.minStockAlert : existing.minStockAlert,
-          unitCost: (normalizedItem.unitCost !== undefined && normalizedItem.unitCost !== null) ? normalizedItem.unitCost : existing.unitCost,
-          packSize: mergedIsPcs ? 1 : (normalizedItem.packSize || existing.packSize || 1),
-          subUnit: mergedIsPcs ? undefined : (normalizedItem.subUnit || existing.subUnit),
-          hasSubUnits: mergedIsPcs ? false : (normalizedItem.hasSubUnits ?? existing.hasSubUnits)
+          currentStock: (existing.currentStock !== undefined && existing.currentStock !== null) ? existing.currentStock : normalizedItem.currentStock,
+          minStockAlert: (existing.minStockAlert !== undefined && existing.minStockAlert !== null) ? existing.minStockAlert : normalizedItem.minStockAlert,
+          unitCost: (existing.unitCost !== undefined && existing.unitCost !== null) ? existing.unitCost : normalizedItem.unitCost,
+          packSize: mergedIsPcs ? 1 : (existing.packSize || normalizedItem.packSize || 1),
+          subUnit: mergedIsPcs ? undefined : (existing.subUnit || normalizedItem.subUnit),
+          hasSubUnits: mergedIsPcs ? false : (existing.hasSubUnits ?? normalizedItem.hasSubUnits)
         });
       }
     }
@@ -1877,29 +1902,33 @@ export const saveRawInventoryItems = (items: RawInventoryItem[]): void => {
       .catch(err => console.warn('Supabase app_settings raw items push error:', err));
 
     if (deduplicated && deduplicated.length > 0) {
-      const payload = deduplicated.map(it => ({
-        id: it.id,
-        name: it.name,
-        nameBn: it.nameBn || '',
-        unit: it.unit || 'kg',
-        "Sub Unit": it.subUnit || (it.unit?.toLowerCase() === 'kg' ? 'gm' : (it.unit?.toLowerCase() === 'liter' ? 'ml' : (it.unit?.toLowerCase() === 'case' || it.unit?.toLowerCase() === 'packet' ? 'pcs' : null))),
-        currentStock: it.currentStock ?? 0,
-        minStockAlert: it.minStockAlert ?? 5,
-        unitCost: it.unitCost ?? 0,
-        wastagePercentage: it.wastagePercentage ?? 0,
-        lastRestockedDate: it.lastRestockedDate || '',
-        supplier: it.supplier || '',
-        DP: it.dp || it.DP || it.image || null,
-        notes: encodeNotesWithMeta(it.notes, {
-          category: it.category,
-          subCategory: it.subCategory,
-          hasSubUnits: it.hasSubUnits,
-          packSize: it.packSize,
-          subUnit: it.subUnit,
-          dp: it.dp || it.DP || it.image,
-          itemType: it.itemType || (isReadymadeItem(it) ? 'READY_MADE' : 'RAW')
-        })
-      }));
+      const payload = deduplicated.map(it => {
+        const resolvedType = it.itemType || (isReadymadeItem(it) ? 'READY_MADE' : 'RAW');
+        return {
+          id: it.id,
+          name: it.name,
+          nameBn: it.nameBn || '',
+          unit: it.unit || 'kg',
+          "Sub Unit": it.subUnit || (it.unit?.toLowerCase() === 'kg' ? 'gm' : (it.unit?.toLowerCase() === 'liter' ? 'ml' : (it.unit?.toLowerCase() === 'case' || it.unit?.toLowerCase() === 'packet' ? 'pcs' : null))),
+          currentStock: it.currentStock ?? 0,
+          minStockAlert: it.minStockAlert ?? 5,
+          unitCost: it.unitCost ?? 0,
+          wastagePercentage: it.wastagePercentage ?? 0,
+          lastRestockedDate: it.lastRestockedDate || '',
+          supplier: it.supplier || '',
+          DP: it.dp || it.DP || it.image || null,
+          itemType: resolvedType,
+          notes: encodeNotesWithMeta(it.notes, {
+            category: it.category,
+            subCategory: it.subCategory,
+            hasSubUnits: it.hasSubUnits,
+            packSize: it.packSize,
+            subUnit: it.subUnit,
+            dp: it.dp || it.DP || it.image,
+            itemType: resolvedType
+          })
+        };
+      });
       Promise.resolve(supabase.from('Canteen_Inventory').upsert(payload, { onConflict: 'id' }))
         .catch(err => console.warn('Supabase Canteen_Inventory upsert note from recipeManager:', err));
     }

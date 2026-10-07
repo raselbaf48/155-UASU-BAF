@@ -913,11 +913,11 @@ export const PosSales: React.FC = () => {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5">
-                  {filteredBatchMembers.map((m) => {
+                  {filteredBatchMembers.map((m, i) => {
                     const isSelected = batchSelectedMemberIds.has(m.airman_id);
                     return (
                       <div
-                        key={m.airman_id}
+                        key={m.airman_id || `batch_${m['BD No'] || i}_${i}`}
                         onClick={() => toggleBatchMember(m.airman_id)}
                         className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 select-none active:scale-[0.98] ${
                           isSelected
@@ -1022,9 +1022,9 @@ export const PosSales: React.FC = () => {
                           সাম্প্রতিক সদস্যবৃন্দ (Recent Members)
                         </div>
                       )}
-                      {filteredFixedMemberCandidates.map((m) => (
+                      {filteredFixedMemberCandidates.map((m, i) => (
                         <div
-                          key={m.airman_id}
+                          key={m.airman_id || `cand_${m['BD No'] || i}_${i}`}
                           onMouseDown={(e) => {
                             e.preventDefault();
                             setFixedMember(m);
@@ -1048,9 +1048,9 @@ export const PosSales: React.FC = () => {
                 {recentMembers.length > 0 && (
                   <div className="flex items-center gap-1.5 flex-wrap pt-1">
                     <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">দ্রুত সিলেক্ট:</span>
-                    {recentMembers.slice(0, 5).map((m) => (
+                    {recentMembers.slice(0, 5).map((m, i) => (
                       <button
-                        key={m.airman_id}
+                        key={m.airman_id || `rec_${m['BD No'] || i}_${i}`}
                         type="button"
                         onClick={() => setFixedMember(m)}
                         className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-indigo-900/40 text-slate-200 text-xs font-bold border border-slate-700 hover:border-indigo-500/50 transition-colors flex items-center space-x-1 cursor-pointer"
@@ -1506,8 +1506,8 @@ export const PosSales: React.FC = () => {
                   
                   {selectedMembers.length > 0 && (
                     <div className="flex flex-wrap gap-2 mb-3">
-                      {selectedMembers.map(m => (
-                        <span key={m.airman_id} className="flex items-center space-x-1 px-3 py-1.5 bg-indigo-900/30 text-indigo-400 rounded-lg text-[10px] font-bold border border-indigo-500/20">
+                      {selectedMembers.map((m, i) => (
+                        <span key={m.airman_id || `sm_${m['BD No'] || i}_${i}`} className="flex items-center space-x-1 px-3 py-1.5 bg-indigo-900/30 text-indigo-400 rounded-lg text-[10px] font-bold border border-indigo-500/20">
                           <span>{m['Rank']} {m['Surname']}</span>
                           <button onClick={() => setSelectedMembers(selectedMembers.filter(sm => sm.airman_id !== m.airman_id))} className="text-indigo-400 hover:text-indigo-300 ml-1">
                             <X className="w-3 h-3" />
@@ -1540,9 +1540,9 @@ export const PosSales: React.FC = () => {
                           const name = m['Surname'] || '';
                           const bd = m['BD No'] || '';
                           return name.toLowerCase().includes(memberSearchTerm.toLowerCase()) || bd.includes(memberSearchTerm);
-                        }).slice(0, 5)).map(m => (
+                        }).slice(0, 5)).map((m, i) => (
                           <div 
-                            key={m.airman_id} 
+                            key={m.airman_id || `drop_${m['BD No'] || i}_${i}`} 
                             onMouseDown={(e) => {
                               e.preventDefault();
                               if (!selectedMembers.find(sm => sm.airman_id === m.airman_id)) {
@@ -1940,8 +1940,8 @@ export const PosSales: React.FC = () => {
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">বিল প্রাপক সদস্য:</label>
                     {selectedMembers.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
-                        {selectedMembers.map(m => (
-                          <span key={m.airman_id} className="inline-flex items-center px-2 py-1 bg-indigo-950 border border-indigo-500/30 text-indigo-300 rounded text-[11px] font-bold">
+                        {selectedMembers.map((m, i) => (
+                          <span key={m.airman_id || `cart_mem_${m['BD No'] || i}_${i}`} className="inline-flex items-center px-2 py-1 bg-indigo-950 border border-indigo-500/30 text-indigo-300 rounded text-[11px] font-bold">
                             <span>{m['Rank']} {m['Surname']}</span>
                             <button onClick={() => setSelectedMembers(selectedMembers.filter(sm => sm.airman_id !== m.airman_id))} className="ml-1 text-slate-400 hover:text-white">
                               ✕

@@ -153,6 +153,7 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ onManagerP
           }
 
           localStorage.setItem('canteen_pre_orders', JSON.stringify(existing));
+          window.dispatchEvent(new Event('canteen_pre_orders_updated'));
           window.dispatchEvent(new Event('canteen_state_updated'));
           window.dispatchEvent(new Event('storage'));
       } catch(e) {

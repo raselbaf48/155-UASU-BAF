@@ -17,18 +17,18 @@ export const formatRankBn = (rankStr?: string): string => {
   const r = rankStr.toUpperCase().trim();
 
   // If already Bengali
-  if (r.includes('মাঃওঃঅঃ') || r.includes('মাস্টার ওয়ারেন্ট') || r.includes('মাস্টার ওয়ারেন্ট')) return 'মাঃওঃঅঃ';
+  if (r.includes('মাঃ ওঃ অঃ') || r.includes('মাঃওঃঅঃ') || r.includes('মাস্টার ওয়ারেন্ট') || r.includes('মাস্টার ওয়ারেন্ট')) return 'মাঃ ওঃ অঃ';
   if (r.includes('সিঃ ওঃ অঃ') || r.includes('সিঃওঃঅঃ') || r.includes('সিনিয়র ওয়ারেন্ট') || r.includes('সিনিয়র ওয়ারেন্ট')) return 'সিঃ ওঃ অঃ';
-  if (r.includes('ওঃঅঃ') || r.includes('ওয়ারেন্ট') || r.includes('ওয়ারেন্ট')) return 'ওঃঅঃ';
+  if (r.includes('ওঃ অঃ') || r.includes('ওঃঅঃ') || r.includes('ওয়ারেন্ট') || r.includes('ওয়ারেন্ট')) return 'ওঃ অঃ';
   if (r.includes('সার্জেন্ট') || r.includes('সার্জেণ্ট')) return 'সার্জেন্ট';
   if (r.includes('কর্পোরাল')) return 'কর্পোরাল';
   if (r.includes('এলএসি')) return 'এলএসি';
   if (r.includes('এসি')) return 'এসি';
 
   // Warrant Officers (JCOs)
-  if (r === 'MWO' || r.includes('MASTER WARRANT')) return 'মাঃওঃঅঃ';
+  if (r === 'MWO' || r.includes('MASTER WARRANT')) return 'মাঃ ওঃ অঃ';
   if (r === 'SWO' || r.includes('SENIOR WARRANT')) return 'সিঃ ওঃ অঃ';
-  if (r === 'WO' || r.includes('WARRANT')) return 'ওঃঅঃ';
+  if (r === 'WO' || r.includes('WARRANT')) return 'ওঃ অঃ';
 
   // Airmen NCOs & ORs
   if (r === 'SGT' || r.includes('SERGEANT')) return 'সার্জেন্ট';

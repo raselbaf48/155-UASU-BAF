@@ -95,40 +95,117 @@ export const getAirmanOfficeRankWeight = getRankWeight;
  * 2. Within the same rank:
  *    Lower BD Number = more senior (bdA - bdB)
  */
+/**
+ * Strictly deduplicates members by BD No and airman_id, merging fields
+ * so that no two members ever share the same identifier or key.
+ */
+export function deduplicateCanteenMembers(members: any[]): any[] {
+  if (!Array.isArray(members) || members.length === 0) return [];
+  const uniqueList: any[] = [];
+
+  for (const m of members) {
+    if (!m) continue;
+    const cleanBd = String(m['BD No'] || m.bdNo || m.airman_id || '').replace(/\D/g, '');
+    if (cleanBd === '48456') continue;
+
+    const rawAirmanId = String(m.airman_id || '').trim();
+    const effectiveAirmanId = rawAirmanId || (cleanBd ? `airman-${cleanBd}` : '');
+    const cleanAid = effectiveAirmanId.toLowerCase();
+
+    const existingIdx = uniqueList.findIndex((item) => {
+      const iBd = String(item['BD No'] || item.bdNo || item.airman_id || '').replace(/\D/g, '');
+      const iAid = String(item.airman_id || (iBd ? `airman-${iBd}` : '')).trim().toLowerCase();
+      if (cleanBd && iBd && cleanBd === iBd) return true;
+      if (cleanAid && iAid && cleanAid === iAid) return true;
+
+      // Also detect if the same person has both a temporary small BD and a real BD
+      const mSurname = String(m.Surname || '').trim().toLowerCase();
+      const iSurname = String(item.Surname || '').trim().toLowerCase();
+      const mRank = String(m.Rank || '').trim().toLowerCase();
+      const iRank = String(item.Rank || '').trim().toLowerCase();
+      if (mSurname && iSurname && mSurname === iSurname && mRank && iRank && mRank === iRank) {
+        const mNum = parseInt(cleanBd, 10);
+        const iNum = parseInt(iBd, 10);
+        if (!isNaN(mNum) && !isNaN(iNum) && ((mNum < 50 && iNum >= 50) || (iNum < 50 && mNum >= 50))) {
+          return true;
+        }
+      }
+
+      return false;
+    });
+
+    const normalizedMember = {
+      ...m,
+      airman_id: effectiveAirmanId || (cleanBd ? `airman-${cleanBd}` : `mem_${uniqueList.length + 1}`),
+      "BD No": m['BD No'] ? String(m['BD No']).trim() : cleanBd,
+    };
+
+    if (existingIdx >= 0) {
+      const existing = uniqueList[existingIdx];
+      const exBd = String(existing['BD No'] || '').replace(/\D/g, '');
+      const curBd = cleanBd;
+      const preferCur = (parseInt(curBd, 10) >= 50 && parseInt(exBd, 10) < 50);
+
+      const resolvedBd = preferCur ? (m['BD No'] ? String(m['BD No']).trim() : curBd) : (existing['BD No'] || curBd);
+      const resolvedAid = preferCur ? (effectiveAirmanId || existing.airman_id) : (existing.airman_id || effectiveAirmanId);
+
+      uniqueList[existingIdx] = {
+        ...existing,
+        ...normalizedMember,
+        airman_id: resolvedAid,
+        "BD No": resolvedBd,
+        Due: normalizedMember.Due !== undefined ? Number(normalizedMember.Due) : existing.Due,
+        due: normalizedMember.Due !== undefined ? Number(normalizedMember.Due) : existing.Due,
+        baki: normalizedMember.Due !== undefined ? Number(normalizedMember.Due) : existing.Due,
+        Contact: normalizedMember.Contact || normalizedMember['Mobile No'] || existing.Contact || existing['Mobile No'] || '',
+        DP: normalizedMember.DP || existing.DP || '',
+        Surname: normalizedMember.Surname || existing.Surname || '',
+        Rank: normalizedMember.Rank || existing.Rank || '',
+        Role: normalizedMember.Role || existing.Role || 'Member',
+        Name_BN: normalizedMember.Name_BN || normalizedMember.name_bn || existing.Name_BN || existing.name_bn,
+        Rank_BN: normalizedMember.Rank_BN || normalizedMember.rank_bn || existing.Rank_BN || existing.rank_bn
+      };
+    } else {
+      uniqueList.push(normalizedMember);
+    }
+  }
+
+  return uniqueList;
+}
+
 export function sortCanteenMembersByOfficeSeniority(members: any[]): any[] {
   if (!Array.isArray(members) || members.length <= 1) return members || [];
 
-  return [...members].sort((a, b) => {
+  const deduplicated = deduplicateCanteenMembers(members);
+
+  return deduplicated.sort((a, b) => {
     const rankA = a.Rank || a.rank || '';
     const rankB = b.Rank || b.rank || '';
     const weightA = getRankWeight(rankA);
     const weightB = getRankWeight(rankB);
 
+    // 1. Military Rank Hierarchy (Whichever rank is senior comes first)
     if (weightA !== weightB) {
       return weightA - weightB;
     }
 
-    // 2. Custom manual seniority within the rank (identical to Biodata Register)
-    const sA = (a.Seniority !== undefined && a.Seniority !== null && a.Seniority !== '' && !isNaN(Number(a.Seniority)))
-      ? Number(a.Seniority)
-      : ((a.seniority !== undefined && a.seniority !== null && a.seniority !== '' && !isNaN(Number(a.seniority))) ? Number(a.seniority) : null);
-
-    const sB = (b.Seniority !== undefined && b.Seniority !== null && b.Seniority !== '' && !isNaN(Number(b.Seniority)))
-      ? Number(b.Seniority)
-      : ((b.seniority !== undefined && b.seniority !== null && b.seniority !== '' && !isNaN(Number(b.seniority))) ? Number(b.seniority) : null);
-
-    if (sA !== null && sB !== null && sA !== sB) {
-      return sA - sB;
-    }
-    if (sA !== null && sB === null) return -1;
-    if (sA === null && sB !== null) return 1;
-
-    // 3. Fallback within the same rank: strictly by BD Number (lower BD No = more senior)
+    // 2. Within the same rank: strictly maintain seniority by BD Number (lower BD No = more senior / comes first)
     const bdAStr = String(a['BD No'] || a.bdNo || a.airman_id || '').replace(/\D/g, '');
     const bdBStr = String(b['BD No'] || b.bdNo || b.airman_id || '').replace(/\D/g, '');
-    const numA = parseInt(bdAStr, 10) || 9999999;
-    const numB = parseInt(bdBStr, 10) || 9999999;
-    return numA - numB;
+    const numA = parseInt(bdAStr, 10);
+    const numB = parseInt(bdBStr, 10);
+
+    const validNumA = !isNaN(numA) && numA > 0;
+    const validNumB = !isNaN(numB) && numB > 0;
+
+    if (validNumA && validNumB && numA !== numB) {
+      return numA - numB;
+    }
+    if (validNumA && !validNumB) return -1;
+    if (!validNumA && validNumB) return 1;
+
+    // Fallback if BD numbers are identical or non-numeric: alphabetical by surname
+    return String(a.Surname || '').localeCompare(String(b.Surname || ''));
   });
 }
 

@@ -2712,16 +2712,36 @@ export const MemberDB: React.FC = () => {
 
       const primaryKey = (cleanBd && cleanBd !== '0') ? `bd_${cleanBd}` : (airmanId ? `airman_${airmanId}` : `name_${String(m.Rank || '').trim()}_${String(m.Surname || '').trim()}`);
 
+      const mSurname = String(m.Surname || '').trim().toLowerCase();
+      const mRank = String(m.Rank || '').trim().toLowerCase();
+
       const existingIdx = uniqueList.findIndex((item) => {
         const iBd = String(item['BD No'] || item.bdNo || '').replace(/\D/g, '');
         const iAirman = String(item.airman_id || '').trim().toLowerCase();
         if (cleanBd && iBd && cleanBd === iBd) return true;
         if (airmanId && iAirman && airmanId === iAirman) return true;
+
+        const iSurname = String(item.Surname || '').trim().toLowerCase();
+        const iRank = String(item.Rank || '').trim().toLowerCase();
+        if (mSurname && iSurname && mSurname === iSurname && mRank && iRank && mRank === iRank) {
+          const mNum = parseInt(cleanBd, 10);
+          const iNum = parseInt(iBd, 10);
+          if (!isNaN(mNum) && !isNaN(iNum) && ((mNum < 50 && iNum >= 50) || (iNum < 50 && mNum >= 50))) {
+            return true;
+          }
+        }
         return false;
       });
 
       if (existingIdx >= 0) {
         const existing = uniqueList[existingIdx];
+        const exBdNum = parseInt(String(existing['BD No'] || '').replace(/\D/g, ''), 10);
+        const curBdNum = parseInt(cleanBd, 10);
+        if (curBdNum >= 50 && exBdNum < 50) {
+          existing['BD No'] = m['BD No'] || cleanBd;
+          if (m.airman_id) existing.airman_id = m.airman_id;
+        }
+
         if (m.Due !== undefined && m.Due !== null) {
           existing.Due = Number(m.Due);
           existing.due = Number(m.Due);
@@ -3403,20 +3423,8 @@ export const MemberDB: React.FC = () => {
               </p>
             </div>
 
-            {/* Action Buttons: Manager, WhatsApp Template Toggle & Payment History */}
+            {/* Action Buttons: WhatsApp Template Toggle & Payment History */}
             <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-              <button
-                type="button"
-                onClick={() => setShowManagerModal(true)}
-                className="flex items-center justify-center space-x-1.5 px-3.5 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md active:scale-95 border bg-indigo-950/70 hover:bg-indigo-900/90 text-indigo-300 hover:text-white border-indigo-700/60"
-                title="ক্যান্টিন ম্যানেজার নির্ধারণ ও বিবরণ"
-              >
-                <ShieldCheck className="w-4 h-4 text-indigo-400" />
-                <span>
-                  Manager: {canteenConfig?.managerName ? canteenConfig.managerName.split(' ')[0] : 'Assign'}
-                </span>
-              </button>
-
               <button
                 type="button"
                 onClick={() => setShowWhatsAppTemplateBox(true)}
@@ -3847,70 +3855,88 @@ export const MemberDB: React.FC = () => {
 
             return (
               <div 
-                key={member.airman_id || i} 
+                key={member.airman_id || `card_${member['BD No'] || i}_${i}`} 
                 onClick={() => openProfile(member)} 
                 className="relative bg-gradient-to-b from-slate-800/90 via-slate-900 to-slate-950 rounded-3xl p-5 border-t border-t-slate-600/60 border-x border-x-slate-700/60 border-b-4 border-b-slate-950 shadow-[0_12px_24px_-4px_rgba(0,0,0,0.65),0_4px_8px_-2px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.12),inset_0_-2px_4px_0_rgba(0,0,0,0.4)] hover:-translate-y-1.5 hover:shadow-[0_20px_35px_-6px_rgba(0,0,0,0.8),0_0_22px_0_rgba(79,70,229,0.3),inset_0_1px_0_0_rgba(255,255,255,0.2)] hover:border-b-indigo-900 transition-all duration-300 cursor-pointer group flex flex-col justify-between overflow-hidden"
               >
                 {/* Top Section: Avatar & Member Info (Left) + Total Due (Right) */}
                 <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center space-x-3.5 min-w-0 flex-1">
-                    {/* 3D Embossed Avatar Frame */}
-                    <div className="w-12 h-12 rounded-2xl bg-slate-950 text-white flex items-center justify-center font-black text-xl shadow-[inset_0_2px_5px_rgba(0,0,0,0.8),0_3px_8px_rgba(0,0,0,0.5)] group-hover:scale-105 transition-transform duration-300 overflow-hidden shrink-0 border border-slate-700/70">
-                      {memberDp ? (
-                        <img 
-                          src={memberDp} 
-                          alt={member['Surname']} 
-                          referrerPolicy="no-referrer"
-                          loading="lazy"
-                          decoding="async"
-                          className="w-full h-full object-cover"
-                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                        />
-                      ) : (
-                        <span className="text-indigo-400 font-black">
-                          {(member['Surname'] || 'U').charAt(0)}
-                        </span>
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center space-x-1.5 mb-1 flex-wrap gap-y-1">
-                        {member['Rank'] && member['Rank'] !== '-' ? (
-                          <>
-                            <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-indigo-500/15 border-t border-indigo-400/40 border-b-2 border-indigo-950 text-indigo-300 shadow-sm shrink-0 font-mono">
-                              {member['Rank']}
-                            </span>
-                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-950/70 border border-indigo-500/30 text-indigo-200 font-sans shrink-0">
-                              {getMemberBanglaRank(member) || formatRankBn(member['Rank'])}
-                            </span>
-                          </>
+                  <div className="flex items-start space-x-3.5 min-w-0 flex-1">
+                    {/* Left Column: Pic with #1 directly under it */}
+                    <div className="flex flex-col items-center shrink-0 space-y-1.5">
+                      <div className="w-13 h-13 rounded-2xl bg-slate-950 text-white flex items-center justify-center font-black text-xl shadow-[inset_0_2px_5px_rgba(0,0,0,0.8),0_3px_8px_rgba(0,0,0,0.5)] group-hover:scale-105 transition-transform duration-300 overflow-hidden shrink-0 border border-slate-700/70">
+                        {memberDp ? (
+                          <img 
+                            src={memberDp} 
+                            alt={member['Surname']} 
+                            referrerPolicy="no-referrer"
+                            loading="lazy"
+                            decoding="async"
+                            className="w-full h-full object-cover"
+                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                          />
                         ) : (
-                          <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-slate-800 text-slate-400 border border-slate-700 shrink-0">
-                            -
-                          </span>
-                        )}
-                        <span className="text-[10px] font-mono font-bold text-slate-400">
-                          BD/{member['BD No'] || member.airman_id?.replace(/\D/g, '') || '-'}
-                        </span>
-                        <span
-                          className="px-2 py-0.5 rounded-md text-[10px] font-mono font-black bg-emerald-500/15 border border-emerald-400/40 text-emerald-300 shadow-xs inline-flex items-center space-x-1 shrink-0"
-                          title="Seniority / জ্যেষ্ঠতা নম্বর (পরিবর্তন করতে Settings > Member DB ব্যবহার করুন)"
-                        >
-                          <Award className="w-2.5 h-2.5 text-emerald-400" />
-                          <span>#{member.seniority || member.Seniority || (i + 1)}</span>
-                        </span>
-                        {String(member['BD No']).trim() === String(canteenConfig?.managerBdNo).trim() && (
-                          <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-indigo-500/25 border border-indigo-400/50 text-indigo-300 font-mono shadow-sm">
-                            Manager
+                          <span className="text-indigo-400 font-black">
+                            {(member['Surname'] || 'U').charAt(0)}
                           </span>
                         )}
                       </div>
-                      <div className="flex items-baseline space-x-1.5 flex-wrap gap-y-0.5">
-                        <h3 className="font-black text-white text-base leading-snug group-hover:text-indigo-300 transition-colors break-words" title={`${member['Rank']} ${member['Surname']}`}>
-                          {member['Surname']}
-                        </h3>
-                        <span className="text-emerald-400 font-sans text-xs font-bold">
-                          ({getMemberBanglaName(member) || formatMemberNameBn(member['Surname'])})
+
+                      {/* #1 (Pic er niche) */}
+                      <span
+                        className="px-2 py-0.5 rounded-lg text-xs font-mono font-black bg-emerald-500/15 border border-emerald-400/40 text-emerald-300 shadow-xs inline-flex items-center"
+                        title="Seniority / জ্যেষ্ঠতা নম্বর"
+                      >
+                        #{member.seniority || member.Seniority || (i + 1)}
+                      </span>
+                    </div>
+
+                    {/* Right Column: Member Info */}
+                    <div className="min-w-0 flex-1 flex flex-col justify-center space-y-1">
+                      {/* Line 1: OIC / Manager er dan pase BD/9241 (NEVER show "MEMBER" badge) */}
+                      <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                        {(() => {
+                          const mBd = String(member['BD No'] || '').replace(/\D/g, '').trim();
+                          const isMgr = mBd && mBd === String(canteenConfig?.managerBdNo || '').replace(/\D/g, '').trim();
+                          const roleStr = String(member.Role || '').trim().toLowerCase();
+                          const isOic = roleStr === 'oic';
+
+                          if (isMgr) {
+                            return (
+                              <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-400/50 shrink-0">
+                                Manager
+                              </span>
+                            );
+                          }
+                          if (isOic) {
+                            return (
+                              <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-400/50 shrink-0">
+                                OIC
+                              </span>
+                            );
+                          }
+                          return null;
+                        })()}
+                        <span className="text-xs font-mono font-black text-slate-300 bg-slate-950 px-2 py-0.5 rounded-md border border-slate-800 shrink-0">
+                          BD/{String(member['BD No'] || '').replace(/\D/g, '') || member['BD No'] || member.airman_id?.replace(/\D/g, '') || '-'}
                         </span>
+                      </div>
+
+                      {/* Line 2: er niche Wg Crd Aftab (Rank & English Surname) */}
+                      <div className="text-sm font-black text-white leading-tight group-hover:text-indigo-300 transition-colors truncate">
+                        {member['Rank'] && member['Rank'] !== '-' ? `${member['Rank']} ` : ''}{member['Surname']}
+                      </div>
+
+                      {/* Line 3: tar niche bangla te উইং কমাঃ আফতাব */}
+                      <div className="text-xs font-bold text-emerald-400 font-sans leading-tight truncate">
+                        {(() => {
+                          const bnRank = getMemberBanglaRank(member) || (member['Rank'] && member['Rank'] !== '-' ? formatRankBn(member['Rank']) : '');
+                          const bnName = getMemberBanglaName(member) || formatMemberNameBn(member['Surname']);
+                          if (bnRank && bnName) return `${bnRank} ${bnName}`;
+                          if (bnName) return bnName;
+                          if (bnRank) return bnRank;
+                          return <span className="text-slate-600 text-[11px]">-</span>;
+                        })()}
                       </div>
                     </div>
                   </div>
@@ -4059,7 +4085,7 @@ export const MemberDB: React.FC = () => {
 
                   return (
                     <tr 
-                      key={member.airman_id || i}
+                      key={member.airman_id || `row_${member['BD No'] || i}_${i}`}
                       onClick={() => openProfile(member)}
                       className={`transition-colors cursor-pointer group ${
                         i % 2 === 0
@@ -6009,10 +6035,10 @@ export const MemberDB: React.FC = () => {
                       return bd.includes(term) || name.includes(term) || rank.includes(term);
                     })
                     .slice(0, 60)
-                    .map((m) => {
+                    .map((m, i) => {
                       const isCurrent = String(m['BD No']).trim() === String(canteenConfig?.managerBdNo).trim();
                       return (
-                        <div key={m.airman_id || m['BD No']} className="p-2.5 flex items-center justify-between gap-3 hover:bg-slate-900/70 rounded-xl transition-colors">
+                        <div key={m.airman_id || `mgr_m_${m['BD No'] || i}_${i}`} className="p-2.5 flex items-center justify-between gap-3 hover:bg-slate-900/70 rounded-xl transition-colors">
                           <div className="flex items-center space-x-3 min-w-0">
                             <div className="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-xs text-indigo-400 overflow-hidden shrink-0">
                               {m.DP ? (

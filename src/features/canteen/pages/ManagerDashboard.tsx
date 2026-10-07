@@ -7,7 +7,7 @@ import {
 import { supabase } from '../../../supabase';
 import { 
   getCanteenConfig, resolveImageUrl, checkPreOrderWindow, CanteenConfig,
-  getCuratedDailyMenu, saveCuratedDailyMenu, isDailyMenuExpired,
+  getCuratedDailyMenu, saveCuratedDailyMenu, isDailyMenuExpired, getCleanActivePreOrders,
   CANTEEN_DAILY_MENU_KEY, CANTEEN_DAILY_MENU_TIMESTAMP_KEY 
 } from '../utils/canteenSettings';
 import { queuePushKeyToCloud } from '../utils/canteenCloudSync';
@@ -163,19 +163,16 @@ export const ManagerDashboard: React.FC = () => {
   };
 
   const loadDailyMenu = () => {
-    // getCuratedDailyMenu automatically enforces 12:00 PM daily auto-reset
+    // getCuratedDailyMenu automatically enforces daily 3:00 auto-reset
     const ids = getCuratedDailyMenu();
     setSelectedItems(ids);
   };
 
   const loadPreOrders = () => {
-      const stored = localStorage.getItem('canteen_pre_orders');
-      if (stored) {
-          try { 
-              const parsed = JSON.parse(stored);
-              setPreOrders(parsed.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())); 
-          } catch(e){}
-      }
+    // getCleanActivePreOrders automatically enforces daily 3:00 auto-reset
+    const active = getCleanActivePreOrders();
+    const sorted = active.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    setPreOrders(sorted);
   };
 
   const toggleSelection = (id: string) => {
@@ -201,6 +198,20 @@ export const ManagerDashboard: React.FC = () => {
       saveCuratedDailyMenu([]);
       queuePushKeyToCloud('canteen_daily_menu', [], 50);
       queuePushKeyToCloud('canteen_daily_menu_updated_at', new Date().toISOString(), 50);
+  };
+
+  const handleClearAllPreOrders = () => {
+      if (!window.confirm('আপনি কি নিশ্চিত যে সকল প্রি-অর্ডার রিসেট (মুছে ফেলতে) করতে চান?')) return;
+      setPreOrders([]);
+      localStorage.setItem('canteen_pre_orders', '[]');
+      queuePushKeyToCloud('canteen_pre_orders', [], 50);
+      supabase.from('app_settings').upsert({
+        setting_key: 'canteen_pre_orders',
+        setting_value: '[]',
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'setting_key' }).then(() => {}, () => {});
+      window.dispatchEvent(new Event('canteen_pre_orders_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
   };
 
 
@@ -685,7 +696,7 @@ export const ManagerDashboard: React.FC = () => {
                                     : 'bg-rose-950 text-rose-400 border border-rose-500/40'
                               }`}>
                                  <span className={`w-1.5 h-1.5 rounded-full ${timeStatus.isOpen ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
-                                 <span>{timeStatus.isOpen ? `Active (${timeStatus.startTime} - ${timeStatus.endTime})` : `Closed (${timeStatus.startTime} - ${timeStatus.endTime})`}</span>
+                                 <span>{timeStatus.isOpen ? `Active (${timeStatus.startTime} - ${timeStatus.endTime})` : (!timeStatus.isEnabled ? 'Disabled' : `Closed (${timeStatus.startTime} - ${timeStatus.endTime})`)}</span>
                               </span>
                            );
                         })()}
@@ -778,8 +789,21 @@ export const ManagerDashboard: React.FC = () => {
                      </p>
                   </div>
                </div>
-               <div className="bg-indigo-500/20 text-indigo-400 px-3.5 py-1.5 rounded-full text-xs font-black">
-                  Today: {todaysPreOrders.length}
+               <div className="flex items-center space-x-2">
+                  {preOrders.length > 0 && (
+                     <button
+                        type="button"
+                        onClick={handleClearAllPreOrders}
+                        title="Reset all pre-orders"
+                        className="px-2.5 py-1 bg-rose-950/70 hover:bg-rose-900 border border-rose-500/40 text-rose-300 rounded-full text-[10px] font-black uppercase flex items-center space-x-1 cursor-pointer transition-all shadow-sm active:scale-95"
+                     >
+                        <RotateCcw className="w-3 h-3" />
+                        <span>Reset Orders</span>
+                     </button>
+                  )}
+                  <div className="bg-indigo-500/20 text-indigo-400 px-3.5 py-1.5 rounded-full text-xs font-black">
+                     Today: {todaysPreOrders.length}
+                  </div>
                </div>
             </div>
 
@@ -923,8 +947,8 @@ export const ManagerDashboard: React.FC = () => {
                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider self-center mr-1">
                         Selected ({selectedMembers.length}):
                      </span>
-                     {selectedMembers.map(m => (
-                        <span key={m.airman_id} className="flex items-center space-x-1.5 px-3 py-1.5 bg-indigo-950/60 text-indigo-300 rounded-lg text-xs font-bold border border-indigo-500/30">
+                     {selectedMembers.map((m, i) => (
+                        <span key={m.airman_id || `mgr_m_${m['BD No'] || i}_${i}`} className="flex items-center space-x-1.5 px-3 py-1.5 bg-indigo-950/60 text-indigo-300 rounded-lg text-xs font-bold border border-indigo-500/30">
                            <span>{m['Rank']} {m['Surname']} (BD: {m['BD No']})</span>
                            <button 
                               type="button"
@@ -961,9 +985,9 @@ export const ManagerDashboard: React.FC = () => {
                            const name = m['Surname'] || '';
                            const bd = m['BD No'] || '';
                            return name.toLowerCase().includes(memberSearchTerm.toLowerCase()) || String(bd).includes(memberSearchTerm);
-                        }).slice(0, 10).map(m => (
+                        }).slice(0, 10).map((m, i) => (
                            <div 
-                              key={m.airman_id} 
+                              key={m.airman_id || `mgr_opt_${m['BD No'] || i}_${i}`} 
                               onMouseDown={(e) => {
                                  e.preventDefault();
                                  if (!selectedMembers.find(sm => sm.airman_id === m.airman_id)) {

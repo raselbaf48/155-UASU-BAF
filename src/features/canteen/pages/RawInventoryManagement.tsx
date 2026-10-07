@@ -22,6 +22,7 @@ import {
   getRawItemSubUnitInfo,
   getRecipeForMenuItem,
   isReadymadeItem,
+  cleanPureBanglaName,
   markRawItemAsDeleted,
   unmarkRawItemAsDeleted,
   DELETED_RAW_ITEMS_STORAGE_KEY
@@ -30,6 +31,7 @@ import { queuePushKeyToCloud } from '../utils/canteenCloudSync';
 import { SaveButton } from '../components/SaveButton';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { getCanteenConfig, getItemDisplayName, CanteenConfig } from '../utils/canteenSettings';
+import { ImportStockModal } from '../components/ImportStockModal';
 
 export type { RawInventoryItem, RawStockLog, InventoryItemType };
 
@@ -86,7 +88,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-4',
     name: 'Milk Powder',
-    nameBn: 'গুঁড়া দুধ (Dano/Diploma)',
+    nameBn: 'গুঁড়া দুধ',
     category: 'Dairy & Beverages',
     unit: 'kg',
     currentStock: 18,
@@ -118,7 +120,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-6',
     name: 'Noodles',
-    nameBn: 'কাঁচা নুডলস (Raw Maggi/Egg)',
+    nameBn: 'কাঁচা নুডলস',
     category: 'Dry Food & Snacks',
     unit: 'packet',
     currentStock: 75,
@@ -174,7 +176,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-10',
     name: 'Pasta',
-    nameBn: 'কাঁচা পাস্তা (Macaroni/Spiral)',
+    nameBn: 'কাঁচা পাস্তা',
     category: 'Dry Food & Snacks',
     unit: 'kg',
     currentStock: 22,
@@ -248,7 +250,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-16',
     name: 'LPG',
-    nameBn: 'এলপিজি গ্যাস (LPG)',
+    nameBn: 'এলপিজি গ্যাস',
     category: 'Fuel & Utilities',
     subCategory: 'Gas Cylinder',
     unit: 'cylinder',
@@ -262,7 +264,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-17',
     name: 'Tomato Sauce',
-    nameBn: 'টমেটো সস (Tometo Sos)',
+    nameBn: 'টমেটো সস',
     category: 'Oil & Spices',
     unit: 'bottle',
     currentStock: 25,
@@ -275,7 +277,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-18',
     name: 'Maggi Masala',
-    nameBn: 'ম্যাগি মসলা (Maggi Mosla)',
+    nameBn: 'ম্যাগি মসলা',
     category: 'Oil & Spices',
     unit: 'packet',
     currentStock: 120,
@@ -288,7 +290,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-19',
     name: 'Green Chili',
-    nameBn: 'কাঁচা মরিচ (Green Chili)',
+    nameBn: 'কাঁচা মরিচ',
     category: 'Vegetables',
     unit: 'kg',
     currentStock: 15,
@@ -305,7 +307,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-20',
     name: 'Coffee',
-    nameBn: 'কফি পাউডার (Coffee)',
+    nameBn: 'কফি পাউডার',
     category: 'Dairy & Beverages',
     unit: 'packet',
     currentStock: 40,
@@ -318,7 +320,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-21',
     name: 'Dry Cake',
-    nameBn: 'ড্রাই কেক (Dry Cake)',
+    nameBn: 'ড্রাই কেক',
     category: 'Dry Food & Snacks',
     unit: 'packet',
     currentStock: 60,
@@ -331,7 +333,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-22',
     name: 'Swarma Bread',
-    nameBn: 'শার্মা ব্রেড / রুটি (Swarma)',
+    nameBn: 'শার্মা ব্রেড / রুটি',
     category: 'Frozen Foods',
     unit: 'pcs',
     currentStock: 80,
@@ -344,7 +346,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-23',
     name: 'Butter Ban',
-    nameBn: 'বাটার বন (Butter Ban)',
+    nameBn: 'বাটার বন',
     category: 'Dry Food & Snacks',
     unit: 'pcs',
     currentStock: 70,
@@ -357,7 +359,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-24',
     name: 'Sandwich Bread',
-    nameBn: 'স্যান্ডউইচ ব্রেড (Sandwitch)',
+    nameBn: 'স্যান্ডউইচ ব্রেড',
     category: 'Dry Food & Snacks',
     unit: 'packet',
     currentStock: 45,
@@ -373,7 +375,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-25',
     name: 'Burger Bun',
-    nameBn: 'বার্গার বান (Burger)',
+    nameBn: 'বার্গার বান',
     category: 'Dry Food & Snacks',
     unit: 'pcs',
     currentStock: 60,
@@ -386,7 +388,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-26',
     name: 'Hotel Porota',
-    nameBn: 'হোটেল পরোটা (Hotel Porota)',
+    nameBn: 'হোটেল পরোটা',
     category: 'Frozen Foods',
     unit: 'pcs',
     currentStock: 120,
@@ -399,7 +401,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-27',
     name: 'Salt',
-    nameBn: 'খাবার লবণ (Salt)',
+    nameBn: 'খাবার লবণ',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 50,
@@ -415,7 +417,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-28',
     name: 'Lemon',
-    nameBn: 'কাঁচা লেবু (Lemon)',
+    nameBn: 'কাঁচা লেবু',
     category: 'Vegetables',
     unit: 'pcs',
     currentStock: 100,
@@ -429,7 +431,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-29',
     name: 'Garlic',
-    nameBn: 'রসুন (Garlic)',
+    nameBn: 'রসুন',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 15,
@@ -446,7 +448,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-30',
     name: 'Ginger',
-    nameBn: 'আদা (Ginger)',
+    nameBn: 'আদা',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 12,
@@ -463,7 +465,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-31',
     name: 'Turmeric Powder',
-    nameBn: 'হলুদ গুঁড়া (Holud Gura)',
+    nameBn: 'হলুদ গুঁড়া',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 10,
@@ -479,7 +481,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-32',
     name: 'Chili Powder',
-    nameBn: 'মরিচের গুঁড়া (Morich Gura)',
+    nameBn: 'মরিচের গুঁড়া',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 10,
@@ -495,7 +497,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-33',
     name: 'Coriander Powder',
-    nameBn: 'ধনে গুঁড়া (Dhone Gura)',
+    nameBn: 'ধনে গুঁড়া',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 8,
@@ -511,7 +513,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-34',
     name: 'Cumin Powder',
-    nameBn: 'জিরা গুঁড়া ও গোটা জিরা (Jeera)',
+    nameBn: 'জিরা গুঁড়া ও গোটা জিরা',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 8,
@@ -527,7 +529,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-35',
     name: 'Garam Masala',
-    nameBn: 'গরম মসলা গুঁড়া (Garam Masala)',
+    nameBn: 'গরম মসলা গুঁড়া',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 5,
@@ -543,7 +545,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-36',
     name: 'Cardamom',
-    nameBn: 'সবুজ এলাচ (Elachi)',
+    nameBn: 'সবুজ এলাচ',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 2,
@@ -559,7 +561,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-37',
     name: 'Cinnamon',
-    nameBn: 'দারুচিনি (Daruchini)',
+    nameBn: 'দারুচিনি',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 4,
@@ -575,7 +577,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-38',
     name: 'Cloves',
-    nameBn: 'লবঙ্গ (Lobongo)',
+    nameBn: 'লবঙ্গ',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 2,
@@ -591,7 +593,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-39',
     name: 'Bay Leaf',
-    nameBn: 'তেজপাতা (Tej Pata)',
+    nameBn: 'তেজপাতা',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 5,
@@ -607,7 +609,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-40',
     name: 'Black Pepper',
-    nameBn: 'গোলমরিচ (Golmorich)',
+    nameBn: 'গোলমরিচ',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 3,
@@ -623,7 +625,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-41',
     name: 'Panch Phoron',
-    nameBn: 'পাঁচফোড়ন (Panch Phoron)',
+    nameBn: 'পাঁচফোড়ন',
     category: 'Oil & Spices',
     unit: 'kg',
     currentStock: 5,
@@ -639,7 +641,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-42',
     name: 'Mustard Oil',
-    nameBn: 'সরিষার তেল (Mustard Oil)',
+    nameBn: 'সরিষার তেল',
     category: 'Oil & Spices',
     unit: 'liter',
     currentStock: 15,
@@ -655,7 +657,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-43',
     name: 'Cucumber',
-    nameBn: 'শসা (Cucumber / সালাদ)',
+    nameBn: 'শসা',
     category: 'Vegetables',
     subCategory: 'Kg - gm',
     unit: 'kg',
@@ -673,7 +675,7 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
   {
     id: 'raw-44',
     name: 'Black Salt',
-    nameBn: 'বিট লবণ (Bit Lobon / Black Salt)',
+    nameBn: 'বিট লবণ',
     category: 'Oil & Spices',
     subCategory: 'Kg - gm',
     unit: 'kg',
@@ -825,6 +827,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
   const [itemToDelete, setItemToDelete] = useState<RawInventoryItem | null>(null);
   const [isDeletingItem, setIsDeletingItem] = useState(false);
   const [showResetConfirmModal, setShowResetConfirmModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
 
   const [newItemData, setNewItemData] = useState<{
     name?: string;
@@ -889,13 +892,15 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
             const isLtr = unit.toLowerCase().trim() === 'liter';
             const rawSubUnit = r['Sub Unit'] ?? r.subUnit ?? r.sub_unit ?? meta.subUnit;
             const itemDp = r.DP || r.dp || meta.dp || r.image || r.image_url || undefined;
-            const rawType = r.itemType || r.item_type || meta.itemType;
-            const itemType: InventoryItemType = (rawType || (isReadymadeItem({ ...r, notes: cleanNotes }) ? 'READY_MADE' : 'RAW')) as InventoryItemType;
+            const rawType = meta.itemType || r.itemType || r.item_type;
+            const itemType: InventoryItemType = (rawType === 'READY_MADE' || rawType === 'RAW')
+              ? rawType
+              : (isReadymadeItem({ ...r, notes: cleanNotes }) ? 'READY_MADE' : 'RAW');
 
             return {
               id: String(r.id),
               name: r.name || '',
-              nameBn: r.nameBn || r.name_bn || r.name || '',
+              nameBn: cleanPureBanglaName(r.nameBn || r.name_bn || '') || r.name || '',
               category: meta.category || r.category || 'Packaging & Disposables',
               subCategory: meta.subCategory || r.subCategory || r.sub_category || '',
               itemType,
@@ -916,7 +921,18 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
             };
           });
           setItems(prev => {
-            const combined = [...(Array.isArray(prev) ? prev : []), ...mapped];
+            const currentMap = new Map((Array.isArray(prev) ? prev : []).map(p => [p.id, p]));
+            const resolvedMapped = mapped.map(m => {
+              const current = currentMap.get(m.id);
+              if (current && (current.itemType === 'RAW' || current.itemType === 'READY_MADE')) {
+                return {
+                  ...m,
+                  itemType: current.itemType
+                };
+              }
+              return m;
+            });
+            const combined = [...(Array.isArray(prev) ? prev : []), ...resolvedMapped];
             const { deduplicated } = deduplicateRawItems(combined);
             const dedupJson = JSON.stringify(deduplicated);
             if (dedupJson === lastSavedItemsJsonRef.current) {
@@ -976,29 +992,33 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
     queuePushKeyToCloud('canteen_raw_inventory_items_v2', items);
 
     if (items.length > 0) {
-      const payload = items.map(it => ({
-        id: it.id,
-        name: it.name,
-        nameBn: it.nameBn || '',
-        unit: it.unit || 'kg',
-        "Sub Unit": it.subUnit || (it.unit?.toLowerCase() === 'kg' ? 'gm' : (it.unit?.toLowerCase() === 'liter' ? 'ml' : (it.unit?.toLowerCase() === 'case' || it.unit?.toLowerCase() === 'packet' ? 'pcs' : null))),
-        currentStock: it.currentStock ?? 0,
-        minStockAlert: it.minStockAlert ?? 5,
-        unitCost: it.unitCost ?? 0,
-        wastagePercentage: it.wastagePercentage ?? 0,
-        lastRestockedDate: it.lastRestockedDate || '',
-        supplier: it.supplier || '',
-        DP: it.dp || it.DP || it.image || null,
-        notes: encodeNotesWithMeta(it.notes, {
-          category: it.category,
-          subCategory: it.subCategory,
-          hasSubUnits: it.hasSubUnits,
-          packSize: it.packSize,
-          subUnit: it.subUnit,
-          dp: it.dp || it.DP || it.image,
-          itemType: it.itemType || (isReadymadeItem(it) ? 'READY_MADE' : 'RAW')
-        })
-      }));
+      const payload = items.map(it => {
+        const resolvedType = it.itemType || (isReadymadeItem(it) ? 'READY_MADE' : 'RAW');
+        return {
+          id: it.id,
+          name: it.name,
+          nameBn: it.nameBn || '',
+          unit: it.unit || 'kg',
+          "Sub Unit": it.subUnit || (it.unit?.toLowerCase() === 'kg' ? 'gm' : (it.unit?.toLowerCase() === 'liter' ? 'ml' : (it.unit?.toLowerCase() === 'case' || it.unit?.toLowerCase() === 'packet' ? 'pcs' : null))),
+          currentStock: it.currentStock ?? 0,
+          minStockAlert: it.minStockAlert ?? 5,
+          unitCost: it.unitCost ?? 0,
+          wastagePercentage: it.wastagePercentage ?? 0,
+          lastRestockedDate: it.lastRestockedDate || '',
+          supplier: it.supplier || '',
+          DP: it.dp || it.DP || it.image || null,
+          itemType: resolvedType,
+          notes: encodeNotesWithMeta(it.notes, {
+            category: it.category,
+            subCategory: it.subCategory,
+            hasSubUnits: it.hasSubUnits,
+            packSize: it.packSize,
+            subUnit: it.subUnit,
+            dp: it.dp || it.DP || it.image,
+            itemType: resolvedType
+          })
+        };
+      });
       Promise.resolve(supabase.from('Canteen_Inventory').upsert(payload, { onConflict: 'id' }))
         .catch(err => console.warn('Supabase Canteen_Inventory upsert note:', err));
     }
@@ -1408,6 +1428,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
             lastRestockedDate: updated.lastRestockedDate || '',
             supplier: updated.supplier || '',
             DP: effectiveDp || null,
+            itemType: resolvedItemType,
             notes: encodeNotesWithMeta(updated.notes, {
               category: updated.category,
               subCategory: updated.subCategory,
@@ -1427,6 +1448,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
         }
         return i;
       });
+      lastSavedItemsJsonRef.current = JSON.stringify(updatedList);
       saveRawInventoryItems(updatedList);
       return updatedList;
     });
@@ -1527,6 +1549,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
         lastRestockedDate: newItem.lastRestockedDate || '',
         supplier: newItem.supplier || '',
         DP: effectiveDp || null,
+        itemType: resolvedItemType,
         notes: encodeNotesWithMeta(newItem.notes, {
           category: newItem.category,
           subCategory: newItem.subCategory,
@@ -1588,6 +1611,54 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
       setIsSavingItem(false);
       setShowAddModal(false);
     }, 1050);
+  };
+
+  // Direct toggle handler for classification (Raw Item <-> Readymate Item)
+  const handleToggleClassification = async (item: RawInventoryItem, targetType?: InventoryItemType) => {
+    const nextType: InventoryItemType = targetType || (item.itemType === 'READY_MADE' ? 'RAW' : 'READY_MADE');
+    const updatedNotes = encodeNotesWithMeta(item.notes, {
+      category: item.category,
+      subCategory: item.subCategory,
+      hasSubUnits: item.hasSubUnits,
+      packSize: item.packSize,
+      subUnit: item.subUnit,
+      dp: item.dp || item.DP || item.image,
+      itemType: nextType
+    });
+
+    const updatedItem: RawInventoryItem = {
+      ...item,
+      itemType: nextType,
+      notes: updatedNotes
+    };
+
+    setItems(prev => {
+      const updatedList = prev.map(i => i.id === item.id ? updatedItem : i);
+      lastSavedItemsJsonRef.current = JSON.stringify(updatedList);
+      saveRawInventoryItems(updatedList);
+      return updatedList;
+    });
+
+    try {
+      await supabase.from('Canteen_Inventory').upsert([{
+        id: updatedItem.id,
+        name: updatedItem.name,
+        nameBn: updatedItem.nameBn || '',
+        unit: updatedItem.unit,
+        "Sub Unit": updatedItem.subUnit || null,
+        currentStock: updatedItem.currentStock,
+        minStockAlert: updatedItem.minStockAlert,
+        unitCost: updatedItem.unitCost,
+        wastagePercentage: updatedItem.wastagePercentage ?? 0,
+        lastRestockedDate: updatedItem.lastRestockedDate || '',
+        supplier: updatedItem.supplier || '',
+        DP: updatedItem.dp || updatedItem.DP || null,
+        itemType: nextType,
+        notes: updatedNotes
+      }], { onConflict: 'id' });
+    } catch (e) {
+      console.warn('Direct classification toggle sync error:', e);
+    }
   };
 
   const handleEditItem = (item: RawInventoryItem) => {
@@ -1747,9 +1818,6 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
             <div>
               <h2 className="text-2xl md:text-3xl font-black text-white uppercase tracking-tight flex items-center gap-2">
                 <span>CANTEEN INVENTORY</span>
-                <span className="text-xs px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-bold uppercase tracking-wider">
-                  ইনভেন্টরি ও স্টক
-                </span>
               </h2>
               <p className="text-xs font-semibold text-slate-400 mt-0.5">
                 Kitchen raw materials, readymade resale items & Cloud DP synchronization
@@ -1795,6 +1863,15 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
             </button>
 
             <button
+              onClick={() => setShowImportModal(true)}
+              className="flex items-center space-x-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black tracking-wider transition-all shadow-md shadow-emerald-600/20 active:scale-95 cursor-pointer"
+              title="Import & Update Stock via Excel / CSV"
+            >
+              <Upload className="w-4 h-4" />
+              <span>IMPORT STOCK</span>
+            </button>
+
+            <button
               onClick={() => setShowLogsModal(true)}
               className="flex items-center space-x-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold border border-slate-700 transition-colors cursor-pointer"
               title="View Stock In / Out Log History"
@@ -1806,212 +1883,83 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
         )}
       </div>
 
-      {/* 2-Option Main Inventory Switcher: 1. RAW Item vs 2. Readymate Items */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-3.5 shadow-md">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      {/* 3-Option Main Inventory Switcher: Raw Item, Readymate Item, All */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-2.5 shadow-md">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
           {/* Option 1: RAW Item */}
           <button
             type="button"
             onClick={() => setInventoryTypeFilter('RAW')}
-            className={`flex items-start gap-3.5 p-4 rounded-2xl border-2 transition-all text-left cursor-pointer ${
+            className={`flex items-center justify-between p-3.5 rounded-xl border-2 transition-all text-left cursor-pointer ${
               inventoryTypeFilter === 'RAW'
                 ? 'bg-gradient-to-r from-blue-950/80 via-indigo-950/70 to-slate-900 border-blue-500 shadow-lg shadow-blue-500/20 ring-1 ring-blue-400/40'
                 : 'bg-slate-950/50 border-slate-800 hover:bg-slate-800/50 hover:border-slate-700'
             }`}
           >
-            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl shrink-0 ${
-              inventoryTypeFilter === 'RAW'
-                ? 'bg-blue-600 text-white shadow-md'
-                : 'bg-slate-800 text-blue-400'
-            }`}>
-              🌾
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-1">
-                <span className="font-black text-white text-sm tracking-wide">1. RAW Item (কাঁচামাল)</span>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-blue-500/20 text-blue-300 border border-blue-500/40">
-                  {stats.rawItemsCount} টি
-                </span>
+            <div className="flex items-center gap-3">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg shrink-0 ${
+                inventoryTypeFilter === 'RAW'
+                  ? 'bg-blue-600 text-white shadow-md'
+                  : 'bg-slate-800 text-blue-400'
+              }`}>
+                🌾
               </div>
-              <p className="text-xs text-blue-200/90 font-medium mt-1">
-                যা দিয়ে প্রসেস করে Menu Ready করা হয়
-              </p>
-              <p className="text-[11px] text-slate-400 mt-0.5 truncate">
-                চাল, ডাল, তেল, মুরগি, গুঁড়া দুধ, মসলা ইত্যাদি
-              </p>
+              <span className="font-black text-white text-base tracking-wide">Raw Item</span>
             </div>
+            <span className="px-2.5 py-1 rounded-full text-xs font-black bg-blue-500/20 text-blue-300 border border-blue-500/40">
+              {stats.rawItemsCount}
+            </span>
           </button>
 
-          {/* Option 2: Readymate Items */}
+          {/* Option 2: Readymate Item */}
           <button
             type="button"
             onClick={() => setInventoryTypeFilter('READY_MADE')}
-            className={`flex items-start gap-3.5 p-4 rounded-2xl border-2 transition-all text-left cursor-pointer ${
+            className={`flex items-center justify-between p-3.5 rounded-xl border-2 transition-all text-left cursor-pointer ${
               inventoryTypeFilter === 'READY_MADE'
                 ? 'bg-gradient-to-r from-emerald-950/80 via-teal-950/70 to-slate-900 border-emerald-500 shadow-lg shadow-emerald-500/20 ring-1 ring-emerald-400/40'
                 : 'bg-slate-950/50 border-slate-800 hover:bg-slate-800/50 hover:border-slate-700'
             }`}
           >
-            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl shrink-0 ${
-              inventoryTypeFilter === 'READY_MADE'
-                ? 'bg-emerald-600 text-white shadow-md'
-                : 'bg-slate-800 text-emerald-400'
-            }`}>
-              🥐
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-1">
-                <span className="font-black text-white text-sm tracking-wide">2. Readymate Items (রেডিমেট)</span>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                  {stats.readymadeItemsCount} টি
-                </span>
+            <div className="flex items-center gap-3">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg shrink-0 ${
+                inventoryTypeFilter === 'READY_MADE'
+                  ? 'bg-emerald-600 text-white shadow-md'
+                  : 'bg-slate-800 text-emerald-400'
+              }`}>
+                🥐
               </div>
-              <p className="text-xs text-emerald-200/90 font-medium mt-1">
-                সরাসরি কিনে এনে প্রসেস ছাড়াই Sell দেওয়া যায়
-              </p>
-              <p className="text-[11px] text-slate-400 mt-0.5 truncate">
-                Butter Ban, Sandwich, Swarma, Biscuit, Singara, Porota, Banana
-              </p>
+              <span className="font-black text-white text-base tracking-wide">Readymate Item</span>
             </div>
+            <span className="px-2.5 py-1 rounded-full text-xs font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+              {stats.readymadeItemsCount}
+            </span>
           </button>
 
-          {/* Option 3: All Items */}
+          {/* Option 3: All */}
           <button
             type="button"
             onClick={() => setInventoryTypeFilter('ALL')}
-            className={`flex items-start gap-3.5 p-4 rounded-2xl border-2 transition-all text-left cursor-pointer ${
+            className={`flex items-center justify-between p-3.5 rounded-xl border-2 transition-all text-left cursor-pointer ${
               inventoryTypeFilter === 'ALL'
                 ? 'bg-gradient-to-r from-indigo-950/80 via-purple-950/70 to-slate-900 border-indigo-500 shadow-lg shadow-indigo-500/20 ring-1 ring-indigo-400/40'
                 : 'bg-slate-950/50 border-slate-800 hover:bg-slate-800/50 hover:border-slate-700'
             }`}
           >
-            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl shrink-0 ${
-              inventoryTypeFilter === 'ALL'
-                ? 'bg-indigo-600 text-white shadow-md'
-                : 'bg-slate-800 text-indigo-400'
-            }`}>
-              📦
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-1">
-                <span className="font-black text-white text-sm tracking-wide">All Inventory (সব আইটেম)</span>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
-                  {stats.totalItems} টি
-                </span>
+            <div className="flex items-center gap-3">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg shrink-0 ${
+                inventoryTypeFilter === 'ALL'
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'bg-slate-800 text-indigo-400'
+              }`}>
+                📦
               </div>
-              <p className="text-xs text-indigo-200/90 font-medium mt-1">
-                সম্পূর্ণ স্টক তালিকা (কাঁচামাল + রেডিমেট)
-              </p>
-              <p className="text-[11px] text-slate-400 mt-0.5 truncate">
-                ক্যান্টিনের সকল আইটেম এক নজরে
-              </p>
+              <span className="font-black text-white text-base tracking-wide">All</span>
             </div>
+            <span className="px-2.5 py-1 rounded-full text-xs font-black bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
+              {stats.totalItems}
+            </span>
           </button>
-        </div>
-      </div>
-
-      {/* Selected Option Clarification Banner */}
-      <div className={`rounded-2xl p-4 border flex items-start gap-3.5 text-xs transition-all ${
-        inventoryTypeFilter === 'RAW'
-          ? 'bg-blue-950/30 border-blue-500/30 text-blue-200'
-          : inventoryTypeFilter === 'READY_MADE'
-          ? 'bg-emerald-950/30 border-emerald-500/30 text-emerald-200'
-          : 'bg-slate-900 border-slate-800 text-slate-300'
-      }`}>
-        <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 text-sm font-black ${
-          inventoryTypeFilter === 'RAW'
-            ? 'bg-blue-500/20 text-blue-400 border border-blue-500/40'
-            : inventoryTypeFilter === 'READY_MADE'
-            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-            : 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/40'
-        }`}>
-          {inventoryTypeFilter === 'RAW' ? '🌾' : inventoryTypeFilter === 'READY_MADE' ? '🥐' : '📦'}
-        </div>
-        <div className="space-y-1">
-          <div className="font-extrabold text-white text-sm">
-            {inventoryTypeFilter === 'RAW' && '১. RAW Items (কাঁচামাল) — যা দিয়ে প্রসেস করে Menu Ready করা হয়'}
-            {inventoryTypeFilter === 'READY_MADE' && '২. Readymate Items (রেডিমেট পণ্য) — যা সরাসরি কিনে এনে কোনো প্রসেস ছাড়াই Sell দেওয়া যায়'}
-            {inventoryTypeFilter === 'ALL' && 'ক্যান্টিনের সম্পূর্ণ ইনভেন্টরি স্টক তালিকা (RAW ও Readymate উভয় পণ্য)'}
-          </div>
-          <p className="leading-relaxed text-slate-300">
-            {inventoryTypeFilter === 'RAW' && 'এই আইটেমগুলো রান্নার কাঁচামাল। যা কিচেনে প্রসেসিং/রান্না করে মেনু তৈরি করতে ব্যবহার করা হয় (যেমন: চাল, ডাল, তেল, মুরগি, গুঁড়া দুধ, ডিম, মসলা ইত্যাদি)। POS বিক্রির সাথে সাথে স্বয়ংক্রিয়ভাবে স্টক বিয়োগ হয়।'}
-            {inventoryTypeFilter === 'READY_MADE' && 'এই পণ্যগুলো সরাসরি বাহিরে কোনো দোকান বা বেকারি থেকে এনে কোনো রূপ রান্না বা প্রসেসিং ছাড়াই কাস্টমারকে Sell দেওয়া যায় (যেমন: Butter Ban, Sandwich, Swarma, Normal Biscuit, Dry Cake, Singara, Puri, Hotel Porota, Hotel Banana ইত্যাদি)।'}
-            {inventoryTypeFilter === 'ALL' && 'এখানে রান্নার কাঁচামাল এবং সরাসরি বিক্রয়যোগ্য রেডিমেট সকল আইটেম প্রদর্শিত হচ্ছে। ফিল্টার করতে উপরের কাঁচামাল বা রেডিমেট অপশনে ক্লিক করুন।'}
-          </p>
-        </div>
-      </div>
-
-      {/* KPI Summary Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Card 1: Total Items */}
-        <div className="relative bg-gradient-to-b from-slate-800/90 via-slate-900 to-slate-950 rounded-3xl p-5 border-t border-t-slate-600/60 border-x border-x-slate-700/60 border-b-4 border-b-slate-950 shadow-[0_12px_24px_-4px_rgba(0,0,0,0.65),0_4px_8px_-2px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.12),inset_0_-2px_4px_0_rgba(0,0,0,0.4)] overflow-hidden">
-          <div className="text-[11px] font-black uppercase text-slate-400 tracking-wider">
-            Total Inventory Items
-          </div>
-          <div className="text-3xl font-black text-white mt-1">
-            {stats.totalItems} <span className="text-xs font-bold text-slate-500 uppercase">Items</span>
-          </div>
-          <div className="text-[11px] text-slate-400 mt-2 flex items-center gap-1.5 flex-wrap">
-            <span className="text-blue-400 font-bold">🌾 {stats.rawItemsCount} RAW</span>
-            <span>•</span>
-            <span className="text-emerald-400 font-bold">🥐 {stats.readymadeItemsCount} Readymade</span>
-          </div>
-        </div>
-
-        {/* Card 2: Total Stock Value */}
-        <div className="relative bg-gradient-to-b from-slate-800/90 via-slate-900 to-slate-950 rounded-3xl p-5 border-t border-t-slate-600/60 border-x border-x-slate-700/60 border-b-4 border-b-slate-950 shadow-[0_12px_24px_-4px_rgba(0,0,0,0.65),0_4px_8px_-2px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.12),inset_0_-2px_4px_0_rgba(0,0,0,0.4)] overflow-hidden">
-          <div className="text-[11px] font-black uppercase text-slate-400 tracking-wider">
-            Total Stock Value
-          </div>
-          <div className="text-3xl font-black text-emerald-400 mt-1">
-            {formatMoney(stats.totalValue, 'en')}
-          </div>
-          <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-            <span>Current warehouse valuation</span>
-          </div>
-        </div>
-
-        {/* Card 3: Low Stock Alerts */}
-        <div 
-          onClick={() => setStockStatusFilter(stockStatusFilter === 'LOW' ? 'ALL' : 'LOW')}
-          className={`relative bg-gradient-to-b from-slate-800/90 via-slate-900 to-slate-950 rounded-3xl p-5 border-t border-t-slate-600/60 border-x border-x-slate-700/60 border-b-4 border-b-slate-950 shadow-[0_12px_24px_-4px_rgba(0,0,0,0.65),0_4px_8px_-2px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.12),inset_0_-2px_4px_0_rgba(0,0,0,0.4)] cursor-pointer transition-all hover:-translate-y-1 ${
-            stats.lowStockCount > 0 
-              ? 'border-t-amber-500/50 border-b-amber-950 bg-gradient-to-b from-amber-950/30 via-slate-900 to-slate-950' 
-              : ''
-          } ${stockStatusFilter === 'LOW' ? 'ring-2 ring-amber-500' : ''}`}
-        >
-          <div className="text-[11px] font-black uppercase tracking-wider text-amber-400 flex items-center justify-between">
-            <span>Low Stock Alert</span>
-            {stats.lowStockCount > 0 && (
-              <span className="animate-pulse flex h-2 w-2 relative">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
-              </span>
-            )}
-          </div>
-          <div className="text-3xl font-black text-amber-400 mt-1">
-            {stats.lowStockCount} <span className="text-xs font-bold text-slate-500 uppercase">Items</span>
-          </div>
-          <div className="text-[11px] text-slate-400 mt-1">
-            {stats.lowStockCount > 0 ? 'Click to filter reorder items' : 'All items sufficiently stocked'}
-          </div>
-        </div>
-
-        {/* Card 4: Inventory Health */}
-        <div className="relative bg-gradient-to-b from-slate-800/90 via-slate-900 to-slate-950 rounded-3xl p-5 border-t border-t-slate-600/60 border-x border-x-slate-700/60 border-b-4 border-b-slate-950 shadow-[0_12px_24px_-4px_rgba(0,0,0,0.65),0_4px_8px_-2px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.12),inset_0_-2px_4px_0_rgba(0,0,0,0.4)] overflow-hidden">
-          <div className="text-[11px] font-black uppercase text-slate-400 tracking-wider">
-            Stock Availability
-          </div>
-          <div className="text-3xl font-black text-indigo-400 mt-1">
-            {stats.healthPercent}%
-          </div>
-          <div className="w-full bg-slate-950 h-2 rounded-full mt-2.5 overflow-hidden border border-slate-800/80 shadow-inner">
-            <div 
-              className={`h-full rounded-full transition-all duration-300 ${stats.healthPercent > 80 ? 'bg-emerald-500' : stats.healthPercent > 50 ? 'bg-amber-500' : 'bg-rose-500'}`}
-              style={{ width: `${stats.healthPercent}%` }}
-            ></div>
-          </div>
         </div>
       </div>
 
@@ -2239,15 +2187,25 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                       {/* Unit, Type & Wastage Tag Pills */}
                       <div className="flex flex-wrap items-center gap-1.5 mt-3">
                         {/* RAW vs Readymate Badge */}
-                        {(item.itemType === 'READY_MADE' || isReadymadeItem(item)) ? (
-                          <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border-t border-emerald-400/30 border-b-2 border-emerald-950 shadow-sm flex items-center gap-1">
-                            <span>🥐 রেডিমেট</span>
-                          </span>
-                        ) : (
-                          <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-blue-500/20 text-blue-300 border-t border-blue-400/30 border-b-2 border-blue-950 shadow-sm flex items-center gap-1">
-                            <span>🌾 কাঁচামাল</span>
-                          </span>
-                        )}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!readOnly) handleToggleClassification(item);
+                          }}
+                          title={readOnly ? undefined : "Click to toggle between Raw Item & Readymate"}
+                          className={`${readOnly ? '' : 'cursor-pointer hover:scale-105 active:scale-95 transition-all'}`}
+                        >
+                          {(item.itemType === 'READY_MADE' || isReadymadeItem(item)) ? (
+                            <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border-t border-emerald-400/30 border-b-2 border-emerald-950 shadow-sm flex items-center gap-1">
+                              <span>🥐 Readymate</span>
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-blue-500/20 text-blue-300 border-t border-blue-400/30 border-b-2 border-blue-950 shadow-sm flex items-center gap-1">
+                              <span>🌾 Raw Item</span>
+                            </span>
+                          )}
+                        </button>
 
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-800/90 text-indigo-300 border-t border-slate-600/40 border-b-2 border-slate-950 shadow-sm uppercase">
                           {item.unit}
@@ -2442,15 +2400,25 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                                 <div>
                                   <div className="font-extrabold text-white text-sm flex items-center gap-2">
                                     <span>{nameDisplay.primary}</span>
-                                    {(item.itemType === 'READY_MADE' || isReadymadeItem(item)) ? (
-                                      <span className="text-[10px] font-black px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                                        🥐 রেডিমেট
-                                      </span>
-                                    ) : (
-                                      <span className="text-[10px] font-black px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                                        🌾 কাঁচামাল
-                                      </span>
-                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (!readOnly) handleToggleClassification(item);
+                                      }}
+                                      title={readOnly ? undefined : "Click to toggle between Raw Item & Readymate"}
+                                      className={`${readOnly ? '' : 'cursor-pointer hover:scale-105 active:scale-95 transition-all'}`}
+                                    >
+                                      {(item.itemType === 'READY_MADE' || isReadymadeItem(item)) ? (
+                                        <span className="text-[10px] font-black px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                          🥐 Readymate
+                                        </span>
+                                      ) : (
+                                        <span className="text-[10px] font-black px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                                          🌾 Raw Item
+                                        </span>
+                                      )}
+                                    </button>
                                     {isLow && (
                                       <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-300 font-bold">
                                         <AlertTriangle className="w-2.5 h-2.5" /> Low
@@ -4156,6 +4124,32 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
           </div>
         </div>
       )}
+
+      {/* Import & Update Stock Modal */}
+      <ImportStockModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        items={items}
+        onStockUpdated={async (updatedItems, newLogs) => {
+          setItems(updatedItems);
+          saveRawInventoryItems(updatedItems);
+          if (newLogs && newLogs.length > 0) {
+            setLogs(prev => {
+              const merged = [...newLogs, ...(Array.isArray(prev) ? prev : [])];
+              try {
+                localStorage.setItem(LOGS_STORAGE_KEY, JSON.stringify(merged));
+              } catch {}
+              queuePushKeyToCloud('canteen_raw_stock_logs', merged);
+              return merged;
+            });
+          }
+          queuePushKeyToCloud('canteen_raw_inventory_items_v2', updatedItems);
+          setTimeout(() => {
+            window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+            window.dispatchEvent(new Event('canteen_raw_stock_logs_updated'));
+          }, 0);
+        }}
+      />
     </div>
   );
 };
