@@ -5,7 +5,8 @@ import {
   Calendar, Tag, FileText, Boxes, UserCheck, Layers, 
   Wallet, ShoppingCart, DollarSign, Store, Utensils,
   Check, PackagePlus, History, Clock, ArrowDownLeft, ArrowUpRight,
-  Filter, CheckSquare, Sparkles, ChevronRight, User
+  Filter, CheckSquare, Sparkles, ChevronRight, User,
+  ArrowLeft, ArrowUpDown, ArrowUp, ArrowDown
 } from 'lucide-react';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { 
@@ -14,7 +15,39 @@ import {
   RawInventoryItem 
 } from '../utils/recipeManager';
 import { supabase } from '../../../supabase';
-import { pushKeyToCloud, pullKeyFromCloud } from '../utils/canteenCloudSync';
+import { pushKeyToCloud, pullKeyFromCloud, recordDeletedExpenseId, getDeletedExpenseIds } from '../utils/canteenCloudSync';
+import { resolveImageUrl } from '../utils/canteenSettings';
+
+export interface CivilianPerson {
+  id: string;
+  name: string;
+  rank: string;
+  surname?: string;
+  role?: string;
+  dp?: string | null;
+  bdNo?: string;
+}
+
+export const matchesCivilian = (
+  personStr: string | null | undefined, 
+  civ: { name?: string; surname?: string } | null | undefined
+): boolean => {
+  if (!personStr || !civ) return false;
+  const target = String(personStr).trim().toLowerCase();
+  const cName = String(civ.name || '').trim().toLowerCase();
+  const cSurname = String(civ.surname || '').trim().toLowerCase();
+  
+  if (cName && target === cName) return true;
+  if (cSurname && cSurname.length >= 2 && target.includes(cSurname)) return true;
+  if (cName && target.includes(cName)) return true;
+  return false;
+};
+
+export const getCivInitials = (civ: { surname?: string; name?: string } | null | undefined): string => {
+  if (!civ) return 'CV';
+  const str = civ.surname || civ.name || 'CV';
+  return str.slice(0, 2).toUpperCase();
+};
 
 export const DUE_SHOPS = ['Grocessary Shop', 'Poultry Shop', 'Bake & Bite'] as const;
 export type DueShopName = typeof DUE_SHOPS[number];
@@ -25,7 +58,7 @@ export interface ExpenseRecord {
   desc: string;
   subdesc?: string;
   category?: string;
-  paymentMethod?: 'Cash' | 'UCB' | 'Due' | string;
+  paymentMethod?: 'Cash' | 'Due' | string;
   dueShop?: 'Grocessary Shop' | 'Poultry Shop' | 'Bake & Bite' | string;
   amount: number;
   qty?: number;
@@ -44,7 +77,7 @@ export interface BazarAdvance {
   amount: number;
   spentAmount: number;
   returnAmount: number;
-  channel: 'CASH' | 'UCB';
+  channel: 'CASH';
   purpose: string;
   status: 'ACTIVE' | 'SETTLED';
   settledDate?: string;
@@ -101,33 +134,53 @@ export const Expenditures: React.FC = () => {
   });
 
   const [rawItems, setRawItems] = useState<RawInventoryItem[]>([]);
-  const [civilians, setCivilians] = useState<Array<{ id: string; name: string }>>([
-    { id: 'civ-tanvir', name: 'Civ Tanvir' },
-    { id: 'civ-nurnabi', name: 'Civ Nur Nabi' }
+  const [civilians, setCivilians] = useState<CivilianPerson[]>([
+    { id: 'civ-tanvir', name: 'Civ Tanvir', rank: 'Civ', surname: 'Tanvir', role: 'Staff', dp: null },
+    { id: 'civ-nurnabi', name: 'Civ Nur Nabi', rank: 'Civ', surname: 'Nur Nabi', role: 'Cook', dp: null },
+    { id: 'civ-akramul', name: 'Civ Akramul', rank: 'Civ', surname: 'Akramul', role: 'Staff', dp: null },
+    { id: 'civ-sharif', name: 'Civ Sharif', rank: 'Civ', surname: 'Sharif', role: 'Staff', dp: null },
+    { id: 'civ-irfan', name: 'Civ Irfan', rank: 'Civ', surname: 'Irfan', role: 'Staff', dp: null },
+    { id: 'civ-sanwar', name: 'Civ Sanwar', rank: 'Civ', surname: 'Sanwar', role: 'Staff', dp: null }
   ]);
+
+  // Main Page View Mode: 'list' (dashboard with records) | 'add-expense' (dedicated new page for expense entry)
+  const [viewMode, setViewMode] = useState<'list' | 'add-expense'>('list');
+
+  // Sorting order for main Expense Records: 'desc' (Latest on top, default) | 'asc' (Oldest on top)
+  const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
+
+  // Civilian History Modal
+  const [viewingHistoryCiv, setViewingHistoryCiv] = useState<CivilianPerson | null>(null);
+
+  // Civilian Advance month filter (default running month)
+  const runningMonthLabel = useMemo(() => {
+    return new Date().toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  }, []);
+  const [civMonthFilter, setCivMonthFilter] = useState<string>(runningMonthLabel);
 
   // Main UI Mode / Modal States
   const [showAddForm, setShowAddForm] = useState(false);
-  const [showHistoryModal, setShowHistoryModal] = useState(false);
-  const [showAdvanceRegisterModal, setShowAdvanceRegisterModal] = useState(false);
+  const [showAddAdvanceModal, setShowAddAdvanceModal] = useState(false);
+  const [showAdvanceBreakdownModal, setShowAdvanceBreakdownModal] = useState(false);
 
-  // Search & Filters for Main Table
+  // Search & Filters for Main Bottom Table ("Expence record ager moto nichei thakbe")
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterMethod, setFilterMethod] = useState<'ALL' | 'Cash' | 'UCB' | 'Due'>('ALL');
+  const [filterMethod, setFilterMethod] = useState<'ALL' | 'Cash' | 'Due'>('ALL');
   const [filterShop, setFilterShop] = useState<'ALL' | DueShopName>('ALL');
   const [filterPerson, setFilterPerson] = useState<string>('ALL');
   const [filterDateRange, setFilterDateRange] = useState<'ALL' | 'THIS_MONTH' | 'TODAY'>('ALL');
 
-  // History Modal Filters
+  // History / Expense Records Modal Filters
   const [historySearch, setHistorySearch] = useState('');
-  const [historyChannelFilter, setHistoryChannelFilter] = useState<'ALL' | 'Cash' | 'UCB' | 'Due'>('ALL');
+  const [historyChannelFilter, setHistoryChannelFilter] = useState<'ALL' | 'Cash' | 'Due'>('ALL');
   const [historyDateFilter, setHistoryDateFilter] = useState<'ALL' | 'THIS_MONTH' | 'TODAY'>('ALL');
 
   // New Expense Form State
   const [formDate, setFormDate] = useState(formatCanteenDate(new Date()));
   const [formPerson, setFormPerson] = useState('Civ Tanvir');
-  const [formPaymentMethod, setFormPaymentMethod] = useState<'Cash' | 'UCB' | 'Due'>('Cash');
+  const [formPaymentMethod, setFormPaymentMethod] = useState<'Cash' | 'Due'>('Cash');
   const [formDueShop, setFormDueShop] = useState<DueShopName>('Grocessary Shop');
+  const [formDeductAdvance, setFormDeductAdvance] = useState(true);
   const [itemRows, setItemRows] = useState<ItemRowInput[]>([
     {
       id: 'row-1',
@@ -148,7 +201,6 @@ export const Expenditures: React.FC = () => {
   const [advDate, setAdvDate] = useState(formatCanteenDate(new Date()));
   const [advPerson, setAdvPerson] = useState('Civ Tanvir');
   const [advAmount, setAdvAmount] = useState<number | ''>('');
-  const [advChannel, setAdvChannel] = useState<'CASH' | 'UCB'>('CASH');
   const [advPurpose, setAdvPurpose] = useState('Daily Bazar Advance');
 
   // Advance Settle / Return Modal State
@@ -167,6 +219,33 @@ export const Expenditures: React.FC = () => {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
+  // Audio chime feedback for success / deletion
+  const playSuccessSound = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+      const now = ctx.currentTime;
+      
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(587.33, now); // D5
+      osc.frequency.setValueAtTime(880, now + 0.08); // A5
+      
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+      
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.3);
+    } catch {}
+  };
+
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 4000);
@@ -181,10 +260,13 @@ export const Expenditures: React.FC = () => {
       try {
         const cloudExp = await pullKeyFromCloud(STORAGE_KEY);
         if (Array.isArray(cloudExp)) {
+          const deletedExpIds = getDeletedExpenseIds();
           const localExp: ExpenseRecord[] = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
           const map = new Map<string, ExpenseRecord>();
           [...cloudExp, ...localExp].forEach(e => {
-            if (e && e.id) map.set(String(e.id), e);
+            if (e && e.id && !deletedExpIds.has(String(e.id))) {
+              map.set(String(e.id), e);
+            }
           });
           const merged = Array.from(map.values());
           localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
@@ -213,25 +295,47 @@ export const Expenditures: React.FC = () => {
       try {
         const { data } = await supabase.from('Canteen_Member').select('*');
         if (data && Array.isArray(data)) {
-          const civList = data
+          const civList: CivilianPerson[] = data
             .filter((m: any) => {
               const rank = (m.Rank || m.rank || '').toUpperCase();
-              return rank.includes('CIV');
+              const role = (m.Role || m.role || '').toUpperCase();
+              const name = (m.Surname || m.Name || '').toUpperCase();
+              return rank.includes('CIV') || role.includes('STAFF') || role.includes('COOK') || name.includes('TANVIR');
             })
-            .map((m: any) => ({
-              id: m.airman_id || m['BD No'] || m.Name || m.name,
-              name: `${m.Rank || 'Civ'} ${m.Surname || m.surname || m.Name || ''}`.trim()
-            }));
+            .map((m: any) => {
+              const surname = m.Surname || m.surname || m.Name || m.name || '';
+              const rank = m.Rank || 'Civ';
+              return {
+                id: String(m.airman_id || m['BD No'] || surname),
+                name: `${rank} ${surname}`.trim(),
+                rank: rank,
+                surname: surname,
+                role: m.Role || 'Staff',
+                dp: m.DP || m.dp || m.photo_url || null,
+                bdNo: m['BD No'] || ''
+              };
+            });
 
-          if (!civList.some(c => c.name.toLowerCase().includes('tanvir'))) {
-            civList.unshift({ id: 'civ-tanvir', name: 'Civ Tanvir' });
-          }
-          if (!civList.some(c => c.name.toLowerCase().includes('nur nabi'))) {
-            civList.push({ id: 'civ-nurnabi', name: 'Civ Nur Nabi' });
-          }
+          const defaultCivs: CivilianPerson[] = [
+            { id: 'civ-tanvir', name: 'Civ Tanvir', rank: 'Civ', surname: 'Tanvir', role: 'Staff', dp: null },
+            { id: 'civ-nurnabi', name: 'Civ Nur Nabi', rank: 'Civ', surname: 'Nur Nabi', role: 'Cook', dp: null },
+            { id: 'civ-akramul', name: 'Civ Akramul', rank: 'Civ', surname: 'Akramul', role: 'Staff', dp: null },
+            { id: 'civ-sharif', name: 'Civ Sharif', rank: 'Civ', surname: 'Sharif', role: 'Staff', dp: null },
+            { id: 'civ-irfan', name: 'Civ Irfan', rank: 'Civ', surname: 'Irfan', role: 'Staff', dp: null },
+            { id: 'civ-sanwar', name: 'Civ Sanwar', rank: 'Civ', surname: 'Sanwar', role: 'Staff', dp: null },
+          ];
+
+          defaultCivs.forEach(def => {
+            if (!civList.some(c => matchesCivilian(c.name, def))) {
+              civList.push(def);
+            }
+          });
+
           setCivilians(civList);
         }
-      } catch {}
+      } catch (err) {
+        console.warn('Failed to fetch civilians:', err);
+      }
     };
 
     fetchCivilians();
@@ -268,11 +372,29 @@ export const Expenditures: React.FC = () => {
     return parts.length >= 2 ? `${parts[1]}-${parts[2]}` : '';
   }, [todayStr]);
 
+  // Helper to dynamically calculate total actual non-due spending for a person in realtime from expenses
+  const getActualSpentForPerson = (
+    personName: string, 
+    civList: CivilianPerson[], 
+    allExpenses: ExpenseRecord[]
+  ): number => {
+    if (!personName) return 0;
+    const target = String(personName).trim().toLowerCase();
+    const matchedCiv = civList.find(c => matchesCivilian(personName, c));
+    return allExpenses.filter(e => {
+      // Exclude shop Due expenses from advance spending
+      if (String(e.paymentMethod || '').toLowerCase() === 'due') return false;
+      if (matchedCiv) {
+        return matchesCivilian(e.detailedPerson, matchedCiv);
+      }
+      return String(e.detailedPerson || '').trim().toLowerCase() === target;
+    }).reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  };
+
   // Calculate Metrics
   const metrics = useMemo(() => {
     let total = 0;
     let cash = 0;
-    let ucb = 0;
     let due = 0;
     let grocDue = 0;
     let poultryDue = 0;
@@ -285,8 +407,6 @@ export const Expenditures: React.FC = () => {
       const method = String(e.paymentMethod || '').toLowerCase();
       if (method === 'cash') {
         cash += amt;
-      } else if (method === 'ucb') {
-        ucb += amt;
       } else if (method === 'due') {
         due += amt;
         const shop = String(e.dueShop || '').toLowerCase();
@@ -298,13 +418,147 @@ export const Expenditures: React.FC = () => {
 
     const activeAdvances = advances.filter(a => a.status === 'ACTIVE');
     const totalActiveAdvance = activeAdvances.reduce((sum, a) => sum + (Number(a.amount) || 0), 0);
+    
+    // Dynamic active spent: compute actual non-due spending in realtime directly from expenses!
+    // This ensures deleting or editing any expense immediately updates Available Advance without stale data.
+    const activePersonNames = new Set<string>(
+      activeAdvances.map(a => String(a.personName || '')).filter(p => p.trim().length > 0)
+    );
+    let totalActiveSpent = 0;
+    activePersonNames.forEach(pName => {
+      totalActiveSpent += getActualSpentForPerson(pName, civilians, expenses);
+    });
 
-    return { total, cash, ucb, due, grocDue, poultryDue, bakeDue, totalActiveAdvance, activeAdvancesCount: activeAdvances.length };
-  }, [expenses, advances]);
+    // Also include any civilian staff spending if not already covered
+    civilians.forEach(civ => {
+      if (!Array.from(activePersonNames).some(p => matchesCivilian(p, civ))) {
+        const civSpent = getActualSpentForPerson(civ.name, civilians, expenses);
+        if (civSpent > 0) {
+          totalActiveSpent += civSpent;
+        }
+      }
+    });
 
-  // Filtered List for Main Table
+    // DO NOT clamp with Math.max(0, ...) so negative balance (ঘাটতি) is accurately displayed in realtime!
+    const availableAdvance = totalActiveAdvance - totalActiveSpent;
+
+    return { 
+      total, 
+      cash, 
+      due, 
+      grocDue, 
+      poultryDue, 
+      bakeDue, 
+      totalActiveAdvance, 
+      totalActiveSpent, 
+      availableAdvance, 
+      activeAdvancesCount: activeAdvances.length 
+    };
+  }, [expenses, advances, civilians]);
+
+  // Date parsing helper for reliable chronological sorting
+  const parseExpenseDate = (dateStr: string): number => {
+    if (!dateStr) return 0;
+    const parts = dateStr.trim().split(/[-/]/);
+    if (parts.length === 3) {
+      if (parts[0].length === 4) {
+        // YYYY-MM-DD
+        return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10)).getTime();
+      } else {
+        // DD-MM-YYYY
+        return new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10)).getTime();
+      }
+    }
+    const t = new Date(dateStr).getTime();
+    return isNaN(t) ? 0 : t;
+  };
+
+  // Helper to get active advance status and balance for a person
+  const getPersonAdvanceStatus = (personName: string) => {
+    const active = advances.filter(a => matchesCivilian(a.personName, { name: personName }) && a.status === 'ACTIVE');
+    const totalAdv = active.reduce((sum, a) => sum + (Number(a.amount) || 0), 0);
+    // Realtime spent from non-due expenses matching this person
+    const totalSp = getActualSpentForPerson(personName, civilians, expenses);
+    const balance = totalAdv - totalSp; // + => ami back pabo, - => amar kase pabe (supports negative balance)
+    return {
+      activeAdvances: active,
+      totalAdvance: totalAdv,
+      totalSpent: totalSp,
+      balance,
+      hasActive: active.length > 0
+    };
+  };
+
+  // Group active advances by person to see "kar kase koto tk deya ase" with realtime spending and balances
+  const personAdvances = useMemo(() => {
+    const map = new Map<string, { 
+      personName: string; 
+      totalAdvance: number; 
+      totalSpent: number;
+      netBalance: number;
+      activeItems: BazarAdvance[]; 
+    }>();
+    
+    // Initialize with known civilians
+    civilians.forEach(c => {
+      map.set(c.name, { 
+        personName: c.name, 
+        totalAdvance: 0, 
+        totalSpent: 0, 
+        netBalance: 0, 
+        activeItems: [] 
+      });
+    });
+
+    // Add active advances
+    advances.filter(a => a.status === 'ACTIVE').forEach(a => {
+      const pName = a.personName || 'Unknown';
+      const existing = map.get(pName) || { 
+        personName: pName, 
+        totalAdvance: 0, 
+        totalSpent: 0, 
+        netBalance: 0, 
+        activeItems: [] 
+      };
+      existing.totalAdvance += (Number(a.amount) || 0);
+      existing.activeItems.push(a);
+      map.set(pName, existing);
+    });
+
+    // Calculate totalSpent dynamically from expenses in realtime for each person
+    map.forEach((existing, pName) => {
+      existing.totalSpent = getActualSpentForPerson(pName, civilians, expenses);
+      existing.netBalance = existing.totalAdvance - existing.totalSpent;
+    });
+
+    const list = Array.from(map.values());
+    return list.sort((a, b) => Math.abs(b.totalAdvance) - Math.abs(a.totalAdvance));
+  }, [civilians, advances, expenses]);
+
+  // Realtime reconciliation of active advances with expenses so stale spentAmounts are cleaned up
+  useEffect(() => {
+    let hasChanges = false;
+    const reconciled = advances.map(adv => {
+      if (adv.status !== 'ACTIVE') return adv;
+      const actualSpent = getActualSpentForPerson(adv.personName, civilians, expenses);
+      const currentSpent = Number(adv.spentAmount) || 0;
+      if (currentSpent !== actualSpent) {
+        hasChanges = true;
+        return { ...adv, spentAmount: actualSpent };
+      }
+      return adv;
+    });
+
+    if (hasChanges) {
+      setAdvances(reconciled);
+      localStorage.setItem(ADVANCES_KEY, JSON.stringify(reconciled));
+      pushKeyToCloud(ADVANCES_KEY, reconciled).catch(() => {});
+    }
+  }, [expenses, civilians, advances]);
+
+  // Filtered List for Main Bottom Expense Records Table ("Expence record ager moto nichei thakbe")
   const filteredExpenses = useMemo(() => {
-    return expenses.filter(e => {
+    const result = expenses.filter(e => {
       const search = searchTerm.toLowerCase();
       const matchSearch = 
         !search ||
@@ -317,18 +571,13 @@ export const Expenditures: React.FC = () => {
       const method = String(e.paymentMethod || '').toLowerCase();
       let matchMethod = true;
       if (filterMethod === 'Cash') matchMethod = method === 'cash';
-      else if (filterMethod === 'UCB') matchMethod = method === 'ucb';
-      else if (filterMethod === 'Due') {
-        matchMethod = method === 'due';
-        if (matchMethod && filterShop !== 'ALL') {
-          const shop = String(e.dueShop || '').toLowerCase();
-          if (filterShop === 'Poultry Shop') matchMethod = shop.includes('poultry');
-          else if (filterShop === 'Bake & Bite') matchMethod = shop.includes('bake') || shop.includes('bite');
-          else matchMethod = !shop.includes('poultry') && !shop.includes('bake');
-        }
-      }
+      else if (filterMethod === 'Due') matchMethod = method === 'due';
 
-      const matchPerson = filterPerson === 'ALL' || e.detailedPerson === filterPerson;
+      let matchShop = true;
+      if (filterShop !== 'ALL') matchShop = e.dueShop === filterShop;
+
+      let matchPerson = true;
+      if (filterPerson !== 'ALL') matchPerson = e.detailedPerson === filterPerson;
 
       let matchDate = true;
       if (filterDateRange === 'TODAY') {
@@ -337,38 +586,20 @@ export const Expenditures: React.FC = () => {
         matchDate = (e.date || '').endsWith(currentMonthKey);
       }
 
-      return matchSearch && matchMethod && matchPerson && matchDate;
+      return matchSearch && matchMethod && matchShop && matchPerson && matchDate;
     });
-  }, [expenses, searchTerm, filterMethod, filterShop, filterPerson, filterDateRange, todayStr, currentMonthKey]);
 
-  // Filtered List for History Modal
-  const filteredHistory = useMemo(() => {
-    return expenses.filter(e => {
-      const search = historySearch.toLowerCase();
-      const matchSearch = 
-        !search ||
-        (e.desc || '').toLowerCase().includes(search) ||
-        (e.date || '').toLowerCase().includes(search) ||
-        (e.detailedPerson || '').toLowerCase().includes(search) ||
-        (e.category || '').toLowerCase().includes(search) ||
-        (e.dueShop || '').toLowerCase().includes(search);
-
-      const method = String(e.paymentMethod || '').toLowerCase();
-      let matchMethod = true;
-      if (historyChannelFilter === 'Cash') matchMethod = method === 'cash';
-      else if (historyChannelFilter === 'UCB') matchMethod = method === 'ucb';
-      else if (historyChannelFilter === 'Due') matchMethod = method === 'due';
-
-      let matchDate = true;
-      if (historyDateFilter === 'TODAY') {
-        matchDate = e.date === todayStr;
-      } else if (historyDateFilter === 'THIS_MONTH') {
-        matchDate = (e.date || '').endsWith(currentMonthKey);
+    return result.sort((a, b) => {
+      const timeA = parseExpenseDate(a.date);
+      const timeB = parseExpenseDate(b.date);
+      if (timeA !== timeB) {
+        return sortOrder === 'desc' ? timeB - timeA : timeA - timeB;
       }
-
-      return matchSearch && matchMethod && matchDate;
+      return sortOrder === 'desc'
+        ? String(b.id).localeCompare(String(a.id), undefined, { numeric: true })
+        : String(a.id).localeCompare(String(b.id), undefined, { numeric: true });
     });
-  }, [expenses, historySearch, historyChannelFilter, historyDateFilter, todayStr, currentMonthKey]);
+  }, [expenses, searchTerm, filterMethod, filterShop, filterPerson, filterDateRange, todayStr, currentMonthKey, sortOrder]);
 
   // Inventory Items filtering for Item Selection panel (Like POS Sales Member selection)
   const availableInventoryCategories = useMemo(() => {
@@ -401,6 +632,30 @@ export const Expenditures: React.FC = () => {
     const rate = item.unitCost || '';
     const unit = item.unit || 'kg';
 
+    const isAlreadySelected = itemRows.some(r => r.rawItemId === item.id || r.desc === itemName);
+
+    if (isAlreadySelected) {
+      // 2nd click: deselect and remove from voucher items!
+      setItemRows(prev => {
+        const remaining = prev.filter(r => !(r.rawItemId === item.id || r.desc === itemName));
+        if (remaining.length === 0) {
+          return [{
+            id: `row-${Date.now()}`,
+            desc: '',
+            category: 'Grocery',
+            qty: 1,
+            unit: 'kg',
+            unitPrice: '',
+            amount: ''
+          }];
+        }
+        return remaining;
+      });
+      showToast(`✕ Deselected "${itemName}"`);
+      return;
+    }
+
+    // 1st click: select and add to voucher items!
     setItemRows(prev => {
       // Find if first row is completely empty, use it
       const firstEmptyIndex = prev.findIndex(r => !r.desc.trim() && !r.amount);
@@ -422,21 +677,6 @@ export const Expenditures: React.FC = () => {
         });
       }
 
-      // Check if already in rows, just increment qty
-      const existingIdx = prev.findIndex(r => r.rawItemId === item.id || r.desc === itemName);
-      if (existingIdx !== -1) {
-        return prev.map((r, i) => {
-          if (i !== existingIdx) return r;
-          const newQty = (parseFloat(r.qty as any) || 0) + 1;
-          const p = parseFloat(r.unitPrice as any) || 0;
-          return {
-            ...r,
-            qty: newQty,
-            amount: p > 0 ? Math.round(newQty * p) : r.amount
-          };
-        });
-      }
-
       // Otherwise append new row
       return [
         ...prev,
@@ -453,7 +693,7 @@ export const Expenditures: React.FC = () => {
       ];
     });
 
-    showToast(`✓ Added "${itemName}" to voucher items!`);
+    showToast(`✓ Selected "${itemName}"`);
   };
 
   // Add another manual row
@@ -509,7 +749,9 @@ export const Expenditures: React.FC = () => {
       return;
     }
 
-    setIsSaving(true);
+    // 1. Play sound IMMEDIATELY inside user gesture
+    playSuccessSound();
+
     try {
       const newRecords: ExpenseRecord[] = validRows.map((r, idx) => {
         const qtyNum = parseFloat(r.qty as any) || undefined;
@@ -540,6 +782,43 @@ export const Expenditures: React.FC = () => {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedAll));
       setExpenses(updatedAll);
 
+      // Advance deduction check:
+      // "add expence theke Due dileo kno irfan er advance balace theke kno kattese"
+      // If paymentMethod is DUE, NEVER deduct from advance!
+      const shouldDeductFromAdvance = formPaymentMethod !== 'Due' && formDeductAdvance;
+      let updatedAdvances = advances;
+
+      if (shouldDeductFromAdvance) {
+        const personActive = advances.filter(a => matchesCivilian(a.personName, { name: formPerson }) && a.status === 'ACTIVE');
+        if (personActive.length === 0) {
+          // If person had no prior active advance record, create one with amount 0 so balance becomes negative (canteen owes them: "আমার কাছে পাবে")
+          const newNegativeAdv: BazarAdvance = {
+            id: `adv-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+            date: formDate,
+            personName: formPerson,
+            amount: 0,
+            spentAmount: formTotalAmount,
+            returnAmount: 0,
+            channel: 'CASH',
+            purpose: `Bazar: ${validRows.map(r => r.desc).join(', ').substring(0, 50)}`,
+            status: 'ACTIVE'
+          };
+          updatedAdvances = [newNegativeAdv, ...advances];
+        }
+
+        // Reconcile spentAmount directly from actual expenses
+        updatedAdvances = updatedAdvances.map(adv => {
+          if (adv.status !== 'ACTIVE') return adv;
+          const actualSpent = getActualSpentForPerson(adv.personName, civilians, updatedAll);
+          return { ...adv, spentAmount: actualSpent };
+        });
+
+        localStorage.setItem(ADVANCES_KEY, JSON.stringify(updatedAdvances));
+        setAdvances(updatedAdvances);
+        pushKeyToCloud(ADVANCES_KEY, updatedAdvances).catch(() => {});
+        window.dispatchEvent(new Event('canteen_bazar_advances_updated'));
+      }
+
       // Auto restock raw inventory if linked
       for (const rec of newRecords) {
         if (rec.rawItemId && rec.qty) {
@@ -555,20 +834,9 @@ export const Expenditures: React.FC = () => {
         }
       }
 
-      // Push to cloud
-      try {
-        await pushKeyToCloud(STORAGE_KEY, updatedAll);
-      } catch (err) {
-        console.warn('Could not push to cloud:', err);
-      }
-
-      window.dispatchEvent(new CustomEvent('canteen_expenses_updated', { detail: updatedAll }));
-      window.dispatchEvent(new Event('canteen_state_updated'));
-      window.dispatchEvent(new Event('storage'));
-
-      showToast(`✅ Saved ${newRecords.length} expense item(s) totaling ৳${formTotalAmount.toLocaleString()}!`);
-      
+      // 2. Instant UI feedback & Navigation back to list view
       setShowAddForm(false);
+      setViewMode('list');
       setItemRows([
         {
           id: 'row-1',
@@ -580,6 +848,33 @@ export const Expenditures: React.FC = () => {
           amount: ''
         }
       ]);
+
+      if (formPaymentMethod === 'Due') {
+        showToast(`✅ Saved ${newRecords.length} item(s) (৳${formTotalAmount.toLocaleString()})! [${formDueShop}] এর বকেয়া হিসেবে সফলভাবে সংরক্ষিত হয়েছে।`);
+      } else if (shouldDeductFromAdvance) {
+        const pStatus = getPersonAdvanceStatus(formPerson);
+        const postBal = pStatus.balance - formTotalAmount;
+        const balNote = postBal > 0 
+          ? ` (অবশিষ্ট অগ্রিম: ৳${postBal} - আমি ব্যাক পাবো)`
+          : postBal < 0
+          ? ` (ব্যালেন্স: -৳${Math.abs(postBal)} - আমার কাছে পাবে)`
+          : ` (অগ্রিম সম্পূর্ণ সমান)`;
+        showToast(`✅ Saved ${newRecords.length} item(s) (৳${formTotalAmount.toLocaleString()})! ${formPerson} এর অগ্রিম থেকে সমন্বয় করা হয়েছে${balNote}`);
+      } else {
+        showToast(`✅ Saved ${newRecords.length} item(s) (৳${formTotalAmount.toLocaleString()})! সরাসরি ক্যাশ খরচ হিসেবে সংরক্ষিত হয়েছে।`);
+      }
+
+      window.dispatchEvent(new CustomEvent('canteen_expenses_updated', { detail: updatedAll }));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
+
+      // 3. Background Cloud Sync without blocking user experience
+      Promise.all([
+        pushKeyToCloud(STORAGE_KEY, updatedAll),
+        ...(shouldDeductFromAdvance ? [pushKeyToCloud(ADVANCES_KEY, updatedAdvances)] : [])
+      ]).catch(err => {
+        console.warn('Background sync warning:', err);
+      });
     } catch (err: any) {
       alert(`Failed to save: ${err?.message || 'Error occurred'}`);
     } finally {
@@ -588,8 +883,9 @@ export const Expenditures: React.FC = () => {
   };
 
   // Register New Bazar Advance
-  const handleSaveNewAdvance = async () => {
-    const amt = parseFloat(String(advAmount));
+  const handleSaveNewAdvance = async (targetPerson?: string, targetAmount?: number, targetPurpose?: string) => {
+    const personToUse = targetPerson || advPerson;
+    const amt = targetAmount !== undefined ? targetAmount : parseFloat(String(advAmount));
     if (isNaN(amt) || amt <= 0) {
       alert('Please enter a valid advance amount (> 0).');
       return;
@@ -599,12 +895,12 @@ export const Expenditures: React.FC = () => {
       const newAdv: BazarAdvance = {
         id: `adv-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         date: advDate,
-        personName: advPerson,
+        personName: personToUse,
         amount: amt,
         spentAmount: 0,
         returnAmount: 0,
-        channel: advChannel,
-        purpose: advPurpose.trim() || 'Daily Bazar Advance',
+        channel: 'CASH',
+        purpose: (targetPurpose || advPurpose).trim() || 'Daily Bazar Advance',
         status: 'ACTIVE'
       };
 
@@ -620,7 +916,8 @@ export const Expenditures: React.FC = () => {
       window.dispatchEvent(new Event('canteen_state_updated'));
       window.dispatchEvent(new Event('storage'));
 
-      showToast(`✅ Advance ৳${amt.toLocaleString()} issued to ${advPerson}!`);
+      playSuccessSound();
+      showToast(`✅ Advance ৳${amt.toLocaleString()} issued to ${personToUse}!`);
       setAdvAmount('');
       setAdvPurpose('Daily Bazar Advance');
     } catch (err: any) {
@@ -629,10 +926,15 @@ export const Expenditures: React.FC = () => {
   };
 
   // Settle / Return Bazar Advance
+  // "Sattle korle cash e in/Out hbe"
   const handleConfirmSettleAdvance = async () => {
     if (!settlingAdvance) return;
     const spent = parseFloat(String(settleSpent)) || 0;
-    const returned = parseFloat(String(settleReturn)) || 0;
+    const initialAdvAmt = Number(settlingAdvance.amount) || 0;
+    const netBal = initialAdvAmt - spent;
+    const isCashIn = netBal > 0;
+    const isCashOut = netBal < 0;
+    const absBal = Math.abs(netBal);
 
     try {
       const updatedAdvances = advances.map(a => {
@@ -640,14 +942,37 @@ export const Expenditures: React.FC = () => {
           return {
             ...a,
             spentAmount: spent,
-            returnAmount: returned,
+            returnAmount: isCashIn ? absBal : 0,
             status: 'SETTLED' as const,
             settledDate: formatCanteenDate(new Date()),
-            notes: settleNotes.trim() || a.notes
+            notes: (settleNotes.trim() || a.notes || '') + (isCashIn ? ` [Cash In: ৳${absBal} returned]` : isCashOut ? ` [Cash Out: ৳${absBal} paid]` : ` [Balanced: ৳0]`)
           };
         }
         return a;
       });
+
+      // If Cash Out (person spent more from own pocket, canteen owes them):
+      // Record cash payment in expenses so canteen cash book accurately reflects Cash Out
+      let updatedExpenses = expenses;
+      if (isCashOut && absBal > 0) {
+        const cashOutExp: ExpenseRecord = {
+          id: `exp-${Date.now()}-settle-${Math.random().toString(36).substring(2, 5)}`,
+          date: formatCanteenDate(new Date()),
+          desc: `Advance Settle Payout to ${settlingAdvance.personName} (বকেয়া ক্যাশ পরিশোধ)`,
+          category: 'Staff/Civ Expense',
+          paymentMethod: 'Cash',
+          amount: absBal,
+          detailedPerson: settlingAdvance.personName,
+          isCustom: true
+        };
+        updatedExpenses = [cashOutExp, ...expenses];
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedExpenses));
+        setExpenses(updatedExpenses);
+        try {
+          await pushKeyToCloud(STORAGE_KEY, updatedExpenses);
+        } catch {}
+        window.dispatchEvent(new CustomEvent('canteen_expenses_updated', { detail: updatedExpenses }));
+      }
 
       localStorage.setItem(ADVANCES_KEY, JSON.stringify(updatedAdvances));
       setAdvances(updatedAdvances);
@@ -660,7 +985,14 @@ export const Expenditures: React.FC = () => {
       window.dispatchEvent(new Event('canteen_state_updated'));
       window.dispatchEvent(new Event('storage'));
 
-      showToast(`✅ Advance settled for ${settlingAdvance.personName} (Spent: ৳${spent}, Returned: ৳${returned})`);
+      const msg = isCashIn
+        ? `✅ Advance settled! ৳${absBal.toLocaleString()} Cash In (আমি ব্যাক পেয়েছি) হিসেবে গ্রহণ করা হয়েছে।`
+        : isCashOut
+        ? `✅ Advance settled! ৳${absBal.toLocaleString()} Cash Out (আমার কাছে পাবে - ক্যাশ পরিশোধ করা হয়েছে)।`
+        : `✅ Advance settled! সম্পূর্ণ হিসাব সমন্বয় করা হয়েছে (৳০)।`;
+
+      playSuccessSound();
+      showToast(msg);
       setSettlingAdvance(null);
       setSettleSpent('');
       setSettleReturn('');
@@ -679,11 +1011,22 @@ export const Expenditures: React.FC = () => {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedAll));
       setExpenses(updatedAll);
 
+      // Reconcile advances immediately on edit so spent amounts are updated without delay
+      const reconciledAdvances = advances.map(adv => {
+        if (adv.status !== 'ACTIVE') return adv;
+        const actualSpent = getActualSpentForPerson(adv.personName, civilians, updatedAll);
+        return { ...adv, spentAmount: actualSpent };
+      });
+      localStorage.setItem(ADVANCES_KEY, JSON.stringify(reconciledAdvances));
+      setAdvances(reconciledAdvances);
+
       try {
         await pushKeyToCloud(STORAGE_KEY, updatedAll);
+        pushKeyToCloud(ADVANCES_KEY, reconciledAdvances).catch(() => {});
       } catch {}
 
       window.dispatchEvent(new CustomEvent('canteen_expenses_updated', { detail: updatedAll }));
+      window.dispatchEvent(new Event('canteen_bazar_advances_updated'));
       window.dispatchEvent(new Event('canteen_state_updated'));
       window.dispatchEvent(new Event('storage'));
 
@@ -699,24 +1042,64 @@ export const Expenditures: React.FC = () => {
   // Delete an expense
   const handleConfirmDelete = async () => {
     if (!deleteTargetId) return;
+    const targetId = String(deleteTargetId);
     try {
-      const updatedAll = expenses.filter(e => String(e.id) !== String(deleteTargetId));
+      // 1. Play chime immediately inside user interaction
+      playSuccessSound();
+
+      // 2. Close modal immediately for instant UI responsiveness
+      setDeleteTargetId(null);
+
+      // 3. Record tombstone in local & cloud so it NEVER resurrects
+      recordDeletedExpenseId(targetId);
+
+      // 4. Update local state & localStorage immediately
+      const updatedAll = expenses.filter(e => String(e.id) !== targetId);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedAll));
       setExpenses(updatedAll);
 
-      try {
-        await pushKeyToCloud(STORAGE_KEY, updatedAll);
-      } catch {}
+      // Reconcile advances immediately on delete so spent amounts are updated without delay
+      const reconciledAdvances = advances.map(adv => {
+        if (adv.status !== 'ACTIVE') return adv;
+        const actualSpent = getActualSpentForPerson(adv.personName, civilians, updatedAll);
+        return { ...adv, spentAmount: actualSpent };
+      });
+      localStorage.setItem(ADVANCES_KEY, JSON.stringify(reconciledAdvances));
+      setAdvances(reconciledAdvances);
 
+      // 5. Show toast feedback immediately
+      showToast(`✅ Expense record deleted successfully! (খরচের রেকর্ড সফলভাবে মুছে ফেলা হয়েছে)`);
+
+      // 6. Broadcast sync events
       window.dispatchEvent(new CustomEvent('canteen_expenses_updated', { detail: updatedAll }));
+      window.dispatchEvent(new Event('canteen_bazar_advances_updated'));
       window.dispatchEvent(new Event('canteen_state_updated'));
       window.dispatchEvent(new Event('storage'));
 
-      showToast(`🗑️ Expense record deleted.`);
-      setDeleteTargetId(null);
+      // 7. Push deletion to cloud asynchronously in background without delaying UI
+      pushKeyToCloud(STORAGE_KEY, updatedAll).catch(err => {
+        console.warn('Cloud sync error on delete:', err);
+      });
+      pushKeyToCloud(ADVANCES_KEY, reconciledAdvances).catch(() => {});
     } catch (err: any) {
       alert(`Delete failed: ${err?.message || 'Error'}`);
     }
+  };
+
+  // Delete an advance record
+  const handleDeleteAdvance = (advId: string) => {
+    if (!window.confirm('Are you sure you want to delete this advance record? (এই অগ্রিম রেকর্ডটি মুছে ফেলতে চান?)')) return;
+    playSuccessSound();
+    const updated = advances.filter(a => a.id !== advId);
+    setAdvances(updated);
+    localStorage.setItem(ADVANCES_KEY, JSON.stringify(updated));
+    showToast('✅ Advance record deleted successfully! (অগ্রিমের রেকর্ড সফলভাবে মুছে ফেলা হয়েছে)');
+    window.dispatchEvent(new Event('canteen_bazar_advances_updated'));
+    window.dispatchEvent(new Event('canteen_state_updated'));
+    window.dispatchEvent(new Event('storage'));
+    pushKeyToCloud(ADVANCES_KEY, updated).catch(err => {
+      console.warn('Could not sync advance deletion to cloud:', err);
+    });
   };
 
   return (
@@ -730,184 +1113,43 @@ export const Expenditures: React.FC = () => {
         </div>
       )}
 
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900/60 p-5 rounded-3xl border border-slate-800 shadow-md">
-        <div>
-          <div className="flex items-center space-x-3">
-            <div className="w-12 h-12 rounded-2xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30 shadow-inner">
-              <Banknote className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <h2 className="text-2xl font-black text-white uppercase tracking-tight">
-                  EXPENCE REGISTER
-                </h2>
-                <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-mono text-[10px] font-black border border-indigo-500/30">
-                  DAILY EXPENSES
-                </span>
+            {/* DEDICATED NEW PAGE: ADD EXPENSE ("Add expence e click korle new page a dekhabe") */}
+      {viewMode === 'add-expense' ? (
+        <div className="space-y-6 animate-in fade-in duration-200">
+          {/* Top Bar with Back Button */}
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900 border border-slate-800 p-5 rounded-3xl shadow-lg">
+            <div className="flex items-center space-x-3">
+              <button
+                type="button"
+                onClick={() => setViewMode('list')}
+                className="px-4 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white transition-all cursor-pointer flex items-center space-x-2 text-xs font-black uppercase border border-slate-700 shadow-sm active:scale-95"
+              >
+                <ArrowLeft className="w-4 h-4 text-indigo-400" />
+                <span>← ফিরে যান (Back to Register)</span>
+              </button>
+              <div>
+                <div className="flex items-center space-x-2">
+                  <h2 className="text-xl font-black text-white uppercase tracking-tight">
+                    NEW EXPENSE VOUCHER ENTRY
+                  </h2>
+                  <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-mono text-[10px] font-black border border-indigo-500/30">
+                    নতুন খরচের ভাউচার
+                  </span>
+                </div>
+                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
+                  ইনভেন্টরি আইটেম নির্বাচন করুন অথবা সরাসরি খরচের ভাউচার তৈরি করুন
+                </p>
               </div>
-              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
-                Canteen Daily Expenses & Purchase Register • খরচের হিসাব
-              </p>
             </div>
-          </div>
-        </div>
 
-        {/* Top Action Buttons: Add Expense, Advance Register, and History (Sync button removed) */}
-        <div className="flex items-center space-x-2.5 w-full sm:w-auto flex-wrap gap-y-2">
-          {/* + ADD EXPENSE */}
-          <button
-            type="button"
-            onClick={() => setShowAddForm(prev => !prev)}
-            className={`px-4 py-2.5 rounded-xl text-xs font-black tracking-wider uppercase transition-all flex items-center space-x-2 shadow-md cursor-pointer active:scale-95 ${
-              showAddForm
-                ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/30 border border-rose-500/40'
-                : 'bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white shadow-indigo-600/30 border border-indigo-400/40'
-            }`}
-          >
-            {showAddForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-            <span>{showAddForm ? 'CLOSE FORM' : '+ ADD EXPENSE'}</span>
-          </button>
-
-          {/* REGISTER ADVANCE BUTTON */}
-          <button
-            type="button"
-            onClick={() => setShowAdvanceRegisterModal(true)}
-            className="px-4 py-2.5 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all flex items-center space-x-2 shadow-md shadow-amber-600/30 cursor-pointer active:scale-95 border border-amber-400/40"
-            title="Manage bazar advance issued to staff/civilians"
-          >
-            <Clock className="w-4 h-4" />
-            <span>REGISTER ADVANCE</span>
-            {metrics.activeAdvancesCount > 0 && (
-              <span className="ml-1 px-1.5 py-0.2 rounded-full bg-white text-amber-900 font-mono text-[9px] font-black">
-                {metrics.activeAdvancesCount}
+            <div className="flex items-center space-x-3">
+              <span className="text-xs font-mono font-black text-emerald-400 bg-emerald-500/10 px-4 py-2 rounded-2xl border border-emerald-500/20">
+                VOUCHER TOTAL: ৳{formTotalAmount.toLocaleString()}
               </span>
-            )}
-          </button>
-
-          {/* HISTORY BUTTON (Replaces Sync option, named 'History') */}
-          <button
-            type="button"
-            onClick={() => setShowHistoryModal(true)}
-            className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-black tracking-wider uppercase transition-colors flex items-center space-x-2 border border-slate-700 shadow-sm cursor-pointer active:scale-95"
-            title="View full expense records history"
-          >
-            <History className="w-4 h-4 text-indigo-400" />
-            <span>HISTORY</span>
-          </button>
-        </div>
-      </div>
-
-      {/* 4 Summary Metric Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Total Expense */}
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 relative overflow-hidden group hover:border-slate-700 transition-all">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-              TOTAL EXPENSES
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-slate-800 text-slate-300 flex items-center justify-center">
-              <Banknote className="w-4 h-4" />
             </div>
           </div>
-          <h3 className="text-2xl font-black text-white font-mono tracking-tight">
-            ৳{metrics.total.toLocaleString()}
-          </h3>
-          <p className="text-[10px] text-slate-500 font-bold mt-1">
-            {expenses.length} Total recorded voucher items
-          </p>
-        </div>
 
-        {/* Cash Expenses */}
-        <div 
-          onClick={() => setFilterMethod(filterMethod === 'Cash' ? 'ALL' : 'Cash')}
-          className={`border rounded-3xl p-5 cursor-pointer transition-all ${
-            filterMethod === 'Cash' 
-              ? 'bg-emerald-950/50 border-emerald-500 shadow-lg shadow-emerald-950/40' 
-              : 'bg-slate-900 border-slate-800 hover:border-emerald-500/40'
-          }`}
-        >
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">
-              CASH PAID
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-              <Wallet className="w-4 h-4" />
-            </div>
-          </div>
-          <h3 className="text-2xl font-black text-emerald-400 font-mono tracking-tight">
-            ৳{metrics.cash.toLocaleString()}
-          </h3>
-          <p className="text-[10px] text-slate-400 font-bold mt-1">
-            {filterMethod === 'Cash' ? 'Filter Active ✓' : 'Click to filter Cash'}
-          </p>
-        </div>
-
-        {/* UCB Expenses */}
-        <div 
-          onClick={() => setFilterMethod(filterMethod === 'UCB' ? 'ALL' : 'UCB')}
-          className={`border rounded-3xl p-5 cursor-pointer transition-all ${
-            filterMethod === 'UCB' 
-              ? 'bg-cyan-950/50 border-cyan-500 shadow-lg shadow-cyan-950/40' 
-              : 'bg-slate-900 border-slate-800 hover:border-cyan-500/40'
-          }`}
-        >
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-black uppercase tracking-wider text-cyan-400">
-              UCB / BANK PAID
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center">
-              <DollarSign className="w-4 h-4" />
-            </div>
-          </div>
-          <h3 className="text-2xl font-black text-cyan-400 font-mono tracking-tight">
-            ৳{metrics.ucb.toLocaleString()}
-          </h3>
-          <p className="text-[10px] text-slate-400 font-bold mt-1">
-            {filterMethod === 'UCB' ? 'Filter Active ✓' : 'Click to filter UCB'}
-          </p>
-        </div>
-
-        {/* Due / Payable */}
-        <div 
-          onClick={() => setFilterMethod(filterMethod === 'Due' ? 'ALL' : 'Due')}
-          className={`border rounded-3xl p-5 cursor-pointer transition-all ${
-            filterMethod === 'Due' 
-              ? 'bg-amber-950/50 border-amber-500 shadow-lg shadow-amber-950/40' 
-              : 'bg-slate-900 border-slate-800 hover:border-amber-500/40'
-          }`}
-        >
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-black uppercase tracking-wider text-amber-400">
-              DUE / PAYABLE
-            </span>
-            <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center">
-              <Store className="w-4 h-4" />
-            </div>
-          </div>
-          <h3 className="text-2xl font-black text-amber-400 font-mono tracking-tight">
-            ৳{metrics.due.toLocaleString()}
-          </h3>
-          <div className="flex items-center space-x-1 mt-1 text-[9px] font-mono text-slate-400">
-            <span>G: ৳{metrics.grocDue}</span>
-            <span>•</span>
-            <span>P: ৳{metrics.poultryDue}</span>
-            <span>•</span>
-            <span>B: ৳{metrics.bakeDue}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* ADD NEW EXPENSE FORM (WITH INVENTORY ITEM SELECTION LIKE POS SALES MEMBER SYSTEM) */}
-      <AnimatePresence>
-        {showAddForm && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="overflow-hidden"
-          >
-            <div className="bg-slate-900 border border-indigo-500/40 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-5">
+          <div className="bg-slate-900 border border-indigo-500/40 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-5">
               
               <div className="flex items-center justify-between pb-3 border-b border-slate-800">
                 <div className="flex items-center space-x-3">
@@ -974,11 +1216,100 @@ export const Expenditures: React.FC = () => {
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   >
                     <option value="Cash">Cash (নগদ ক্যাশ)</option>
-                    <option value="UCB">UCB (ব্যাংক)</option>
                     <option value="Due">Due (বকেয়া দোকান বিল)</option>
                   </select>
                 </div>
               </div>
+
+              {/* Advance Status & Deduction Banner */}
+              {formPaymentMethod === 'Due' ? (
+                <div className="p-4 rounded-2xl border bg-slate-950/80 border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/30">
+                      <Store className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center space-x-2 flex-wrap">
+                        <span className="font-black text-amber-300 uppercase">বকেয়া দোকান বিল ({formDueShop}):</span>
+                        <span className="px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 font-mono font-bold border border-amber-500/20">
+                          ৳{formTotalAmount.toLocaleString()}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        এই ভাউচারটি <strong className="text-amber-300">[{formDueShop}]</strong> এর বকেয়া রেজিস্টারে যুক্ত হবে। কোনো সিভিলিয়ানের অগ্রিম ব্যালেন্স থেকে টাকা কাটা হবে না।
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="shrink-0 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 px-3 py-1.5 rounded-xl text-[11px] font-bold">
+                    ✓ {formPerson} এর অগ্রিম ব্যালেন্স সুরক্ষিত থাকবে
+                  </div>
+                </div>
+              ) : (() => {
+                const advStatus = getPersonAdvanceStatus(formPerson);
+                const afterBal = advStatus.balance - formTotalAmount;
+                return (
+                  <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition-all ${
+                    advStatus.totalAdvance > 0 
+                      ? 'bg-amber-950/30 border-amber-500/40 text-amber-200' 
+                      : 'bg-slate-950/80 border-slate-800 text-slate-300'
+                  }`}>
+                    <div className="flex items-center space-x-3">
+                      <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/30">
+                        <User className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="flex items-center space-x-2 flex-wrap">
+                          <span className="font-black text-white">{formPerson} এর অগ্রিম হিসাব:</span>
+                          <span className="font-mono font-bold text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
+                            প্রদত্ত অগ্রিম: ৳{advStatus.totalAdvance.toLocaleString()}
+                          </span>
+                          <span className="font-mono text-slate-400">
+                            ইতিমধ্যে খরচ: ৳{advStatus.totalSpent.toLocaleString()}
+                          </span>
+                        </div>
+                        
+                        <div className="flex items-center space-x-2 mt-1.5">
+                          <label className="flex items-center space-x-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={formDeductAdvance}
+                              onChange={(e) => setFormDeductAdvance(e.target.checked)}
+                              className="w-4 h-4 rounded text-indigo-600 bg-slate-900 border-slate-700 focus:ring-indigo-500"
+                            />
+                            <span className="text-[11px] font-bold text-slate-300">
+                              এই খরচ (৳{formTotalAmount.toLocaleString()}) {formPerson} এর অগ্রিম থেকে সমন্বয় করুন
+                            </span>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+
+                    {formDeductAdvance ? (
+                      <div className="shrink-0 flex items-center space-x-2 bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-800">
+                        <span className="text-[11px] font-bold text-slate-400">ভাউচার পর ব্যালেন্স:</span>
+                        <span className={`px-2.5 py-1 rounded-xl text-xs font-mono font-black border ${
+                          afterBal > 0 
+                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' 
+                            : afterBal < 0 
+                            ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' 
+                            : 'bg-slate-800 text-slate-400 border-slate-700'
+                        }`}>
+                          {afterBal > 0 
+                            ? `+ ৳${afterBal.toLocaleString()} (আমি ব্যাক পাবো)` 
+                            : afterBal < 0 
+                            ? `- ৳${Math.abs(afterBal).toLocaleString()} (আমার কাছে পাবে)` 
+                            : '৳০ (সমান)'}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="shrink-0 bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800 text-[11px] text-slate-400 font-bold">
+                        সরাসরি ক্যাশ খরচ (অগ্রিম অপরিবর্তিত)
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* If Payment Method is DUE: PROMINENT SHOP SELECTOR */}
               {formPaymentMethod === 'Due' && (
@@ -1255,10 +1586,10 @@ export const Expenditures: React.FC = () => {
               <div className="pt-2 flex items-center justify-end space-x-3">
                 <button
                   type="button"
-                  onClick={() => setShowAddForm(false)}
+                  onClick={() => setViewMode('list')}
                   className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-black uppercase transition-colors"
                 >
-                  Cancel
+                  Cancel (বাতিল)
                 </button>
                 <button
                   type="button"
@@ -1274,58 +1605,261 @@ export const Expenditures: React.FC = () => {
               </div>
 
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+        </div>
+      ) : (
+        <div className="space-y-6 animate-in fade-in duration-200">
+          {/* Header */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900/60 p-5 rounded-3xl border border-slate-800 shadow-md">
+        <div>
+          <div className="flex items-center space-x-3">
+            <div className="w-12 h-12 rounded-2xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30 shadow-inner">
+              <Banknote className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h2 className="text-2xl font-black text-white uppercase tracking-tight">
+                  EXPENCE REGISTER
+                </h2>
+                <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-mono text-[10px] font-black border border-indigo-500/30">
+                  DAILY EXPENSES
+                </span>
+              </div>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
+                Canteen Daily Expenses & Purchase Register • খরচের হিসাব
+              </p>
+            </div>
+          </div>
+        </div>
 
-      {/* Filter and Search Bar */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 shadow-sm space-y-3">
-        <div className="flex flex-col lg:flex-row gap-3">
-          {/* Search Input */}
+        {/* Header Right Status Badge */}
+        <div className="flex items-center space-x-2 text-xs font-bold text-slate-400 bg-slate-950 px-3.5 py-2 rounded-2xl border border-slate-800">
+          <Calendar className="w-4 h-4 text-indigo-400" />
+          <span>{todayStr}</span>
+          <span className="text-slate-600">•</span>
+          <span className="text-emerald-400 font-mono">{expenses.length} Records</span>
+        </div>
+      </div>
+
+          {/* 4 Summary Metric Cards (Sequence: Total Expenses, Cash Paid, DUE, Available Advance) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* 1. Total Expense */}
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 relative overflow-hidden group hover:border-slate-700 transition-all">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+              TOTAL EXPENSES
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-slate-800 text-slate-300 flex items-center justify-center">
+              <Banknote className="w-4 h-4" />
+            </div>
+          </div>
+          <h3 className="text-2xl font-black text-white font-mono tracking-tight">
+            ৳{metrics.total.toLocaleString()}
+          </h3>
+          <p className="text-[10px] text-slate-500 font-bold mt-1">
+            {expenses.length} Total recorded voucher items
+          </p>
+        </div>
+
+        {/* 2. Cash Expenses */}
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 transition-all">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">
+              CASH PAID
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+              <Wallet className="w-4 h-4" />
+            </div>
+          </div>
+          <h3 className="text-2xl font-black text-emerald-400 font-mono tracking-tight">
+            ৳{metrics.cash.toLocaleString()}
+          </h3>
+          <p className="text-[10px] text-slate-400 font-bold mt-1">
+            Direct Cash paid for items
+          </p>
+        </div>
+
+        {/* 3. Due / Payable */}
+        <div 
+          onClick={() => setFilterMethod(filterMethod === 'Due' ? 'ALL' : 'Due')}
+          className={`border rounded-3xl p-5 cursor-pointer transition-all ${
+            filterMethod === 'Due' 
+              ? 'bg-amber-950/50 border-amber-500 shadow-lg shadow-amber-950/40' 
+              : 'bg-slate-900 border-slate-800 hover:border-amber-500/40'
+          }`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-black uppercase tracking-wider text-amber-400">
+              DUE / PAYABLE
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center">
+              <Store className="w-4 h-4" />
+            </div>
+          </div>
+          <h3 className="text-2xl font-black text-amber-400 font-mono tracking-tight">
+            ৳{metrics.due.toLocaleString()}
+          </h3>
+          <div className="flex items-center space-x-1 mt-1 text-[9px] font-mono text-slate-400">
+            <span>G: ৳{metrics.grocDue}</span>
+            <span>•</span>
+            <span>P: ৳{metrics.poultryDue}</span>
+            <span>•</span>
+            <span>B: ৳{metrics.bakeDue}</span>
+          </div>
+        </div>
+
+        {/* 4. AVAILABLE ADVANCE ("Advance 500 ase oikhane available advance hbe") */}
+        <div 
+          onClick={() => setShowAdvanceBreakdownModal(true)}
+          className={`border rounded-3xl p-5 cursor-pointer transition-all shadow-sm group select-none active:scale-[0.98] ${
+            metrics.availableAdvance < 0
+              ? 'bg-rose-950/20 border-rose-500/40 hover:border-rose-400 hover:bg-rose-950/30'
+              : 'bg-slate-900 border-slate-800 hover:border-amber-500/50 hover:bg-slate-900/90'
+          }`}
+          title="Click to view who received how much advance (সিভিলিয়ানদের অগ্রিম ও সমন্বয় দেখতে ক্লিক করুন)"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center space-x-2">
+              <span className={`text-[10px] font-black uppercase tracking-wider ${
+                metrics.availableAdvance < 0 ? 'text-rose-400' : 'text-amber-400'
+              }`}>
+                AVAILABLE ADVANCE (উপলব্ধ অগ্রিম)
+              </span>
+              {metrics.availableAdvance < 0 ? (
+                <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                  ঘাটতি (নেগেটিভ)
+                </span>
+              ) : (
+                <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                  {metrics.activeAdvancesCount} Active
+                </span>
+              )}
+            </div>
+            <div className={`w-8 h-8 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform ${
+              metrics.availableAdvance < 0 ? 'bg-rose-500/20 text-rose-400' : 'bg-amber-500/20 text-amber-400'
+            }`}>
+              <Clock className="w-4 h-4" />
+            </div>
+          </div>
+          <h3 className={`text-2xl font-black font-mono tracking-tight ${
+            metrics.availableAdvance < 0 ? 'text-rose-400' : 'text-amber-400'
+          }`}>
+            {metrics.availableAdvance < 0 ? `-৳${Math.abs(metrics.availableAdvance).toLocaleString()}` : `৳${metrics.availableAdvance.toLocaleString()}`}
+          </h3>
+          <div className="flex items-center justify-between mt-1 text-[10px] text-slate-400 font-bold group-hover:text-amber-300 transition-colors">
+            <span className="flex items-center space-x-1">
+              <span>{metrics.availableAdvance < 0 ? 'অগ্রিমের চেয়ে অতিরিক্ত খরচ' : 'সিভিলিয়ান স্টাফদের অগ্রিম হিসাব'}</span>
+              <ChevronRight className="w-3 h-3 text-amber-400 inline" />
+            </span>
+            <span className="text-[9px] font-mono text-slate-500">
+              Click to view
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Action Bar Above Expense Records: "+ ADD EXPENSE" ("Add expence option ta Expence record er box er opore asbe") */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 border border-indigo-500/30 rounded-3xl p-4 sm:p-5 shadow-lg">
+        <div className="flex items-center space-x-3.5">
+          <div className="w-11 h-11 rounded-2xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30 shadow-inner shrink-0">
+            <PackagePlus className="w-6 h-6" />
+          </div>
+          <div>
+            <div className="flex items-center space-x-2">
+              <h3 className="text-base font-black text-white uppercase tracking-tight">
+                নতুন দৈনন্দিন খরচ যুক্ত করুন (ADD EXPENSE)
+              </h3>
+              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                New Voucher
+              </span>
+            </div>
+            <p className="text-xs font-bold text-slate-400 mt-0.5">
+              ইনভেন্টরি আইটেম সিলেক্ট করে বা নতুন বিবরণ দিয়ে খরচের ভাউচার এন্ট্রি করুন
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setViewMode('add-expense')}
+          className="w-full sm:w-auto px-6 py-3 bg-gradient-to-r from-indigo-600 via-indigo-500 to-indigo-600 hover:from-indigo-500 hover:to-indigo-400 text-white rounded-2xl text-xs font-black uppercase tracking-wider flex items-center justify-center space-x-2 shadow-lg shadow-indigo-600/30 transition-all cursor-pointer active:scale-95 border border-indigo-400/30 shrink-0"
+        >
+          <Plus className="w-4 h-4" />
+          <span>+ ADD EXPENSE (নতুন খরচ যুক্ত করুন)</span>
+        </button>
+      </div>
+
+          {/* EXPENCE RECORDS LIST (MAIN TABLE AT BOTTOM OF PAGE - "Expence record ager moto nichei thakbe") */}
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
+        {/* Header of Table */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-4 border-b border-slate-800">
+          <div>
+            <div className="flex items-center space-x-2.5">
+              <div className="w-9 h-9 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30">
+                <FileText className="w-5 h-5" />
+              </div>
+              <h3 className="text-base font-black text-white uppercase tracking-tight">
+                EXPENCE RECORDS (দৈনিক খরচের হিসাব ও রেজিস্টার)
+              </h3>
+            </div>
+            <p className="text-[11px] text-slate-400 font-bold mt-0.5">
+              সকল দৈনন্দিন খরচের ভাউচার তালিকা, অনুসন্ধান ও হিসাব ব্যবস্থাপনা
+            </p>
+          </div>
+
+          <div className="flex items-center space-x-3">
+            <span className="text-xs font-mono font-bold text-slate-400 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
+              মোট রেকর্ড: <span className="text-white font-black">{filteredExpenses.length}</span>
+            </span>
+            <span className="text-xs font-mono font-black text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/20">
+              মোট খরচ: ৳{filteredExpenses.reduce((s, e) => s + (Number(e.amount) || 0), 0).toLocaleString()}
+            </span>
+          </div>
+        </div>
+
+        {/* Search & Filter Toolbar */}
+        <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3">
           <div className="relative flex-1">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
               type="text"
-              placeholder="Search items, dates, persons, shops..."
+              placeholder="Search expenses (item name, date, detailer person, shop)..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-slate-950/60 border border-slate-800 rounded-2xl pl-11 pr-4 py-2.5 text-xs font-bold text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2 text-xs font-bold text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             />
           </div>
 
-          {/* Quick Payment Channel Pills */}
-          <div className="flex items-center space-x-1 bg-slate-950/80 p-1 rounded-2xl border border-slate-800 overflow-x-auto">
-            {(['ALL', 'Cash', 'UCB', 'Due'] as const).map(method => (
+          {/* Channel Filters */}
+          <div className="flex items-center space-x-1 bg-slate-950 p-1 rounded-xl border border-slate-800 shrink-0">
+            {(['ALL', 'Cash', 'Due'] as const).map(ch => (
               <button
-                key={method}
+                key={ch}
                 type="button"
-                onClick={() => setFilterMethod(method)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all shrink-0 cursor-pointer ${
-                  filterMethod === method
-                    ? 'bg-indigo-600 text-white shadow-sm'
-                    : 'text-slate-400 hover:text-white'
+                onClick={() => setFilterMethod(ch)}
+                className={`px-3 py-1 rounded-lg text-xs font-black uppercase transition-all cursor-pointer ${
+                  filterMethod === ch ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
                 }`}
               >
-                {method}
+                {ch}
               </button>
             ))}
           </div>
 
           {/* Date Filter */}
-          <div className="flex items-center space-x-1 bg-slate-950/80 p-1 rounded-2xl border border-slate-800 overflow-x-auto">
+          <div className="flex items-center space-x-1 bg-slate-950 p-1 rounded-xl border border-slate-800 shrink-0">
             <button
               type="button"
               onClick={() => setFilterDateRange('ALL')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all shrink-0 cursor-pointer ${
+              className={`px-3 py-1 rounded-lg text-xs font-black uppercase transition-all cursor-pointer ${
                 filterDateRange === 'ALL' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'
               }`}
             >
-              All Dates
+              All
             </button>
             <button
               type="button"
               onClick={() => setFilterDateRange('THIS_MONTH')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all shrink-0 cursor-pointer ${
+              className={`px-3 py-1 rounded-lg text-xs font-black uppercase transition-all cursor-pointer ${
                 filterDateRange === 'THIS_MONTH' ? 'bg-slate-800 text-emerald-400' : 'text-slate-400 hover:text-white'
               }`}
             >
@@ -1334,7 +1868,7 @@ export const Expenditures: React.FC = () => {
             <button
               type="button"
               onClick={() => setFilterDateRange('TODAY')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all shrink-0 cursor-pointer ${
+              className={`px-3 py-1 rounded-lg text-xs font-black uppercase transition-all cursor-pointer ${
                 filterDateRange === 'TODAY' ? 'bg-slate-800 text-cyan-400' : 'text-slate-400 hover:text-white'
               }`}
             >
@@ -1342,373 +1876,338 @@ export const Expenditures: React.FC = () => {
             </button>
           </div>
 
-          {/* Person Selector */}
-          <div className="flex items-center space-x-2">
+          {/* Person Filter */}
+          <div className="shrink-0">
             <select
               value={filterPerson}
               onChange={(e) => setFilterPerson(e.target.value)}
-              className="bg-slate-950/80 border border-slate-800 rounded-2xl px-3 py-2 text-xs font-bold text-emerald-400 focus:outline-none"
+              className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-slate-300 focus:outline-none"
             >
-              <option value="ALL">All Detailers</option>
+              <option value="ALL">All Persons</option>
               {civilians.map(c => (
                 <option key={c.id} value={c.name}>{c.name}</option>
               ))}
             </select>
           </div>
-        </div>
 
-        {/* When Due is Selected: Sub-filter by Shop */}
-        {filterMethod === 'Due' && (
-          <div className="flex items-center space-x-2 pt-1 border-t border-slate-800/60 overflow-x-auto text-xs">
-            <span className="text-[10px] font-black text-amber-400 uppercase tracking-widest shrink-0">
-              FILTER SHOP:
-            </span>
+          {/* Due Shop Filter (visible when filterMethod is Due) */}
+          {filterMethod === 'Due' && (
+            <div className="shrink-0">
+              <select
+                value={filterShop}
+                onChange={(e) => setFilterShop(e.target.value as any)}
+                className="bg-slate-950 border border-amber-500/40 rounded-xl px-3 py-2 text-xs font-bold text-amber-300 focus:outline-none"
+              >
+                <option value="ALL">All Due Shops</option>
+                {DUE_SHOPS.map(s => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Sort Order Selector ("Expence record e show er jonno assending , Dessendion er option thakbe , default e Latest gula opore thakbe") */}
+          <div className="flex items-center space-x-1 bg-slate-950 p-1 rounded-xl border border-slate-800 shrink-0">
             <button
               type="button"
-              onClick={() => setFilterShop('ALL')}
-              className={`px-2.5 py-1 rounded-lg font-bold text-[11px] uppercase transition-all shrink-0 ${
-                filterShop === 'ALL' ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-white bg-slate-950'
+              onClick={() => setSortOrder('desc')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase transition-all cursor-pointer flex items-center space-x-1.5 ${
+                sortOrder === 'desc' 
+                  ? 'bg-indigo-600 text-white shadow-sm' 
+                  : 'text-slate-400 hover:text-white'
               }`}
+              title="Latest expenses first (সর্বশেষ খরচ আগে - ডিফল্ট)"
             >
-              All Shops
+              <ArrowDown className="w-3.5 h-3.5" />
+              <span>Latest (নতুন আগে)</span>
             </button>
-            {DUE_SHOPS.map(shop => (
-              <button
-                key={shop}
-                type="button"
-                onClick={() => setFilterShop(shop)}
-                className={`px-2.5 py-1 rounded-lg font-bold text-[11px] uppercase transition-all shrink-0 ${
-                  filterShop === shop ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-white bg-slate-950'
-                }`}
-              >
-                {shop}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Main Expense Table */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl shadow-sm overflow-hidden">
-        <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <FileText className="w-4 h-4 text-indigo-400" />
-            <h3 className="text-xs font-black text-white uppercase tracking-widest">
-              EXPENCE RECORDS LIST
-            </h3>
-          </div>
-          <div className="text-right">
-            <span className="text-[11px] font-bold text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-1 rounded-lg">
-              Showing {filteredExpenses.length} Records • ৳{filteredExpenses.reduce((s, e) => s + (Number(e.amount) || 0), 0).toLocaleString()}
-            </span>
+            <button
+              type="button"
+              onClick={() => setSortOrder('asc')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase transition-all cursor-pointer flex items-center space-x-1.5 ${
+                sortOrder === 'asc' 
+                  ? 'bg-indigo-600 text-white shadow-sm' 
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="Oldest expenses first (পুরনো খরচ আগে)"
+            >
+              <ArrowUp className="w-3.5 h-3.5" />
+              <span>Oldest (পুরনো আগে)</span>
+            </button>
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        {/* Expenses Table */}
+        <div className="overflow-x-auto rounded-2xl border border-slate-800">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="border-b border-slate-800 bg-slate-950/60 text-[10px] font-black text-slate-400 uppercase tracking-wider">
-                <th className="py-3.5 px-4 w-12 text-center">#</th>
-                <th className="py-3.5 px-4">Date</th>
-                <th className="py-3.5 px-4">Item Description</th>
-                <th className="py-3.5 px-4">Category</th>
-                <th className="py-3.5 px-4 text-center">Qty & Unit</th>
-                <th className="py-3.5 px-4 text-center">Rate</th>
-                <th className="py-3.5 px-4 text-right">Amount (৳)</th>
-                <th className="py-3.5 px-4 text-center">Channel</th>
-                <th className="py-3.5 px-4 text-center">Detailer</th>
-                <th className="py-3.5 px-4 text-center w-20">Actions</th>
+              <tr className="border-b border-slate-800 bg-slate-950/80 text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                <th className="py-3 px-3 w-10 text-center">#</th>
+                <th 
+                  className="py-3 px-3 cursor-pointer select-none hover:text-white transition-colors"
+                  onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
+                  title="Click to toggle Latest/Oldest sorting"
+                >
+                  <div className="flex items-center space-x-1">
+                    <span>Date</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-400 inline" />
+                  </div>
+                </th>
+                <th className="py-3 px-3">Item Description</th>
+                <th className="py-3 px-3">Category</th>
+                <th className="py-3 px-3 text-center">Qty</th>
+                <th className="py-3 px-3 text-center">Rate</th>
+                <th className="py-3 px-3 text-right">Amount (৳)</th>
+                <th className="py-3 px-3 text-center">Channel</th>
+                <th className="py-3 px-3 text-center">Detailer</th>
+                <th className="py-3 px-3 text-center w-24">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/80 text-xs font-bold">
+            <tbody className="divide-y divide-slate-800 text-xs font-bold">
               {filteredExpenses.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="py-14 text-center text-slate-500 font-bold">
-                    No expense records matching filter criteria.
+                  <td colSpan={10} className="py-12 text-center text-slate-500">
+                    No expense records found matching criteria.
                   </td>
                 </tr>
               ) : (
-                filteredExpenses.map((expense, idx) => {
-                  const method = String(expense.paymentMethod || '').trim();
-                  const isDue = method.toLowerCase() === 'due';
-                  const isCash = method.toLowerCase() === 'cash';
-                  const isUcb = method.toLowerCase() === 'ucb';
-
-                  return (
-                    <tr 
-                      key={expense.id || idx}
-                      className="hover:bg-slate-800/50 transition-colors group"
-                    >
-                      <td className="py-3 px-4 text-center text-slate-500 font-mono text-[11px]">
-                        {idx + 1}
-                      </td>
-                      <td className="py-3 px-4 text-slate-300 font-mono text-[11px] whitespace-nowrap">
-                        {expense.date}
-                      </td>
-                      <td className="py-3 px-4 text-white font-black">
-                        <div className="flex items-center space-x-1.5">
-                          <span>{expense.desc}</span>
-                          {expense.isCustom && (
-                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                              Custom
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="py-3 px-4 text-slate-400 text-[11px]">
-                        <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700/60">
-                          {expense.category || 'Grocery'}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-center text-slate-300 font-mono">
-                        {expense.qty ? `${expense.qty} ${expense.unit || 'kg'}` : '-'}
-                      </td>
-                      <td className="py-3 px-4 text-center text-amber-300 font-mono">
-                        {expense.unitPrice ? `৳${expense.unitPrice}` : '-'}
-                      </td>
-                      <td className="py-3 px-4 text-right font-mono font-black text-white">
-                        ৳{Number(expense.amount).toLocaleString()}
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        {isDue ? (
-                          <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-xl text-[10px] font-black uppercase bg-amber-500/10 text-amber-300 border border-amber-500/30">
-                            <Store className="w-3 h-3 text-amber-400" />
-                            <span>Due • {expense.dueShop || 'Grocessary Shop'}</span>
-                          </span>
-                        ) : isCash ? (
-                          <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-xl text-[10px] font-black uppercase bg-emerald-500/10 text-emerald-300 border border-emerald-500/30">
-                            <Wallet className="w-3 h-3 text-emerald-400" />
-                            <span>Cash</span>
-                          </span>
-                        ) : isUcb ? (
-                          <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-xl text-[10px] font-black uppercase bg-cyan-500/10 text-cyan-300 border border-cyan-500/30">
-                            <DollarSign className="w-3 h-3 text-cyan-400" />
-                            <span>UCB</span>
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-400 text-[10px]">
-                            {method || 'Other'}
+                filteredExpenses.map((item, idx) => (
+                  <tr key={item.id || idx} className="hover:bg-slate-800/40 transition-colors">
+                    <td className="py-2.5 px-3 text-center text-slate-500 font-mono text-[11px]">
+                      {idx + 1}
+                    </td>
+                    <td className="py-2.5 px-3 text-slate-300 font-mono text-[11px] whitespace-nowrap">
+                      {item.date}
+                    </td>
+                    <td className="py-2.5 px-3 text-white font-black">
+                      <div className="flex items-center space-x-1.5">
+                        <span>{item.desc}</span>
+                        {item.isCustom && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                            Custom
                           </span>
                         )}
-                      </td>
-                      <td className="py-3 px-4 text-center text-slate-300 text-[11px]">
-                        {expense.detailedPerson || 'Civ Tanvir'}
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        <div className="flex items-center justify-center space-x-1">
-                          <button
-                            type="button"
-                            onClick={() => setEditingExpense(expense)}
-                            className="p-1.5 text-slate-400 hover:text-indigo-400 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                            title="Edit"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDeleteTargetId(expense.id)}
-                            className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                            title="Delete"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
+                      </div>
+                    </td>
+                    <td className="py-2.5 px-3 text-slate-400 text-[11px]">
+                      {item.category || 'Grocery'}
+                    </td>
+                    <td className="py-2.5 px-3 text-center text-slate-300 font-mono">
+                      {item.qty ? `${item.qty} ${item.unit || 'kg'}` : '-'}
+                    </td>
+                    <td className="py-2.5 px-3 text-center text-amber-300 font-mono">
+                      {item.unitPrice ? `৳${item.unitPrice}` : '-'}
+                    </td>
+                    <td className="py-2.5 px-3 text-right font-mono font-black text-emerald-400">
+                      ৳{Number(item.amount).toLocaleString()}
+                    </td>
+                    <td className="py-2.5 px-3 text-center text-[10px]">
+                      <span className={`px-2 py-0.5 rounded font-black ${
+                        String(item.paymentMethod || '').toLowerCase() === 'due'
+                          ? 'bg-amber-950/60 text-amber-300 border border-amber-500/30'
+                          : 'bg-slate-800 text-slate-300'
+                      }`}>
+                        {item.paymentMethod || 'Cash'} {item.dueShop ? `(${item.dueShop})` : ''}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-3 text-center text-slate-300 text-[11px]">
+                      {item.detailedPerson || 'Civ Tanvir'}
+                    </td>
+                    <td className="py-2.5 px-3 text-center">
+                      <div className="flex items-center justify-center space-x-1">
+                        <button
+                          type="button"
+                          onClick={() => setEditingExpense(item)}
+                          className="p-1.5 text-slate-400 hover:text-indigo-400 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                          title="Edit"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeleteTargetId(item.id)}
+                          className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                          title="Delete"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
               )}
             </tbody>
-            {filteredExpenses.length > 0 && (
-              <tfoot>
-                <tr className="border-t-2 border-slate-800 bg-slate-950/80 font-black">
-                  <td colSpan={6} className="py-3.5 px-4 text-right text-xs uppercase tracking-widest text-slate-400">
-                    TOTAL FILTERED EXPENSES:
-                  </td>
-                  <td className="py-3.5 px-4 text-right text-base text-emerald-400 font-mono font-black">
-                    ৳{filteredExpenses.reduce((s, e) => s + (Number(e.amount) || 0), 0).toLocaleString()}
-                  </td>
-                  <td colSpan={3}></td>
-                </tr>
-              </tfoot>
-            )}
           </table>
         </div>
-      </div>
 
-      {/* HISTORY MODAL (EXPENSE RECORD HISTORY AT TOP OF PAGE) */}
+        {/* Table Footer */}
+        <div className="flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-800 font-bold">
+          <span>Showing {filteredExpenses.length} of {expenses.length} total recorded items</span>
+          <span className="font-mono text-emerald-400 font-black">
+            Total: ৳{filteredExpenses.reduce((s, i) => s + (Number(i.amount) || 0), 0).toLocaleString()}
+          </span>
+        </div>
+      </div>
+        </div>
+      )}
+
+      {/* ADD ADVANCE MODAL ("alada box asbe", "Pic er moto", "Default e amount thakbe na", "Preset e 500, 1000, 1500, 2000 thakbe") */}
       <AnimatePresence>
-        {showHistoryModal && (
+        {showAddAdvanceModal && (
           <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-5">
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-5xl max-h-[90vh] shadow-2xl flex flex-col overflow-hidden"
+              className="bg-slate-900 border border-amber-500/40 rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden"
             >
-              {/* Modal Header */}
-              <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
+              {/* Header */}
+              <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/80">
                 <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30">
-                    <History className="w-5 h-5" />
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30">
+                    <Plus className="w-5 h-5" />
                   </div>
                   <div>
                     <h3 className="text-base font-black text-white uppercase tracking-tight">
-                      EXPENCE RECORD HISTORY (খরচের ইতিহাস)
+                      ADD ADVANCE (অগ্রিম প্রদান)
                     </h3>
                     <p className="text-[11px] text-slate-400 font-bold">
-                      View, search and review all historical expense vouchers
+                      Civilian / Staff বাজার খরচের জন্য নতুন অগ্রিম প্রদান করুন
                     </p>
                   </div>
                 </div>
 
                 <button
                   type="button"
-                  onClick={() => setShowHistoryModal(false)}
+                  onClick={() => setShowAddAdvanceModal(false)}
                   className="p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800 hover:bg-slate-700 transition-colors"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              {/* History Search & Filters */}
-              <div className="p-4 border-b border-slate-800 bg-slate-900 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              {/* Form Content */}
+              <div className="p-5 sm:p-6 space-y-4">
+                {/* Person */}
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1.5">
+                    RECIPIENT / PERSON (কাকে অগ্রিম দেওয়া হচ্ছে)
+                  </label>
+                  <select
+                    value={advPerson}
+                    onChange={(e) => setAdvPerson(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-emerald-300 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  >
+                    {civilians.map(c => (
+                      <option key={c.id} value={c.name}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Date */}
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1.5">
+                    DATE (তারিখ)
+                  </label>
                   <input
                     type="text"
-                    placeholder="Search in history..."
-                    value={historySearch}
-                    onChange={(e) => setHistorySearch(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2 text-xs font-bold text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    value={advDate}
+                    onChange={(e) => setAdvDate(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white font-mono focus:outline-none"
                   />
                 </div>
 
-                <div className="flex items-center space-x-1 bg-slate-950 p-1 rounded-xl border border-slate-800 shrink-0">
-                  {(['ALL', 'Cash', 'UCB', 'Due'] as const).map(ch => (
-                    <button
-                      key={ch}
-                      type="button"
-                      onClick={() => setHistoryChannelFilter(ch)}
-                      className={`px-3 py-1 rounded-lg text-xs font-black uppercase transition-all ${
-                        historyChannelFilter === ch ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      {ch}
-                    </button>
-                  ))}
+                {/* Amount with Presets ("Default e amount thakbe na", "Preset e 500, 1000, 1500, 2000 thakbe") */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                      ADVANCE AMOUNT (অগ্রিম টাকা ৳)
+                    </label>
+                    <span className="text-[10px] text-amber-400/80 font-bold">
+                      {advAmount ? `৳${Number(advAmount).toLocaleString()}` : 'Default: Empty'}
+                    </span>
+                  </div>
+
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-black text-amber-400 font-mono">
+                      ৳
+                    </span>
+                    <input
+                      type="number"
+                      placeholder="টাকার পরিমাণ লিখুন (যেমন: 1000)"
+                      value={advAmount}
+                      onChange={(e) => setAdvAmount(e.target.value === '' ? '' : parseFloat(e.target.value))}
+                      className="w-full bg-slate-950 border border-amber-500/50 rounded-xl pl-9 pr-4 py-3 text-sm font-black text-amber-300 font-mono focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      autoFocus
+                    />
+                  </div>
+
+                  {/* Preset Buttons: 500, 1000, 1500, 2000 */}
+                  <div className="flex items-center space-x-2 mt-2.5">
+                    <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">
+                      Preset:
+                    </span>
+                    {[500, 1000, 1500, 2000].map(val => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => setAdvAmount(val)}
+                        className={`flex-1 py-1.5 rounded-xl text-xs font-mono font-black transition-all cursor-pointer ${
+                          advAmount === val
+                            ? 'bg-amber-500 text-slate-950 shadow-md ring-2 ring-amber-400'
+                            : 'bg-slate-950 text-amber-300 hover:bg-slate-800 hover:text-white border border-slate-800'
+                        }`}
+                      >
+                        ৳{val}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
-                <div className="flex items-center space-x-1 bg-slate-950 p-1 rounded-xl border border-slate-800 shrink-0">
+                {/* Purpose */}
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-1.5">
+                    PURPOSE / NOTE (উদ্দেশ্য / বিবরণ)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Daily Bazar Advance"
+                    value={advPurpose}
+                    onChange={(e) => setAdvPurpose(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white focus:outline-none"
+                  />
+                </div>
+
+                {/* Action Buttons */}
+                <div className="pt-3 flex items-center space-x-3">
                   <button
                     type="button"
-                    onClick={() => setHistoryDateFilter('ALL')}
-                    className={`px-3 py-1 rounded-lg text-xs font-black uppercase transition-all ${
-                      historyDateFilter === 'ALL' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'
-                    }`}
+                    onClick={() => setShowAddAdvanceModal(false)}
+                    className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-black uppercase transition-colors"
                   >
-                    All
+                    Cancel
                   </button>
                   <button
                     type="button"
-                    onClick={() => setHistoryDateFilter('THIS_MONTH')}
-                    className={`px-3 py-1 rounded-lg text-xs font-black uppercase transition-all ${
-                      historyDateFilter === 'THIS_MONTH' ? 'bg-slate-800 text-emerald-400' : 'text-slate-400 hover:text-white'
-                    }`}
+                    onClick={async () => {
+                      await handleSaveNewAdvance();
+                      setShowAddAdvanceModal(false);
+                    }}
+                    className="flex-1 py-3 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-amber-600/30 flex items-center justify-center space-x-2 cursor-pointer active:scale-95"
                   >
-                    This Month
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setHistoryDateFilter('TODAY')}
-                    className={`px-3 py-1 rounded-lg text-xs font-black uppercase transition-all ${
-                      historyDateFilter === 'TODAY' ? 'bg-slate-800 text-cyan-400' : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    Today
+                    <Plus className="w-4 h-4" />
+                    <span>Confirm Add Advance</span>
                   </button>
                 </div>
-              </div>
-
-              {/* History Table */}
-              <div className="flex-1 overflow-y-auto p-4">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-800 bg-slate-950/80 text-[10px] font-black text-slate-400 uppercase tracking-wider sticky top-0">
-                      <th className="py-2.5 px-3 w-10 text-center">#</th>
-                      <th className="py-2.5 px-3">Date</th>
-                      <th className="py-2.5 px-3">Item Description</th>
-                      <th className="py-2.5 px-3">Category</th>
-                      <th className="py-2.5 px-3 text-center">Qty</th>
-                      <th className="py-2.5 px-3 text-center">Rate</th>
-                      <th className="py-2.5 px-3 text-right">Amount (৳)</th>
-                      <th className="py-2.5 px-3 text-center">Channel</th>
-                      <th className="py-2.5 px-3 text-center">Detailer</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800 text-xs font-bold">
-                    {filteredHistory.length === 0 ? (
-                      <tr>
-                        <td colSpan={9} className="py-12 text-center text-slate-500">
-                          No history records found.
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredHistory.map((item, idx) => (
-                        <tr key={item.id || idx} className="hover:bg-slate-800/40">
-                          <td className="py-2.5 px-3 text-center text-slate-500 font-mono text-[11px]">
-                            {idx + 1}
-                          </td>
-                          <td className="py-2.5 px-3 text-slate-300 font-mono text-[11px] whitespace-nowrap">
-                            {item.date}
-                          </td>
-                          <td className="py-2.5 px-3 text-white font-black">
-                            {item.desc}
-                          </td>
-                          <td className="py-2.5 px-3 text-slate-400 text-[11px]">
-                            {item.category || 'Grocery'}
-                          </td>
-                          <td className="py-2.5 px-3 text-center text-slate-300 font-mono">
-                            {item.qty ? `${item.qty} ${item.unit || 'kg'}` : '-'}
-                          </td>
-                          <td className="py-2.5 px-3 text-center text-amber-300 font-mono">
-                            {item.unitPrice ? `৳${item.unitPrice}` : '-'}
-                          </td>
-                          <td className="py-2.5 px-3 text-right font-mono font-black text-emerald-400">
-                            ৳{Number(item.amount).toLocaleString()}
-                          </td>
-                          <td className="py-2.5 px-3 text-center text-[10px]">
-                            <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300">
-                              {item.paymentMethod || 'Cash'} {item.dueShop ? `(${item.dueShop})` : ''}
-                            </span>
-                          </td>
-                          <td className="py-2.5 px-3 text-center text-slate-300 text-[11px]">
-                            {item.detailedPerson || 'Civ Tanvir'}
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* History Footer */}
-              <div className="p-4 border-t border-slate-800 bg-slate-950 flex items-center justify-between">
-                <span className="text-xs text-slate-400 font-bold">
-                  Total Items: {filteredHistory.length}
-                </span>
-                <span className="text-sm font-mono font-black text-emerald-400">
-                  Total Sum: ৳{filteredHistory.reduce((s, i) => s + (Number(i.amount) || 0), 0).toLocaleString()}
-                </span>
               </div>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
 
-      {/* REGISTER ADVANCE MODAL (CIVILIAN / STAFF BAZAR ADVANCE REGISTER) */}
+      {/* ADVANCE BREAKDOWN MODAL ("কার কাছে কতো টাকা দেওয়া আছে" - 2 Columns Grid) */}
       <AnimatePresence>
-        {showAdvanceRegisterModal && (
+        {showAdvanceBreakdownModal && (
           <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-5">
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
@@ -1716,195 +2215,219 @@ export const Expenditures: React.FC = () => {
               exit={{ scale: 0.95, opacity: 0 }}
               className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-4xl max-h-[90vh] shadow-2xl flex flex-col overflow-hidden"
             >
-              {/* Modal Header */}
-              <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
+              {/* Header */}
+              <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/80">
                 <div className="flex items-center space-x-3">
                   <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30">
                     <Clock className="w-5 h-5" />
                   </div>
                   <div>
                     <h3 className="text-base font-black text-white uppercase tracking-tight">
-                      REGISTER ADVANCE (বাজার অগ্রিম রেজিস্টার)
+                      CIVILIAN STAFF ADVANCE REGISTER (অগ্রিম ও খরচের হিসাব)
                     </h3>
                     <p className="text-[11px] text-slate-400 font-bold">
-                      Civilian / Staff বাজার খরচের অগ্রিম টাকা প্রদান ও সমন্বয়
+                      সিভিলিয়ান স্টাফদের অগ্রিম গ্রহণ, খরচের ভাউচার ও সমন্বয় ব্যালেন্স
                     </p>
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => setShowAdvanceRegisterModal(false)}
-                  className="p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800 hover:bg-slate-700 transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* Issue New Advance Form */}
-              <div className="p-5 border-b border-slate-800 bg-slate-950/50 space-y-3">
-                <h4 className="text-xs font-black text-amber-400 uppercase tracking-wider flex items-center space-x-1.5">
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Issue New Bazar Advance (নতুন অগ্রিম প্রদান)</span>
-                </h4>
-
-                <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Date</label>
-                    <input
-                      type="text"
-                      value={advDate}
-                      onChange={(e) => setAdvDate(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white font-mono"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Person</label>
-                    <select
-                      value={advPerson}
-                      onChange={(e) => setAdvPerson(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-emerald-300"
-                    >
-                      {civilians.map(c => (
-                        <option key={c.id} value={c.name}>{c.name}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Amount (৳)</label>
-                    <input
-                      type="number"
-                      placeholder="e.g. 5000"
-                      value={advAmount}
-                      onChange={(e) => setAdvAmount(e.target.value === '' ? '' : parseFloat(e.target.value))}
-                      className="w-full bg-slate-900 border border-amber-500/50 rounded-xl px-3 py-2 text-xs font-black text-amber-300 font-mono"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Channel</label>
-                    <select
-                      value={advChannel}
-                      onChange={(e) => setAdvChannel(e.target.value as any)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white"
-                    >
-                      <option value="CASH">CASH</option>
-                      <option value="UCB">UCB</option>
-                    </select>
-                  </div>
-
-                  <div className="flex items-end">
-                    <button
-                      type="button"
-                      onClick={handleSaveNewAdvance}
-                      className="w-full py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-black uppercase transition-all shadow-md shadow-amber-600/30 cursor-pointer active:scale-95"
-                    >
-                      + Issue Advance
-                    </button>
-                  </div>
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvanceBreakdownModal(false)}
+                    className="p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800 hover:bg-slate-700 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
                 </div>
               </div>
 
-              {/* Active & Settled Advances List */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-black text-white uppercase tracking-wider">
-                    All Bazar Advances ({advances.length})
-                  </h4>
-                  <span className="text-xs font-mono font-bold text-amber-400">
-                    Active Unsettled: ৳{metrics.totalActiveAdvance.toLocaleString()}
+              {/* Modal Body: 2 Columns Grid for Civilians ("Advanc e click korle suhdu Civ der box asbe") */}
+              <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-1">
+                  <span className="text-xs font-black text-slate-300 uppercase tracking-wider">
+                    CIVILIAN MEMBERS ({civilians.length})
                   </span>
+                  <div className="flex items-center space-x-2">
+                    <span className={`text-xs font-mono font-black px-3 py-1 rounded-xl border ${
+                      metrics.availableAdvance < 0 
+                        ? 'text-rose-400 bg-rose-500/10 border-rose-500/30' 
+                        : 'text-amber-400 bg-amber-500/10 border-amber-500/20'
+                    }`}>
+                      উপলব্ধ মোট অগ্রিম: {metrics.availableAdvance < 0 ? `-৳${Math.abs(metrics.availableAdvance).toLocaleString()}` : `৳${metrics.availableAdvance.toLocaleString()}`}
+                    </span>
+                  </div>
                 </div>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="border-b border-slate-800 bg-slate-950/70 text-[10px] font-black text-slate-400 uppercase tracking-wider">
-                        <th className="py-2.5 px-3">Date</th>
-                        <th className="py-2.5 px-3">Person</th>
-                        <th className="py-2.5 px-3">Purpose</th>
-                        <th className="py-2.5 px-3 text-center">Channel</th>
-                        <th className="py-2.5 px-3 text-right">Advance (৳)</th>
-                        <th className="py-2.5 px-3 text-right">Spent (৳)</th>
-                        <th className="py-2.5 px-3 text-right">Returned (৳)</th>
-                        <th className="py-2.5 px-3 text-center">Status</th>
-                        <th className="py-2.5 px-3 text-center">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800 text-xs font-bold">
-                      {advances.length === 0 ? (
-                        <tr>
-                          <td colSpan={9} className="py-10 text-center text-slate-500">
-                            No bazar advance recorded yet.
-                          </td>
-                        </tr>
-                      ) : (
-                        advances.map((adv) => {
-                          const isActive = adv.status === 'ACTIVE';
-                          return (
-                            <tr key={adv.id} className="hover:bg-slate-800/40">
-                              <td className="py-2.5 px-3 text-slate-300 font-mono text-[11px] whitespace-nowrap">
-                                {adv.date}
-                              </td>
-                              <td className="py-2.5 px-3 text-white font-black">
-                                {adv.personName}
-                              </td>
-                              <td className="py-2.5 px-3 text-slate-400 text-[11px]">
-                                {adv.purpose}
-                              </td>
-                              <td className="py-2.5 px-3 text-center font-mono text-[11px]">
-                                <span className={`px-2 py-0.5 rounded text-[10px] ${adv.channel === 'CASH' ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20' : 'bg-cyan-500/10 text-cyan-300 border border-cyan-500/20'}`}>
-                                  {adv.channel}
-                                </span>
-                              </td>
-                              <td className="py-2.5 px-3 text-right font-mono font-black text-amber-400">
-                                ৳{Number(adv.amount).toLocaleString()}
-                              </td>
-                              <td className="py-2.5 px-3 text-right font-mono text-slate-300">
-                                {adv.spentAmount ? `৳${adv.spentAmount.toLocaleString()}` : '-'}
-                              </td>
-                              <td className="py-2.5 px-3 text-right font-mono text-emerald-400">
-                                {adv.returnAmount ? `৳${adv.returnAmount.toLocaleString()}` : '-'}
-                              </td>
-                              <td className="py-2.5 px-3 text-center">
-                                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
-                                  isActive
-                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                                    : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                                }`}>
-                                  {adv.status}
-                                </span>
-                              </td>
-                              <td className="py-2.5 px-3 text-center">
-                                {isActive ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setSettlingAdvance(adv);
-                                      setSettleSpent(adv.amount);
-                                      setSettleReturn(0);
-                                    }}
-                                    className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer shadow-sm"
-                                  >
-                                    Settle / Return
-                                  </button>
-                                ) : (
-                                  <span className="text-[10px] text-slate-500 font-mono">
-                                    {adv.settledDate || 'Settled'}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {civilians.map(civ => {
+                    const civAdvs = advances.filter(a => matchesCivilian(a.personName, civ));
+                    const activeAdvs = civAdvs.filter(a => a.status === 'ACTIVE');
+                    const totalCivAdv = civAdvs.reduce((s, a) => s + (Number(a.amount) || 0), 0);
+
+                    // Exclude shop Due expenses from civilian advance spending
+                    const civExpenses = expenses.filter(e => 
+                      matchesCivilian(e.detailedPerson, civ) &&
+                      String(e.paymentMethod || '').toLowerCase() !== 'due'
+                    );
+                    const totalCivExp = civExpenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+                    const civBalance = totalCivAdv - totalCivExp;
+
+                    return (
+                      <div
+                        key={civ.id}
+                        className="bg-slate-950/90 border border-slate-800 hover:border-amber-500/40 rounded-3xl p-5 space-y-4 transition-all shadow-md flex flex-col justify-between"
+                      >
+                        <div className="space-y-3">
+                          {/* Top Row: Pic, Rank & Name, pase Month & History */}
+                          <div className="flex items-start justify-between gap-3 pb-3 border-b border-slate-800/80">
+                            {/* Left: Pic + Rank & Name */}
+                            <div className="flex items-center space-x-3 min-w-0">
+                              {civ.dp ? (
+                                <img
+                                  src={resolveImageUrl(civ.dp)}
+                                  alt={civ.name}
+                                  className="w-12 h-12 rounded-2xl object-cover border border-amber-500/40 shadow-inner shrink-0"
+                                  onError={(e) => {
+                                    (e.target as HTMLElement).style.display = 'none';
+                                  }}
+                                />
+                              ) : (
+                                <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center font-black text-sm shrink-0">
+                                  {getCivInitials(civ)}
+                                </div>
+                              )}
+                              <div className="min-w-0">
+                                <h4 className="text-sm font-black text-white truncate">
+                                  {civ.rank ? `${civ.rank} ` : ''}{civ.surname || civ.name}
+                                </h4>
+                                <div className="flex items-center space-x-1.5 mt-0.5">
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
+                                    {civ.role || 'Staff Civilian'}
                                   </span>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
+                                  {activeAdvs.length > 0 && (
+                                    <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                      {activeAdvs.length} Active
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Right: pase Month (default running month) & History */}
+                            <div className="flex flex-col items-end space-y-1.5 shrink-0">
+                              {/* Month (Default: running month) */}
+                              <div className="flex items-center space-x-1 bg-slate-900 border border-slate-700/80 px-2 py-1 rounded-xl text-[10px] font-bold text-slate-300">
+                                <Calendar className="w-3 h-3 text-amber-400" />
+                                <span>{civMonthFilter}</span>
+                              </div>
+
+                              {/* History button */}
+                              <button
+                                type="button"
+                                onClick={() => setViewingHistoryCiv(civ)}
+                                className="px-2.5 py-1 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center space-x-1 border border-indigo-500/30 transition-all cursor-pointer active:scale-95"
+                                title="View transaction history"
+                              >
+                                <History className="w-3 h-3 text-indigo-400" />
+                                <span>History</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Middle Row (niche): Total Advance, Total Expence, Available balance */}
+                          <div className="grid grid-cols-3 gap-2 text-center text-[10px] font-bold">
+                            <div className="bg-slate-900/80 border border-slate-800/80 p-2.5 rounded-2xl">
+                              <span className="text-slate-400 block mb-0.5">Total Advance</span>
+                              <span className="font-mono text-amber-400 font-black text-xs">
+                                ৳{totalCivAdv.toLocaleString()}
+                              </span>
+                            </div>
+
+                            <div className="bg-slate-900/80 border border-slate-800/80 p-2.5 rounded-2xl">
+                              <span className="text-slate-400 block mb-0.5">Total Expence</span>
+                              <span className="font-mono text-slate-200 font-black text-xs">
+                                ৳{totalCivExp.toLocaleString()}
+                              </span>
+                            </div>
+
+                            <div className={`p-2.5 rounded-2xl border ${
+                              civBalance < 0 ? 'bg-rose-950/30 border-rose-800/60' : 'bg-slate-900/80 border-slate-800/80'
+                            }`}>
+                              <span className="text-slate-400 block mb-0.5">Available Balance</span>
+                              <span className={`font-mono font-black text-xs ${
+                                civBalance > 0 ? 'text-emerald-400' : civBalance < 0 ? 'text-rose-400' : 'text-slate-300'
+                              }`}>
+                                {civBalance < 0 ? `-৳${Math.abs(civBalance).toLocaleString()}` : `৳${civBalance.toLocaleString()}`}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Balance Status Banner */}
+                          <div className={`p-2.5 rounded-2xl border text-[11px] font-bold flex items-center justify-between ${
+                            civBalance > 0
+                              ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
+                              : civBalance < 0
+                              ? 'bg-rose-950/40 border-rose-500/40 text-rose-300'
+                              : 'bg-slate-900 border-slate-800 text-slate-400'
+                          }`}>
+                            <span>হিসাব স্ট্যাটাস:</span>
+                            <span className="font-mono font-black">
+                              {civBalance > 0
+                                ? `+ ৳${civBalance.toLocaleString()} (আমি ব্যাক পাবো)`
+                                : civBalance < 0
+                                ? `- ৳${Math.abs(civBalance).toLocaleString()} (আমার কাছে পাবে)`
+                                : '৳০ (সমান)'}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Bottom Row (er niche): Add, Sattle */}
+                        <div className="pt-3 border-t border-slate-800/80 flex items-center space-x-2.5">
+                          {/* Add button */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAdvPerson(civ.name);
+                              setAdvAmount('');
+                              setShowAddAdvanceModal(true);
+                            }}
+                            className="flex-1 py-2.5 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center space-x-1.5 shadow-md shadow-amber-600/30 cursor-pointer active:scale-95"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Add</span>
+                          </button>
+
+                          {/* Sattle button */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const targetAdv = activeAdvs[0] || {
+                                id: `adv-${Date.now()}-${civ.id}`,
+                                date: formatCanteenDate(new Date()),
+                                personName: civ.name,
+                                amount: totalCivAdv,
+                                spentAmount: totalCivExp,
+                                returnAmount: 0,
+                                channel: 'CASH',
+                                purpose: 'Bazar Advance Settlement',
+                                status: 'ACTIVE' as const
+                              };
+                              setSettlingAdvance(targetAdv);
+                              setSettleSpent(totalCivExp);
+                              setSettleReturn(civBalance > 0 ? civBalance : 0);
+                            }}
+                            className="flex-1 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center space-x-1.5 shadow-md shadow-indigo-600/30 cursor-pointer active:scale-95"
+                          >
+                            <CheckSquare className="w-3.5 h-3.5" />
+                            <span>Sattle</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
-
             </motion.div>
           </div>
         )}
@@ -1968,7 +2491,7 @@ export const Expenditures: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="text-slate-400 block mb-1">Returned Cash/Balance (ফেরত টাকা ৳)</label>
+                  <label className="text-slate-400 block mb-1">Returned Cash / Balance (ফেরত টাকা ৳)</label>
                   <input
                     type="number"
                     value={settleReturn}
@@ -1976,6 +2499,42 @@ export const Expenditures: React.FC = () => {
                     className="w-full bg-slate-950 border border-emerald-500/40 rounded-xl px-3 py-2 text-emerald-400 font-mono font-black"
                   />
                 </div>
+
+                {/* Cash In or Cash Out Result Box */}
+                {(() => {
+                  const sp = typeof settleSpent === 'number' ? settleSpent : parseFloat(String(settleSpent)) || 0;
+                  const advAmt = Number(settlingAdvance.amount) || 0;
+                  const bal = advAmt - sp;
+                  const isCashIn = bal > 0;
+                  const isCashOut = bal < 0;
+                  const absBal = Math.abs(bal);
+
+                  return (
+                    <div className={`p-3.5 rounded-2xl border text-xs space-y-1.5 transition-all ${
+                      isCashIn 
+                        ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-200' 
+                        : isCashOut 
+                        ? 'bg-rose-950/40 border-rose-500/50 text-rose-200' 
+                        : 'bg-slate-950 border-slate-800 text-slate-300'
+                    }`}>
+                      <div className="flex items-center justify-between font-black">
+                        <span className="uppercase tracking-wider">
+                          {isCashIn ? '🟢 CASH IN (আমি ব্যাক পাবো)' : isCashOut ? '🔴 CASH OUT (আমার কাছে পাবে)' : '⚪ BALANCED (হিসাব সমান)'}
+                        </span>
+                        <span className="font-mono text-sm">
+                          {isCashIn ? `+ ৳${absBal.toLocaleString()}` : isCashOut ? `- ৳${absBal.toLocaleString()}` : '৳০'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] opacity-80">
+                        {isCashIn 
+                          ? `${settlingAdvance.personName} বাজার খরচের উদ্বৃত্ত ৳${absBal.toLocaleString()} ক্যাশ ফেরত দিবে (Cash In)।` 
+                          : isCashOut 
+                          ? `অগ্রিমের চেয়ে ৳${absBal.toLocaleString()} বেশি খরচ হয়েছে। ক্যাশ থেকে তাকে পরিশোধ করা হবে (Cash Out)।` 
+                          : 'অগ্রিম এবং খরচ সম্পূর্ণ সমান রয়েছে।'}
+                      </p>
+                    </div>
+                  );
+                })()}
 
                 <div>
                   <label className="text-slate-400 block mb-1">Settlement Note (মন্তব্য)</label>
@@ -2000,9 +2559,23 @@ export const Expenditures: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleConfirmSettleAdvance}
-                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black uppercase transition-colors"
+                  className={`flex-1 py-2.5 rounded-xl text-xs font-black uppercase transition-all shadow-md active:scale-95 cursor-pointer ${
+                    (() => {
+                      const sp = typeof settleSpent === 'number' ? settleSpent : parseFloat(String(settleSpent)) || 0;
+                      const bal = (Number(settlingAdvance.amount) || 0) - sp;
+                      return bal < 0 
+                        ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/30' 
+                        : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30';
+                    })()
+                  }`}
                 >
-                  Confirm Settle
+                  {(() => {
+                    const sp = typeof settleSpent === 'number' ? settleSpent : parseFloat(String(settleSpent)) || 0;
+                    const bal = (Number(settlingAdvance.amount) || 0) - sp;
+                    if (bal > 0) return `Confirm Settle (Cash In: +৳${bal.toLocaleString()})`;
+                    if (bal < 0) return `Confirm Settle (Cash Out: -৳${Math.abs(bal).toLocaleString()})`;
+                    return 'Confirm Settle (৳০)';
+                  })()}
                 </button>
               </div>
             </motion.div>
@@ -2112,7 +2685,6 @@ export const Expenditures: React.FC = () => {
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white"
                     >
                       <option value="Cash">Cash</option>
-                      <option value="UCB">UCB</option>
                       <option value="Due">Due</option>
                     </select>
                   </div>
@@ -2207,6 +2779,170 @@ export const Expenditures: React.FC = () => {
                 >
                   Confirm Delete
                 </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* CIVILIAN HISTORY MODAL ("History") */}
+      <AnimatePresence>
+        {viewingHistoryCiv && (
+          <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[70] flex items-center justify-center p-3 sm:p-5">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-slate-900 border border-indigo-500/40 rounded-3xl w-full max-w-2xl max-h-[85vh] shadow-2xl flex flex-col overflow-hidden"
+            >
+              {/* Header */}
+              <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/80">
+                <div className="flex items-center space-x-3">
+                  {viewingHistoryCiv.dp ? (
+                    <img
+                      src={resolveImageUrl(viewingHistoryCiv.dp)}
+                      alt={viewingHistoryCiv.name}
+                      className="w-12 h-12 rounded-2xl object-cover border border-indigo-500/40 shrink-0"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-2xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-black text-sm border border-indigo-500/30 shrink-0">
+                      {getCivInitials(viewingHistoryCiv)}
+                    </div>
+                  )}
+                  <div>
+                    <div className="flex items-center space-x-2">
+                      <h3 className="text-base font-black text-white uppercase tracking-tight">
+                        {viewingHistoryCiv.name}
+                      </h3>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+                        {viewingHistoryCiv.role || 'Staff Civilian'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 font-bold mt-0.5">
+                      অগ্রিম গ্রহণ, খরচের ভাউচার ও সমন্বয় ইতিহাস
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setViewingHistoryCiv(null)}
+                  className="p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800 hover:bg-slate-700 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                {/* Summary Strip */}
+                {(() => {
+                  const civAdvs = advances.filter(a => matchesCivilian(a.personName, viewingHistoryCiv));
+                  // Exclude shop Due expenses from civilian advance spending
+                  const civExps = expenses.filter(e => 
+                    matchesCivilian(e.detailedPerson, viewingHistoryCiv) &&
+                    String(e.paymentMethod || '').toLowerCase() !== 'due'
+                  );
+                  const totalAdv = civAdvs.reduce((s, a) => s + (Number(a.amount) || 0), 0);
+                  const totalExp = civExps.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+                  const bal = totalAdv - totalExp;
+
+                  return (
+                    <div className="grid grid-cols-3 gap-2.5 text-center text-xs font-bold">
+                      <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800">
+                        <span className="text-slate-400 block text-[10px] mb-1">মোট অগ্রিম</span>
+                        <span className="font-mono text-amber-400 font-black text-sm">৳{totalAdv.toLocaleString()}</span>
+                      </div>
+                      <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800">
+                        <span className="text-slate-400 block text-[10px] mb-1">বাজার খরচ (ক্যাশ)</span>
+                        <span className="font-mono text-slate-200 font-black text-sm">৳{totalExp.toLocaleString()}</span>
+                      </div>
+                      <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800">
+                        <span className="text-slate-400 block text-[10px] mb-1">অবশিষ্ট ব্যালেন্স</span>
+                        <span className={`font-mono font-black text-sm ${bal > 0 ? 'text-emerald-400' : bal < 0 ? 'text-rose-400' : 'text-slate-400'}`}>
+                          {bal > 0 ? `+৳${bal.toLocaleString()}` : bal < 0 ? `-৳${Math.abs(bal).toLocaleString()}` : '৳০'}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Section: Advances History */}
+                <div className="space-y-2">
+                  <h4 className="text-xs font-black text-amber-400 uppercase tracking-wider flex items-center space-x-1.5">
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>অগ্রিম গ্রহণের ইতিহাস (Advances)</span>
+                  </h4>
+                  {advances.filter(a => matchesCivilian(a.personName, viewingHistoryCiv)).length === 0 ? (
+                    <p className="text-xs text-slate-500 italic p-3 bg-slate-950 rounded-xl text-center">কোনো অগ্রিম রেকর্ড নেই</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {advances.filter(a => matchesCivilian(a.personName, viewingHistoryCiv)).map(a => (
+                        <div key={a.id} className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between text-xs hover:border-slate-700 transition-colors">
+                          <div>
+                            <div className="flex items-center space-x-2">
+                              <span className="font-mono text-slate-400 text-[11px]">{a.date}</span>
+                              <span className="font-mono font-black text-amber-400">৳{Number(a.amount).toLocaleString()}</span>
+                              <span className={`text-[10px] px-1.5 py-0.2 rounded font-bold ${a.status === 'ACTIVE' ? 'bg-amber-500/10 text-amber-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
+                                {a.status}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 mt-0.5">{a.purpose || 'Daily Bazar Advance'}</p>
+                          </div>
+                          <div className="flex items-center space-x-2.5">
+                            {Number(a.spentAmount) > 0 && (
+                              <span className="text-[10px] font-mono text-slate-400">খরচ: ৳{a.spentAmount}</span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteAdvance(a.id)}
+                              className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                              title="Delete advance record"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Section: Expenses History */}
+                <div className="space-y-2">
+                  <h4 className="text-xs font-black text-emerald-400 uppercase tracking-wider flex items-center space-x-1.5">
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>খরচের ভাউচার ইতিহাস (Expenses)</span>
+                  </h4>
+                  {expenses.filter(e => matchesCivilian(e.detailedPerson, viewingHistoryCiv)).length === 0 ? (
+                    <p className="text-xs text-slate-500 italic p-3 bg-slate-950 rounded-xl text-center">কোনো খরচের ভাউচার নেই</p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                      {expenses.filter(e => matchesCivilian(e.detailedPerson, viewingHistoryCiv)).map(e => {
+                        const isDueExp = String(e.paymentMethod || '').toLowerCase() === 'due';
+                        return (
+                          <div key={e.id} className="p-2.5 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between text-xs">
+                            <div>
+                              <div className="flex items-center space-x-2 flex-wrap">
+                                <span className="font-mono text-slate-400 text-[11px]">{e.date}</span>
+                                <span className="font-bold text-white">{e.desc}</span>
+                                <span className="text-[10px] text-slate-500">({e.category || 'Grocery'})</span>
+                                {isDueExp && (
+                                  <span className="text-[9px] px-1.5 py-0.5 rounded font-black bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                                    বকেয়া [{e.dueShop || 'দোকান বিল'}] - অগ্রিম নয়
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <span className={`font-mono font-black ${isDueExp ? 'text-amber-400' : 'text-emerald-400'}`}>
+                              ৳{Number(e.amount).toLocaleString()}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             </motion.div>
           </div>
