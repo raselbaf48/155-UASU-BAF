@@ -49,7 +49,7 @@ export const AppUpdateModal: React.FC<AppUpdateModalProps> = ({
   };
 
   const formattedDate = latestVersion.created_at
-    ? new Date(latestVersion.created_at).toLocaleDateString('bn-BD', {
+    ? new Date(latestVersion.created_at).toLocaleDateString('en-US', {
         year: 'numeric',
         month: 'short',
         day: 'numeric',
@@ -73,7 +73,7 @@ export const AppUpdateModal: React.FC<AppUpdateModalProps> = ({
                   Capacitor In-App Update
                 </span>
                 <h3 className="text-xl font-black text-white tracking-tight mt-1">
-                  নতুন আপডেট উপলব্ধ!
+                  New Update Available!
                 </h3>
               </div>
             </div>
@@ -81,7 +81,7 @@ export const AppUpdateModal: React.FC<AppUpdateModalProps> = ({
             <button
               onClick={onClose}
               className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/80 transition-colors cursor-pointer"
-              title="বন্ধ করুন"
+              title="Close"
             >
               <X className="w-5 h-5" />
             </button>
@@ -93,7 +93,7 @@ export const AppUpdateModal: React.FC<AppUpdateModalProps> = ({
           {/* Version Comparison Card */}
           <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 flex items-center justify-between text-xs">
             <div>
-              <span className="text-[10px] uppercase font-bold text-slate-400 block">বর্তমান ভার্সন</span>
+              <span className="text-[10px] uppercase font-bold text-slate-400 block">CURRENT VERSION</span>
               <span className="font-mono font-bold text-slate-300">
                 v{currentVersionName} <span className="text-slate-500">({currentVersionCode})</span>
               </span>
@@ -102,7 +102,7 @@ export const AppUpdateModal: React.FC<AppUpdateModalProps> = ({
             <div className="text-emerald-400 font-black text-lg">➔</div>
 
             <div className="text-right">
-              <span className="text-[10px] uppercase font-bold text-emerald-400 block">লেটেস্ট ভার্সন</span>
+              <span className="text-[10px] uppercase font-bold text-emerald-400 block">LATEST VERSION</span>
               <span className="font-mono font-black text-emerald-300 text-sm">
                 v{latestVersion.version_name} <span className="text-emerald-500/80">({latestVersion.version_code})</span>
               </span>
@@ -114,7 +114,7 @@ export const AppUpdateModal: React.FC<AppUpdateModalProps> = ({
             <div className="p-4 rounded-2xl bg-slate-800/50 border border-slate-700/60 space-y-2">
               <div className="flex items-center space-x-1.5 text-xs font-bold text-slate-300">
                 <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                <span>নতুন পরিবর্তন ও রিলিজ নোটস:</span>
+                <span>Release Notes & Changes:</span>
               </div>
               <div className="text-xs text-slate-300 leading-relaxed whitespace-pre-line pl-1 border-l-2 border-emerald-500/40 font-sans">
                 {latestVersion.release_notes}
@@ -123,7 +123,7 @@ export const AppUpdateModal: React.FC<AppUpdateModalProps> = ({
           ) : (
             <div className="p-3.5 rounded-2xl bg-slate-800/40 border border-slate-800 text-xs text-slate-400 flex items-center space-x-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>এই সংস্করণে বাগ ফিক্স ও নিরাপত্তা উন্নয়ন অন্তর্ভুক্ত রয়েছে।</span>
+              <span>This update includes security improvements and bug fixes.</span>
             </div>
           )}
 
@@ -132,19 +132,19 @@ export const AppUpdateModal: React.FC<AppUpdateModalProps> = ({
             {formattedDate && (
               <span className="flex items-center space-x-1">
                 <Calendar className="w-3.5 h-3.5 text-slate-500" />
-                <span>প্রকাশের তারিখ: {formattedDate}</span>
+                <span>Release Date: {formattedDate}</span>
               </span>
             )}
             <span className="flex items-center space-x-1 text-slate-500">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Supabase ভেরিফাইড</span>
+              <span>Supabase Verified</span>
             </span>
           </div>
 
           {downloadSuccess && (
             <div className="p-3 rounded-xl bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 text-xs flex items-center space-x-2">
               <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
-              <span>APK ডাউনলোড শুরু হয়েছে! ব্রাউজার বা ডাউনলোড নোটিফিকেশন চেক করুন।</span>
+              <span>APK download started! Please check your browser or notification bar.</span>
             </div>
           )}
         </div>
@@ -156,7 +156,7 @@ export const AppUpdateModal: React.FC<AppUpdateModalProps> = ({
             onClick={handleSkip}
             className="w-full sm:w-auto px-4 py-2.5 rounded-xl text-xs font-bold text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
           >
-            এই ভার্সন বাদ দিন
+            Skip This Version
           </button>
 
           <div className="flex items-center space-x-2 w-full sm:w-auto sm:ml-auto">
@@ -165,7 +165,7 @@ export const AppUpdateModal: React.FC<AppUpdateModalProps> = ({
               onClick={onClose}
               className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer"
             >
-              পরে করুন
+              Later
             </button>
 
             <button
@@ -175,7 +175,7 @@ export const AppUpdateModal: React.FC<AppUpdateModalProps> = ({
               className="flex-1 sm:flex-none px-5 py-2.5 rounded-xl text-xs font-black bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white shadow-lg shadow-emerald-900/40 flex items-center justify-center space-x-2 transition-all cursor-pointer disabled:opacity-50"
             >
               <Download className="w-4 h-4" />
-              <span>{isOpening ? 'ওপেন হচ্ছে...' : 'এখনই APK ডাউনলোড'}</span>
+              <span>{isOpening ? 'Opening...' : 'Download APK Now'}</span>
             </button>
           </div>
         </div>

@@ -17,7 +17,7 @@
 
 /* Fallback for all Bengali text across the application to render in SuttonyMJ */
 body, button, input, select, textarea, table, th, td {
-  font-family: 'Inter', 'SuttonyMJ', 'SutonnyMJ', 'SutonnyOMJ', 'Sutonny MJ', 'Noto Serif Bengali', 'Tiro Bangla', 'SolaimanLipi', 'Kalpurush', sans-serif, serif;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
 #statement-paper-slip, #statement-paper-slip *,
@@ -26,7 +26,6 @@ body, button, input, select, textarea, table, th, td {
 .font-sutonny, .font-sutonny *,
 .font-bangla, .font-bangla *,
 .font-bengali, .font-bengali *,
-[lang="bn"], [lang="bn"] *,
 #print-canteen-bill-content, #print-canteen-bill-content * {
   font-family: 'SuttonyMJ', 'SutonnyMJ', 'SutonnyOMJ', 'Sutonny MJ', 'Noto Serif Bengali', 'Tiro Bangla', 'SolaimanLipi', 'Kalpurush', serif !important;
 }

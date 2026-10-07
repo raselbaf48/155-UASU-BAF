@@ -140,18 +140,29 @@ export const Expenditures: React.FC = () => {
   const [newAdvanceAmount, setNewAdvanceAmount] = useState('1000');
   const [newAdvanceMethod, setNewAdvanceMethod] = useState<'Cash' | 'UCB'>('Cash');
   const [newAdvanceDate, setNewAdvanceDate] = useState(formatCanteenDate(new Date()));
-  const [newAdvancePurpose, setNewAdvancePurpose] = useState('দৈনিক রান্নার বাজার (Daily Cooking Bazar)');
+  const [newAdvancePurpose, setNewAdvancePurpose] = useState('Daily Cooking Bazar');
   const [debitFromFundNow, setDebitFromFundNow] = useState(false);
 
-  // Receive Return Modal State (টাকা ফেরত গ্রহণ)
+  // Receive Return Modal State
   const [selectedAdvanceForReturn, setSelectedAdvanceForReturn] = useState<BazarAdvance | null>(null);
   const [returnAmountInput, setReturnAmountInput] = useState<string>('');
   const [returnMethod, setReturnMethod] = useState<'Cash' | 'UCB'>('Cash');
   const [returnDate, setReturnDate] = useState(formatCanteenDate(new Date()));
-  const [returnNote, setReturnNote] = useState('বাজারের উদ্বৃত্ত টাকা ফেরত (Bazar surplus return)');
+  const [returnNote, setReturnNote] = useState('Bazar surplus refund');
   const [isSubmittingReturn, setIsSubmittingReturn] = useState(false);
   const [isCloudSyncing, setIsCloudSyncing] = useState(false);
   const [lastSyncedTime, setLastSyncedTime] = useState<string | null>(null);
+
+  // Civ Accounts & Ledger States
+  const [selectedCivForLedger, setSelectedCivForLedger] = useState<string | null>(null);
+  const [selectedCivForSettle, setSelectedCivForSettle] = useState<{ name: string; balance: number } | null>(null);
+  const [settleAmountInput, setSettleAmountInput] = useState<string>('');
+  const [settleMethod, setSettleMethod] = useState<'Cash' | 'UCB'>('Cash');
+  const [settleDate, setSettleDate] = useState<string>(formatCanteenDate(new Date()));
+  const [settleNote, setSettleNote] = useState<string>('');
+  const [isSubmittingSettle, setIsSubmittingSettle] = useState(false);
+  const [showAddCivModal, setShowAddCivModal] = useState(false);
+  const [newCivNameInput, setNewCivNameInput] = useState('');
 
   // Sound chime effect for celebration
   const playChime = () => {
@@ -213,7 +224,7 @@ export const Expenditures: React.FC = () => {
       const timeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
       setLastSyncedTime(timeStr);
       if (showToastNotice) {
-        showToast('Supabase ক্লাউড থেকে সকল খরচ ও বাজার অগ্রিম সফলভাবে সিঙ্ক হয়েছে! ☁️');
+        showToast('All expenditures and bazar advances successfully synced with cloud! ☁️');
       }
     } catch (err) {
       console.warn('Cloud sync error in Expenditures:', err);
@@ -300,6 +311,18 @@ export const Expenditures: React.FC = () => {
             civList.push({ id: 'civ-nurnabi', name: 'Civ Nur Nabi' });
           }
 
+          // Merge custom civilians from local storage
+          try {
+            const customCivs = JSON.parse(localStorage.getItem('canteen_custom_civilians') || '[]');
+            if (Array.isArray(customCivs)) {
+              customCivs.forEach((cc: any) => {
+                if (cc && cc.name && !civList.some(c => c.name.toLowerCase() === cc.name.toLowerCase())) {
+                  civList.push(cc);
+                }
+              });
+            }
+          } catch {}
+
           setCivilians(civList);
           const defaultCiv = civList.find(c => c.name.toLowerCase().includes('tanvir'));
           if (defaultCiv) {
@@ -364,9 +387,12 @@ export const Expenditures: React.FC = () => {
   };
 
   // Helper to open Add Page with fresh default items
-  const handleOpenAddPage = (preselectedAdvance?: BazarAdvance) => {
+  const handleOpenAddPage = (preselectedAdvance?: BazarAdvance, preselectedCivName?: string) => {
     setBatchDate(formatCanteenDate(new Date()));
     setBatchPaymentMethod('Cash');
+
+    const targetPerson = preselectedCivName || preselectedAdvance?.person || detailedPerson || 'Civ Tanvir';
+    setDetailedPerson(targetPerson);
 
     if (preselectedAdvance) {
       setIsLinkedToAdvance(true);
@@ -375,9 +401,9 @@ export const Expenditures: React.FC = () => {
       setAdvanceAmountInput(String(preselectedAdvance.advanceAmount));
       setBatchPaymentMethod(preselectedAdvance.paymentMethod);
     } else {
-      // Check if there is an active advance for the current detailed person
+      // Check if there is an active advance for the target person
       const pendingAdv = advances.find(a => 
-        a.person.toLowerCase() === detailedPerson.toLowerCase() && 
+        a.person.toLowerCase().trim() === targetPerson.toLowerCase().trim() && 
         (a.status === 'PENDING_BAZAR' || a.status === 'PENDING_RETURN')
       );
       if (pendingAdv) {
@@ -505,7 +531,7 @@ export const Expenditures: React.FC = () => {
     });
 
     if (validRows.length === 0) {
-      alert('অনুগ্রহ করে কমপক্ষে একটি আইটেমের নাম, পরিমাণ এবং দর সঠিকভাবে প্রদান করুন।');
+      alert('Please provide valid item name, quantity, and unit rate for at least one item.');
       return;
     }
 
@@ -594,7 +620,7 @@ export const Expenditures: React.FC = () => {
           person: detailedPerson || 'Civ Tanvir',
           advanceAmount: advTotal,
           paymentMethod: (batchPaymentMethod === 'UCB' ? 'UCB' : 'Cash'),
-          purpose: 'দৈনিক বাজার খরচ',
+          purpose: 'Daily Bazar Procurement',
           bazarTotalAmount: bazarTotal,
           remainingAmount: remaining,
           status: advStatus,
@@ -621,9 +647,9 @@ export const Expenditures: React.FC = () => {
         setIsSavedBatch(false);
         setIsAddPage(false);
         if (isLinkedToAdvance && advanceRemainingDiff > 0) {
-          showToast(`বাজার খরচ ৳${batchTotalAmount} সংরক্ষিত! ${detailedPerson}-এর কাছে ৳${advanceRemainingDiff} ফেরত পাওনা রয়েছে।`);
+          showToast(`Bazar expenditure of ৳${batchTotalAmount.toLocaleString('en-US')} saved! ৳${advanceRemainingDiff.toLocaleString('en-US')} surplus refundable from ${detailedPerson}.`);
         } else {
-          showToast(`মোট ৳${batchTotalAmount.toLocaleString('en-US')} মূল্যের ${newRecords.length}টি খরচ সফলভাবে সংরক্ষিত হয়েছে!`);
+          showToast(`Total ${newRecords.length} expenditure records (৳${batchTotalAmount.toLocaleString('en-US')}) saved successfully!`);
         }
       }, 700);
     }, 400);
@@ -633,7 +659,7 @@ export const Expenditures: React.FC = () => {
   const handleCreateNewAdvance = () => {
     const amt = parseFloat(newAdvanceAmount);
     if (isNaN(amt) || amt <= 0) {
-      alert('অনুগ্রহ করে সঠিক অগ্রিম টাকার পরিমাণ লিখুন (যেমন: 1000)');
+      alert('Please enter a valid advance amount (e.g. 1000)');
       return;
     }
 
@@ -644,7 +670,7 @@ export const Expenditures: React.FC = () => {
       person: newAdvancePerson || 'Civ Tanvir',
       advanceAmount: amt,
       paymentMethod: newAdvanceMethod,
-      purpose: newAdvancePurpose || 'দৈনিক বাজার',
+      purpose: newAdvancePurpose || 'Daily Bazar',
       bazarTotalAmount: 0,
       remainingAmount: amt,
       status: 'PENDING_BAZAR'
@@ -658,7 +684,7 @@ export const Expenditures: React.FC = () => {
       const expRec: ExpenseRecord = {
         id: 'exp-adv-' + Date.now(),
         date: newAdv.date,
-        desc: `বাজার অগ্রিম - ${newAdv.person}`.toUpperCase(),
+        desc: `BAZAR ADVANCE - ${newAdv.person}`.toUpperCase(),
         paymentMethod: newAdv.paymentMethod,
         amount: amt,
         detailedPerson: newAdv.person,
@@ -670,7 +696,7 @@ export const Expenditures: React.FC = () => {
 
     setShowNewAdvanceModal(false);
     playChime();
-    showToast(`${newAdv.person}-কে ৳${amt.toLocaleString('en-US')} বাজার অগ্রিম প্রদান সফল হয়েছে!`);
+    showToast(`Successfully disbursed ৳${amt.toLocaleString('en-US')} bazar advance to ${newAdv.person}!`);
   };
 
   // Open Receive Return Modal
@@ -679,7 +705,7 @@ export const Expenditures: React.FC = () => {
     setReturnAmountInput(String(Math.max(0, adv.remainingAmount)));
     setReturnMethod(adv.paymentMethod || 'Cash');
     setReturnDate(formatCanteenDate(new Date()));
-    setReturnNote(`বাজার উদ্বৃত্ত ফেরত (${adv.person})`);
+    setReturnNote(`Bazar surplus refund (${adv.person})`);
   };
 
   // Confirm Return: Return money received into Cash or UCB
@@ -687,7 +713,7 @@ export const Expenditures: React.FC = () => {
     if (!selectedAdvanceForReturn) return;
     const returnAmt = parseFloat(returnAmountInput);
     if (isNaN(returnAmt) || returnAmt <= 0) {
-      alert('অনুগ্রহ করে ফেরত টাকার সঠিক পরিমাণ লিখুন।');
+      alert('Please enter a valid refund amount.');
       return;
     }
 
@@ -706,7 +732,7 @@ export const Expenditures: React.FC = () => {
           returnMethod,
           returnDate,
           status: newStatus,
-          notes: `${a.notes || ''} [ফেরত: ৳${returnAmt} (${returnMethod}) - ${returnDate}]`.trim()
+          notes: `${a.notes || ''} [Refund: ৳${returnAmt} (${returnMethod}) - ${returnDate}]`.trim()
         };
       }
       return a;
@@ -725,7 +751,7 @@ export const Expenditures: React.FC = () => {
         type: 'BAZAR_RETURN',
         gateway: returnMethod.toUpperCase(),
         memberName: adv.person,
-        items: `বাজারের অবশিষ্ট ফেরত (${adv.person}) • মূল অগ্রিম: ৳${adv.advanceAmount}, বাজার খরচ: ৳${adv.bazarTotalAmount}, ফেরত: ৳${returnAmt}`,
+        items: `Bazar Surplus Refund (${adv.person}) • Original Advance: ৳${adv.advanceAmount}, Spent: ৳${adv.bazarTotalAmount}, Refund: ৳${returnAmt}`,
         note: returnNote
       };
       const updatedTxs = [returnTx, ...txs];
@@ -740,15 +766,216 @@ export const Expenditures: React.FC = () => {
     setIsSubmittingReturn(false);
     setSelectedAdvanceForReturn(null);
     playChime();
-    showToast(`৳${returnAmt.toLocaleString('en-US')} সফলভাবে ${returnMethod}-এ ফেরত জমা হয়েছে!`);
+    showToast(`৳${returnAmt.toLocaleString('en-US')} successfully deposited to ${returnMethod}!`);
+  };
+
+  // Helper to compute individual civilian ledger account balance & stats
+  const getCivAccount = (civName: string) => {
+    const normName = civName.toLowerCase().trim();
+
+    // 1. All advances given to this person
+    const civAdvances = advances.filter(a => a.person.toLowerCase().trim() === normName);
+    const totalGiven = civAdvances.reduce((s, a) => s + (Number(a.advanceAmount) || 0), 0);
+
+    // 2. All actual bazar expenses detailed under this person (excluding internal advance fund debits)
+    const civExpenses = expenses.filter(e => 
+      (e.detailedPerson || '').toLowerCase().trim() === normName &&
+      !String(e.id || '').startsWith('exp-adv-')
+    );
+    const totalSpent = civExpenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+
+    // 3. All cash returns made by this person
+    const totalReturned = civAdvances.reduce((s, a) => s + (Number(a.returnAmount) || 0), 0);
+
+    // 4. Excess reimbursements paid to this person if any
+    const totalReimbursed = civAdvances.reduce((s, a) => {
+      if (a.status === 'SETTLED' && a.remainingAmount < 0) {
+        return s + Math.abs(a.remainingAmount);
+      }
+      return s;
+    }, 0);
+
+    // Net balance: money given (+) minus bazar spent (-) minus returned (-) plus reimbursed (+)
+    // (+) means "Receivable from staff" (staff owes us)
+    // (-) means "Payable to staff" (we owe staff)
+    // (0) means "Balanced / Settled"
+    const netBalance = totalGiven - totalSpent - totalReturned + totalReimbursed;
+
+    return {
+      civName,
+      totalGiven,
+      totalSpent,
+      totalReturned,
+      totalReimbursed,
+      netBalance,
+      advancesCount: civAdvances.length,
+      expensesCount: civExpenses.length,
+      civExpenses,
+      civAdvances
+    };
+  };
+
+  // Quick Open Give Money / Advance for a specific Civ
+  const handleOpenGiveMoneyToCiv = (civName: string) => {
+    setNewAdvancePerson(civName);
+    setNewAdvanceAmount('1000');
+    setNewAdvanceDate(formatCanteenDate(new Date()));
+    setNewAdvanceMethod('Cash');
+    setDebitFromFundNow(true);
+    setShowNewAdvanceModal(true);
+  };
+
+  // Quick Open Bazar Expense Entry for a specific Civ
+  const handleOpenBazarForCiv = (civName: string) => {
+    const pendingAdv = advances.find(a => 
+      a.person.toLowerCase().trim() === civName.toLowerCase().trim() && 
+      (a.status === 'PENDING_BAZAR' || a.status === 'PENDING_RETURN')
+    );
+    handleOpenAddPage(pendingAdv, civName);
+  };
+
+  // Quick Open Settle / Balance Adjustment for a specific Civ
+  const handleOpenSettleCiv = (civName: string, balance: number) => {
+    setSelectedCivForSettle({ name: civName, balance });
+    setSettleAmountInput(String(Math.abs(balance)));
+    setSettleMethod('Cash');
+    setSettleDate(formatCanteenDate(new Date()));
+    setSettleNote(
+      balance > 0 
+        ? `Surplus Refund Settlement (${civName})` 
+        : `Reimbursement Payout Settlement (${civName})`
+    );
+  };
+
+  // Confirm Settle / Return or Reimbursement
+  const handleConfirmSettle = async () => {
+    if (!selectedCivForSettle) return;
+    const { name: civName, balance } = selectedCivForSettle;
+    const amt = parseFloat(settleAmountInput);
+    if (isNaN(amt) || amt <= 0) {
+      alert('Please enter a valid settlement amount');
+      return;
+    }
+
+    setIsSubmittingSettle(true);
+    try {
+      if (balance > 0) {
+        // Civ returns surplus cash back to Canteen Fund
+        let remainingToReturn = amt;
+        const updatedAdvances = advances.map(a => {
+          if (a.person.toLowerCase().trim() === civName.toLowerCase().trim() && a.status !== 'SETTLED') {
+            const deduct = Math.min(remainingToReturn, Math.max(0, a.remainingAmount));
+            if (deduct > 0) {
+              remainingToReturn -= deduct;
+              const newRem = Math.max(0, a.remainingAmount - deduct);
+              return {
+                ...a,
+                remainingAmount: newRem,
+                returnAmount: (a.returnAmount || 0) + deduct,
+                returnMethod: settleMethod,
+                returnDate: settleDate,
+                status: newRem === 0 ? ('SETTLED' as const) : ('PENDING_RETURN' as const),
+                notes: `${a.notes || ''} [Refund: ৳${deduct} (${settleMethod}) - ${settleDate}]`.trim()
+              };
+            }
+          }
+          return a;
+        });
+
+        saveAdvancesToStorage(updatedAdvances);
+
+        // Record BAZAR_RETURN in canteen_txs so CanteenFund Cash/UCB increases
+        const rawTxs = localStorage.getItem(TXS_STORAGE_KEY);
+        const txs = rawTxs ? JSON.parse(rawTxs) : [];
+        const returnTx = {
+          id: 'bazar-ret-' + Date.now(),
+          date: settleDate,
+          amount: amt,
+          type: 'BAZAR_RETURN',
+          gateway: settleMethod.toUpperCase(),
+          memberName: civName,
+          items: `Bazar Surplus Refund (${civName})`,
+          note: settleNote || `Account Balance Settlement (${civName})`
+        };
+        const updatedTxs = [returnTx, ...txs];
+        localStorage.setItem(TXS_STORAGE_KEY, JSON.stringify(updatedTxs));
+        window.dispatchEvent(new Event('canteen_txs_updated'));
+        window.dispatchEvent(new Event('canteen_state_updated'));
+        await pushKeyToCloud('canteen_txs', updatedTxs);
+
+        showToast(`Successfully received ৳${amt.toLocaleString('en-US')} refund from ${civName}!`);
+      } else {
+        // Civ spent more from pocket (balance < 0), canteen pays reimbursement from fund
+        const updatedAdvances = advances.map(a => {
+          if (a.person.toLowerCase().trim() === civName.toLowerCase().trim() && (a.status === 'EXCESS_PAID' || a.remainingAmount < 0)) {
+            return {
+              ...a,
+              status: 'SETTLED' as const,
+              notes: `${a.notes || ''} [Reimbursement: ৳${amt} (${settleMethod}) - ${settleDate}]`.trim()
+            };
+          }
+          return a;
+        });
+        saveAdvancesToStorage(updatedAdvances);
+
+        // Record expense in canteen_expenses to deduct payout from fund
+        const expRec: ExpenseRecord = {
+          id: 'exp-reimburse-' + Date.now(),
+          date: settleDate,
+          desc: `BAZAR REIMBURSEMENT - ${civName}`.toUpperCase(),
+          paymentMethod: settleMethod,
+          amount: amt,
+          detailedPerson: civName,
+          isCustom: true
+        };
+        const updatedExpenses = [expRec, ...expenses];
+        saveToStorage(updatedExpenses);
+
+        showToast(`Successfully paid ৳${amt.toLocaleString('en-US')} reimbursement to ${civName}!`);
+      }
+
+      setSelectedCivForSettle(null);
+      playChime();
+    } catch (err: any) {
+      alert('Settlement failed: ' + (err?.message || 'Error'));
+    } finally {
+      setIsSubmittingSettle(false);
+    }
+  };
+
+  // Add a new Civilian to local storage and active list
+  const handleAddNewCivilian = () => {
+    const trimmed = newCivNameInput.trim();
+    if (!trimmed) return;
+    const finalName = trimmed.toLowerCase().startsWith('civ') ? trimmed : `Civ ${trimmed}`;
+
+    if (civilians.some(c => c.name.toLowerCase() === finalName.toLowerCase())) {
+      showToast('A staff member with this name already exists!');
+      return;
+    }
+
+    const newCiv = { id: 'civ-' + Date.now(), name: finalName };
+    const updated = [...civilians, newCiv];
+    setCivilians(updated);
+
+    try {
+      const customCivs = JSON.parse(localStorage.getItem('canteen_custom_civilians') || '[]');
+      customCivs.push(newCiv);
+      localStorage.setItem('canteen_custom_civilians', JSON.stringify(customCivs));
+      pushKeyToCloud('canteen_custom_civilians', customCivs);
+    } catch {}
+
+    setNewCivNameInput('');
+    setShowAddCivModal(false);
+    showToast(`Staff member "${finalName}" added successfully!`);
   };
 
   // Delete an advance record
   const handleDeleteAdvance = (advId: string) => {
-    if (!window.confirm('আপনি কি এই বাজার অগ্রিম রেকর্ডটি মুছে ফেলতে চান?')) return;
+    if (!window.confirm('Are you sure you want to delete this bazar advance record?')) return;
     const updated = advances.filter(a => a.id !== advId);
     saveAdvancesToStorage(updated);
-    showToast('অগ্রিম রেকর্ড মুছে ফেলা হয়েছে!');
+    showToast('Advance record deleted successfully!');
   };
 
   // Delete expense record
@@ -757,7 +984,7 @@ export const Expenditures: React.FC = () => {
     saveToStorage(updated);
     setConfirmDeleteId(null);
     if (editingExpense) setEditingExpense(null);
-    showToast('খরচ রেকর্ড সফলভাবে মুছে ফেলা হয়েছে!');
+    showToast('Expense record deleted successfully!');
   };
 
   // Update existing expense record
@@ -784,7 +1011,7 @@ export const Expenditures: React.FC = () => {
       setTimeout(() => {
         setIsSavedEdit(false);
         setEditingExpense(null);
-        showToast('খরচ বিবরণী সফলভাবে আপডেট করা হয়েছে!');
+        showToast('Expense record updated successfully!');
       }, 500);
     }, 300);
   };
@@ -865,7 +1092,7 @@ export const Expenditures: React.FC = () => {
               type="button"
               onClick={() => setIsAddPage(false)}
               className="p-2.5 rounded-2xl bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition-all cursor-pointer active:scale-90"
-              title="ফিরে যান"
+              title="Back"
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
@@ -873,11 +1100,11 @@ export const Expenditures: React.FC = () => {
               <h2 className="text-xl font-black text-white uppercase tracking-tight flex items-center space-x-2">
                 <span>ADD NEW EXPENDITURE</span>
                 <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
-                  ভাউচার এন্ট্রি
+                  Voucher Entry
                 </span>
               </h2>
               <p className="text-[11px] font-bold text-slate-400">
-                বাজারের কাঁচামাল বা অন্যান্য খরচের হিসাব সংযোজন করুন
+                Itemize market raw materials or administrative expense vouchers
               </p>
             </div>
           </div>
@@ -893,7 +1120,7 @@ export const Expenditures: React.FC = () => {
           </div>
         </div>
 
-        {/* BAZAR ADVANCE INTEGRATION PANEL (বাজার অগ্রিম সমন্বয়) */}
+        {/* BAZAR ADVANCE INTEGRATION PANEL */}
         <div className={`p-5 rounded-3xl border transition-all ${
           isLinkedToAdvance 
             ? 'bg-gradient-to-br from-amber-950/40 via-slate-900 to-indigo-950/30 border-amber-500/40 shadow-xl shadow-amber-950/20' 
@@ -906,15 +1133,15 @@ export const Expenditures: React.FC = () => {
               </div>
               <div>
                 <h3 className="text-sm font-black text-white flex items-center space-x-2">
-                  <span>বাজার অগ্রিম লিংক ও সমন্বয় (Bazar Advance Settlement)</span>
+                  <span>Bazar Advance Link & Settlement</span>
                   {isLinkedToAdvance && (
                     <span className="text-[9px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold">
-                      অগ্রিম সমন্বয় সক্রিয়
+                      Advance Active
                     </span>
                   )}
                 </h3>
                 <p className="text-[11px] text-slate-400">
-                  আজকের বাজারের জন্য কোনো সদস্য/কর্মীকে অগ্রিম টাকা দেওয়া হয়েছিল কি না?
+                  Was cash advance given to this member/staff for today's market procurement?
                 </p>
               </div>
             </div>
@@ -929,7 +1156,7 @@ export const Expenditures: React.FC = () => {
               />
               <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
               <span className="ml-2.5 text-xs font-black text-slate-300">
-                {isLinkedToAdvance ? 'অগ্রিম হিসাব চালু' : 'অগ্রিম নেই (সাধারণ খরচ)'}
+                {isLinkedToAdvance ? 'Linked to Advance' : 'No Advance (Standard Expense)'}
               </span>
             </label>
           </div>
@@ -940,7 +1167,7 @@ export const Expenditures: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <label className="text-[10px] font-black text-amber-300 uppercase tracking-wider block mb-1">
-                    অগ্রিম গ্রহণকারী (Person)
+                    Advance Recipient (Person)
                   </label>
                   <select
                     value={detailedPerson}
@@ -955,7 +1182,7 @@ export const Expenditures: React.FC = () => {
 
                 <div>
                   <label className="text-[10px] font-black text-amber-300 uppercase tracking-wider block mb-1">
-                    প্রদত্ত অগ্রিম পরিমাণ (Advance Given ৳)
+                    Advance Given Amount (৳)
                   </label>
                   <input
                     type="number"
@@ -968,14 +1195,14 @@ export const Expenditures: React.FC = () => {
 
                 <div>
                   <label className="text-[10px] font-black text-amber-300 uppercase tracking-wider block mb-1">
-                    প্রদানের মাধ্যম (Payment Method)
+                    Payment Method
                   </label>
                   <select
                     value={batchPaymentMethod}
                     onChange={(e) => setBatchPaymentMethod(e.target.value as any)}
                     className="w-full bg-slate-900 border border-amber-500/30 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
                   >
-                    <option value="Cash">Cash (নগদ)</option>
+                    <option value="Cash">Cash (Counter)</option>
                     <option value="UCB">UCB</option>
                   </select>
                 </div>
@@ -985,18 +1212,18 @@ export const Expenditures: React.FC = () => {
               <div className="bg-slate-950/70 border border-amber-500/30 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center space-x-6 flex-wrap gap-y-2 text-xs">
                   <div>
-                    <span className="text-slate-400 font-bold block text-[10px]">প্রদত্ত অগ্রিম:</span>
+                    <span className="text-slate-400 font-bold block text-[10px]">Disbursed Advance:</span>
                     <span className="font-mono font-black text-white text-sm">৳{advanceAmountNum.toLocaleString()}</span>
                   </div>
                   <div className="text-slate-600 font-black">−</div>
                   <div>
-                    <span className="text-slate-400 font-bold block text-[10px]">মোট বাজার খরচ:</span>
+                    <span className="text-slate-400 font-bold block text-[10px]">Total Bazar Spent:</span>
                     <span className="font-mono font-black text-rose-300 text-sm">৳{batchTotalAmount.toLocaleString()}</span>
                   </div>
                   <div className="text-slate-600 font-black">=</div>
                   <div>
                     <span className="text-slate-400 font-bold block text-[10px]">
-                      {advanceRemainingDiff >= 0 ? `${detailedPerson}-এর কাছে ফেরতযোগ্য বাকি:` : `${detailedPerson}-কে অতিরিক্ত প্রদেয়:`}
+                      {advanceRemainingDiff >= 0 ? `Surplus Refundable from ${detailedPerson}:` : `Excess Payable to ${detailedPerson}:`}
                     </span>
                     <span className={`font-mono font-black text-base ${advanceRemainingDiff >= 0 ? 'text-amber-400' : 'text-rose-400'}`}>
                       ৳{Math.abs(advanceRemainingDiff).toLocaleString()}
@@ -1006,11 +1233,11 @@ export const Expenditures: React.FC = () => {
 
                 <div className="text-[11px] font-bold text-amber-300/90 bg-amber-500/10 px-3.5 py-1.5 rounded-xl border border-amber-500/20">
                   {advanceRemainingDiff > 0 ? (
-                    <span>💡 বাজার শেষ হলে {detailedPerson} ৳{advanceRemainingDiff} ফেরত দিলে Cash/UCB-তে যুক্ত হবে।</span>
+                    <span>💡 When bazar completes, {detailedPerson} will refund ৳{advanceRemainingDiff} into Cash/UCB.</span>
                   ) : advanceRemainingDiff === 0 ? (
-                    <span className="text-emerald-400">✓ সম্পূর্ণ হিসাব মিলে গেছে! কোনো ফেরত বাকি নেই।</span>
+                    <span className="text-emerald-400">✓ Account perfectly balanced! No refund pending.</span>
                   ) : (
-                    <span className="text-rose-400">⚠️ বাজার খরচ অগ্রিমের চেয়ে ৳{Math.abs(advanceRemainingDiff)} বেশি হয়েছে!</span>
+                    <span className="text-rose-400">⚠️ Bazar expenditure exceeded advance by ৳{Math.abs(advanceRemainingDiff)}!</span>
                   )}
                 </div>
               </div>
@@ -1024,7 +1251,7 @@ export const Expenditures: React.FC = () => {
             <div>
               <label className="text-[11px] font-black text-slate-400 tracking-widest uppercase mb-2 block flex items-center space-x-1.5">
                 <Calendar className="w-3.5 h-3.5 text-indigo-400" />
-                <span>তারিখ (Date)</span>
+                <span>Date</span>
               </label>
               <input 
                 type="text" 
@@ -1037,7 +1264,7 @@ export const Expenditures: React.FC = () => {
             <div>
               <label className="text-[11px] font-black text-slate-400 tracking-widest uppercase mb-2 block flex items-center space-x-1.5">
                 <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
-                <span>ব্যক্তি (Detailed Person)</span>
+                <span>Detailer / Responsible Person</span>
               </label>
               <select 
                 value={detailedPerson}
@@ -1053,16 +1280,16 @@ export const Expenditures: React.FC = () => {
             <div>
               <label className="text-[11px] font-black text-slate-400 tracking-widest uppercase mb-2 block flex items-center space-x-1.5">
                 <Wallet className="w-3.5 h-3.5 text-indigo-400" />
-                <span>পরিশোধের মাধ্যম (Payment Method)</span>
+                <span>Payment Method</span>
               </label>
               <select 
                 value={batchPaymentMethod}
                 onChange={(e) => setBatchPaymentMethod(e.target.value as any)}
                 className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
               >
-                <option value="Cash">Cash (নগদ)</option>
+                <option value="Cash">Cash (Counter)</option>
                 <option value="UCB">UCB</option>
-                <option value="Due">Due (বাকি)</option>
+                <option value="Due">Due (Payable)</option>
               </select>
             </div>
           </div>
@@ -1073,10 +1300,10 @@ export const Expenditures: React.FC = () => {
           <div className="flex items-center justify-between">
             <label className="text-xs font-black text-slate-300 uppercase tracking-wider flex items-center space-x-2">
               <Boxes className="w-4 h-4 text-indigo-400" />
-              <span>কাঁচামাল দ্রুত নির্বাচন (RAW INVENTORY ITEMS)</span>
+              <span>QUICK RAW INVENTORY SELECT</span>
             </label>
             <span className="text-[10px] text-slate-500 font-bold">
-              ক্লিক করলেই নিচের ভাউচার তালিকায় যোগ হবে
+              Click to quickly add to the voucher table below
             </span>
           </div>
 
@@ -1110,9 +1337,9 @@ export const Expenditures: React.FC = () => {
           <div className="flex items-center justify-between flex-wrap gap-2">
             <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center space-x-2">
               <FileText className="w-4 h-4 text-indigo-400" />
-              <span>খরচ আইটেম তালিকা (EXPENDITURE ITEMS LIST)</span>
+              <span>EXPENDITURE ITEMS LIST</span>
               <span className="text-xs bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full font-mono">
-                {itemRows.length} টি
+                {itemRows.length} items
               </span>
             </h3>
 
@@ -1122,14 +1349,14 @@ export const Expenditures: React.FC = () => {
               className="px-4 py-2 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 rounded-xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 transition-all shadow-sm cursor-pointer active:scale-95"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>+ কাস্টম আইটেম (ইনভেন্টরিতে যুক্ত হবে না)</span>
+              <span>+ Custom Item (Non-inventory)</span>
             </button>
           </div>
 
           <div className="space-y-3">
             {itemRows.length === 0 ? (
               <div className="p-8 text-center bg-slate-950/40 rounded-3xl border border-dashed border-slate-800 text-slate-400 text-xs font-bold">
-                কোনো আইটেম যোগ করা হয়নি। উপরের কাঁচামাল বাটনে চাপুন অথবা &quot;+ কাস্টম আইটেম&quot; বাটনে ক্লিক করুন।
+                No items added yet. Click raw inventory buttons above or "+ Custom Item".
               </div>
             ) : (
               itemRows.map((row, index) => (
@@ -1162,12 +1389,12 @@ export const Expenditures: React.FC = () => {
                     {/* Item Name */}
                     <div className="md:col-span-4">
                       <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider block mb-1">
-                        আইটেমের নাম (Item Name)
+                        Item Name
                       </label>
                       {row.isCustom ? (
                         <input 
                           type="text"
-                          placeholder="e.g. রিকশা ভাড়া / পলিথিন / বিবিধ"
+                          placeholder="e.g. Rickshaw Fare / Packaging / Misc"
                           value={row.itemName ?? ""}
                           onChange={(e) => handleUpdateRowField(row.uid, 'itemName', e.target.value)}
                           className="w-full bg-slate-900 border border-amber-500/40 rounded-xl px-3.5 py-2 text-xs font-black text-amber-200 focus:outline-none focus:ring-2 focus:ring-amber-500"
@@ -1178,10 +1405,10 @@ export const Expenditures: React.FC = () => {
                           onChange={(e) => handleUpdateRowField(row.uid, 'rawItemId', e.target.value)}
                           className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-xs font-black text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                         >
-                          <option value="">আইটেম নির্বাচন করুন...</option>
+                          <option value="">Select item...</option>
                           {rawItems.map(item => (
                             <option key={item.id} value={item.id}>
-                              {item.name} ({item.nameBn}) • {item.unit}
+                              {item.name} • {item.unit}
                             </option>
                           ))}
                         </select>
@@ -1191,7 +1418,7 @@ export const Expenditures: React.FC = () => {
                     {/* Qty */}
                     <div className="md:col-span-2">
                       <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider block mb-1 text-center">
-                        পরিমাণ (Qty)
+                        Quantity
                       </label>
                       <input 
                         type="number"
@@ -1206,7 +1433,7 @@ export const Expenditures: React.FC = () => {
                     {/* Unit */}
                     <div className="md:col-span-1">
                       <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider block mb-1 text-center">
-                        একক
+                        Unit
                       </label>
                       <input 
                         type="text"
@@ -1220,12 +1447,12 @@ export const Expenditures: React.FC = () => {
                     {/* Unit Price (Rate) */}
                     <div className="md:col-span-2">
                       <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider block mb-1 text-right">
-                        দর (Rate ৳)
+                        Rate (৳)
                       </label>
                       <input 
                         type="number"
                         step="0.01"
-                        placeholder="দর"
+                        placeholder="Rate"
                         value={row.unitPrice ?? ""}
                         onChange={(e) => handleUpdateRowField(row.uid, 'unitPrice', e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
                         className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-right font-mono"
@@ -1235,7 +1462,7 @@ export const Expenditures: React.FC = () => {
                     {/* Amount */}
                     <div className="md:col-span-1 text-right">
                       <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider block mb-1">
-                        মোট (৳)
+                        Total (৳)
                       </label>
                       <div className="py-2 text-xs font-black text-white font-mono">
                         ৳{row.amount.toLocaleString('en-US')}
@@ -1248,7 +1475,7 @@ export const Expenditures: React.FC = () => {
                         type="button"
                         onClick={() => handleRemoveRow(row.uid)}
                         className="p-2 text-rose-400 hover:text-white hover:bg-rose-600/20 rounded-xl transition-colors cursor-pointer"
-                        title="আইটেমটি বাদ দিন"
+                        title="Remove item"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -1268,7 +1495,7 @@ export const Expenditures: React.FC = () => {
             onClick={() => setIsAddPage(false)}
             className="w-full sm:w-auto px-6 py-3.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-2xl text-xs font-black uppercase transition-all cursor-pointer"
           >
-            বাতিল (Cancel)
+            Cancel
           </button>
 
           <div className="flex items-center space-x-3 w-full sm:w-auto justify-end">
@@ -1277,9 +1504,9 @@ export const Expenditures: React.FC = () => {
               onClick={handleSaveBatchExpenses}
               isSaving={isSavingBatch}
               isSaved={isSavedBatch}
-              idleText={`খরচ সংরক্ষণ করুন (৳${batchTotalAmount.toLocaleString('en-US')})`}
-              savingText="সংরক্ষণ হচ্ছে..."
-              savedText="সফলভাবে সংরক্ষিত! ✓"
+              idleText={`Save Expenditures (৳${batchTotalAmount.toLocaleString('en-US')})`}
+              savingText="Saving..."
+              savedText="Saved Successfully! ✓"
               className="w-full sm:w-auto px-8 py-3.5 text-xs font-black tracking-wider shadow-lg shadow-indigo-600/30"
             />
           </div>
@@ -1317,7 +1544,7 @@ export const Expenditures: React.FC = () => {
               </span>
             </div>
             <p className="text-[11px] font-bold text-slate-400 mt-0.5">
-              ডেইলি বাজার অগ্রিম, ভাউচার খরচ এন্ট্রি, নিষ্পত্তি ও ক্যাশ সমন্বয় ব্যবস্থাপনা
+              Daily bazar procurement advances, expense vouchers, civilian ledger & cash reconciliation
             </p>
           </div>
         </div>
@@ -1330,10 +1557,10 @@ export const Expenditures: React.FC = () => {
             onClick={() => syncWithCloud(true)}
             disabled={isCloudSyncing}
             className="flex items-center space-x-1.5 px-3 py-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-800 border border-emerald-500/30 hover:border-emerald-400 text-emerald-400 text-[11px] font-black uppercase tracking-wider transition-all shadow-sm cursor-pointer active:scale-95"
-            title="Supabase ক্লাউড থেকে সর্বশেষ সকল খরচ ও বাজার অগ্রিম ডাটা রিলোড করুন"
+            title="Reload latest expenditures and advance data from cloud"
           >
             <Cloud className={`w-3.5 h-3.5 ${isCloudSyncing ? 'animate-bounce text-amber-400' : 'text-emerald-400'}`} />
-            <span>{isCloudSyncing ? 'সিঙ্ক হচ্ছে...' : 'Cloud Synced ✓'}</span>
+            <span>{isCloudSyncing ? 'Syncing...' : 'Cloud Synced ✓'}</span>
             {lastSyncedTime && <span className="text-[10px] text-slate-400 font-mono font-normal">({lastSyncedTime})</span>}
           </button>
 
@@ -1342,10 +1569,10 @@ export const Expenditures: React.FC = () => {
             type="button"
             onClick={() => setShowNewAdvanceModal(true)}
             className="flex items-center space-x-2 px-4 py-2.5 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md shadow-amber-900/30 cursor-pointer active:scale-95"
-            title="নতুন বাজার অগ্রিম প্রদান করুন"
+            title="Disburse new advance cash to staff"
           >
             <ShoppingCart className="w-4 h-4 text-amber-200" />
-            <span>+ বাজার অগ্রিম</span>
+            <span>+ Bazar Advance</span>
           </button>
 
           {/* Add Expenses Button */}
@@ -1353,10 +1580,10 @@ export const Expenditures: React.FC = () => {
             type="button"
             onClick={() => handleOpenAddPage()} 
             className="flex items-center space-x-2 px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md shadow-indigo-900/30 cursor-pointer active:scale-95"
-            title="নতুন খরচ ভাউচার যোগ করুন"
+            title="Record new expense voucher"
           >
             <Plus className="w-4 h-4 text-indigo-200" />
-            <span>+ খরচ ভাউচার এন্ট্রি</span>
+            <span>+ Expense Voucher</span>
           </button>
         </div>
       </div>
@@ -1367,32 +1594,32 @@ export const Expenditures: React.FC = () => {
         {/* Card 1: Total Spending */}
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 flex flex-col justify-between shadow-sm relative overflow-hidden group hover:border-indigo-500/50 transition-all">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">সর্বমোট খরচ</span>
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Total Expenses</span>
             <div className="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center border border-indigo-500/20">
               <Banknote className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3">
             <h3 className="text-xl sm:text-2xl font-black text-white font-mono">৳{total.toLocaleString()}</h3>
-            <p className="text-[10px] text-slate-500 font-bold mt-0.5">{expenses.length} টি ভাউচার রেকর্ড</p>
+            <p className="text-[10px] text-slate-500 font-bold mt-0.5">{expenses.length} voucher records</p>
           </div>
         </div>
 
         {/* Card 2: Current Month Spending */}
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 flex flex-col justify-between shadow-sm relative overflow-hidden group hover:border-emerald-500/50 transition-all">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">চলতি মাসের খরচ</span>
+            <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">Current Month</span>
             <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center border border-emerald-500/20">
               <Calendar className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3">
             <h3 className="text-xl sm:text-2xl font-black text-emerald-400 font-mono">৳{currentMonthSpending.toLocaleString()}</h3>
-            <p className="text-[10px] text-slate-500 font-bold mt-0.5">বর্তমান মাসের বাজার ব্যয়</p>
+            <p className="text-[10px] text-slate-500 font-bold mt-0.5">Expenses recorded this month</p>
           </div>
         </div>
 
-        {/* Card 3: Pending Returns (পাওনা / তানভীরের কাছে বাকি) */}
+        {/* Card 3: Pending Returns */}
         <div 
           onClick={() => setActiveTab('BAZAR_ADVANCES')}
           className={`border rounded-2xl p-4 sm:p-5 flex flex-col justify-between shadow-sm relative overflow-hidden cursor-pointer transition-all ${
@@ -1400,11 +1627,11 @@ export const Expenditures: React.FC = () => {
               ? 'bg-gradient-to-br from-amber-950/50 via-slate-900 to-slate-900 border-amber-500/50 hover:border-amber-400 shadow-amber-950/20' 
               : 'bg-slate-900/90 border-slate-800 hover:border-slate-700'
           }`}
-          title="ক্লিক করে বাজার অগ্রিম ও ফেরতযোগ্য বাকি দেখুন"
+          title="Click to view bazar advances and refundable balances"
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-1.5">
-              <span className="text-[10px] font-black uppercase tracking-wider text-amber-300">অগ্রিম বাকি পাওনা</span>
+              <span className="text-[10px] font-black uppercase tracking-wider text-amber-300">Advance Receivable</span>
               {pendingReturnsCount > 0 && (
                 <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
               )}
@@ -1416,7 +1643,7 @@ export const Expenditures: React.FC = () => {
           <div className="mt-3">
             <h3 className="text-xl sm:text-2xl font-black text-amber-300 font-mono">৳{pendingReturnsTotal.toLocaleString()}</h3>
             <p className="text-[10px] text-amber-400/80 font-bold mt-0.5">
-              {pendingReturnsCount > 0 ? `${pendingReturnsCount}টি ফেরত বাকি (ক্লিক করুন)` : 'সব অগ্রিম নিষ্পত্তি সম্পন্ন'}
+              {pendingReturnsCount > 0 ? `${pendingReturnsCount} pending returns (Click to view)` : 'All advances settled'}
             </p>
           </div>
         </div>
@@ -1424,18 +1651,18 @@ export const Expenditures: React.FC = () => {
         {/* Card 4: Cash vs UCB Split */}
         <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 flex flex-col justify-between shadow-sm relative overflow-hidden">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">পরিশোধের মাধ্যম</span>
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Payment Channels</span>
             <div className="w-7 h-7 rounded-lg bg-slate-800 text-slate-400 flex items-center justify-center border border-slate-700">
               <Wallet className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-2 space-y-1">
             <div className="flex items-center justify-between text-xs">
-              <span className="text-slate-400 font-bold">নগদ (Cash):</span>
+              <span className="text-slate-400 font-bold">Cash:</span>
               <span className="font-mono font-black text-emerald-400">৳{cashTotal.toLocaleString()}</span>
             </div>
             <div className="flex items-center justify-between text-xs">
-              <span className="text-slate-400 font-bold">UCB / ব্যাংক:</span>
+              <span className="text-slate-400 font-bold">UCB / Bank:</span>
               <span className="font-mono font-black text-cyan-400">৳{ucbTotal.toLocaleString()}</span>
             </div>
           </div>
@@ -1457,7 +1684,7 @@ export const Expenditures: React.FC = () => {
             }`}
           >
             <FileText className="w-4 h-4" />
-            <span>সকল খরচ তালিকা ({expenses.length})</span>
+            <span>All Expenses ({expenses.length})</span>
           </button>
 
           {/* Tab 2: Bazar Advances & Settlement Tracker */}
@@ -1471,7 +1698,7 @@ export const Expenditures: React.FC = () => {
             }`}
           >
             <ShoppingCart className="w-4 h-4" />
-            <span>বাজার অগ্রিম ও নিষ্পত্তি ({advances.length})</span>
+            <span>Civilian Accounts & Bazar Ledger ({civilians.length})</span>
             {pendingReturnsCount > 0 && (
               <span className="ml-1 px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black">
                 {pendingReturnsCount}
@@ -1490,7 +1717,7 @@ export const Expenditures: React.FC = () => {
             }`}
           >
             <Sparkles className="w-4 h-4" />
-            <span>আইটেম ও পরিসংখ্যান</span>
+            <span>Procurement Analytics</span>
           </button>
         </div>
 
@@ -1523,7 +1750,7 @@ export const Expenditures: React.FC = () => {
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input 
               type="text" 
-              placeholder="আইটেমের নাম, ব্যক্তি (যেমন: Civ Tanvir), পেমেন্ট মেথড বা তারিখ দিয়ে খুঁজুন..."
+              placeholder="Search item name, person (e.g. Civ Tanvir), payment method or date..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full bg-slate-900 border border-slate-800 rounded-2xl pl-11 pr-4 py-3 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-slate-500 shadow-inner"
@@ -1537,21 +1764,21 @@ export const Expenditures: React.FC = () => {
                 <thead>
                   <tr className="border-b border-slate-800 bg-slate-950/60 text-[10px] font-black text-slate-400 uppercase tracking-wider">
                     <th className="py-3.5 px-4 w-12 text-center">#</th>
-                    <th className="py-3.5 px-4">তারিখ</th>
-                    <th className="py-3.5 px-4">আইটেমের বিবরণ</th>
-                    <th className="py-3.5 px-4 text-center">পরিমাণ</th>
-                    <th className="py-3.5 px-4 text-center">দর (৳)</th>
-                    <th className="py-3.5 px-4 text-center">দায়িত্বপ্রাপ্ত (Detailer)</th>
-                    <th className="py-3.5 px-4 text-center">মাধ্যম</th>
-                    <th className="py-3.5 px-4 text-right">মোট টাকা</th>
-                    <th className="py-3.5 px-4 text-center w-20">অ্যাকশন</th>
+                    <th className="py-3.5 px-4">Date</th>
+                    <th className="py-3.5 px-4">Item Description</th>
+                    <th className="py-3.5 px-4 text-center">Qty</th>
+                    <th className="py-3.5 px-4 text-center">Rate (৳)</th>
+                    <th className="py-3.5 px-4 text-center">Detailer</th>
+                    <th className="py-3.5 px-4 text-center">Channel</th>
+                    <th className="py-3.5 px-4 text-right">Total Amount</th>
+                    <th className="py-3.5 px-4 text-center w-20">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60 text-xs font-bold">
                   {filtered.length === 0 ? (
                     <tr>
                       <td colSpan={9} className="py-12 text-center text-slate-500 font-bold">
-                        কোনো খরচ রেকর্ড পাওয়া যায়নি।
+                        No expenditure records found.
                       </td>
                     </tr>
                   ) : (
@@ -1576,7 +1803,7 @@ export const Expenditures: React.FC = () => {
                             )}
                             {expense.advanceId && (
                               <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                                অগ্রিম লিংক
+                                Advance Linked
                               </span>
                             )}
                           </div>
@@ -1617,7 +1844,7 @@ export const Expenditures: React.FC = () => {
                               type="button"
                               onClick={() => setEditingExpense(expense)}
                               className="p-1.5 text-slate-400 hover:text-indigo-400 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                              title="সম্পাদনা করুন"
+                              title="Edit"
                             >
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
@@ -1625,7 +1852,7 @@ export const Expenditures: React.FC = () => {
                               type="button"
                               onClick={() => setConfirmDeleteId(expense.id)}
                               className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
-                              title="মুছে ফেলুন"
+                              title="Delete"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -1641,7 +1868,7 @@ export const Expenditures: React.FC = () => {
         </div>
       )}
 
-      {/* TAB 2: BAZAR ADVANCES & SETTLEMENT TRACKER (বাজার অগ্রিম ও নিষ্পত্তি) */}
+      {/* TAB 2: BAZAR ADVANCES & SETTLEMENT TRACKER */}
       {activeTab === 'BAZAR_ADVANCES' && (
         <div className="space-y-6 animate-in fade-in duration-200">
           
@@ -1653,31 +1880,227 @@ export const Expenditures: React.FC = () => {
               </div>
               <div>
                 <h3 className="text-base font-black text-white flex items-center space-x-2">
-                  <span>বাজার অগ্রিম ও নিষ্পত্তি খাতা (Advance & Settlement Tracker)</span>
+                  <span>Civilian Procurement Accounts & Ledger</span>
                 </h3>
                 <p className="text-xs text-slate-400">
-                  কর্মীকে বাজার করার জন্য অগ্রিম দেওয়া, ভাউচার মিলিয়ে খরচ সমন্বয় ও অবশিষ্ট টাকা ক্যাশে ফেরত গ্রহণ
+                  Individual account boxes for staff: (+) Balance = Receivable from staff, (-) Balance = Payable to staff
                 </p>
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setShowNewAdvanceModal(true)}
-              className="px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center space-x-2 cursor-pointer shadow-lg shadow-amber-950/40 self-start sm:self-auto"
-            >
-              <Plus className="w-4 h-4" />
-              <span>+ নতুন অগ্রিম প্রদান</span>
-            </button>
+            <div className="flex items-center space-x-2 flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAddCivModal(true)}
+                className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center space-x-1.5 cursor-pointer shadow-md"
+              >
+                <Plus className="w-4 h-4 text-emerald-400" />
+                <span>+ Add Staff Member</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowNewAdvanceModal(true)}
+                className="px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center space-x-2 cursor-pointer shadow-lg shadow-amber-950/40 self-start sm:self-auto"
+              >
+                <Plus className="w-4 h-4" />
+                <span>+ Disburse Cash / Advance</span>
+              </button>
+            </div>
           </div>
 
-          {/* Advances Cards Grid */}
+          {/* 1. INDIVIDUAL CIVILIAN RUNNING ACCOUNT BOXES */}
           <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center space-x-2">
+                  <UserCheck className="w-4 h-4 text-emerald-400" />
+                  <span>Civilian Procurement Accounts (Individual Running Balance)</span>
+                </h4>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Cash given is credited (+), itemized bazar expenditures are debited (-)
+                </p>
+              </div>
+            </div>
+
+            {/* The Grid of Boxes */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {civilians.map(civ => {
+                const civAcc = getCivAccount(civ.name);
+                const isReceivable = civAcc.netBalance > 0;
+                const isPayable = civAcc.netBalance < 0;
+                const isSettled = civAcc.netBalance === 0;
+
+                return (
+                  <div
+                    key={civ.id || civ.name}
+                    className={`rounded-3xl border p-5 shadow-lg space-y-4 relative overflow-hidden transition-all ${
+                      isReceivable
+                        ? 'bg-slate-900/95 border-emerald-500/40 hover:border-emerald-500 shadow-emerald-950/20'
+                        : isPayable
+                        ? 'bg-slate-900/95 border-rose-500/40 hover:border-rose-500 shadow-rose-950/20'
+                        : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    {/* Header: Name and Status Badge */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center space-x-3 min-w-0">
+                        <div className={`w-11 h-11 rounded-2xl flex items-center justify-center font-black text-sm border shrink-0 ${
+                          isReceivable
+                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                            : isPayable
+                            ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                            : 'bg-slate-800 text-slate-400 border-slate-700'
+                        }`}>
+                          {civ.name.replace('Civ ', '').charAt(0) || 'C'}
+                        </div>
+                        <div className="min-w-0">
+                          <h4 className="text-base font-black text-white truncate">{civ.name}</h4>
+                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
+                            Civilian Staff
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Status Badge */}
+                      <div className="shrink-0">
+                        {isReceivable ? (
+                          <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 inline-flex items-center space-x-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                            <span>Receivable (+)</span>
+                          </span>
+                        ) : isPayable ? (
+                          <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase bg-rose-500/20 text-rose-300 border border-rose-500/40 inline-flex items-center space-x-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse"></span>
+                            <span>Payable (-)</span>
+                          </span>
+                        ) : (
+                          <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase bg-slate-800 text-slate-400 border border-slate-700 inline-block">
+                            ✓ Balanced (৳0)
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Prominent Balance Display */}
+                    <div className={`p-4 rounded-2xl border ${
+                      isReceivable
+                        ? 'bg-gradient-to-r from-emerald-950/40 via-slate-950 to-slate-950 border-emerald-500/40'
+                        : isPayable
+                        ? 'bg-gradient-to-r from-rose-950/40 via-slate-950 to-slate-950 border-rose-500/40'
+                        : 'bg-slate-950/80 border-slate-800'
+                    }`}>
+                      <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-wider text-slate-400">
+                        <span>Running Account Balance</span>
+                        <span className="font-mono font-bold text-slate-500">
+                          {civAcc.expensesCount} expenses • {civAcc.advancesCount} advances
+                        </span>
+                      </div>
+                      <div className="mt-1 flex items-baseline space-x-1">
+                        <h3 className={`text-3xl font-black font-mono tracking-tight ${
+                          isReceivable
+                            ? 'text-emerald-400'
+                            : isPayable
+                            ? 'text-rose-400'
+                            : 'text-slate-300'
+                        }`}>
+                          {isReceivable
+                            ? `+ ৳${civAcc.netBalance.toLocaleString()}`
+                            : isPayable
+                            ? `- ৳${Math.abs(civAcc.netBalance).toLocaleString()}`
+                            : '৳0'}
+                        </h3>
+                      </div>
+                      <p className="text-[11px] text-slate-400 font-bold mt-1 leading-snug">
+                        {isReceivable
+                          ? `💡 Cash held in hand for bazar / Receivable from ${civ.name}`
+                          : isPayable
+                          ? `⚠️ Spent out of pocket / Payable to ${civ.name}: ৳${Math.abs(civAcc.netBalance).toLocaleString()}`
+                          : `✓ All transactions settled and balanced`}
+                      </p>
+                    </div>
+
+                    {/* Mini Breakdown Grid */}
+                    <div className="grid grid-cols-3 gap-2 text-center bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80 text-xs font-mono">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block font-sans">Total Disbursed (+)</span>
+                        <span className="font-black text-white text-xs">৳{civAcc.totalGiven.toLocaleString()}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 block font-sans">Total Spent (-)</span>
+                        <span className="font-black text-rose-300 text-xs">৳{civAcc.totalSpent.toLocaleString()}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 block font-sans">Settled / Refund</span>
+                        <span className="font-black text-teal-300 text-xs">৳{civAcc.totalReturned.toLocaleString()}</span>
+                      </div>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenGiveMoneyToCiv(civ.name)}
+                        className="py-2.5 px-3 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center space-x-1.5 transition-all shadow-md shadow-amber-950/30 cursor-pointer active:scale-95"
+                        title="Disburse cash for market (will credit account)"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>+ Give Cash</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleOpenBazarForCiv(civ.name)}
+                        className="py-2.5 px-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center space-x-1.5 transition-all shadow-md shadow-indigo-950/30 cursor-pointer active:scale-95"
+                        title="Record itemized bazar voucher (will debit account)"
+                      >
+                        <ShoppingCart className="w-3.5 h-3.5" />
+                        <span>🛒 Bazar Voucher</span>
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-800/80 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCivForLedger(civ.name)}
+                        className="text-slate-400 hover:text-indigo-400 font-bold text-[11px] flex items-center space-x-1 transition-colors cursor-pointer"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        <span>Ledger Statement</span>
+                      </button>
+
+                      {!isSettled && (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenSettleCiv(civ.name, civAcc.netBalance)}
+                          className={`px-3 py-1.5 rounded-xl text-[11px] font-black uppercase transition-all cursor-pointer flex items-center space-x-1 ${
+                            isReceivable
+                              ? 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40'
+                              : 'bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 border border-rose-500/40'
+                          }`}
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          <span>{isReceivable ? 'Receive Refund' : 'Reimburse Payout'}</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 2. RECENT ADVANCES & VOUCHERS LIST */}
+          <div className="space-y-4 pt-6 border-t border-slate-800">
+            <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider flex items-center space-x-2">
+              <Clock className="w-4 h-4 text-amber-400" />
+              <span>Recent Advance & Voucher History</span>
+            </h4>
             {advances.length === 0 ? (
               <div className="p-12 text-center bg-slate-900/60 rounded-3xl border border-slate-800 space-y-3">
                 <ShoppingCart className="w-10 h-10 text-slate-600 mx-auto" />
                 <p className="text-slate-400 font-bold text-sm">
-                  কোনো বাজার অগ্রিম রেকর্ড নেই।
+                  No bazar advance records found.
                 </p>
                 <button
                   type="button"
@@ -1685,7 +2108,7 @@ export const Expenditures: React.FC = () => {
                   className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-black uppercase tracking-wider inline-flex items-center space-x-2 cursor-pointer shadow-md"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>প্রথম বাজার অগ্রিম প্রদান করুন</span>
+                  <span>Disburse First Bazar Advance</span>
                 </button>
               </div>
             ) : (
@@ -1729,14 +2152,14 @@ export const Expenditures: React.FC = () => {
                                 : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
                             }`}>
                               {isPendingReturn
-                                ? `৳${adv.remainingAmount} ফেরত পাওনা`
+                                ? `৳${adv.remainingAmount} Pending Return`
                                 : isPendingBazar
-                                ? 'বাজারে রয়েছে (Bazar in progress)'
-                                : 'সম্পূর্ণ নিষ্পত্তি (Settled ✓)'}
+                                ? 'Procurement in Progress'
+                                : 'Fully Settled ✓'}
                             </span>
                           </div>
                           <p className="text-[11px] text-slate-400 font-mono mt-0.5">
-                            তারিখ: {adv.date} • প্রদানের মাধ্যম: <strong className="text-white">{adv.paymentMethod}</strong> • {adv.purpose || 'বাজার'}
+                            Date: {adv.date} • Channel: <strong className="text-white">{adv.paymentMethod}</strong> • {adv.purpose || 'Bazar'}
                           </p>
                         </div>
                       </div>
@@ -1744,17 +2167,17 @@ export const Expenditures: React.FC = () => {
                       {/* Middle: Math Breakdown */}
                       <div className="flex items-center space-x-4 bg-slate-950/60 p-3 rounded-2xl border border-slate-800 text-xs font-mono">
                         <div>
-                          <span className="text-[10px] text-slate-400 block font-sans">প্রদত্ত অগ্রিম:</span>
+                          <span className="text-[10px] text-slate-400 block font-sans">Disbursed Advance:</span>
                           <span className="font-black text-white text-sm">৳{adv.advanceAmount.toLocaleString()}</span>
                         </div>
                         <div className="text-slate-600 font-black">−</div>
                         <div>
-                          <span className="text-[10px] text-slate-400 block font-sans">মোট বাজার খরচ:</span>
+                          <span className="text-[10px] text-slate-400 block font-sans">Total Bazar Spent:</span>
                           <span className="font-black text-rose-300 text-sm">৳{adv.bazarTotalAmount.toLocaleString()}</span>
                         </div>
                         <div className="text-slate-600 font-black">=</div>
                         <div>
-                          <span className="text-[10px] text-slate-400 block font-sans">অবশিষ্ট ফেরতযোগ্য:</span>
+                          <span className="text-[10px] text-slate-400 block font-sans">Remaining Refundable:</span>
                           <span className={`font-black text-sm ${adv.remainingAmount > 0 ? 'text-amber-400 font-bold' : 'text-emerald-400'}`}>
                             ৳{adv.remainingAmount.toLocaleString()}
                           </span>
@@ -1768,10 +2191,10 @@ export const Expenditures: React.FC = () => {
                             type="button"
                             onClick={() => handleOpenReceiveReturn(adv)}
                             className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-md shadow-emerald-950/30 flex items-center space-x-1.5 cursor-pointer active:scale-95"
-                            title="টাকা ফেরত গ্রহণ করে ক্যাশ/UCB-তে যুক্ত করুন"
+                            title="Receive surplus refund to cash/UCB"
                           >
                             <RotateCcw className="w-3.5 h-3.5" />
-                            <span>টাকা ফেরত গ্রহণ (৳{adv.remainingAmount})</span>
+                            <span>Receive Refund (৳{adv.remainingAmount})</span>
                           </button>
                         )}
 
@@ -1780,17 +2203,17 @@ export const Expenditures: React.FC = () => {
                             type="button"
                             onClick={() => handleOpenAddPage(adv)}
                             className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-md flex items-center space-x-1.5 cursor-pointer active:scale-95"
-                            title="বাজারের ভাউচার হিসাব এন্ট্রি করুন"
+                            title="Enter market expenditure voucher"
                           >
                             <FileText className="w-3.5 h-3.5" />
-                            <span>বাজার খরচ এন্ট্রি</span>
+                            <span>Enter Bazar Expenses</span>
                           </button>
                         )}
 
                         {isSettled && (
                           <div className="flex items-center space-x-1 px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-400 text-xs font-bold border border-emerald-500/20">
                             <Check className="w-3.5 h-3.5" />
-                            <span>হিসাব ক্লোজড ({adv.returnMethod || 'Cash'})</span>
+                            <span>Account Settled ({adv.returnMethod || 'Cash'})</span>
                           </div>
                         )}
 
@@ -1798,7 +2221,7 @@ export const Expenditures: React.FC = () => {
                           type="button"
                           onClick={() => handleDeleteAdvance(adv.id)}
                           className="p-2 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
-                          title="অগ্রিম রেকর্ডটি মুছুন"
+                          title="Delete advance record"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -1810,7 +2233,7 @@ export const Expenditures: React.FC = () => {
                     {adv.bazarItemsSummary && (
                       <div className="mt-3 pt-3 border-t border-slate-800/80 text-[11px] text-slate-400 flex items-center space-x-2">
                         <Tag className="w-3 h-3 text-indigo-400 shrink-0" />
-                        <span className="truncate">বাজার আইটেম: {adv.bazarItemsSummary}</span>
+                        <span className="truncate">Bazar Items: {adv.bazarItemsSummary}</span>
                       </div>
                     )}
                   </div>
@@ -1827,7 +2250,7 @@ export const Expenditures: React.FC = () => {
           <div className="bg-slate-900 rounded-3xl p-6 border border-slate-800 space-y-4">
             <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center space-x-2">
               <Sparkles className="w-4 h-4 text-emerald-400" />
-              <span>ব্যক্তি অনুযায়ী বাজার ব্যয়ের সারাংশ (Detailer-wise Breakdown)</span>
+              <span>Detailer-wise Procurement Breakdown</span>
             </h3>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
@@ -1842,15 +2265,15 @@ export const Expenditures: React.FC = () => {
                   <div key={civ.id} className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4 space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-black text-white">{civ.name}</span>
-                      <span className="text-[10px] text-slate-500 font-mono">{civExpenses.length} টি ভাউচার</span>
+                      <span className="text-[10px] text-slate-500 font-mono">{civExpenses.length} vouchers</span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-[11px] text-slate-400">মোট বাজার:</span>
+                      <span className="text-[11px] text-slate-400">Total Bazar:</span>
                       <span className="font-mono font-black text-emerald-400">৳{civTotal.toLocaleString()}</span>
                     </div>
                     {civPending > 0 && (
                       <div className="flex items-center justify-between pt-1 border-t border-slate-800 text-[11px]">
-                        <span className="text-amber-400 font-bold">ফেরত পাওনা:</span>
+                        <span className="text-amber-400 font-bold">Pending Refund:</span>
                         <span className="font-mono font-black text-amber-300">৳{civPending.toLocaleString()}</span>
                       </div>
                     )}
@@ -1862,7 +2285,7 @@ export const Expenditures: React.FC = () => {
         </div>
       )}
 
-      {/* MODAL 1: NEW BAZAR ADVANCE MODAL (নতুন বাজার অগ্রিম প্রদান) */}
+      {/* MODAL 1: NEW BAZAR ADVANCE MODAL */}
       {showNewAdvanceModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[180] flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-amber-500/40 rounded-3xl p-6 md:p-8 w-full max-w-md shadow-2xl animate-in zoom-in-95 space-y-5">
@@ -1873,10 +2296,10 @@ export const Expenditures: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="text-base font-black text-white uppercase tracking-tight">
-                    নতুন বাজার অগ্রিম প্রদান
+                    Disburse Bazar Advance
                   </h3>
                   <p className="text-[11px] text-slate-400">
-                    বাজার করার জন্য কর্মীকে টাকা অগ্রিম প্রদান
+                    Disburse advance cash to staff for market procurement
                   </p>
                 </div>
               </div>
@@ -1892,7 +2315,7 @@ export const Expenditures: React.FC = () => {
             <div className="space-y-4">
               <div>
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
-                  অগ্রিম গ্রহণকারী ব্যক্তি
+                  Staff Member / Detailer
                 </label>
                 <select
                   value={newAdvancePerson}
@@ -1907,11 +2330,11 @@ export const Expenditures: React.FC = () => {
 
               <div>
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
-                  অগ্রিম টাকার পরিমাণ (৳)
+                  Advance Amount (৳)
                 </label>
                 <input
                   type="number"
-                  placeholder="যেমন: 1000"
+                  placeholder="e.g. 1000"
                   value={newAdvanceAmount}
                   onChange={(e) => setNewAdvanceAmount(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-base font-black text-white focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono"
@@ -1921,21 +2344,21 @@ export const Expenditures: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
-                    প্রদানের মাধ্যম
+                    Payment Channel
                   </label>
                   <select
                     value={newAdvanceMethod}
                     onChange={(e) => setNewAdvanceMethod(e.target.value as any)}
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-3 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
                   >
-                    <option value="Cash">Cash (নগদ)</option>
-                    <option value="UCB">UCB (ব্যাংক)</option>
+                    <option value="Cash">Cash (Counter)</option>
+                    <option value="UCB">UCB (Bank)</option>
                   </select>
                 </div>
 
                 <div>
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
-                    তারিখ
+                    Disbursement Date
                   </label>
                   <input
                     type="text"
@@ -1948,13 +2371,13 @@ export const Expenditures: React.FC = () => {
 
               <div>
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
-                  উদ্দেশ্য / বিবরণ
+                  Purpose / Notes
                 </label>
                 <input
                   type="text"
                   value={newAdvancePurpose}
                   onChange={(e) => setNewAdvancePurpose(e.target.value)}
-                  placeholder="যেমন: দুপুরের রান্নার বাজার"
+                  placeholder="e.g. Lunch Procurement Bazar"
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
                 />
               </div>
@@ -1966,21 +2389,21 @@ export const Expenditures: React.FC = () => {
                 onClick={() => setShowNewAdvanceModal(false)}
                 className="px-5 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
               >
-                বাতিল
+                Cancel
               </button>
               <button
                 type="button"
                 onClick={handleCreateNewAdvance}
                 className="px-6 py-3 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-amber-950/40 cursor-pointer"
               >
-                অগ্রিম নিশ্চিত করুন
+                Confirm Advance
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* MODAL 2: RECEIVE RETURN MODAL (টাকা ফেরত গ্রহণ) */}
+      {/* MODAL 2: RECEIVE RETURN MODAL */}
       {selectedAdvanceForReturn && (
         <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm z-[190] flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-emerald-500/40 rounded-3xl p-6 md:p-8 w-full max-w-md shadow-2xl animate-in zoom-in-95 space-y-5">
@@ -1991,10 +2414,10 @@ export const Expenditures: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="text-base font-black text-white uppercase tracking-tight">
-                    বাজার উদ্বৃত্ত টাকা ফেরত গ্রহণ
+                    Receive Bazar Surplus Refund
                   </h3>
                   <p className="text-[11px] text-slate-400">
-                    {selectedAdvanceForReturn.person}-এর কাছ থেকে ফেরত টাকা জমা নিন
+                    Receive remaining surplus cash from {selectedAdvanceForReturn.person}
                   </p>
                 </div>
               </div>
@@ -2010,15 +2433,15 @@ export const Expenditures: React.FC = () => {
             {/* Advance summary card */}
             <div className="bg-slate-950/70 p-4 rounded-2xl border border-slate-800 text-xs space-y-1.5 font-mono">
               <div className="flex justify-between">
-                <span className="text-slate-400 font-sans">প্রদত্ত অগ্রিম:</span>
+                <span className="text-slate-400 font-sans">Disbursed Advance:</span>
                 <span className="font-black text-white">৳{selectedAdvanceForReturn.advanceAmount}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400 font-sans">মোট বাজার খরচ:</span>
+                <span className="text-slate-400 font-sans">Total Bazar Spent:</span>
                 <span className="font-black text-rose-300">৳{selectedAdvanceForReturn.bazarTotalAmount}</span>
               </div>
               <div className="flex justify-between pt-1 border-t border-slate-800 text-sm">
-                <span className="text-amber-300 font-sans font-bold">ফেরতযোগ্য পাওনা:</span>
+                <span className="text-amber-300 font-sans font-bold">Refundable Balance:</span>
                 <span className="font-black text-amber-400">৳{selectedAdvanceForReturn.remainingAmount}</span>
               </div>
             </div>
@@ -2026,7 +2449,7 @@ export const Expenditures: React.FC = () => {
             <div className="space-y-4">
               <div>
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
-                  ফেরত গ্রহণের পরিমাণ (৳)
+                  Refund Amount (৳)
                 </label>
                 <input
                   type="number"
@@ -2039,21 +2462,21 @@ export const Expenditures: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
-                    জমার মাধ্যম (Account)
+                    Deposit Channel
                   </label>
                   <select
                     value={returnMethod}
                     onChange={(e) => setReturnMethod(e.target.value as any)}
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-3 text-xs font-black text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
-                    <option value="Cash">Cash (নগদ ক্যাশবাক্স)</option>
-                    <option value="UCB">UCB (ব্যাংক একাউন্ট)</option>
+                    <option value="Cash">Cash (Counter Fund)</option>
+                    <option value="UCB">UCB (Bank Account)</option>
                   </select>
                 </div>
 
                 <div>
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
-                    ফেরতের তারিখ
+                    Return Date
                   </label>
                   <input
                     type="text"
@@ -2066,7 +2489,7 @@ export const Expenditures: React.FC = () => {
 
               <div>
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
-                  মন্তব্য
+                  Notes / Remarks
                 </label>
                 <input
                   type="text"
@@ -2083,7 +2506,7 @@ export const Expenditures: React.FC = () => {
                 onClick={() => setSelectedAdvanceForReturn(null)}
                 className="px-5 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
               >
-                বাতিল
+                Cancel
               </button>
               <button
                 type="button"
@@ -2092,7 +2515,7 @@ export const Expenditures: React.FC = () => {
                 className="px-6 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-emerald-950/40 cursor-pointer flex items-center space-x-2"
               >
                 <Check className="w-4 h-4" />
-                <span>টাকা ফেরত ক্যাশে জমা নিশ্চিত করুন</span>
+                <span>Confirm Refund Deposit</span>
               </button>
             </div>
           </div>
@@ -2333,6 +2756,454 @@ export const Expenditures: React.FC = () => {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* MODAL 4: CIVILIAN INDIVIDUAL LEDGER STATEMENT */}
+      {selectedCivForLedger && (() => {
+        const civAcc = getCivAccount(selectedCivForLedger);
+        // Build chronological list of ledger items
+        const ledgerItems: Array<{
+          id: string;
+          date: string;
+          type: 'GIVEN' | 'EXPENSE' | 'RETURN';
+          desc: string;
+          method: string;
+          amount: number;
+        }> = [];
+
+        // 1. Advances given (+)
+        civAcc.civAdvances.forEach(adv => {
+          ledgerItems.push({
+            id: 'adv-' + adv.id,
+            date: adv.date,
+            type: 'GIVEN',
+            desc: `Advance received for bazar (${adv.purpose || 'Daily Bazar'})`,
+            method: adv.paymentMethod,
+            amount: adv.advanceAmount
+          });
+
+          // If return was recorded on this advance
+          if (adv.returnAmount && adv.returnAmount > 0) {
+            ledgerItems.push({
+              id: 'ret-' + adv.id,
+              date: adv.returnDate || adv.date,
+              type: 'RETURN',
+              desc: `Surplus cash refunded (${adv.notes || 'Deposited to cash'})`,
+              method: adv.returnMethod || 'Cash',
+              amount: adv.returnAmount
+            });
+          }
+        });
+
+        // 2. Expenses detailed by this civ (-)
+        civAcc.civExpenses.forEach(exp => {
+          ledgerItems.push({
+            id: 'exp-' + exp.id,
+            date: exp.date,
+            type: 'EXPENSE',
+            desc: `${exp.desc} ${exp.qty ? `(${exp.qty} ${exp.unit || ''})` : ''}`,
+            method: exp.paymentMethod || 'Cash',
+            amount: exp.amount
+          });
+        });
+
+        // Sort by date/timestamp
+        ledgerItems.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+        // Calculate running balance at each row
+        let runningBal = 0;
+        const rowsWithBalance = ledgerItems.map(item => {
+          if (item.type === 'GIVEN') runningBal += item.amount;
+          else if (item.type === 'EXPENSE') runningBal -= item.amount;
+          else if (item.type === 'RETURN') runningBal -= item.amount;
+          return { ...item, runningBalance: runningBal };
+        });
+
+        return (
+          <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 md:p-8 w-full max-w-3xl shadow-2xl animate-in zoom-in-95 space-y-5 max-h-[90vh] flex flex-col">
+              
+              {/* Header */}
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
+                <div className="flex items-center space-x-3">
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-base border shrink-0 ${
+                    civAcc.netBalance > 0
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                      : civAcc.netBalance < 0
+                      ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                      : 'bg-slate-800 text-slate-300 border-slate-700'
+                  }`}>
+                    {selectedCivForLedger.replace('Civ ', '').charAt(0) || 'C'}
+                  </div>
+                  <div>
+                    <div className="flex items-center space-x-2">
+                      <h3 className="text-lg font-black text-white">{selectedCivForLedger}</h3>
+                      <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                        Personal Ledger
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400">
+                      Complete statement of cash received (+), vouchers debited (-), and surplus refunds
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedCivForLedger(null)}
+                  className="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Top Summary Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 shrink-0">
+                <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800">
+                  <span className="text-[10px] text-slate-400 block font-bold uppercase">Total Received (+)</span>
+                  <span className="text-base font-black text-white font-mono">৳{civAcc.totalGiven.toLocaleString()}</span>
+                </div>
+                <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800">
+                  <span className="text-[10px] text-slate-400 block font-bold uppercase">Total Spent (-)</span>
+                  <span className="text-base font-black text-rose-300 font-mono">৳{civAcc.totalSpent.toLocaleString()}</span>
+                </div>
+                <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800">
+                  <span className="text-[10px] text-slate-400 block font-bold uppercase">Total Refunded</span>
+                  <span className="text-base font-black text-teal-300 font-mono">৳{civAcc.totalReturned.toLocaleString()}</span>
+                </div>
+                <div className={`p-3 rounded-2xl border ${
+                  civAcc.netBalance > 0
+                    ? 'bg-emerald-950/40 border-emerald-500/40'
+                    : civAcc.netBalance < 0
+                    ? 'bg-rose-950/40 border-rose-500/40'
+                    : 'bg-slate-950/70 border-slate-800'
+                }`}>
+                  <span className="text-[10px] text-slate-400 block font-bold uppercase">Current Balance</span>
+                  <span className={`text-base font-black font-mono ${
+                    civAcc.netBalance > 0
+                      ? 'text-emerald-400'
+                      : civAcc.netBalance < 0
+                      ? 'text-rose-400'
+                      : 'text-slate-300'
+                  }`}>
+                    {civAcc.netBalance > 0
+                      ? `+ ৳${civAcc.netBalance.toLocaleString()}`
+                      : civAcc.netBalance < 0
+                      ? `- ৳${Math.abs(civAcc.netBalance).toLocaleString()}`
+                      : '৳0'}
+                  </span>
+                  <span className="text-[9px] font-bold block mt-0.5 text-slate-400">
+                    {civAcc.netBalance > 0 ? 'Receivable from staff' : civAcc.netBalance < 0 ? 'Payable to staff' : 'Balanced'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Transactions Ledger Table */}
+              <div className="flex-1 overflow-y-auto rounded-2xl border border-slate-800 bg-slate-950/60 scrollbar-none">
+                {rowsWithBalance.length === 0 ? (
+                  <div className="p-12 text-center text-slate-400 text-xs font-bold">
+                    No transaction records found.
+                  </div>
+                ) : (
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-900/90 text-slate-400 font-black uppercase text-[10px] sticky top-0 border-b border-slate-800">
+                      <tr>
+                        <th className="px-3.5 py-3">Date</th>
+                        <th className="px-3.5 py-3">Description</th>
+                        <th className="px-3.5 py-3">Channel</th>
+                        <th className="px-3.5 py-3 text-right">Received (+)</th>
+                        <th className="px-3.5 py-3 text-right">Spent (-)</th>
+                        <th className="px-3.5 py-3 text-right">Balance</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 font-mono">
+                      {rowsWithBalance.map((r, i) => (
+                        <tr key={r.id || i} className="hover:bg-slate-900/40 transition-colors">
+                          <td className="px-3.5 py-2.5 text-slate-400 whitespace-nowrap">{r.date}</td>
+                          <td className="px-3.5 py-2.5 font-sans font-bold text-slate-200">
+                            <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${
+                              r.type === 'GIVEN'
+                                ? 'bg-amber-400'
+                                : r.type === 'EXPENSE'
+                                ? 'bg-rose-400'
+                                : 'bg-teal-400'
+                            }`} />
+                            {r.desc}
+                          </td>
+                          <td className="px-3.5 py-2.5 text-slate-400">{r.method}</td>
+                          <td className="px-3.5 py-2.5 text-right font-black text-amber-300">
+                            {r.type === 'GIVEN' ? `৳${r.amount.toLocaleString()}` : '-'}
+                          </td>
+                          <td className="px-3.5 py-2.5 text-right font-black text-rose-300">
+                            {r.type === 'EXPENSE' ? `৳${r.amount.toLocaleString()}` : r.type === 'RETURN' ? `(Refund ৳${r.amount})` : '-'}
+                          </td>
+                          <td className={`px-3.5 py-2.5 text-right font-black ${
+                            r.runningBalance > 0
+                              ? 'text-emerald-400'
+                              : r.runningBalance < 0
+                              ? 'text-rose-400'
+                              : 'text-slate-400'
+                          }`}>
+                            {r.runningBalance > 0 ? `+ ৳${r.runningBalance.toLocaleString()}` : r.runningBalance < 0 ? `- ৳${Math.abs(r.runningBalance).toLocaleString()}` : '৳0'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              {/* Footer Actions */}
+              <div className="pt-3 border-t border-slate-800 flex items-center justify-between shrink-0">
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const name = selectedCivForLedger;
+                      setSelectedCivForLedger(null);
+                      handleOpenGiveMoneyToCiv(name);
+                    }}
+                    className="px-3.5 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center space-x-1.5 cursor-pointer shadow-md"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>+ Give Cash</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const name = selectedCivForLedger;
+                      setSelectedCivForLedger(null);
+                      handleOpenBazarForCiv(name);
+                    }}
+                    className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center space-x-1.5 cursor-pointer shadow-md"
+                  >
+                    <ShoppingCart className="w-3.5 h-3.5" />
+                    <span>🛒 Enter Bazar Expense</span>
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedCivForLedger(null)}
+                  className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* MODAL 5: CIVILIAN SETTLEMENT / BALANCE ADJUSTMENT MODAL */}
+      {selectedCivForSettle && (
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm z-[195] flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 md:p-8 w-full max-w-md shadow-2xl animate-in zoom-in-95 space-y-5">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center space-x-3">
+                <div className={`w-10 h-10 rounded-2xl flex items-center justify-center border ${
+                  selectedCivForSettle.balance > 0
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                    : 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                }`}>
+                  <RotateCcw className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white uppercase tracking-tight">
+                    {selectedCivForSettle.balance > 0 ? 'Receive Surplus Refund' : 'Reimburse Out-of-Pocket Expense'}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Complete account settlement for {selectedCivForSettle.name}
+                  </p>
+                </div>
+              </div>
+
+              <button 
+                type="button"
+                onClick={() => setSelectedCivForSettle(null)}
+                className="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Explanation card */}
+            <div className={`p-4 rounded-2xl border text-xs space-y-1 ${
+              selectedCivForSettle.balance > 0
+                ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-200'
+                : 'bg-rose-950/40 border-rose-500/30 text-rose-200'
+            }`}>
+              <div className="flex justify-between items-center text-sm font-black font-mono">
+                <span>Current Balance:</span>
+                <span>
+                  {selectedCivForSettle.balance > 0 
+                    ? `+ ৳${selectedCivForSettle.balance.toLocaleString()}` 
+                    : `- ৳${Math.abs(selectedCivForSettle.balance).toLocaleString()}`}
+                </span>
+              </div>
+              <p className="text-[11px] opacity-90 mt-1">
+                {selectedCivForSettle.balance > 0
+                  ? `💡 Staff holds ৳${selectedCivForSettle.balance.toLocaleString()} surplus after bazar. Receiving this will increase Cash fund.`
+                  : `⚠️ Staff spent extra ৳${Math.abs(selectedCivForSettle.balance).toLocaleString()} from personal funds. Reimbursing this will be deducted from fund.`}
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                  Settlement Amount (৳)
+                </label>
+                <input
+                  type="number"
+                  value={settleAmountInput}
+                  onChange={(e) => setSettleAmountInput(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-base font-black text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                    Payment Channel
+                  </label>
+                  <select
+                    value={settleMethod}
+                    onChange={(e) => setSettleMethod(e.target.value as any)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-3 text-xs font-black text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="Cash">Cash (Counter Fund)</option>
+                    <option value="UCB">UCB (Bank Fund)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                    Date
+                  </label>
+                  <input
+                    type="text"
+                    value={settleDate}
+                    onChange={(e) => setSettleDate(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-3 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                  Notes / Remarks
+                </label>
+                <input
+                  type="text"
+                  value={settleNote}
+                  onChange={(e) => setSettleNote(e.target.value)}
+                  placeholder="e.g. Account balance settlement & cash received"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-slate-800 flex items-center justify-end space-x-3">
+              <button
+                type="button"
+                onClick={() => setSelectedCivForSettle(null)}
+                className="px-5 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isSubmittingSettle}
+                onClick={handleConfirmSettle}
+                className={`px-6 py-3 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-lg cursor-pointer flex items-center space-x-2 ${
+                  selectedCivForSettle.balance > 0
+                    ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-emerald-950/40'
+                    : 'bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 shadow-rose-950/40'
+                }`}
+              >
+                <Check className="w-4 h-4" />
+                <span>
+                  {isSubmittingSettle 
+                    ? 'Processing...' 
+                    : selectedCivForSettle.balance > 0 
+                    ? 'Confirm Surplus Refund' 
+                    : 'Confirm Reimbursement'}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 6: ADD NEW CIVILIAN MODAL */}
+      {showAddCivModal && (
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm z-[195] flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 md:p-8 w-full max-w-sm shadow-2xl animate-in zoom-in-95 space-y-5">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30">
+                  <UserCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white uppercase tracking-tight">
+                    Add Civilian Staff Member
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Create dedicated procurement account box for staff
+                  </p>
+                </div>
+              </div>
+
+              <button 
+                type="button"
+                onClick={() => setShowAddCivModal(false)}
+                className="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                  Civilian Staff Name
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Civ Rafiq or Rafiq"
+                  value={newCivNameInput}
+                  onChange={(e) => setNewCivNameInput(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-sm font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  autoFocus
+                />
+                <p className="text-[10px] text-slate-500 mt-1">
+                  (A dedicated procurement account box will be created automatically)
+                </p>
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-slate-800 flex items-center justify-end space-x-3">
+              <button
+                type="button"
+                onClick={() => setShowAddCivModal(false)}
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleAddNewCivilian}
+                disabled={!newCivNameInput.trim()}
+                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-md shadow-indigo-950/40 cursor-pointer flex items-center space-x-1.5"
+              >
+                <Check className="w-4 h-4" />
+                <span>Add Staff Member</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

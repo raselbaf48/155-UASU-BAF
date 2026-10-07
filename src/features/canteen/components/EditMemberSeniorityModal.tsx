@@ -243,10 +243,10 @@ export const EditMemberSeniorityModal: React.FC<EditMemberSeniorityModalProps> =
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Quick:</span>
                 <button
                   type="button"
-                  onClick={() => setSeniorityInput(1)}
+                  onClick={() => setSeniorityInput(rankRange.minSeniority)}
                   className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-800 hover:bg-emerald-900/40 text-emerald-300 border border-emerald-500/20 hover:border-emerald-500/40 transition-colors cursor-pointer"
                 >
-                  ১ম (জ্যেষ্ঠতম) #{rankRange.minSeniority}
+                  Senior #{rankRange.minSeniority}
                 </button>
                 {rankRange.totalInRank > 2 && (
                   <button
@@ -254,7 +254,7 @@ export const EditMemberSeniorityModal: React.FC<EditMemberSeniorityModalProps> =
                     onClick={() => setSeniorityInput(Math.floor((rankRange.minSeniority + rankRange.maxSeniority) / 2))}
                     className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors cursor-pointer"
                   >
-                    মাঝামাঝি
+                    Middle
                   </button>
                 )}
                 {rankRange.totalInRank > 1 && (
@@ -263,7 +263,7 @@ export const EditMemberSeniorityModal: React.FC<EditMemberSeniorityModalProps> =
                     onClick={() => setSeniorityInput(rankRange.maxSeniority)}
                     className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors cursor-pointer"
                   >
-                    কনিষ্ঠতম #{rankRange.maxSeniority}
+                    Junior #{rankRange.maxSeniority}
                   </button>
                 )}
                 <button
@@ -271,7 +271,7 @@ export const EditMemberSeniorityModal: React.FC<EditMemberSeniorityModalProps> =
                   onClick={handleResetToAuto}
                   disabled={isSaving}
                   className="ml-auto px-2.5 py-1 rounded-lg text-[10px] font-bold text-slate-400 hover:text-white bg-slate-800/60 hover:bg-slate-700 border border-slate-700/60 transition-colors cursor-pointer flex items-center gap-1"
-                  title="BD No অনুসারে স্বয়ংক্রিয় ক্রম রিসেট করুন"
+                  title="Reset to default rank order"
                 >
                   <RefreshCw className="w-3 h-3" />
                   <span>Auto (BD No)</span>
@@ -284,14 +284,14 @@ export const EditMemberSeniorityModal: React.FC<EditMemberSeniorityModalProps> =
               <div className="text-xs font-bold text-emerald-200 bg-emerald-950/70 p-3 rounded-xl border border-emerald-500/40 flex items-center space-x-2.5 animate-in fade-in duration-150">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
                 <span>
-                  লক্ষ্য ক্রম: <strong className="font-mono text-emerald-300 text-sm">#{targetResolved.resolvedSeniority}</strong> ({rank}-এর {targetResolved.relativeRankIndex === 1 ? '১ম (জ্যেষ্ঠতম)' : `${targetResolved.relativeRankIndex}তম`} ব্যক্তি হিসেবে নির্ধারিত হবে)
+                  Target Position: <strong className="font-mono text-emerald-300 text-sm">#{targetResolved.resolvedSeniority}</strong> ({rank} rank position {targetResolved.relativeRankIndex})
                 </span>
               </div>
             )}
 
             {/* Explanation Note */}
             <p className="text-[11px] text-emerald-300/80 leading-relaxed font-medium">
-              পদোন্নতির তারিখ বা ব্যাচ জ্যেষ্ঠতা অনুসারে ম্যানুয়ালি ক্রম পরিবর্তন করা যায়। সামরিক পদমর্যাদার নিয়ম অক্ষুণ্ণ রেখে মধ্যবর্তী সদস্যদের ক্রম স্বয়ংক্রিয়ভাবে সাজানো হবে এবং এটি অফিস Biodata Register-এ তাৎক্ষণিক সিঙ্ক হবে।
+              Seniority rank ordering maintains military rank structure and syncs with cloud database in real-time.
             </p>
           </div>
 
@@ -305,7 +305,7 @@ export const EditMemberSeniorityModal: React.FC<EditMemberSeniorityModalProps> =
           {saveSuccess && (
             <div className="p-3 bg-emerald-950/90 border border-emerald-500/50 rounded-xl text-xs text-emerald-200 flex items-center space-x-2 animate-in fade-in">
               <Check className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>জ্যেষ্ঠতা নম্বর সফলভাবে সংরক্ষিত এবং সিঙ্ক হয়েছে!</span>
+              <span>Seniority position saved and synced successfully!</span>
             </div>
           )}
         </div>
@@ -318,7 +318,7 @@ export const EditMemberSeniorityModal: React.FC<EditMemberSeniorityModalProps> =
             disabled={isSaving}
             className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
           >
-            বাতিল / Cancel
+            Cancel
           </button>
 
           <button
@@ -334,17 +334,17 @@ export const EditMemberSeniorityModal: React.FC<EditMemberSeniorityModalProps> =
             {isSaving ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin text-white" />
-                <span>সংরক্ষণ হচ্ছে...</span>
+                <span>Saving...</span>
               </>
             ) : saveSuccess ? (
               <>
                 <Check className="w-4 h-4 text-white" />
-                <span>সংরক্ষিত!</span>
+                <span>Saved!</span>
               </>
             ) : (
               <>
                 <Award className="w-4 h-4 text-emerald-200" />
-                <span>জ্যেষ্ঠতা সংরক্ষণ করুন</span>
+                <span>Save Seniority</span>
               </>
             )}
           </button>

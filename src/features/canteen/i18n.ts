@@ -1,26 +1,38 @@
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
-import LanguageDetector from 'i18next-browser-languagedetector';
 
 import bnCanteen from '../../locales/bn/canteen.json';
 import enCanteen from '../../locales/en/canteen.json';
 
+// Ensure English is always default unless user explicitly chose Bengali in UI
+const getInitialLanguage = (): string => {
+  try {
+    const explicit = localStorage.getItem('canteen_explicit_lang');
+    if (explicit === 'bn') return 'bn';
+    // Clear any previous auto-detected 'bn' in i18nextLng
+    if (localStorage.getItem('i18nextLng') === 'bn' && !explicit) {
+      localStorage.setItem('i18nextLng', 'en');
+    }
+  } catch {
+    // ignore
+  }
+  return 'en';
+};
+
+const initialLanguage = getInitialLanguage();
+
 i18n
-  .use(LanguageDetector)
   .use(initReactI18next)
   .init({
     resources: {
       bn: { translation: bnCanteen },
       en: { translation: enCanteen }
     },
-    fallbackLng: 'bn',
+    lng: initialLanguage,
+    fallbackLng: 'en',
     debug: false,
     interpolation: {
       escapeValue: false, // not needed for react as it escapes by default
-    },
-    detection: {
-      order: ['localStorage', 'navigator'],
-      caches: ['localStorage'],
     }
   });
 
@@ -31,7 +43,7 @@ export const formatMoney = (amount: number, lng: string) => {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2
   }).format(amount);
-  return lng === 'bn' ? `৳ ${formatted}` : `৳ ${formatted}`;
+  return `৳ ${formatted}`;
 };
 
 export const formatNumber = (num: number, lng: string) => {

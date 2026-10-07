@@ -5048,7 +5048,7 @@ export const MemberDB: React.FC = () => {
                 {isSubmittingPayment ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin text-white" />
-                    <span>পেমেন্ট নিশ্চিত করা হচ্ছে...</span>
+                    <span>Confirming Payment...</span>
                   </>
                 ) : (
                   <>
@@ -5156,7 +5156,7 @@ export const MemberDB: React.FC = () => {
             <div className="space-y-1 mb-4">
               <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-emerald-300 text-xs font-black uppercase tracking-wider">
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                <span>বিল পরিশোধ সফল হয়েছে</span>
+                <span>Payment Successful</span>
               </span>
               <h3 className="text-2xl font-black text-white tracking-tight">
                 Payment Confirmed!
@@ -5166,7 +5166,7 @@ export const MemberDB: React.FC = () => {
             {/* Paid Amount Display Card with Emerald Glow */}
             <div className="my-4 py-4 px-5 bg-gradient-to-r from-emerald-950/80 via-slate-900 to-emerald-950/80 rounded-2xl border border-emerald-500/40 shadow-inner">
               <p className="text-[10px] font-black uppercase tracking-widest text-emerald-300 mb-0.5">
-                পরিশোধকৃত পরিমাণ (Amount Paid)
+                Amount Paid
               </p>
               <div className="text-4xl sm:text-5xl font-black font-mono text-emerald-400 tracking-tight flex items-center justify-center space-x-1">
                 <span>৳</span>
@@ -5207,13 +5207,13 @@ export const MemberDB: React.FC = () => {
 
               {/* Due Balance Shift Row */}
               <div className="flex items-center justify-between pt-1">
-                <span className="text-slate-400">পূর্বে মোট বকেয়া:</span>
+                <span className="text-slate-400">Previous Total Due:</span>
                 <span className="font-mono text-slate-300 line-through">৳{paymentSuccessData.previousDue.toLocaleString()}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-slate-300 font-black">বর্তমান অবশিষ্ট বকেয়া:</span>
+                <span className="text-slate-300 font-black">Remaining Balance Due:</span>
                 <span className={`font-mono text-base font-black ${paymentSuccessData.newDue === 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {paymentSuccessData.newDue === 0 ? '৳০ (সম্পূর্ণ পরিশোধিত)' : `৳${paymentSuccessData.newDue.toLocaleString()}`}
+                  {paymentSuccessData.newDue === 0 ? '৳0 (Fully Paid)' : `৳${paymentSuccessData.newDue.toLocaleString()}`}
                 </span>
               </div>
 
@@ -5236,7 +5236,7 @@ export const MemberDB: React.FC = () => {
                 className="flex-1 py-3 px-3 bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all border border-slate-700 flex items-center justify-center space-x-1.5 cursor-pointer shadow-sm active:translate-y-0.5"
               >
                 <FileText className="w-4 h-4 text-indigo-400" />
-                <span>রসিদ / হিসাব</span>
+                <span>Receipt</span>
               </button>
 
               <button
@@ -5244,7 +5244,7 @@ export const MemberDB: React.FC = () => {
                 onClick={() => setPaymentSuccessData(null)}
                 className="flex-1 py-3 px-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-md shadow-emerald-900/40 flex items-center justify-center space-x-1.5 cursor-pointer active:translate-y-0.5"
               >
-                <span>সম্পন্ন (DONE)</span>
+                <span>Done</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -5372,7 +5372,7 @@ export const MemberDB: React.FC = () => {
                   <Phone className="w-5 h-5" />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">যোগাযোগের নম্বর (Phone / Mobile)</p>
+                  <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Contact Number (Phone / Mobile)</p>
                   <p className="text-lg font-black font-mono text-emerald-400 truncate tracking-wide">
                     {contactActionMember.Contact || contactActionMember['Mobile No']}
                   </p>
@@ -5399,12 +5399,12 @@ export const MemberDB: React.FC = () => {
                 {copiedPhone ? (
                   <>
                     <Check className="w-3.5 h-3.5 text-white" />
-                    <span>কপি হয়েছে</span>
+                    <span>Copied</span>
                   </>
                 ) : (
                   <>
                     <Copy className="w-3.5 h-3.5" />
-                    <span>কপি</span>
+                    <span>Copy</span>
                   </>
                 )}
               </button>
@@ -5415,7 +5415,7 @@ export const MemberDB: React.FC = () => {
               const due = getMemberTotalDue(contactActionMember, selectedCategory);
               return (
                 <div className="mb-5 px-3.5 py-2.5 bg-slate-800/50 rounded-xl border border-slate-700/60 flex items-center justify-between text-xs">
-                  <span className="font-bold text-slate-300">বর্তমান বকেয়া (Total Due):</span>
+                  <span className="font-bold text-slate-300">Current Total Due:</span>
                   <span className={`font-mono font-black ${due > 0 ? 'text-rose-400 text-sm' : 'text-emerald-400 text-sm'}`}>
                     ৳{due.toLocaleString()}
                   </span>
@@ -5431,7 +5431,7 @@ export const MemberDB: React.FC = () => {
                 className="w-full py-3.5 px-4 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white rounded-2xl text-sm font-black uppercase tracking-wider flex items-center justify-center space-x-2.5 shadow-lg shadow-emerald-900/40 border-t border-emerald-300/40 active:translate-y-0.5 transition-all group/call"
               >
                 <PhoneCall className="w-5 h-5 shrink-0 group-hover/call:scale-110 transition-transform" />
-                <span>সরাসরি কল করুন (Phone Call)</span>
+                <span>Direct Call (Phone Call)</span>
               </a>
 
               {/* WhatsApp Message Button */}
@@ -5449,7 +5449,7 @@ export const MemberDB: React.FC = () => {
                     className="w-full py-3.5 px-4 bg-gradient-to-r from-teal-600 via-teal-500 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white rounded-2xl text-sm font-black uppercase tracking-wider flex items-center justify-center space-x-2.5 shadow-lg shadow-teal-900/40 border-t border-teal-300/40 active:translate-y-0.5 transition-all group/wa"
                   >
                     <MessageCircle className="w-5 h-5 shrink-0 group-hover/wa:scale-110 transition-transform" />
-                    <span>হোয়াটসঅ্যাপ মেসেজ পাঠান (WhatsApp)</span>
+                    <span>Send WhatsApp Message</span>
                   </a>
                 );
               })()}
@@ -5461,7 +5461,7 @@ export const MemberDB: React.FC = () => {
               onClick={() => setContactActionMember(null)}
               className="w-full mt-4 py-2.5 bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 rounded-xl text-xs font-black uppercase tracking-wider transition-colors cursor-pointer border border-slate-700/60"
             >
-              বন্ধ করুন (Close)
+              Close
             </button>
           </div>
         </div>
@@ -5557,7 +5557,7 @@ export const MemberDB: React.FC = () => {
                     </span>
                   </h3>
                   <p className="text-[11px] text-slate-400">
-                    সকল সদস্যের বিল পরিশোধের তালিকা এবং পেমেন্ট বাতিল ব্যবস্থা
+                    All members payment history and reversal register
                   </p>
                 </div>
               </div>
@@ -5565,7 +5565,7 @@ export const MemberDB: React.FC = () => {
                 type="button"
                 onClick={() => setIsPaymentHistoryOpen(false)}
                 className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
-                title="বন্ধ করুন"
+                title="Close"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -5578,7 +5578,7 @@ export const MemberDB: React.FC = () => {
                 <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                 <input
                   type="text"
-                  placeholder="সদস্যের নাম, বিডি নম্বর, তারিখ দিয়ে খুঁজুন..."
+                  placeholder="Search by member name, BD No, date..."
                   value={paymentSearch}
                   onChange={(e) => setPaymentSearch(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2 text-xs font-bold text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-all"
@@ -5595,10 +5595,10 @@ export const MemberDB: React.FC = () => {
                     onChange={(e) => setPaymentMonthFilter(e.target.value)}
                     className="bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer"
                   >
-                    <option value="ALL" className="bg-slate-900 text-white">সব মাস (All Months)</option>
+                    <option value="ALL" className="bg-slate-900 text-white">All Months</option>
                     {availableMonths.map((m) => (
                       <option key={m} value={m} className="bg-slate-900 text-white">
-                        {formatBengaliMonthYear(m)} {m === getRunningMonthKey() ? '(চলতি মাস)' : ''}
+                        {toEnglishDate(m)} {m === getRunningMonthKey() ? '(Current Month)' : ''}
                       </option>
                     ))}
                   </select>
@@ -5644,9 +5644,9 @@ export const MemberDB: React.FC = () => {
                   </button>
                 </div>
 
-                {/* মোট আদায় অনুযায়ী আপডেট */}
+                {/* Total Collections Summary */}
                 <div className="px-3 py-1 bg-emerald-950/60 border border-emerald-500/30 rounded-xl flex items-center space-x-1.5 text-xs">
-                  <span className="text-slate-400 text-[10px] uppercase font-bold">মোট আদায়:</span>
+                  <span className="text-slate-400 text-[10px] uppercase font-bold">Total Collected:</span>
                   <span className="text-emerald-400 font-mono font-black">৳{totalPaymentsAmount.toLocaleString()}</span>
                 </div>
               </div>
@@ -5657,9 +5657,9 @@ export const MemberDB: React.FC = () => {
               {filteredPaymentTxs.length === 0 ? (
                 <div className="py-12 text-center text-slate-500 space-y-2">
                   <Receipt className="w-10 h-10 mx-auto text-slate-600 opacity-60" />
-                  <p className="text-sm font-bold text-slate-400">কোনো পেমেন্ট হিস্ট্রি পাওয়া যায়নি</p>
+                  <p className="text-sm font-bold text-slate-400">No payment history found</p>
                   <p className="text-xs text-slate-500">
-                    {paymentSearch ? 'অনুসন্ধানের সাথে কোনো রেকর্ড মিলছে না।' : 'এখনও পর্যন্ত কোনো বিল পেমেন্ট জমা হয়নি।'}
+                    {paymentSearch ? 'No records match search.' : 'No bill payments recorded yet.'}
                   </p>
                 </div>
               ) : (
@@ -5671,7 +5671,7 @@ export const MemberDB: React.FC = () => {
                   });
                   const memberEffectiveDp = targetMember ? getMemberEffectiveDp(targetMember) : '';
                   const rank = String(tx.rank || targetMember?.Rank || targetMember?.rank || '').trim();
-                  const rawName = String(tx.memberName || (targetMember ? `${targetMember.Surname || ''}` : 'সদস্য')).trim();
+                  const rawName = String(tx.memberName || (targetMember ? `${targetMember.Surname || ''}` : 'Member')).trim();
                   let cleanName = rawName;
                   if (rank && cleanName.toLowerCase().startsWith(rank.toLowerCase())) {
                     cleanName = cleanName.slice(rank.length).trim();
@@ -5721,7 +5721,7 @@ export const MemberDB: React.FC = () => {
                             </span>
                             <span>•</span>
                             <span className="text-slate-400 truncate max-w-[240px]">
-                              {tx.items || 'বিল পরিশোধ'}
+                              {tx.items || 'Bill Payment'}
                             </span>
                           </div>
                         </div>
@@ -5738,7 +5738,7 @@ export const MemberDB: React.FC = () => {
                           <div className="flex items-center space-x-1.5 justify-end mt-0.5">
                             {tx.isReverted || tx.status === 'REVERTED' ? (
                               <span className="px-2 py-0.2 rounded-full text-[9px] font-black uppercase bg-rose-950/80 text-rose-300 border border-rose-500/40 font-mono">
-                                বাতিলকৃত / REVERTED
+                                REVERTED
                               </span>
                             ) : (
                               <span className="px-2 py-0.2 rounded-full text-[9px] font-black uppercase bg-slate-800 text-slate-300 border border-slate-700 font-mono">
@@ -5746,7 +5746,7 @@ export const MemberDB: React.FC = () => {
                               </span>
                             )}
                             <span className="text-[9px] text-slate-500 font-mono">
-                              বর্তমান বকেয়া: ৳{currentMemberDue.toLocaleString()}
+                              Current Due: ৳{currentMemberDue.toLocaleString()}
                             </span>
                           </div>
                         </div>
@@ -5754,14 +5754,14 @@ export const MemberDB: React.FC = () => {
                         {/* Delete / Revert Status Button */}
                         {tx.isReverted || tx.status === 'REVERTED' ? (
                           <span className="px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-500 text-xs font-mono font-bold">
-                            বাতিলকৃত
+                            REVERTED
                           </span>
                         ) : (
                           <button
                             type="button"
                             onClick={() => setPaymentToDelete({ ...tx, targetMember })}
                             className="px-2.5 py-1.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 hover:text-white border border-rose-900/50 flex items-center space-x-1 text-xs font-bold transition-all cursor-pointer active:scale-95 shadow-xs"
-                            title="এই পেমেন্ট বাতিল করুন (সদস্যের বকেয়া আগের অবস্থায় ফিরে যাবে এবং হিস্টোরিতে সংরক্ষিত থাকবে)"
+                            title="Revert this payment (Member due will be restored and recorded in history)"
                           >
                             <Trash2 className="w-3.5 h-3.5 text-rose-400" />
                             <span className="text-[11px]">Revert</span>
@@ -5777,14 +5777,14 @@ export const MemberDB: React.FC = () => {
             {/* Modal Footer */}
             <div className="p-3.5 border-t border-slate-800 bg-slate-950/60 flex items-center justify-between text-xs text-slate-400 shrink-0">
               <span className="text-[11px]">
-                পেমেন্ট মুছে দিলে সংশ্লিষ্ট সদস্যের বকেয়া (Due) স্বয়ংক্রিয়ভাবে আগের অবস্থায় ফিরে যায়।
+                Reverting payment automatically restores the member due to previous balance.
               </span>
               <button
                 type="button"
                 onClick={() => setIsPaymentHistoryOpen(false)}
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
               >
-                বন্ধ করুন
+                Close
               </button>
             </div>
           </div>
@@ -5814,33 +5814,33 @@ export const MemberDB: React.FC = () => {
 
               <div className="text-center space-y-1.5">
                 <h3 className="text-lg font-black text-white uppercase tracking-tight">
-                  পেমেন্ট বাতিল নিশ্চিত করুন
+                  Confirm Payment Reversal
                 </h3>
                 <p className="text-xs text-slate-400">
-                  আপনি কি নিশ্চিত যে আপনি এই পেমেন্ট রেকর্ডটি মুছে ফেলতে চান?
+                  Are you sure you want to revert this payment record?
                 </p>
               </div>
 
               {/* Transaction Summary Card */}
               <div className="p-4 bg-slate-950/80 rounded-2xl border border-slate-800 space-y-2 text-xs">
                 <div className="flex justify-between items-center text-slate-300">
-                  <span className="text-slate-400">সদস্যের নাম:</span>
-                  <span className="font-bold text-white">{paymentToDelete.memberName || 'সদস্য'}</span>
+                  <span className="text-slate-400">Member Name:</span>
+                  <span className="font-bold text-white">{paymentToDelete.memberName || 'Member'}</span>
                 </div>
                 <div className="flex justify-between items-center text-slate-300">
-                  <span className="text-slate-400">বিডি নম্বর (BD No):</span>
+                  <span className="text-slate-400">BD No:</span>
                   <span className="font-mono font-bold text-white">BD/{String(paymentToDelete.bdNo || '').replace(/\D/g, '')}</span>
                 </div>
                 <div className="flex justify-between items-center text-slate-300">
-                  <span className="text-slate-400">পরিশোধের তারিখ:</span>
+                  <span className="text-slate-400">Payment Date:</span>
                   <span className="font-mono text-indigo-300">{toEnglishDate(paymentToDelete.date)}</span>
                 </div>
                 <div className="flex justify-between items-center text-slate-300">
-                  <span className="text-slate-400">পরিশোধের মাধ্যম:</span>
+                  <span className="text-slate-400">Payment Method:</span>
                   <span className="font-bold text-slate-200">{paymentToDelete.gateway || 'CASH'}</span>
                 </div>
                 <div className="flex justify-between items-center pt-2 border-t border-slate-800 text-sm">
-                  <span className="font-bold text-slate-300">পরিশোধিত অর্থ (Amount):</span>
+                  <span className="font-bold text-slate-300">Amount Paid:</span>
                   <span className="font-mono font-black text-emerald-400 text-base">
                     ৳{Number(paymentToDelete.amount || 0).toLocaleString()}
                   </span>
@@ -5851,10 +5851,10 @@ export const MemberDB: React.FC = () => {
               <div className="p-3 bg-rose-950/50 border border-rose-800/60 rounded-xl text-[11px] text-rose-200 space-y-1 leading-relaxed">
                 <p className="font-bold flex items-center gap-1.5 text-rose-300">
                   <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                  <span>বকেয়া পুনর্বহাল বিজ্ঞপ্তি:</span>
+                  <span>Due Restoration Notice:</span>
                 </p>
                 <p>
-                  পেমেন্ট মুছে দিলে সদস্যের বকেয়া (Due) অবিলম্বে <strong>৳{Number(paymentToDelete.amount || 0).toLocaleString()} বৃদ্ধি পেয়ে পূর্বের অবস্থায় ফিরে যাবে</strong> এবং ক্লাউডেও স্বয়ংক্রিয়ভাবে আপডেট হবে।
+                  Reverting this payment will immediately restore member due by <strong>৳{Number(paymentToDelete.amount || 0).toLocaleString()}</strong> and update the cloud database in real-time.
                 </p>
               </div>
 
@@ -5866,7 +5866,7 @@ export const MemberDB: React.FC = () => {
                   onClick={() => setPaymentToDelete(null)}
                   className="flex-1 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50 active:scale-95"
                 >
-                  ফিরে যান (Cancel)
+                  Cancel
                 </button>
 
                 <button
@@ -5878,12 +5878,12 @@ export const MemberDB: React.FC = () => {
                   {isDeletingPayment ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin text-white" />
-                      <span>মুছে ফেলা হচ্ছে...</span>
+                      <span>Reverting...</span>
                     </>
                   ) : (
                     <>
                       <Trash2 className="w-4 h-4" />
-                      <span>হ্যাঁ, বাতিল করুন</span>
+                      <span>Yes, Revert</span>
                     </>
                   )}
                 </button>
@@ -5907,7 +5907,7 @@ export const MemberDB: React.FC = () => {
                       CANTEEN MANAGER MANAGEMENT
                     </h3>
                     <p className="text-xs text-slate-400">
-                      সক্রিয় ক্যান্টিন ম্যানেজার নির্বাচন ও তথ্য বিবরণী
+                      Active Canteen Manager Selection & Details
                     </p>
                   </div>
                 </div>
@@ -6055,7 +6055,7 @@ export const MemberDB: React.FC = () => {
 
               {/* Footer info */}
               <div className="pt-2 border-t border-slate-800 flex justify-between items-center text-[10px] text-slate-500">
-                <span>ম্যানেজার পরিবর্তন তথ্য রিয়েল-টাইমে ক্লাউডে সংরক্ষিত হবে।</span>
+                <span>Manager changes will be saved in real-time to cloud.</span>
                 <button
                   type="button"
                   onClick={() => setShowManagerModal(false)}
@@ -6087,7 +6087,7 @@ export const MemberDB: React.FC = () => {
                 );
                 if (refreshed) setProfileMember(refreshed);
               }
-              showToast('জ্যেষ্ঠতা সফলভাবে হালনাগাদ করা হয়েছে!');
+              showToast('Seniority updated successfully!');
             }}
           />
         )}

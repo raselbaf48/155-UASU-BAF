@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Landmark, 
   Layers, 
@@ -27,7 +27,10 @@ import {
   PhoneCall,
   LayoutGrid,
   List,
-  Tag
+  Tag,
+  Wallet,
+  CreditCard,
+  AlertTriangle
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { pushKeyToCloud, recordDeletedTxId } from '../utils/canteenCloudSync';
@@ -87,8 +90,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
   getMemberFilteredBill,
 }) => {
   const isUnitFund = category === 'UNIT_FUND';
-  const categoryTitle = isUnitFund ? 'UNIT FUND' : 'OTHERS';
-  const categoryBnTitle = isUnitFund ? 'ইউনিট ফান্ড' : 'অন্যান্য বিল';
+  const categoryTitle = isUnitFund ? 'UNIT FUND' : 'OTHERS BILL';
 
   // Month navigation
   const [currentMonth, setCurrentMonth] = useState<string>(
@@ -101,9 +103,46 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
     const now = new Date();
     return now.toISOString().split('T')[0];
   });
+  const dateInputRef = useRef<HTMLInputElement>(null);
   const [note, setNote] = useState<string>('');
+  const [othersFundSource, setOthersFundSource] = useState<'Cash' | 'UCB'>('Cash');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  // Target month key computed from selected date
+  const targetMonthKey = useMemo(() => {
+    const dateObj = new Date(txDate);
+    return !isNaN(dateObj.getTime())
+      ? `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`
+      : currentMonth;
+  }, [txDate, currentMonth]);
+
+  // Set of member IDs who already have a Unit Fund entry in this target month
+  const membersWithUnitFundThisMonth = useMemo(() => {
+    const set = new Set<string>();
+    if (category !== 'UNIT_FUND') return set;
+
+    (allTxs || []).forEach((tx: any) => {
+      if (getTxCategory(tx) !== 'UNIT_FUND') return;
+      if (tx.type === 'BILL PAYMENT' || tx.gateway === 'PAID') return;
+
+      const txMonth = tx.monthKey || getTxMonthKey(tx);
+      if (txMonth !== targetMonthKey) return;
+
+      const cleanBd = String(tx.bdNo || tx['BD No'] || tx.airman_id || '').replace(/\D/g, '');
+      const airmanId = String(tx.airman_id || '').toLowerCase().trim();
+
+      members.forEach((m) => {
+        const mCleanBd = String(m['BD No'] || m.bdNo || m.airman_id || '').replace(/\D/g, '');
+        const mAirman = String(m.airman_id || '').toLowerCase().trim();
+        if ((cleanBd && mCleanBd === cleanBd) || (airmanId && mAirman === airmanId)) {
+          set.add(String(m.airman_id || m['BD No']));
+        }
+      });
+    });
+
+    return set;
+  }, [allTxs, category, targetMonthKey, members]);
 
   // Member Selection State
   const [selectedAirmanIds, setSelectedAirmanIds] = useState<Set<string>>(new Set());
@@ -111,17 +150,17 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
   const [memberFilter, setMemberFilter] = useState<'ALL' | 'OFFICER' | 'AIRMEN' | 'CIVILIAN'>('ALL');
   const [dueListFilter, setDueListFilter] = useState<'ALL' | 'WITH_DUE'>('ALL');
   const [viewMode, setViewMode] = useState<'CARDS' | 'TABLE'>('TABLE');
-  const [activeTab, setActiveTab] = useState<'ADD_BATCH' | 'MEMBERS_LIST' | 'RECENT_LOG'>('ADD_BATCH');
+  const [activeTab, setActiveTab] = useState<'ADD_BATCH' | 'RECENT_LOG'>('ADD_BATCH');
 
   // Quick preset notes for Others fund
   const quickNotes = [
-    'মেস ডিনার ফি',
-    'পিকনিক ও রিফ্রেশমেন্ট',
-    'বিদায় ও সংবর্ধনা উপহার',
-    'খেলাধুলা ও বিনোদন চাঁদা',
-    'জরুরি কল্যাণ অনুদান',
-    'বিশেষ পার্টি ও আপ্যায়ন',
-    'অফিসিয়াল স্টেশনারি/টোকেন'
+    'Mess Dinner Fee',
+    'Picnic & Refreshment',
+    'Farewell & Reception Gift',
+    'Sports & Entertainment Fund',
+    'Special Event Catering',
+    'Emergency Welfare Grant',
+    'Official Stationery & Token'
   ];
 
   const quickAmounts = [100, 200, 300, 500, 1000, 1500];
@@ -203,6 +242,10 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
 
   // Selection helpers
   const handleToggleMember = (airmanId: string) => {
+    if (isUnitFund && membersWithUnitFundThisMonth.has(airmanId)) {
+      showToast(`Unit Fund has already been billed for this member for ${targetMonthKey}! Duplicate billing in the same month is restricted.`, 'error');
+      return;
+    }
     setSelectedAirmanIds((prev) => {
       const next = new Set(prev);
       if (next.has(airmanId)) {
@@ -219,6 +262,9 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       const next = new Set(prev);
       filteredMembers.forEach((m) => {
         const id = String(m.airman_id || m['BD No']);
+        if (isUnitFund && membersWithUnitFundThisMonth.has(id)) {
+          return; // Skip members already billed for this month
+        }
         next.add(id);
       });
       return next;
@@ -238,7 +284,11 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
           (filter === 'AIRMEN' && isAirmanMember(m)) ||
           (filter === 'CIVILIAN' && isCivilianMember(m));
         if (matches) {
-          next.add(String(m.airman_id || m['BD No']));
+          const id = String(m.airman_id || m['BD No']);
+          if (isUnitFund && membersWithUnitFundThisMonth.has(id)) {
+            return; // Skip members already billed for this month
+          }
+          next.add(id);
         }
       });
       return next;
@@ -264,18 +314,42 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
 
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
-      showToast('অনুগ্রহ করে সঠিক টাকার পরিমাণ লিখুন (Enter a valid amount)', 'error');
+      showToast('Please enter a valid amount greater than 0', 'error');
       return;
     }
 
     if (selectedAirmanIds.size === 0) {
-      showToast('অন্তত একজন সদস্য নির্বাচন করুন (Select at least one member)', 'error');
+      showToast('Please select at least one member to assign the bill', 'error');
       return;
     }
 
     if (!isUnitFund && !note.trim()) {
-      showToast('Others বিলের জন্য কিসের জন্য যোগ করা হলো (Note) লিখা আবশ্যক!', 'error');
+      showToast('A description note is required for Others Bill', 'error');
       return;
+    }
+
+    // STRICT CHECK: Unit Fund cannot be added more than once to any member in the same month
+    if (isUnitFund) {
+      const selectedMemberList = members.filter((m) =>
+        selectedAirmanIds.has(String(m.airman_id || m['BD No']))
+      );
+      const duplicateMembers = selectedMemberList.filter((m) =>
+        membersWithUnitFundThisMonth.has(String(m.airman_id || m['BD No']))
+      );
+
+      if (duplicateMembers.length > 0) {
+        const dupNames = duplicateMembers
+          .map((m) => `${m['Rank'] || ''} ${m['Surname'] || m['BD No']}`)
+          .slice(0, 3)
+          .join(', ');
+        showToast(
+          `The following members already have Unit Fund billed for ${targetMonthKey}: ${dupNames}${
+            duplicateMembers.length > 3 ? ' and others' : ''
+          }! Duplicate billing in the same month is restricted.`,
+          'error'
+        );
+        return;
+      }
     }
 
     setIsSubmitting(true);
@@ -306,19 +380,19 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
         ? `${String(dateObj.getDate()).padStart(2, '0')} ${enMonths[dateObj.getMonth()]} ${String(dateObj.getFullYear()).slice(-2)}`
         : formatCanteenDate(new Date());
 
-      const targetMonthKey = !isNaN(dateObj.getTime())
+      const targetMonth = !isNaN(dateObj.getTime())
         ? `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`
         : currentMonth;
 
       const newBatchTxs = selectedMemberList.map((m, idx) => {
         const cleanBdNo = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
         return {
-          id: `tx-${category.toLowerCase()}-${cleanBdNo}-${targetMonthKey}-${now + idx}`,
+          id: `tx-${category.toLowerCase()}-${cleanBdNo}-${targetMonth}-${now + idx}`,
           created_at: new Date().toISOString(),
           createdAt: new Date().toISOString(),
           timestamp: now + idx,
           date: formattedTxDate,
-          monthKey: targetMonthKey,
+          monthKey: targetMonth,
           airman_id: m.airman_id,
           bdNo: m['BD No'] || m.bdNo,
           memberName: `${m['Rank'] || ''} ${m['Surname'] || ''}`.trim(),
@@ -336,8 +410,37 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       const updatedTxs = [...newBatchTxs, ...existingTxs];
       localStorage.setItem('canteen_txs', JSON.stringify(updatedTxs));
 
-      // Push to cloud in background
+      // Push member txs to cloud in background
       await pushKeyToCloud('canteen_txs', updatedTxs);
+
+      // OTHERS BILL: Automatically deduct total billed amount from Fund Cash or UCB as an expense
+      if (!isUnitFund) {
+        const totalOthersDeduction = numAmount * selectedMemberList.length;
+        const existingExpenses = (() => {
+          try {
+            return JSON.parse(localStorage.getItem('canteen_expenses') || '[]');
+          } catch {
+            return [];
+          }
+        })();
+
+        const othersExpenseRecord = {
+          id: `exp-others-${now}`,
+          date: formattedTxDate,
+          desc: `OTHERS BILL: ${finalNote}`.toUpperCase(),
+          subdesc: `Bill charged to ${selectedMemberList.length} members (৳${numAmount.toLocaleString()} per member)`,
+          category: 'Others Bill',
+          paymentMethod: othersFundSource, // 'Cash' | 'UCB'
+          amount: totalOthersDeduction,
+          detailedPerson: 'Canteen / Unit Office',
+          isCustom: true
+        };
+
+        const updatedExpenses = [othersExpenseRecord, ...existingExpenses];
+        localStorage.setItem('canteen_expenses', JSON.stringify(updatedExpenses));
+        await pushKeyToCloud('canteen_expenses', updatedExpenses);
+        window.dispatchEvent(new Event('canteen_expenses_updated'));
+      }
 
       // Trigger sync events across the entire app
       window.dispatchEvent(new Event('canteen_txs_updated'));
@@ -345,9 +448,16 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       window.dispatchEvent(new Event('canteen_members_updated'));
       window.dispatchEvent(new Event('storage'));
 
-      showToast(
-        `সফলভাবে ${selectedMemberList.length} জন সদস্যের জন্য জনপ্রতি ৳${numAmount.toLocaleString()} (${categoryBnTitle}) যোগ করা হয়েছে!`
-      );
+      if (isUnitFund) {
+        showToast(
+          `Successfully posted Unit Fund bill of ৳${numAmount.toLocaleString()} per member for ${selectedMemberList.length} members!`
+        );
+      } else {
+        const totalOthersDeduction = numAmount * selectedMemberList.length;
+        showToast(
+          `Successfully posted Others Bill for ${selectedMemberList.length} members and deducted ৳${totalOthersDeduction.toLocaleString()} from ${othersFundSource} Fund!`
+        );
+      }
 
       // Reset form
       setAmount('');
@@ -356,7 +466,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       onSuccess();
     } catch (err: any) {
       console.error('Batch add error:', err);
-      showToast(`বিল যোগ করতে সমস্যা হয়েছে: ${err?.message || 'Unknown error'}`, 'error');
+      showToast(`Failed to post batch bills: ${err?.message || 'Unknown error'}`, 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -364,7 +474,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
 
   // Delete an individual transaction
   const handleDeleteTx = async (txId: string) => {
-    if (!window.confirm('আপনি কি নিশ্চিত যে এই রেকর্ডটি মুছে ফেলতে চান? (Are you sure to delete this transaction?)')) {
+    if (!window.confirm('Are you sure you want to delete this bill transaction?')) {
       return;
     }
 
@@ -387,10 +497,10 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       window.dispatchEvent(new Event('canteen_members_updated'));
       window.dispatchEvent(new Event('storage'));
 
-      showToast('রেকর্ডটি সফলভাবে মুছে ফেলা হয়েছে');
+      showToast('Transaction record deleted successfully');
       onSuccess();
     } catch (err: any) {
-      showToast(`মুছতে সমস্যা হয়েছে: ${err.message}`, 'error');
+      showToast(`Delete failed: ${err.message}`, 'error');
     }
   };
 
@@ -417,13 +527,13 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       )}
 
       {/* Top Header & Navigation Strip */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/90 border border-slate-800 p-4 sm:p-5 rounded-3xl shadow-sm">
+      <div className="flex items-center justify-between gap-4 bg-slate-900/90 border border-slate-800 p-4 sm:p-5 rounded-3xl shadow-sm">
         <div className="flex items-center space-x-3.5">
           <button
             type="button"
             onClick={onBack}
             className="w-10 h-10 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center border border-slate-700 transition-colors cursor-pointer shrink-0 active:scale-95"
-            title="ক্যান্টিন বিলে ফিরে যান (Back to Canteen Bills)"
+            title="Back to Canteen Bills"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
@@ -439,72 +549,25 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
             <div>
               <div className="flex items-center space-x-2">
                 <h1 className="text-xl sm:text-2xl font-black text-white uppercase tracking-tight">
-                  {categoryTitle} MANAGEMENT
+                  {isUnitFund ? 'UNIT FUND MANAGEMENT' : 'OTHERS BILL MANAGEMENT'}
                 </h1>
                 <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase font-mono border ${
                   isUnitFund ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40' : 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
                 }`}>
-                  {categoryBnTitle}
+                  {isUnitFund ? 'UNIT FUND' : 'OTHERS BILL'}
                 </span>
               </div>
               <p className="text-xs text-slate-400 font-bold mt-0.5">
                 {isUnitFund 
-                  ? 'ইউনিট ফান্ড নির্ধারিত সদস্যদের একসাথে সহজে চার্জ নির্ধারণ ও রেকর্ড করুন' 
-                  : 'অন্যান্য নির্দিষ্ট খাতে (নোট সহ) একাধিক সদস্যকে এক ক্লিকে বিল প্রদান করুন'}
+                  ? 'Batch assign and record fixed monthly Unit Fund subscriptions for members' 
+                  : 'Batch charge specific expenses to members with automatic fund deductions'}
               </p>
             </div>
           </div>
         </div>
-
-        {/* Category Tabs Switcher (Canteen, Unit Fund, Others, All) - Fits mobile perfectly */}
-        <div className="w-full md:w-auto grid grid-cols-4 md:flex items-center gap-1 sm:gap-1.5 p-1 bg-slate-950/90 rounded-2xl border border-slate-800">
-          <button
-            type="button"
-            onClick={() => onCategoryChange('ALL')}
-            className="px-1.5 sm:px-3 py-1.5 sm:py-2 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer flex items-center justify-center space-x-1 sm:space-x-1.5 bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700/60"
-          >
-            <Receipt className="w-3.5 h-3.5 text-slate-300 shrink-0" />
-            <span>All</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => onCategoryChange('CANTEEN')}
-            className="px-1.5 sm:px-3 py-1.5 sm:py-2 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer flex items-center justify-center space-x-1 sm:space-x-1.5 bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700/60"
-          >
-            <Coffee className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-            <span>Canteen</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => onCategoryChange('UNIT_FUND')}
-            className={`px-1.5 sm:px-3 py-1.5 sm:py-2 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer flex items-center justify-center space-x-1 sm:space-x-1.5 ${
-              isUnitFund
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 ring-1 ring-indigo-400'
-                : 'bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700/60'
-            }`}
-          >
-            <Landmark className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-            <span>Unit Fund</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => onCategoryChange('OTHERS')}
-            className={`px-1.5 sm:px-3 py-1.5 sm:py-2 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider whitespace-nowrap transition-all cursor-pointer flex items-center justify-center space-x-1 sm:space-x-1.5 ${
-              !isUnitFund
-                ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30 ring-1 ring-cyan-400'
-                : 'bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700/60'
-            }`}
-          >
-            <Layers className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-            <span>Others</span>
-          </button>
-        </div>
       </div>
 
-      {/* Summary KPI Cards & Month Selector: Monthly Billed & Due Side-by-Side, Selected Members card removed */}
+      {/* Summary KPI Cards & Month Selector */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {/* Month Selector Card */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 shadow-sm flex flex-col justify-between">
@@ -521,18 +584,18 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
               type="button"
               onClick={handlePrevMonth}
               className="p-1 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
-              title="পূর্ববর্তী মাস"
+              title="Previous Month"
             >
               <ChevronLeft className="w-4 h-4 text-indigo-400" />
             </button>
-            <div className="text-center font-bold text-xs sm:text-sm text-slate-100">
-              {formatBengaliMonthYear(currentMonth)}
+            <div className="text-center font-bold text-xs sm:text-sm text-slate-100 font-mono">
+              {currentMonth}
             </div>
             <button
               type="button"
               onClick={handleNextMonth}
               className="p-1 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
-              title="পরবর্তী মাস"
+              title="Next Month"
             >
               <ChevronRight className="w-4 h-4 text-indigo-400" />
             </button>
@@ -558,7 +621,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                 ৳{stats.totalMonthBilled.toLocaleString()}
               </div>
               <p className="text-[10px] font-bold text-slate-400 truncate mt-0.5">
-                {formatBengaliMonthYear(currentMonth)} এর মোট অর্জিত বিল
+                Total billed in {currentMonth}
               </p>
             </div>
           </div>
@@ -578,15 +641,14 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                 ৳{stats.totalDue.toLocaleString()}
               </div>
               <p className="text-[10px] font-bold text-slate-400 truncate mt-0.5">
-                {stats.membersWithDue} জন সদস্যের সর্বমোট বকেয়া
+                {stats.membersWithDue} members with outstanding due
               </p>
             </div>
           </div>
         </div>
       </div>
 
-
-      {/* Main Mode Navigation (Add Batch Bill vs Members List vs Recent Log) */}
+      {/* Main Mode Navigation (Add Batch Bill vs Recent Log) */}
       <div className="flex items-center justify-between border-b border-slate-800 pb-3 flex-wrap gap-2">
         <div className="flex items-center space-x-2">
           <button
@@ -601,22 +663,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
             }`}
           >
             <Plus className="w-4 h-4" />
-            <span>একাধিক সদস্যকে বিল যোগ করুন (Batch Add)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('MEMBERS_LIST')}
-            className={`px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider flex items-center space-x-2 transition-all cursor-pointer ${
-              activeTab === 'MEMBERS_LIST'
-                ? isUnitFund
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                  : 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30'
-                : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
-            }`}
-          >
-            <Users className="w-4 h-4" />
-            <span>সদস্য বকেয়া তালিকা ({displayedMembersForDues.length})</span>
+            <span>Batch Bill Generator</span>
           </button>
 
           <button
@@ -631,20 +678,9 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
             }`}
           >
             <Clock className="w-4 h-4" />
-            <span>সাম্প্রতিক রেকর্ড লগ ({categoryTransactions.length})</span>
+            <span>Transaction History & Audit Log ({categoryTransactions.length})</span>
           </button>
         </div>
-
-        {handleExportBills && (
-          <button
-            type="button"
-            onClick={handleExportBills}
-            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 border border-slate-700 transition-colors cursor-pointer"
-          >
-            <FileText className="w-3.5 h-3.5 text-indigo-400" />
-            <span>Export (PDF/Print)</span>
-          </button>
-        )}
       </div>
 
       {/* ================= TAB 1: BATCH ADD BILL ================= */}
@@ -656,17 +692,17 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
               <div className="border-b border-slate-800 pb-3">
                 <h3 className="text-base font-black text-white uppercase tracking-tight flex items-center space-x-2">
                   <Coins className={`w-5 h-5 ${isUnitFund ? 'text-indigo-400' : 'text-cyan-400'}`} />
-                  <span>বিল নির্ধারণ ফর্ম (Bill Form)</span>
+                  <span>Batch Billing Form</span>
                 </h3>
                 <p className="text-xs text-slate-400 font-bold mt-1">
-                  টাকার পরিমাণ ও তারিখ নির্ধারণ করে ডানপাশ থেকে সদস্য সিলেক্ট করুন
+                  Set amount and date, then select members from the right
                 </p>
               </div>
 
               {/* Amount Input */}
               <div>
                 <label className="block text-xs font-black uppercase text-slate-300 mb-1.5">
-                  টাকার পরিমাণ (Amount per Member) <span className="text-rose-400">*</span>
+                  Amount per Member <span className="text-rose-400">*</span>
                 </label>
                 <div className="relative">
                   <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-mono font-black text-slate-400 text-base">
@@ -676,7 +712,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                     type="number"
                     min="1"
                     step="1"
-                    placeholder="যেমন: ৫০০"
+                    placeholder="Enter amount (e.g. 500)"
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-700 rounded-2xl pl-9 pr-4 py-3 text-base font-mono font-black text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 shadow-inner"
@@ -703,18 +739,43 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                 </div>
               </div>
 
-              {/* Date Input */}
+              {/* Date Input - Compact with Calendar Icon click trigger */}
               <div>
-                <label className="block text-xs font-black uppercase text-slate-300 mb-1.5">
-                  তারিখ ও মাস (Date & Target Month)
+                <label className="block text-xs font-black uppercase text-slate-300 mb-1.5 flex items-center justify-between">
+                  <span>Billing Date</span>
+                  <span className="text-[10px] font-mono text-slate-400">Target Month: {targetMonthKey}</span>
                 </label>
-                <div className="relative">
-                  <Calendar className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <div 
+                  onClick={() => {
+                    try {
+                      dateInputRef.current?.showPicker();
+                    } catch (e) {
+                      dateInputRef.current?.focus();
+                    }
+                  }}
+                  className="inline-flex items-center space-x-2 bg-slate-950 border border-slate-700 hover:border-indigo-500/70 rounded-2xl px-3 py-2 cursor-pointer transition-all shadow-inner group"
+                >
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      try {
+                        dateInputRef.current?.showPicker();
+                      } catch (err) {
+                        dateInputRef.current?.focus();
+                      }
+                    }}
+                    className="p-1 rounded-lg text-slate-400 group-hover:text-indigo-400 hover:bg-slate-800 transition-colors cursor-pointer"
+                    title="Click to open calendar"
+                  >
+                    <Calendar className="w-4 h-4" />
+                  </button>
                   <input
+                    ref={dateInputRef}
                     type="date"
                     value={txDate}
                     onChange={(e) => setTxDate(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-2xl pl-10 pr-4 py-2.5 text-xs font-mono font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 shadow-inner"
+                    className="bg-transparent text-xs font-mono font-bold text-white focus:outline-none cursor-pointer w-28 sm:w-32"
                   />
                 </div>
               </div>
@@ -723,11 +784,11 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
               <div>
                 <label className="block text-xs font-black uppercase text-slate-300 mb-1.5 flex items-center justify-between">
                   <span>
-                    কিসের জন্য বিল যোগ করা হলো (Note / Description){' '}
+                    Description / Purpose{' '}
                     {!isUnitFund && <span className="text-rose-400">*</span>}
                   </span>
                   {!isUnitFund && (
-                    <span className="text-[10px] font-bold text-cyan-400 font-mono">বাধ্যতামূলক</span>
+                    <span className="text-[10px] font-bold text-cyan-400 font-mono">Required</span>
                   )}
                 </label>
                 <textarea
@@ -736,8 +797,8 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                   onChange={(e) => setNote(e.target.value)}
                   placeholder={
                     isUnitFund
-                      ? 'ঐচ্ছিক বিবরণ (যেমন: ইউনিট কল্যাণ বরাদ্দ, বিশেষ চাঁদা)'
-                      : 'কিসের জন্য এই বিল কাটা হলো তা বিস্তারিত লিখুন (যেমন: মেস ডিনার ফি, পিকনিক চাঁদা...)'
+                      ? 'Optional reference note (e.g. Welfare subscription)'
+                      : 'Detailed purpose of charge (e.g. Mess Dinner Fee, Refreshments...)'
                   }
                   className={`w-full bg-slate-950 border rounded-2xl p-3 text-xs font-bold text-white focus:outline-none shadow-inner resize-none ${
                     !isUnitFund && !note.trim()
@@ -752,7 +813,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                   <div className="mt-2 space-y-1">
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center space-x-1">
                       <Tag className="w-3 h-3 text-cyan-400" />
-                      <span>দ্রুত নোট নির্বাচন করুন:</span>
+                      <span>Quick Preset Notes:</span>
                     </p>
                     <div className="flex flex-wrap gap-1.5">
                       {quickNotes.map((qn) => (
@@ -774,20 +835,64 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                 )}
               </div>
 
+              {/* For Others Bill: Fund Deduction Source (Cash or UCB) */}
+              {!isUnitFund && (
+                <div className="bg-slate-950/80 rounded-2xl p-3 border border-cyan-500/30 space-y-2">
+                  <label className="block text-[11px] font-black uppercase text-cyan-300 flex items-center justify-between">
+                    <span className="flex items-center space-x-1.5">
+                      <Wallet className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Deduct from Fund Account *</span>
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-mono font-normal">Canteen Fund</span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setOthersFundSource('Cash')}
+                      className={`py-2 px-3 rounded-xl text-xs font-black flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+                        othersFundSource === 'Cash'
+                          ? 'bg-emerald-600 text-white shadow-md shadow-emerald-950/40 ring-1 ring-emerald-400'
+                          : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                      }`}
+                    >
+                      <Wallet className="w-3.5 h-3.5" />
+                      <span>Cash (Drawer)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOthersFundSource('UCB')}
+                      className={`py-2 px-3 rounded-xl text-xs font-black flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+                        othersFundSource === 'UCB'
+                          ? 'bg-cyan-600 text-white shadow-md shadow-cyan-950/40 ring-1 ring-cyan-400'
+                          : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                      }`}
+                    >
+                      <CreditCard className="w-3.5 h-3.5" />
+                      <span>UCB (Bank)</span>
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-400 font-bold leading-relaxed">
+                    💡 Total bill {numAmount > 0 && selectedCount > 0 ? `৳${totalBatchAmount.toLocaleString()}` : 'amount'} will be automatically deducted as an expenditure from <strong className="text-white">{othersFundSource} Fund</strong> upon posting.
+                  </p>
+                </div>
+              )}
+
               {/* Live Calculation Summary Box */}
               <div className="bg-slate-950 rounded-2xl p-3.5 border border-slate-800 space-y-2">
                 <div className="flex items-center justify-between text-xs font-bold text-slate-400">
-                  <span>নির্বাচিত সদস্য:</span>
-                  <span className="font-mono text-white font-black">{selectedCount} জন</span>
+                  <span>Selected Members:</span>
+                  <span className="font-mono text-white font-black">{selectedCount} members</span>
                 </div>
                 <div className="flex items-center justify-between text-xs font-bold text-slate-400">
-                  <span>জনপ্রতি পরিমাণ:</span>
-                  <span className="font-mono text-emerald-400 font-black">৳{numAmount.toLocaleString()}</span>
+                  <span>Amount Per Member:</span>
+                  <span className="font-mono text-emerald-400 font-black">
+                    {numAmount > 0 ? `৳${numAmount.toLocaleString()}` : 'Nil'}
+                  </span>
                 </div>
                 <div className="border-t border-slate-800 pt-2 flex items-center justify-between text-sm font-black text-white">
-                  <span>সর্বমোট বিল:</span>
-                  <span className="font-mono text-base text-amber-400">
-                    ৳{totalBatchAmount.toLocaleString()}
+                  <span>Total Batch Amount:</span>
+                  <span className="font-mono text-base text-amber-400 font-black">
+                    {numAmount > 0 && selectedCount > 0 ? `৳${totalBatchAmount.toLocaleString()}` : 'Nil'}
                   </span>
                 </div>
               </div>
@@ -812,8 +917,8 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                 )}
                 <span>
                   {isSubmitting 
-                    ? 'সংরক্ষণ হচ্ছে...' 
-                    : `বিল যোগ করুন (${selectedCount} জন • ৳${totalBatchAmount.toLocaleString()})`}
+                    ? 'Posting Bills...' 
+                    : `Post Batch Bill (${selectedCount} Members • ${numAmount > 0 && selectedCount > 0 ? `৳${totalBatchAmount.toLocaleString()}` : 'Nil'})`}
                 </span>
               </button>
             </div>
@@ -828,7 +933,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                   <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
-                    placeholder="সদস্য খুঁজুন (BD No, Rank, Name, বাংলা নাম)..."
+                    placeholder="Search member (BD No, Rank, Name)..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-700 rounded-2xl pl-10 pr-4 py-2.5 text-xs font-bold text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 shadow-inner"
@@ -884,9 +989,9 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                 </div>
 
                 <div className="flex items-center space-x-2 text-xs font-bold text-slate-400">
-                  <span>নির্বাচিত:</span>
+                  <span>Selected:</span>
                   <span className="px-2 py-0.5 rounded-lg bg-indigo-500/20 text-indigo-300 font-mono font-black border border-indigo-500/30">
-                    {selectedCount} জন
+                    {selectedCount} members
                   </span>
                 </div>
               </div>
@@ -895,11 +1000,12 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
               <div className="max-h-[520px] overflow-y-auto space-y-2 pr-1 scrollbar-none">
                 {filteredMembers.length === 0 ? (
                   <div className="p-8 text-center text-slate-400 text-xs font-bold">
-                    কোনো সদস্য পাওয়া যায়নি (No members found)
+                    No matching members found
                   </div>
                 ) : (
                   filteredMembers.map((m) => {
                     const airmanId = String(m.airman_id || m['BD No']);
+                    const isAlreadyBilledThisMonth = isUnitFund && membersWithUnitFundThisMonth.has(airmanId);
                     const isSelected = selectedAirmanIds.has(airmanId);
                     const memberDp = resolveImageUrl(m.DP);
                     const currentDue = getMemberTotalDue(m, category);
@@ -908,16 +1014,20 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                       <div
                         key={airmanId}
                         onClick={() => handleToggleMember(airmanId)}
-                        className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
-                          isSelected
-                            ? 'bg-indigo-950/40 border-indigo-500/70 shadow-sm shadow-indigo-950/50'
-                            : 'bg-slate-950/60 hover:bg-slate-800/50 border-slate-800/80'
+                        className={`p-3 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
+                          isAlreadyBilledThisMonth
+                            ? 'bg-slate-950/40 border-slate-800/60 opacity-60 cursor-not-allowed'
+                            : isSelected
+                            ? 'bg-indigo-950/40 border-indigo-500/70 shadow-sm shadow-indigo-950/50 cursor-pointer'
+                            : 'bg-slate-950/60 hover:bg-slate-800/50 border-slate-800/80 cursor-pointer'
                         }`}
                       >
                         <div className="flex items-center space-x-3 min-w-0 flex-1">
                           {/* Checkbox */}
                           <div className={`w-5 h-5 rounded-lg flex items-center justify-center border transition-all shrink-0 ${
-                            isSelected 
+                            isAlreadyBilledThisMonth
+                              ? 'bg-slate-800 border-slate-700 text-indigo-400'
+                              : isSelected 
                               ? 'bg-indigo-600 border-indigo-400 text-white' 
                               : 'bg-slate-900 border-slate-700 text-transparent'
                           }`}>
@@ -951,9 +1061,11 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                               <span className="font-black text-white text-xs truncate">
                                 {m['Surname']}
                               </span>
-                              <span className="text-[11px] font-bold text-emerald-400">
-                                ({getMemberBanglaName(m) || formatMemberNameBn(m['Surname'])})
-                              </span>
+                              {isAlreadyBilledThisMonth && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 font-sans flex items-center space-x-1">
+                                  <span>✓ Billed for {targetMonthKey}</span>
+                                </span>
+                              )}
                             </div>
                             <div className="text-[11px] font-mono text-slate-400 mt-0.5">
                               BD/{m['BD No']} • {m.Role || 'Member'}
@@ -982,243 +1094,20 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
         </div>
       )}
 
-      {/* ================= TAB 2: MEMBERS DUES LIST ================= */}
-      {activeTab === 'MEMBERS_LIST' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-            <div className="flex items-center space-x-2">
-              <button
-                type="button"
-                onClick={() => setDueListFilter('ALL')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase transition-all cursor-pointer ${
-                  dueListFilter === 'ALL'
-                    ? 'bg-slate-700 text-white'
-                    : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
-                }`}
-              >
-                All Members ({filteredMembers.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setDueListFilter('WITH_DUE')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase transition-all cursor-pointer ${
-                  dueListFilter === 'WITH_DUE'
-                    ? 'bg-rose-900/80 text-rose-200 border border-rose-500/50'
-                    : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
-                }`}
-              >
-                Due Only ({stats.membersWithDue})
-              </button>
-            </div>
-
-            <div className="flex items-center space-x-2">
-              <div className="relative">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  placeholder="খুঁজুন..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white"
-                />
-              </div>
-
-              <div className="flex items-center bg-slate-950 rounded-xl p-0.5 border border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setViewMode('TABLE')}
-                  className={`p-1.5 rounded-lg ${viewMode === 'TABLE' ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}
-                  title="Table View"
-                >
-                  <List className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setViewMode('CARDS')}
-                  className={`p-1.5 rounded-lg ${viewMode === 'CARDS' ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}
-                  title="Cards View"
-                >
-                  <LayoutGrid className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Dues Table View */}
-          {viewMode === 'TABLE' ? (
-            <div className="overflow-x-auto border border-slate-800 rounded-2xl">
-              <table className="w-full text-left text-xs whitespace-nowrap">
-                <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] font-black border-b border-slate-800">
-                  <tr>
-                    <th className="px-4 py-3">#</th>
-                    <th className="px-4 py-3">Member Details</th>
-                    <th className="px-4 py-3">BD No</th>
-                    <th className="px-4 py-3 text-right">{currentMonth} Bill</th>
-                    <th className="px-4 py-3 text-right">Total {categoryTitle} Due</th>
-                    <th className="px-4 py-3 text-center">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60 font-medium">
-                  {displayedMembersForDues.map((member, idx) => {
-                    const memberDp = resolveImageUrl(member.DP);
-                    const monthBill = getMemberFilteredBill(member, category, currentMonth);
-                    const totalDue = getMemberTotalDue(member, category);
-
-                    return (
-                      <tr key={member.airman_id || idx} className="hover:bg-slate-800/40 transition-colors">
-                        <td className="px-4 py-3 font-mono text-slate-500">{idx + 1}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center space-x-2.5">
-                            <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center overflow-hidden shrink-0">
-                              {memberDp ? (
-                                <img src={memberDp} alt="" className="w-full h-full object-cover" />
-                              ) : (
-                                <span className="font-bold text-indigo-400">
-                                  {(member['Surname'] || 'U').charAt(0)}
-                                </span>
-                              )}
-                            </div>
-                            <div>
-                              <div className="flex items-center space-x-1.5">
-                                {member['Rank'] && (
-                                  <span className="px-1.5 py-0.2 rounded text-[10px] font-black bg-indigo-500/15 text-indigo-300 font-mono">
-                                    {member['Rank']}
-                                  </span>
-                                )}
-                                <span className="font-black text-white">{member['Surname']}</span>
-                                <span className="text-[11px] font-bold text-emerald-400">
-                                  ({getMemberBanglaName(member) || formatMemberNameBn(member['Surname'])})
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 font-mono text-slate-300">#{member['BD No']}</td>
-                        <td className="px-4 py-3 text-right font-mono font-bold text-slate-300">
-                          ৳{monthBill.toLocaleString()}
-                        </td>
-                        <td className="px-4 py-3 text-right font-mono font-black">
-                          <span className={totalDue > 0 ? 'text-rose-400 text-sm' : 'text-slate-500'}>
-                            ৳{totalDue.toLocaleString()}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <div className="flex items-center justify-center space-x-1.5">
-                            <button
-                              type="button"
-                              onClick={() => openStatement(member)}
-                              className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-indigo-300 rounded-lg text-[10px] font-bold uppercase transition-colors cursor-pointer"
-                            >
-                              Statement
-                            </button>
-                            <button
-                              type="button"
-                              disabled={totalDue <= 0}
-                              onClick={() => openPayBill(member)}
-                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase transition-colors ${
-                                totalDue > 0
-                                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer'
-                                  : 'bg-slate-800 text-slate-600 cursor-not-allowed'
-                              }`}
-                            >
-                              Pay
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-              {displayedMembersForDues.map((member, idx) => {
-                const memberDp = resolveImageUrl(member.DP);
-                const monthBill = getMemberFilteredBill(member, category, currentMonth);
-                const totalDue = getMemberTotalDue(member, category);
-
-                return (
-                  <div
-                    key={member.airman_id || idx}
-                    className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-3"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2.5">
-                        <div className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center overflow-hidden shrink-0">
-                          {memberDp ? (
-                            <img src={memberDp} alt="" className="w-full h-full object-cover" />
-                          ) : (
-                            <span className="font-bold text-indigo-400">
-                              {(member['Surname'] || 'U').charAt(0)}
-                            </span>
-                          )}
-                        </div>
-                        <div>
-                          <div className="flex items-center space-x-1">
-                            <span className="text-[10px] font-black uppercase text-indigo-300 font-mono">
-                              {member['Rank']}
-                            </span>
-                            <span className="font-black text-white text-xs">{member['Surname']}</span>
-                          </div>
-                          <div className="text-[10px] font-mono text-slate-400">#{member['BD No']}</div>
-                        </div>
-                      </div>
-
-                      <div className="text-right">
-                        <div className="text-[10px] font-bold text-slate-400">DUE</div>
-                        <div className={`font-mono font-black ${totalDue > 0 ? 'text-rose-400 text-sm' : 'text-slate-500'}`}>
-                          ৳{totalDue.toLocaleString()}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="border-t border-slate-800/80 pt-2 flex items-center justify-between">
-                      <span className="text-[11px] font-bold text-slate-400">
-                        {currentMonth} Bill: <strong className="text-white font-mono">৳{monthBill}</strong>
-                      </span>
-                      <div className="flex items-center space-x-1">
-                        <button
-                          type="button"
-                          onClick={() => openStatement(member)}
-                          className="px-2 py-1 bg-slate-800 text-indigo-300 rounded-lg text-[10px] font-bold cursor-pointer"
-                        >
-                          Statement
-                        </button>
-                        <button
-                          type="button"
-                          disabled={totalDue <= 0}
-                          onClick={() => openPayBill(member)}
-                          className={`px-2 py-1 rounded-lg text-[10px] font-bold ${
-                            totalDue > 0 ? 'bg-emerald-600 text-white cursor-pointer' : 'bg-slate-800 text-slate-600 cursor-not-allowed'
-                          }`}
-                        >
-                          Pay
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ================= TAB 3: RECENT LOG ================= */}
+      {/* ================= RECENT TRANSACTION AUDIT LOG ================= */}
       {activeTab === 'RECENT_LOG' && (
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
             <div>
               <h3 className="text-base font-black text-white uppercase tracking-tight">
-                {categoryTitle} লেনদেন ও বিল লগ (Recent Transaction History)
+                {categoryTitle} Transaction History & Audit Log
               </h3>
               <p className="text-xs text-slate-400 font-bold mt-0.5">
-                সাম্প্রতিক যোগ করা বিলের তালিকা • ভুল রেকর্ড মুছে ফেলার সুবিধা
+                Audited list of recently billed transactions • Delete incorrect entries anytime
               </p>
             </div>
             <span className="text-xs font-mono font-bold text-slate-400">
-              মোট রেকর্ড: {categoryTransactions.length} টি
+              Total Records: {categoryTransactions.length}
             </span>
           </div>
 
@@ -1226,18 +1115,18 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
             <table className="w-full text-left text-xs whitespace-nowrap">
               <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] font-black border-b border-slate-800">
                 <tr>
-                  <th className="px-4 py-3">তারিখ (Date)</th>
-                  <th className="px-4 py-3">সদস্য (Member)</th>
-                  <th className="px-4 py-3">বিবরণ / Note (কিসের জন্য)</th>
-                  <th className="px-4 py-3 text-right">পরিমাণ (Amount)</th>
-                  <th className="px-4 py-3 text-center">মুছে ফেলুন (Action)</th>
+                  <th className="px-4 py-3">Date</th>
+                  <th className="px-4 py-3">Member</th>
+                  <th className="px-4 py-3">Description / Purpose</th>
+                  <th className="px-4 py-3 text-right">Amount</th>
+                  <th className="px-4 py-3 text-center">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 font-medium">
                 {categoryTransactions.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="px-4 py-8 text-center text-slate-500 font-bold">
-                      কোনো সাম্প্রতিক রেকর্ড পাওয়া যায়নি (No transaction records found)
+                      No transaction records found for this category
                     </td>
                   </tr>
                 ) : (
@@ -1274,7 +1163,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                           type="button"
                           onClick={() => handleDeleteTx(tx.id)}
                           className="p-1.5 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 rounded-lg transition-colors cursor-pointer"
-                          title="এই রেকর্ডটি মুছে ফেলুন (Delete transaction)"
+                          title="Delete this transaction record"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>

@@ -1543,14 +1543,14 @@ export const CanteenMemberDB: React.FC = () => {
                   <div>
                     <div className="flex items-center space-x-2 flex-wrap">
                       <label className="text-[10px] font-black text-slate-300 uppercase tracking-wider">
-                        Seniority / জ্যেষ্ঠতা নম্বর:
+                        Seniority Number:
                       </label>
                       <span className="font-mono text-emerald-400 font-black text-sm px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-400/30">
                         #{editMember.seniority || editMember.Seniority || '-'}
                       </span>
                     </div>
                     <p className="text-[10px] text-emerald-300/80 font-medium mt-0.5">
-                      অফিস Biodata Register ও ক্যান্টিন ডাটাবেজে পদমর্যাদার ক্রম অনুযায়ী সুবিন্যস্ত।
+                      Synced with Office Biodata Register and Canteen database.
                     </p>
                   </div>
                 </div>
@@ -1561,7 +1561,7 @@ export const CanteenMemberDB: React.FC = () => {
                   className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 shadow-sm transition-all cursor-pointer active:scale-95"
                 >
                   <Edit3 className="w-3.5 h-3.5" />
-                  <span>Change Seniority / ক্রম পরিবর্তন</span>
+                  <span>Change Seniority</span>
                 </button>
               </div>
 
@@ -1785,7 +1785,7 @@ export const CanteenMemberDB: React.FC = () => {
                 </div>
                 <p className="text-[11px] font-bold text-emerald-300 mt-1 flex items-center gap-1.5 truncate">
                   <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0 animate-spin" />
-                  <span>ক্লাউডে সফলভাবে সংরক্ষিত হয়েছে! {saveSuccessBanner.nameBn ? `(${saveSuccessBanner.nameBn})` : ''}</span>
+                  <span>Saved successfully to Cloud! {saveSuccessBanner.nameBn ? `(${saveSuccessBanner.nameBn})` : ''}</span>
                 </p>
               </div>
             </div>

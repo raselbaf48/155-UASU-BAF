@@ -520,7 +520,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                     className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-xs font-bold hover:bg-emerald-500/30 transition-all cursor-pointer animate-pulse mt-1"
                   >
                     <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>নতুন আপডেট v{updateAvailable.version_name} উপলব্ধ (ক্লিক করুন)</span>
+                    <span>New Update v{updateAvailable.version_name} Available (Click to Update)</span>
                   </button>
                 )}
               </div>

@@ -540,6 +540,12 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
   const toggleLanguage = () => {
     const nextLang = i18n.language === 'bn' ? 'en' : 'bn';
     i18n.changeLanguage(nextLang);
+    try {
+      localStorage.setItem('canteen_explicit_lang', nextLang);
+      localStorage.setItem('i18nextLng', nextLang);
+    } catch {
+      // ignore
+    }
   };
 
   const isEmployee = currentUser.role === 'employee' || currentUser.name === 'Guest';
