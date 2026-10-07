@@ -558,7 +558,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
     { id: 'inventory', name: 'Inventory', icon: Boxes },
     { id: 'expenditures', name: 'Expence register', icon: Banknote },
     { id: 'reports', name: 'Reports', icon: PieChart },
-    { id: 'fund', name: 'Fund', icon: Wallet },
+    { id: 'fund', name: 'Capital', icon: Wallet },
     { id: 'settings', name: 'Settings', icon: SettingsIcon },
   ] : [
     { id: 'dashboard', name: 'Home', icon: Grid },

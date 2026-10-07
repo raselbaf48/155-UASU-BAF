@@ -586,15 +586,6 @@ export const DueRegister: React.FC = () => {
             <Upload className="w-4 h-4" />
             <span>IMPORT DUE DATA</span>
           </button>
-
-          <button
-            type="button"
-            onClick={loadDueExpenses}
-            className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-black tracking-wider uppercase transition-colors flex items-center space-x-2 border border-slate-700 shadow-sm cursor-pointer"
-          >
-            <RefreshCw className="w-4 h-4" />
-            <span>SYNC</span>
-          </button>
         </div>
       </div>
 

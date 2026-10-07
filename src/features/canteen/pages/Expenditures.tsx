@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Search, Plus, Trash2, Banknote, X, Save, Edit2, AlertTriangle, CheckCircle2, 
-  Calendar, Tag, FileText, ArrowLeft, Boxes, UserCheck, Layers, 
-  RefreshCw, Wallet, ShoppingCart, DollarSign, Store, Utensils,
-  Filter, Check, ArrowRight, PackagePlus
+  Calendar, Tag, FileText, Boxes, UserCheck, Layers, 
+  Wallet, ShoppingCart, DollarSign, Store, Utensils,
+  Check, PackagePlus, History, Clock, ArrowDownLeft, ArrowUpRight,
+  Filter, CheckSquare, Sparkles, ChevronRight, User
 } from 'lucide-react';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { 
@@ -36,7 +37,22 @@ export interface ExpenseRecord {
   advanceId?: string;
 }
 
+export interface BazarAdvance {
+  id: string;
+  date: string;
+  personName: string;
+  amount: number;
+  spentAmount: number;
+  returnAmount: number;
+  channel: 'CASH' | 'UCB';
+  purpose: string;
+  status: 'ACTIVE' | 'SETTLED';
+  settledDate?: string;
+  notes?: string;
+}
+
 const STORAGE_KEY = 'canteen_expenses';
+const ADVANCES_KEY = 'canteen_bazar_advances';
 
 interface ItemRowInput {
   id: string;
@@ -75,21 +91,37 @@ export const Expenditures: React.FC = () => {
     }
   });
 
+  const [advances, setAdvances] = useState<BazarAdvance[]>(() => {
+    try {
+      const raw = localStorage.getItem(ADVANCES_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+
   const [rawItems, setRawItems] = useState<RawInventoryItem[]>([]);
   const [civilians, setCivilians] = useState<Array<{ id: string; name: string }>>([
     { id: 'civ-tanvir', name: 'Civ Tanvir' },
     { id: 'civ-nurnabi', name: 'Civ Nur Nabi' }
   ]);
 
-  // Search & Filters
+  // Main UI Mode / Modal States
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [showAdvanceRegisterModal, setShowAdvanceRegisterModal] = useState(false);
+
+  // Search & Filters for Main Table
   const [searchTerm, setSearchTerm] = useState('');
   const [filterMethod, setFilterMethod] = useState<'ALL' | 'Cash' | 'UCB' | 'Due'>('ALL');
   const [filterShop, setFilterShop] = useState<'ALL' | DueShopName>('ALL');
   const [filterPerson, setFilterPerson] = useState<string>('ALL');
   const [filterDateRange, setFilterDateRange] = useState<'ALL' | 'THIS_MONTH' | 'TODAY'>('ALL');
 
-  // Form toggle
-  const [showAddForm, setShowAddForm] = useState(false);
+  // History Modal Filters
+  const [historySearch, setHistorySearch] = useState('');
+  const [historyChannelFilter, setHistoryChannelFilter] = useState<'ALL' | 'Cash' | 'UCB' | 'Due'>('ALL');
+  const [historyDateFilter, setHistoryDateFilter] = useState<'ALL' | 'THIS_MONTH' | 'TODAY'>('ALL');
 
   // New Expense Form State
   const [formDate, setFormDate] = useState(formatCanteenDate(new Date()));
@@ -108,6 +140,23 @@ export const Expenditures: React.FC = () => {
     }
   ]);
 
+  // Inventory Item Selector in Form (like Member Selection in POS Sales)
+  const [inventorySearch, setInventorySearch] = useState('');
+  const [inventoryCategoryFilter, setInventoryCategoryFilter] = useState('ALL');
+
+  // Register Advance Form State
+  const [advDate, setAdvDate] = useState(formatCanteenDate(new Date()));
+  const [advPerson, setAdvPerson] = useState('Civ Tanvir');
+  const [advAmount, setAdvAmount] = useState<number | ''>('');
+  const [advChannel, setAdvChannel] = useState<'CASH' | 'UCB'>('CASH');
+  const [advPurpose, setAdvPurpose] = useState('Daily Bazar Advance');
+
+  // Advance Settle / Return Modal State
+  const [settlingAdvance, setSettlingAdvance] = useState<BazarAdvance | null>(null);
+  const [settleSpent, setSettleSpent] = useState<number | ''>('');
+  const [settleReturn, setSettleReturn] = useState<number | ''>('');
+  const [settleNotes, setSettleNotes] = useState('');
+
   // Edit Expense State
   const [editingExpense, setEditingExpense] = useState<ExpenseRecord | null>(null);
 
@@ -117,39 +166,47 @@ export const Expenditures: React.FC = () => {
   // UI state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 4000);
   };
 
-  // Cloud Sync
-  const syncWithCloud = async (showNotice = false) => {
-    setIsSyncing(true);
-    try {
-      const cloudExpenses = await pullKeyFromCloud(STORAGE_KEY);
-      if (Array.isArray(cloudExpenses)) {
-        const localExpenses: ExpenseRecord[] = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-        const expMap = new Map<string, ExpenseRecord>();
-        [...cloudExpenses, ...localExpenses].forEach(e => {
-          if (e && e.id) expMap.set(String(e.id), e);
-        });
-        const merged = Array.from(expMap.values());
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
-        setExpenses(merged);
-        if (showNotice) showToast('Synced with cloud successfully! ☁️');
-      }
-    } catch (err) {
-      console.warn('Sync error in Expence register:', err);
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
+  // Initial load & data listener
   useEffect(() => {
-    syncWithCloud(false);
     setRawItems(getRawInventoryItems());
+
+    // Pull from cloud silently
+    const pullCloud = async () => {
+      try {
+        const cloudExp = await pullKeyFromCloud(STORAGE_KEY);
+        if (Array.isArray(cloudExp)) {
+          const localExp: ExpenseRecord[] = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+          const map = new Map<string, ExpenseRecord>();
+          [...cloudExp, ...localExp].forEach(e => {
+            if (e && e.id) map.set(String(e.id), e);
+          });
+          const merged = Array.from(map.values());
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+          setExpenses(merged);
+        }
+
+        const cloudAdv = await pullKeyFromCloud(ADVANCES_KEY);
+        if (Array.isArray(cloudAdv)) {
+          const localAdv: BazarAdvance[] = JSON.parse(localStorage.getItem(ADVANCES_KEY) || '[]');
+          const advMap = new Map<string, BazarAdvance>();
+          [...cloudAdv, ...localAdv].forEach(a => {
+            if (a && a.id) advMap.set(String(a.id), a);
+          });
+          const mergedAdv = Array.from(advMap.values());
+          localStorage.setItem(ADVANCES_KEY, JSON.stringify(mergedAdv));
+          setAdvances(mergedAdv);
+        }
+      } catch (err) {
+        console.warn('Expense sync error:', err);
+      }
+    };
+    pullCloud();
 
     // Fetch civilians from Canteen_Member
     const fetchCivilians = async () => {
@@ -184,19 +241,32 @@ export const Expenditures: React.FC = () => {
         const raw = localStorage.getItem(STORAGE_KEY);
         setExpenses(raw ? JSON.parse(raw) : []);
       } catch {}
+      try {
+        const rawAdv = localStorage.getItem(ADVANCES_KEY);
+        setAdvances(rawAdv ? JSON.parse(rawAdv) : []);
+      } catch {}
       setRawItems(getRawInventoryItems());
     };
 
     window.addEventListener('canteen_expenses_updated', handleSync);
+    window.addEventListener('canteen_bazar_advances_updated', handleSync);
     window.addEventListener('canteen_state_updated', handleSync);
     window.addEventListener('storage', handleSync);
 
     return () => {
       window.removeEventListener('canteen_expenses_updated', handleSync);
+      window.removeEventListener('canteen_bazar_advances_updated', handleSync);
       window.removeEventListener('canteen_state_updated', handleSync);
       window.removeEventListener('storage', handleSync);
     };
   }, []);
+
+  // Today & Month strings
+  const todayStr = useMemo(() => formatCanteenDate(new Date()), []);
+  const currentMonthKey = useMemo(() => {
+    const parts = todayStr.split('-');
+    return parts.length >= 2 ? `${parts[1]}-${parts[2]}` : '';
+  }, [todayStr]);
 
   // Calculate Metrics
   const metrics = useMemo(() => {
@@ -226,20 +296,15 @@ export const Expenditures: React.FC = () => {
       }
     });
 
-    return { total, cash, ucb, due, grocDue, poultryDue, bakeDue };
-  }, [expenses]);
+    const activeAdvances = advances.filter(a => a.status === 'ACTIVE');
+    const totalActiveAdvance = activeAdvances.reduce((sum, a) => sum + (Number(a.amount) || 0), 0);
 
-  // Today & Month strings
-  const todayStr = useMemo(() => formatCanteenDate(new Date()), []);
-  const currentMonthKey = useMemo(() => {
-    const parts = todayStr.split('-');
-    return parts.length >= 2 ? `${parts[1]}-${parts[2]}` : '';
-  }, [todayStr]);
+    return { total, cash, ucb, due, grocDue, poultryDue, bakeDue, totalActiveAdvance, activeAdvancesCount: activeAdvances.length };
+  }, [expenses, advances]);
 
-  // Filtered List
+  // Filtered List for Main Table
   const filteredExpenses = useMemo(() => {
     return expenses.filter(e => {
-      // Search
       const search = searchTerm.toLowerCase();
       const matchSearch = 
         !search ||
@@ -249,7 +314,6 @@ export const Expenditures: React.FC = () => {
         (e.category || '').toLowerCase().includes(search) ||
         (e.dueShop || '').toLowerCase().includes(search);
 
-      // Payment method
       const method = String(e.paymentMethod || '').toLowerCase();
       let matchMethod = true;
       if (filterMethod === 'Cash') matchMethod = method === 'cash';
@@ -264,10 +328,8 @@ export const Expenditures: React.FC = () => {
         }
       }
 
-      // Person
       const matchPerson = filterPerson === 'ALL' || e.detailedPerson === filterPerson;
 
-      // Date range
       let matchDate = true;
       if (filterDateRange === 'TODAY') {
         matchDate = e.date === todayStr;
@@ -279,7 +341,122 @@ export const Expenditures: React.FC = () => {
     });
   }, [expenses, searchTerm, filterMethod, filterShop, filterPerson, filterDateRange, todayStr, currentMonthKey]);
 
-  // Handle adding another row in form
+  // Filtered List for History Modal
+  const filteredHistory = useMemo(() => {
+    return expenses.filter(e => {
+      const search = historySearch.toLowerCase();
+      const matchSearch = 
+        !search ||
+        (e.desc || '').toLowerCase().includes(search) ||
+        (e.date || '').toLowerCase().includes(search) ||
+        (e.detailedPerson || '').toLowerCase().includes(search) ||
+        (e.category || '').toLowerCase().includes(search) ||
+        (e.dueShop || '').toLowerCase().includes(search);
+
+      const method = String(e.paymentMethod || '').toLowerCase();
+      let matchMethod = true;
+      if (historyChannelFilter === 'Cash') matchMethod = method === 'cash';
+      else if (historyChannelFilter === 'UCB') matchMethod = method === 'ucb';
+      else if (historyChannelFilter === 'Due') matchMethod = method === 'due';
+
+      let matchDate = true;
+      if (historyDateFilter === 'TODAY') {
+        matchDate = e.date === todayStr;
+      } else if (historyDateFilter === 'THIS_MONTH') {
+        matchDate = (e.date || '').endsWith(currentMonthKey);
+      }
+
+      return matchSearch && matchMethod && matchDate;
+    });
+  }, [expenses, historySearch, historyChannelFilter, historyDateFilter, todayStr, currentMonthKey]);
+
+  // Inventory Items filtering for Item Selection panel (Like POS Sales Member selection)
+  const availableInventoryCategories = useMemo(() => {
+    const cats = new Set<string>();
+    cats.add('ALL');
+    rawItems.forEach(i => {
+      if (i.category) cats.add(i.category.trim());
+    });
+    return Array.from(cats);
+  }, [rawItems]);
+
+  const filteredRawInventory = useMemo(() => {
+    return rawItems.filter(item => {
+      const s = inventorySearch.toLowerCase();
+      const matchesSearch = 
+        !s ||
+        (item.name || '').toLowerCase().includes(s) ||
+        (item.nameBn || '').toLowerCase().includes(s) ||
+        (item.category || '').toLowerCase().includes(s);
+
+      const matchesCat = inventoryCategoryFilter === 'ALL' || item.category === inventoryCategoryFilter;
+      return matchesSearch && matchesCat;
+    });
+  }, [rawItems, inventorySearch, inventoryCategoryFilter]);
+
+  // Select an inventory item into current row or append new row
+  const handleSelectInventoryItem = (item: RawInventoryItem) => {
+    const itemName = item.nameBn || item.name;
+    const cat = item.category || 'Grocery';
+    const rate = item.unitCost || '';
+    const unit = item.unit || 'kg';
+
+    setItemRows(prev => {
+      // Find if first row is completely empty, use it
+      const firstEmptyIndex = prev.findIndex(r => !r.desc.trim() && !r.amount);
+      if (firstEmptyIndex !== -1) {
+        return prev.map((r, i) => {
+          if (i !== firstEmptyIndex) return r;
+          const qty = r.qty || 1;
+          const amt = typeof rate === 'number' && rate > 0 ? Number(qty) * rate : r.amount;
+          return {
+            ...r,
+            desc: itemName,
+            category: cat,
+            rawItemId: item.id,
+            unit: unit,
+            unitPrice: rate,
+            qty: qty,
+            amount: amt
+          };
+        });
+      }
+
+      // Check if already in rows, just increment qty
+      const existingIdx = prev.findIndex(r => r.rawItemId === item.id || r.desc === itemName);
+      if (existingIdx !== -1) {
+        return prev.map((r, i) => {
+          if (i !== existingIdx) return r;
+          const newQty = (parseFloat(r.qty as any) || 0) + 1;
+          const p = parseFloat(r.unitPrice as any) || 0;
+          return {
+            ...r,
+            qty: newQty,
+            amount: p > 0 ? Math.round(newQty * p) : r.amount
+          };
+        });
+      }
+
+      // Otherwise append new row
+      return [
+        ...prev,
+        {
+          id: `row-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+          desc: itemName,
+          category: cat,
+          rawItemId: item.id,
+          qty: 1,
+          unit: unit,
+          unitPrice: rate,
+          amount: typeof rate === 'number' && rate > 0 ? rate : ''
+        }
+      ];
+    });
+
+    showToast(`✓ Added "${itemName}" to voucher items!`);
+  };
+
+  // Add another manual row
   const handleAddRow = () => {
     setItemRows(prev => [
       ...prev,
@@ -306,7 +483,6 @@ export const Expenditures: React.FC = () => {
       if (r.id !== id) return r;
       const updated = { ...r, [field]: value };
 
-      // Auto calculate amount if qty & unitPrice change
       if (field === 'qty' || field === 'unitPrice') {
         const q = field === 'qty' ? parseFloat(value) : parseFloat(r.qty as any);
         const p = field === 'unitPrice' ? parseFloat(value) : parseFloat(r.unitPrice as any);
@@ -360,7 +536,6 @@ export const Expenditures: React.FC = () => {
         };
       });
 
-      // Save to localStorage
       const updatedAll = [...newRecords, ...expenses];
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedAll));
       setExpenses(updatedAll);
@@ -387,14 +562,12 @@ export const Expenditures: React.FC = () => {
         console.warn('Could not push to cloud:', err);
       }
 
-      // Dispatch global events
       window.dispatchEvent(new CustomEvent('canteen_expenses_updated', { detail: updatedAll }));
       window.dispatchEvent(new Event('canteen_state_updated'));
       window.dispatchEvent(new Event('storage'));
 
       showToast(`✅ Saved ${newRecords.length} expense item(s) totaling ৳${formTotalAmount.toLocaleString()}!`);
       
-      // Reset form
       setShowAddForm(false);
       setItemRows([
         {
@@ -411,6 +584,89 @@ export const Expenditures: React.FC = () => {
       alert(`Failed to save: ${err?.message || 'Error occurred'}`);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // Register New Bazar Advance
+  const handleSaveNewAdvance = async () => {
+    const amt = parseFloat(String(advAmount));
+    if (isNaN(amt) || amt <= 0) {
+      alert('Please enter a valid advance amount (> 0).');
+      return;
+    }
+
+    try {
+      const newAdv: BazarAdvance = {
+        id: `adv-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        date: advDate,
+        personName: advPerson,
+        amount: amt,
+        spentAmount: 0,
+        returnAmount: 0,
+        channel: advChannel,
+        purpose: advPurpose.trim() || 'Daily Bazar Advance',
+        status: 'ACTIVE'
+      };
+
+      const updatedAdvances = [newAdv, ...advances];
+      localStorage.setItem(ADVANCES_KEY, JSON.stringify(updatedAdvances));
+      setAdvances(updatedAdvances);
+
+      try {
+        await pushKeyToCloud(ADVANCES_KEY, updatedAdvances);
+      } catch {}
+
+      window.dispatchEvent(new Event('canteen_bazar_advances_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
+
+      showToast(`✅ Advance ৳${amt.toLocaleString()} issued to ${advPerson}!`);
+      setAdvAmount('');
+      setAdvPurpose('Daily Bazar Advance');
+    } catch (err: any) {
+      alert(`Failed to issue advance: ${err?.message || 'Error'}`);
+    }
+  };
+
+  // Settle / Return Bazar Advance
+  const handleConfirmSettleAdvance = async () => {
+    if (!settlingAdvance) return;
+    const spent = parseFloat(String(settleSpent)) || 0;
+    const returned = parseFloat(String(settleReturn)) || 0;
+
+    try {
+      const updatedAdvances = advances.map(a => {
+        if (a.id === settlingAdvance.id) {
+          return {
+            ...a,
+            spentAmount: spent,
+            returnAmount: returned,
+            status: 'SETTLED' as const,
+            settledDate: formatCanteenDate(new Date()),
+            notes: settleNotes.trim() || a.notes
+          };
+        }
+        return a;
+      });
+
+      localStorage.setItem(ADVANCES_KEY, JSON.stringify(updatedAdvances));
+      setAdvances(updatedAdvances);
+
+      try {
+        await pushKeyToCloud(ADVANCES_KEY, updatedAdvances);
+      } catch {}
+
+      window.dispatchEvent(new Event('canteen_bazar_advances_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
+
+      showToast(`✅ Advance settled for ${settlingAdvance.personName} (Spent: ৳${spent}, Returned: ৳${returned})`);
+      setSettlingAdvance(null);
+      setSettleSpent('');
+      setSettleReturn('');
+      setSettleNotes('');
+    } catch (err: any) {
+      alert(`Settle failed: ${err?.message || 'Error'}`);
     }
   };
 
@@ -497,7 +753,9 @@ export const Expenditures: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center space-x-3 w-full sm:w-auto">
+        {/* Top Action Buttons: Add Expense, Advance Register, and History (Sync button removed) */}
+        <div className="flex items-center space-x-2.5 w-full sm:w-auto flex-wrap gap-y-2">
+          {/* + ADD EXPENSE */}
           <button
             type="button"
             onClick={() => setShowAddForm(prev => !prev)}
@@ -511,14 +769,31 @@ export const Expenditures: React.FC = () => {
             <span>{showAddForm ? 'CLOSE FORM' : '+ ADD EXPENSE'}</span>
           </button>
 
+          {/* REGISTER ADVANCE BUTTON */}
           <button
             type="button"
-            disabled={isSyncing}
-            onClick={() => syncWithCloud(true)}
-            className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-black tracking-wider uppercase transition-colors flex items-center space-x-2 border border-slate-700 shadow-sm cursor-pointer disabled:opacity-50"
+            onClick={() => setShowAdvanceRegisterModal(true)}
+            className="px-4 py-2.5 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all flex items-center space-x-2 shadow-md shadow-amber-600/30 cursor-pointer active:scale-95 border border-amber-400/40"
+            title="Manage bazar advance issued to staff/civilians"
           >
-            <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin text-indigo-400' : ''}`} />
-            <span>SYNC</span>
+            <Clock className="w-4 h-4" />
+            <span>REGISTER ADVANCE</span>
+            {metrics.activeAdvancesCount > 0 && (
+              <span className="ml-1 px-1.5 py-0.2 rounded-full bg-white text-amber-900 font-mono text-[9px] font-black">
+                {metrics.activeAdvancesCount}
+              </span>
+            )}
+          </button>
+
+          {/* HISTORY BUTTON (Replaces Sync option, named 'History') */}
+          <button
+            type="button"
+            onClick={() => setShowHistoryModal(true)}
+            className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-black tracking-wider uppercase transition-colors flex items-center space-x-2 border border-slate-700 shadow-sm cursor-pointer active:scale-95"
+            title="View full expense records history"
+          >
+            <History className="w-4 h-4 text-indigo-400" />
+            <span>HISTORY</span>
           </button>
         </div>
       </div>
@@ -623,7 +898,7 @@ export const Expenditures: React.FC = () => {
         </div>
       </div>
 
-      {/* ADD NEW EXPENSE SIMPLE FORM */}
+      {/* ADD NEW EXPENSE FORM (WITH INVENTORY ITEM SELECTION LIKE POS SALES MEMBER SYSTEM) */}
       <AnimatePresence>
         {showAddForm && (
           <motion.div
@@ -644,7 +919,7 @@ export const Expenditures: React.FC = () => {
                       NEW EXPENSE VOUCHER ENTRY
                     </h3>
                     <p className="text-[11px] text-slate-400 font-bold">
-                      দৈনিক বাজার বা খরচের আইটেম যুক্ত করুন (সহজ ও নির্ভুল)
+                      ইনভেন্টরি আইটেম সিলেক্ট করুন অথবা সরাসরি নতুন এন্ট্রি দিন
                     </p>
                   </div>
                 </div>
@@ -747,11 +1022,129 @@ export const Expenditures: React.FC = () => {
                 </div>
               )}
 
+              {/* INVENTORY ITEM PICKER (POS SALES MEMBER SELECTION STYLE) */}
+              <div className="bg-slate-950/90 border border-slate-800 rounded-3xl p-4 sm:p-5 shadow-xl space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-black text-white flex items-center space-x-2 uppercase tracking-wider">
+                      <Boxes className="w-4 h-4 text-indigo-400" />
+                      <span>Select From Raw Inventory (ইনভেন্টরি আইটেম)</span>
+                    </h4>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      আইটেমে ক্লিক করলে স্বয়ংক্রিয়ভাবে নিচে খরচের ভাউচার তালিকায় যুক্ত হবে
+                    </p>
+                  </div>
+
+                  <div className="text-xs font-mono text-slate-400">
+                    <span>Available: </span>
+                    <strong className="text-indigo-400">{filteredRawInventory.length} items</strong>
+                  </div>
+                </div>
+
+                {/* Search & Category Filter Pills */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <input 
+                      type="text"
+                      value={inventorySearch}
+                      onChange={(e) => setInventorySearch(e.target.value)}
+                      placeholder="Search inventory items (Rice, Dal, Oil, Meat...)"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-9 py-2 text-xs font-bold text-white placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
+                    />
+                    {inventorySearch && (
+                      <button 
+                        onClick={() => setInventorySearch('')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs font-bold p-1"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex items-center space-x-1 bg-slate-900 p-1 rounded-xl border border-slate-800 overflow-x-auto scrollbar-none shrink-0">
+                    {availableInventoryCategories.slice(0, 6).map((cat) => {
+                      const isSel = inventoryCategoryFilter === cat;
+                      return (
+                        <button
+                          key={cat}
+                          type="button"
+                          onClick={() => setInventoryCategoryFilter(cat)}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer ${
+                            isSel ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          {cat}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Inventory Items Grid */}
+                <div className="max-h-[220px] overflow-y-auto pr-1">
+                  {filteredRawInventory.length === 0 ? (
+                    <div className="text-center py-6 text-slate-500 bg-slate-900/40 rounded-2xl border border-slate-800 text-xs">
+                      No matching raw inventory items found. You can enter item details manually below.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                      {filteredRawInventory.map((item) => {
+                        const isSelectedInVoucher = itemRows.some(r => r.rawItemId === item.id || r.desc === (item.nameBn || item.name));
+                        return (
+                          <div
+                            key={item.id}
+                            onClick={() => handleSelectInventoryItem(item)}
+                            className={`p-2.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-2 select-none active:scale-[0.98] ${
+                              isSelectedInVoucher
+                                ? 'bg-indigo-950/60 border-indigo-500 shadow-md ring-1 ring-indigo-500/40'
+                                : 'bg-slate-900/70 border-slate-800 hover:border-indigo-500/50 hover:bg-slate-900'
+                            }`}
+                          >
+                            <div className="flex items-center space-x-2.5 min-w-0">
+                              <div className={`w-5 h-5 rounded-lg flex items-center justify-center shrink-0 border transition-colors ${
+                                isSelectedInVoucher
+                                  ? 'bg-indigo-600 border-indigo-500 text-white' 
+                                  : 'border-slate-700 bg-slate-950 text-transparent'
+                              }`}>
+                                <Check className="w-3.5 h-3.5 stroke-[3]" />
+                              </div>
+
+                              <div className="min-w-0">
+                                <h5 className="text-xs font-black text-white truncate">
+                                  {item.nameBn || item.name}
+                                </h5>
+                                <div className="flex items-center space-x-2 text-[10px] text-slate-400">
+                                  <span className="font-mono text-emerald-400">৳{item.unitCost}/{item.unit}</span>
+                                  <span>•</span>
+                                  <span>Stock: {item.currentStock} {item.unit}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              className={`p-1 rounded-lg text-[10px] font-black uppercase transition-all shrink-0 ${
+                                isSelectedInVoucher
+                                  ? 'bg-indigo-600 text-white'
+                                  : 'bg-slate-800 text-slate-300 hover:bg-indigo-600 hover:text-white'
+                              }`}
+                            >
+                              <Plus className="w-3 h-3" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* Item Rows Table */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-black text-slate-300 uppercase tracking-wider">
-                    ITEM DETAILS (পণ্যের তালিকা)
+                    VOUCHER ITEMS LIST ({itemRows.length})
                   </span>
                   <button
                     type="button"
@@ -759,7 +1152,7 @@ export const Expenditures: React.FC = () => {
                     className="px-3 py-1 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white rounded-lg text-[11px] font-bold uppercase transition-all flex items-center space-x-1 cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>Add Another Row</span>
+                    <span>Add Custom Row</span>
                   </button>
                 </div>
 
@@ -1142,6 +1535,480 @@ export const Expenditures: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {/* HISTORY MODAL (EXPENSE RECORD HISTORY AT TOP OF PAGE) */}
+      <AnimatePresence>
+        {showHistoryModal && (
+          <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-5">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-5xl max-h-[90vh] shadow-2xl flex flex-col overflow-hidden"
+            >
+              {/* Modal Header */}
+              <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30">
+                    <History className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-white uppercase tracking-tight">
+                      EXPENCE RECORD HISTORY (খরচের ইতিহাস)
+                    </h3>
+                    <p className="text-[11px] text-slate-400 font-bold">
+                      View, search and review all historical expense vouchers
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowHistoryModal(false)}
+                  className="p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800 hover:bg-slate-700 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* History Search & Filters */}
+              <div className="p-4 border-b border-slate-800 bg-slate-900 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search in history..."
+                    value={historySearch}
+                    onChange={(e) => setHistorySearch(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2 text-xs font-bold text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div className="flex items-center space-x-1 bg-slate-950 p-1 rounded-xl border border-slate-800 shrink-0">
+                  {(['ALL', 'Cash', 'UCB', 'Due'] as const).map(ch => (
+                    <button
+                      key={ch}
+                      type="button"
+                      onClick={() => setHistoryChannelFilter(ch)}
+                      className={`px-3 py-1 rounded-lg text-xs font-black uppercase transition-all ${
+                        historyChannelFilter === ch ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {ch}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex items-center space-x-1 bg-slate-950 p-1 rounded-xl border border-slate-800 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setHistoryDateFilter('ALL')}
+                    className={`px-3 py-1 rounded-lg text-xs font-black uppercase transition-all ${
+                      historyDateFilter === 'ALL' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHistoryDateFilter('THIS_MONTH')}
+                    className={`px-3 py-1 rounded-lg text-xs font-black uppercase transition-all ${
+                      historyDateFilter === 'THIS_MONTH' ? 'bg-slate-800 text-emerald-400' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    This Month
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHistoryDateFilter('TODAY')}
+                    className={`px-3 py-1 rounded-lg text-xs font-black uppercase transition-all ${
+                      historyDateFilter === 'TODAY' ? 'bg-slate-800 text-cyan-400' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Today
+                  </button>
+                </div>
+              </div>
+
+              {/* History Table */}
+              <div className="flex-1 overflow-y-auto p-4">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-800 bg-slate-950/80 text-[10px] font-black text-slate-400 uppercase tracking-wider sticky top-0">
+                      <th className="py-2.5 px-3 w-10 text-center">#</th>
+                      <th className="py-2.5 px-3">Date</th>
+                      <th className="py-2.5 px-3">Item Description</th>
+                      <th className="py-2.5 px-3">Category</th>
+                      <th className="py-2.5 px-3 text-center">Qty</th>
+                      <th className="py-2.5 px-3 text-center">Rate</th>
+                      <th className="py-2.5 px-3 text-right">Amount (৳)</th>
+                      <th className="py-2.5 px-3 text-center">Channel</th>
+                      <th className="py-2.5 px-3 text-center">Detailer</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800 text-xs font-bold">
+                    {filteredHistory.length === 0 ? (
+                      <tr>
+                        <td colSpan={9} className="py-12 text-center text-slate-500">
+                          No history records found.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredHistory.map((item, idx) => (
+                        <tr key={item.id || idx} className="hover:bg-slate-800/40">
+                          <td className="py-2.5 px-3 text-center text-slate-500 font-mono text-[11px]">
+                            {idx + 1}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-300 font-mono text-[11px] whitespace-nowrap">
+                            {item.date}
+                          </td>
+                          <td className="py-2.5 px-3 text-white font-black">
+                            {item.desc}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-400 text-[11px]">
+                            {item.category || 'Grocery'}
+                          </td>
+                          <td className="py-2.5 px-3 text-center text-slate-300 font-mono">
+                            {item.qty ? `${item.qty} ${item.unit || 'kg'}` : '-'}
+                          </td>
+                          <td className="py-2.5 px-3 text-center text-amber-300 font-mono">
+                            {item.unitPrice ? `৳${item.unitPrice}` : '-'}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono font-black text-emerald-400">
+                            ৳{Number(item.amount).toLocaleString()}
+                          </td>
+                          <td className="py-2.5 px-3 text-center text-[10px]">
+                            <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                              {item.paymentMethod || 'Cash'} {item.dueShop ? `(${item.dueShop})` : ''}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-center text-slate-300 text-[11px]">
+                            {item.detailedPerson || 'Civ Tanvir'}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* History Footer */}
+              <div className="p-4 border-t border-slate-800 bg-slate-950 flex items-center justify-between">
+                <span className="text-xs text-slate-400 font-bold">
+                  Total Items: {filteredHistory.length}
+                </span>
+                <span className="text-sm font-mono font-black text-emerald-400">
+                  Total Sum: ৳{filteredHistory.reduce((s, i) => s + (Number(i.amount) || 0), 0).toLocaleString()}
+                </span>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* REGISTER ADVANCE MODAL (CIVILIAN / STAFF BAZAR ADVANCE REGISTER) */}
+      <AnimatePresence>
+        {showAdvanceRegisterModal && (
+          <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-5">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-4xl max-h-[90vh] shadow-2xl flex flex-col overflow-hidden"
+            >
+              {/* Modal Header */}
+              <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30">
+                    <Clock className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-white uppercase tracking-tight">
+                      REGISTER ADVANCE (বাজার অগ্রিম রেজিস্টার)
+                    </h3>
+                    <p className="text-[11px] text-slate-400 font-bold">
+                      Civilian / Staff বাজার খরচের অগ্রিম টাকা প্রদান ও সমন্বয়
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowAdvanceRegisterModal(false)}
+                  className="p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800 hover:bg-slate-700 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Issue New Advance Form */}
+              <div className="p-5 border-b border-slate-800 bg-slate-950/50 space-y-3">
+                <h4 className="text-xs font-black text-amber-400 uppercase tracking-wider flex items-center space-x-1.5">
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Issue New Bazar Advance (নতুন অগ্রিম প্রদান)</span>
+                </h4>
+
+                <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Date</label>
+                    <input
+                      type="text"
+                      value={advDate}
+                      onChange={(e) => setAdvDate(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Person</label>
+                    <select
+                      value={advPerson}
+                      onChange={(e) => setAdvPerson(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-emerald-300"
+                    >
+                      {civilians.map(c => (
+                        <option key={c.id} value={c.name}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Amount (৳)</label>
+                    <input
+                      type="number"
+                      placeholder="e.g. 5000"
+                      value={advAmount}
+                      onChange={(e) => setAdvAmount(e.target.value === '' ? '' : parseFloat(e.target.value))}
+                      className="w-full bg-slate-900 border border-amber-500/50 rounded-xl px-3 py-2 text-xs font-black text-amber-300 font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Channel</label>
+                    <select
+                      value={advChannel}
+                      onChange={(e) => setAdvChannel(e.target.value as any)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white"
+                    >
+                      <option value="CASH">CASH</option>
+                      <option value="UCB">UCB</option>
+                    </select>
+                  </div>
+
+                  <div className="flex items-end">
+                    <button
+                      type="button"
+                      onClick={handleSaveNewAdvance}
+                      className="w-full py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-black uppercase transition-all shadow-md shadow-amber-600/30 cursor-pointer active:scale-95"
+                    >
+                      + Issue Advance
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Active & Settled Advances List */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-black text-white uppercase tracking-wider">
+                    All Bazar Advances ({advances.length})
+                  </h4>
+                  <span className="text-xs font-mono font-bold text-amber-400">
+                    Active Unsettled: ৳{metrics.totalActiveAdvance.toLocaleString()}
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-800 bg-slate-950/70 text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                        <th className="py-2.5 px-3">Date</th>
+                        <th className="py-2.5 px-3">Person</th>
+                        <th className="py-2.5 px-3">Purpose</th>
+                        <th className="py-2.5 px-3 text-center">Channel</th>
+                        <th className="py-2.5 px-3 text-right">Advance (৳)</th>
+                        <th className="py-2.5 px-3 text-right">Spent (৳)</th>
+                        <th className="py-2.5 px-3 text-right">Returned (৳)</th>
+                        <th className="py-2.5 px-3 text-center">Status</th>
+                        <th className="py-2.5 px-3 text-center">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800 text-xs font-bold">
+                      {advances.length === 0 ? (
+                        <tr>
+                          <td colSpan={9} className="py-10 text-center text-slate-500">
+                            No bazar advance recorded yet.
+                          </td>
+                        </tr>
+                      ) : (
+                        advances.map((adv) => {
+                          const isActive = adv.status === 'ACTIVE';
+                          return (
+                            <tr key={adv.id} className="hover:bg-slate-800/40">
+                              <td className="py-2.5 px-3 text-slate-300 font-mono text-[11px] whitespace-nowrap">
+                                {adv.date}
+                              </td>
+                              <td className="py-2.5 px-3 text-white font-black">
+                                {adv.personName}
+                              </td>
+                              <td className="py-2.5 px-3 text-slate-400 text-[11px]">
+                                {adv.purpose}
+                              </td>
+                              <td className="py-2.5 px-3 text-center font-mono text-[11px]">
+                                <span className={`px-2 py-0.5 rounded text-[10px] ${adv.channel === 'CASH' ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20' : 'bg-cyan-500/10 text-cyan-300 border border-cyan-500/20'}`}>
+                                  {adv.channel}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-mono font-black text-amber-400">
+                                ৳{Number(adv.amount).toLocaleString()}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-mono text-slate-300">
+                                {adv.spentAmount ? `৳${adv.spentAmount.toLocaleString()}` : '-'}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-mono text-emerald-400">
+                                {adv.returnAmount ? `৳${adv.returnAmount.toLocaleString()}` : '-'}
+                              </td>
+                              <td className="py-2.5 px-3 text-center">
+                                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                                  isActive
+                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                    : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                }`}>
+                                  {adv.status}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3 text-center">
+                                {isActive ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSettlingAdvance(adv);
+                                      setSettleSpent(adv.amount);
+                                      setSettleReturn(0);
+                                    }}
+                                    className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer shadow-sm"
+                                  >
+                                    Settle / Return
+                                  </button>
+                                ) : (
+                                  <span className="text-[10px] text-slate-500 font-mono">
+                                    {adv.settledDate || 'Settled'}
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* SETTLE ADVANCE MODAL */}
+      <AnimatePresence>
+        {settlingAdvance && (
+          <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-[60] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md shadow-2xl p-6 space-y-4"
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                <div className="flex items-center space-x-2">
+                  <CheckSquare className="w-5 h-5 text-indigo-400" />
+                  <h3 className="text-base font-black text-white uppercase tracking-tight">
+                    SETTLE BAZAR ADVANCE
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSettlingAdvance(null)}
+                  className="p-1.5 text-slate-400 hover:text-white rounded-lg bg-slate-800"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800 text-xs space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Person:</span>
+                  <span className="font-bold text-white">{settlingAdvance.personName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Issued Advance:</span>
+                  <span className="font-mono font-black text-amber-400">৳{settlingAdvance.amount.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Channel:</span>
+                  <span className="font-bold text-white">{settlingAdvance.channel}</span>
+                </div>
+              </div>
+
+              <div className="space-y-3 text-xs font-bold">
+                <div>
+                  <label className="text-slate-400 block mb-1">Spent In Bazar (প্রকৃত বাজার খরচ ৳)</label>
+                  <input
+                    type="number"
+                    value={settleSpent}
+                    onChange={(e) => {
+                      const sp = parseFloat(e.target.value) || 0;
+                      setSettleSpent(sp);
+                      const ret = Math.max(0, settlingAdvance.amount - sp);
+                      setSettleReturn(ret);
+                    }}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-slate-400 block mb-1">Returned Cash/Balance (ফেরত টাকা ৳)</label>
+                  <input
+                    type="number"
+                    value={settleReturn}
+                    onChange={(e) => setSettleReturn(parseFloat(e.target.value) || 0)}
+                    className="w-full bg-slate-950 border border-emerald-500/40 rounded-xl px-3 py-2 text-emerald-400 font-mono font-black"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-slate-400 block mb-1">Settlement Note (মন্তব্য)</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Broiler and vegetables purchased, cash returned"
+                    value={settleNotes}
+                    onChange={(e) => setSettleNotes(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center space-x-3">
+                <button
+                  type="button"
+                  onClick={() => setSettlingAdvance(null)}
+                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-black uppercase transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmSettleAdvance}
+                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black uppercase transition-colors"
+                >
+                  Confirm Settle
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* QUICK EDIT MODAL */}
       <AnimatePresence>
