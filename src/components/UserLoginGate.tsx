@@ -4,6 +4,7 @@ import { EmployeeDashboard } from '../features/canteen/pages/EmployeeDashboard';
 import { supabase } from '../supabase';
 import { fetchDirectImageUrl, getCanteenConfig } from '../features/canteen/utils/canteenSettings';
 import { syncCanteenMembersFromCloud, pullAllCanteenDataFromCloud } from '../features/canteen/utils/canteenCloudSync';
+import { getCanteenMembersCache } from '../features/canteen/utils/canteenMenuData';
 
 import { Airman } from '../types';
 import { Logo155UASU } from './Logo155UASU';
@@ -266,13 +267,59 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
     if (activeTab === 'Canteen') {
       const cfg = getCanteenConfig();
       const cleanLower = cleanInput.toLowerCase();
-      const currentMgrBd = (cfg.managerBdNo || '').replace(/^BD\/?/i, '').trim().toLowerCase();
-      const isMasterManager = cleanLower === '48456';
-      const isCurrentManager = Boolean(currentMgrBd && cleanLower === currentMgrBd);
+      const cleanDigits = cleanInput.replace(/\D/g, '').toLowerCase();
+      const currentMgrBd = (cfg.managerBdNo || '').replace(/^BD\/?/i, '').replace(/\D/g, '').trim().toLowerCase();
+      const isMasterManager = cleanLower === '48456' || cleanDigits === '48456';
+      const isCurrentManager = Boolean(currentMgrBd && (cleanLower === currentMgrBd || cleanDigits === currentMgrBd));
       const isManager = isMasterManager; // ONLY Master ID 48456 gets direct manager mode
 
-      let airman = airmen.find(a => a.bdNo.toLowerCase() === cleanLower);
+      // 1. Search Canteen Members Cache first (Primary source of truth for Canteen Member DB)
+      const canteenList = getCanteenMembersCache();
+      const matchedCanteenMember = canteenList.find((m: any) => {
+        const mBd = String(m['BD No'] || m.bdNo || '').replace(/\D/g, '').toLowerCase();
+        const mAid = String(m.airman_id || '').replace(/^airman-/i, '').toLowerCase();
+        const mBdRaw = String(m['BD No'] || m.bdNo || '').replace(/^BD\/?/i, '').trim().toLowerCase();
+        return (cleanDigits && mBd === cleanDigits) || mBdRaw === cleanLower || mAid === cleanLower;
+      });
 
+      // 2. Search local single-member cache
+      let localMemberData: any = null;
+      try {
+        const raw = localStorage.getItem(`canteen_member_${cleanDigits || cleanLower}`);
+        if (raw) localMemberData = JSON.parse(raw);
+      } catch {}
+
+      // 3. Search nominal roll airmen (with prefix stripped)
+      let matchedAirman = airmen.find(a => {
+        const aBd = (a.bdNo || '').replace(/^BD\/?/i, '').trim().toLowerCase();
+        const aBdDigits = (a.bdNo || '').replace(/\D/g, '').toLowerCase();
+        const aId = (a.id || '').replace(/^airman-/i, '').trim().toLowerCase();
+        return (cleanDigits && aBdDigits === cleanDigits) || aBd === cleanLower || aId === cleanLower;
+      });
+
+      // 4. Real-time Cloud Fallback: Query Supabase Canteen_Member directly if not found locally
+      let cloudMember: any = null;
+      if (!matchedCanteenMember && !localMemberData && !matchedAirman && !isMasterManager && !isCurrentManager) {
+        setIsLoading(true);
+        try {
+          const { data } = await supabase
+            .from('Canteen_Member')
+            .select('*')
+            .or(`"BD No".eq.${cleanInput},"BD No".eq.BD/${cleanInput},airman_id.eq.${cleanInput},airman_id.eq.airman-${cleanInput}`)
+            .limit(1);
+          if (data && data.length > 0) {
+            cloudMember = data[0];
+          }
+        } catch (err) {
+          console.warn('Cloud Canteen_Member lookup error:', err);
+        } finally {
+          setIsLoading(false);
+        }
+      }
+
+      const memberRecord = matchedCanteenMember || cloudMember || localMemberData;
+
+      let airman: any = null;
       if (isMasterManager) {
         airman = {
           id: 'airman-48456',
@@ -288,7 +335,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
           active: true,
           photoUrl: ''
         };
-      } else if (isCurrentManager && !airman) {
+      } else if (isCurrentManager && !matchedAirman && !memberRecord) {
         airman = {
           id: `airman-${cleanInput}`,
           serNo: 1,
@@ -303,10 +350,34 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
           active: true,
           photoUrl: cfg.adminImage || ''
         };
+      } else if (matchedAirman) {
+        airman = { ...matchedAirman };
+      } else if (memberRecord) {
+        const mRank = memberRecord.Rank || memberRecord.rank || 'LAC';
+        const mSurname = memberRecord.Surname || memberRecord.surname || memberRecord.Name || 'Member';
+        const mDp = memberRecord.DP || memberRecord.dp || '';
+        const mContact = memberRecord.Contact || memberRecord['Mobile No'] || memberRecord.mobileNo || '';
+        const mFlight = memberRecord.Flight || memberRecord.flight || 'Admin';
+        const mTrade = memberRecord.Trade || memberRecord.trade || 'Canteen Member';
+
+        airman = {
+          id: memberRecord.airman_id || `airman-${cleanInput}`,
+          serNo: 99,
+          code: `${mRank}-${mSurname.slice(0, 3).toUpperCase()}`,
+          bdNo: cleanInput,
+          rank: mRank as any,
+          name: mSurname,
+          fullName: `${mRank} ${mSurname}`.trim(),
+          flightName: mFlight as any,
+          trade: mTrade,
+          mobileNo: mContact,
+          active: memberRecord.active !== false,
+          photoUrl: mDp
+        };
       }
 
       if (!airman) {
-        setErrorMsg('Member ID not found.');
+        setErrorMsg('Member ID not found. অনুগ্রহ করে সঠিক Member ID / BD নম্বর দিন।');
         return;
       }
 
@@ -315,14 +386,16 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
       localStorage.setItem('baf_canteen_recent_logins', JSON.stringify(updatedRecents));
       saveLastUsedIdForPortal('Canteen', cleanInput);
 
-      let canteenData: any = null;
+      let canteenData: any = memberRecord || null;
       if (!isMasterManager) {
-        try {
-          const raw = localStorage.getItem(`canteen_member_${cleanInput.toLowerCase()}`);
-          if (raw) canteenData = JSON.parse(raw);
-        } catch {}
+        if (!canteenData) {
+          try {
+            const raw = localStorage.getItem(`canteen_member_${cleanInput.toLowerCase()}`);
+            if (raw) canteenData = JSON.parse(raw);
+          } catch {}
+        }
 
-        // Non-blocking background sync with Supabase so login is 100% instantaneous
+        // Non-blocking background sync with Supabase to cache latest DPs & dues
         (async () => {
           try {
             const { data } = await supabase
@@ -353,10 +426,11 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
 
       const enrichedAirman: any = {
         ...airman,
-        photoUrl: isMasterManager ? '' : (canteenData?.dp || (isCurrentManager ? cfg.adminImage : '') || airman.photoUrl || ''),
-        due: isMasterManager ? 0 : (canteenData?.due !== undefined ? canteenData.due : 0),
-        rank: isMasterManager ? 'LAC' : (canteenData?.rank || airman.rank),
-        surname: isMasterManager ? 'Rizwan Islam' : (canteenData?.surname || airman.name),
+        bdNo: cleanInput,
+        photoUrl: isMasterManager ? '' : (memberRecord?.DP || memberRecord?.dp || canteenData?.dp || (isCurrentManager ? cfg.adminImage : '') || airman.photoUrl || ''),
+        due: isMasterManager ? 0 : (memberRecord?.Due !== undefined ? Number(memberRecord.Due) : (memberRecord?.due !== undefined ? Number(memberRecord.due) : (canteenData?.due !== undefined ? canteenData.due : 0))),
+        rank: isMasterManager ? 'LAC' : (memberRecord?.Rank || memberRecord?.rank || canteenData?.rank || airman.rank),
+        surname: isMasterManager ? 'Rizwan Islam' : (memberRecord?.Surname || memberRecord?.surname || canteenData?.surname || airman.name),
         role: isManager ? 'manager' : 'employee'
       };
 
@@ -624,7 +698,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                              saveLastUsedIdForPortal('Canteen', cleanInput);
                            } else if (activeTab === 'Office') {
                              saveLastUsedIdForPortal('Office', cleanInput);
-                             const found = airmen.find(a => a.bdNo === cleanInput);
+                             const found = airmen.find(a => (a.bdNo || '').replace(/^BD\/?/i, '').trim().toLowerCase() === cleanInput.toLowerCase());
                              setTargetAirman(found || null);
                            }
                         }

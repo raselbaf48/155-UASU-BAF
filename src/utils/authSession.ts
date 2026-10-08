@@ -445,7 +445,46 @@ export const validateUserLogin = async (
 
   // 1. Instant Local Verification (Zero latency check)
   const detailedList = getDetailedUsers(nominalAirmen);
-  const matchedDetail = detailedList.find((u) => u.bdNo.toLowerCase() === cleanInput);
+  let matchedDetail = detailedList.find((u) => u.bdNo.toLowerCase() === cleanInput);
+
+  // Check Canteen Member DB cache if not found in detailed users
+  if (!matchedDetail) {
+    try {
+      const rawCanteen = localStorage.getItem('canteen_members_cache');
+      if (rawCanteen) {
+        const cList = JSON.parse(rawCanteen);
+        if (Array.isArray(cList)) {
+          const cm = cList.find((m: any) => {
+            const mBd = String(m['BD No'] || m.bdNo || '').replace(/\D/g, '').toLowerCase();
+            const mAid = String(m.airman_id || '').replace(/^airman-/i, '').toLowerCase();
+            return mBd === cleanInput || mAid === cleanInput;
+          });
+          if (cm) {
+            const cleanBdNo = String(cm['BD No'] || cm.bdNo || cleanInput).replace(/\D/g, '');
+            matchedDetail = {
+              id: `user-login-${cleanBdNo}`,
+              airmanId: cm.airman_id || `airman-${cleanBdNo}`,
+              bdNo: cleanBdNo,
+              rank: cm.Rank || 'LAC',
+              name: cm.Surname || 'Member',
+              mobileNo: cm.Contact || '',
+              flightName: cm.Flight || 'Admin',
+              trade: cm.Trade || 'General',
+              role: 'USER',
+              password: cleanBdNo,
+              status: 'ACTIVE',
+              detailOrder: `DO-155/MEMBER/${cleanBdNo}`,
+              detailedAt: new Date().toISOString(),
+              detailedBy: 'Canteen Member DB Sync',
+              remarks: 'Auto-synced from Canteen Member DB',
+            };
+            detailedList.push(matchedDetail);
+            saveDetailedUsers(detailedList);
+          }
+        }
+      }
+    } catch {}
+  }
 
   if (matchedDetail) {
     const expectedPassword = matchedDetail.password || matchedDetail.bdNo;
@@ -577,6 +616,51 @@ export const validateUserLogin = async (
         }
         
         return { success: true, airman: nominalMatch, detailedUser: mappedUser, message: `Access granted for ${supaUser['Rank']} ${supaUser['Name']}` };
+      } else {
+        // Fallback: check Canteen_Member table in Supabase
+        const { data: cMem } = await supabase
+          .from('Canteen_Member')
+          .select('*')
+          .or(`"BD No".eq.${cleanInput},"BD No".eq.BD/${cleanInput},airman_id.eq.${cleanInput},airman_id.eq.airman-${cleanInput}`)
+          .limit(1);
+
+        if (cMem && cMem.length > 0) {
+          const cm = cMem[0];
+          const cleanBdNo = String(cm['BD No'] || cleanInput).replace(/\D/g, '');
+          const expectedPassword = cleanBdNo;
+          if (passwordInput.trim() === expectedPassword) {
+            const mappedUser: DetailedUserLogin = {
+              id: `user-login-${cleanBdNo}`,
+              airmanId: cm.airman_id || `airman-${cleanBdNo}`,
+              bdNo: cleanBdNo,
+              rank: cm.Rank || 'LAC',
+              name: cm.Surname || 'Member',
+              flightName: cm.Flight || 'Admin',
+              trade: cm.Trade || 'General',
+              role: 'USER',
+              password: cleanBdNo,
+              status: 'ACTIVE',
+              detailOrder: `DO-155/MEMBER/${cleanBdNo}`,
+              detailedAt: new Date().toISOString(),
+              detailedBy: 'Canteen Member DB'
+            };
+            const nominalMatch: Airman = {
+              id: cm.airman_id || `airman-${cleanBdNo}`,
+              serNo: 99,
+              code: `${cm.Rank || 'LAC'}-${(cm.Surname || 'MEM').slice(0, 3).toUpperCase()}`,
+              bdNo: `BD/${cleanBdNo}`,
+              rank: (cm.Rank as any) || 'LAC',
+              name: cm.Surname || 'Member',
+              trade: cm.Trade || 'General',
+              addressBlock: '155 UASU',
+              mobileNo: cm.Contact || '',
+              flightName: (cm.Flight as any) || 'Admin',
+              remarks: '',
+              active: true,
+            };
+            return { success: true, airman: nominalMatch, detailedUser: mappedUser, message: `Access granted for ${cm.Rank} ${cm.Surname}` };
+          }
+        }
       }
     }
   } catch(e) {

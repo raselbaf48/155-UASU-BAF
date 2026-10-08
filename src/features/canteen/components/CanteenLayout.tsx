@@ -30,9 +30,10 @@ import { CanteenReports } from '../pages/CanteenReports';
 import { CanteenSettings } from '../pages/CanteenSettings';
 import { CanteenFund } from '../pages/CanteenFund';
 import { DueRegister } from '../pages/DueRegister';
+import { RawDistributionPage } from '../pages/RawDistributionPage';
 import { AirmanProfileModal } from '../../../components/AirmanProfileModal';
 
-import { Wallet, LayoutDashboard, Coffee, Search, List, CreditCard, ArrowLeft, Utensils, Wifi, HelpCircle, LogIn, Grid, Package as Pkg, ShoppingCart, Users, Banknote, BarChart2, Settings as SettingsIcon, PieChart, Package, UserCircle, X, Menu, User, Eye, EyeOff, Lock, Phone, UtensilsCrossed, Boxes, ClipboardList, Cloud, RefreshCw, Receipt, KeyRound } from 'lucide-react';
+import { Wallet, LayoutDashboard, Coffee, Search, List, CreditCard, ArrowLeft, Utensils, Wifi, HelpCircle, LogIn, Grid, Package as Pkg, ShoppingCart, Users, Banknote, BarChart2, Settings as SettingsIcon, PieChart, Package, UserCircle, X, Menu, User, Eye, EyeOff, Lock, Phone, UtensilsCrossed, Boxes, ClipboardList, Cloud, RefreshCw, Receipt, KeyRound, ChefHat } from 'lucide-react';
 
 interface CanteenLayoutProps {
   initialMember?: { name: string, bdNo: string, role?: 'employee'|'manager', photoUrl?: string, due?: number };
@@ -578,7 +579,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
     { id: 'expenditures', name: 'Expense Register', icon: Banknote },
     { id: 'reports', name: 'Reports', icon: PieChart },
     { id: 'fund', name: 'Capital', icon: Wallet },
-    { id: 'settings', name: 'Settings', icon: SettingsIcon },
+    { id: 'raw_distribution', name: i18n.language === 'bn' ? 'কাঁচামাল বণ্টন (২০ জন)' : 'Raw Distribute (20 Pax)', icon: ChefHat },
   ] : [
     { id: 'dashboard', name: 'Home', icon: Grid },
     { id: 'personal_portal', name: 'Personal Portal', icon: UserCircle },
@@ -597,6 +598,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
       case 'expenditures': return <Expenditures />;
       case 'reports': return <CanteenReports />;
       case 'fund': return <CanteenFund />;
+      case 'raw_distribution': return <RawDistributionPage />;
       case 'settings': return <CanteenSettings onClose={() => setActiveTab('manager_dashboard')} />;
       default: return null;
     }
@@ -604,7 +606,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
 
   const renderContent = () => {
     // If not a manager, prevent access to any manager tabs
-    const managerTabs = ['manager_dashboard', 'pos_sales', 'member_db', 'due_register', 'expenditures', 'reports', 'fund', 'settings'];
+    const managerTabs = ['manager_dashboard', 'pos_sales', 'member_db', 'due_register', 'expenditures', 'reports', 'fund', 'raw_distribution', 'settings'];
     if (currentUser.role !== 'manager' && managerTabs.includes(activeTab)) {
       return (
         <PersonalPortal 
@@ -827,6 +829,21 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
                 </p>
              </div>
           </div>
+
+          {/* Settings option positioned below Manager Mode */}
+          {currentUser.role === 'manager' && (
+            <button
+              onClick={() => setActiveTab('settings')}
+              className={`w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl transition-all font-bold text-xs uppercase tracking-widest cursor-pointer border ${
+                activeTab === 'settings'
+                  ? 'bg-indigo-600 text-white border-indigo-500 shadow-lg shadow-indigo-600/30'
+                  : 'text-slate-300 hover:text-white bg-slate-900 hover:bg-slate-800 border-slate-800 hover:border-slate-700'
+              }`}
+            >
+              <SettingsIcon className="w-4 h-4 text-indigo-400" />
+              <span>SETTINGS</span>
+            </button>
+          )}
         </div>
       </div>
       )}
@@ -944,6 +961,25 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
                       </p>
                    </div>
                 </div>
+
+                {/* Settings option positioned below Manager Mode */}
+                {currentUser.role === 'manager' && (
+                  <button
+                    onClick={() => {
+                      setActiveTab('settings');
+                      setMobileMenuOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl transition-all font-bold text-xs uppercase tracking-widest cursor-pointer border ${
+                      activeTab === 'settings'
+                        ? 'bg-indigo-600 text-white border-indigo-500 shadow-lg shadow-indigo-600/30'
+                        : 'text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-750 border-slate-700 hover:border-slate-600'
+                    }`}
+                  >
+                    <SettingsIcon className="w-4 h-4 text-indigo-400" />
+                    <span>SETTINGS</span>
+                  </button>
+                )}
+
                 {currentUser.role === 'manager' ? (
                   <button
                     onClick={() => {

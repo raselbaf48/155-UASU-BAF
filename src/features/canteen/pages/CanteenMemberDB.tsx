@@ -32,6 +32,8 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { supabase } from '../../../supabase';
+import { getDetailedUsers, saveDetailedUsers } from '../../../utils/authSession';
+import { localDb } from '../../../services/localDatabase';
 import { resolveImageUrl, fetchDirectImageUrl, getCanteenConfig, saveCanteenConfig, CanteenConfig } from '../utils/canteenSettings';
 import { processGalleryImage } from '../utils/imageUpload';
 import { SaveButton } from '../components/SaveButton';
@@ -817,12 +819,85 @@ export const CanteenMemberDB: React.FC = () => {
         bdNo: cleanBd
       }));
 
-      // If BD changed, remove obsolete local storage keys of the old BD No
+      // If BD changed, remove obsolete local storage keys of the old BD No & sync login records
       if (isBdChanged && originalBdClean) {
         localStorage.removeItem(`canteen_member_${originalBdClean}`);
         localStorage.removeItem(`member_bangla_name_${originalBdClean}`);
         localStorage.removeItem(`member_bangla_rank_${originalBdClean}`);
         localStorage.removeItem(`member_seniority_${originalBdClean}`);
+
+        // Update recent login lists with new BD No
+        try {
+          const recentsRaw = localStorage.getItem('baf_canteen_recent_logins');
+          if (recentsRaw) {
+            const recents: string[] = JSON.parse(recentsRaw);
+            const updatedRecents = recents.map(r => (r.toLowerCase() === originalBdClean.toLowerCase() ? cleanBd : r));
+            localStorage.setItem('baf_canteen_recent_logins', JSON.stringify(updatedRecents));
+          }
+          const lastUsedCanteen = localStorage.getItem('baf_last_used_canteen_id');
+          if (lastUsedCanteen && lastUsedCanteen.toLowerCase() === originalBdClean.toLowerCase()) {
+            localStorage.setItem('baf_last_used_canteen_id', cleanBd);
+          }
+          const officeRecentsRaw = localStorage.getItem('baf_recent_logins');
+          if (officeRecentsRaw) {
+            const oRecents: string[] = JSON.parse(officeRecentsRaw);
+            const updatedORecents = oRecents.map(r => (r.toLowerCase() === originalBdClean.toLowerCase() ? cleanBd : r));
+            localStorage.setItem('baf_recent_logins', JSON.stringify(updatedORecents));
+          }
+        } catch {}
+
+        // Sync detailed user login accounts
+        try {
+          const detailed = getDetailedUsers();
+          const uIdx = detailed.findIndex(u => u.bdNo.toLowerCase() === originalBdClean.toLowerCase() || u.airmanId === originalAirmanId);
+          if (uIdx >= 0) {
+            detailed[uIdx].bdNo = cleanBd;
+            detailed[uIdx].id = `user-login-${cleanBd}`;
+            detailed[uIdx].airmanId = targetAirmanId;
+            detailed[uIdx].name = updatedLocalMember.Surname;
+            detailed[uIdx].rank = updatedLocalMember.Rank;
+            if (detailed[uIdx].password === originalBdClean) {
+              detailed[uIdx].password = cleanBd;
+            }
+            saveDetailedUsers(detailed);
+          } else {
+            detailed.push({
+              id: `user-login-${cleanBd}`,
+              airmanId: targetAirmanId,
+              bdNo: cleanBd,
+              rank: updatedLocalMember.Rank,
+              name: updatedLocalMember.Surname,
+              flightName: updatedLocalMember.Flight || 'Admin',
+              trade: updatedLocalMember.Trade || 'General',
+              role: 'USER',
+              password: cleanBd,
+              status: 'ACTIVE',
+              detailOrder: `DO-155/MEMBER/${cleanBd}`,
+              detailedAt: new Date().toISOString(),
+              detailedBy: 'Member DB Update',
+              remarks: 'Updated BD No from Member DB'
+            });
+            saveDetailedUsers(detailed);
+          }
+        } catch (e) {
+          console.warn('Note syncing detailed users on BD change:', e);
+        }
+
+        // Sync localDb airmen if present
+        try {
+          const airmen = localDb.getAirmen();
+          const target = airmen.find(a => (a.bdNo || '').replace(/\D/g, '') === originalBdClean || a.id === originalAirmanId);
+          if (target) {
+            localDb.updateAirman(target.id, {
+              bdNo: `BD/${cleanBd}`,
+              name: updatedLocalMember.Surname || target.name,
+              rank: (updatedLocalMember.Rank as any) || target.rank,
+              photoUrl: updatedLocalMember.DP || target.photoUrl
+            });
+          }
+        } catch (e) {
+          console.warn('Note updating localDb airman on BD change:', e);
+        }
       }
 
       // Queue push to cloud app_settings cache
@@ -879,7 +954,17 @@ export const CanteenMemberDB: React.FC = () => {
                 await supabase.from('Canteen_Member').delete().eq('airman_id', `airman-${originalBdClean}`);
                 await supabase.from('Canteen').delete().eq('BD No', originalBdClean);
                 await supabase.from('Canteen').delete().eq('airman_id', `airman-${originalBdClean}`);
+                await supabase.from('user_profiles').delete().eq('User ID', originalBdClean);
               }
+              await supabase.from('user_profiles').upsert([{
+                'User ID': cleanBd,
+                airman_id: targetAirmanId,
+                Rank: updatedLocalMember.Rank,
+                Name: updatedLocalMember.Surname,
+                Role: 'USER',
+                'User Login PIN': cleanBd,
+                Status: 'ACTIVE'
+              }]);
             } catch (delErr) {
               console.warn('Note deleting old member row on BD change:', delErr);
             }

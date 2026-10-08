@@ -2393,6 +2393,16 @@ export const saveRecipeForMenuItem = (
   }
 };
 
+export const saveMenuRecipes = (recipes: MenuRecipeMap): void => {
+  try {
+    localStorage.setItem(RECIPES_STORAGE_KEY, JSON.stringify(recipes));
+    window.dispatchEvent(new Event('canteen_menu_recipes_updated'));
+    window.dispatchEvent(new Event('storage'));
+  } catch (e) {
+    console.warn('Failed to save menu recipes:', e);
+  }
+};
+
 export interface RawStockDeductionResult {
   success: boolean;
   deducted: Array<{
