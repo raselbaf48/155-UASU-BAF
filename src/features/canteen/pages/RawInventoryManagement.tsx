@@ -2303,8 +2303,17 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
         <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
           <div className="px-5 py-2.5 bg-slate-950/40 border-b border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
             <span className="flex items-center gap-1.5">
-              <Edit2 className="w-3 h-3 text-indigo-400" />
-              <span className="font-medium text-slate-300">Click any row to view or edit details</span>
+              {!readOnly ? (
+                <>
+                  <Edit2 className="w-3 h-3 text-indigo-400" />
+                  <span className="font-medium text-slate-300">Click any row to view or edit details</span>
+                </>
+              ) : (
+                <>
+                  <Boxes className="w-3 h-3 text-indigo-400" />
+                  <span className="font-medium text-slate-300">Raw Inventory & Materials (View Only)</span>
+                </>
+              )}
             </span>
             <span className="text-[10px] text-slate-500 font-mono">Total: {filteredItems.length} items</span>
           </div>
@@ -2584,7 +2593,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
       )}
 
       {/* MODAL: Add / Edit Raw Item */}
-      {showAddModal && (
+      {showAddModal && !readOnly && (
         <div className="fixed inset-0 z-[250] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 w-full max-w-xl shadow-2xl animate-in zoom-in-95 max-h-[90vh] flex flex-col">
             <div className="flex justify-between items-center pb-4 border-b border-slate-800 shrink-0">
@@ -3347,7 +3356,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
       )}
 
       {/* MODAL: Restock Item */}
-      {showRestockModal && (() => {
+      {showRestockModal && !readOnly && (() => {
         const currentItem = items.find(i => i.id === selectedItemId) || items[0];
         const mainUnit = currentItem?.unit || 'pcs';
         const subInfo = getRawItemSubUnitInfo(currentItem);
@@ -3528,7 +3537,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
       })()}
 
       {/* MODAL: Issue / Kitchen Usage */}
-      {showIssueModal && (() => {
+      {showIssueModal && !readOnly && (() => {
         const currentItem = items.find(i => i.id === selectedItemId) || items[0];
         const mainUnit = currentItem?.unit || 'pcs';
         const subInfo = getRawItemSubUnitInfo(currentItem);
@@ -3888,7 +3897,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
       )}
 
       {/* QUICK DP PHOTO MODAL: Instantly set or upload image synced to Supabase DP column */}
-      {quickDpItem && (
+      {quickDpItem && !readOnly && (
         <div className="fixed inset-0 z-[300] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 w-full max-w-md shadow-2xl animate-in zoom-in-95 space-y-5">
             <div className="flex justify-between items-center pb-3 border-b border-slate-800">
@@ -4092,7 +4101,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
       )}
 
       {/* Reset Defaults Confirmation Modal */}
-      {showResetConfirmModal && (
+      {showResetConfirmModal && !readOnly && (
         <div className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-gradient-to-b from-slate-900 to-slate-950 border border-slate-700/80 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
             <div className="text-center space-y-2">

@@ -34,7 +34,7 @@ export const DEFAULT_CANTEEN_CONFIG: CanteenConfig = {
   adminImage: 'https://lh3.googleusercontent.com/pw/AP1GczPXDD5Dohq-6TWemgeYREoimsS-iXc6KjQoxxRgI0hjRf2tESul2P6eQYmPbFDBUzcP7tRKaBH8HkHHoBqJb83Ng8bbo5mKFhfT4YkiEcEVrCc3Nd39=s800',
   phone: '+880 1601-676760',
   password: '1111',
-  managerBdNo: '',
+  managerBdNo: '475268',
   footer: 'Official Canteen of UAV | Integrity and Service',
   preOrderEnabled: true,
   preOrderStartTime: '18:00',
@@ -640,7 +640,11 @@ export function getCanteenConfig(): CanteenConfig {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_CANTEEN_CONFIG;
     const parsed = JSON.parse(raw);
-    return { ...DEFAULT_CANTEEN_CONFIG, ...parsed };
+    const cfg = { ...DEFAULT_CANTEEN_CONFIG, ...parsed };
+    if (!cfg.managerBdNo) {
+      cfg.managerBdNo = '475268';
+    }
+    return cfg;
   } catch (e) {
     console.error('Failed to load canteen settings from storage:', e);
     return DEFAULT_CANTEEN_CONFIG;

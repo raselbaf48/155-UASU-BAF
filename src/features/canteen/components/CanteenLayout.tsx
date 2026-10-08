@@ -45,7 +45,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
   const [cloudSyncStatus, setCloudSyncStatus] = useState<CloudSyncStatus>(() => getCanteenCloudSyncStatus());
 
   const cleanBdInitial = initialMember?.bdNo ? initialMember.bdNo.replace(/^BD\/?/i, '').trim() : '';
-  const currentMgrBd = (canteenConfig.managerBdNo || '').replace(/^BD\/?/i, '').trim().toLowerCase();
+  const currentMgrBd = (canteenConfig.managerBdNo || '475268').replace(/^BD\/?/i, '').trim().toLowerCase();
   const isMasterManager = cleanBdInitial.toLowerCase() === '48456';
   // ONLY Master ID 48456 directly enters Manager mode; all other users start in Customer mode
   const isManager = isMasterManager;
@@ -70,13 +70,25 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
               rank: found.Rank || '',
               surname: found.Surname || '',
               contact: found.Contact || found['Mobile No'] || '',
-              bdNo: cleanBdInitial
+              bdNo: cleanBdInitial,
+              role: found.Role || ''
             };
           }
         }
       }
     } catch { return null; }
     return null;
+  })();
+
+  // Check if current user is the designated Manager (Master ID 48456, Manager BD No, or Member with Manager role)
+  const isDesignatedManager = (() => {
+    const userBdClean = String(cleanBdInitial || initialMember?.bdNo || '').replace(/\D/g, '');
+    const mgrBdClean = String(canteenConfig.managerBdNo || currentMgrBd || '475268').replace(/\D/g, '');
+    if (userBdClean === '48456') return true;
+    if (mgrBdClean && userBdClean === mgrBdClean) return true;
+    if (String(initialMember?.role || '').toLowerCase() === 'manager') return true;
+    if (String(cachedMember?.role || '').toLowerCase() === 'manager') return true;
+    return false;
   })();
 
   const initialDp = isMasterManager 
@@ -734,20 +746,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
         </div>
 
         <div className="p-6 space-y-3">
-          {currentUser.role !== 'manager' ? (
-            <button
-              onClick={() => {
-                setLoginTab('manager');
-                setShowLogin(true);
-                setLoginError('');
-                setLoginInput('');
-              }}
-              className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl text-indigo-200 bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 hover:border-indigo-400 transition-all font-bold text-xs uppercase tracking-widest shadow-md cursor-pointer active:scale-95"
-            >
-              <KeyRound className="w-4 h-4 text-amber-400" />
-              <span>MANAGER LOGIN</span>
-            </button>
-          ) : (
+          {currentUser.role === 'manager' ? (
             <button
               onClick={() => {
                 setCurrentUser({
@@ -764,7 +763,20 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
               <User className="w-4 h-4 text-emerald-400" />
               <span>CUSTOMER MODE</span>
             </button>
-          )}
+          ) : isDesignatedManager ? (
+            <button
+              onClick={() => {
+                setLoginTab('manager');
+                setShowLogin(true);
+                setLoginError('');
+                setLoginInput('');
+              }}
+              className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl text-indigo-200 bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 hover:border-indigo-400 transition-all font-bold text-xs uppercase tracking-widest shadow-md cursor-pointer active:scale-95"
+            >
+              <KeyRound className="w-4 h-4 text-amber-400" />
+              <span>MANAGER LOGIN</span>
+            </button>
+          ) : null}
 
           <button
             onClick={handleLogout}
@@ -932,21 +944,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
                       </p>
                    </div>
                 </div>
-                {currentUser.role !== 'manager' ? (
-                  <button
-                    onClick={() => {
-                      setLoginTab('manager');
-                      setShowLogin(true);
-                      setMobileMenuOpen(false);
-                      setLoginError('');
-                      setLoginInput('');
-                    }}
-                    className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl text-indigo-200 bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 transition-all font-bold text-xs uppercase tracking-widest shadow-md cursor-pointer active:scale-95"
-                  >
-                    <KeyRound className="w-4 h-4 text-amber-400" />
-                    <span>MANAGER LOGIN</span>
-                  </button>
-                ) : (
+                {currentUser.role === 'manager' ? (
                   <button
                     onClick={() => {
                       setCurrentUser({
@@ -964,7 +962,21 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
                     <User className="w-4 h-4 text-emerald-400" />
                     <span>CUSTOMER MODE</span>
                   </button>
-                )}
+                ) : isDesignatedManager ? (
+                  <button
+                    onClick={() => {
+                      setLoginTab('manager');
+                      setShowLogin(true);
+                      setMobileMenuOpen(false);
+                      setLoginError('');
+                      setLoginInput('');
+                    }}
+                    className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl text-indigo-200 bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 transition-all font-bold text-xs uppercase tracking-widest shadow-md cursor-pointer active:scale-95"
+                  >
+                    <KeyRound className="w-4 h-4 text-amber-400" />
+                    <span>MANAGER LOGIN</span>
+                  </button>
+                ) : null}
 
                 <button
                     onClick={handleLogout}

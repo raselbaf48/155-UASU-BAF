@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   Utensils, Search, User, Zap, History, CreditCard, ShoppingCart, 
   Clock, Trash2, CheckCircle2, XCircle, X, ShoppingBag, Banknote, 
-  ArrowUpRight, ArrowDownLeft, Filter, Layers 
+  ArrowUpRight, ArrowDownLeft, Filter, Layers, Calendar 
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, getCanteenConfig, checkPreOrderWindow, getCuratedDailyMenu, getCleanActivePreOrders, CanteenConfig, PreOrderTimeStatus, getItemDisplayName } from '../utils/canteenSettings';
@@ -48,6 +48,102 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
   const [cancelConfirmId, setCancelConfirmId] = useState<string | null>(null);
   const [duplicateConfirmItem, setDuplicateConfirmItem] = useState<{ item: any; currentQty: number } | null>(null);
 
+  // Activity Log Filters (Month and Status)
+  const [selectedMonth, setSelectedMonth] = useState<string>('ALL');
+  const [selectedStatus, setSelectedStatus] = useState<string>('ALL');
+
+  const getActivityMonthKey = useCallback((act: any): { key: string; label: string } => {
+    if (act.timestamp) {
+      const d = new Date(typeof act.timestamp === 'number' ? act.timestamp : act.timestamp);
+      if (!isNaN(d.getTime())) {
+        const yr = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const monStr = d.toLocaleString('en-US', { month: 'short' });
+        return { key: `${yr}-${m}`, label: `${monStr} ${yr}` };
+      }
+    }
+    const dateStr = String(act.date || '').trim();
+    const mMatch = dateStr.match(/(\d{1,2})\s+([A-Za-z]{3})\s+(\d{2,4})/);
+    if (mMatch) {
+      const mon = mMatch[2];
+      let yr = parseInt(mMatch[3], 10);
+      if (yr < 100) yr += 2000;
+      const monIndex = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'].indexOf(mon.toLowerCase());
+      const m = String(monIndex >= 0 ? monIndex + 1 : 1).padStart(2, '0');
+      return { key: `${yr}-${m}`, label: `${mon} ${yr}` };
+    }
+    const dmyMatch = dateStr.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
+    if (dmyMatch) {
+      const m = dmyMatch[2].padStart(2, '0');
+      let yr = parseInt(dmyMatch[3], 10);
+      if (yr < 100) yr += 2000;
+      const monIndex = parseInt(m, 10) - 1;
+      const monNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      return { key: `${yr}-${m}`, label: `${monNames[monIndex] || 'Mon'} ${yr}` };
+    }
+    return { key: 'other', label: 'Other' };
+  }, []);
+
+  const availableMonths = useMemo(() => {
+    const map = new Map<string, { label: string; count: number }>();
+    activities.forEach(act => {
+      const { key, label } = getActivityMonthKey(act);
+      if (key !== 'other') {
+        const existing = map.get(key);
+        if (!existing) {
+          map.set(key, { label, count: 1 });
+        } else {
+          existing.count += 1;
+        }
+      }
+    });
+    return Array.from(map.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([key, data]) => ({ key, label: data.label, count: data.count }));
+  }, [activities, getActivityMonthKey]);
+
+  const statusCounts = useMemo(() => {
+    let purchase = 0;
+    let paid = 0;
+    let pending = 0;
+    activities.forEach(act => {
+      if (act.type === 'BILL PAYMENT' || act.status === 'PAID') {
+        paid++;
+      } else if (act.type === 'PRE-ORDER' || act.status === 'PENDING') {
+        pending++;
+      } else {
+        purchase++;
+      }
+    });
+    return { PURCHASE: purchase, PAID: paid, PENDING: pending };
+  }, [activities]);
+
+  const filteredActivities = useMemo(() => {
+    return activities.filter(act => {
+      // 1. Status Filter
+      if (selectedStatus !== 'ALL') {
+        const actStatus = (
+          act.type === 'BILL PAYMENT' || act.status === 'PAID'
+            ? 'PAID'
+            : act.type === 'PRE-ORDER' || act.status === 'PENDING'
+            ? 'PENDING'
+            : 'PURCHASE'
+        );
+        if (actStatus !== selectedStatus) {
+          return false;
+        }
+      }
+      // 2. Month Filter
+      if (selectedMonth !== 'ALL') {
+        const { key } = getActivityMonthKey(act);
+        if (key !== selectedMonth) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [activities, selectedMonth, selectedStatus, getActivityMonthKey]);
+
   // Live Raw Inventory & Recipes for realtime available stock
   const [rawInventory, setRawInventory] = useState<any[]>(() => getRawInventoryItems());
   const [recipesMap, setRecipesMap] = useState<any>(() => getMenuRecipes());
@@ -80,6 +176,31 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
     return null;
   });
   const [imgError, setImgError] = useState(false);
+
+  // Realtime Ledger Due (Total Charges - Total Payments)
+  const [liveLedgerDue, setLiveLedgerDue] = useState<number | undefined>(() => {
+    try {
+      const txsStr = localStorage.getItem('canteen_txs') || '[]';
+      const txs = JSON.parse(txsStr);
+      if (Array.isArray(txs) && cleanBd) {
+        const cleanBdLower = cleanBd.toLowerCase();
+        const userTxs = txs.filter((t: any) => {
+          const tBd = String(t.bdNo || t.airman_id || '').replace(/^BD\/?/i, '').trim().toLowerCase();
+          return tBd === cleanBdLower || (t.airman_id && String(t.airman_id).toLowerCase().includes(cleanBdLower));
+        });
+        if (userTxs.length > 0) {
+          const charges = userTxs
+            .filter((t: any) => t.type !== 'BILL PAYMENT' && !t.isReverted && t.status !== 'REVERTED')
+            .reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0);
+          const payments = userTxs
+            .filter((t: any) => t.type === 'BILL PAYMENT' && !t.isReverted && t.status !== 'REVERTED')
+            .reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0);
+          return Math.max(0, charges - payments);
+        }
+      }
+    } catch {}
+    return undefined;
+  });
 
   useEffect(() => {
     let isMounted = true;
@@ -244,6 +365,17 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
 
       // 1. Transactions (Purchases and Payments)
       const userTxs = txs.filter((tx: any) => isMemberMatch(tx.airman_id, tx.bdNo));
+
+      if (userTxs.length > 0) {
+        const charges = userTxs
+          .filter((t: any) => t.type !== 'BILL PAYMENT' && !t.isReverted && t.status !== 'REVERTED')
+          .reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0);
+        const payments = userTxs
+          .filter((t: any) => t.type === 'BILL PAYMENT' && !t.isReverted && t.status !== 'REVERTED')
+          .reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0);
+        const netDue = Math.max(0, charges - payments);
+        setLiveLedgerDue(netDue);
+      }
       
       const parsedTxs: any[] = userTxs.map((tx: any) => {
           const isPayment = tx.type === 'BILL PAYMENT' || tx.type === 'PAYMENT' || (typeof tx.items === 'string' && tx.items.toUpperCase().includes('BILL PAYMENT'));
@@ -282,7 +414,7 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
               orderId: tx.orderId,
               isPreOrder: !!(tx.isPreOrder || tx.orderId),
               isCompletedPreOrder: !!(tx.isPreOrder || tx.orderId),
-              status: isPayment ? 'PAID' : (tx.isPreOrder || tx.orderId ? 'COMPLETED' : 'PURCHASE')
+              status: isPayment ? 'PAID' : 'PURCHASE'
           };
       });
 
@@ -316,7 +448,7 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
                       orderId: po.orderId,
                       isPreOrder: true,
                       isCompletedPreOrder: true,
-                      status: 'COMPLETED'
+                      status: 'PURCHASE'
                   });
               }
           } else {
@@ -374,6 +506,24 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
   useEffect(() => {
       fetchMenu();
       fetchActivities();
+
+      // Pull latest transactions from Supabase cloud to ensure fresh ledger balance
+      (async () => {
+        try {
+          const { data } = await supabase.from('app_settings').select('setting_value').eq('setting_key', 'canteen_txs').maybeSingle();
+          if (data?.setting_value) {
+            const cloudTxs = typeof data.setting_value === 'string' ? JSON.parse(data.setting_value) : data.setting_value;
+            if (Array.isArray(cloudTxs)) {
+              const local = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+              const txMap = new Map();
+              [...local, ...cloudTxs].forEach(t => { if (t?.id) txMap.set(String(t.id), t); });
+              const merged = Array.from(txMap.values());
+              localStorage.setItem('canteen_txs', JSON.stringify(merged));
+              fetchActivities();
+            }
+          }
+        } catch {}
+      })();
       
       const handleSync = () => {
           fetchMenu();
@@ -603,11 +753,11 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
 
           <div className="bg-[#0f172a] rounded-[2rem] px-10 py-6 text-center shadow-xl relative overflow-hidden mt-2 border border-slate-800/80">
               <div className="absolute inset-0 bg-gradient-to-r from-[#4f46e5]/20 to-transparent pointer-events-none" />
-              <p className="text-[9px] font-black text-indigo-300 uppercase tracking-widest mb-1 relative z-10">Liability Assessment</p>
+              <p className="text-[9px] font-black text-indigo-300 uppercase tracking-widest mb-1 relative z-10">Current Due Amount</p>
               <h3 className="text-4xl font-black text-white tracking-tighter relative z-10">
-                ৳{memberDetails?.due !== undefined ? memberDetails.due : (currentUser?.due !== undefined ? currentUser.due : 0)}
+                ৳{liveLedgerDue !== undefined ? liveLedgerDue : (memberDetails?.due !== undefined ? memberDetails.due : (currentUser?.due !== undefined ? currentUser.due : 0))}
               </h3>
-              <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-1 relative z-10">Live Accounting Balance</p>
+              <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mt-1 relative z-10">Live Accounting Balance (বর্তমান বকেয়া)</p>
               <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-1/2 h-1 bg-[#4f46e5] rounded-t-full" />
           </div>
       </div>
@@ -777,20 +927,104 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
 
       {/* Activity Log */}
       <div className="bg-slate-900 rounded-[2rem] p-5 sm:p-6 md:p-8 shadow-sm border border-slate-800 space-y-4">
-          <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-black text-white tracking-widest uppercase flex items-center space-x-2">
-                  <span className="text-[#4f46e5]"><History className="w-4 h-4" /></span>
-                  <span>Activity Log</span>
-              </h3>
-              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                  Recent Entries ({activities.length})
-              </span>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-1">
+              <div>
+                  <h3 className="text-sm font-black text-white tracking-widest uppercase flex items-center space-x-2">
+                      <span className="text-[#4f46e5]"><History className="w-4 h-4" /></span>
+                      <span>Activity Log</span>
+                  </h3>
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                      Recent Entries ({filteredActivities.length} of {activities.length})
+                  </span>
+              </div>
+
+              {(selectedMonth !== 'ALL' || selectedStatus !== 'ALL') && (
+                  <button
+                      type="button"
+                      onClick={() => {
+                          setSelectedMonth('ALL');
+                          setSelectedStatus('ALL');
+                      }}
+                      className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300 underline cursor-pointer self-start sm:self-auto"
+                  >
+                      Reset Filters (ফিল্টার মুছুন)
+                  </button>
+              )}
           </div>
+
+          {/* Month & Status Filter Controls */}
+          {activities.length > 0 && (
+              <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 bg-slate-950/70 p-3 rounded-2xl border border-slate-800/80">
+                  {/* Month Filter Dropdown */}
+                  <div className="flex items-center space-x-2 min-w-0">
+                      <div className="flex items-center space-x-1.5 text-slate-400 text-xs font-bold shrink-0">
+                          <Calendar className="w-3.5 h-3.5 text-indigo-400" />
+                          <span>Month:</span>
+                      </div>
+                      <select
+                          value={selectedMonth}
+                          onChange={(e) => setSelectedMonth(e.target.value)}
+                          className="bg-slate-900 border border-slate-700/80 text-white text-xs font-bold rounded-xl px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                      >
+                          <option value="ALL">All Months ({activities.length})</option>
+                          {availableMonths.map(m => (
+                              <option key={m.key} value={m.key}>
+                                  {m.label} ({m.count})
+                              </option>
+                          ))}
+                      </select>
+                  </div>
+
+                  {/* Status Filter Buttons */}
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-none">
+                      {[
+                          { id: 'ALL', label: 'All', count: activities.length },
+                          { id: 'PURCHASE', label: 'Purchase', count: statusCounts.PURCHASE },
+                          { id: 'PAID', label: 'Paid', count: statusCounts.PAID },
+                          { id: 'PENDING', label: 'Pending', count: statusCounts.PENDING },
+                      ].map(tab => (
+                          <button
+                              key={tab.id}
+                              type="button"
+                              onClick={() => setSelectedStatus(tab.id)}
+                              className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer flex items-center space-x-1.5 ${
+                                  selectedStatus === tab.id
+                                      ? 'bg-[#4f46e5] text-white shadow-md shadow-indigo-600/30'
+                                      : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
+                              }`}
+                          >
+                              <span>{tab.label}</span>
+                              <span className={`px-1.5 py-0.5 rounded-full text-[9px] ${
+                                  selectedStatus === tab.id ? 'bg-black/30 text-white' : 'bg-slate-800 text-slate-400'
+                              }`}>
+                                  {tab.count}
+                              </span>
+                          </button>
+                      ))}
+                  </div>
+              </div>
+          )}
 
           {activities.length === 0 ? (
               <div className="text-center py-10 text-slate-400 bg-slate-950/30 rounded-2xl border border-dashed border-slate-800">
                   <History className="w-10 h-10 mx-auto opacity-20 mb-3" />
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-300">No activities found</p>
+              </div>
+          ) : filteredActivities.length === 0 ? (
+              <div className="text-center py-10 text-slate-400 bg-slate-950/30 rounded-2xl border border-dashed border-slate-800 space-y-2">
+                  <History className="w-10 h-10 mx-auto opacity-20 mb-1" />
+                  <p className="text-xs font-bold text-slate-300">No activities match the selected month / status filter</p>
+                  <p className="text-[11px] text-slate-500 font-medium">ফিল্টারের সাথে কোনো কার্যকলাপ খুঁজে পাওয়া যায়নি।</p>
+                  <button
+                      type="button"
+                      onClick={() => {
+                          setSelectedMonth('ALL');
+                          setSelectedStatus('ALL');
+                      }}
+                      className="inline-block mt-2 px-3 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 rounded-xl text-xs font-bold border border-indigo-500/30 cursor-pointer transition-colors"
+                  >
+                      Clear Filters
+                  </button>
               </div>
           ) : (
               <div className="overflow-x-auto rounded-2xl border border-slate-800/90 bg-slate-950/60">
@@ -807,7 +1041,7 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
                           </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/60">
-                          {activities.map((act, idx) => (
+                          {filteredActivities.map((act, idx) => (
                               <tr 
                                   key={act.id || idx}
                                   className="hover:bg-slate-800/50 transition-colors group"
@@ -850,11 +1084,11 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
 
                                   {/* Status */}
                                   <td className="py-3.5 px-4 text-center">
-                                      {act.type === 'BILL PAYMENT' ? (
+                                      {act.type === 'BILL PAYMENT' || act.status === 'PAID' ? (
                                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-950 text-emerald-400 border border-emerald-500/30">
                                               PAID
                                           </span>
-                                      ) : act.type === 'PRE-ORDER' ? (
+                                      ) : act.type === 'PRE-ORDER' || act.status === 'PENDING' ? (
                                           <div className="inline-flex items-center space-x-1.5 justify-center">
                                               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-amber-950 text-amber-400 border border-amber-500/30">
                                                   PENDING
@@ -868,11 +1102,6 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
                                                   <X className="w-3 h-3" />
                                               </button>
                                           </div>
-                                      ) : act.isCompletedPreOrder ? (
-                                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-indigo-950 text-emerald-400 border border-emerald-500/30">
-                                              <CheckCircle2 className="w-2.5 h-2.5 mr-1 text-emerald-400" />
-                                              DONE
-                                          </span>
                                       ) : (
                                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-indigo-950 text-indigo-400 border border-indigo-500/30">
                                               PURCHASE

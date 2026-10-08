@@ -251,6 +251,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
   const [historySearchTerm, setHistorySearchTerm] = useState('');
 
   const handleOpenItemModal = (item: any) => {
+    if (readOnly) return;
     const rawList = getRawInventoryItems();
     setAvailableRawItems(rawList);
     setSelectedItemForModal(item);
@@ -894,11 +895,13 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
             return (
                <div 
                   key={item.id} 
-                  onClick={() => handleOpenItemModal(item)}
-                  className={`relative rounded-3xl p-5 border-t border-x border-b-4 transition-all duration-300 cursor-pointer group flex flex-col justify-between ${
+                  onClick={readOnly ? undefined : () => handleOpenItemModal(item)}
+                  className={`relative rounded-3xl p-5 border-t border-x border-b-4 transition-all duration-300 group flex flex-col justify-between ${
+                     readOnly ? 'cursor-default' : 'cursor-pointer hover:-translate-y-1.5'
+                  } ${
                      isLowStock
-                        ? "bg-gradient-to-b from-rose-950/40 via-slate-900 to-slate-950 border-rose-500/90 border-b-rose-950 shadow-[0_0_25px_rgba(239,68,68,0.45),inset_0_0_15px_rgba(239,68,68,0.18)] ring-2 ring-rose-500/50 hover:shadow-[0_0_35px_rgba(239,68,68,0.65)] hover:-translate-y-1.5"
-                        : "bg-gradient-to-b from-slate-800/90 via-slate-900 to-slate-950 border-t-slate-600/60 border-x-slate-700/60 border-b-slate-950 shadow-[0_12px_24px_-4px_rgba(0,0,0,0.65),0_4px_8px_-2px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.12),inset_0_-2px_4px_0_rgba(0,0,0,0.4)] hover:-translate-y-1.5 hover:shadow-[0_20px_35px_-6px_rgba(0,0,0,0.8),0_0_22px_0_rgba(79,70,229,0.3),inset_0_1px_0_0_rgba(255,255,255,0.2)] hover:border-b-indigo-900"
+                        ? "bg-gradient-to-b from-rose-950/40 via-slate-900 to-slate-950 border-rose-500/90 border-b-rose-950 shadow-[0_0_25px_rgba(239,68,68,0.45),inset_0_0_15px_rgba(239,68,68,0.18)] ring-2 ring-rose-500/50 hover:shadow-[0_0_35px_rgba(239,68,68,0.65)]"
+                        : "bg-gradient-to-b from-slate-800/90 via-slate-900 to-slate-950 border-t-slate-600/60 border-x-slate-700/60 border-b-slate-950 shadow-[0_12px_24px_-4px_rgba(0,0,0,0.65),0_4px_8px_-2px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.12),inset_0_-2px_4px_0_rgba(0,0,0,0.4)] hover:shadow-[0_20px_35px_-6px_rgba(0,0,0,0.8),0_0_22px_0_rgba(79,70,229,0.3),inset_0_1px_0_0_rgba(255,255,255,0.2)] hover:border-b-indigo-900"
                   }`}
                >
                   <div>
@@ -971,30 +974,48 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
 
                      {/* Cost & Selling Price Box */}
                      <div className="mt-4 bg-[#0a101d]/90 rounded-2xl p-4 border border-slate-800/80 flex items-center justify-between">
-                        <div className="space-y-0.5">
-                           <span className="text-slate-400 text-xs font-bold block">খরচ</span>
-                           <span className="text-amber-400 font-black text-lg font-mono">৳{displayCost.toFixed(1)}</span>
-                        </div>
-                        <div className="text-right space-y-0.5">
-                           <span className="text-slate-400 text-xs font-bold block">মূল্য</span>
-                           <span className="text-white font-black text-lg font-mono">৳{priceNum}</span>
-                        </div>
+                        {!readOnly ? (
+                           <>
+                              <div className="space-y-0.5">
+                                 <span className="text-slate-400 text-xs font-bold block">খরচ</span>
+                                 <span className="text-amber-400 font-black text-lg font-mono">৳{displayCost.toFixed(1)}</span>
+                              </div>
+                              <div className="text-right space-y-0.5">
+                                 <span className="text-slate-400 text-xs font-bold block">মূল্য</span>
+                                 <span className="text-white font-black text-lg font-mono">৳{priceNum}</span>
+                              </div>
+                           </>
+                        ) : (
+                           <div className="w-full flex items-center justify-between">
+                              <div className="space-y-0.5">
+                                 <span className="text-slate-400 text-xs font-bold block">ক্যাফে মূল্য (Price)</span>
+                                 <span className="text-white font-black text-xl font-mono">৳{priceNum}</span>
+                              </div>
+                              <span className="px-3 py-1 rounded-xl bg-indigo-600/20 text-indigo-300 text-xs font-black uppercase tracking-wider border border-indigo-500/30">
+                                 Regular Price
+                              </span>
+                           </div>
+                        )}
                      </div>
 
-                     {/* Profit Pill */}
-                     <div className="mt-2.5 px-4 py-2 rounded-xl bg-slate-950/70 border border-slate-800/80 flex items-center justify-between">
-                        <span className="text-emerald-400 text-xs font-bold">মুনাফা (Profit):</span>
-                        <span className={`font-mono font-black text-xs ${profit >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                           {profit < 0 ? '-' : ''}৳{Math.abs(profit).toFixed(1)} ({profitPct >= 0 ? `+${profitPct}` : profitPct}%)
-                        </span>
-                     </div>
+                     {/* Profit Pill - Manager Only */}
+                     {!readOnly && (
+                        <div className="mt-2.5 px-4 py-2 rounded-xl bg-slate-950/70 border border-slate-800/80 flex items-center justify-between">
+                           <span className="text-emerald-400 text-xs font-bold">মুনাফা (Profit):</span>
+                           <span className={`font-mono font-black text-xs ${profit >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                              {profit < 0 ? '-' : ''}৳{Math.abs(profit).toFixed(1)} ({profitPct >= 0 ? `+${profitPct}` : profitPct}%)
+                           </span>
+                        </div>
+                     )}
                   </div>
 
-                  {/* Card Footer */}
-                  <div className="mt-4 pt-3 border-t border-slate-800/60 flex items-center justify-between text-slate-400 text-xs font-medium">
-                     <span>এডিট ও হিস্ট্রি দেখতে ক্লিক করুন</span>
-                     <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-indigo-400 group-hover:translate-x-1 transition-all" />
-                  </div>
+                  {/* Card Footer - Manager Only */}
+                  {!readOnly && (
+                     <div className="mt-4 pt-3 border-t border-slate-800/60 flex items-center justify-between text-slate-400 text-xs font-medium">
+                        <span>এডিট ও হিস্ট্রি দেখতে ক্লিক করুন</span>
+                        <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-indigo-400 group-hover:translate-x-1 transition-all" />
+                     </div>
+                  )}
                </div>
             );
          })}
@@ -1009,7 +1030,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       )}
 
       {/* Unified Item Details & Recipe Modal */}
-      {selectedItemForModal && (
+      {selectedItemForModal && !readOnly && (
          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in zoom-in-95">
             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-4xl shadow-2xl flex flex-col max-h-[92vh]">
                {/* Modal Header */}
@@ -1514,7 +1535,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       )}
 
       {/* Quick Recipe Modal */}
-      {quickRecipeItem && (
+      {quickRecipeItem && !readOnly && (
          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in zoom-in-95">
             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-xl shadow-2xl flex flex-col max-h-[90vh]">
                {/* Header */}
@@ -1701,7 +1722,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       )}
 
       {/* Add / Edit Item Modal */}
-      {showAddModal && (
+      {showAddModal && !readOnly && (
          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in zoom-in-95">
             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-xl shadow-2xl flex flex-col max-h-[90vh]">
                <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0 mb-4">
@@ -1847,7 +1868,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
 
       {/* Delete Confirmation Modal */}
       <AnimatePresence>
-        {deleteConfirmId && (
+        {deleteConfirmId && !readOnly && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
