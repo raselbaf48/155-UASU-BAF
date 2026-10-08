@@ -536,6 +536,32 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
                 </div>
 
                 <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider">
+                      MANAGER SYSTEM KEY (ম্যানেজার সিস্টেম কি)
+                    </label>
+                    <span className="text-[10px] font-mono text-amber-400 font-bold">
+                      Default: 1111
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    value={settings.password || ''}
+                    onChange={(e) => {
+                      const updated = { ...settings, password: e.target.value };
+                      setSettings(updated);
+                      saveCanteenConfig(updated);
+                    }}
+                    placeholder="1111"
+                    maxLength={10}
+                    className="w-full bg-slate-950 text-white rounded-2xl px-5 py-3.5 text-xs font-mono font-bold border border-slate-700/80 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    সাইডবার থেকে ম্যানেজার প্যানেলে প্রবেশ করার জন্য ব্যবহৃত ৪ ডিজিটের সিকিউরিটি কি (ডিফল্ট: 1111)।
+                  </p>
+                </div>
+
+                <div>
                   <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider block mb-2">
                     FOOTER / MEMO NOTE
                   </label>

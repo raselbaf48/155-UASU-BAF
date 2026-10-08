@@ -22,8 +22,8 @@ export const Settings: React.FC = () => {
                 <Key className="w-5 h-5 text-slate-400" />
                 <span>Manager System Key</span>
             </h3>
-            <input type="password" defaultValue="1234" className="w-full md:w-1/2 px-4 py-2 bg-slate-800 dark:bg-slate-800 border border-slate-700 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium" />
-            <p className="text-xs text-slate-400 mt-2">PIN for entering Manager Panel. Default is 1234.</p>
+            <input type="password" defaultValue="1111" className="w-full md:w-1/2 px-4 py-2 bg-slate-800 dark:bg-slate-800 border border-slate-700 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium font-mono" />
+            <p className="text-xs text-slate-400 mt-2">PIN for entering Manager Panel. Default is 1111.</p>
          </div>
          <hr className="border-slate-800 dark:border-slate-800" />
          <div>

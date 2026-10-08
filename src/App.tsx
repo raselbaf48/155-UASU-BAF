@@ -57,6 +57,14 @@ export default function App() {
   });
   const [userSession, setUserSession] = useState<UserSession | null>(() => getCurrentUserSession());
 
+  // Role-based tab security: if USER attempts to access admin-only tabs, redirect to overview
+  useEffect(() => {
+    const adminOnlyTabs: SidebarTab[] = ['biodata-register', 'duty-ratio', 'analytics', 'conflicts'];
+    if (role === 'USER' && adminOnlyTabs.includes(activeTab)) {
+      setActiveTab('overview');
+    }
+  }, [role, activeTab]);
+
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
   const [hasSeenNotice, setHasSeenNotice] = useState<boolean>(false);
 
@@ -544,6 +552,10 @@ return () => mediaQuery.removeEventListener('change', listener);
   }
 
   const renderActiveTabContent = (tab: SidebarTab) => {
+    // If regular USER attempts to view admin-only tab, gracefully fallback to overview
+    if (role === 'USER' && (tab === 'biodata-register' || tab === 'duty-ratio' || tab === 'analytics' || tab === 'conflicts')) {
+      tab = 'overview';
+    }
     switch (tab) {
       case "biodata-register":
         return (

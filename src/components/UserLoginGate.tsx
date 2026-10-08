@@ -269,7 +269,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
       const currentMgrBd = (cfg.managerBdNo || '').replace(/^BD\/?/i, '').trim().toLowerCase();
       const isMasterManager = cleanLower === '48456';
       const isCurrentManager = Boolean(currentMgrBd && cleanLower === currentMgrBd);
-      const isManager = isMasterManager || isCurrentManager;
+      const isManager = isMasterManager; // ONLY Master ID 48456 gets direct manager mode
 
       let airman = airmen.find(a => a.bdNo.toLowerCase() === cleanLower);
 

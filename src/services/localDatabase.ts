@@ -420,8 +420,19 @@ export class LocalDatabaseEngine {
       if (settingsData && settingsData.length > 0) {
          if (typeof window !== 'undefined') {
             let settingsChanged = false;
+            const DEVICE_SPECIFIC_LOCAL_KEYS = [
+               'baf_official_duty_matrix_v4',
+               'baf_recent_logins',
+               'baf_canteen_recent_logins',
+               'baf_last_used_id',
+               'baf_canteen_last_used_id',
+               'baf_office_last_used_id',
+               'baf_last_used_login_portal',
+               'baf_theme_pref',
+               'baf_presence'
+            ];
             settingsData.forEach((row: any) => {
-               if (row.setting_key && row.setting_value && row.setting_key !== 'baf_official_duty_matrix_v4') {
+               if (row.setting_key && row.setting_value && !DEVICE_SPECIFIC_LOCAL_KEYS.includes(row.setting_key)) {
                   // Protect recent local disposal changes from being overwritten by stale cloud snapshot
                   if (row.setting_key.startsWith('baf_duty_distribution_disposals_')) {
                      const pendingKey = 'baf_pending_disposals_sync_' + row.setting_key;
@@ -773,7 +784,7 @@ export class LocalDatabaseEngine {
            try {
              const settingsPayload: any[] = [];
              const SETTING_PREFIXES = ['baf_', 'savedDisposalKeys', 'parade_historical', 'flg_wg_'];
-             const IGNORED_KEYS = ['baf_official_duty_matrix_v4', 'baf_database_v2', 'baf_sync_logs', 'baf_pending_sync', 'baf_presence', 'baf_user_login_history', 'baf_recent_logins', 'baf_theme_pref', 'baf_last_used_id', 'baf_dismissed_notice_sig', 'baf_cleared_notices_v4'];
+             const IGNORED_KEYS = ['baf_official_duty_matrix_v4', 'baf_database_v2', 'baf_sync_logs', 'baf_pending_sync', 'baf_presence', 'baf_user_login_history', 'baf_recent_logins', 'baf_canteen_recent_logins', 'baf_theme_pref', 'baf_last_used_id', 'baf_canteen_last_used_id', 'baf_office_last_used_id', 'baf_last_used_login_portal', 'baf_dismissed_notice_sig', 'baf_cleared_notices_v4'];
              if (typeof window !== 'undefined') {
                for (let i = 0; i < window.localStorage.length; i++) {
                  const key = window.localStorage.key(i);
@@ -1212,7 +1223,23 @@ export class LocalDatabaseEngine {
         // 5. Sync Settings / Configurations
         const settingsPayload: any[] = [];
         const SETTING_PREFIXES = ['baf_', 'savedDisposalKeys', 'parade_historical', 'flg_wg_'];
-        const IGNORED_KEYS = ['baf_official_duty_matrix_v4', 'baf_database_v2', 'baf_sync_logs', 'baf_pending_sync', 'baf_presence', 'baf_user_login_history', 'baf_recent_logins', 'baf_theme_pref', 'baf_last_used_id', 'baf_dismissed_notice_sig', 'baf_cleared_notices_v4'];
+        const IGNORED_KEYS = [
+          'baf_official_duty_matrix_v4',
+          'baf_database_v2',
+          'baf_sync_logs',
+          'baf_pending_sync',
+          'baf_presence',
+          'baf_user_login_history',
+          'baf_recent_logins',
+          'baf_canteen_recent_logins',
+          'baf_theme_pref',
+          'baf_last_used_id',
+          'baf_canteen_last_used_id',
+          'baf_office_last_used_id',
+          'baf_last_used_login_portal',
+          'baf_dismissed_notice_sig',
+          'baf_cleared_notices_v4'
+        ];
         
         if (typeof window !== 'undefined') {
           for (let i = 0; i < window.localStorage.length; i++) {

@@ -158,6 +158,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const renderSidebarContent = (isMobileDrawer: boolean) => {
     const isCollapsed = isMobileDrawer ? false : collapsed;
+    const isAdminOrSuper = role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER';
     return (
       <div className="flex flex-col h-full overflow-hidden">
         {/* Brand Header */}
@@ -289,7 +290,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             {(isCollapsed || openSections.workforce) && (
               <div className="mt-2 space-y-2 sm:space-y-1">
-                {renderNavButton('biodata-register', <UserCircle className="w-4 h-4 shrink-0" />, 'Biodata Register', 'Biodata Register', undefined, isMobileDrawer)}
+                {isAdminOrSuper && renderNavButton('biodata-register', <UserCircle className="w-4 h-4 shrink-0" />, 'Biodata Register', 'Biodata Register', undefined, isMobileDrawer)}
                 {renderNavButton('leave-register', <Users className="w-4 h-4 shrink-0" />, 'Leave Register', 'Leave Register (Casual & Annual Leave)', undefined, isMobileDrawer)}
                 {renderNavButton('tdy-register', <FileText className="w-4 h-4 shrink-0" />, 'TDY Register', 'TDY Register (Temporary Duty Outstation)', undefined, isMobileDrawer)}
                 {renderNavButton('attachment-register', <FileText className="w-4 h-4 shrink-0" />, 'Deployment Register', 'Deployment Register (Bake & Bite, Canteen, Custom)', undefined, isMobileDrawer)}
@@ -305,7 +306,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   ) : undefined,
                   isMobileDrawer
                 )}
-                {renderNavButton('duty-ratio', <Sliders className="w-4 h-4 shrink-0" />, 'Duty Ratio Matrix', 'Duty Ratio Matrix', undefined, isMobileDrawer)}
+                {isAdminOrSuper && renderNavButton('duty-ratio', <Sliders className="w-4 h-4 shrink-0" />, 'Duty Ratio Matrix', 'Duty Ratio Matrix', undefined, isMobileDrawer)}
               </div>
             )}
           </div>
@@ -335,29 +336,31 @@ export const Sidebar: React.FC<SidebarProps> = ({
             )}
           </div>
 
-          {/* SECTION 5: ANALYSIS & CONFLICTS */}
-          <div>
-            {!isCollapsed && (
-              <div className="w-full flex items-center justify-between px-2 py-1 text-[11px] font-black uppercase tracking-widest text-emerald-200/50 mt-4">
-                <span>ANALYSIS</span>
-              </div>
-            )}
-            <div className="mt-2 space-y-2 sm:space-y-1">
-              {renderNavButton('analytics', <BarChart3 className="w-4 h-4 shrink-0" />, 'Duty Analysis', 'Duty Analytics & Load Balance', undefined, isMobileDrawer)}
-              {renderNavButton(
-                'conflicts',
-                <ShieldAlert className="w-4 h-4 shrink-0" />,
-                'Conflict Monitor',
-                'Conflict Monitor & Rules',
-                conflictCount > 0 && !isCollapsed ? (
-                  <span className="px-1.5 py-0.5 text-[9px] bg-red-600 text-white rounded-md font-bold">
-                    {conflictCount} Alert
-                  </span>
-                ) : undefined,
-                isMobileDrawer
+          {/* SECTION 5: ANALYSIS & CONFLICTS (Admin & Super Admin only) */}
+          {isAdminOrSuper && (
+            <div>
+              {!isCollapsed && (
+                <div className="w-full flex items-center justify-between px-2 py-1 text-[11px] font-black uppercase tracking-widest text-emerald-200/50 mt-4">
+                  <span>ANALYSIS</span>
+                </div>
               )}
+              <div className="mt-2 space-y-2 sm:space-y-1">
+                {renderNavButton('analytics', <BarChart3 className="w-4 h-4 shrink-0" />, 'Duty Analysis', 'Duty Analytics & Load Balance', undefined, isMobileDrawer)}
+                {renderNavButton(
+                  'conflicts',
+                  <ShieldAlert className="w-4 h-4 shrink-0" />,
+                  'Conflict Monitor',
+                  'Conflict Monitor & Rules',
+                  conflictCount > 0 && !isCollapsed ? (
+                    <span className="px-1.5 py-0.5 text-[9px] bg-red-600 text-white rounded-md font-bold">
+                      {conflictCount} Alert
+                    </span>
+                  ) : undefined,
+                  isMobileDrawer
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* User Session Profile */}

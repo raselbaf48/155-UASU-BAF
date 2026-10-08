@@ -25,7 +25,10 @@ import {
   List,
   Award,
   Edit3,
-  Sparkles
+  Sparkles,
+  KeyRound,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { supabase } from '../../../supabase';
@@ -68,6 +71,33 @@ export const CanteenMemberDB: React.FC = () => {
   const [canteenConfig, setCanteenConfig] = useState<CanteenConfig>(() => getCanteenConfig());
   const [showManagerModal, setShowManagerModal] = useState(false);
   const [managerSearchTerm, setManagerSearchTerm] = useState('');
+  const [systemKeyInput, setSystemKeyInput] = useState<string>(() => (getCanteenConfig()?.password || '1111'));
+  const [showSystemKeyInModal, setShowSystemKeyInModal] = useState<boolean>(false);
+  const [keySaveSuccess, setKeySaveSuccess] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (showManagerModal) {
+      setSystemKeyInput(canteenConfig?.password || '1111');
+      setKeySaveSuccess(false);
+    }
+  }, [showManagerModal, canteenConfig?.password]);
+
+  const handleSaveSystemKey = () => {
+    const cleanKey = systemKeyInput.trim();
+    if (!cleanKey || cleanKey.length < 4) {
+      alert('সিস্টেম কি অবশ্যই কমপক্ষে ৪ ডিজিটের হতে হবে (System Key must be at least 4 digits)');
+      return;
+    }
+    const updated: CanteenConfig = {
+      ...canteenConfig,
+      password: cleanKey
+    };
+    setCanteenConfig(updated);
+    saveCanteenConfig(updated);
+    setKeySaveSuccess(true);
+    showToast(`ম্যানেজার সিস্টেম কি সফলভাবে পরিবর্তন করা হয়েছে: ${cleanKey}`);
+    setTimeout(() => setKeySaveSuccess(false), 3000);
+  };
 
   const [members, setMembers] = useState<any[]>(() => {
     const cached = getCanteenMembersCache();
@@ -1016,12 +1046,19 @@ export const CanteenMemberDB: React.FC = () => {
             <h3 className="text-base font-black text-white truncate leading-tight mt-0.5">
               {canteenConfig?.managerName || 'No Manager Assigned Yet'}
             </h3>
-            {canteenConfig?.phone && (
-              <p className="text-[11px] text-emerald-400 font-mono flex items-center gap-1 mt-0.5">
-                <Phone className="w-3 h-3 text-emerald-400" />
-                <span>{canteenConfig.phone}</span>
-              </p>
-            )}
+            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+              {canteenConfig?.phone && (
+                <p className="text-[11px] text-emerald-400 font-mono flex items-center gap-1">
+                  <Phone className="w-3 h-3 text-emerald-400" />
+                  <span>{canteenConfig.phone}</span>
+                </p>
+              )}
+              <span className="text-[10px] text-slate-500">•</span>
+              <span className="text-[11px] text-amber-400 font-mono font-bold flex items-center gap-1">
+                <KeyRound className="w-3 h-3 text-amber-400" />
+                <span>System Key: {canteenConfig?.password || '1111'}</span>
+              </span>
+            </div>
           </div>
         </div>
 
@@ -2325,6 +2362,61 @@ export const CanteenMemberDB: React.FC = () => {
                   )}
                 </div>
               </div>
+            </div>
+
+            {/* System Key Settings Section */}
+            <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <KeyRound className="w-4 h-4 text-amber-400" />
+                  <label className="text-xs font-black text-white uppercase tracking-wider">
+                    MANAGER SYSTEM KEY (ম্যানেজার সিস্টেম কি)
+                  </label>
+                </div>
+                <span className="text-[10px] font-mono text-slate-400 font-bold bg-slate-900 border border-slate-800 px-2 py-0.5 rounded-md">
+                  Default: 1111
+                </span>
+              </div>
+              
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+                <div className="relative flex-1">
+                  <input
+                    type={showSystemKeyInModal ? "text" : "password"}
+                    value={systemKeyInput}
+                    onChange={(e) => setSystemKeyInput(e.target.value)}
+                    maxLength={10}
+                    placeholder="1111"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-4 pr-10 py-2 text-xs font-mono font-bold text-white tracking-widest focus:outline-none focus:border-amber-400"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowSystemKeyInModal(!showSystemKeyInModal)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1 cursor-pointer"
+                    title={showSystemKeyInModal ? "Hide Key" : "Show Key"}
+                  >
+                    {showSystemKeyInModal ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleSaveSystemKey}
+                  className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md active:scale-95 flex items-center justify-center space-x-1.5 shrink-0 cursor-pointer"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Update Key</span>
+                </button>
+              </div>
+
+              {keySaveSuccess && (
+                <p className="text-xs font-bold text-emerald-400 flex items-center space-x-1 animate-fadeIn">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>সিস্টেম কি সফলভাবে পরিবর্তন ও সেভ করা হয়েছে!</span>
+                </p>
+              )}
+              <p className="text-[10px] text-slate-400 leading-relaxed">
+                এই System Key ব্যবহার করে সাইডবার থেকে যে কেউ ম্যানেজার মোডে প্রবেশ করতে পারবে।
+              </p>
             </div>
 
             {/* Member Selection Section */}

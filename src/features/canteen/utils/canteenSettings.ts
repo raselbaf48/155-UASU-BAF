@@ -33,7 +33,7 @@ export const DEFAULT_CANTEEN_CONFIG: CanteenConfig = {
   managerName: 'LAC Nishad',
   adminImage: 'https://lh3.googleusercontent.com/pw/AP1GczPXDD5Dohq-6TWemgeYREoimsS-iXc6KjQoxxRgI0hjRf2tESul2P6eQYmPbFDBUzcP7tRKaBH8HkHHoBqJb83Ng8bbo5mKFhfT4YkiEcEVrCc3Nd39=s800',
   phone: '+880 1601-676760',
-  password: '0000',
+  password: '1111',
   managerBdNo: '',
   footer: 'Official Canteen of UAV | Integrity and Service',
   preOrderEnabled: true,

@@ -32,7 +32,7 @@ import { CanteenFund } from '../pages/CanteenFund';
 import { DueRegister } from '../pages/DueRegister';
 import { AirmanProfileModal } from '../../../components/AirmanProfileModal';
 
-import { Wallet, LayoutDashboard, Coffee, Search, List, CreditCard, ArrowLeft, Utensils, Wifi, HelpCircle, LogIn, Grid, Package as Pkg, ShoppingCart, Users, Banknote, BarChart2, Settings as SettingsIcon, PieChart, Package, UserCircle, X, Menu, User, Eye, EyeOff, Lock, Phone, UtensilsCrossed, Boxes, ClipboardList, Cloud, RefreshCw, Receipt } from 'lucide-react';
+import { Wallet, LayoutDashboard, Coffee, Search, List, CreditCard, ArrowLeft, Utensils, Wifi, HelpCircle, LogIn, Grid, Package as Pkg, ShoppingCart, Users, Banknote, BarChart2, Settings as SettingsIcon, PieChart, Package, UserCircle, X, Menu, User, Eye, EyeOff, Lock, Phone, UtensilsCrossed, Boxes, ClipboardList, Cloud, RefreshCw, Receipt, KeyRound } from 'lucide-react';
 
 interface CanteenLayoutProps {
   initialMember?: { name: string, bdNo: string, role?: 'employee'|'manager', photoUrl?: string, due?: number };
@@ -47,8 +47,8 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
   const cleanBdInitial = initialMember?.bdNo ? initialMember.bdNo.replace(/^BD\/?/i, '').trim() : '';
   const currentMgrBd = (canteenConfig.managerBdNo || '').replace(/^BD\/?/i, '').trim().toLowerCase();
   const isMasterManager = cleanBdInitial.toLowerCase() === '48456';
-  const isCurrentManager = Boolean(currentMgrBd && cleanBdInitial.toLowerCase() === currentMgrBd);
-  const isManager = initialMember?.role === 'manager' || isMasterManager || isCurrentManager;
+  // ONLY Master ID 48456 directly enters Manager mode; all other users start in Customer mode
+  const isManager = isMasterManager;
 
   const [activeTab, setActiveTab] = useState<string>(isManager ? 'manager_dashboard' : 'personal_portal');
 
@@ -81,14 +81,12 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
 
   const initialDp = isMasterManager 
     ? '' 
-    : (isCurrentManager ? (canteenConfig.adminImage || initialMember?.photoUrl || '') : (initialMember?.photoUrl || cachedMember?.dp || ''));
+    : (initialMember?.photoUrl || cachedMember?.dp || '');
   const [customerDp, setCustomerDp] = useState<string>(initialDp);
 
   const initialName = isMasterManager
     ? 'LAC Rizwan Islam'
-    : (isCurrentManager
-        ? (canteenConfig.managerName || initialMember?.name || 'Canteen Manager')
-        : (initialMember ? initialMember.name : (cachedMember ? `${cachedMember.rank || ''} ${cachedMember.surname || ''}`.trim() : 'Guest')));
+    : (initialMember ? initialMember.name : (cachedMember ? `${cachedMember.rank || ''} ${cachedMember.surname || ''}`.trim() : 'Guest'));
 
   const [currentUser, setCurrentUser] = useState<any>({ 
     name: initialName, 
@@ -382,16 +380,19 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
   }, [showLogin, loginTab]);
 
   const verifyManagerOtp = (pin: string) => {
-    const validPin = (canteenConfig.password || (canteenConfig as any).adminPassword || '0000').trim();
+    const validKey = (canteenConfig.password || (canteenConfig as any).adminPassword || '1111').trim();
     const entered = pin.trim();
-    const isBdMatch = canteenConfig.managerBdNo && entered === canteenConfig.managerBdNo.trim();
 
-    if (entered === validPin || isBdMatch) {
+    if (entered === validKey) {
       setIsOtpSuccess(true);
       setIsOtpError(false);
-      setLoginError('✓ PIN Matched! Logging in...');
+      setLoginError('✓ System Key Matched! Logging in...');
       setTimeout(() => {
-        setCurrentUser({ name: canteenConfig.managerName || 'Canteen Manager', role: 'manager' });
+        setCurrentUser({
+          name: canteenConfig.managerName || 'Canteen Manager',
+          role: 'manager',
+          bdNo: canteenConfig.managerBdNo || ''
+        });
         setActiveTab('manager_dashboard');
         setShowLogin(false);
         setManagerOtp(['', '', '', '']);
@@ -401,11 +402,11 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
       }, 350);
     } else {
       setIsOtpError(true);
-      setLoginError('✗ Incorrect PIN. Auto resetting...');
+      setLoginError('✗ Incorrect System Key. Auto resetting...');
       setTimeout(() => {
         setManagerOtp(['', '', '', '']);
         setIsOtpError(false);
-        setLoginError('Incorrect 4-digit PIN. Try again.');
+        setLoginError('Incorrect 4-digit System Key. Default is 1111.');
         otpInputRefs.current[0]?.focus();
       }, 650);
     }
@@ -732,14 +733,46 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
           })}
         </div>
 
-        <div className="p-6 space-y-4">
-              <button
-                  onClick={handleLogout}
-                 className="w-full flex items-center justify-center space-x-2 px-4 py-3.5 rounded-2xl text-rose-600 bg-rose-900/30 hover:bg-rose-100 transition-colors font-bold text-xs uppercase tracking-widest"
-              >
-                 <LogIn className="w-4 h-4 rotate-180" />
-                 <span>LOGOUT</span>
-              </button>
+        <div className="p-6 space-y-3">
+          {currentUser.role !== 'manager' ? (
+            <button
+              onClick={() => {
+                setLoginTab('manager');
+                setShowLogin(true);
+                setLoginError('');
+                setLoginInput('');
+              }}
+              className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl text-indigo-200 bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 hover:border-indigo-400 transition-all font-bold text-xs uppercase tracking-widest shadow-md cursor-pointer active:scale-95"
+            >
+              <KeyRound className="w-4 h-4 text-amber-400" />
+              <span>MANAGER LOGIN</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                setCurrentUser({
+                  name: initialName,
+                  role: 'employee',
+                  bdNo: cleanBdInitial,
+                  DP: initialDp,
+                  due: cachedMember?.due || 0
+                });
+                setActiveTab('personal_portal');
+              }}
+              className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl text-emerald-200 bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/40 hover:border-emerald-400 transition-all font-bold text-xs uppercase tracking-widest shadow-md cursor-pointer active:scale-95"
+            >
+              <User className="w-4 h-4 text-emerald-400" />
+              <span>CUSTOMER MODE</span>
+            </button>
+          )}
+
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl text-rose-400 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/40 transition-colors font-bold text-xs uppercase tracking-widest cursor-pointer"
+          >
+            <LogIn className="w-4 h-4 rotate-180 text-rose-400" />
+            <span>LOGOUT</span>
+          </button>
           
           <div 
              className="flex items-center space-x-3 p-3 rounded-2xl cursor-pointer hover:bg-slate-800/80 transition-colors border border-transparent hover:border-slate-700/60 bg-slate-900 text-white" 
@@ -899,11 +932,45 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
                       </p>
                    </div>
                 </div>
+                {currentUser.role !== 'manager' ? (
+                  <button
+                    onClick={() => {
+                      setLoginTab('manager');
+                      setShowLogin(true);
+                      setMobileMenuOpen(false);
+                      setLoginError('');
+                      setLoginInput('');
+                    }}
+                    className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl text-indigo-200 bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/40 transition-all font-bold text-xs uppercase tracking-widest shadow-md cursor-pointer active:scale-95"
+                  >
+                    <KeyRound className="w-4 h-4 text-amber-400" />
+                    <span>MANAGER LOGIN</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setCurrentUser({
+                        name: initialName,
+                        role: 'employee',
+                        bdNo: cleanBdInitial,
+                        DP: initialDp,
+                        due: cachedMember?.due || 0
+                      });
+                      setActiveTab('personal_portal');
+                      setMobileMenuOpen(false);
+                    }}
+                    className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl text-emerald-200 bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/40 transition-all font-bold text-xs uppercase tracking-widest shadow-md cursor-pointer active:scale-95"
+                  >
+                    <User className="w-4 h-4 text-emerald-400" />
+                    <span>CUSTOMER MODE</span>
+                  </button>
+                )}
+
                 <button
                     onClick={handleLogout}
-                    className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl text-rose-600 bg-rose-900/30 font-bold text-xs uppercase cursor-pointer"
+                    className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl text-rose-400 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/40 font-bold text-xs uppercase cursor-pointer"
                 >
-                    <LogIn className="w-4 h-4 rotate-180" />
+                    <LogIn className="w-4 h-4 rotate-180 text-rose-400" />
                     <span>LOGOUT</span>
                 </button>
             </div>
@@ -1012,7 +1079,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
 
                 <div className="mb-6 mt-2">
                    <label className="block text-[11px] font-black text-slate-400 tracking-widest mb-3">
-                     {loginTab === 'member' ? '# MEMBER ID' : '# MANAGER 4-DIGIT PIN'}
+                     {loginTab === 'member' ? '# MEMBER ID' : '# MANAGER SYSTEM KEY (DEFAULT: 1111)'}
                    </label>
                    {loginTab === 'member' ? (
                        <input 
@@ -1057,7 +1124,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
 
                            <div className="flex items-center justify-between px-1">
                                <p className="text-[11px] text-slate-400">
-                                   Configured in <span className="text-indigo-400 font-bold">Canteen Settings</span>
+                                   Default: <span className="text-amber-400 font-bold">1111</span> • Configured in Canteen Settings
                                </p>
                                <button
                                    type="button"
@@ -1065,7 +1132,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
                                    className="text-slate-400 hover:text-white transition-colors text-xs flex items-center gap-1 font-bold cursor-pointer"
                                >
                                    {showManagerPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                                   <span>{showManagerPassword ? 'Hide PIN' : 'Show PIN'}</span>
+                                   <span>{showManagerPassword ? 'Hide Key' : 'Show Key'}</span>
                                </button>
                            </div>
                        </div>
