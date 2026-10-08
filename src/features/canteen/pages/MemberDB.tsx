@@ -1014,7 +1014,7 @@ export const MemberDB: React.FC = () => {
         const methodStr = isCash ? 'Cash' : 'UCB';
         const desc = isReverted 
           ? `Bill Payment (বাতিল / REVERTED) - ${methodStr}`
-          : `Bill Payment - ${methodStr}`;
+          : (tx.items || `Bill Payment - ${methodStr}`);
 
         rows.push({
           rowId: `${tx.id}_pay`,
@@ -1246,6 +1246,8 @@ export const MemberDB: React.FC = () => {
   // Pay Bill Modal state
   const [payBillMember, setPayBillMember] = useState<any | null>(null);
   const [payBillCategory, setPayBillCategory] = useState<'ALL' | 'CANTEEN' | 'UNIT_FUND' | 'OTHERS'>('ALL');
+  const [payBillMonth, setPayBillMonth] = useState<string>(() => getRunningMonthKey());
+  const [payDate, setPayDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [payAmount, setPayAmount] = useState('');
   const [payMethod, setPayMethod] = useState<'CASH' | 'UCB'>('UCB');
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
@@ -1263,6 +1265,9 @@ export const MemberDB: React.FC = () => {
     category: string;
     txId: string;
     date: string;
+    paymentDate?: string;
+    billMonth?: string;
+    lastDateCovered?: string;
     breakdownNote?: string;
   } | null>(null);
 
@@ -1846,9 +1851,91 @@ export const MemberDB: React.FC = () => {
     return profileDue;
   };
 
+  // Helper to determine the last calendar date of a given month key (e.g. '2026-09' -> 30 Sep 2026)
+  const getLastDateOfMonth = (monthKey: string) => {
+    if (!monthKey || monthKey === 'ALL') {
+      const now = new Date();
+      const d = String(now.getDate()).padStart(2, '0');
+      const m = String(now.getMonth() + 1).padStart(2, '0');
+      const y = now.getFullYear();
+      return {
+        dateStr: now.toISOString().split('T')[0],
+        formatted: `${d}/${m}/${y}`,
+        labelBn: 'আজ পর্যন্ত'
+      };
+    }
+    const [yearStr, monthStr] = monthKey.split('-');
+    const year = parseInt(yearStr, 10);
+    const month = parseInt(monthStr, 10);
+    const lastDay = new Date(year, month, 0).getDate();
+    const dStr = String(lastDay).padStart(2, '0');
+    const mStr = String(month).padStart(2, '0');
+    const monthNamesBn = [
+      'জানুয়ারি', 'ফেব্রুয়ারি', 'মার্চ', 'এপ্রিল', 'মে', 'জুন',
+      'জুলাই', 'আগস্ট', 'সেপ্টেম্বর', 'অক্টোবর', 'নভেম্বর', 'ডিসেম্বর'
+    ];
+    const bnName = monthNamesBn[month - 1] || '';
+    return {
+      dateStr: `${year}-${mStr}-${dStr}`,
+      formatted: `${dStr}/${mStr}/${year}`,
+      labelBn: `${toBengaliNum(dStr)} ${bnName} ${toBengaliNum(year)}`
+    };
+  };
+
+  // Helper to calculate Member's accumulated due up to the last date of a selected month
+  const getMemberDueUpToMonth = (member: any, targetMonth: string, category: BillCategory = 'ALL'): number => {
+    if (!member) return 0;
+    const totalCurrentDue = getMemberTotalDue(member, category);
+    if (!targetMonth || targetMonth === 'ALL') {
+      return totalCurrentDue;
+    }
+
+    const memberTxs = filterMemberTxs(member, allTxs);
+    if (memberTxs.length === 0) {
+      return totalCurrentDue;
+    }
+
+    // 1. All charges incurred on or before targetMonth
+    const chargesUpTo = memberTxs.filter((tx) => {
+      const cat = getTxCategory(tx);
+      const catMatch = category === 'ALL' || cat === category;
+      const txMonth = getTxEffectiveMonth(tx);
+      return catMatch && txMonth && txMonth <= targetMonth;
+    });
+    const totalCharges = calculateEffectiveCharges(chargesUpTo);
+
+    // 2. All payments assigned to targetMonth or prior months
+    const paymentsUpTo = memberTxs
+      .filter((tx) => {
+        const isPay = tx.type === 'BILL PAYMENT' && !tx.isReverted && tx.status !== 'REVERTED';
+        if (!isPay) return false;
+        const catMatch = category === 'ALL' || tx.billType === 'ALL' || tx.billType === category || !tx.billType;
+        const payMonth = tx.billMonth || tx.monthKey || getTxEffectiveMonth(tx);
+        return catMatch && payMonth && payMonth <= targetMonth;
+      })
+      .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+    const calculatedDue = Math.max(0, totalCharges - paymentsUpTo);
+    const monthBill = getMemberFilteredBill(member, category, targetMonth);
+
+    // Accumulated due up to target month capped at current ledger balance
+    const effectiveDue = Math.min(totalCurrentDue, Math.max(calculatedDue, monthBill));
+    return effectiveDue;
+  };
+
   const openPayBill = (member: any) => {
     const totalDue = getMemberTotalDue(member, selectedCategory);
     if (totalDue <= 0) return; // Prevent paying if Total Due is Nil
+
+    const defaultMonth = (selectedMonth && selectedMonth !== 'ALL') ? selectedMonth : getRunningMonthKey();
+    setPayBillMonth(defaultMonth);
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    setPayDate(todayStr);
+
+    const monthDue = getMemberDueUpToMonth(member, defaultMonth, selectedCategory);
+    const initialPay = monthDue > 0 ? monthDue : totalDue;
+
     setPayBillMember({
       ...member,
       Due: totalDue,
@@ -1856,7 +1943,7 @@ export const MemberDB: React.FC = () => {
       baki: totalDue
     });
     setPayBillCategory(selectedCategory);
-    setPayAmount(totalDue > 0 ? String(totalDue) : '');
+    setPayAmount(initialPay > 0 ? String(initialPay) : '');
     setPayMethod('UCB');
   };
 
@@ -2482,19 +2569,36 @@ export const MemberDB: React.FC = () => {
       const catLabel = payBillCategory === 'ALL' ? 'ALL BILLS' : payBillCategory.replace('_', ' ');
       const payeeName = `${payBillMember.Rank || payBillMember.rank || ''} ${payBillMember.Surname || payBillMember['Surname'] || payBillMember.name || ''}`.trim();
 
-      const now = new Date();
-      // If paying while filtering by a specific month (e.g. '2026-09'), assign payment directly to that month!
-      const paymentMonthCycle = (selectedMonth && selectedMonth !== 'ALL') ? selectedMonth : getPaymentCycleMonthKey(now);
-      const monthLabelBn = formatBengaliMonthYear(paymentMonthCycle);
-      const paymentItemDesc = `Bill Payment - ${gatewayFormatted} (${monthLabelBn})`;
+      // Resolve selected payment date
+      const payDateObj = (() => {
+        if (payDate && /^\d{4}-\d{2}-\d{2}$/.test(payDate)) {
+          const [y, m, d] = payDate.split('-').map(Number);
+          return new Date(y, m - 1, d, 12, 0, 0);
+        }
+        return new Date();
+      })();
+      const formattedPayDate = formatCanteenDate(payDateObj);
+
+      // Bill month cycle that is being paid for
+      const billMonthCycle = (payBillMonth && payBillMonth !== 'ALL')
+        ? payBillMonth
+        : ((selectedMonth && selectedMonth !== 'ALL') ? selectedMonth : getPaymentCycleMonthKey(payDateObj));
+      const billMonthLabelBn = formatBengaliMonthYear(billMonthCycle);
+      const lastDateInfo = getLastDateOfMonth(billMonthCycle);
+
+      const paymentItemDesc = `Bill Payment - ${gatewayFormatted} (${billMonthLabelBn} বিল | শেষ তারিখ: ${lastDateInfo.formatted} | পরিশোধ: ${formattedPayDate})`;
 
       const tx = {
         id: 'tx-pay-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
-        date: formatCanteenDate(now),
-        created_at: now.toISOString(),
-        createdAt: now.toISOString(),
-        timestamp: now.getTime(),
-        monthKey: paymentMonthCycle,
+        date: formattedPayDate,
+        paymentDate: payDate,
+        billMonth: billMonthCycle,
+        billMonthBn: billMonthLabelBn,
+        lastDateCovered: lastDateInfo.formatted,
+        created_at: payDateObj.toISOString(),
+        createdAt: payDateObj.toISOString(),
+        timestamp: payDateObj.getTime(),
+        monthKey: billMonthCycle,
         airman_id: payBillMember.airman_id,
         bdNo: payBillMember['BD No'] || payBillMember.airman_id,
         memberName: payeeName,
@@ -2537,7 +2641,10 @@ export const MemberDB: React.FC = () => {
         method: isCash ? 'CASH' : 'UCB',
         category: catLabel,
         txId: tx.id,
-        date: tx.date,
+        date: formattedPayDate,
+        paymentDate: formattedPayDate,
+        billMonth: billMonthLabelBn,
+        lastDateCovered: lastDateInfo.labelBn,
         breakdownNote: paymentItemDesc
       });
 
@@ -5070,84 +5177,184 @@ export const MemberDB: React.FC = () => {
       )}
 
       {/* Pay Bill Modal (Direct from card's Right Side "PAY BILL" button) */}
-      {payBillMember && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-in zoom-in-95">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-800 mb-6">
-              <div>
-                <h3 className="text-lg font-black text-white uppercase tracking-tight">SETTLE ACCOUNT</h3>
-                <p className="text-[10px] text-slate-400 uppercase font-bold">{payBillMember['Rank']} {payBillMember['Surname']}</p>
-              </div>
-              <button onClick={() => setPayBillMember(null)} className="text-slate-400 hover:text-white p-1">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      {payBillMember && (() => {
+        const lastDateInfo = getLastDateOfMonth(payBillMonth);
+        const dueUpTo = getMemberDueUpToMonth(payBillMember, payBillMonth, payBillCategory || selectedCategory);
+        const singleMonthBill = (payBillMonth !== 'ALL') ? getMemberFilteredBill(payBillMember, payBillCategory || selectedCategory, payBillMonth) : 0;
+        const totalOverallDue = getMemberTotalDue(payBillMember, payBillCategory || selectedCategory) || payBillMember.Due || payBillMember.baki || 0;
 
-            <div className="text-center mb-6">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Current Due Amount</p>
-              <p className="text-3xl font-black text-rose-500 font-mono">
-                ৳{(getMemberTotalDue(payBillMember, payBillCategory || selectedCategory) || payBillMember.Due || payBillMember.baki || 0).toLocaleString()}
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
-                  Payment Amount (৳)
-                </label>
-                <input 
-                  type="number"
-                  placeholder="0.00"
-                  value={payAmount ?? ""}
-                  onChange={(e) => setPayAmount(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-lg font-black font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
-                  Payment Method
-                </label>
-                <div className="flex space-x-2">
-                  <button 
-                    type="button"
-                    onClick={() => setPayMethod('UCB')}
-                    className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer ${payMethod === 'UCB' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 ring-1 ring-indigo-400' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
-                  >
-                    UCB
-                  </button>
-                  <button 
-                    type="button"
-                    onClick={() => setPayMethod('CASH')}
-                    className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer ${payMethod === 'CASH' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 ring-1 ring-indigo-400' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
-                  >
-                    CASH
-                  </button>
+        return (
+          <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-md shadow-2xl animate-in zoom-in-95">
+              <div className="flex items-center justify-between pb-4 border-b border-slate-800 mb-5">
+                <div>
+                  <h3 className="text-lg font-black text-white uppercase tracking-tight">SETTLE ACCOUNT</h3>
+                  <p className="text-[10px] text-slate-400 uppercase font-bold">{payBillMember['Rank']} {payBillMember['Surname']} (BD/{payBillMember['BD No'] || payBillMember.airman_id})</p>
                 </div>
+                <button onClick={() => setPayBillMember(null)} className="text-slate-400 hover:text-white p-1">
+                  <X className="w-5 h-5" />
+                </button>
               </div>
 
-              <button 
-                type="button"
-                onClick={handleSettleAccount}
-                disabled={isSubmittingPayment || !payAmount || Number(payAmount) <= 0}
-                className="w-full mt-4 py-3.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-500 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white rounded-xl text-xs font-black tracking-widest uppercase transition-all shadow-lg shadow-emerald-950/50 flex items-center justify-center space-x-2 cursor-pointer active:translate-y-0.5"
-              >
-                {isSubmittingPayment ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin text-white" />
-                    <span>Confirming Payment...</span>
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle2 className="w-4 h-4 text-emerald-300" />
-                    <span>CONFIRM PAYMENT</span>
-                  </>
+              {/* Month Selector */}
+              <div className="mb-4">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1.5 flex items-center justify-between">
+                  <span>BILL MONTH (বিলের মাস)</span>
+                  <span className="text-[10px] text-indigo-400 font-mono font-bold">
+                    {lastDateInfo.labelBn}
+                  </span>
+                </label>
+                <select
+                  value={payBillMonth}
+                  onChange={(e) => {
+                    const newMonth = e.target.value;
+                    setPayBillMonth(newMonth);
+                    const newDue = getMemberDueUpToMonth(payBillMember, newMonth, payBillCategory || selectedCategory);
+                    setPayAmount(newDue > 0 ? String(newDue) : String(totalOverallDue || ''));
+                  }}
+                  className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-xs font-bold font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                >
+                  {availableMonths.map((m) => {
+                    const lastD = getLastDateOfMonth(m);
+                    return (
+                      <option key={m} value={m} className="bg-slate-900 text-white">
+                        {formatBengaliMonthYear(m)} ({lastD.formatted} পর্যন্ত বিল)
+                      </option>
+                    );
+                  })}
+                  <option value="ALL" className="bg-slate-900 text-white">
+                    ALL / সর্বমোট বর্তমান বকেয়া (আজ পর্যন্ত)
+                  </option>
+                </select>
+              </div>
+
+              {/* Due Amount Highlight Card */}
+              <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 text-center mb-4 space-y-1">
+                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                  {payBillMonth === 'ALL' 
+                    ? 'সর্বমোট বর্তমান বকেয়া' 
+                    : `${lastDateInfo.labelBn} পর্যন্ত বকেয়া বিল`}
+                </p>
+                <p className="text-3xl font-black text-rose-500 font-mono">
+                  ৳{dueUpTo.toLocaleString()}
+                </p>
+                {singleMonthBill > 0 && singleMonthBill !== dueUpTo && payBillMonth !== 'ALL' && (
+                  <p className="text-[11px] text-slate-400 font-medium">
+                    (শুধু {formatBengaliMonthYear(payBillMonth)} মাসের বিল: <span className="text-amber-400 font-mono font-bold">৳{singleMonthBill.toLocaleString()}</span>)
+                  </p>
                 )}
-              </button>
+                {totalOverallDue !== dueUpTo && (
+                  <p className="text-[10px] text-slate-500 pt-0.5">
+                    মোট সার্বিক বকেয়া (আজ পর্যন্ত): ৳{totalOverallDue.toLocaleString()}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-4">
+                {/* Payment Date Input */}
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                    PAYMENT DATE (পরিশোধের তারিখ)
+                  </label>
+                  <input 
+                    type="date"
+                    value={payDate}
+                    onChange={(e) => setPayDate(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <p className="text-[10px] text-emerald-400/90 font-medium mt-1">
+                    পরিশোধ হিসেবে রেকর্ড হবে: {(() => {
+                      if (payDate && /^\d{4}-\d{2}-\d{2}$/.test(payDate)) {
+                        const [y, m, d] = payDate.split('-').map(Number);
+                        return formatCanteenDate(new Date(y, m - 1, d, 12, 0, 0));
+                      }
+                      return formatCanteenDate(new Date());
+                    })()}
+                  </p>
+                </div>
+
+                {/* Payment Amount Input & Quick Fill Pills */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">
+                      PAYMENT AMOUNT (৳)
+                    </label>
+                    <div className="flex gap-1.5">
+                      {dueUpTo > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setPayAmount(String(dueUpTo))}
+                          className="text-[10px] px-2 py-0.5 rounded-md bg-indigo-600/30 text-indigo-300 hover:bg-indigo-600/50 font-mono font-bold"
+                        >
+                          বকেয়া ৳{dueUpTo}
+                        </button>
+                      )}
+                      {singleMonthBill > 0 && singleMonthBill !== dueUpTo && (
+                        <button
+                          type="button"
+                          onClick={() => setPayAmount(String(singleMonthBill))}
+                          className="text-[10px] px-2 py-0.5 rounded-md bg-amber-600/30 text-amber-300 hover:bg-amber-600/50 font-mono font-bold"
+                        >
+                          মাসিক ৳{singleMonthBill}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <input 
+                    type="number"
+                    placeholder="0.00"
+                    value={payAmount ?? ""}
+                    onChange={(e) => setPayAmount(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-lg font-black font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                {/* Payment Method */}
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                    PAYMENT METHOD
+                  </label>
+                  <div className="flex space-x-2">
+                    <button 
+                      type="button"
+                      onClick={() => setPayMethod('UCB')}
+                      className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer ${payMethod === 'UCB' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 ring-1 ring-indigo-400' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
+                    >
+                      UCB
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={() => setPayMethod('CASH')}
+                      className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer ${payMethod === 'CASH' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 ring-1 ring-indigo-400' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
+                    >
+                      CASH
+                    </button>
+                  </div>
+                </div>
+
+                <button 
+                  type="button"
+                  onClick={handleSettleAccount}
+                  disabled={isSubmittingPayment || !payAmount || Number(payAmount) <= 0}
+                  className="w-full mt-4 py-3.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-500 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white rounded-xl text-xs font-black tracking-widest uppercase transition-all shadow-lg shadow-emerald-950/50 flex items-center justify-center space-x-2 cursor-pointer active:translate-y-0.5"
+                >
+                  {isSubmittingPayment ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span>Confirming Payment...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-emerald-300" />
+                      <span>CONFIRM PAYMENT</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Dynamic Payment Success Confirmation Modal with Celebration Animation */}
       {paymentSuccessData && (
@@ -5304,10 +5511,24 @@ export const MemberDB: React.FC = () => {
                 </span>
               </div>
 
+              {/* Bill Month & Payment Date Breakdown */}
+              <div className="flex items-center justify-between pt-1 border-t border-slate-800/60 text-xs">
+                <span className="text-slate-400">Bill Month (বিলের মাস):</span>
+                <span className="font-bold text-indigo-300 font-mono">
+                  {paymentSuccessData.billMonth} {paymentSuccessData.lastDateCovered ? `(${paymentSuccessData.lastDateCovered})` : ''}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400">Payment Date (পরিশোধের তারিখ):</span>
+                <span className="font-bold text-emerald-400 font-mono">
+                  {paymentSuccessData.paymentDate || paymentSuccessData.date}
+                </span>
+              </div>
+
               {/* Transaction Reference & Date */}
               <div className="flex items-center justify-between pt-1.5 border-t border-slate-800/80 text-[10px] text-slate-500 font-mono">
                 <span>TX: {paymentSuccessData.txId.slice(0, 14)}...</span>
-                <span>{paymentSuccessData.date}</span>
+                <span>{paymentSuccessData.paymentDate || paymentSuccessData.date}</span>
               </div>
             </div>
 

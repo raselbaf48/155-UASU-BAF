@@ -579,7 +579,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
     { id: 'expenditures', name: 'Expense Register', icon: Banknote },
     { id: 'reports', name: 'Reports', icon: PieChart },
     { id: 'fund', name: 'Capital', icon: Wallet },
-    { id: 'raw_distribution', name: i18n.language === 'bn' ? 'কাঁচামাল বণ্টন (২০ জন)' : 'Raw Distribute (20 Pax)', icon: ChefHat },
+    { id: 'raw_distribution', name: 'Recipe Formulation', icon: ChefHat },
   ] : [
     { id: 'dashboard', name: 'Home', icon: Grid },
     { id: 'personal_portal', name: 'Personal Portal', icon: UserCircle },

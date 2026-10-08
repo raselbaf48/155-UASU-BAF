@@ -32,6 +32,11 @@ import {
   isReadymadeItem
 } from '../utils/recipeManager';
 import {
+  get20PaxRecipes,
+  calculateMenuPortionCostFrom20Pax,
+  Recipe20PaxMap
+} from './RawDistributionPage';
+import {
   getMenuItemBanglaName,
   saveMenuItemBanglaName,
   fetchMenuBanglaNamesFromCloud
@@ -105,6 +110,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
 
   // Recipe & Raw Inventory states
   const [recipes, setRecipes] = useState<Record<string, RecipeIngredient[]>>(() => getMenuRecipes());
+  const [recipes20Pax, setRecipes20Pax] = useState<Recipe20PaxMap>(() => get20PaxRecipes());
   const [availableRawItems, setAvailableRawItems] = useState<RawInventoryItem[]>(() => getRawInventoryItems());
   const [itemRecipe, setItemRecipe] = useState<RecipeIngredient[]>([]);
   const [showCostAndRawItem, setShowCostAndRawItem] = useState(false);
@@ -406,24 +412,19 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       setResolvingModalDp(false);
     }
 
-    const sanitizedRecipe = modalRecipe.map(r => ({
-      ...r,
-      quantity: (r.quantity !== '' && r.quantity !== undefined && !isNaN(Number(r.quantity))) ? Number(r.quantity) : 0
-    }));
-    const finalRecipe = sanitizedRecipe;
-    const modalRecipeCost = calculateMenuItemCost(finalRecipe, availableRawItems).totalCost;
-    const parsedCost = finalRecipe.length > 0 
-      ? modalRecipeCost 
+    const formulationCost = calculateMenuPortionCostFrom20Pax(
+      { id: selectedItemForModal.id, name: modalFormData.name },
+      recipes20Pax,
+      availableRawItems
+    );
+    const parsedCost = formulationCost > 0 
+      ? formulationCost 
       : (Number(modalFormData.cost) >= 0 ? Number(modalFormData.cost) : 0);
-    const rawItemValue = finalRecipe.length > 0
-      ? formatRecipeRawItemsString(finalRecipe, availableRawItems)
-      : (modalFormData.rawItem !== undefined ? modalFormData.rawItem.trim() : '');
     const payload: any = {
       name: modalFormData.name.trim(),
       category: modalFormData.category,
       price: parsedPrice,
       Cost: parsedCost,
-      'Raw Item': rawItemValue,
       DP: finalDp || null
     };
 
@@ -452,12 +453,8 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       ...payload,
       nameBn: modalFormData.nameBn?.trim(),
       name_bn: modalFormData.nameBn?.trim(),
-      cost: parsedCost,
-      rawItem: rawItemValue
+      cost: parsedCost
     } : i));
-
-    saveRecipeForMenuItem(selectedItemForModal.id, finalRecipe, modalFormData.name.trim());
-    setRecipes(getMenuRecipes());
 
     setIsSavedModal(true);
     setTimeout(() => {
@@ -470,14 +467,21 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
 
   // Sync recipes and raw inventory
   useEffect(() => {
-    const handleSync = () => {
+    const handleSync = (e?: any) => {
       setRecipes(getMenuRecipes());
       setAvailableRawItems(getRawInventoryItems());
+      if (e?.detail && typeof e.detail === 'object') {
+        setRecipes20Pax(e.detail);
+      } else {
+        setRecipes20Pax(get20PaxRecipes());
+      }
     };
+    window.addEventListener('canteen_recipes_20pax_updated', handleSync);
     window.addEventListener('canteen_menu_recipes_updated', handleSync);
     window.addEventListener('canteen_raw_inventory_updated', handleSync);
     window.addEventListener('storage', handleSync);
     return () => {
+      window.removeEventListener('canteen_recipes_20pax_updated', handleSync);
       window.removeEventListener('canteen_menu_recipes_updated', handleSync);
       window.removeEventListener('canteen_raw_inventory_updated', handleSync);
       window.removeEventListener('storage', handleSync);
@@ -882,9 +886,9 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
          {filteredItems.map(item => {
             const itemRecipe = getRecipeForMenuItem(item.id, item.name, recipes);
-            const costRes = calculateMenuItemCost(itemRecipe, availableRawItems);
             const stockInfo = calculateMenuItemStockInfo(item.id, item.name, availableRawItems, recipes);
-            const displayCost = itemRecipe.length > 0 ? costRes.totalCost : Number(item.Cost ?? item.cost ?? 0);
+            // Realtime cost calculated directly from Recipe Formulation (20 Pax)
+            const displayCost = calculateMenuPortionCostFrom20Pax(item, recipes20Pax, availableRawItems);
             const priceNum = Number(item.price) || 0;
             const profit = priceNum - displayCost;
             const profitPct = priceNum > 0 ? Math.round((profit / priceNum) * 100) : (profit > 0 ? 100 : (profit < 0 ? -100 : 0));
@@ -930,7 +934,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                            </span>
                            <div className="flex items-center space-x-1 text-slate-400 text-xs">
                               <ChefHat className="w-3.5 h-3.5 text-indigo-400" />
-                              <span>{itemRecipe.length > 0 ? `${itemRecipe.length} উপকরণ` : "রেসিপি নেই"}</span>
+                              <span>{displayCost > 0 ? "Recipe Formula (20 Pax)" : "রেসিপি নেই"}</span>
                            </div>
                         </div>
                      </div>
@@ -1073,7 +1077,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                      }`}
                   >
                      <Edit2 className="w-3.5 h-3.5" />
-                     <span>Details & Recipe</span>
+                     <span>Details & Pricing</span>
                   </button>
 
                   <button
@@ -1210,18 +1214,11 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
 
                            {/* Financial Summary */}
                            {(() => {
-                              const calcCost = calculateMenuItemCost(modalRecipe.map(ing => {
-                                  const r = availableRawItems.find(raw => raw.id === ing.rawItemId);
-                                  const sub = r ? getRawItemSubUnitInfo(r) : null;
-                                  const valid = [
-                                     ...(sub && sub.hasSubUnit && sub.subUnit ? [sub.subUnit.toLowerCase()] : []),
-                                     ...(r && r.unit ? [r.unit.toLowerCase()] : [])
-                                  ];
-                                  const safeUnit = (valid.length > 0 && valid.some(u => u === (ing.unit || '').toLowerCase()))
-                                     ? ing.unit
-                                     : (sub && sub.hasSubUnit && sub.subUnit ? sub.subUnit : (r?.unit || ing.unit || 'pcs'));
-                                  return { ...ing, unit: safeUnit };
-                               }), availableRawItems).totalCost;
+                              const calcCost = calculateMenuPortionCostFrom20Pax(
+                                 { id: selectedItemForModal.id, name: modalFormData.name || selectedItemForModal.name, cost: modalFormData.cost },
+                                 recipes20Pax,
+                                 availableRawItems
+                              );
                               const selling = Number(modalFormData.price) || 0;
                               const profit = selling - calcCost;
                               const marginPct = selling > 0 ? ((profit / selling) * 100).toFixed(1) : "0";
@@ -1233,7 +1230,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                                        <span className="text-sm font-black text-white font-mono">৳{selling}</span>
                                     </div>
                                     <div>
-                                       <span className="text-[10px] font-bold text-slate-400 block">COST</span>
+                                       <span className="text-[10px] font-bold text-slate-400 block">COST (20 PAX)</span>
                                        <span className="text-sm font-black text-amber-400 font-mono">৳{calcCost.toFixed(1)}</span>
                                     </div>
                                     <div>
@@ -1302,123 +1299,74 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                            })()}
                         </div>
 
-                        {/* Right: Recipe Ingredients Editor */}
+                        {/* Right: Recipe Formulation & Cost Info */}
                         <div className="space-y-4">
-                           <div className="flex items-center justify-between">
-                              <h4 className="text-xs font-black text-amber-400 uppercase tracking-wider flex items-center space-x-1.5">
-                                 <ChefHat className="w-4 h-4" />
-                                 <span>Ingredients ({modalRecipe.length})</span>
-                              </h4>
+                           <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-5 space-y-4">
+                              <div className="flex items-center space-x-2.5 text-emerald-400">
+                                 <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                                    <ChefHat className="w-5 h-5 text-emerald-400" />
+                                 </div>
+                                 <div>
+                                    <h4 className="text-xs font-black uppercase tracking-wider text-white">
+                                       Recipe Formulation
+                                    </h4>
+                                    <p className="text-[10px] text-slate-400">
+                                       Standard 20-portion production matrix
+                                    </p>
+                                 </div>
+                              </div>
 
-                              <button
-                                 type="button"
-                                 onClick={handleAddModalIngredientRow}
-                                 className="flex items-center space-x-1 px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                              >
-                                 <Plus className="w-3.5 h-3.5" />
-                                 <span>Add Ingredient</span>
-                              </button>
+                              {(() => {
+                                 const displayModalCost = calculateMenuPortionCostFrom20Pax(
+                                    { id: selectedItemForModal.id, name: modalFormData.name || selectedItemForModal.name },
+                                    recipes20Pax,
+                                    availableRawItems
+                                 );
+                                 const p = Number(modalFormData.price) || 0;
+                                 const profit = p - displayModalCost;
+                                 const marginPct = p > 0 ? Math.round((profit / p) * 100) : 0;
+
+                                 return (
+                                    <>
+                                       <div className="bg-slate-900/90 p-4 rounded-xl border border-slate-800 flex items-center justify-between">
+                                          <div className="space-y-0.5">
+                                             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                                                Live Portion Ready Cost (খরচ)
+                                             </span>
+                                             <span className="text-2xl font-black font-mono text-emerald-400">
+                                                ৳{displayModalCost.toFixed(1)}
+                                             </span>
+                                          </div>
+                                          <div className="text-right space-y-0.5">
+                                             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                                                Selling Price (মূল্য)
+                                             </span>
+                                             <span className="text-2xl font-black font-mono text-white">
+                                                ৳{p}
+                                             </span>
+                                          </div>
+                                       </div>
+
+                                       <div className="p-3 bg-indigo-950/40 border border-indigo-500/30 rounded-xl space-y-1 text-xs text-indigo-200">
+                                          <div className="flex items-center space-x-1.5 font-bold text-indigo-300">
+                                             <Info className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                                             <span>Real-time Cost Synchronization</span>
+                                          </div>
+                                          <p className="text-[11px] text-slate-400 leading-relaxed">
+                                             All raw material ingredients and 20-portion cooking formulas are centralized in <strong>Recipe Formulation</strong>. Whenever ingredient quantities or inventory rates change, this ready cost updates automatically in real-time.
+                                          </p>
+                                       </div>
+
+                                       <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between">
+                                          <span className="text-xs font-bold text-slate-300">Estimated Gross Margin:</span>
+                                          <span className={`font-mono font-bold text-xs ${profit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                             ৳{profit.toFixed(1)} ({marginPct}%)
+                                          </span>
+                                       </div>
+                                    </>
+                                 );
+                              })()}
                            </div>
-
-                           {modalRecipe.length === 0 ? (
-                              <div className="bg-slate-950/60 border border-dashed border-slate-800 rounded-2xl p-8 text-center">
-                                 <ChefHat className="w-8 h-8 text-slate-600 mx-auto mb-2" />
-                                 <p className="text-xs font-bold text-slate-500">No ingredients added</p>
-                              </div>
-                           ) : (
-                              <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-                                 {modalRecipe.map((ing, idx) => {
-                                     const itemRaw = availableRawItems.find(r => r.id === ing.rawItemId);
-                                     const subInfo = itemRaw ? getRawItemSubUnitInfo(itemRaw) : null;
-                                     const unitOptions: string[] = [];
-                                     if (subInfo && subInfo.hasSubUnit && subInfo.subUnit) {
-                                        unitOptions.push(subInfo.subUnit);
-                                     }
-                                     if (itemRaw && itemRaw.unit && !unitOptions.includes(itemRaw.unit)) {
-                                        unitOptions.push(itemRaw.unit);
-                                     }
-
-                                     const currentUnit = (unitOptions.length > 0 && unitOptions.some(u => u.toLowerCase() === (ing.unit || '').toLowerCase()))
-                                        ? ing.unit
-                                        : (subInfo && subInfo.hasSubUnit && subInfo.subUnit ? subInfo.subUnit : (itemRaw?.unit || ing.unit || 'pcs'));
-
-                                     const ratio = itemRaw ? getIngredientToInventoryRatio(itemRaw, currentUnit) : 1;
-                                     const effectiveCost = itemRaw ? getEffectiveRawUnitCost(itemRaw) : 0;
-                                     const effectiveUnitPrice = ratio > 0 ? (effectiveCost / ratio) : effectiveCost;
-                                     const rowCost = (Number(ing.quantity) || 0) * effectiveUnitPrice;
-
-                                     return (
-                                        <div key={idx} className="bg-slate-950/80 border border-slate-800/80 rounded-2xl p-2.5 flex items-center gap-2">
-                                           {/* Compact Ingredient Select Box */}
-                                           <div className="flex-1 min-w-0">
-                                              <select
-                                                 value={ing.rawItemId ?? ""}
-                                                 onChange={(e) => handleModalIngredientRawChange(idx, e.target.value)}
-                                                 className="w-full bg-slate-900 border border-slate-700/80 text-white rounded-xl px-2.5 py-2 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500 truncate"
-                                              >
-                                                 <option value="" disabled className="bg-slate-900 text-slate-400">
-                                                    -- Select Ingredient --
-                                                 </option>
-                                                 {availableRawItems.map((r, rIdx) => (
-                                                    <option key={`${r.id}_${rIdx}`} value={r.id} className="bg-slate-900 text-white">
-                                                       {r.name}{r.nameBn && r.nameBn !== r.name ? ` (${r.nameBn})` : ''}
-                                                    </option>
-                                                 ))}
-                                              </select>
-                                           </div>
-
-                                           {/* Compact Qty Box */}
-                                           <div className="w-14 shrink-0">
-                                              <input 
-                                                 type="number"
-                                                 step="any"
-                                                 value={ing.quantity ?? ""}
-                                                 onChange={(e) => handleModalIngredientQtyChange(idx, e.target.value)}
-                                                 className="w-full bg-slate-900 border border-slate-700/80 text-white rounded-xl px-1.5 py-2 text-xs font-mono font-bold text-center focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                                                 placeholder="Qty"
-                                              />
-                                           </div>
-
-                                           {/* Compact Unit Badge / Select (Subunit Priority) */}
-                                           <div className="shrink-0">
-                                              {unitOptions.length <= 1 ? (
-                                                 <span className="inline-block px-2 py-2 rounded-xl bg-indigo-950/60 border border-indigo-500/30 text-[11px] font-mono font-bold text-indigo-300 min-w-[42px] text-center">
-                                                    {currentUnit}
-                                                 </span>
-                                              ) : (
-                                                 <select
-                                                    value={currentUnit}
-                                                    onChange={(e) => handleModalIngredientUnitChange(idx, e.target.value)}
-                                                    className="bg-indigo-950/70 border border-indigo-500/40 text-[11px] font-mono font-bold text-indigo-300 rounded-xl px-2 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
-                                                 >
-                                                    {unitOptions.map(u => (
-                                                       <option key={u} value={u} className="bg-slate-900 text-white font-mono">{u}</option>
-                                                    ))}
-                                                 </select>
-                                              )}
-                                           </div>
-
-                                           {/* Row Cost */}
-                                           <div className="text-right shrink-0 min-w-[50px] pr-1">
-                                              <span className="text-xs font-mono font-black text-amber-400 block">
-                                                 ৳{rowCost.toFixed(1)}
-                                              </span>
-                                           </div>
-
-                                           {/* Delete Button */}
-                                           <button
-                                              type="button"
-                                              onClick={() => handleRemoveModalIngredientRow(idx)}
-                                              className="p-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-xl transition-colors cursor-pointer shrink-0"
-                                              title="Remove ingredient"
-                                           >
-                                              <Trash2 className="w-3.5 h-3.5" />
-                                           </button>
-                                        </div>
-                                     );
-                                  })}
-                              </div>
-                           )}
                         </div>
                      </div>
                   ) : (
