@@ -140,20 +140,26 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
 
     const handleStorage = (e: StorageEvent) => {
       if (e.key === 'canteen_settings') {
-        setCanteenConfig(getCanteenConfig());
+        setTimeout(() => {
+          setCanteenConfig(getCanteenConfig());
+        }, 0);
       }
     };
     const handleSettingsUpdated = (e: any) => {
-      if (e.detail) {
-        setCanteenConfig(e.detail);
-      } else {
-        setCanteenConfig(getCanteenConfig());
-      }
+      setTimeout(() => {
+        if (e.detail) {
+          setCanteenConfig(e.detail);
+        } else {
+          setCanteenConfig(getCanteenConfig());
+        }
+      }, 0);
     };
     const handleCloudSyncStatus = (e: any) => {
-      if (e.detail) {
-        setCloudSyncStatus(e.detail);
-      }
+      setTimeout(() => {
+        if (e.detail) {
+          setCloudSyncStatus(e.detail);
+        }
+      }, 0);
     };
 
     window.addEventListener('storage', handleStorage);

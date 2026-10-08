@@ -10,7 +10,7 @@ import {
 import { 
   getCanteenConfig, saveCanteenConfig, resolveImageUrl, 
   fetchCanteenConfigFromCloud, checkPreOrderWindow, CanteenConfig,
-  ItemDisplayLanguage
+  ItemDisplayLanguage, checkAndEnforceDailyMenuReset
 } from '../utils/canteenSettings';
 import { pullAllCanteenDataFromCloud } from '../utils/canteenCloudSync';
 import { getCanteenMembersCache, fetchCanteenMembersOnce } from '../utils/canteenMenuData';
@@ -67,6 +67,32 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
   const [settings, setSettings] = useState<CanteenConfig>(() => getCanteenConfig());
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [resetSuccess, setResetSuccess] = useState(false);
+  const [dhakaTime, setDhakaTime] = useState(() => {
+    try {
+      return new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Dhaka', hour: 'numeric', minute: 'numeric', second: 'numeric', hour12: true }).format(new Date());
+    } catch {
+      return new Date().toLocaleTimeString();
+    }
+  });
+
+  useEffect(() => {
+    const clockTimer = setInterval(() => {
+      try {
+        setDhakaTime(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Dhaka', hour: 'numeric', minute: 'numeric', second: 'numeric', hour12: true }).format(new Date()));
+      } catch {
+        setDhakaTime(new Date().toLocaleTimeString());
+      }
+    }, 1000);
+    return () => clearInterval(clockTimer);
+  }, []);
+
+  const handleManualResetNow = () => {
+    if (!window.confirm('আপনি কি নিশ্চিত যে এখনই আজকের কিউরেটেড মেনু এবং প্রি-অর্ডার সম্পূর্ণ রিসেট করতে চান?')) return;
+    checkAndEnforceDailyMenuReset(true, settings);
+    setResetSuccess(true);
+    setTimeout(() => setResetSuccess(false), 3500);
+  };
 
   // Cloud Sync state
   const [lastSyncedTime, setLastSyncedTime] = useState<string>(() => new Date().toLocaleTimeString());
@@ -955,168 +981,225 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
                 );
               })()}
 
-              {/* 1. DAILY AUTO-RESET TIME (স্বয়ংক্রিয় রিসেট সময় - মেনু ও প্রি-অর্ডার) */}
-              <div className="bg-slate-950/80 p-6 sm:p-7 rounded-3xl border border-indigo-500/30 shadow-lg space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              {/* 1. PRE-ORDER ACTIVE TIMING (মেম্বারদের প্রি-অর্ডার শুরু ও শেষ সময়) */}
+              <div className="bg-slate-950/80 p-6 sm:p-7 rounded-3xl border border-indigo-500/30 shadow-lg space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
                   <div>
                     <label className="text-sm font-black text-indigo-400 uppercase tracking-wider flex items-center space-x-2">
-                      <RotateCcw className="w-4 h-4 text-indigo-400" />
-                      <span>DAILY AUTO-RESET TIME (স্বয়ংক্রিয় রিসেট সময়)</span>
+                      <Clock className="w-4 h-4 text-indigo-400" />
+                      <span>PRE-ORDER ACTIVE TIMING (মেম্বারদের প্রি-অর্ডার উন্মুক্ত সময়)</span>
                     </label>
                     <p className="text-xs text-slate-400 mt-1">
-                      প্রতিদিন এই সময়ে কিউরেটেড মেনু এবং জমাকৃত সমস্ত প্রি-অর্ডার স্বয়ংক্রিয়ভাবে রিসেট হয়ে শূন্য (Reset) হয়ে যাবে।
+                      এই নির্ধারিত সময়ে সাধারণ মেম্বাররা তাদের পোর্টালে মেনু দেখতে পারবে এবং প্রি-অর্ডার করতে পারবে। সময় শেষ হলে মেম্বারদের জন্য প্রি-অর্ডার বন্ধ হয়ে যাবে ও মেনু আড়াল থাকবে (ম্যানেজার ড্যাশবোর্ড থেকে দেখতে ও ম্যানুয়াল প্রি-অর্ডার নিতে পারবেন)।
                     </p>
                   </div>
-                  <div className="px-3.5 py-1.5 bg-indigo-500/20 border border-indigo-500/40 rounded-xl text-xs font-black text-indigo-300 self-start sm:self-auto font-mono">
-                    সক্রিয় রিসেট: {settings.dailyResetTime || '15:00'}
+                  <div className="flex items-center gap-2 self-start sm:self-auto">
+                    <span className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs font-mono font-bold text-emerald-400 flex items-center gap-1.5 shadow-inner">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                      <span>ঢাকা সময়: {dhakaTime}</span>
+                    </span>
+                    <span className="px-3 py-1.5 bg-indigo-500/20 border border-indigo-500/40 rounded-xl text-xs font-black text-indigo-300 font-mono">
+                      মেম্বার উইন্ডো: {settings.preOrderStartTime || '18:00'} - {settings.preOrderEndTime || '08:00'}
+                    </span>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center pt-2">
-                  <div className="space-y-1.5">
-                    <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest block">
-                      রিসেট সময় নির্ধারণ করুন (SELECT RESET TIME)
+                {/* Timing Inputs (Start and End) */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-2 bg-slate-900/60 p-5 rounded-2xl border border-slate-800/80">
+                    <label className="text-xs font-black text-emerald-400 uppercase tracking-wider flex items-center space-x-1.5">
+                      <Clock className="w-4 h-4" />
+                      <span>PRE-ORDER START TIME (কখন থেকে শুরু হবে)</span>
                     </label>
+                    <p className="text-[11px] text-slate-400 font-medium">
+                      এই নির্ধারিত সময়ে সাধারণ মেম্বারদের জন্য প্রি-অর্ডার মেনু উন্মুক্ত হবে।
+                    </p>
                     <input
                       type="time"
-                      value={settings.dailyResetTime || '15:00'}
+                      value={settings.preOrderStartTime || '18:00'}
+                      onChange={(e) => {
+                        const updated = { ...settings, preOrderStartTime: e.target.value };
+                        setSettings(updated);
+                        saveCanteenConfig(updated);
+                      }}
+                      className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded-2xl px-5 py-3.5 text-base font-bold text-white outline-none transition-all shadow-inner font-mono"
+                    />
+                  </div>
+
+                  <div className="space-y-2 bg-slate-900/60 p-5 rounded-2xl border border-slate-800/80">
+                    <label className="text-xs font-black text-amber-400 uppercase tracking-wider flex items-center space-x-1.5">
+                      <Clock className="w-4 h-4" />
+                      <span>PRE-ORDER END TIME (কখন মেম্বার প্রি-অর্ডার বন্ধ হবে)</span>
+                    </label>
+                    <p className="text-[11px] text-slate-400 font-medium">
+                      এই সময়ে সাধারণ মেম্বারদের প্রি-অর্ডার বন্ধ হবে ও মেনু আড়াল থাকবে (ম্যানেজার দেখতে পাবেন)।
+                    </p>
+                    <input
+                      type="time"
+                      value={settings.preOrderEndTime || '08:00'}
+                      onChange={(e) => {
+                        const updated = { ...settings, preOrderEndTime: e.target.value };
+                        setSettings(updated);
+                        saveCanteenConfig(updated);
+                      }}
+                      className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-2xl px-5 py-3.5 text-base font-bold text-white outline-none transition-all shadow-inner font-mono"
+                    />
+                  </div>
+                </div>
+
+                {/* Shift Presets */}
+                <div className="space-y-2.5 pt-1">
+                  <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest block">
+                    কুইক প্রি-অর্ডার শিডিউল প্রিসেট (PRE-ORDER TIMING PRESETS)
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                    {[
+                      { label: 'Morning & Lunch', start: '08:00', end: '14:00' },
+                      { label: 'Full Day Regular', start: '08:00', end: '16:00' },
+                      { label: 'Extended Daytime', start: '08:00', end: '18:00' },
+                      { label: 'Overnight Shift', start: '18:00', end: '08:00' },
+                      { label: 'Evening Snacks', start: '16:00', end: '21:00' },
+                      { label: 'Night Shift', start: '20:00', end: '08:00' }
+                    ].map((p, idx) => {
+                      const isSelected = (settings.preOrderStartTime || '18:00') === p.start && (settings.preOrderEndTime || '08:00') === p.end;
+                      return (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => {
+                            const updated = { 
+                              ...settings, 
+                              preOrderStartTime: p.start, 
+                              preOrderEndTime: p.end, 
+                              preOrderEnabled: true 
+                            };
+                            setSettings(updated);
+                            saveCanteenConfig(updated);
+                            showSavedFeedback();
+                          }}
+                          className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
+                            isSelected 
+                              ? 'bg-emerald-950/70 border-emerald-500 text-emerald-300 shadow-md shadow-emerald-950/50 ring-1 ring-emerald-500/40' 
+                              : 'bg-slate-900/60 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-850'
+                          }`}
+                        >
+                          <p className="text-xs font-bold truncate">{p.label}</p>
+                          <p className="text-[10px] font-mono text-slate-400 mt-0.5">{p.start} - {p.end}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. DAILY MENU & DASHBOARD AUTO-RESET (মেনু ও লাইভ প্রি-অর্ডার স্বয়ংক্রিয় রিসেট সময়) */}
+              <div className="bg-slate-950/80 p-6 sm:p-7 rounded-3xl border border-rose-500/30 shadow-lg space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+                  <div>
+                    <label className="text-sm font-black text-rose-400 uppercase tracking-wider flex items-center space-x-2">
+                      <RotateCcw className="w-4 h-4 text-rose-400" />
+                      <span>DAILY MENU & DASHBOARD AUTO-RESET (স্বয়ংক্রিয় মেনু ও প্রি-অর্ডার রিসেট সময়)</span>
+                    </label>
+                    <p className="text-xs text-slate-400 mt-1">
+                      প্রতিদিন এই নির্ধারিত সময়ে ম্যানেজারের ড্যাশবোর্ড থেকে কিউরেটেড মেনু এবং লাইভ প্রি-অর্ডারের তালিকা সম্পূর্ণ রিসেট হয়ে খালি হবে। (যেসব প্রি-অর্ডার Complete করা হয়েছে সেগুলোর বিল ও ট্রানজাকশন মেম্বারের একাউন্টে সম্পূর্ণ সংরক্ষিত থাকবে)।
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 self-start sm:self-auto">
+                    <span className="px-3 py-1.5 bg-rose-500/20 border border-rose-500/40 rounded-xl text-xs font-black text-rose-300 font-mono">
+                      রিসেট সময়: {settings.dailyResetTime || '16:00'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+                  <div className="space-y-2 bg-slate-900/60 p-5 rounded-2xl border border-slate-800/80">
+                    <label className="text-xs font-black text-rose-400 uppercase tracking-wider flex items-center space-x-1.5">
+                      <RotateCcw className="w-4 h-4" />
+                      <span>DAILY RESET TIME (দৈনিক মেনু অটো-রিসেট সময়)</span>
+                    </label>
+                    <p className="text-[11px] text-slate-400 font-medium">
+                      এই সময়ে ম্যানেজারের কিউরেটেড মেনু এবং লাইভ প্রি-অর্ডার তালিকা রিসেট হয়ে খালি হবে।
+                    </p>
+                    <input
+                      type="time"
+                      value={settings.dailyResetTime || '16:00'}
                       onChange={(e) => {
                         const updated = { ...settings, dailyResetTime: e.target.value };
                         setSettings(updated);
                         saveCanteenConfig(updated);
                       }}
-                      className="w-full bg-slate-900 border border-slate-700 focus:border-indigo-500 rounded-2xl px-5 py-3.5 text-base font-bold text-white outline-none transition-all shadow-inner"
+                      className="w-full bg-slate-950 border border-slate-700 focus:border-rose-500 rounded-2xl px-5 py-3.5 text-base font-bold text-white outline-none transition-all shadow-inner font-mono"
                     />
                   </div>
 
-                  <div className="space-y-1.5">
+                  <div className="space-y-2.5">
                     <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest block">
-                      কুইক রিসেট প্রিসেট (QUICK PRESETS)
+                      কুইক রিসেট সময় প্রিসেট (RESET TIME PRESETS)
                     </label>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                      {[
-                        { label: '3:00 PM (বিকেল ৩টা)', time: '15:00' },
-                        { label: '4:00 PM (বিকেল ৪টা)', time: '16:00' },
-                        { label: '2:00 PM (দুপুর ২টা)', time: '14:00' },
-                        { label: '12:00 PM (দুপুর ১২টা)', time: '12:00' },
-                        { label: '3:00 AM (ভোর ৩টা)', time: '03:00' },
-                        { label: '11:59 PM (রাত ১২টা)', time: '23:59' },
-                      ].map((preset) => {
-                        const isSelected = (settings.dailyResetTime || '15:00') === preset.time;
+                    <div className="grid grid-cols-3 gap-2">
+                      {['03:00', '08:00', '14:00', '16:00', '18:00', '23:59'].map((rTime, idx) => {
+                        const isSelected = (settings.dailyResetTime || '16:00') === rTime;
                         return (
                           <button
-                            key={preset.time}
+                            key={idx}
                             type="button"
                             onClick={() => {
-                              const updated = { ...settings, dailyResetTime: preset.time };
+                              const updated = { ...settings, dailyResetTime: rTime };
                               setSettings(updated);
                               saveCanteenConfig(updated);
                               showSavedFeedback();
                             }}
-                            className={`p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer text-left ${
+                            className={`py-2 px-3 rounded-xl border text-center transition-all cursor-pointer font-mono font-bold text-xs ${
                               isSelected
-                                ? 'bg-indigo-950/80 border-indigo-500 text-indigo-300 shadow-sm ring-1 ring-indigo-500/50'
-                                : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-850'
+                                ? 'bg-rose-950/80 border-rose-500 text-rose-300 ring-1 ring-rose-500/40'
+                                : 'bg-slate-900/60 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-850'
                             }`}
                           >
-                            <p className="truncate">{preset.label}</p>
-                            <p className="text-[10px] font-mono text-slate-500 mt-0.5">{preset.time}</p>
+                            {rTime}
                           </button>
                         );
                       })}
                     </div>
                   </div>
                 </div>
-              </div>
 
-              {/* 2. PRE-ORDER ACTIVE TIMING (SHOW / HIDE HOURS) */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-950/60 p-6 sm:p-7 rounded-3xl border border-slate-800 shadow-md">
-                <div className="space-y-2">
-                  <label className="text-xs font-black text-emerald-400 uppercase tracking-wider flex items-center space-x-1.5">
-                    <Clock className="w-4 h-4" />
-                    <span>PRE-ORDER START TIME (কখন থেকে শো হবে)</span>
-                  </label>
-                  <p className="text-[11px] text-slate-400 font-medium">
-                    এই নির্ধারিত সময়ে ম্যানেজার ও মেম্বার ইন্টারফেসে মেনু দৃশ্যমান হবে এবং প্রি-অর্ডার শুরু হবে।
-                  </p>
-                  <input
-                    type="time"
-                    value={settings.preOrderStartTime || '08:00'}
-                    onChange={(e) => {
-                      const updated = { ...settings, preOrderStartTime: e.target.value };
-                      setSettings(updated);
-                      saveCanteenConfig(updated);
-                    }}
-                    className="w-full bg-slate-900 border border-slate-700 focus:border-emerald-500 rounded-2xl px-5 py-3.5 text-base font-bold text-white outline-none transition-all shadow-inner"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-xs font-black text-rose-400 uppercase tracking-wider flex items-center space-x-1.5">
-                    <Clock className="w-4 h-4" />
-                    <span>PRE-ORDER END TIME (অটো কাটঅফ / বন্ধ হবে)</span>
-                  </label>
-                  <p className="text-[11px] text-slate-400 font-medium">
-                    এই সময়ের পর প্রি-অর্ডার বন্ধ হয়ে যাবে এবং বাইরে থাকা অবস্থায় নতুন প্রি-অর্ডার নেওয়া হবে না।
-                  </p>
-                  <input
-                    type="time"
-                    value={settings.preOrderEndTime || '16:00'}
-                    onChange={(e) => {
-                      const updated = { ...settings, preOrderEndTime: e.target.value };
-                      setSettings(updated);
-                      saveCanteenConfig(updated);
-                    }}
-                    className="w-full bg-slate-900 border border-slate-700 focus:border-rose-500 rounded-2xl px-5 py-3.5 text-base font-bold text-white outline-none transition-all shadow-inner"
-                  />
-                </div>
-              </div>
-
-              {/* 3. QUICK SHIFT PRESETS (কুইক শিফট টাইমিং) */}
-              <div className="space-y-3">
-                <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest block">
-                  QUICK PRESETS (কুইক শিফট টাইমিং)
-                </label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                  {[
-                    { label: 'Morning & Lunch', start: '08:00', end: '14:00' },
-                    { label: 'Full Day Regular', start: '08:00', end: '16:00' },
-                    { label: 'Extended Daytime', start: '08:00', end: '18:00' },
-                    { label: 'Evening Snacks', start: '16:00', end: '21:00' }
-                  ].map((p, idx) => {
-                    const isSelected = (settings.preOrderStartTime || '08:00') === p.start && (settings.preOrderEndTime || '16:00') === p.end;
-                    return (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => {
-                          const updated = { ...settings, preOrderStartTime: p.start, preOrderEndTime: p.end, preOrderEnabled: true };
-                          setSettings(updated);
-                          saveCanteenConfig(updated);
-                          showSavedFeedback();
-                        }}
-                        className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer ${
-                          isSelected 
-                            ? 'bg-emerald-950/60 border-emerald-500 text-emerald-300 shadow-md shadow-emerald-950/50' 
-                            : 'bg-slate-950/50 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-850'
-                        }`}
-                      >
-                        <p className="text-xs font-bold truncate">{p.label}</p>
-                        <p className="text-[10px] font-mono text-slate-400 mt-0.5">{p.start} - {p.end}</p>
-                      </button>
-                    );
-                  })}
+                {/* Instant Force Reset Card */}
+                <div className="p-4 sm:p-5 rounded-2xl bg-rose-950/20 border border-rose-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h5 className="text-xs font-black text-rose-300 uppercase tracking-wider flex items-center gap-2">
+                      <Trash2 className="w-4 h-4 text-rose-400" />
+                      <span>ম্যানুয়াল মেনু ও লাইভ প্রি-অর্ডার রিসেট (FORCE RESET MENU NOW)</span>
+                    </h5>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      অটো রিসেট সময়ের অপেক্ষা না করে যদি এখনই মেনু ও লাইভ প্রি-অর্ডার তালিকা রিসেট করতে চান।
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {resetSuccess && (
+                      <span className="text-xs font-bold text-emerald-400 flex items-center gap-1 animate-in fade-in">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                        <span>মেনু সফলভাবে রিসেট হয়েছে!</span>
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleManualResetNow}
+                      className="px-4 py-2.5 bg-rose-950/80 hover:bg-rose-900 border border-rose-500/50 text-rose-200 rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md active:scale-95 cursor-pointer whitespace-nowrap"
+                    >
+                      এখনই মেনু রিসেট করুন (Reset Now)
+                    </button>
+                  </div>
                 </div>
               </div>
 
               {/* Save Button */}
-              <div className="pt-4 border-t border-slate-800">
+              <div className="pt-2 border-t border-slate-800">
                 <SaveButton
                   type="button"
                   onClick={handleSaveAll}
                   isSaving={isSaving}
                   isSaved={saveSuccess}
-                  idleText="Save Pre-Order Timing to Cloud"
+                  idleText="Save Pre-Order Timing & Auto-Reset to Cloud"
                   savingText="Saving Schedule..."
                   savedText="Timing Saved & Synced Successfully! ✓"
                   className="w-full py-4 text-xs font-black tracking-widest cursor-pointer"

@@ -2,8 +2,24 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { 
   Utensils, Search, X, Check, ChefHat, Clock, Plus, XCircle, AlertTriangle, CheckCircle2,
-  Layers, Filter, Sparkles, ChevronDown, ChevronUp, RefreshCw, Users, ArrowRight, Eye, Calendar, RotateCcw
+  Layers, Filter, Sparkles, ChevronDown, ChevronUp, RefreshCw, Users, ArrowRight, Eye, Calendar, RotateCcw,
+  CheckSquare, Package as PackageIcon
 } from 'lucide-react';
+
+const isOfficerMember = (m: any): boolean => {
+  const r = String(m?.Rank || m?.rank || '').toUpperCase().trim();
+  const officerRanks = ['ACM', 'AM', 'AVM', 'AIR CDRE', 'GP CAPT', 'WG CDR', 'SQN LDR', 'FLT LT', 'FG OFFR', 'FLG OFFR', 'PLT OFFR'];
+  return officerRanks.some((or) => r.includes(or));
+};
+
+const isCivilianMember = (m: any): boolean => {
+  const r = String(m?.Rank || m?.rank || '').toUpperCase().trim();
+  return r.includes('CIV') || r.includes('NC(E)') || r.includes('NCE');
+};
+
+const isAirmanMember = (m: any): boolean => {
+  return !isOfficerMember(m) && !isCivilianMember(m);
+};
 import { supabase } from '../../../supabase';
 import { 
   getCanteenConfig, resolveImageUrl, checkPreOrderWindow, CanteenConfig,
@@ -100,12 +116,12 @@ export const ManagerDashboard: React.FC = () => {
     loadDailyMenu();
     loadPreOrders();
     
-    // Set up an interval to refresh pre-orders and check curated menu 12:00 PM auto-reset
+    // Set up an interval to refresh pre-orders and check curated menu schedule cutoff auto-reset
     const interval = setInterval(() => {
       if (!isMounted) return;
       loadDailyMenu();
       loadPreOrders();
-    }, 10000);
+    }, 5000);
 
     const handleSync = () => {
       setTimeout(() => {
@@ -210,8 +226,10 @@ export const ManagerDashboard: React.FC = () => {
         setting_value: '[]',
         updated_at: new Date().toISOString()
       }, { onConflict: 'setting_key' }).then(() => {}, () => {});
-      window.dispatchEvent(new Event('canteen_pre_orders_updated'));
-      window.dispatchEvent(new Event('canteen_state_updated'));
+      setTimeout(() => {
+        window.dispatchEvent(new Event('canteen_pre_orders_updated'));
+        window.dispatchEvent(new Event('canteen_state_updated'));
+      }, 0);
   };
 
 
@@ -219,15 +237,137 @@ export const ManagerDashboard: React.FC = () => {
   const { t, i18n } = useTranslation();
   const [manualBd, setManualBd] = useState('');
   const [manualName, setManualName] = useState('');
-  const [manualItemId, setManualItemId] = useState('');
-  const [manualQty, setManualQty] = useState(1);
+  // Multi-item selection for Manual Pre-Order: Map itemId -> quantity
+  const [selectedMenuItems, setSelectedMenuItems] = useState<Record<string, number>>({});
   const [cancelConfirmId, setCancelConfirmId] = useState<string | null>(null);
   const [manualAmount, setManualAmount] = useState('');
 
+  // POS Sales-style Member Selection & Item Filter States
+  const [memberRankFilter, setMemberRankFilter] = useState<'ALL' | 'OFFICER' | 'AIRMEN' | 'CIVILIAN'>('ALL');
+  const [itemCategoryFilter, setItemCategoryFilter] = useState<string>('ALL');
+  const [itemSearchTerm, setItemSearchTerm] = useState<string>('');
+
+  const officerCount = useMemo(() => members.filter(isOfficerMember).length, [members]);
+  const civilianCount = useMemo(() => members.filter(isCivilianMember).length, [members]);
+  const airmenCount = useMemo(() => members.filter(isAirmanMember).length, [members]);
+
+  const filteredMembers = useMemo(() => {
+    return members.filter(m => {
+      if (memberRankFilter === 'OFFICER' && !isOfficerMember(m)) return false;
+      if (memberRankFilter === 'CIVILIAN' && !isCivilianMember(m)) return false;
+      if (memberRankFilter === 'AIRMEN' && !isAirmanMember(m)) return false;
+
+      if (!memberSearchTerm.trim()) return true;
+      const term = memberSearchTerm.toLowerCase();
+      const bd = String(m['BD No'] || '').toLowerCase();
+      const rank = String(m['Rank'] || '').toLowerCase();
+      const surname = String(m['Surname'] || '').toLowerCase();
+      return bd.includes(term) || rank.includes(term) || surname.includes(term);
+    });
+  }, [members, memberRankFilter, memberSearchTerm]);
+
+  const toggleMember = (m: any) => {
+    setSelectedMembers(prev => {
+      const exists = prev.some(sm => sm.airman_id === m.airman_id || (sm['BD No'] && sm['BD No'] === m['BD No']));
+      if (exists) {
+        return prev.filter(sm => sm.airman_id !== m.airman_id && (!m['BD No'] || sm['BD No'] !== m['BD No']));
+      } else {
+        return [...prev, m];
+      }
+    });
+  };
+
+  const handleSelectAllFiltered = () => {
+    setSelectedMembers(prev => {
+      const prevIds = new Set(prev.map(m => m.airman_id || m['BD No']));
+      const newItems = filteredMembers.filter(m => !prevIds.has(m.airman_id || m['BD No']));
+      return [...prev, ...newItems];
+    });
+  };
+
+  const handleClearMembers = () => {
+    setSelectedMembers([]);
+  };
+
+  // Strictly ONLY today's curated daily menu items can be selected for manual pre-order
+  const curatedCatalog = useMemo(() => {
+    return catalog.filter(i => Array.isArray(selectedItems) && selectedItems.some(id => String(id) === String(i.id)));
+  }, [catalog, selectedItems]);
+
+  const chosenItemsList = useMemo(() => {
+    return Object.entries(selectedMenuItems)
+      .filter(([_, qty]) => Number(qty) > 0)
+      .map(([id, qty]) => {
+        const item = catalog.find(i => String(i.id) === String(id));
+        return item ? { ...item, qty: Number(qty) } : null;
+      })
+      .filter(Boolean) as (any & { qty: number })[];
+  }, [selectedMenuItems, catalog]);
+
+  const totalPerMember = useMemo(() => {
+    return chosenItemsList.reduce((sum, i) => sum + ((i.price || 0) * i.qty), 0);
+  }, [chosenItemsList]);
+
+  const grandTotalAllMembers = useMemo(() => {
+    return totalPerMember * selectedMembers.length;
+  }, [totalPerMember, selectedMembers.length]);
+
+  const toggleMenuItem = (id: string) => {
+    setSelectedMenuItems(prev => {
+      const cur = prev[id] || 0;
+      if (cur > 0) {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      }
+      return { ...prev, [id]: 1 };
+    });
+  };
+
+  const setMenuItemQty = (id: string, qty: number) => {
+    setSelectedMenuItems(prev => {
+      if (qty <= 0) {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      }
+      return { ...prev, [id]: qty };
+    });
+  };
+
+  const clearAllSelectedMenuItems = () => {
+    setSelectedMenuItems({});
+  };
+
+  const availableItemCats = useMemo(() => {
+    const cats = new Set<string>(['ALL']);
+    curatedCatalog.forEach(i => {
+      if (i.category) cats.add(i.category.trim().toUpperCase());
+    });
+    return Array.from(cats);
+  }, [curatedCatalog]);
+
+  const filteredCatalogItems = useMemo(() => {
+    return curatedCatalog.filter(i => {
+      const matchesCat = itemCategoryFilter === 'ALL' || (i.category || 'SNACKS').toUpperCase() === itemCategoryFilter;
+      if (!matchesCat) return false;
+      if (!itemSearchTerm.trim()) return true;
+      const term = itemSearchTerm.toLowerCase();
+      const name = String(i.name || '').toLowerCase();
+      const nameBn = String(i.name_bn || '').toLowerCase();
+      return name.includes(term) || nameBn.includes(term);
+    });
+  }, [curatedCatalog, itemCategoryFilter, itemSearchTerm]);
+
   const handleManualPreOrder = () => {
-      if (selectedMembers.length === 0 || !manualItemId) return;
-      const item = catalog.find(i => i.id === manualItemId);
-      if (!item) return;
+      if (selectedMembers.length === 0 || chosenItemsList.length === 0) return;
+
+      const itemsForOrder = chosenItemsList.map(i => ({
+        id: i.id,
+        name: i.name,
+        qty: i.qty,
+        price: i.price
+      }));
 
       const existingStr = localStorage.getItem('canteen_pre_orders') || '[]';
       let existing = [];
@@ -238,26 +378,33 @@ export const ManagerDashboard: React.FC = () => {
               orderId: 'PO-' + Date.now() + '-' + idx,
               timestamp: new Date().toISOString(),
               memberId: m['BD No'],
-              memberName: m['Rank'] + ' ' + m['Surname'],
-              items: [{ id: item.id, name: item.name, qty: manualQty, price: item.price }],
-              total: item.price * manualQty,
+              memberName: [m['Rank'], m['Surname']].filter(Boolean).join(' ') || m['BD No'],
+              items: itemsForOrder,
+              total: totalPerMember,
               status: 'pending'
           };
           existing.push(newOrder);
       });
 
       localStorage.setItem('canteen_pre_orders', JSON.stringify(existing));
-      window.dispatchEvent(new Event('canteen_pre_orders_updated'));
-      window.dispatchEvent(new Event('canteen_state_updated'));
-      window.dispatchEvent(new Event('storage'));
+      queuePushKeyToCloud('canteen_pre_orders', existing, 50);
+      supabase.from('app_settings').upsert({
+        setting_key: 'canteen_pre_orders',
+        setting_value: JSON.stringify(existing),
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'setting_key' }).then(() => {}, () => {});
+      setTimeout(() => {
+        window.dispatchEvent(new Event('canteen_pre_orders_updated'));
+        window.dispatchEvent(new Event('canteen_state_updated'));
+        window.dispatchEvent(new Event('storage'));
+      }, 0);
       
       const parsed = existing.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       setPreOrders(parsed);
 
       setSelectedMembers([]);
+      setSelectedMenuItems({});
       setMemberSearchTerm('');
-      setManualItemId('');
-      setManualQty(1);
   };
   
   const handleRevertPreOrder = async (order: any) => {
@@ -297,10 +444,12 @@ export const ManagerDashboard: React.FC = () => {
       fetchMembers();
       fetchCatalog();
 
-      window.dispatchEvent(new Event('canteen_state_updated'));
-      window.dispatchEvent(new Event('canteen_txs_updated'));
-      window.dispatchEvent(new Event('baf_state_updated'));
-      window.dispatchEvent(new Event('storage'));
+      setTimeout(() => {
+        window.dispatchEvent(new Event('canteen_state_updated'));
+        window.dispatchEvent(new Event('canteen_txs_updated'));
+        window.dispatchEvent(new Event('baf_state_updated'));
+        window.dispatchEvent(new Event('storage'));
+      }, 0);
   };
 
   const handleCompletePreOrder = async (order: any) => {
@@ -373,10 +522,12 @@ export const ManagerDashboard: React.FC = () => {
       fetchMembers();
       fetchCatalog();
 
-      window.dispatchEvent(new Event('canteen_state_updated'));
-      window.dispatchEvent(new Event('canteen_txs_updated'));
-      window.dispatchEvent(new Event('baf_state_updated'));
-      window.dispatchEvent(new Event('storage'));
+      setTimeout(() => {
+        window.dispatchEvent(new Event('canteen_state_updated'));
+        window.dispatchEvent(new Event('canteen_txs_updated'));
+        window.dispatchEvent(new Event('baf_state_updated'));
+        window.dispatchEvent(new Event('storage'));
+      }, 0);
   };
 
   const handleCancelPreOrder = () => {
@@ -387,9 +538,11 @@ export const ManagerDashboard: React.FC = () => {
       
       const updated = existing.filter((o: any) => o.orderId !== cancelConfirmId);
       localStorage.setItem('canteen_pre_orders', JSON.stringify(updated));
-      window.dispatchEvent(new Event('canteen_pre_orders_updated'));
-      window.dispatchEvent(new Event('canteen_state_updated'));
-      window.dispatchEvent(new Event('storage'));
+      setTimeout(() => {
+        window.dispatchEvent(new Event('canteen_pre_orders_updated'));
+        window.dispatchEvent(new Event('canteen_state_updated'));
+        window.dispatchEvent(new Event('storage'));
+      }, 0);
       
       const parsed = updated.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       setPreOrders(parsed);
@@ -925,134 +1078,480 @@ export const ManagerDashboard: React.FC = () => {
          </div>
 
          {/* 3. MANUAL PRE-ORDER BOX */}
-         <div className="bg-slate-900 rounded-[2rem] p-6 sm:p-8 shadow-xl border border-slate-800 flex flex-col">
-            <div className="flex items-center space-x-3 mb-6">
-               <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
-                  <Plus className="w-5 h-5" />
+         <div className="bg-slate-900 rounded-[2rem] p-6 sm:p-8 shadow-xl border border-slate-800 flex flex-col space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-800">
+               <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+                     <Plus className="w-5 h-5" />
+                  </div>
+                  <div>
+                     <h3 className="text-sm font-black text-white tracking-widest uppercase">
+                        MANUAL PRE-ORDER
+                     </h3>
+                     <p className="text-[11px] text-slate-400 font-medium">
+                        Create pre-order on behalf of airmen, officers or canteen members
+                     </p>
+                  </div>
                </div>
-               <div>
-                  <h3 className="text-sm font-black text-white tracking-widest uppercase">
-                     MANUAL PRE-ORDER
-                  </h3>
-                  <p className="text-[11px] text-slate-400 font-medium">
-                     Create pre-order on behalf of airmen or canteen members
-                  </p>
-               </div>
+
+                {selectedMembers.length > 0 && chosenItemsList.length > 0 && (
+                   <div className="flex items-center space-x-3 bg-slate-950/80 px-3.5 py-1.5 rounded-xl border border-indigo-500/30 text-xs font-mono">
+                      <span className="text-slate-400">Total:</span>
+                      <span className="text-emerald-400 font-black">
+                         ৳{grandTotalAllMembers.toLocaleString()}
+                      </span>
+                      <span className="text-slate-500">({selectedMembers.length} Members • {chosenItemsList.length} Items)</span>
+                   </div>
+                )}
             </div>
 
-            <div className="space-y-4">
-               {/* Selected Members Chips */}
-               {selectedMembers.length > 0 && (
-                  <div className="flex flex-wrap gap-2 p-3 bg-slate-950/60 rounded-xl border border-slate-800">
-                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider self-center mr-1">
-                        Selected ({selectedMembers.length}):
-                     </span>
-                     {selectedMembers.map((m, i) => (
-                        <span key={m.airman_id || `mgr_m_${m['BD No'] || i}_${i}`} className="flex items-center space-x-1.5 px-3 py-1.5 bg-indigo-950/60 text-indigo-300 rounded-lg text-xs font-bold border border-indigo-500/30">
-                           <span>{m['Rank']} {m['Surname']} (BD: {m['BD No']})</span>
-                           <button 
-                              type="button"
-                              onClick={() => setSelectedMembers(selectedMembers.filter(sm => sm.airman_id !== m.airman_id))} 
-                              className="text-indigo-400 hover:text-white transition-colors ml-1 p-0.5"
-                           >
-                              <X className="w-3.5 h-3.5" />
-                           </button>
-                        </span>
-                     ))}
+            {/* STEP 1: CURATED MENU SELECTION (MULTIPLE ITEMS WITH PICTURES) */}
+            <div className="space-y-3.5 bg-slate-950/60 p-4 sm:p-5 rounded-2xl border border-slate-800/80">
+               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-800/60">
+                  <div className="flex items-center space-x-2">
+                     <span className="w-5 h-5 rounded-full bg-indigo-600 text-white text-[10px] font-black flex items-center justify-center">1</span>
+                     <div>
+                        <h4 className="text-xs font-black text-white uppercase tracking-wider flex items-center space-x-2">
+                           <span>কিউরেটেড মেনু নির্বাচন (SELECT CURATED DAILY MENU)</span>
+                           <span className="px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-500/30 text-[9px] font-mono">
+                              {curatedCatalog.length} Available Today
+                           </span>
+                        </h4>
+                        <p className="text-[11px] text-slate-400 font-medium">
+                           শুধুমাত্র আজকের কিউরেট করা মেনু থেকে এক বা একাধিক আইটেম ও পরিমাণ নির্বাচন করতে পারবেন।
+                        </p>
+                     </div>
                   </div>
-               )}
 
-               {/* Member Search with Autocomplete */}
-               <div className="relative">
-                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">
-                     <Search className="w-4 h-4" />
-                  </div>
-                  <input 
-                     type="text" 
-                     placeholder="Search Member by Name or BD No..." 
-                     value={memberSearchTerm} 
-                     onChange={e => {
-                        setMemberSearchTerm(e.target.value);
-                        setShowMemberDropdown(true);
-                     }}
-                     onFocus={() => setShowMemberDropdown(true)}
-                     onBlur={() => setTimeout(() => setShowMemberDropdown(false), 250)}
-                     className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-11 pr-4 py-3.5 text-sm font-bold text-slate-200 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all placeholder:text-slate-500" 
-                  />
-                  {showMemberDropdown && (
-                     <div className="absolute left-0 right-0 top-full mt-2 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-60 overflow-y-auto z-50 divide-y divide-slate-800">
-                        {members.filter(m => {
-                           const name = m['Surname'] || '';
-                           const bd = m['BD No'] || '';
-                           return name.toLowerCase().includes(memberSearchTerm.toLowerCase()) || String(bd).includes(memberSearchTerm);
-                        }).slice(0, 10).map((m, i) => (
-                           <div 
-                              key={m.airman_id || `mgr_opt_${m['BD No'] || i}_${i}`} 
-                              onMouseDown={(e) => {
-                                 e.preventDefault();
-                                 if (!selectedMembers.find(sm => sm.airman_id === m.airman_id)) {
-                                    setSelectedMembers([...selectedMembers, m]);
-                                 }
-                                 setMemberSearchTerm('');
-                                 setShowMemberDropdown(false);
-                              }}
-                              className="px-4 py-3 hover:bg-slate-800 cursor-pointer flex items-center justify-between transition-colors"
-                           >
-                              <div>
-                                 <p className="text-xs font-bold text-white">{m['Rank']} {m['Surname']}</p>
-                                 <p className="text-[10px] text-slate-400">BD No: {m['BD No']}</p>
-                              </div>
-                              <span className="p-1 bg-indigo-500/10 text-indigo-400 rounded-lg">
-                                 <Plus className="w-4 h-4" />
-                              </span>
-                           </div>
-                        ))}
-                        {memberSearchTerm !== '' && members.filter(m => {
-                           const name = m['Surname'] || '';
-                           const bd = m['BD No'] || '';
-                           return name.toLowerCase().includes(memberSearchTerm.toLowerCase()) || String(bd).includes(memberSearchTerm);
-                        }).length === 0 && (
-                           <div className="px-4 py-3 text-xs text-slate-400 text-center">No members found</div>
-                        )}
+                  {chosenItemsList.length > 0 && (
+                     <div className="flex items-center space-x-2 self-start sm:self-auto">
+                        <span className="px-2.5 py-1 rounded-xl bg-indigo-950/80 text-indigo-300 border border-indigo-500/40 text-xs font-mono font-bold">
+                           {chosenItemsList.length} Items (৳{totalPerMember}/member)
+                        </span>
+                        <button
+                           type="button"
+                           onClick={clearAllSelectedMenuItems}
+                           className="text-[11px] font-bold text-rose-400 hover:text-rose-300 flex items-center space-x-1 cursor-pointer px-2 py-1 rounded-lg hover:bg-slate-900 transition-colors"
+                        >
+                           <X className="w-3.5 h-3.5" />
+                           <span>Clear</span>
+                        </button>
                      </div>
                   )}
                </div>
 
-               {/* Item & Quantity Selector */}
-               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div className="sm:col-span-1">
-                     <select 
-                        value={manualItemId} 
-                        onChange={e => setManualItemId(e.target.value)} 
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3.5 text-sm font-bold text-slate-200 outline-none focus:border-indigo-500 transition-all"
-                     >
-                        <option value="">Select Item</option>
-                        {catalog.filter(i => selectedItems.includes(i.id)).map(i => (
-                           <option key={i.id} value={i.id}>{i.name} - ৳{i.price}</option>
+               {/* Selected Items Detail Tray (Multiple Items Selected) */}
+               {chosenItemsList.length > 0 && (
+                  <div className="p-3.5 rounded-2xl bg-indigo-950/30 border border-indigo-500/40 space-y-2.5 shadow-lg">
+                     <div className="flex items-center justify-between text-xs font-bold text-indigo-300">
+                        <span className="flex items-center space-x-1.5 uppercase tracking-wider text-[11px]">
+                           <Check className="w-3.5 h-3.5 text-emerald-400" />
+                           <span>Selected Menu Items ({chosenItemsList.length}):</span>
+                        </span>
+                        <span className="font-mono text-emerald-400 font-black">
+                           Subtotal Per Member: ৳{totalPerMember}
+                        </span>
+                     </div>
+                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-48 overflow-y-auto pr-1">
+                        {chosenItemsList.map(item => (
+                           <div 
+                              key={item.id}
+                              className="p-2.5 rounded-xl bg-slate-900/90 border border-indigo-500/30 flex items-center justify-between gap-2 shadow-sm"
+                           >
+                              <div className="flex items-center space-x-2.5 min-w-0 flex-1">
+                                 <div className="w-10 h-10 rounded-lg bg-slate-950 border border-slate-800 overflow-hidden shrink-0 flex items-center justify-center">
+                                    {item.DP ? (
+                                       <img 
+                                          src={resolveImageUrl(item.DP)} 
+                                          alt={item.name} 
+                                          referrerPolicy="no-referrer"
+                                          className="w-full h-full object-cover"
+                                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                       />
+                                    ) : (
+                                       <Utensils className="w-4 h-4 text-slate-500" />
+                                    )}
+                                 </div>
+                                 <div className="min-w-0 flex-1">
+                                    <p className="text-xs font-black text-white truncate">{item.name}</p>
+                                    <p className="text-[10px] font-mono text-emerald-400 font-bold">৳{item.price} × {item.qty} = ৳{(item.price || 0) * item.qty}</p>
+                                 </div>
+                              </div>
+
+                              {/* Quantity Controls */}
+                              <div className="flex items-center space-x-1 shrink-0 bg-slate-950 px-1.5 py-1 rounded-lg border border-slate-800">
+                                 <button
+                                    type="button"
+                                    onClick={() => setMenuItemQty(item.id, item.qty - 1)}
+                                    className="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-white flex items-center justify-center font-black text-xs cursor-pointer"
+                                 >
+                                    -
+                                 </button>
+                                 <span className="w-6 text-center font-mono font-black text-xs text-white">
+                                    {item.qty}
+                                 </span>
+                                 <button
+                                    type="button"
+                                    onClick={() => setMenuItemQty(item.id, item.qty + 1)}
+                                    className="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-white flex items-center justify-center font-black text-xs cursor-pointer"
+                                 >
+                                    +
+                                 </button>
+                                 <button
+                                    type="button"
+                                    onClick={() => toggleMenuItem(item.id)}
+                                    className="w-6 h-6 rounded text-rose-400 hover:text-white hover:bg-rose-950/60 flex items-center justify-center ml-1 cursor-pointer"
+                                    title="Remove item"
+                                 >
+                                    <X className="w-3.5 h-3.5" />
+                                 </button>
+                              </div>
+                           </div>
                         ))}
-                     </select>
+                     </div>
+                  </div>
+               )}
+
+               {/* Curated Catalog Items Grid */}
+               {curatedCatalog.length === 0 ? (
+                  <div className="text-center py-8 px-4 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-3">
+                     <Utensils className="w-10 h-10 text-slate-600 mx-auto" />
+                     <h5 className="text-sm font-black text-slate-300">আজকের জন্য কোনো মেনু কিউরেট করা হয়নি</h5>
+                     <p className="text-xs text-slate-400 max-w-md mx-auto">
+                        ম্যানুয়াল প্রি-অর্ডারের জন্য শুধুমাত্র আজকের কিউরেট করা মেনু ব্যবহার করা যায়। উপরে 'Curate Today's Menu' থেকে মেনু নির্ধারণ করুন।
+                     </p>
+                     <button
+                        type="button"
+                        onClick={() => setShowCurateMenu(true)}
+                        className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs tracking-wider uppercase transition-colors cursor-pointer"
+                     >
+                        Curate Today's Menu
+                     </button>
+                  </div>
+               ) : (
+                  <>
+                     {/* Filter Bar for Curated Items */}
+                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+                        <div className="relative flex-1">
+                           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                           <input
+                              type="text"
+                              placeholder="Search curated menu items..."
+                              value={itemSearchTerm}
+                              onChange={e => setItemSearchTerm(e.target.value)}
+                              className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-2 text-xs font-bold text-slate-200 outline-none focus:border-indigo-500"
+                           />
+                           {itemSearchTerm && (
+                              <button
+                                 onClick={() => setItemSearchTerm('')}
+                                 className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs font-bold"
+                              >
+                                 ✕
+                              </button>
+                           )}
+                        </div>
+
+                        {/* Category Pills */}
+                        <div className="flex items-center space-x-1.5 overflow-x-auto scrollbar-none pb-0.5">
+                           {availableItemCats.map(cat => {
+                              const isSel = itemCategoryFilter === cat;
+                              return (
+                                 <button
+                                    key={cat}
+                                    type="button"
+                                    onClick={() => setItemCategoryFilter(cat)}
+                                    className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer border ${
+                                       isSel
+                                          ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
+                                          : 'bg-slate-900 text-slate-400 hover:text-slate-200 border-slate-800'
+                                    }`}
+                                 >
+                                    {cat}
+                                 </button>
+                              );
+                           })}
+                        </div>
+                     </div>
+
+                     {/* Items Grid with Picture Thumbnails */}
+                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5 max-h-[320px] overflow-y-auto pr-1">
+                        {filteredCatalogItems.map(item => {
+                           const currentQty = selectedMenuItems[item.id] || 0;
+                           const isSelected = currentQty > 0;
+                           const stockInfo = calculateMenuItemStockInfo(item.id, item.name, rawInventory, recipesMap);
+                           const isOutOfStock = stockInfo.availableStock <= 0;
+
+                           return (
+                              <div
+                                 key={item.id}
+                                 onClick={() => toggleMenuItem(item.id)}
+                                 className={`p-2 rounded-xl border transition-all cursor-pointer flex flex-col items-center text-center select-none group relative ${
+                                    isSelected
+                                       ? 'bg-indigo-950/70 border-indigo-500 ring-2 ring-indigo-500/50 shadow-md shadow-indigo-950/60'
+                                       : 'bg-slate-900/80 border-slate-800 hover:border-slate-700 hover:bg-slate-900'
+                                 }`}
+                              >
+                                 {/* Picture Thumbnail */}
+                                 <div className="w-14 h-14 rounded-xl bg-slate-950 border border-slate-800/80 overflow-hidden flex items-center justify-center mb-1.5 shrink-0 shadow-inner group-hover:scale-105 transition-transform relative">
+                                    {item.DP ? (
+                                       <img
+                                          src={resolveImageUrl(item.DP)}
+                                          alt={item.name}
+                                          referrerPolicy="no-referrer"
+                                          className="w-full h-full object-cover"
+                                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                       />
+                                    ) : (
+                                       <Utensils className="w-6 h-6 text-slate-500 group-hover:text-indigo-400 transition-colors" />
+                                    )}
+
+                                    {isSelected && (
+                                       <div className="absolute top-1 right-1 w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center shadow-md">
+                                          <Check className="w-3 h-3 stroke-[3]" />
+                                       </div>
+                                    )}
+                                 </div>
+
+                                 {/* Name & Bengali */}
+                                 <h5 className={`text-[11px] font-black line-clamp-1 w-full ${
+                                    isSelected ? 'text-indigo-300' : 'text-slate-200 group-hover:text-white'
+                                 }`}>
+                                    {item.name}
+                                 </h5>
+                                 {item.name_bn && (
+                                    <p className="text-[9px] text-slate-400 line-clamp-1 w-full">{item.name_bn}</p>
+                                 )}
+
+                                 {/* Price & Badge */}
+                                 <div className="mt-1 flex items-center justify-between w-full pt-1 border-t border-slate-800/60 text-[10px]">
+                                    <span className="font-mono font-black text-amber-400">৳{item.price}</span>
+                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded ${
+                                       stockInfo.availableStock > 0 ? 'text-emerald-400 bg-emerald-950/60' : 'text-rose-400 bg-rose-950/60'
+                                    }`}>
+                                       স্টক: {stockInfo.availableStock}
+                                    </span>
+                                 </div>
+
+                                 {/* Quantity Adjuster if selected */}
+                                 {isSelected && (
+                                    <div 
+                                       className="mt-1.5 w-full flex items-center justify-between bg-slate-950/90 rounded-lg p-0.5 border border-indigo-500/40"
+                                       onClick={(e) => e.stopPropagation()}
+                                    >
+                                       <button
+                                          type="button"
+                                          onClick={() => setMenuItemQty(item.id, currentQty - 1)}
+                                          className="w-5 h-5 rounded bg-slate-800 hover:bg-slate-700 text-white flex items-center justify-center font-black text-xs cursor-pointer"
+                                       >
+                                          -
+                                       </button>
+                                       <span className="font-mono font-black text-[11px] text-indigo-300">
+                                          Qty: {currentQty}
+                                       </span>
+                                       <button
+                                          type="button"
+                                          onClick={() => setMenuItemQty(item.id, currentQty + 1)}
+                                          className="w-5 h-5 rounded bg-slate-800 hover:bg-slate-700 text-white flex items-center justify-center font-black text-xs cursor-pointer"
+                                       >
+                                          +
+                                       </button>
+                                    </div>
+                                 )}
+                              </div>
+                           );
+                        })}
+                     </div>
+                  </>
+               )}
+            </div>
+
+            {/* STEP 2: MEMBER SELECTION (POS SALES STYLE - "Dashboard e Manual Pre order e Member selection ta POS sales er member selection er moto hbe") */}
+            <div className="space-y-3.5 bg-slate-950/60 p-4 sm:p-5 rounded-2xl border border-slate-800/80">
+               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-800/60">
+                  <div className="flex items-center space-x-2">
+                     <span className="w-5 h-5 rounded-full bg-indigo-600 text-white text-[10px] font-black flex items-center justify-center">2</span>
+                     <h4 className="text-xs font-black text-white uppercase tracking-wider">
+                        সদস্য নির্বাচন করুন (SELECT MEMBERS)
+                     </h4>
                   </div>
 
-                  <div className="flex items-center bg-slate-950 border border-slate-800 rounded-xl px-4 py-2">
-                     <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest mr-2">Qty:</span>
-                     <input 
-                        type="number" 
-                        min="1" 
-                        value={manualQty} 
-                        onChange={e => setManualQty(Math.max(1, Number(e.target.value) || 1))} 
-                        className="w-full bg-transparent text-sm font-bold text-slate-200 outline-none"
-                     />
+                  {/* Quick Action Buttons */}
+                  <div className="flex items-center space-x-2">
+                     <button
+                        type="button"
+                        onClick={handleSelectAllFiltered}
+                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-black tracking-wider flex items-center space-x-1.5 border border-slate-700 transition-all cursor-pointer"
+                     >
+                        <CheckSquare className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Select All ({filteredMembers.length})</span>
+                     </button>
+                     {selectedMembers.length > 0 && (
+                        <button
+                           type="button"
+                           onClick={handleClearMembers}
+                           className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-950/40 text-rose-300 text-xs font-black tracking-wider flex items-center space-x-1.5 border border-slate-700 transition-all cursor-pointer"
+                        >
+                           <X className="w-3.5 h-3.5" />
+                           <span>Clear ({selectedMembers.length})</span>
+                        </button>
+                     )}
                   </div>
-
-                  <button 
-                     type="button"
-                     onClick={handleManualPreOrder} 
-                     disabled={selectedMembers.length === 0 || !manualItemId}
-                     className="w-full bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black tracking-widest uppercase py-3.5 transition-all shadow-lg shadow-emerald-950/40 disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] cursor-pointer"
-                  >
-                     Add Pre-Order
-                  </button>
                </div>
+
+               {/* Search & Rank Filters */}
+               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <div className="relative flex-1">
+                     <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                     <input 
+                        type="text"
+                        value={memberSearchTerm}
+                        onChange={(e) => setMemberSearchTerm(e.target.value)}
+                        placeholder="Search by BD No, Rank, or Surname..."
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-9 py-2.5 text-xs sm:text-sm font-bold text-white placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
+                     />
+                     {memberSearchTerm && (
+                        <button 
+                           onClick={() => setMemberSearchTerm('')}
+                           className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs font-bold p-1"
+                        >
+                           ✕
+                        </button>
+                     )}
+                  </div>
+
+                  {/* Rank Filter Pills */}
+                  <div className="flex items-center space-x-1 bg-slate-900 p-1 rounded-xl border border-slate-800 overflow-x-auto scrollbar-none shrink-0">
+                     {(['ALL', 'OFFICER', 'AIRMEN', 'CIVILIAN'] as const).map((r) => {
+                        const count = r === 'ALL' ? members.length : r === 'OFFICER' ? officerCount : r === 'AIRMEN' ? airmenCount : civilianCount;
+                        const label = r === 'ALL' ? 'ALL' : r === 'OFFICER' ? 'OFFICER' : r === 'AIRMEN' ? 'AIRMEN' : 'CIVILIAN';
+                        const isSel = memberRankFilter === r;
+                        return (
+                           <button
+                              key={r}
+                              type="button"
+                              onClick={() => setMemberRankFilter(r)}
+                              className={`px-2.5 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer ${
+                                 isSel ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                              }`}
+                           >
+                              {label} ({count})
+                           </button>
+                        );
+                     })}
+                  </div>
+               </div>
+
+               {/* Selected KPI Stats Strip */}
+               <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-2xl flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center space-x-4 flex-wrap gap-y-1 text-xs font-mono">
+                     <span className="text-slate-400">
+                        Selected: <strong className="text-indigo-400 text-sm">{selectedMembers.length} Members</strong>
+                     </span>
+                     <span className="text-slate-500">•</span>
+                     <span className="text-slate-400">
+                        Per Member: <strong className="text-white text-sm">৳{totalPerMember}</strong>
+                     </span>
+                     <span className="text-slate-500">•</span>
+                     <span className="text-slate-400">
+                        Grand Total: <strong className="text-emerald-400 text-sm sm:text-base font-black">
+                           ৳{grandTotalAllMembers.toLocaleString()}
+                        </strong>
+                     </span>
+                  </div>
+
+                  {/* Selected Chips */}
+                  {selectedMembers.length > 0 && (
+                     <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto w-full pt-2 border-t border-slate-800/60">
+                        {selectedMembers.map((m, i) => (
+                           <span key={m.airman_id || `mgr_chip_${m['BD No'] || i}`} className="flex items-center space-x-1.5 px-2.5 py-1 bg-indigo-950/60 text-indigo-300 rounded-lg text-[11px] font-bold border border-indigo-500/30">
+                              <span>{m['Rank']} {m['Surname']} (BD: {m['BD No']})</span>
+                              <button
+                                 type="button"
+                                 onClick={() => toggleMember(m)}
+                                 className="text-indigo-400 hover:text-white transition-colors p-0.5"
+                              >
+                                 <X className="w-3 h-3" />
+                              </button>
+                           </span>
+                        ))}
+                     </div>
+                  )}
+               </div>
+
+               {/* Members Grid (POS Sales Style) */}
+               <div className="max-h-[380px] overflow-y-auto pr-1 space-y-2">
+                  {filteredMembers.length === 0 ? (
+                     <div className="text-center py-10 text-slate-400 bg-slate-900/40 rounded-2xl border border-slate-800 p-6">
+                        <Users className="w-8 h-8 mx-auto opacity-20 mb-2" />
+                        <p className="text-xs font-bold uppercase tracking-wider text-slate-300">No Members Found</p>
+                        <p className="text-[11px] text-slate-500 mt-1">Check search filters or try another rank category.</p>
+                     </div>
+                  ) : (
+                     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5">
+                        {filteredMembers.map((m, i) => {
+                           const isSelected = selectedMembers.some((sm) => sm.airman_id === m.airman_id || (sm['BD No'] && sm['BD No'] === m['BD No']));
+                           const itemCost = totalPerMember;
+
+                           return (
+                              <div
+                                 key={m.airman_id || `mgr_grid_${m['BD No'] || i}_${i}`}
+                                 onClick={() => toggleMember(m)}
+                                 className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 select-none active:scale-[0.98] ${
+                                    isSelected
+                                       ? 'bg-indigo-950/50 border-indigo-500 shadow-md shadow-indigo-950/40 ring-1 ring-indigo-500/40'
+                                       : 'bg-slate-900/60 border-slate-800/80 hover:border-slate-700 hover:bg-slate-900'
+                                 }`}
+                              >
+                                 <div className="flex items-center space-x-3 min-w-0">
+                                    <div className={`w-5 h-5 rounded-lg flex items-center justify-center shrink-0 border transition-colors ${
+                                       isSelected 
+                                          ? 'bg-indigo-600 border-indigo-500 text-white' 
+                                          : 'border-slate-700 bg-slate-950 text-transparent'
+                                    }`}>
+                                       <Check className="w-3.5 h-3.5 stroke-[3]" />
+                                    </div>
+                                    <div className="min-w-0">
+                                       <div className="flex items-center space-x-1.5 truncate">
+                                          <span className="text-xs font-black text-white truncate">
+                                             {m['Rank']} {m['Surname']}
+                                          </span>
+                                       </div>
+                                       <div className="flex items-center space-x-2 mt-0.5">
+                                          <span className="text-[10px] font-mono text-slate-400">BD: {m['BD No']}</span>
+                                          <span className="text-[10px] font-mono font-bold text-amber-400">Due: ৳{m.Due || 0}</span>
+                                       </div>
+                                    </div>
+                                 </div>
+
+                                 {isSelected && itemCost > 0 && (
+                                    <span className="text-[10px] font-mono font-bold text-emerald-400 shrink-0 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30">
+                                       +৳{itemCost}
+                                    </span>
+                                 )}
+                              </div>
+                           );
+                        })}
+                     </div>
+                  )}
+               </div>
+            </div>
+
+            {/* STEP 3: SUBMIT BUTTON */}
+            <div className="pt-2">
+               <button 
+                  type="button"
+                  onClick={handleManualPreOrder} 
+                  disabled={selectedMembers.length === 0 || chosenItemsList.length === 0}
+                  className="w-full py-4 rounded-2xl text-xs sm:text-sm font-black tracking-wider uppercase flex items-center justify-center space-x-2 transition-all shadow-lg bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed disabled:shadow-none cursor-pointer active:scale-[0.99]"
+               >
+                  <CheckCircle2 className="w-5 h-5" />
+                  <span>
+                     {selectedMembers.length === 0 || chosenItemsList.length === 0 
+                        ? 'Select Curated Menu Item(s) and Members to Place Pre-Order' 
+                        : `Confirm Pre-Order (${selectedMembers.length} Members • ${chosenItemsList.length} Items • Grand Total ৳${grandTotalAllMembers.toLocaleString()})`
+                     }
+                  </span>
+               </button>
             </div>
          </div>
 

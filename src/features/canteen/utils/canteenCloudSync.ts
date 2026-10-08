@@ -1,6 +1,6 @@
 import { supabase } from '../../../supabase';
 import { deduplicateRawItems } from './recipeManager';
-import { resolveImageUrl, getCanteenConfig, isTimestampPastResetThreshold } from './canteenSettings';
+import { resolveImageUrl, getCanteenConfig, isTimestampPastResetThreshold, checkAndEnforceDailyMenuReset } from './canteenSettings';
 import { normalizeCanteenMembersSeniority, sortCanteenMembersByOfficeSeniority } from './canteenSeniority';
 import { 
   getCanteenMembersCache, 
@@ -287,7 +287,11 @@ export function queuePushKeyToCloud(key: string, data?: any, delay = 600) {
       try {
         const raw = localStorage.getItem(key);
         if (raw !== null) {
-          valueToPush = JSON.parse(raw);
+          try {
+            valueToPush = JSON.parse(raw);
+          } catch {
+            valueToPush = raw;
+          }
         }
       } catch {}
     }
@@ -312,44 +316,46 @@ export function queuePushKeyToCloud(key: string, data?: any, delay = 600) {
 function dispatchKeyUpdateEvent(key: string) {
   if (typeof window === 'undefined') return;
 
-  switch (key) {
-    case 'canteen_txs':
-      window.dispatchEvent(new Event('canteen_txs_updated'));
-      break;
-    case 'canteen_pre_orders':
-      window.dispatchEvent(new Event('canteen_pre_orders_updated'));
-      break;
-    case 'canteen_expenses':
-      window.dispatchEvent(new Event('canteen_expenses_updated'));
-      break;
-    case 'canteen_bazar_advances':
-      window.dispatchEvent(new Event('canteen_bazar_advances_updated'));
-      break;
-    case 'canteen_member_bangla_names':
-      window.dispatchEvent(new Event('canteen_member_bangla_names_updated'));
-      break;
-    case 'canteen_fund_transfers':
-      window.dispatchEvent(new Event('canteen_transfers_updated'));
-      break;
-    case 'canteen_menu_recipes_v2':
-      window.dispatchEvent(new Event('canteen_menu_recipes_updated'));
-      break;
-    case 'canteen_raw_stock_logs_v2':
-      window.dispatchEvent(new Event('canteen_raw_stock_logs_updated'));
-      break;
-    case 'canteen_raw_inventory_items_v2':
-      window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
-      break;
-    case 'canteen_daily_menu':
-    case 'canteen_daily_menu_updated_at':
-      window.dispatchEvent(new Event('canteen_daily_menu_updated'));
-      break;
-    case 'canteen_bill_import_history':
-      window.dispatchEvent(new Event('canteen_bill_import_history_updated'));
-      break;
-  }
-  window.dispatchEvent(new Event('canteen_state_updated'));
-  window.dispatchEvent(new Event('storage'));
+  setTimeout(() => {
+    switch (key) {
+      case 'canteen_txs':
+        window.dispatchEvent(new Event('canteen_txs_updated'));
+        break;
+      case 'canteen_pre_orders':
+        window.dispatchEvent(new Event('canteen_pre_orders_updated'));
+        break;
+      case 'canteen_expenses':
+        window.dispatchEvent(new Event('canteen_expenses_updated'));
+        break;
+      case 'canteen_bazar_advances':
+        window.dispatchEvent(new Event('canteen_bazar_advances_updated'));
+        break;
+      case 'canteen_member_bangla_names':
+        window.dispatchEvent(new Event('canteen_member_bangla_names_updated'));
+        break;
+      case 'canteen_fund_transfers':
+        window.dispatchEvent(new Event('canteen_transfers_updated'));
+        break;
+      case 'canteen_menu_recipes_v2':
+        window.dispatchEvent(new Event('canteen_menu_recipes_updated'));
+        break;
+      case 'canteen_raw_stock_logs_v2':
+        window.dispatchEvent(new Event('canteen_raw_stock_logs_updated'));
+        break;
+      case 'canteen_raw_inventory_items_v2':
+        window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+        break;
+      case 'canteen_daily_menu':
+      case 'canteen_daily_menu_updated_at':
+        window.dispatchEvent(new Event('canteen_daily_menu_updated'));
+        break;
+      case 'canteen_bill_import_history':
+        window.dispatchEvent(new Event('canteen_bill_import_history_updated'));
+        break;
+    }
+    window.dispatchEvent(new Event('canteen_state_updated'));
+    window.dispatchEvent(new Event('storage'));
+  }, 0);
 }
 
 /**
@@ -433,8 +439,8 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
             const isCloudExpired = isTimestampPastResetThreshold(cloudUpdated);
             const isLocalExpired = isTimestampPastResetThreshold(localUpdated);
 
-            // If expired past daily 3:00, reset to empty
-            if (isCloudExpired && isLocalExpired) {
+            // If expired past schedule reset threshold, reset to empty
+            if (isCloudExpired || isLocalExpired) {
               finalVal = [];
               queuePushKeyToCloud('canteen_daily_menu', [], 50);
             } else if (!isLocalExpired && localTime >= cloudTime && Array.isArray(localVal) && localVal.length > 0) {
@@ -470,8 +476,13 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
             }
           }
         } else if (key === 'canteen_daily_menu' && Array.isArray(localVal) && localVal.length > 0 && (!Array.isArray(cloudVal) || cloudVal.length === 0)) {
-          finalVal = localVal;
-          queuePushKeyToCloud('canteen_daily_menu', localVal, 100);
+          const localUpdated = typeof window !== 'undefined' ? localStorage.getItem('canteen_daily_menu_updated_at') : null;
+          if (isTimestampPastResetThreshold(localUpdated)) {
+            finalVal = [];
+          } else {
+            finalVal = localVal;
+            queuePushKeyToCloud('canteen_daily_menu', localVal, 100);
+          }
         } else if (typeof cloudVal === 'object' && cloudVal !== null && typeof localVal === 'object' && localVal !== null) {
           finalVal = { ...cloudVal, ...localVal };
         }
@@ -786,6 +797,12 @@ export function initCanteenCloudSync(): () => void {
   fetchCanteenMenuOnce();
   preloadAllCanteenMedia();
 
+  // Active check & enforce Pre-Order schedule cutoff reset in real-time
+  checkAndEnforceDailyMenuReset();
+  const autoResetTimer = setInterval(() => {
+    checkAndEnforceDailyMenuReset();
+  }, 5000);
+
   // 2. Setup Realtime subscription on app_settings
   const channel = supabase
     .channel('canteen_all_cloud_sync_channel')
@@ -948,8 +965,15 @@ export function initCanteenCloudSync(): () => void {
   const handleLocalStockLogs = () => queuePushKeyToCloud('canteen_raw_stock_logs_v2');
   const handleLocalRawInventory = () => queuePushKeyToCloud('canteen_raw_inventory_items_v2');
   const handleLocalDailyMenu = () => {
-    queuePushKeyToCloud('canteen_daily_menu');
-    queuePushKeyToCloud('canteen_daily_menu_updated_at');
+    try {
+      const rawMenu = localStorage.getItem('canteen_daily_menu');
+      const parsedMenu = rawMenu ? JSON.parse(rawMenu) : [];
+      queuePushKeyToCloud('canteen_daily_menu', parsedMenu, 50);
+    } catch {
+      queuePushKeyToCloud('canteen_daily_menu', [], 50);
+    }
+    const rawTime = localStorage.getItem('canteen_daily_menu_updated_at') || new Date().toISOString();
+    queuePushKeyToCloud('canteen_daily_menu_updated_at', rawTime, 50);
   };
 
   window.addEventListener('canteen_txs_updated', handleLocalTxs);
@@ -974,6 +998,7 @@ export function initCanteenCloudSync(): () => void {
     window.removeEventListener('canteen_menu_recipes_updated', handleLocalRecipes);
     window.removeEventListener('canteen_raw_stock_logs_updated', handleLocalStockLogs);
     window.removeEventListener('canteen_raw_inventory_updated', handleLocalRawInventory);
+    clearInterval(autoResetTimer);
     window.removeEventListener('canteen_daily_menu_updated', handleLocalDailyMenu);
     isInitialized = false;
   };

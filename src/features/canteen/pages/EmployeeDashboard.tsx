@@ -75,6 +75,10 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ onManagerP
           fetchMenu();
       };
 
+      const interval = setInterval(() => {
+          fetchMenu();
+      }, 5000);
+
       const handleSettingsUpdated = (e: any) => {
           if (e.detail) {
               setCanteenConfig(e.detail);
@@ -85,11 +89,14 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ onManagerP
 
       window.addEventListener('storage', handleStorageChange);
       window.addEventListener('canteen_menu_updated', handleCustomEvent);
+      window.addEventListener('canteen_daily_menu_updated', handleCustomEvent);
       window.addEventListener('canteen_settings_updated', handleSettingsUpdated);
       
       return () => {
+          clearInterval(interval);
           window.removeEventListener('storage', handleStorageChange);
           window.removeEventListener('canteen_menu_updated', handleCustomEvent);
+          window.removeEventListener('canteen_daily_menu_updated', handleCustomEvent);
           window.removeEventListener('canteen_settings_updated', handleSettingsUpdated);
       };
   }, []);

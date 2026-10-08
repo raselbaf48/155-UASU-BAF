@@ -133,13 +133,17 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
     const handlePortalChanged = (e: any) => {
       const p = e.detail?.portal;
       if (p && (p === 'Office' || p === 'Nt Count' || p === 'Canteen')) {
-        setActiveTab((prev) => (prev === p ? prev : p));
+        setTimeout(() => {
+          setActiveTab((prev) => (prev === p ? prev : p));
+        }, 0);
       }
     };
     window.addEventListener('baf_portal_preference_changed', handlePortalChanged);
 
     const handleCfgUpdate = (e: any) => {
-      setCanteenConfig(e?.detail || getCanteenConfig());
+      setTimeout(() => {
+        setCanteenConfig(e?.detail || getCanteenConfig());
+      }, 0);
     };
     window.addEventListener('canteen_settings_updated', handleCfgUpdate);
     window.addEventListener('storage', handleCfgUpdate);

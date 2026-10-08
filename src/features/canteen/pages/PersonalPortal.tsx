@@ -26,6 +26,10 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
   
   const [dailyMenu, setDailyMenu] = useState<any[]>(() => {
     try {
+      const windowStatus = checkPreOrderWindow();
+      if (!windowStatus.isOpen && currentUser?.role !== 'manager') {
+        return [];
+      }
       const ids = getCuratedDailyMenu();
       if (Array.isArray(ids) && ids.length > 0) {
         const allItems = getCanteenMenuCache();
@@ -351,9 +355,10 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
           const cfg = getCanteenConfig();
           setCanteenConfig(cfg);
           setPreOrderWindow(checkPreOrderWindow(cfg));
+          fetchMenu();
       };
       refreshStatus();
-      const timer = setInterval(refreshStatus, 10000);
+      const timer = setInterval(refreshStatus, 5000);
       const handleConfigUpdate = (e: any) => {
           const cfg = e.detail || getCanteenConfig();
           setCanteenConfig(cfg);
@@ -408,6 +413,13 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
   }, [fetchActivities]);
 
   const fetchMenu = async () => {
+    // If pre-order window is closed, regular members cannot view or order daily items
+    const windowStatus = checkPreOrderWindow(canteenConfig);
+    if (!windowStatus.isOpen && currentUser?.role !== 'manager') {
+      setDailyMenu([]);
+      return;
+    }
+
     const ids = getCuratedDailyMenu();
     if (ids && ids.length > 0) {
       const cachedItems = getCanteenMenuCache();
