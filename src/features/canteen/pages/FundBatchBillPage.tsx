@@ -30,11 +30,12 @@ import {
   Tag,
   Wallet,
   CreditCard,
+  ShieldCheck,
   AlertTriangle
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { pushKeyToCloud, recordDeletedTxId } from '../utils/canteenCloudSync';
-import { resolveImageUrl } from '../utils/canteenSettings';
+import { resolveImageUrl, getCanteenConfig } from '../utils/canteenSettings';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { formatBengaliMonthYear } from '../utils/exportCanteenBillExcel';
 import { 
@@ -106,8 +107,55 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
   const dateInputRef = useRef<HTMLInputElement>(null);
   const [note, setNote] = useState<string>('');
   const [othersFundSource, setOthersFundSource] = useState<'Cash' | 'UCB'>('Cash');
+  const [cashDeductTarget, setCashDeductTarget] = useState<'MANAGER' | 'STAFF'>('MANAGER');
+  const [selectedStaffName, setSelectedStaffName] = useState<string>('Civ Tanvir');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  const canteenConfig = useMemo(() => getCanteenConfig(), []);
+  const managerName = canteenConfig?.managerName || 'LAC Nishad';
+
+  // Civilian staff list
+  const civilianStaffList = useMemo(() => {
+    const civs: Array<{ id: string; name: string; surname: string }> = [];
+    const seenNames = new Set<string>();
+
+    members.forEach((m) => {
+      if (isCivilianMember(m)) {
+        const surname = m['Surname'] || m.surname || m.name || '';
+        const rank = m['Rank'] || m.rank || 'Civ';
+        const fullName = `${rank} ${surname}`.trim() || surname;
+        const key = fullName.toLowerCase();
+        if (fullName && !seenNames.has(key)) {
+          seenNames.add(key);
+          civs.push({
+            id: String(m.airman_id || m['BD No'] || surname),
+            name: fullName,
+            surname: surname
+          });
+        }
+      }
+    });
+
+    const defaultCivs = [
+      { id: 'civ-tanvir', name: 'Civ Tanvir', surname: 'Tanvir' },
+      { id: 'civ-nurnabi', name: 'Civ Nur Nabi', surname: 'Nur Nabi' },
+      { id: 'civ-akramul', name: 'Civ Akramul', surname: 'Akramul' },
+      { id: 'civ-sharif', name: 'Civ Sharif', surname: 'Sharif' },
+      { id: 'civ-irfan', name: 'Civ Irfan', surname: 'Irfan' },
+      { id: 'civ-sanwar', name: 'Civ Sanwar', surname: 'Sanwar' }
+    ];
+
+    defaultCivs.forEach((def) => {
+      const key = def.name.toLowerCase();
+      if (!seenNames.has(key)) {
+        seenNames.add(key);
+        civs.push(def);
+      }
+    });
+
+    return civs;
+  }, [members]);
 
   // Target month key computed from selected date
   const targetMonthKey = useMemo(() => {
@@ -424,15 +472,19 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
           }
         })();
 
+        const detailedPerson = othersFundSource === 'Cash'
+          ? (cashDeductTarget === 'STAFF' ? selectedStaffName : managerName)
+          : 'UCB Bank';
+
         const othersExpenseRecord = {
           id: `exp-others-${now}`,
           date: formattedTxDate,
           desc: `OTHERS BILL: ${finalNote}`.toUpperCase(),
-          subdesc: `Bill charged to ${selectedMemberList.length} members (৳${numAmount.toLocaleString()} per member)`,
+          subdesc: `Bill charged to ${selectedMemberList.length} members (৳${numAmount.toLocaleString()} per member) [${othersFundSource === 'Cash' ? (cashDeductTarget === 'STAFF' ? `Staff: ${selectedStaffName}` : `Manager: ${managerName}`) : 'UCB Bank'}]`,
           category: 'Others Bill',
           paymentMethod: othersFundSource, // 'Cash' | 'UCB'
           amount: totalOthersDeduction,
-          detailedPerson: 'Canteen / Unit Office',
+          detailedPerson: detailedPerson,
           isCustom: true
         };
 
@@ -440,6 +492,57 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
         localStorage.setItem('canteen_expenses', JSON.stringify(updatedExpenses));
         await pushKeyToCloud('canteen_expenses', updatedExpenses);
         window.dispatchEvent(new Event('canteen_expenses_updated'));
+
+        // If Cash and Staff is selected: deduct from the staff member's account!
+        if (othersFundSource === 'Cash' && cashDeductTarget === 'STAFF' && selectedStaffName) {
+          const advancesRaw = localStorage.getItem('canteen_bazar_advances');
+          const advances: any[] = advancesRaw ? JSON.parse(advancesRaw) : [];
+
+          const targetStaff = selectedStaffName.trim().toLowerCase();
+          const personActive = advances.filter((a) => {
+            const pName = String(a.personName || '').trim().toLowerCase();
+            const isSettled = a.status === 'SETTLED' || Number(a.returnAmount) > 0 || (a.notes && a.notes.includes('[Settled]')) || Boolean(a.settledDate);
+            return (pName === targetStaff || pName.includes(targetStaff) || targetStaff.includes(pName)) &&
+                   String(a.status || 'ACTIVE').toUpperCase() === 'ACTIVE' &&
+                   !isSettled;
+          });
+
+          let updatedAdvances = advances;
+          if (personActive.length === 0) {
+            // If person had no active advance, create one so their spent balance is updated
+            const newNegativeAdv = {
+              id: `adv-${now}-${Math.random().toString(36).substring(2, 6)}`,
+              date: formattedTxDate,
+              personName: selectedStaffName,
+              amount: 0,
+              spentAmount: totalOthersDeduction,
+              returnAmount: 0,
+              channel: 'CASH',
+              purpose: `OTHERS BILL: ${finalNote}`.toUpperCase(),
+              status: 'ACTIVE',
+              notes: `Auto deducted for Others Bill (${selectedMemberList.length} members)`
+            };
+            updatedAdvances = [newNegativeAdv, ...advances];
+          } else {
+            let deducted = false;
+            updatedAdvances = advances.map((a) => {
+              const pName = String(a.personName || '').trim().toLowerCase();
+              const isSettled = a.status === 'SETTLED' || Number(a.returnAmount) > 0 || (a.notes && a.notes.includes('[Settled]')) || Boolean(a.settledDate);
+              if (!deducted && (pName === targetStaff || pName.includes(targetStaff) || targetStaff.includes(pName)) && String(a.status || 'ACTIVE').toUpperCase() === 'ACTIVE' && !isSettled) {
+                deducted = true;
+                return {
+                  ...a,
+                  spentAmount: (Number(a.spentAmount) || 0) + totalOthersDeduction
+                };
+              }
+              return a;
+            });
+          }
+
+          localStorage.setItem('canteen_bazar_advances', JSON.stringify(updatedAdvances));
+          await pushKeyToCloud('canteen_bazar_advances', updatedAdvances);
+          window.dispatchEvent(new Event('canteen_bazar_advances_updated'));
+        }
       }
 
       // Trigger sync events across the entire app
@@ -807,37 +910,11 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                   }`}
                   required={!isUnitFund}
                 />
-
-                {/* Preset quick notes for Others */}
-                {!isUnitFund && (
-                  <div className="mt-2 space-y-1">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center space-x-1">
-                      <Tag className="w-3 h-3 text-cyan-400" />
-                      <span>Quick Preset Notes:</span>
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {quickNotes.map((qn) => (
-                        <button
-                          key={qn}
-                          type="button"
-                          onClick={() => setNote(qn)}
-                          className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                            note === qn
-                              ? 'bg-cyan-600 text-white'
-                              : 'bg-slate-800/80 text-cyan-300 hover:bg-slate-800 border border-slate-700/60'
-                          }`}
-                        >
-                          {qn}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
 
               {/* For Others Bill: Fund Deduction Source (Cash or UCB) */}
               {!isUnitFund && (
-                <div className="bg-slate-950/80 rounded-2xl p-3 border border-cyan-500/30 space-y-2">
+                <div className="bg-slate-950/80 rounded-2xl p-3 border border-cyan-500/30 space-y-2.5">
                   <label className="block text-[11px] font-black uppercase text-cyan-300 flex items-center justify-between">
                     <span className="flex items-center space-x-1.5">
                       <Wallet className="w-3.5 h-3.5 text-cyan-400" />
@@ -871,8 +948,88 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                       <span>UCB (Bank)</span>
                     </button>
                   </div>
+
+                  {/* Cash Account Options: Manager vs Staff */}
+                  {othersFundSource === 'Cash' && (
+                    <div className="bg-slate-900/90 rounded-xl p-2.5 border border-slate-800/90 space-y-2 mt-1">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-black uppercase text-slate-300 flex items-center space-x-1.5">
+                          <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Deduct Cash From *</span>
+                        </label>
+                        <span className="text-[9px] text-slate-400 font-mono">
+                          {cashDeductTarget === 'MANAGER' ? 'Manager Cash' : 'Staff Account'}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setCashDeductTarget('MANAGER')}
+                          className={`py-1.5 px-2.5 rounded-lg text-[11px] font-black flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+                            cashDeductTarget === 'MANAGER'
+                              ? 'bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-400'
+                              : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+                          }`}
+                        >
+                          <ShieldCheck className="w-3.5 h-3.5 text-indigo-200" />
+                          <span className="truncate">Manager ({managerName})</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setCashDeductTarget('STAFF')}
+                          className={`py-1.5 px-2.5 rounded-lg text-[11px] font-black flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+                            cashDeductTarget === 'STAFF'
+                              ? 'bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-400'
+                              : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+                          }`}
+                        >
+                          <Users className="w-3.5 h-3.5 text-emerald-200" />
+                          <span>Staff</span>
+                        </button>
+                      </div>
+
+                      {/* Staff member selection list */}
+                      {cashDeductTarget === 'STAFF' && (
+                        <div className="space-y-1.5 pt-1 border-t border-slate-800/80">
+                          <label className="block text-[10px] font-black uppercase text-slate-400">
+                            Select Staff Member Account *
+                          </label>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                            {civilianStaffList.map((st) => (
+                              <button
+                                key={st.id || st.name}
+                                type="button"
+                                onClick={() => setSelectedStaffName(st.name)}
+                                className={`px-2 py-1.5 rounded-lg text-[10px] font-black text-center truncate transition-all cursor-pointer ${
+                                  selectedStaffName === st.name
+                                    ? 'bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-300'
+                                    : 'bg-slate-950 text-slate-300 hover:bg-slate-800 border border-slate-800'
+                                }`}
+                                title={st.name}
+                              >
+                                {st.name}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <p className="text-[10px] text-slate-400 font-bold leading-relaxed">
-                    💡 Total bill {numAmount > 0 && selectedCount > 0 ? `৳${totalBatchAmount.toLocaleString()}` : 'amount'} will be automatically deducted as an expenditure from <strong className="text-white">{othersFundSource} Fund</strong> upon posting.
+                    💡 Total bill {numAmount > 0 && selectedCount > 0 ? `৳${totalBatchAmount.toLocaleString()}` : 'amount'} will be automatically deducted from{' '}
+                    {othersFundSource === 'Cash' ? (
+                      cashDeductTarget === 'STAFF' ? (
+                        <strong className="text-emerald-400">{selectedStaffName} এর Account / Advance</strong>
+                      ) : (
+                        <strong className="text-indigo-300">Manager ({managerName}) এর Cash Drawer</strong>
+                      )
+                    ) : (
+                      <strong className="text-cyan-300">UCB Bank Fund</strong>
+                    )}{' '}
+                    upon posting.
                   </p>
                 </div>
               )}

@@ -357,6 +357,41 @@ export const getRunningMonthKey = (): string => {
   return `${y}-${m}`;
 };
 
+// Helper to identify and filter out any Cash Advance, Advance Return, Bazar Advance, or Settle Return from Member Canteen Billing
+export const isAdvanceRelated = (tx: any): boolean => {
+  if (!tx) return false;
+  const t = String(tx?.type || '').toUpperCase().trim();
+  const id = String(tx?.id || '').toLowerCase();
+  const items = String(tx?.items || '').toLowerCase();
+  const desc = String(tx?.description || tx?.desc || '').toLowerCase();
+
+  return (
+    t === 'ADVANCE' ||
+    t === 'ADVANCE_PAYMENT' ||
+    t === 'ADVANCE_RETURN' ||
+    t === 'BAZAR_RETURN' ||
+    t === 'CASH_ADVANCE' ||
+    t === 'CASH_REFUND' ||
+    t === 'REFUND' ||
+    t === 'BAZAR_ADVANCE' ||
+    Boolean(tx?.isAdvance) ||
+    id.startsWith('tx-adv-') ||
+    id.startsWith('adv-') ||
+    id.startsWith('tx-bazar-') ||
+    items.includes('cash advance') ||
+    items.includes('cash refund') ||
+    items.includes('advance return') ||
+    items.includes('উদ্বৃত্ত ফেরত') ||
+    items.includes('অগ্রিম') ||
+    items.includes('advance settle') ||
+    items.includes('settle balance from') ||
+    desc.includes('advance return') ||
+    desc.includes('cash advance') ||
+    desc.includes('advance settle') ||
+    desc.includes('settle balance from')
+  );
+};
+
 // Official menu catalog prices dictionary
 // Official menu catalog prices dictionary with exact rates
 export const DEFAULT_MENU_PRICES: Record<string, number> = {
@@ -775,6 +810,29 @@ export const MemberDB: React.FC = () => {
     syncWhatsAppTemplateConfigFromCloud().catch(() => {});
   }, []);
 
+  // Proactively decouple advance return transactions from member IDs so they never pollute member dining profiles
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('canteen_txs');
+      if (raw) {
+        const txs = JSON.parse(raw);
+        let modified = false;
+        const cleaned = txs.map((tx: any) => {
+          if (isAdvanceRelated(tx) && (tx.airman_id || tx.bdNo || tx.memberName)) {
+            modified = true;
+            return { ...tx, airman_id: '', bdNo: '', memberName: '', isAdvance: true };
+          }
+          return tx;
+        });
+        if (modified) {
+          localStorage.setItem('canteen_txs', JSON.stringify(cleaned));
+          pushKeyToCloud('canteen_txs', cleaned).catch(() => {});
+          window.dispatchEvent(new Event('canteen_txs_updated'));
+        }
+      }
+    } catch {}
+  }, []);
+
   // Menu catalog prices cache for accurate item rate calculations
   const [menuCatalog, setMenuCatalog] = useState<any[]>(() => getCanteenMenuCache());
 
@@ -948,6 +1006,8 @@ export const MemberDB: React.FC = () => {
     });
 
     sortedProfileTx.forEach((tx) => {
+      if (!tx || isAdvanceRelated(tx)) return;
+
       if (tx.type === 'BILL PAYMENT') {
         const isReverted = tx.isReverted || tx.status === 'REVERTED' || String(tx.items || '').includes('[বাতিল');
         const isCash = String(tx.gateway || '').toUpperCase() === 'CASH' || String(tx.items || '').toUpperCase().includes('CASH');
@@ -1118,7 +1178,7 @@ export const MemberDB: React.FC = () => {
     const initialTxsByGroup = new Map<string, any[]>();
 
     txList.forEach((tx) => {
-      if (!tx || tx.type === 'BILL PAYMENT' || tx.type === 'REVERTED' || tx.isReverted) return;
+      if (!tx || isAdvanceRelated(tx) || tx.type === 'BILL PAYMENT' || tx.type === 'REVERTED' || tx.isReverted) return;
 
       const isInit = tx.type === 'INITIAL_BILL' || 
         tx.type === 'AMOUNT_CHANGE' ||
@@ -1169,7 +1229,7 @@ export const MemberDB: React.FC = () => {
     const effectiveBilled = calculateEffectiveCharges(profileTx || []);
     let paid = 0;
     (profileTx || []).forEach((t: any) => {
-      if (!t) return;
+      if (!t || isAdvanceRelated(t)) return;
       const isReverted = t.isReverted || t.status === 'REVERTED' || String(t.items || '').includes('[বাতিল');
       if (isReverted) return;
       if (t.type === 'BILL PAYMENT') {
@@ -1582,7 +1642,7 @@ export const MemberDB: React.FC = () => {
     const bdMap = new Map<string, any[]>();
 
     (allTxs || []).forEach((tx: any) => {
-      if (!tx) return;
+      if (!tx || isAdvanceRelated(tx)) return;
       const txAirman = String(tx.airman_id || tx.airmanId || '').trim().toLowerCase();
       if (txAirman) {
         if (!airmanMap.has(txAirman)) airmanMap.set(txAirman, []);
@@ -1652,7 +1712,7 @@ export const MemberDB: React.FC = () => {
     const mRank = String(member['Rank'] || member.rank || '').trim().toLowerCase();
 
     return txs.filter((tx: any) => {
-      if (!tx) return false;
+      if (!tx || isAdvanceRelated(tx)) return false;
       const txAirman = String(tx.airman_id || tx.airmanId || '').trim().toLowerCase();
       if (mAirman && txAirman && mAirman === txAirman) return true;
 
@@ -3523,75 +3583,6 @@ export const MemberDB: React.FC = () => {
         </div>
       </div>
 
-      {/* Top Filter: Overall, Officer, Airmen, Civilian (Selected member box removed) */}
-      <div className="w-full min-w-0 bg-slate-900/90 border border-slate-800 rounded-2xl p-1.5 sm:p-2 shadow-sm">
-        <div className="grid grid-cols-4 w-full items-center gap-1 sm:gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800/80">
-          <button
-            type="button"
-            onClick={() => setRankTypeFilter('OVERALL')}
-            className={`px-1 sm:px-3 py-1.5 rounded-lg text-[9px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 sm:space-x-1.5 ${
-              rankTypeFilter === 'OVERALL'
-                ? 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white shadow-md shadow-indigo-600/30'
-                : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
-            }`}
-          >
-            <Users className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0 hidden xs:inline-block sm:inline-block" />
-            <span>OVERALL</span>
-            <span className="px-1 py-0.2 rounded-md bg-white/15 text-[8px] sm:text-[9px] font-mono font-bold">
-              {overallCount}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setRankTypeFilter('OFFICER')}
-            className={`px-1 sm:px-3 py-1.5 rounded-lg text-[9px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 sm:space-x-1.5 ${
-              rankTypeFilter === 'OFFICER'
-                ? 'bg-gradient-to-r from-amber-600 to-orange-600 text-white shadow-md shadow-amber-600/30'
-                : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
-            }`}
-          >
-            <ShieldCheck className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0 hidden xs:inline-block sm:inline-block" />
-            <span>OFFICER</span>
-            <span className="px-1 py-0.2 rounded-md bg-white/15 text-[8px] sm:text-[9px] font-mono font-bold">
-              {officerCount}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setRankTypeFilter('AIRMEN')}
-            className={`px-1 sm:px-3 py-1.5 rounded-lg text-[9px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 sm:space-x-1.5 ${
-              rankTypeFilter === 'AIRMEN'
-                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-600/30'
-                : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
-            }`}
-          >
-            <User className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0 hidden xs:inline-block sm:inline-block" />
-            <span>AIRMEN</span>
-            <span className="px-1 py-0.2 rounded-md bg-white/15 text-[8px] sm:text-[9px] font-mono font-bold">
-              {airmenCount}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setRankTypeFilter('CIVILIAN')}
-            className={`px-1 sm:px-3 py-1.5 rounded-lg text-[9px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 sm:space-x-1.5 ${
-              rankTypeFilter === 'CIVILIAN'
-                ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-md shadow-purple-600/30'
-                : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
-            }`}
-          >
-            <Coffee className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0 hidden xs:inline-block sm:inline-block" />
-            <span>CIVILIAN</span>
-            <span className="px-1 py-0.2 rounded-md bg-white/15 text-[8px] sm:text-[9px] font-mono font-bold">
-              {civilianCount}
-            </span>
-          </button>
-        </div>
-      </div>
-
       {/* Bill Category Tabs & Compact Month Selector */}
       <div className="bg-slate-900/85 border border-slate-800 rounded-xl p-2.5 sm:p-3 space-y-2.5 shadow-sm">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
@@ -3807,6 +3798,75 @@ export const MemberDB: React.FC = () => {
               <List className="w-4 h-4" />
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Role / Rank Filter: Overall, Officer, Airmen, Civilian (Placed below Search Row) */}
+      <div className="w-full min-w-0 bg-slate-900/90 border border-slate-800 rounded-2xl p-1.5 sm:p-2 shadow-sm">
+        <div className="grid grid-cols-4 w-full items-center gap-1 sm:gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800/80">
+          <button
+            type="button"
+            onClick={() => setRankTypeFilter('OVERALL')}
+            className={`px-1 sm:px-3 py-1.5 rounded-lg text-[9px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 sm:space-x-1.5 ${
+              rankTypeFilter === 'OVERALL'
+                ? 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white shadow-md shadow-indigo-600/30'
+                : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
+            }`}
+          >
+            <Users className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0 hidden xs:inline-block sm:inline-block" />
+            <span>OVERALL</span>
+            <span className="px-1 py-0.2 rounded-md bg-white/15 text-[8px] sm:text-[9px] font-mono font-bold">
+              {overallCount}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setRankTypeFilter('OFFICER')}
+            className={`px-1 sm:px-3 py-1.5 rounded-lg text-[9px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 sm:space-x-1.5 ${
+              rankTypeFilter === 'OFFICER'
+                ? 'bg-gradient-to-r from-amber-600 to-orange-600 text-white shadow-md shadow-amber-600/30'
+                : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
+            }`}
+          >
+            <ShieldCheck className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0 hidden xs:inline-block sm:inline-block" />
+            <span>OFFICER</span>
+            <span className="px-1 py-0.2 rounded-md bg-white/15 text-[8px] sm:text-[9px] font-mono font-bold">
+              {officerCount}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setRankTypeFilter('AIRMEN')}
+            className={`px-1 sm:px-3 py-1.5 rounded-lg text-[9px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 sm:space-x-1.5 ${
+              rankTypeFilter === 'AIRMEN'
+                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-600/30'
+                : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
+            }`}
+          >
+            <User className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0 hidden xs:inline-block sm:inline-block" />
+            <span>AIRMEN</span>
+            <span className="px-1 py-0.2 rounded-md bg-white/15 text-[8px] sm:text-[9px] font-mono font-bold">
+              {airmenCount}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setRankTypeFilter('CIVILIAN')}
+            className={`px-1 sm:px-3 py-1.5 rounded-lg text-[9px] sm:text-xs font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 sm:space-x-1.5 ${
+              rankTypeFilter === 'CIVILIAN'
+                ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-md shadow-purple-600/30'
+                : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
+            }`}
+          >
+            <Coffee className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0 hidden xs:inline-block sm:inline-block" />
+            <span>CIVILIAN</span>
+            <span className="px-1 py-0.2 rounded-md bg-white/15 text-[8px] sm:text-[9px] font-mono font-bold">
+              {civilianCount}
+            </span>
+          </button>
         </div>
       </div>
 

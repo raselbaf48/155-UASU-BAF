@@ -1183,8 +1183,9 @@ export const Expenditures: React.FC = () => {
             const returnTx = {
               id: `tx-adv-ret-${Date.now()}-${civ.id}`,
               date: formatCanteenDate(new Date()),
-              memberName: displayName,
-              airman_id: civ.id,
+              memberName: '',
+              airman_id: '',
+              isAdvance: true,
               type: 'ADVANCE_RETURN',
               items: `Advance Return (Settle Balance from ${displayName})`,
               gateway: 'CASH',
