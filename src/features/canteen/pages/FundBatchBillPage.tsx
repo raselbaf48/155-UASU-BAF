@@ -33,7 +33,8 @@ import {
   CreditCard,
   ShieldCheck,
   AlertTriangle,
-  Pencil
+  Pencil,
+  Settings
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { pushKeyToCloud, recordDeletedTxId } from '../utils/canteenCloudSync';
@@ -41,6 +42,7 @@ import { resolveImageUrl, getCanteenConfig } from '../utils/canteenSettings';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { formatBengaliMonthYear } from '../utils/exportCanteenBillExcel';
 import { DateNavigator, getTodayYMD } from '../components/DateNavigator';
+import { FundHistoryModal } from '../components/FundHistoryModal';
 import { 
   BillCategory, 
   isOfficerMember, 
@@ -113,13 +115,11 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
   const isUnitFund = category === 'UNIT_FUND';
   const categoryTitle = isUnitFund ? 'UNIT FUND' : 'OTHERS BILL';
 
-  // Month navigation
-  const [currentMonth, setCurrentMonth] = useState<string>(
-    initialSelectedMonth && initialSelectedMonth !== 'ALL' ? initialSelectedMonth : getRunningMonthKey()
-  );
-
   // Batch Add Form State
   const [amount, setAmount] = useState<string>('');
+  const [amountMode, setAmountMode] = useState<'SAME' | 'DIFFERENT'>('SAME');
+  const [memberCustomAmounts, setMemberCustomAmounts] = useState<Record<string, string>>({});
+  const [fillAllInput, setFillAllInput] = useState<string>('');
   const [txDate, setTxDate] = useState<string>(() => getTodayYMD());
   
   // Purpose Presets & Notes State
@@ -130,6 +130,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
     'Mess Dinner Fee',
     'Picnic & Refreshment'
   ];
+
   const [purposePresets, setPurposePresets] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem('canteen_purpose_presets');
@@ -141,6 +142,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
   const [notes, setNotes] = useState<string>('');
   const [newPresetInput, setNewPresetInput] = useState<string>('');
   const [isAddingPreset, setIsAddingPreset] = useState<boolean>(false);
+  const [isEditingPresets, setIsEditingPresets] = useState<boolean>(false);
 
   const [othersFundSource, setOthersFundSource] = useState<'Cash' | 'UCB'>('Cash');
   const [cashDeductTarget, setCashDeductTarget] = useState<'MANAGER' | 'STAFF'>('MANAGER');
@@ -148,8 +150,9 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
-  // Officer rank filter state
+  // Officer & Airmen rank filter state
   const [officerRankFilter, setOfficerRankFilter] = useState<string>('ALL');
+  const [airmanRankFilter, setAirmanRankFilter] = useState<string>('ALL');
 
   // Transaction edit & delete state
   const [txToEdit, setTxToEdit] = useState<any | null>(null);
@@ -203,13 +206,16 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
     return civs;
   }, [members]);
 
-  // Target month key computed from selected date
+  // Target month key computed directly from selected date (Date e ja thake oi month er bill er sathe add hbe)
   const targetMonthKey = useMemo(() => {
+    if (!txDate) return getRunningMonthKey();
+    const parts = txDate.split('-');
+    if (parts.length >= 2) return `${parts[0]}-${parts[1]}`;
     const dateObj = new Date(txDate);
     return !isNaN(dateObj.getTime())
       ? `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`
-      : currentMonth;
-  }, [txDate, currentMonth]);
+      : getRunningMonthKey();
+  }, [txDate]);
 
   // Set of member IDs who already have a Unit Fund entry in this target month
   const membersWithUnitFundThisMonth = useMemo(() => {
@@ -245,6 +251,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
   const [dueListFilter, setDueListFilter] = useState<'ALL' | 'WITH_DUE'>('ALL');
   const [viewMode, setViewMode] = useState<'CARDS' | 'TABLE'>('TABLE');
   const [activeTab, setActiveTab] = useState<'ADD_BATCH' | 'RECENT_LOG'>('ADD_BATCH');
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState<boolean>(false);
   const [historySearch, setHistorySearch] = useState<string>('');
 
   // Quick preset notes for Others fund
@@ -281,6 +288,32 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
     setIsAddingPreset(false);
   };
 
+  const handleAddPresetWithName = (nameToAdd: string) => {
+    const trimmed = nameToAdd.trim();
+    if (!trimmed) return;
+    if (!purposePresets.includes(trimmed)) {
+      const updated = [...purposePresets, trimmed];
+      setPurposePresets(updated);
+      try {
+        localStorage.setItem('canteen_purpose_presets', JSON.stringify(updated));
+      } catch {}
+    }
+    setPurpose(trimmed);
+    setNewPresetInput('');
+    setIsAddingPreset(false);
+  };
+
+  const handleRemovePreset = (presetToRemove: string) => {
+    const updated = purposePresets.filter(p => p !== presetToRemove);
+    setPurposePresets(updated);
+    try {
+      localStorage.setItem('canteen_purpose_presets', JSON.stringify(updated));
+    } catch {}
+    if (purpose === presetToRemove) {
+      setPurpose(updated[0] || '');
+    }
+  };
+
   // Distinct officer ranks for officer rank filter
   const officerRanks = useMemo(() => {
     const ranksSet = new Set<string>();
@@ -304,6 +337,34 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
     });
   }, [members]);
 
+  // Distinct airman ranks for airman rank filter (Member selection theke Airmen er o Rank wise Filter kora jbe)
+  const airmanRanks = useMemo(() => {
+    const ranksSet = new Set<string>();
+    members.forEach((m) => {
+      if (isAirmanMember(m)) {
+        const r = String(m['Rank'] || m.rank || '').trim().toUpperCase();
+        if (r && r !== '-') ranksSet.add(r);
+      }
+    });
+    const standardAirmanOrder = [
+      'MWO', 'MASTER WARRANT OFFICER', 
+      'SWO', 'SENIOR WARRANT OFFICER', 
+      'WO', 'WARRANT OFFICER', 
+      'SGT', 'SERGEANT', 
+      'CPL', 'CORPORAL', 
+      'LAC', 'LEADING AIRCRAFTMAN', 
+      'AC', 'AIRCRAFTMAN'
+    ];
+    return Array.from(ranksSet).sort((a, b) => {
+      const idxA = standardAirmanOrder.findIndex(o => a.includes(o) || o.includes(a));
+      const idxB = standardAirmanOrder.findIndex(o => b.includes(o) || b.includes(o));
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return a.localeCompare(b);
+    });
+  }, [members]);
+
   // Filter members based on search and memberFilter, maintaining strict Rank Seniority (Officers > JCOs > Airmen > Civilians)
   const filteredMembers = useMemo(() => {
     const list = members.filter((m) => {
@@ -315,8 +376,16 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
           if (!mRank.includes(officerRankFilter)) return false;
         }
       }
-      if (memberFilter === 'AIRMEN' && !isAirmanMember(m)) return false;
-      if (memberFilter === 'CIVILIAN' && !isCivilianMember(m)) return false;
+      if (memberFilter === 'AIRMEN') {
+        if (!isAirmanMember(m)) return false;
+        if (airmanRankFilter !== 'ALL') {
+          const mRank = String(m['Rank'] || m.rank || '').trim().toUpperCase();
+          if (!mRank.includes(airmanRankFilter)) return false;
+        }
+      }
+      if (memberFilter === 'CIVILIAN') {
+        if (!isCivilianMember(m)) return false;
+      }
 
       // Search Query
       if (searchQuery.trim()) {
@@ -335,7 +404,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
     });
 
     return sortCanteenMembersByOfficeSeniority(list);
-  }, [members, memberFilter, officerRankFilter, searchQuery, getMemberBanglaName, getMemberBanglaRank]);
+  }, [members, memberFilter, officerRankFilter, airmanRankFilter, searchQuery, getMemberBanglaName, getMemberBanglaRank]);
 
   // Members for the dues table/cards
   const displayedMembersForDues = useMemo(() => {
@@ -350,7 +419,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
     return sortCanteenMembersByOfficeSeniority(list);
   }, [filteredMembers, dueListFilter, category, getMemberTotalDue]);
 
-  // Overall Statistics for this category
+  // Overall Statistics for this category based on selected date's billing month
   const stats = useMemo(() => {
     let totalDue = 0;
     let totalMonthBilled = 0;
@@ -362,12 +431,12 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
         totalDue += d;
         membersWithDue += 1;
       }
-      const mb = getMemberFilteredBill(m, category, currentMonth);
+      const mb = getMemberFilteredBill(m, category, targetMonthKey);
       totalMonthBilled += mb;
     });
 
     return { totalDue, totalMonthBilled, membersWithDue };
-  }, [members, category, currentMonth, getMemberTotalDue, getMemberFilteredBill]);
+  }, [members, category, targetMonthKey, getMemberTotalDue, getMemberFilteredBill]);
 
   // Filter category transactions for recent log
   const categoryTransactions = useMemo(() => {
@@ -447,32 +516,25 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
     });
   };
 
-  // Month navigation helpers
-  const handlePrevMonth = () => {
-    const [y, m] = currentMonth.split('-').map(Number);
-    const d = new Date(y, m - 2, 1);
-    setCurrentMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
-  };
-
-  const handleNextMonth = () => {
-    const [y, m] = currentMonth.split('-').map(Number);
-    const d = new Date(y, m, 1);
-    setCurrentMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
-  };
-
   // Submit Batch Bill Addition
   const handleBatchAddBill = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const numAmount = parseFloat(amount);
-    if (isNaN(numAmount) || numAmount <= 0) {
-      showToast('Please enter a valid amount greater than 0', 'error');
-      return;
-    }
-
     if (selectedAirmanIds.size === 0) {
       showToast('Please select at least one member to assign the bill', 'error');
       return;
+    }
+
+    // Validate each selected member has an amount > 0
+    for (const id of Array.from(selectedAirmanIds)) {
+      const raw = memberCustomAmounts[id] !== undefined ? memberCustomAmounts[id] : amount;
+      const val = parseFloat(raw || '0');
+      if (isNaN(val) || val <= 0) {
+        const m = members.find(mem => String(mem.airman_id || mem['BD No']) === id);
+        const name = m ? `${m['Rank'] || ''} ${m['Surname'] || m['BD No']}` : id;
+        showToast(`Please enter a valid amount for ${name}`, 'error');
+        return;
+      }
     }
 
     if (!isUnitFund && !purpose.trim()) {
@@ -529,10 +591,14 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       // Format date for display matching POS Sales (e.g. 09 Oct 26)
       const formattedTxDate = formatCanteenDate(txDate);
 
-      const targetMonth = targetMonthKey || currentMonth;
+      const targetMonth = targetMonthKey;
 
       const newBatchTxs = selectedMemberList.map((m, idx) => {
         const cleanBdNo = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
+        const mId = String(m.airman_id || m['BD No']);
+        const raw = memberCustomAmounts[mId] !== undefined ? memberCustomAmounts[mId] : amount;
+        const memberAmt = parseFloat(raw || '0') || 0;
+
         return {
           id: `tx-${category.toLowerCase()}-${cleanBdNo}-${targetMonth}-${now + idx}`,
           created_at: new Date().toISOString(),
@@ -547,7 +613,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
           items: defaultDesc,
           note: finalNotes || undefined,
           soldItems: [],
-          amount: numAmount,
+          amount: memberAmt,
           type: 'INITIAL_BILL',
           gateway: 'DUE',
           billType: category
@@ -560,88 +626,86 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       // Push member txs to cloud in background
       await pushKeyToCloud('canteen_txs', updatedTxs);
 
-      // OTHERS BILL: Automatically deduct total billed amount from Fund Cash or UCB as an expense
-      if (!isUnitFund) {
-        const totalOthersDeduction = numAmount * selectedMemberList.length;
-        const existingExpenses = (() => {
-          try {
-            return JSON.parse(localStorage.getItem('canteen_expenses') || '[]');
-          } catch {
-            return [];
-          }
-        })();
+      // Automatically deduct total billed amount from Fund Cash or UCB as an expense so Capital All Logs receives entry
+      const totalBatchDeduction = totalBatchAmount;
+      const existingExpenses = (() => {
+        try {
+          return JSON.parse(localStorage.getItem('canteen_expenses') || '[]');
+        } catch {
+          return [];
+        }
+      })();
 
-        const detailedPerson = othersFundSource === 'Cash'
-          ? (cashDeductTarget === 'STAFF' ? selectedStaffName : managerName)
-          : 'UCB Bank';
+      const detailedPerson = othersFundSource === 'Cash'
+        ? (cashDeductTarget === 'STAFF' ? selectedStaffName : managerName)
+        : 'UCB Bank';
 
-        const othersExpenseRecord = {
-          id: `exp-others-${now}`,
-          date: formattedTxDate,
-          desc: `OTHERS BILL: ${finalPurpose}`.toUpperCase(),
-          subdesc: `Bill charged to ${selectedMemberList.length} members (৳${numAmount.toLocaleString()} per member)${finalNotes ? ` • Note: ${finalNotes}` : ''} [${othersFundSource === 'Cash' ? (cashDeductTarget === 'STAFF' ? `Staff: ${selectedStaffName}` : `Manager: ${managerName}`) : 'UCB Bank'}]`,
-          category: 'Others Bill',
-          paymentMethod: othersFundSource, // 'Cash' | 'UCB'
-          amount: totalOthersDeduction,
-          detailedPerson: detailedPerson,
-          isCustom: true
-        };
+      const fundExpenseRecord = {
+        id: `exp-${category.toLowerCase()}-${now}`,
+        date: formattedTxDate,
+        desc: `${isUnitFund ? 'UNIT FUND' : 'OTHERS BILL'}: ${finalPurpose}`.toUpperCase(),
+        subdesc: `Batch Bill: ${selectedMemberList.length} members (Total: ৳${totalBatchAmount.toLocaleString()})${finalNotes ? ` • Note: ${finalNotes}` : ''} [${othersFundSource === 'Cash' ? (cashDeductTarget === 'STAFF' ? `Staff: ${selectedStaffName}` : `Manager: ${managerName}`) : 'UCB Bank'}]`,
+        category: isUnitFund ? 'Unit Fund' : 'Others Bill',
+        paymentMethod: othersFundSource, // 'Cash' | 'UCB'
+        amount: totalBatchDeduction,
+        detailedPerson: detailedPerson,
+        isCustom: true
+      };
 
-        const updatedExpenses = [othersExpenseRecord, ...existingExpenses];
-        localStorage.setItem('canteen_expenses', JSON.stringify(updatedExpenses));
-        await pushKeyToCloud('canteen_expenses', updatedExpenses);
-        window.dispatchEvent(new Event('canteen_expenses_updated'));
+      const updatedExpenses = [fundExpenseRecord, ...existingExpenses];
+      localStorage.setItem('canteen_expenses', JSON.stringify(updatedExpenses));
+      await pushKeyToCloud('canteen_expenses', updatedExpenses);
+      window.dispatchEvent(new Event('canteen_expenses_updated'));
 
-        // If Cash and Staff is selected: deduct from the staff member's account!
-        if (othersFundSource === 'Cash' && cashDeductTarget === 'STAFF' && selectedStaffName) {
-          const advancesRaw = localStorage.getItem('canteen_bazar_advances');
-          const advances: any[] = advancesRaw ? JSON.parse(advancesRaw) : [];
+      // If Cash and Staff is selected: deduct from the staff member's account!
+      if (othersFundSource === 'Cash' && cashDeductTarget === 'STAFF' && selectedStaffName) {
+        const advancesRaw = localStorage.getItem('canteen_bazar_advances');
+        const advances: any[] = advancesRaw ? JSON.parse(advancesRaw) : [];
 
-          const targetStaff = selectedStaffName.trim().toLowerCase();
-          const personActive = advances.filter((a) => {
+        const targetStaff = selectedStaffName.trim().toLowerCase();
+        const personActive = advances.filter((a) => {
+          const pName = String(a.personName || '').trim().toLowerCase();
+          const isSettled = a.status === 'SETTLED' || Number(a.returnAmount) > 0 || (a.notes && a.notes.includes('[Settled]')) || Boolean(a.settledDate);
+          return (pName === targetStaff || pName.includes(targetStaff) || targetStaff.includes(pName)) &&
+                 String(a.status || 'ACTIVE').toUpperCase() === 'ACTIVE' &&
+                 !isSettled;
+        });
+
+        let updatedAdvances = advances;
+        if (personActive.length === 0) {
+          // If person had no active advance, create one so their spent balance is updated
+          const newNegativeAdv = {
+            id: `adv-${now}-${Math.random().toString(36).substring(2, 6)}`,
+            date: formattedTxDate,
+            personName: selectedStaffName,
+            amount: 0,
+            spentAmount: totalBatchDeduction,
+            returnAmount: 0,
+            channel: 'CASH',
+            purpose: `${isUnitFund ? 'UNIT FUND' : 'OTHERS BILL'}: ${finalPurpose}`.toUpperCase(),
+            status: 'ACTIVE',
+            notes: `Auto deducted for ${isUnitFund ? 'Unit Fund' : 'Others'} Bill (${selectedMemberList.length} members)`
+          };
+          updatedAdvances = [newNegativeAdv, ...advances];
+        } else {
+          let deducted = false;
+          updatedAdvances = advances.map((a) => {
             const pName = String(a.personName || '').trim().toLowerCase();
             const isSettled = a.status === 'SETTLED' || Number(a.returnAmount) > 0 || (a.notes && a.notes.includes('[Settled]')) || Boolean(a.settledDate);
-            return (pName === targetStaff || pName.includes(targetStaff) || targetStaff.includes(pName)) &&
-                   String(a.status || 'ACTIVE').toUpperCase() === 'ACTIVE' &&
-                   !isSettled;
+            if (!deducted && (pName === targetStaff || pName.includes(targetStaff) || targetStaff.includes(pName)) && String(a.status || 'ACTIVE').toUpperCase() === 'ACTIVE' && !isSettled) {
+              deducted = true;
+              return {
+                ...a,
+                spentAmount: (Number(a.spentAmount) || 0) + totalBatchDeduction
+              };
+            }
+            return a;
           });
-
-          let updatedAdvances = advances;
-          if (personActive.length === 0) {
-            // If person had no active advance, create one so their spent balance is updated
-            const newNegativeAdv = {
-              id: `adv-${now}-${Math.random().toString(36).substring(2, 6)}`,
-              date: formattedTxDate,
-              personName: selectedStaffName,
-              amount: 0,
-              spentAmount: totalOthersDeduction,
-              returnAmount: 0,
-              channel: 'CASH',
-              purpose: `OTHERS BILL: ${finalPurpose}`.toUpperCase(),
-              status: 'ACTIVE',
-              notes: `Auto deducted for Others Bill (${selectedMemberList.length} members)`
-            };
-            updatedAdvances = [newNegativeAdv, ...advances];
-          } else {
-            let deducted = false;
-            updatedAdvances = advances.map((a) => {
-              const pName = String(a.personName || '').trim().toLowerCase();
-              const isSettled = a.status === 'SETTLED' || Number(a.returnAmount) > 0 || (a.notes && a.notes.includes('[Settled]')) || Boolean(a.settledDate);
-              if (!deducted && (pName === targetStaff || pName.includes(targetStaff) || targetStaff.includes(pName)) && String(a.status || 'ACTIVE').toUpperCase() === 'ACTIVE' && !isSettled) {
-                deducted = true;
-                return {
-                  ...a,
-                  spentAmount: (Number(a.spentAmount) || 0) + totalOthersDeduction
-                };
-              }
-              return a;
-            });
-          }
-
-          localStorage.setItem('canteen_bazar_advances', JSON.stringify(updatedAdvances));
-          await pushKeyToCloud('canteen_bazar_advances', updatedAdvances);
-          window.dispatchEvent(new Event('canteen_bazar_advances_updated'));
         }
+
+        localStorage.setItem('canteen_bazar_advances', JSON.stringify(updatedAdvances));
+        await pushKeyToCloud('canteen_bazar_advances', updatedAdvances);
+        window.dispatchEvent(new Event('canteen_bazar_advances_updated'));
       }
 
       // Trigger sync events across the entire app
@@ -652,17 +716,19 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
 
       if (isUnitFund) {
         showToast(
-          `Successfully posted Unit Fund bill of ৳${numAmount.toLocaleString()} per member for ${selectedMemberList.length} members!`
+          `Successfully posted Unit Fund bill for ${selectedMemberList.length} members (Total: ৳${totalBatchDeduction.toLocaleString()}) and recorded in Capital Logs!`
         );
       } else {
-        const totalOthersDeduction = numAmount * selectedMemberList.length;
         showToast(
-          `Successfully posted Others Bill for ${selectedMemberList.length} members and deducted ৳${totalOthersDeduction.toLocaleString()} from ${othersFundSource} Fund!`
+          `Successfully posted Others Bill for ${selectedMemberList.length} members and deducted ৳${totalBatchDeduction.toLocaleString()} from ${othersFundSource} Fund!`
         );
       }
 
       // Reset form
       setAmount('');
+      setMemberCustomAmounts({});
+      setAmountMode('SAME');
+      setFillAllInput('');
       setNotes('');
       setSelectedAirmanIds(new Set());
       onSuccess();
@@ -886,7 +952,60 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
 
   const selectedCount = selectedAirmanIds.size;
   const numAmount = parseFloat(amount) || 0;
-  const totalBatchAmount = selectedCount * numAmount;
+
+  // Selected members list sorted by seniority
+  const selectedMembersList = useMemo(() => {
+    const list = members.filter((m) =>
+      selectedAirmanIds.has(String(m.airman_id || m['BD No']))
+    );
+    return sortCanteenMembersByOfficeSeniority(list);
+  }, [members, selectedAirmanIds]);
+
+  const totalBatchAmount = useMemo(() => {
+    if (selectedCount === 0) return 0;
+    let sum = 0;
+    selectedAirmanIds.forEach((id) => {
+      const raw = memberCustomAmounts[id] !== undefined ? memberCustomAmounts[id] : amount;
+      const val = parseFloat(raw || '0') || 0;
+      sum += val;
+    });
+    return sum;
+  }, [selectedCount, selectedAirmanIds, memberCustomAmounts, amount]);
+
+  const isAllMemberAmountsValid = useMemo(() => {
+    if (selectedCount === 0) return false;
+    for (const id of Array.from(selectedAirmanIds)) {
+      const raw = memberCustomAmounts[id] !== undefined ? memberCustomAmounts[id] : amount;
+      const val = parseFloat(raw || '0');
+      if (isNaN(val) || val <= 0) return false;
+    }
+    return true;
+  }, [selectedCount, selectedAirmanIds, memberCustomAmounts, amount]);
+
+  const invalidCustomAmountsCount = useMemo(() => {
+    if (selectedCount === 0) return 0;
+    let count = 0;
+    selectedAirmanIds.forEach((id) => {
+      const raw = memberCustomAmounts[id] !== undefined ? memberCustomAmounts[id] : amount;
+      const val = parseFloat(raw || '0');
+      if (isNaN(val) || val <= 0) count++;
+    });
+    return count;
+  }, [selectedCount, selectedAirmanIds, memberCustomAmounts, amount]);
+
+  const allSameMembers = useMemo(() => {
+    if (selectedCount <= 1) return true;
+    const ids = Array.from(selectedAirmanIds);
+    const firstVal = memberCustomAmounts[ids[0]] !== undefined ? memberCustomAmounts[ids[0]] : amount;
+    return ids.every(id => (memberCustomAmounts[id] !== undefined ? memberCustomAmounts[id] : amount) === firstVal);
+  }, [selectedCount, selectedAirmanIds, memberCustomAmounts, amount]);
+
+  const firstMemberAmt = useMemo(() => {
+    if (selectedCount === 0) return 0;
+    const firstId = Array.from(selectedAirmanIds)[0];
+    const raw = memberCustomAmounts[firstId] !== undefined ? memberCustomAmounts[firstId] : amount;
+    return parseFloat(raw || '0') || 0;
+  }, [selectedCount, selectedAirmanIds, memberCustomAmounts, amount]);
 
   return (
     <div className="space-y-5 animate-in fade-in duration-300 pb-16">
@@ -948,43 +1067,28 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
 
         {/* Upper Right Corner: Prominent History & Action Control */}
         <div className="flex items-center space-x-2 shrink-0 self-end sm:self-auto">
-          {activeTab === 'ADD_BATCH' ? (
-            <button
-              type="button"
-              onClick={() => setActiveTab('RECENT_LOG')}
-              className={`flex items-center space-x-2 px-4 py-2.5 rounded-2xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer shadow-lg active:scale-95 border ${
-                isUnitFund
-                  ? 'bg-slate-950 hover:bg-indigo-950/60 text-slate-200 hover:text-white border-slate-800 hover:border-indigo-500/50 shadow-black/40'
-                  : 'bg-slate-950 hover:bg-cyan-950/60 text-slate-200 hover:text-white border-slate-800 hover:border-cyan-500/50 shadow-black/40'
-              } group`}
-              title="View Audited Transaction History"
-            >
-              <Clock className={`w-4 h-4 transition-transform group-hover:rotate-[-30deg] ${
-                isUnitFund ? 'text-indigo-400' : 'text-cyan-400'
-              }`} />
-              <span>History</span>
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black ${
-                isUnitFund 
-                  ? 'bg-indigo-950 text-indigo-300 border border-indigo-500/40'
-                  : 'bg-cyan-950 text-cyan-300 border border-cyan-500/40'
-              }`}>
-                {categoryTransactions.length}
-              </span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setActiveTab('ADD_BATCH')}
-              className={`flex items-center space-x-2 px-4 py-2.5 rounded-2xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer shadow-lg active:scale-95 border ${
-                isUnitFund
-                  ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white border-indigo-400/40 shadow-indigo-900/40'
-                  : 'bg-gradient-to-r from-cyan-600 to-cyan-700 hover:from-cyan-500 hover:to-cyan-600 text-white border-cyan-400/40 shadow-cyan-900/40'
-              }`}
-            >
-              <Plus className="w-4 h-4" />
-              <span>New Batch Bill</span>
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setIsHistoryModalOpen(true)}
+            className={`flex items-center space-x-2 px-4 py-2.5 rounded-2xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer shadow-lg active:scale-95 border ${
+              isUnitFund
+                ? 'bg-slate-950 hover:bg-indigo-950/60 text-slate-200 hover:text-white border-slate-800 hover:border-indigo-500/50 shadow-black/40'
+                : 'bg-slate-950 hover:bg-cyan-950/60 text-slate-200 hover:text-white border-slate-800 hover:border-cyan-500/50 shadow-black/40'
+            } group`}
+            title="View Audited Transaction History"
+          >
+            <Clock className={`w-4 h-4 transition-transform group-hover:rotate-[-30deg] ${
+              isUnitFund ? 'text-indigo-400' : 'text-cyan-400'
+            }`} />
+            <span>History</span>
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black ${
+              isUnitFund 
+                ? 'bg-indigo-950 text-indigo-300 border border-indigo-500/40'
+                : 'bg-cyan-950 text-cyan-300 border border-cyan-500/40'
+            }`}>
+              {categoryTransactions.length}
+            </span>
+          </button>
         </div>
       </div>
 
@@ -994,7 +1098,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-[11px] font-black uppercase tracking-wider text-slate-400 truncate">
-              MONTHLY BILLED
+              {formatActiveMonth(targetMonthKey).toUpperCase()} BILLED
             </span>
             <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
               isUnitFund ? 'bg-indigo-500/10 text-indigo-400' : 'bg-cyan-500/10 text-cyan-400'
@@ -1007,7 +1111,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
               ৳{stats.totalMonthBilled.toLocaleString()}
             </div>
             <p className="text-[11px] font-bold text-slate-400 truncate mt-1">
-              Total billed for this month
+              Billed for {formatActiveMonth(targetMonthKey)}
             </p>
           </div>
         </div>
@@ -1033,655 +1137,790 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
         </div>
       </div>
 
-      {/* ================= TAB 1: BATCH ADD BILL ================= */}
-      {activeTab === 'ADD_BATCH' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Left Column: Form Controls (Amount, Date, Note, Action Button) */}
-          <div className="lg:col-span-4 space-y-4">
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
-              <div className="border-b border-slate-800 pb-3">
-                <h3 className="text-base font-black text-white uppercase tracking-tight flex items-center space-x-2">
-                  <Coins className={`w-5 h-5 ${isUnitFund ? 'text-indigo-400' : 'text-cyan-400'}`} />
-                  <span>Batch Billing Form</span>
-                </h3>
-                <p className="text-xs text-slate-400 font-bold mt-1">
-                  Set amount and date, then select members from the right
-                </p>
-              </div>
-
-              {/* Amount Input */}
-              <div>
-                <label className="block text-xs font-black uppercase text-slate-300 mb-1.5">
-                  Amount per Member <span className="text-rose-400">*</span>
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-mono font-black text-slate-400 text-base">
-                    ৳
-                  </span>
-                  <input
-                    type="number"
-                    min="1"
-                    step="1"
-                    placeholder="Enter amount (e.g. 500)"
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-2xl pl-9 pr-4 py-3 text-base font-mono font-black text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 shadow-inner"
-                    required
-                  />
-                </div>
-
-                {/* Quick Presets */}
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                  {quickAmounts.map((q) => (
-                    <button
-                      key={q}
-                      type="button"
-                      onClick={() => setAmount(String(q))}
-                      className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold transition-all cursor-pointer ${
-                        amount === String(q)
-                          ? 'bg-indigo-600 text-white'
-                          : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                      }`}
-                    >
-                      ৳{q}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Billing Date using DateNavigator in POS Sales format */}
-              <div>
-                <label className="block text-xs font-black uppercase text-slate-300 mb-1.5">
-                  Billing Date
-                </label>
-                <DateNavigator 
-                  value={txDate} 
-                  onChange={setTxDate} 
-                  label="Dt"
-                  format="dd_mm_yy"
-                />
-              </div>
-
-              {/* Purpose with Presets, Custom Add, and Notes underneath */}
-              <div className="space-y-3">
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-xs font-black uppercase text-slate-300 flex items-center space-x-1.5">
-                      <Tag className="w-3.5 h-3.5 text-indigo-400" />
-                      <span>
-                        Purpose {!isUnitFund && <span className="text-rose-400">*</span>}
-                      </span>
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => setIsAddingPreset(!isAddingPreset)}
-                      className="text-[11px] font-bold text-indigo-400 hover:text-indigo-300 transition-colors flex items-center space-x-1 cursor-pointer"
-                    >
-                      <Plus className="w-3 h-3" />
-                      <span>{isAddingPreset ? 'Close' : 'Preset যোগ'}</span>
-                    </button>
-                  </div>
-
-                  {/* Add Preset Input Form */}
-                  {isAddingPreset && (
-                    <div className="flex items-center space-x-1.5 mb-2.5 p-2 bg-slate-950 rounded-xl border border-indigo-500/40">
-                      <input
-                        type="text"
-                        placeholder="নতুন প্রিসেটের নাম লিখুন..."
-                        value={newPresetInput}
-                        onChange={(e) => setNewPresetInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            handleAddPreset();
-                          }
-                        }}
-                        className="flex-1 bg-transparent text-xs font-bold text-white px-2 py-1 focus:outline-none placeholder:text-slate-500"
-                        autoFocus
-                      />
-                      <button
-                        type="button"
-                        onClick={handleAddPreset}
-                        className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-all cursor-pointer shrink-0"
-                      >
-                        Add
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Purpose Presets Chips */}
-                  <div className="flex flex-wrap gap-1.5 mb-2">
-                    {purposePresets.map((preset) => (
-                      <button
-                        key={preset}
-                        type="button"
-                        onClick={() => setPurpose(preset)}
-                        className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                          purpose === preset
-                            ? 'bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-400'
-                            : 'bg-slate-950 text-slate-300 hover:bg-slate-800 border border-slate-800'
-                        }`}
-                      >
-                        {preset}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Purpose Text Input */}
-                  <input
-                    type="text"
-                    value={purpose}
-                    onChange={(e) => setPurpose(e.target.value)}
-                    placeholder="উদ্দেশ্য লিখুন বা ওপরের প্রিসেট থেকে নির্বাচন করুন..."
-                    className="w-full bg-slate-950 border border-slate-700 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 shadow-inner"
-                    required={!isUnitFund}
-                  />
-                </div>
-
-                {/* Notes (niche nootes er option rakhba) */}
-                <div>
-                  <label className="block text-xs font-black uppercase text-slate-300 mb-1.5 flex items-center space-x-1.5">
-                    <FileText className="w-3.5 h-3.5 text-slate-400" />
-                    <span>Notes / বিশেষ বিবরণ (ঐচ্ছিক)</span>
-                  </label>
-                  <textarea
-                    rows={2}
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder="প্রয়োজনীয় কোনো বাড়তি নোট বা বিবরণ লিখুন..."
-                    className="w-full bg-slate-950 border border-slate-700 rounded-2xl p-3 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 shadow-inner resize-none"
-                  />
-                </div>
-              </div>
-
-              {/* Payment Method (Cash / UCB) - replaces Deduct from Fund */}
-              {!isUnitFund && (
-                <div className="bg-slate-950/80 rounded-2xl p-3.5 border border-cyan-500/30 space-y-3">
-                  <label className="block text-xs font-black uppercase text-cyan-300 flex items-center justify-between">
-                    <span className="flex items-center space-x-1.5">
-                      <Wallet className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>Payment Method *</span>
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-mono font-normal">Canteen Fund</span>
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setOthersFundSource('Cash')}
-                      className={`py-2 px-3 rounded-xl text-xs font-black flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
-                        othersFundSource === 'Cash'
-                          ? 'bg-emerald-600 text-white shadow-md shadow-emerald-950/40 ring-1 ring-emerald-400'
-                          : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
-                      }`}
-                    >
-                      <Wallet className="w-3.5 h-3.5" />
-                      <span>Cash</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setOthersFundSource('UCB')}
-                      className={`py-2 px-3 rounded-xl text-xs font-black flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
-                        othersFundSource === 'UCB'
-                          ? 'bg-cyan-600 text-white shadow-md shadow-cyan-950/40 ring-1 ring-cyan-400'
-                          : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
-                      }`}
-                    >
-                      <CreditCard className="w-3.5 h-3.5" />
-                      <span>UCB</span>
-                    </button>
-                  </div>
-
-                  {/* When Cash is selected: Staff option toggle & selection */}
-                  {othersFundSource === 'Cash' && (
-                    <div className="bg-slate-900/90 rounded-xl p-3 border border-slate-800 space-y-2.5">
-                      <div className="flex items-center justify-between">
-                        <label className="flex items-center space-x-2 cursor-pointer select-none">
-                          <input 
-                            type="checkbox"
-                            checked={cashDeductTarget === 'STAFF'}
-                            onChange={(e) => setCashDeductTarget(e.target.checked ? 'STAFF' : 'MANAGER')}
-                            className="w-4 h-4 rounded text-emerald-600 bg-slate-950 border-slate-700 focus:ring-0 focus:ring-offset-0 cursor-pointer"
-                          />
-                          <span className="text-xs font-bold text-slate-200">
-                            Staff অপশন নির্বাচন (Staff Account)
-                          </span>
-                        </label>
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-950 text-slate-400 border border-slate-800">
-                          {cashDeductTarget === 'STAFF' ? 'Staff Account' : 'Auto Manager Cash'}
-                        </span>
-                      </div>
-
-                      {/* If Staff is selected, show list of staff names */}
-                      {cashDeductTarget === 'STAFF' ? (
-                        <div className="space-y-1.5 pt-1.5 border-t border-slate-800">
-                          <label className="block text-[10px] font-black uppercase text-slate-400">
-                            Select Staff Member *
-                          </label>
-                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                            {civilianStaffList.map((st) => (
-                              <button
-                                key={st.id || st.name}
-                                type="button"
-                                onClick={() => setSelectedStaffName(st.name)}
-                                className={`px-2 py-1.5 rounded-lg text-[10px] font-black text-center truncate transition-all cursor-pointer ${
-                                  selectedStaffName === st.name
-                                    ? 'bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-300'
-                                    : 'bg-slate-950 text-slate-300 hover:bg-slate-800 border border-slate-800'
-                                }`}
-                                title={st.name}
-                              >
-                                {st.name}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="p-2 rounded-lg bg-indigo-950/30 border border-indigo-900/40 text-[11px] text-indigo-300 font-bold flex items-center space-x-2">
-                          <ShieldCheck className="w-4 h-4 text-indigo-400 shrink-0" />
-                          <span>Staff নির্বাচন না করায় স্বয়ংক্রিয়ভাবে Manager ({managerName}) এর Cash থেকে টাকা কেটে যাবে।</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  <p className="text-[10px] text-slate-400 font-bold leading-relaxed">
-                    💡 Total bill {numAmount > 0 && selectedCount > 0 ? `৳${totalBatchAmount.toLocaleString()}` : 'amount'} will be deducted from{' '}
-                    {othersFundSource === 'Cash' ? (
-                      cashDeductTarget === 'STAFF' ? (
-                        <strong className="text-emerald-400">{selectedStaffName} এর Account / Advance</strong>
-                      ) : (
-                        <strong className="text-indigo-300">Manager ({managerName}) এর Cash</strong>
-                      )
-                    ) : (
-                      <strong className="text-cyan-300">UCB Fund</strong>
-                    )}{' '}
-                    upon posting.
-                  </p>
-                </div>
-              )}
-
-              {/* Live Calculation Summary Box */}
-              <div className="bg-slate-950 rounded-2xl p-3.5 border border-slate-800 space-y-2">
-                <div className="flex items-center justify-between text-xs font-bold text-slate-400">
-                  <span>Selected Members:</span>
-                  <span className="font-mono text-white font-black">{selectedCount} members</span>
-                </div>
-                <div className="flex items-center justify-between text-xs font-bold text-slate-400">
-                  <span>Amount Per Member:</span>
-                  <span className="font-mono text-emerald-400 font-black">
-                    {numAmount > 0 ? `৳${numAmount.toLocaleString()}` : 'Nil'}
-                  </span>
-                </div>
-                <div className="border-t border-slate-800 pt-2 flex items-center justify-between text-sm font-black text-white">
-                  <span>Total Batch Amount:</span>
-                  <span className="font-mono text-base text-amber-400 font-black">
-                    {numAmount > 0 && selectedCount > 0 ? `৳${totalBatchAmount.toLocaleString()}` : 'Nil'}
-                  </span>
-                </div>
-              </div>
-
-              {/* Action Submit Button */}
-              <button
-                type="button"
-                disabled={isSubmitting || selectedCount === 0 || numAmount <= 0 || (!isUnitFund && !purpose.trim())}
-                onClick={handleBatchAddBill}
-                className={`w-full py-3.5 rounded-2xl text-xs font-black uppercase tracking-wider flex items-center justify-center space-x-2 transition-all cursor-pointer shadow-lg active:scale-98 ${
-                  selectedCount > 0 && numAmount > 0 && (isUnitFund || purpose.trim())
-                    ? isUnitFund
-                      ? 'bg-gradient-to-r from-indigo-600 to-teal-600 hover:from-indigo-500 hover:to-teal-500 text-white shadow-indigo-600/30'
-                      : 'bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white shadow-cyan-600/30'
-                    : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-800 shadow-none'
-                }`}
-              >
-                {isSubmitting ? (
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Check className="w-4 h-4" />
-                )}
-                <span>
-                  {isSubmitting 
-                    ? 'Posting Bills...' 
-                    : `Post Batch Bill (${selectedCount} Members • ${numAmount > 0 && selectedCount > 0 ? `৳${totalBatchAmount.toLocaleString()}` : 'Nil'})`}
-                </span>
-              </button>
+      {/* ================= BATCH ADD BILL GENERATOR (SYNCHRONIZED SEQUENCE) ================= */}
+      {/* Sequence: Date, Member selection, Select Cat, Amount, Payment Method, Confirm */}
+      <div className="space-y-5">
+        {/* STEP 1: DATE */}
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-sm space-y-3">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+            <div className="flex items-center space-x-2.5">
+              <span className="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-400 font-mono font-black text-xs flex items-center justify-center">
+                ১
+              </span>
+              <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center space-x-2">
+                <Calendar className="w-4 h-4 text-indigo-400" />
+                <span>তারিখ (Billing Date)</span>
+              </h3>
             </div>
+            <span className="text-[11px] font-mono font-bold px-2.5 py-1 rounded-xl bg-slate-950 text-indigo-300 border border-slate-800">
+              Month: {formatActiveMonth(targetMonthKey)}
+            </span>
           </div>
-
-          {/* Right Column: Member Selection Grid / List */}
-          <div className="lg:col-span-8 space-y-4">
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
-              {/* Header with Search and Group Selector */}
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-                <div className="relative flex-1">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    placeholder="Search member (BD No, Rank, Name)..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-2xl pl-10 pr-4 py-2.5 text-xs font-bold text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 shadow-inner"
-                  />
-                  {searchQuery && (
-                    <button
-                      type="button"
-                      onClick={() => setSearchQuery('')}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-
-                {/* Quick Selection Shortcuts */}
-                <div className="flex items-center space-x-1.5 flex-wrap gap-y-1">
-                  <button
-                    type="button"
-                    onClick={handleSelectAllFiltered}
-                    className="px-2.5 py-1.5 bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 rounded-xl text-[11px] font-black uppercase transition-all cursor-pointer"
-                  >
-                    Select All ({filteredMembers.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleDeselectAll}
-                    disabled={selectedCount === 0}
-                    className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl text-[11px] font-black uppercase transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Clear All
-                  </button>
-                </div>
-              </div>
-
-              {/* Category Filter Chips */}
-              <div className="flex items-center justify-between border-y border-slate-800/80 py-2.5 flex-wrap gap-2">
-                <div className="flex items-center space-x-1.5 overflow-x-auto scrollbar-none">
-                  {(['ALL', 'OFFICER', 'AIRMEN', 'CIVILIAN'] as const).map((cat) => (
-                    <button
-                      key={cat}
-                      type="button"
-                      onClick={() => {
-                        setMemberFilter(cat);
-                        if (cat !== 'OFFICER') setOfficerRankFilter('ALL');
-                      }}
-                      className={`px-3 py-1 rounded-xl text-[11px] font-black uppercase transition-all cursor-pointer ${
-                        memberFilter === cat
-                          ? 'bg-slate-700 text-white shadow-xs'
-                          : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
-                      }`}
-                    >
-                      {cat}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="flex items-center space-x-2 text-xs font-bold text-slate-400">
-                  <span>Selected:</span>
-                  <span className="px-2 py-0.5 rounded-lg bg-indigo-500/20 text-indigo-300 font-mono font-black border border-indigo-500/30">
-                    {selectedCount} members
-                  </span>
-                </div>
-              </div>
-
-              {/* Rank-wise secondary filter when OFFICER is selected */}
-              {memberFilter === 'OFFICER' && officerRanks.length > 0 && (
-                <div className="flex items-center space-x-1.5 overflow-x-auto scrollbar-none py-2 px-2.5 bg-slate-950/90 rounded-2xl border border-indigo-500/30">
-                  <span className="text-[10px] font-black uppercase tracking-wider text-indigo-400 shrink-0 mr-1 flex items-center space-x-1">
-                    <Filter className="w-3 h-3" />
-                    <span>Officer Rank:</span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setOfficerRankFilter('ALL')}
-                    className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all shrink-0 cursor-pointer ${
-                      officerRankFilter === 'ALL'
-                        ? 'bg-indigo-600 text-white shadow-xs'
-                        : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
-                    }`}
-                  >
-                    ALL RANKS
-                  </button>
-                  {officerRanks.map((r) => (
-                    <button
-                      key={r}
-                      type="button"
-                      onClick={() => setOfficerRankFilter(r)}
-                      className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all shrink-0 cursor-pointer ${
-                        officerRankFilter === r
-                          ? 'bg-indigo-600 text-white shadow-xs'
-                          : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
-                      }`}
-                    >
-                      {r}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {/* Members Selection List */}
-              <div className="h-[480px] min-h-[420px] max-h-[520px] overflow-y-auto space-y-2 pr-1 scrollbar-none flex flex-col">
-                {filteredMembers.length === 0 ? (
-                  <div className="flex-1 flex items-center justify-center p-8 text-center text-slate-400 text-xs font-bold">
-                    No matching members found
-                  </div>
-                ) : (
-                  filteredMembers.map((m, i) => {
-                    const airmanId = String(m.airman_id || m['BD No']);
-                    const isAlreadyBilledThisMonth = isUnitFund && membersWithUnitFundThisMonth.has(airmanId);
-                    const isSelected = selectedAirmanIds.has(airmanId);
-                    const memberDp = resolveImageUrl(m.DP);
-                    const currentDue = getMemberTotalDue(m, category);
-
-                    return (
-                      <div
-                        key={airmanId || `fund_m_${m['BD No'] || i}_${i}`}
-                        onClick={() => handleToggleMember(airmanId)}
-                        className={`p-3 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
-                          isAlreadyBilledThisMonth
-                            ? 'bg-slate-950/40 border-slate-800/60 opacity-60 cursor-not-allowed'
-                            : isSelected
-                            ? 'bg-indigo-950/40 border-indigo-500/70 shadow-sm shadow-indigo-950/50 cursor-pointer'
-                            : 'bg-slate-950/60 hover:bg-slate-800/50 border-slate-800/80 cursor-pointer'
-                        }`}
-                      >
-                        <div className="flex items-center space-x-3 min-w-0 flex-1">
-                          {/* Checkbox */}
-                          <div className={`w-5 h-5 rounded-lg flex items-center justify-center border transition-all shrink-0 ${
-                            isAlreadyBilledThisMonth
-                              ? 'bg-slate-800 border-slate-700 text-indigo-400'
-                              : isSelected 
-                              ? 'bg-indigo-600 border-indigo-400 text-white' 
-                              : 'bg-slate-900 border-slate-700 text-transparent'
-                          }`}>
-                            <Check className="w-3.5 h-3.5 stroke-[3]" />
-                          </div>
-
-                          {/* Avatar */}
-                          <div className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center overflow-hidden shrink-0">
-                            {memberDp ? (
-                              <img
-                                src={memberDp}
-                                alt={m['Surname']}
-                                className="w-full h-full object-cover"
-                                onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                              />
-                            ) : (
-                              <span className="font-black text-xs text-indigo-400">
-                                {(m['Surname'] || 'U').charAt(0)}
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Info */}
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center space-x-1.5 flex-wrap gap-y-0.5">
-                              {m['Rank'] && m['Rank'] !== '-' && (
-                                <span className="px-1.5 py-0.2 rounded text-[10px] font-black uppercase bg-indigo-500/15 text-indigo-300 font-mono">
-                                  {m['Rank']}
-                                </span>
-                              )}
-                              <span className="font-black text-white text-xs truncate">
-                                {m['Surname']}
-                              </span>
-                              {isAlreadyBilledThisMonth && (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 font-sans flex items-center space-x-1">
-                                  <span>✓ Billed for {targetMonthKey}</span>
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-[11px] font-mono text-slate-400 mt-0.5">
-                              BD/{m['BD No']} • {m.Role || 'Member'}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Current Fund Due */}
-                        <div className="text-right shrink-0">
-                          <div className="text-[10px] font-bold text-slate-400 uppercase">
-                            CURRENT DUE
-                          </div>
-                          <div className={`text-xs font-black font-mono ${
-                            currentDue > 0 ? 'text-amber-400' : 'text-slate-500'
-                          }`}>
-                            ৳{currentDue.toLocaleString()}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
+          <div>
+            <DateNavigator 
+              value={txDate} 
+              onChange={setTxDate} 
+              label="Dt"
+              format="dd_mm_yy"
+            />
           </div>
         </div>
-      )}
 
-      {/* ================= RECENT TRANSACTION AUDIT LOG ================= */}
-      {activeTab === 'RECENT_LOG' && (
+        {/* STEP 2: MEMBER SELECTION */}
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-800 pb-4 gap-3">
-            <div className="flex items-center space-x-3">
-              <button
-                type="button"
-                onClick={() => setActiveTab('ADD_BATCH')}
-                className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer text-xs font-bold flex items-center space-x-1.5 border border-slate-700/80 active:scale-95"
-                title="Back to Generator"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                <span>Back to Generator</span>
-              </button>
-              <div>
-                <h3 className="text-base font-black text-white uppercase tracking-tight flex items-center space-x-2">
-                  <Clock className={`w-4 h-4 ${isUnitFund ? 'text-indigo-400' : 'text-cyan-400'}`} />
-                  <span>{categoryTitle} Transaction History & Audit Log</span>
-                </h3>
-                <p className="text-xs text-slate-400 font-bold mt-0.5">
-                  Audited list of recently billed transactions • Delete incorrect entries anytime
-                </p>
-              </div>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+            <div className="flex items-center space-x-2.5">
+              <span className="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-400 font-mono font-black text-xs flex items-center justify-center">
+                ২
+              </span>
+              <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center space-x-2">
+                <Users className="w-4 h-4 text-indigo-400" />
+                <span>সদস্য নির্বাচন (Member Selection)</span>
+              </h3>
             </div>
-            <div className="flex items-center space-x-2">
-              <span className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono font-bold text-slate-300">
-                Total Records: <strong className="text-white font-mono">{categoryTransactions.length}</strong>
+            <div className="flex items-center space-x-2 text-xs font-bold text-slate-400 self-end sm:self-auto">
+              <span>Selected:</span>
+              <span className="px-2.5 py-0.5 rounded-lg bg-indigo-500/20 text-indigo-300 font-mono font-black border border-indigo-500/30">
+                {selectedCount} members
               </span>
             </div>
           </div>
 
-          {/* Search bar inside History */}
-          <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="Search history by member name, BD No, or description..."
-              value={historySearch}
-              onChange={(e) => setHistorySearch(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-2xl pl-10 pr-4 py-2.5 text-xs font-bold text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 shadow-inner"
-            />
-            {historySearch && (
+          {/* Search Bar & Batch Controls */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search member (BD No, Rank, Name)..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 rounded-2xl pl-10 pr-4 py-2.5 text-xs font-bold text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 shadow-inner"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Selection Shortcuts */}
+            <div className="flex items-center space-x-1.5 flex-wrap gap-y-1">
               <button
                 type="button"
-                onClick={() => setHistorySearch('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                onClick={handleSelectAllFiltered}
+                className="px-3 py-1.5 bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 rounded-xl text-[11px] font-black uppercase transition-all cursor-pointer"
               >
-                <X className="w-3.5 h-3.5" />
+                Select All ({filteredMembers.length})
               </button>
+              <button
+                type="button"
+                onClick={handleDeselectAll}
+                disabled={selectedCount === 0}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl text-[11px] font-black uppercase transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Clear All
+              </button>
+            </div>
+          </div>
+
+          {/* Top Category Filter Chips */}
+          <div className="flex items-center space-x-1.5 overflow-x-auto scrollbar-none py-1">
+            {(['ALL', 'OFFICER', 'AIRMEN', 'CIVILIAN'] as const).map((cat) => (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => {
+                  setMemberFilter(cat);
+                  if (cat !== 'OFFICER') setOfficerRankFilter('ALL');
+                  if (cat !== 'AIRMEN') setAirmanRankFilter('ALL');
+                }}
+                className={`px-3 py-1 rounded-xl text-[11px] font-black uppercase transition-all cursor-pointer ${
+                  memberFilter === cat
+                    ? 'bg-slate-700 text-white shadow-xs'
+                    : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+
+          {/* Rank-wise secondary filter when OFFICER is selected */}
+          {memberFilter === 'OFFICER' && officerRanks.length > 0 && (
+            <div className="flex items-center space-x-1.5 overflow-x-auto scrollbar-none py-2 px-2.5 bg-slate-950/90 rounded-2xl border border-indigo-500/30">
+              <span className="text-[10px] font-black uppercase tracking-wider text-indigo-400 shrink-0 mr-1 flex items-center space-x-1">
+                <Filter className="w-3 h-3" />
+                <span>Officer Rank:</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setOfficerRankFilter('ALL')}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all shrink-0 cursor-pointer ${
+                  officerRankFilter === 'ALL'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                }`}
+              >
+                ALL RANKS
+              </button>
+              {officerRanks.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => setOfficerRankFilter(r)}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all shrink-0 cursor-pointer ${
+                    officerRankFilter === r
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                  }`}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Rank-wise secondary filter when AIRMEN is selected */}
+          {memberFilter === 'AIRMEN' && airmanRanks.length > 0 && (
+            <div className="flex items-center space-x-1.5 overflow-x-auto scrollbar-none py-2 px-2.5 bg-slate-950/90 rounded-2xl border border-cyan-500/30">
+              <span className="text-[10px] font-black uppercase tracking-wider text-cyan-400 shrink-0 mr-1 flex items-center space-x-1">
+                <Filter className="w-3 h-3" />
+                <span>Airmen Rank:</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setAirmanRankFilter('ALL')}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all shrink-0 cursor-pointer ${
+                  airmanRankFilter === 'ALL'
+                    ? 'bg-cyan-600 text-white shadow-xs'
+                    : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                }`}
+              >
+                ALL RANKS
+              </button>
+              {airmanRanks.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => setAirmanRankFilter(r)}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all shrink-0 cursor-pointer ${
+                    airmanRankFilter === r
+                      ? 'bg-cyan-600 text-white shadow-xs'
+                      : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                  }`}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Members Selection List Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-[380px] overflow-y-auto p-2.5 rounded-2xl bg-slate-950/70 border border-slate-800 scrollbar-none">
+            {filteredMembers.length === 0 ? (
+              <div className="col-span-full py-8 text-center text-slate-400 text-xs font-bold">
+                No matching members found
+              </div>
+            ) : (
+              filteredMembers.map((m, i) => {
+                const airmanId = String(m.airman_id || m['BD No']);
+                const isAlreadyBilledThisMonth = isUnitFund && membersWithUnitFundThisMonth.has(airmanId);
+                const isSelected = selectedAirmanIds.has(airmanId);
+                const memberDp = resolveImageUrl(m.DP);
+                const currentDue = getMemberTotalDue(m, category);
+
+                return (
+                  <div
+                    key={airmanId || `fund_m_${m['BD No'] || i}_${i}`}
+                    onClick={() => handleToggleMember(airmanId)}
+                    className={`p-3 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
+                      isAlreadyBilledThisMonth
+                        ? 'bg-slate-950/40 border-slate-800/60 opacity-60 cursor-not-allowed'
+                        : isSelected
+                        ? 'bg-indigo-950/40 border-indigo-500/70 shadow-sm shadow-indigo-950/50 cursor-pointer'
+                        : 'bg-slate-950/60 hover:bg-slate-800/50 border-slate-800/80 cursor-pointer'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-3 min-w-0 flex-1">
+                      {/* Checkbox */}
+                      <div className={`w-5 h-5 rounded-lg flex items-center justify-center border transition-all shrink-0 ${
+                        isAlreadyBilledThisMonth
+                          ? 'bg-slate-800 border-slate-700 text-indigo-400'
+                          : isSelected 
+                          ? 'bg-indigo-600 border-indigo-400 text-white' 
+                          : 'bg-slate-900 border-slate-700 text-transparent'
+                      }`}>
+                        <Check className="w-3.5 h-3.5 stroke-[3]" />
+                      </div>
+
+                      {/* Avatar */}
+                      <div className="w-9 h-9 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center overflow-hidden shrink-0">
+                        {memberDp ? (
+                          <img
+                            src={memberDp}
+                            alt={m['Surname']}
+                            className="w-full h-full object-cover"
+                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                          />
+                        ) : (
+                          <span className="font-black text-xs text-indigo-400">
+                            {(m['Surname'] || 'U').charAt(0)}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Info */}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center space-x-1.5 flex-wrap gap-y-0.5">
+                          {m['Rank'] && m['Rank'] !== '-' && (
+                            <span className="px-1.5 py-0.2 rounded text-[10px] font-black uppercase bg-indigo-500/15 text-indigo-300 font-mono">
+                              {m['Rank']}
+                            </span>
+                          )}
+                          <span className="font-black text-white text-xs truncate">
+                            {m['Surname']}
+                          </span>
+                          {isAlreadyBilledThisMonth && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
+                              ✓ Billed
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] font-mono text-slate-400 mt-0.5 truncate">
+                          BD/{m['BD No']} • {m.Role || 'Member'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Current Fund Due */}
+                    <div className="text-right shrink-0">
+                      <div className="text-[9px] font-bold text-slate-400 uppercase">
+                        DUE
+                      </div>
+                      <div className={`text-xs font-black font-mono ${
+                        currentDue > 0 ? 'text-amber-400' : 'text-slate-500'
+                      }`}>
+                        ৳{currentDue.toLocaleString()}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* STEP 3: SELECT CAT */}
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+            <div className="flex items-center space-x-2.5">
+              <span className="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-400 font-mono font-black text-xs flex items-center justify-center">
+                ৩
+              </span>
+              <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center space-x-2">
+                <Tag className="w-4 h-4 text-indigo-400" />
+                <span>ক্যাটাগরি / প্রিসেট নির্বাচন (Select Cat) {!isUnitFund && <span className="text-rose-400">*</span>}</span>
+              </h3>
+            </div>
+            {/* Settings Gear Icon to toggle edit mode, like Add Disposal */}
+            <button
+              type="button"
+              onClick={() => setIsEditingPresets(!isEditingPresets)}
+              className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                isEditingPresets
+                  ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title={isEditingPresets ? 'Done Editing Presets' : 'Manage Saved Presets'}
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Preset Pills */}
+          <div className="flex flex-wrap items-center gap-2">
+            {purposePresets.map((preset) => {
+              const isSelected = !isEditingPresets && purpose === preset;
+              return (
+                <div key={preset} className="relative group">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isEditingPresets) return;
+                      setPurpose(preset);
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all truncate ${
+                      isEditingPresets
+                        ? 'pr-7 opacity-85 cursor-default bg-slate-950 border-slate-700 text-slate-300'
+                        : 'cursor-pointer'
+                    } ${
+                      isSelected
+                        ? 'ring-2 ring-indigo-500 border-indigo-500 bg-indigo-950/90 text-indigo-100 shadow-sm'
+                        : !isEditingPresets
+                        ? 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-900'
+                        : ''
+                    }`}
+                  >
+                    {preset}
+                  </button>
+                  {isEditingPresets && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemovePreset(preset)}
+                      className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 rounded-full bg-red-900/60 text-red-300 hover:bg-red-800 hover:text-white transition-colors cursor-pointer"
+                      title="Delete preset"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Inline Add Preset: NO popup overflowing on mobile, NO suggested categories */}
+            {!isEditingPresets && (
+              isAddingPreset ? (
+                <div className="flex items-center gap-1.5 bg-slate-950 border border-indigo-500/60 rounded-xl p-1 max-w-full">
+                  <input
+                    type="text"
+                    placeholder="নতুন প্রিসেট..."
+                    value={newPresetInput}
+                    onChange={(e) => setNewPresetInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddPreset();
+                      } else if (e.key === 'Escape') {
+                        setIsAddingPreset(false);
+                      }
+                    }}
+                    className="bg-transparent border-0 px-2 py-1 text-xs font-bold text-white outline-none placeholder:text-slate-500 w-32 sm:w-44"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddPreset}
+                    className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-all cursor-pointer shrink-0"
+                  >
+                    Add
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setIsAddingPreset(false); setNewPresetInput(''); }}
+                    className="p-1 text-slate-400 hover:text-white rounded-lg transition-all cursor-pointer"
+                    title="Cancel"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setIsAddingPreset(true)}
+                  className="px-2.5 py-1.5 rounded-xl text-xs font-bold border border-dashed border-slate-700 hover:border-indigo-500 text-slate-400 hover:text-indigo-300 bg-slate-950 transition-all cursor-pointer flex items-center space-x-1"
+                  title="Add Preset"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Preset</span>
+                </button>
+              )
             )}
           </div>
 
-          <div className="overflow-x-auto border border-slate-800 rounded-2xl min-h-[360px]">
-            <table className="w-full text-left text-xs whitespace-nowrap">
-              <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] font-black border-b border-slate-800">
-                <tr>
-                  <th className="px-4 py-3">Date</th>
-                  <th className="px-4 py-3">Member</th>
-                  <th className="px-4 py-3">Description / Purpose</th>
-                  <th className="px-4 py-3 text-right">Amount</th>
-                  <th className="px-4 py-3 text-center">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60 font-medium">
-                {filteredHistoryTransactions.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="px-4 py-24 text-center text-slate-500 font-bold">
-                      {historySearch ? 'No matching records found' : 'No transaction records found for this category'}
-                    </td>
-                  </tr>
-                ) : (
-                  filteredHistoryTransactions.map((tx, idx) => (
-                    <tr key={tx.id || idx} className="hover:bg-slate-800/40 transition-colors">
-                      <td className="px-4 py-3 font-mono text-slate-300">
-                        {tx.date || tx.created_at?.split('T')[0] || '-'}
-                        {tx.monthKey && (
-                          <span className="ml-1.5 px-1.5 py-0.2 rounded text-[10px] bg-slate-800 text-slate-400 font-mono">
-                            {tx.monthKey}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="font-bold text-white">
-                          {tx.memberName || tx.name || `BD/${tx.bdNo}`}
-                        </span>
-                        {tx.bdNo && (
-                          <span className="ml-1.5 text-[10px] font-mono text-slate-400">
-                            #{tx.bdNo}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-slate-300">
-                        <span className="px-2 py-0.5 rounded-lg bg-slate-950 border border-slate-800 text-indigo-300 font-bold text-xs inline-block">
-                          {tx.items || tx.note || (isUnitFund ? 'Unit Fund' : 'Others Bill')}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right font-mono font-black text-emerald-400 text-sm">
-                        ৳{Number(tx.amount || 0).toLocaleString()}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <div className="flex items-center justify-center space-x-1.5">
-                          <button
-                            type="button"
-                            onClick={() => setTxToEdit(tx)}
-                            className="p-1.5 hover:bg-indigo-500/20 text-slate-400 hover:text-indigo-400 rounded-lg transition-colors cursor-pointer"
-                            title="Edit this transaction record"
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setTxToDelete(tx)}
-                            className="p-1.5 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 rounded-lg transition-colors cursor-pointer"
-                            title="Delete this transaction record"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+          {/* Specify Custom Name / বিবরণ Input */}
+          <div className="p-3 bg-slate-950/70 border border-slate-800 rounded-2xl space-y-1">
+            <label className="text-[11px] font-bold text-slate-300 block">
+              Specify Purpose Name / বিবরণ {!isUnitFund && <span className="text-rose-400">*</span>}
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. বাজার, ফরম-৭৯৩, ইত্যাদি..."
+              value={purpose}
+              onChange={(e) => setPurpose(e.target.value)}
+              className="w-full px-3 py-2 text-xs font-bold rounded-xl border border-slate-700 bg-slate-900 text-white outline-none focus:border-indigo-500 shadow-inner"
+              required={!isUnitFund}
+            />
+          </div>
+
+          {/* Notes (ঐচ্ছিক) */}
+          <div>
+            <label className="block text-xs font-black uppercase text-slate-300 mb-1.5 flex items-center space-x-1.5">
+              <FileText className="w-3.5 h-3.5 text-slate-400" />
+              <span>Notes / বিশেষ বিবরণ (ঐচ্ছিক)</span>
+            </label>
+            <textarea
+              rows={2}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="প্রয়োজনীয় কোনো বাড়তি নোট বা বিবরণ লিখুন..."
+              className="w-full bg-slate-950 border border-slate-700 rounded-2xl p-3 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 shadow-inner resize-none"
+            />
           </div>
         </div>
-      )}
+
+        {/* STEP 4: AMOUNT */}
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3.5">
+            <div className="flex items-center space-x-2.5">
+              <span className="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-400 font-mono font-black text-xs flex items-center justify-center">
+                ৪
+              </span>
+              <div>
+                <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center space-x-2">
+                  <Coins className="w-4 h-4 text-indigo-400" />
+                  <span>বিলের পরিমাণ (Amount) <span className="text-rose-400">*</span></span>
+                </h3>
+                <p className="text-[11px] text-slate-400 font-medium">
+                  {selectedCount === 0 
+                    ? 'প্রথমে উপরে সদস্য নির্বাচন করুন'
+                    : selectedCount === 1 
+                      ? 'নির্বাচিত ১ জন সদস্যের জন্য বিল'
+                      : `নির্বাচিত ${selectedCount} জন সদস্যের জন্য বিলের পরিমাণ নির্ধারণ করুন`}
+                </p>
+              </div>
+            </div>
+
+            {selectedCount > 0 && (
+              <span className="text-xs font-mono font-black px-2.5 py-1 rounded-xl bg-slate-950 border border-slate-800 text-indigo-300 self-start sm:self-auto">
+                {selectedCount} {selectedCount === 1 ? 'Member' : 'Members'}
+              </span>
+            )}
+          </div>
+
+          {selectedCount === 0 ? (
+            <div className="p-6 text-center text-slate-400 text-xs font-bold bg-slate-950/60 rounded-2xl border border-dashed border-slate-800">
+              <Users className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-50" />
+              বিলের পরিমাণ নির্ধারণ করতে অনুগ্রহ করে উপরে <span className="text-indigo-400">২য় ধাপ (সদস্য নির্বাচন)</span> থেকে এক বা একাধিক সদস্য সিলেক্ট করুন।
+            </div>
+          ) : (
+            <div className="space-y-3.5">
+              {/* Quick Toolbar: Fill All / সবগুলোতে দিন */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 p-3.5 bg-slate-950/80 rounded-2xl border border-slate-800">
+                <div className="text-xs font-bold text-slate-300">
+                  নিচে প্রতিটি নির্বাচিত সদস্যের নামের পাশে কাঙ্ক্ষিত পরিমাণ লিখুন:
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="relative w-32 sm:w-36">
+                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-mono font-bold text-slate-400 text-xs">৳</span>
+                    <input
+                      type="number"
+                      placeholder="একসাথে বসান"
+                      value={fillAllInput}
+                      onChange={(e) => setFillAllInput(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-6 pr-2 py-1.5 text-xs font-mono text-white outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!fillAllInput) return;
+                      const next: Record<string, string> = {};
+                      selectedAirmanIds.forEach((id) => {
+                        next[id] = fillAllInput;
+                      });
+                      setMemberCustomAmounts(next);
+                      showToast(`সকল সদস্যের জন্য ৳${fillAllInput} বসানো হয়েছে`);
+                    }}
+                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shadow-sm"
+                  >
+                    সবগুলোতে দিন
+                  </button>
+                </div>
+              </div>
+
+              {/* List of Selected Members with Name & Individual Amount Box Beside Them */}
+              <div className="max-h-80 overflow-y-auto space-y-2 p-2 sm:p-2.5 bg-slate-950/70 border border-slate-800 rounded-2xl">
+                {selectedMembersList.map((m, idx) => {
+                  const mId = String(m.airman_id || m['BD No']);
+                  const memberDp = resolveImageUrl(m.DP);
+                  const memberVal = memberCustomAmounts[mId] !== undefined ? memberCustomAmounts[mId] : '';
+                  const numVal = parseFloat(memberVal);
+                  const isValidVal = !isNaN(numVal) && numVal > 0;
+
+                  return (
+                    <div
+                      key={mId}
+                      className={`p-2.5 sm:p-3 rounded-xl border flex items-center justify-between gap-3 transition-all ${
+                        isValidVal
+                          ? 'bg-slate-900/90 border-slate-800/90 hover:border-slate-700'
+                          : 'bg-rose-950/10 border-rose-500/30'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2.5 sm:space-x-3 min-w-0 flex-1">
+                        <span className="w-5 text-[10px] font-mono text-slate-500 text-center shrink-0">
+                          {idx + 1}
+                        </span>
+                        <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-center overflow-hidden shrink-0">
+                          {memberDp ? (
+                            <img
+                              src={memberDp}
+                              alt={m['Surname']}
+                              className="w-full h-full object-cover"
+                              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                            />
+                          ) : (
+                            <span className="font-black text-xs text-indigo-400">
+                              {(m['Surname'] || 'M').charAt(0)}
+                            </span>
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center space-x-1.5 flex-wrap">
+                            {m['Rank'] && m['Rank'] !== '-' && (
+                              <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase bg-indigo-500/15 text-indigo-300 font-mono">
+                                {m['Rank']}
+                              </span>
+                            )}
+                            <span className="font-bold text-white text-xs truncate">
+                              {m['Surname']}
+                            </span>
+                          </div>
+                          <div className="text-[10px] font-mono text-slate-400 truncate">
+                            BD/{m['BD No']}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Individual Amount Box Right Beside Member */}
+                      <div className="relative w-32 sm:w-44 shrink-0">
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-mono font-bold text-slate-400 text-xs">
+                          ৳
+                        </span>
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          placeholder="টাকার পরিমাণ"
+                          value={memberVal}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setMemberCustomAmounts((prev) => ({
+                              ...prev,
+                              [mId]: val
+                            }));
+                          }}
+                          className={`w-full bg-slate-950 border rounded-xl pl-6 pr-2.5 py-2 text-xs font-mono font-black text-white outline-none shadow-inner transition-all ${
+                            isValidVal
+                              ? 'border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500'
+                              : 'border-rose-500/50 focus:border-rose-400'
+                          }`}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Live Total Banner */}
+              <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-indigo-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                <div className="flex items-center space-x-2">
+                  <span className="text-slate-300 font-bold">
+                    নির্বাচিত {selectedCount} জন সদস্যের মোট বিল:
+                  </span>
+                  {invalidCustomAmountsCount > 0 ? (
+                    <span className="text-[11px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/20">
+                      ⚠️ {invalidCustomAmountsCount} জনের পরিমাণ বাকি
+                    </span>
+                  ) : (
+                    <span className="text-[11px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-lg border border-emerald-500/20">
+                      ✓ সবার পরিমাণ নির্ধারিত
+                    </span>
+                  )}
+                </div>
+                <span className="font-mono font-black text-emerald-400 text-base">
+                  ৳{totalBatchAmount.toLocaleString()}
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* STEP 5: PAYMENT METHOD */}
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-sm space-y-3.5">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+            <div className="flex items-center space-x-2.5">
+              <span className="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-400 font-mono font-black text-xs flex items-center justify-center">
+                ৫
+              </span>
+              <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center space-x-2">
+                <Wallet className="w-4 h-4 text-cyan-400" />
+                <span>পেমেন্ট মাধ্যম (Payment Method) <span className="text-rose-400">*</span></span>
+              </h3>
+            </div>
+            <span className="text-[10px] text-slate-400 font-mono">Capital Fund</span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2.5">
+            <button
+              type="button"
+              onClick={() => setOthersFundSource('Cash')}
+              className={`py-3 px-4 rounded-2xl text-xs font-black flex items-center justify-center space-x-2 transition-all cursor-pointer ${
+                othersFundSource === 'Cash'
+                  ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-950/50 ring-2 ring-emerald-400'
+                  : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+              }`}
+            >
+              <Wallet className="w-4 h-4" />
+              <span>Cash</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setOthersFundSource('UCB')}
+              className={`py-3 px-4 rounded-2xl text-xs font-black flex items-center justify-center space-x-2 transition-all cursor-pointer ${
+                othersFundSource === 'UCB'
+                  ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-950/50 ring-2 ring-cyan-400'
+                  : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+              }`}
+            >
+              <CreditCard className="w-4 h-4" />
+              <span>UCB</span>
+            </button>
+          </div>
+
+          {/* When Cash is selected: Staff option toggle & selection */}
+          {othersFundSource === 'Cash' && (
+            <div className="bg-slate-950/90 rounded-2xl p-3.5 border border-slate-800 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <label className="flex items-center space-x-2 cursor-pointer select-none">
+                  <input 
+                    type="checkbox"
+                    checked={cashDeductTarget === 'STAFF'}
+                    onChange={(e) => setCashDeductTarget(e.target.checked ? 'STAFF' : 'MANAGER')}
+                    className="w-4 h-4 rounded text-emerald-600 bg-slate-900 border-slate-700 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                  />
+                  <span className="text-xs font-bold text-slate-200">
+                    Staff অপশন নির্বাচন (Staff Account)
+                  </span>
+                </label>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-900 text-slate-400 border border-slate-800">
+                  {cashDeductTarget === 'STAFF' ? 'Staff Account' : 'Auto Manager Cash'}
+                </span>
+              </div>
+
+              {cashDeductTarget === 'STAFF' ? (
+                <div className="space-y-1.5 pt-1.5 border-t border-slate-800">
+                  <label className="block text-[10px] font-black uppercase text-slate-400">
+                    Select Staff Member *
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                    {civilianStaffList.map((st) => (
+                      <button
+                        key={st.id || st.name}
+                        type="button"
+                        onClick={() => setSelectedStaffName(st.name)}
+                        className={`px-2 py-1.5 rounded-lg text-[10px] font-black text-center truncate transition-all cursor-pointer ${
+                          selectedStaffName === st.name
+                            ? 'bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-300'
+                            : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
+                        }`}
+                        title={st.name}
+                      >
+                        {st.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="p-2.5 rounded-xl bg-indigo-950/30 border border-indigo-900/40 text-[11px] text-indigo-300 font-bold flex items-center space-x-2">
+                  <ShieldCheck className="w-4 h-4 text-indigo-400 shrink-0" />
+                  <span>Staff নির্বাচন না করায় স্বয়ংক্রিয়ভাবে Manager ({managerName}) এর Cash থেকে টাকা কর্তন ও লগ করা হবে।</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          <p className="text-[10px] text-slate-400 font-bold leading-relaxed">
+            💡 মোট বিল {totalBatchAmount > 0 && selectedCount > 0 ? `৳${totalBatchAmount.toLocaleString()}` : ''} ক্যাপিটাল ফান্ডের{' '}
+            {othersFundSource === 'Cash' ? (
+              cashDeductTarget === 'STAFF' ? (
+                <strong className="text-emerald-400">{selectedStaffName} এর Advance</strong>
+              ) : (
+                <strong className="text-indigo-300">Manager ({managerName}) Cash</strong>
+              )
+            ) : (
+              <strong className="text-cyan-300">UCB Fund</strong>
+            )}{' '}
+            থেকে কর্তন হয়ে Capital এর All Logs-এ এন্ট্রি যোগ হবে।
+          </p>
+        </div>
+
+        {/* STEP 6: CONFIRM */}
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
+          <div className="flex items-center space-x-2.5 border-b border-slate-800 pb-2.5">
+            <span className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 font-mono font-black text-xs flex items-center justify-center">
+              ৬
+            </span>
+            <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center space-x-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              <span>বিল নিশ্চিতকরণ ও পোস্ট (Confirm)</span>
+            </h3>
+          </div>
+
+          {/* Live Calculation Summary Box */}
+          <div className="bg-slate-950 rounded-2xl p-4 border border-slate-800 space-y-2.5">
+            <div className="flex items-center justify-between text-xs font-bold text-slate-400">
+              <span>Billing Date:</span>
+              <span className="font-mono text-white font-black">{formatCanteenDate(txDate)}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs font-bold text-slate-400">
+              <span>Selected Members:</span>
+              <span className="font-mono text-white font-black">{selectedCount} members</span>
+            </div>
+            <div className="flex items-center justify-between text-xs font-bold text-slate-400">
+              <span>Purpose / Category:</span>
+              <span className="text-indigo-300 font-bold truncate max-w-[200px]">{purpose || (isUnitFund ? 'Unit Fund Subscription' : 'Others Bill')}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs font-bold text-slate-400">
+              <span>Amount Per Member:</span>
+              <span className="font-mono text-emerald-400 font-black">
+                {amountMode === 'SAME'
+                  ? (numAmount > 0 ? `৳${numAmount.toLocaleString()}` : 'Nil')
+                  : `Individual Rates (ভিন্ন ভিন্ন পরিমাণ)`}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-xs font-bold text-slate-400">
+              <span>Payment Channel:</span>
+              <span className="font-mono text-cyan-300 font-bold">
+                {othersFundSource} {othersFundSource === 'Cash' ? `(${cashDeductTarget === 'STAFF' ? selectedStaffName : 'Manager Cash'})` : ''}
+              </span>
+            </div>
+            <div className="border-t border-slate-800 pt-2.5 flex items-center justify-between text-sm font-black text-white">
+              <span>Total Batch Amount:</span>
+              <span className="font-mono text-xl text-amber-400 font-black">
+                {totalBatchAmount > 0 && selectedCount > 0 ? `৳${totalBatchAmount.toLocaleString()}` : 'Nil'}
+              </span>
+            </div>
+          </div>
+
+          {/* Action Submit Button */}
+          <button
+            type="button"
+            disabled={isSubmitting || selectedCount === 0 || !isAllMemberAmountsValid || (!isUnitFund && !purpose.trim())}
+            onClick={handleBatchAddBill}
+            className={`w-full py-4 rounded-2xl text-xs font-black uppercase tracking-wider flex items-center justify-center space-x-2 transition-all cursor-pointer shadow-xl active:scale-98 ${
+              selectedCount > 0 && isAllMemberAmountsValid && (isUnitFund || purpose.trim())
+                ? 'bg-gradient-to-r from-emerald-600 via-indigo-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-950/50'
+                : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-800 shadow-none'
+            }`}
+          >
+            {isSubmitting ? (
+              <RefreshCw className="w-4 h-4 animate-spin" />
+            ) : (
+              <Check className="w-4 h-4" />
+            )}
+            <span>
+              {isSubmitting 
+                ? 'Posting Bills...' 
+                : `Confirm & Post Batch Bill (${selectedCount} Members • ${totalBatchAmount > 0 && selectedCount > 0 ? `৳${totalBatchAmount.toLocaleString()}` : 'Nil'})`}
+            </span>
+          </button>
+        </div>
+      </div>
 
       {/* Edit Transaction Modal */}
       {txToEdit && (
@@ -1732,6 +1971,21 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
           </div>
         </div>
       )}
+
+      {/* Dedicated History Modal (Separate Page like Sales History & Payment History) */}
+      <FundHistoryModal
+        isOpen={isHistoryModalOpen}
+        onClose={() => setIsHistoryModalOpen(false)}
+        initialCategory={category}
+        allTxs={allTxs}
+        members={members}
+        onRemoveTx={onRemoveTx}
+        onSuccess={onSuccess}
+        getMemberBanglaName={getMemberBanglaName}
+        getMemberBanglaRank={getMemberBanglaRank}
+        formatRankBn={formatRankBn}
+        formatMemberNameBn={formatMemberNameBn}
+      />
     </div>
   );
 };
@@ -1792,7 +2046,6 @@ export const EditFundTxModal: React.FC<EditFundTxModalProps> = ({
   const [editDate, setEditDate] = useState<string>(() => parseTxDateToYMD(tx.date || tx.created_at || tx.timestamp));
   const [editItems, setEditItems] = useState<string>(tx.items || '');
   const [editNote, setEditNote] = useState<string>(tx.note || '');
-  const [editMonthKey, setEditMonthKey] = useState<string>(tx.monthKey || '2026-10');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1801,19 +2054,9 @@ export const EditFundTxModal: React.FC<EditFundTxModalProps> = ({
       setEditDate(parseTxDateToYMD(tx.date || tx.created_at || tx.timestamp));
       setEditItems(tx.items || '');
       setEditNote(tx.note || '');
-      setEditMonthKey(tx.monthKey || '2026-10');
       setErrorMsg(null);
     }
   }, [tx]);
-
-  useEffect(() => {
-    if (editDate) {
-      const parts = editDate.split('-');
-      if (parts.length >= 2) {
-        setEditMonthKey(`${parts[0]}-${parts[1]}`);
-      }
-    }
-  }, [editDate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1827,13 +2070,22 @@ export const EditFundTxModal: React.FC<EditFundTxModalProps> = ({
       return;
     }
 
+    // Automatically derive monthKey from editDate (Date e ja thake oi month er bill er sathe add hbe)
+    const derivedMonthKey = (() => {
+      if (editDate) {
+        const parts = editDate.split('-');
+        if (parts.length >= 2) return `${parts[0]}-${parts[1]}`;
+      }
+      return tx.monthKey || getRunningMonthKey();
+    })();
+
     try {
       await onSave({
         amount: num,
         date: editDate,
         items: editItems.trim(),
         note: editNote.trim() || undefined,
-        monthKey: editMonthKey
+        monthKey: derivedMonthKey
       });
     } catch (err: any) {
       setErrorMsg(err?.message || 'সংরক্ষণ ব্যর্থ হয়েছে');
@@ -1918,20 +2170,6 @@ export const EditFundTxModal: React.FC<EditFundTxModalProps> = ({
               onChange={setEditDate}
               label="Dt"
               format="dd_mm_yy"
-            />
-          </div>
-
-          {/* Month Key */}
-          <div>
-            <label className="block text-xs font-black uppercase text-slate-300 mb-1">
-              Billing Month Key
-            </label>
-            <input
-              type="text"
-              value={editMonthKey}
-              onChange={(e) => setEditMonthKey(e.target.value)}
-              placeholder="e.g. 2026-10"
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white focus:outline-none focus:border-indigo-500"
             />
           </div>
 

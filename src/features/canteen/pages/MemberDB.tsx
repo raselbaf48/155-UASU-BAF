@@ -34,6 +34,7 @@ import {
   Coins,
   Edit3,
   History,
+  Clock,
   Download,
   Users,
   User,
@@ -122,6 +123,7 @@ import {
 } from '../utils/canteenMenuData';
 import { playCelebrationSound } from '../utils/audioFeedback';
 import { FundBatchBillPage } from './FundBatchBillPage';
+import { FundHistoryModal } from '../components/FundHistoryModal';
 
 export type BillCategory = 'ALL' | 'CANTEEN' | 'UNIT_FUND' | 'OTHERS';
 
@@ -707,6 +709,7 @@ export const MemberDB: React.FC = () => {
   const [rankTypeFilter, setRankTypeFilter] = useState<'OVERALL' | 'OFFICER' | 'AIRMEN' | 'CIVILIAN'>('OVERALL');
   const [viewMode, setViewMode] = useState<'BOX' | 'TABLE'>('BOX');
   const [, setBanglaVersion] = useState<number>(0);
+  const [isFundHistoryModalOpen, setIsFundHistoryModalOpen] = useState(false);
 
   const [allTxs, setAllTxs] = useState<any[]>(() => {
     try {
@@ -4036,6 +4039,22 @@ export const MemberDB: React.FC = () => {
                   {allPaymentTxs.length}
                 </span>
               </button>
+
+              <button
+                type="button"
+                onClick={() => setIsFundHistoryModalOpen(true)}
+                className="w-full sm:w-auto flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-black text-xs uppercase tracking-wider shadow-md transition-all cursor-pointer active:scale-95 border border-slate-700 group"
+                title="Unit Fund & Other History আলাদা পেজে দেখুন"
+              >
+                <Clock className="w-4 h-4 text-cyan-400 group-hover:rotate-[-45deg] transition-transform" />
+                <span>Unit Fund & Other History</span>
+                <span className="px-1.5 py-0.5 rounded-full bg-black/30 text-[10px] font-mono font-black text-cyan-300 border border-cyan-400/20">
+                  {(allTxs || []).filter((tx: any) => {
+                    const c = getTxCategory(tx);
+                    return c === 'UNIT_FUND' || c === 'OTHERS';
+                  }).length}
+                </span>
+              </button>
             </div>
           </div>
 
@@ -7017,6 +7036,21 @@ export const MemberDB: React.FC = () => {
             }}
           />
         )}
+
+        {/* Unit Fund & Others History Modal (Separate Dedicated Page) */}
+        <FundHistoryModal
+          isOpen={isFundHistoryModalOpen}
+          onClose={() => setIsFundHistoryModalOpen(false)}
+          initialCategory={selectedCategory === 'UNIT_FUND' ? 'UNIT_FUND' : selectedCategory === 'OTHERS' ? 'OTHERS' : 'ALL'}
+          allTxs={allTxs}
+          members={members}
+          onRemoveTx={handleRemoveTx}
+          onSuccess={() => fetchMembers(true)}
+          getMemberBanglaName={getMemberBanglaName}
+          getMemberBanglaRank={getMemberBanglaRank}
+          formatRankBn={formatRankBn}
+          formatMemberNameBn={formatMemberNameBn}
+        />
 
       </AnimatePresence>
 

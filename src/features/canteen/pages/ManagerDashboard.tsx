@@ -825,6 +825,18 @@ export const ManagerDashboard: React.FC = () => {
 
       {/* Centered Pre-Order Content & Separate Boxes */}
       <div className="max-w-4xl mx-auto w-full space-y-6">
+         {/* Top Centered Curate Menu Button (Pic 1: Center above Today's Menu box) */}
+         <div className="flex justify-center items-center pt-2">
+            <button 
+               type="button"
+               onClick={() => setShowCurateMenu(true)} 
+               className="px-6 py-3 bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-2xl text-xs font-black tracking-widest uppercase transition-all shadow-xl shadow-indigo-600/30 hover:shadow-indigo-500/40 flex items-center space-x-2.5 active:scale-95 cursor-pointer border border-indigo-400/40 hover:border-indigo-300"
+            >
+               <ChefHat className="w-4 h-4 text-amber-300" />
+               <span>CURATE MENU ({selectedItems.length})</span>
+            </button>
+         </div>
+
          {/* 1. MENU BOX */}
          <div className="bg-slate-900 rounded-[2rem] p-6 sm:p-8 shadow-xl border border-slate-800 flex flex-col">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
@@ -856,39 +868,26 @@ export const ManagerDashboard: React.FC = () => {
                      </div>
                   </div>
                </div>
-               <div className="flex items-center space-x-2 self-start sm:self-auto">
-                  {selectedItems.length > 0 && (
+               {selectedItems.length > 0 && (
+                  <div className="flex items-center space-x-2 self-start sm:self-auto">
                      <button 
                         type="button"
                         onClick={clearAllDailyItems}
                         title="Clear Curated Menu"
-                        className="px-3 py-2.5 bg-rose-950/70 hover:bg-rose-900/90 border border-rose-500/40 text-rose-300 rounded-xl text-xs font-black tracking-wider uppercase transition-all flex items-center space-x-1.5 active:scale-95 cursor-pointer shadow-md shadow-rose-950/30"
+                        className="px-3 py-2 bg-rose-950/70 hover:bg-rose-900/90 border border-rose-500/40 text-rose-300 rounded-xl text-xs font-black tracking-wider uppercase transition-all flex items-center space-x-1.5 active:scale-95 cursor-pointer shadow-md shadow-rose-950/30"
                      >
                         <RotateCcw className="w-3.5 h-3.5" />
                         <span>Reset</span>
                      </button>
-                  )}
-                  <button 
-                     onClick={() => setShowCurateMenu(true)} 
-                     className="px-5 py-2.5 bg-[#4f46e5] hover:bg-[#4338ca] text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md shadow-indigo-500/20 flex items-center space-x-2 active:scale-95 cursor-pointer"
-                  >
-                     <ChefHat className="w-4 h-4" />
-                     <span>CURATE MENU ({selectedItems.length})</span>
-                  </button>
-               </div>
+                  </div>
+               )}
             </div>
 
             {/* Curated Menu Items */}
             {(!selectedItems || selectedItems.length === 0) ? (
                <div className="py-8 px-4 rounded-2xl bg-slate-950/60 border border-slate-800/80 flex flex-col items-center justify-center text-center">
                   <Utensils className="w-10 h-10 text-slate-600 mb-2" />
-                  <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-2">No menu items curated for today</p>
-                  <button 
-                     onClick={() => setShowCurateMenu(true)}
-                     className="text-xs text-indigo-400 hover:text-indigo-300 font-bold underline cursor-pointer"
-                  >
-                     Click here to curate today's menu
-                  </button>
+                  <p className="text-slate-400 text-xs font-bold uppercase tracking-wider">No menu items curated for today</p>
                </div>
             ) : (
                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5 w-full py-2">

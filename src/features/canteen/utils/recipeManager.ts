@@ -169,20 +169,29 @@ export const getRawItemSubUnitInfo = (item?: Partial<RawInventoryItem> | null): 
     return { hasSubUnit: true, subUnit: 'pcs', packSize: size, label: `১ কেস = ${size} পিস` };
   }
 
-  // 6. Packet / Box - Pcs / Slice / Cup / gm (ONLY if main unit is packet/box/pkt/bottle/cylinder)
-  if (['packet', 'box', 'pkt', 'প্যাকেট', 'বক্স', 'bottle', 'বোতল', 'cylinder', 'সিলিন্ডার', 'can', 'tin', 'jar', 'pack'].includes(u)) {
+  // 6. Cylinder - kg / gm / pcs (LPG gas cylinder)
+  if (['cylinder', 'সিলিন্ডার'].includes(u)) {
+    const sub = explicitSub && explicitSub !== u ? explicitSub : 'kg';
+    const isGm = ['gm', 'g', 'gram', 'গ্রাম'].includes(sub);
+    const defaultSize = isGm ? 12000 : 12;
+    const size = packSizeVal > 1 ? packSizeVal : defaultSize;
+    return { hasSubUnit: true, subUnit: sub, packSize: size, label: `১ সিলিন্ডার = ${size} ${sub}` };
+  }
+
+  // 7. Packet / Box - Pcs / Slice / Cup / gm / ml (ONLY if main unit is packet/box/pkt/bottle/can)
+  if (['packet', 'box', 'pkt', 'প্যাকেট', 'বক্স', 'bottle', 'বোতল', 'can', 'tin', 'jar', 'pack'].includes(u)) {
     const sub = explicitSub && explicitSub !== u ? explicitSub : 'pcs';
-    const isWeightSub = ['gm', 'g', 'gram', 'গ্রাম'].includes(sub);
-    const isVolumeSub = ['ml', 'milli', 'মিলি'].includes(sub);
+    const isWeightSub = ['gm', 'g', 'gram', 'গ্রাম', 'kg', 'কেজি'].includes(sub);
+    const isVolumeSub = ['ml', 'milli', 'মিলি', 'liter', 'ltr', 'লিটার'].includes(sub);
     const defaultSize = isWeightSub ? 1000 : (isVolumeSub ? 1000 : 24);
     const size = packSizeVal > 1 ? packSizeVal : defaultSize;
     return { hasSubUnit: true, subUnit: sub, packSize: size, label: `১ ${item.unit || 'প্যাকেট'} = ${size} ${sub}` };
   }
 
-  // 7. Explicit configured sub-units where packSize > 1 and subUnit differs from unit
+  // 8. Explicit configured sub-units where packSize > 1 and subUnit differs from unit
   if (explicitSub && explicitSub !== u) {
-    const isWeightSub = ['gm', 'g', 'gram', 'গ্রাম'].includes(explicitSub);
-    const isVolumeSub = ['ml', 'milli', 'মিলি'].includes(explicitSub);
+    const isWeightSub = ['gm', 'g', 'gram', 'গ্রাম', 'kg', 'কেজি'].includes(explicitSub);
+    const isVolumeSub = ['ml', 'milli', 'মিলি', 'liter', 'ltr', 'লিটার'].includes(explicitSub);
     const defaultSize = isWeightSub ? 1000 : (isVolumeSub ? 1000 : 1);
     const size = packSizeVal > 1 ? packSizeVal : defaultSize;
     if (size > 1) {
@@ -525,7 +534,10 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
     unitCost: 1450,
     lastRestockedDate: '2026-09-21',
     supplier: 'Beximco / Omera Gas',
-    notes: 'Commercial 12kg LPG gas cylinder for cooking stove'
+    notes: 'Commercial 12kg LPG gas cylinder for cooking stove',
+    hasSubUnits: true,
+    packSize: 12,
+    subUnit: 'kg'
   },
   {
     id: 'raw-17',
@@ -1586,11 +1598,12 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
       packSize = explicitPackSize > 1 ? explicitPackSize : 30;
       hasSubUnits = true;
     } else if (isPacket || (explicitSub && explicitSub !== u)) {
-      const isWeight = ['gm', 'g', 'gram', 'গ্রাম'].includes(explicitSub);
-      const isVol = ['ml', 'milli', 'মিলি'].includes(explicitSub);
-      subCategory = item.subCategory || (isWeight ? 'Kg - gm' : (isVol ? 'Ltr - ml' : 'Packet - Pcs'));
-      subUnit = item.subUnit || (explicitSub && explicitSub !== u ? explicitSub : 'pcs');
-      packSize = explicitPackSize > 1 ? explicitPackSize : (isWeight ? 1000 : (isVol ? 1000 : 24));
+      const isWeight = ['gm', 'g', 'gram', 'গ্রাম', 'kg', 'কেজি'].includes(explicitSub);
+      const isVol = ['ml', 'milli', 'মিলি', 'liter', 'ltr', 'লিটার'].includes(explicitSub);
+      const isCyl = ['cylinder', 'সিলিন্ডার'].includes(u);
+      subCategory = item.subCategory || (isCyl ? 'Gas Cylinder' : (isWeight ? 'Kg - gm' : (isVol ? 'Ltr - ml' : 'Packet - Pcs')));
+      subUnit = item.subUnit || (explicitSub && explicitSub !== u ? explicitSub : (isCyl ? 'kg' : 'pcs'));
+      packSize = explicitPackSize > 1 ? explicitPackSize : (isCyl ? 12 : (isWeight ? 1000 : (isVol ? 1000 : 24)));
       hasSubUnits = true;
     }
 
@@ -1758,7 +1771,16 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
     }
 
     // STRICT RULE: Unit Pcs has NO sub-unit, and unit and sub-unit can NEVER be identical
-    if (itIsPcs || isSame || (it.packSize && it.packSize <= 1)) {
+    if (itIsPcs || isSame) {
+      return {
+        ...it,
+        hasSubUnits: false,
+        packSize: 1,
+        subUnit: undefined
+      };
+    }
+
+    if (!it.hasSubUnits && !it.subUnit && it.packSize && it.packSize <= 1) {
       return {
         ...it,
         hasSubUnits: false,

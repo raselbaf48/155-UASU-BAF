@@ -893,6 +893,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
             const unit = r.unit || 'kg';
             const isKg = unit.toLowerCase().trim() === 'kg';
             const isLtr = unit.toLowerCase().trim() === 'liter';
+            const isCyl = ['cylinder', 'সিলিন্ডার'].includes(unit.toLowerCase().trim());
             const rawSubUnit = r['Sub Unit'] ?? r.subUnit ?? r.sub_unit ?? meta.subUnit;
             const itemDp = r.DP || r.dp || meta.dp || r.image || r.image_url || undefined;
             const rawType = meta.itemType || r.itemType || r.item_type;
@@ -915,9 +916,9 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
               lastRestockedDate: r.lastRestockedDate || r.last_restocked_date || '',
               supplier: r.supplier || '',
               notes: cleanNotes,
-              hasSubUnits: isKg ? true : Boolean(meta.hasSubUnits ?? r.hasSubUnits ?? r.has_sub_units ?? Boolean(rawSubUnit) ?? (Number(r.packSize ?? r.pack_size) > 1)),
-              packSize: isKg ? (Number(meta.packSize ?? r.packSize ?? r.pack_size) > 1 ? Number(meta.packSize ?? r.packSize ?? r.pack_size) : 1000) : Number(meta.packSize ?? r.packSize ?? r.pack_size ?? 1),
-              subUnit: rawSubUnit || (isKg ? 'gm' : (isLtr ? 'ml' : (meta.subUnit || r.subUnit || r.sub_unit || 'pcs'))),
+              hasSubUnits: (isKg || isCyl) ? true : Boolean(meta.hasSubUnits ?? r.hasSubUnits ?? r.has_sub_units ?? Boolean(rawSubUnit) ?? (Number(r.packSize ?? r.pack_size) > 1)),
+              packSize: isKg ? (Number(meta.packSize ?? r.packSize ?? r.pack_size) > 1 ? Number(meta.packSize ?? r.packSize ?? r.pack_size) : 1000) : (isCyl ? (Number(meta.packSize ?? r.packSize ?? r.pack_size) > 1 ? Number(meta.packSize ?? r.packSize ?? r.pack_size) : 12) : Number(meta.packSize ?? r.packSize ?? r.pack_size ?? 1)),
+              subUnit: rawSubUnit || (isKg ? 'gm' : (isLtr ? 'ml' : (isCyl ? 'kg' : (meta.subUnit || r.subUnit || r.sub_unit || 'pcs')))),
               dp: itemDp,
               DP: itemDp,
               image: itemDp
@@ -1360,6 +1361,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
           const isKg = !isPcs && u === 'kg';
           const isLtr = !isPcs && ['liter', 'ltr', 'litre'].includes(u);
           const isCase = !isPcs && ['case', 'crate'].includes(u);
+          const isCyl = !isPcs && ['cylinder', 'সিলিন্ডার'].includes(u);
           const rawSub = (newItemData.subUnit || '').toLowerCase().trim();
           const isSameUnit = Boolean(u && rawSub && u === rawSub);
 
@@ -1369,11 +1371,11 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
 
           const packSize = (!hasSubUnits)
             ? 1
-            : (Number(newItemData.packSize) > 1 ? Number(newItemData.packSize) : (isKg || isLtr ? 1000 : isCase ? 30 : 100));
+            : (Number(newItemData.packSize) > 1 ? Number(newItemData.packSize) : (isKg || isLtr ? 1000 : isCase ? 30 : isCyl ? 12 : 100));
 
           const subUnit = (!hasSubUnits)
             ? undefined
-            : (newItemData.subUnit ? newItemData.subUnit.trim() : (isKg ? 'gm' : isLtr ? 'ml' : isCase ? 'pcs' : undefined));
+            : (newItemData.subUnit ? newItemData.subUnit.trim() : (isKg ? 'gm' : isLtr ? 'ml' : isCase ? 'pcs' : isCyl ? 'kg' : undefined));
 
           const parsedStock = (newItemData.currentStock !== '' && newItemData.currentStock !== undefined && !isNaN(Number(newItemData.currentStock)))
             ? Number(newItemData.currentStock)
@@ -1417,7 +1419,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
             name: updated.name,
             nameBn: updated.nameBn || '',
             unit: updated.unit,
-            "Sub Unit": updated.subUnit || (updated.unit?.toLowerCase() === 'kg' ? 'gm' : (updated.unit?.toLowerCase() === 'liter' ? 'ml' : (updated.unit?.toLowerCase() === 'case' || updated.unit?.toLowerCase() === 'packet' ? 'pcs' : null))),
+            "Sub Unit": updated.subUnit || (updated.unit?.toLowerCase() === 'kg' ? 'gm' : (updated.unit?.toLowerCase() === 'liter' ? 'ml' : (updated.unit?.toLowerCase() === 'case' || updated.unit?.toLowerCase() === 'packet' ? 'pcs' : (updated.unit?.toLowerCase() === 'cylinder' ? 'kg' : null)))),
             currentStock: updated.currentStock,
             minStockAlert: updated.minStockAlert,
             unitCost: updated.unitCost,
@@ -1480,6 +1482,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
       const isKg = !isPcs && u === 'kg';
       const isLtr = !isPcs && ['liter', 'ltr', 'litre'].includes(u);
       const isCase = !isPcs && ['case', 'crate'].includes(u);
+      const isCyl = !isPcs && ['cylinder', 'সিলিন্ডার'].includes(u);
       const rawSub = (newItemData.subUnit || '').toLowerCase().trim();
       const isSameUnit = Boolean(u && rawSub && u === rawSub);
 
@@ -1489,11 +1492,11 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
 
       const packSize = (!hasSubUnits)
         ? 1
-        : (Number(newItemData.packSize) > 1 ? Number(newItemData.packSize) : (isKg || isLtr ? 1000 : isCase ? 30 : 100));
+        : (Number(newItemData.packSize) > 1 ? Number(newItemData.packSize) : (isKg || isLtr ? 1000 : isCase ? 30 : isCyl ? 12 : 100));
 
       const subUnit = (!hasSubUnits)
         ? undefined
-        : (newItemData.subUnit ? newItemData.subUnit.trim() : (isKg ? 'gm' : isLtr ? 'ml' : isCase ? 'pcs' : undefined));
+        : (newItemData.subUnit ? newItemData.subUnit.trim() : (isKg ? 'gm' : isLtr ? 'ml' : isCase ? 'pcs' : isCyl ? 'kg' : undefined));
 
       const effectiveDp = newItemData.dp?.trim() || undefined;
       const resolvedItemType: InventoryItemType = newItemData.itemType || (inventoryTypeFilter === 'READY_MADE' ? 'READY_MADE' : 'RAW');
@@ -1661,14 +1664,20 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
     const isKg = !isPcs && u === 'kg';
     const isLtr = !isPcs && ['liter', 'ltr', 'litre'].includes(u);
     const isCase = !isPcs && ['case', 'crate'].includes(u);
-    const isPkt = !isPcs && ['packet', 'pkt', 'box'].includes(u);
+    const isPkt = !isPcs && ['packet', 'pkt', 'box', 'bottle', 'can', 'tin', 'jar', 'pack'].includes(u);
+    const isCyl = !isPcs && ['cylinder', 'সিলিন্ডার'].includes(u);
     const meta = decodeNotesMeta(item.notes);
     const explicitlyDisabled = item.hasSubUnits === false || meta.hasSubUnits === false;
     const hasConfiguredSub = !isPcs && !explicitlyDisabled && Boolean(
       item.hasSubUnits === true ||
-      (item.subUnit && item.subUnit.toLowerCase().trim() !== u && item.packSize && item.packSize > 1) ||
-      (isKg || isLtr || isPkt || isCase)
+      Boolean(item.subUnit && item.subUnit.toLowerCase().trim() !== u) ||
+      (isKg || isLtr || isPkt || isCase || isCyl)
     );
+
+    const defaultSubForUnit = isKg ? 'gm' : (isLtr ? 'ml' : (isCase ? 'pcs' : (isCyl ? 'kg' : 'pcs')));
+    const defaultPackSizeForUnit = isKg || isLtr ? 1000 : (isCase ? 30 : (isCyl ? 12 : (isPkt ? 24 : 100)));
+    const activePackSize = item.packSize && item.packSize > 1 ? item.packSize : defaultPackSizeForUnit;
+    const activeSubUnit = (item.subUnit && item.subUnit.toLowerCase().trim() !== u) ? item.subUnit : defaultSubForUnit;
 
     setNewItemData({
       name: item.name,
@@ -1681,8 +1690,8 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
       notes: item.notes || '',
       wastagePercentage: item.wastagePercentage || 0,
       hasSubUnits: hasConfiguredSub,
-      packSize: !hasConfiguredSub ? 1 : (item.packSize && item.packSize > 1 ? item.packSize : (isKg || isLtr ? 1000 : isCase ? 30 : isPkt ? 24 : 100)),
-      subUnit: !hasConfiguredSub ? undefined : (item.subUnit && item.subUnit.toLowerCase().trim() !== u ? item.subUnit : (isKg ? 'gm' : isLtr ? 'ml' : isCase ? 'pcs' : 'pcs')),
+      packSize: !hasConfiguredSub ? 1 : activePackSize,
+      subUnit: !hasConfiguredSub ? undefined : activeSubUnit,
       itemType: item.itemType || (isReadymadeItem(item) ? 'READY_MADE' : 'RAW'),
       dp: item.dp || item.DP || item.image || ''
     });
@@ -3015,13 +3024,22 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                   }
 
                   const availableSubUnits = [
+                    { val: 'kg', label: 'kg (Kilogram)' },
+                    { val: 'gm', label: 'gm (Gram)' },
+                    { val: 'liter', label: 'liter (Liter)' },
+                    { val: 'ml', label: 'ml (Milli-liter)' },
                     { val: 'pcs', label: 'pcs (Pieces)' },
                     { val: 'slice', label: 'slice (Slice)' },
                     { val: 'cup', label: 'cup (Cup)' },
                     { val: 'sheet', label: 'sheet (Sheet)' },
-                    { val: 'gm', label: 'gm (Gram)' },
-                    { val: 'ml', label: 'ml (Milli-liter)' }
+                    { val: 'can', label: 'can (Can)' },
+                    { val: 'bottle', label: 'bottle (Bottle)' },
+                    { val: 'plate', label: 'plate (Plate)' }
                   ].filter(opt => opt.val !== currentSelectedUnit);
+
+                  if (newItemData.subUnit && !availableSubUnits.some(opt => opt.val === newItemData.subUnit)) {
+                    availableSubUnits.unshift({ val: newItemData.subUnit, label: `${newItemData.subUnit} (Custom)` });
+                  }
 
                   const defaultSub = availableSubUnits[0]?.val || 'pcs';
                   const activeSub = (newItemData.subUnit && newItemData.subUnit !== currentSelectedUnit)
