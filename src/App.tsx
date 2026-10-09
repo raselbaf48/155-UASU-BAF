@@ -44,6 +44,7 @@ import { Logo155UASU } from './components/Logo155UASU';
 import { Shield, AlertCircle, X } from 'lucide-react';
 import { getCurrentUserSession, clearUserSession, UserSession } from './utils/authSession';
 import { localDb } from './services/localDatabase';
+import { initCanteenCloudSync } from './features/canteen/utils/canteenCloudSync';
 import { supabase, isSupabaseConfigured } from './supabase';
 import { setLastUsedPortal } from './services/portalPreferenceService';
 
@@ -64,6 +65,16 @@ export default function App() {
       setActiveTab('overview');
     }
   }, [role, activeTab]);
+
+  // Priority 1: When anyone opens the app, download the latest datasets from Cloud first!
+  // Before cloud download completes, uploads are blocked to prevent data loss.
+  useEffect(() => {
+    localDb.syncFromFirebase();
+    const cleanupCanteenSync = initCanteenCloudSync();
+    return () => {
+      cleanupCanteenSync();
+    };
+  }, []);
 
   // Global click handler: Clicking anywhere on a date input or its container opens the calendar
   useEffect(() => {

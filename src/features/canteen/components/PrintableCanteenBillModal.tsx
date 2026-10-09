@@ -22,7 +22,8 @@ import {
   formatMemberNameBn,
   getMonthNamesBn,
   exportCanteenBillToExcel,
-  getPaymentCycleMonthKey
+  getPaymentCycleMonthKey,
+  resolvePaymentBillMonth
 } from '../utils/exportCanteenBillExcel';
 import { WhatsAppIcon } from '../pages/MemberDB';
 import { buildWhatsAppMultipleBillMessage } from '../utils/canteenWhatsAppTemplate';
@@ -244,13 +245,10 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
   }, [filteredMembers]);
 
   // Helper to extract comparable YYYY-MM key from any transaction
-  // Payments strictly belong to the month they were paid in (25th-24th shifting rule removed)
+  // Resolves payments to the month whose bill was paid (e.g. September bill paid in October belongs to September)
   const getMonthKeyOfTx = (tx: any): string => {
     if (isPaymentTx(tx)) {
-      const cycleKey = getPaymentCycleMonthKey(tx.date || tx.timestamp || tx.created_at || tx.createdAt);
-      if (cycleKey) return cycleKey;
-      if (tx.monthKey) return tx.monthKey;
-      return '';
+      return resolvePaymentBillMonth(tx);
     }
     return tx.monthKey || getTxMonthKey(tx.date) || '';
   };

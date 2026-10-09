@@ -1195,154 +1195,72 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
 
           {/* DEDICATED PAGE 4: DATABASE CLOUD SYNC */}
           {activeSection === 'cloudsync' && (
-            <div className="bg-slate-900 rounded-[2.5rem] p-6 md:p-10 shadow-sm border border-slate-800 space-y-8">
-              {/* Header Box */}
-              <div className="flex flex-col items-center justify-center p-6 text-center">
-                <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-blue-900/50 to-indigo-900/40 border border-blue-500/30 flex items-center justify-center mb-4 shadow-xl shadow-blue-500/10">
-                  <Cloud className="w-10 h-10 text-blue-400" />
+            <div className="space-y-6 animate-fadeIn max-w-md mx-auto">
+              <div className="flex flex-col items-center justify-center p-8 text-center bg-transparent">
+                <div className="w-16 h-16 rounded-full bg-[#1e2b4d] flex items-center justify-center mb-6">
+                  <Cloud className="w-8 h-8 text-blue-400" />
                 </div>
-                <h3 className="text-2xl font-black text-white tracking-tight">Database Cloud Sync</h3>
-                <p className="text-xs text-slate-400 mt-1 max-w-md">
-                  Manually push your local canteen changes or pull updates from central Supabase cloud database.
+                <h3 className="text-xl font-bold text-white mb-2">Database Cloud Sync</h3>
+                <p className="text-sm text-slate-400 mb-8 max-w-sm">
+                  Manually push your local canteen changes or pull updates from the central Supabase database.
                 </p>
-                <div className="mt-3 flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-950/80 border border-emerald-500/30 text-emerald-400 text-xs font-mono font-bold">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                    SUPABASE CONNECTED
-                  </span>
-                </div>
-              </div>
 
-              {/* Progress Feedback */}
-              {syncStatusText && (
-                <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-2xl space-y-2 animate-in fade-in">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-bold text-white flex items-center gap-2">
-                      {(isSyncingPush || isSyncingPull) && <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-400" />}
-                      <span>{syncStatusText}</span>
-                    </span>
-                    <span className="font-mono text-blue-400 font-bold">{syncProgress}%</span>
-                  </div>
-                  <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
-                    <div 
-                      className="bg-gradient-to-r from-blue-500 to-indigo-500 h-full transition-all duration-300 rounded-full"
-                      style={{ width: `${syncProgress}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* 2 Big Action Cards: Push & Pull */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                {/* Push to Cloud */}
-                <div className="bg-slate-950/70 border border-slate-800 rounded-3xl p-6 flex flex-col justify-between space-y-4 hover:border-slate-700 transition-colors">
-                  <div className="space-y-2">
-                    <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center">
-                      <Upload className="w-5 h-5" />
+                {(isSyncingPush || isSyncingPull || syncStatusText) && syncProgress >= 0 && syncProgress <= 100 && (
+                  <div className="w-full mb-6 max-w-sm mx-auto">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider">{syncStatusText || 'Processing...'}</span>
+                      <span className="text-xs font-bold text-slate-300">{syncProgress}%</span>
                     </div>
-                    <h4 className="text-base font-black text-white">Push to Cloud</h4>
-                    <p className="text-xs text-slate-400 leading-relaxed">
-                      Upload current local configuration, parameters, and members cache to the central Supabase database.
-                    </p>
+                    <div className="w-full bg-slate-900 rounded-full h-2 overflow-hidden border border-slate-700">
+                      <div className="bg-gradient-to-r from-blue-500 to-indigo-500 h-2 rounded-full transition-all duration-300" style={{ width: `${syncProgress}%` }}></div>
+                    </div>
                   </div>
+                )}
 
-                  <button
+                <div className="grid grid-cols-2 gap-4 w-full">
+                  <button 
                     type="button"
                     disabled={isSyncingPush || isSyncingPull}
                     onClick={handlePushToCloud}
-                    className="w-full py-3.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center space-x-2 shadow-lg shadow-blue-600/20 cursor-pointer"
+                    className="relative group w-full overflow-hidden rounded-xl p-[1px] transition-all hover:shadow-[0_0_15px_-5px_rgba(59,130,246,0.3)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none cursor-pointer"
                   >
-                    {isSyncingPush ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Pushing to Cloud...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Upload className="w-4 h-4" />
-                        <span>Push Local Data to Cloud</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                {/* Pull from Cloud */}
-                <div className="bg-slate-950/70 border border-slate-800 rounded-3xl p-6 flex flex-col justify-between space-y-4 hover:border-slate-700 transition-colors">
-                  <div className="space-y-2">
-                    <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                      <Download className="w-5 h-5" />
+                    <div className="absolute inset-0 bg-gradient-to-r from-blue-600/40 to-indigo-600/40 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                    <div className="relative flex flex-row items-center justify-center gap-2 w-full h-full bg-[#1e293b] px-4 py-3.5 rounded-xl border border-slate-700/50 transition-colors group-hover:bg-[#1e293b]/80">
+                      <Upload className={`w-4 h-4 text-blue-400 ${isSyncingPush ? 'animate-bounce' : ''}`} />
+                      <span className="text-sm font-medium tracking-wide text-slate-200 group-hover:text-white transition-colors">
+                        {isSyncingPush && syncProgress === 100 ? 'Success!' : isSyncingPush ? 'Uploading...' : 'Push to Cloud'}
+                      </span>
                     </div>
-                    <h4 className="text-base font-black text-white">Pull from Cloud</h4>
-                    <p className="text-xs text-slate-400 leading-relaxed">
-                      Fetch fresh member lists, updated menu items, and canteen configuration from central Supabase database.
-                    </p>
-                  </div>
+                  </button>
 
-                  <button
+                  <button 
                     type="button"
                     disabled={isSyncingPush || isSyncingPull}
                     onClick={handlePullFromCloud}
-                    className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center space-x-2 shadow-lg shadow-emerald-600/20 cursor-pointer"
+                    className="relative group w-full overflow-hidden rounded-xl p-[1px] transition-all hover:shadow-[0_0_15px_-5px_rgba(16,185,129,0.3)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none cursor-pointer"
                   >
-                    {isSyncingPull ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Downloading Data...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Download className="w-4 h-4" />
-                        <span>Pull from Cloud Database</span>
-                      </>
-                    )}
+                    <div className="absolute inset-0 bg-gradient-to-r from-emerald-600/40 to-teal-600/40 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                    <div className="relative flex flex-row items-center justify-center gap-2 w-full h-full bg-[#1e293b] px-4 py-3.5 rounded-xl border border-slate-700/50 transition-colors group-hover:bg-[#1e293b]/80">
+                      <Download className={`w-4 h-4 text-emerald-400 ${isSyncingPull ? 'animate-bounce' : ''}`} />
+                      <span className="text-sm font-medium tracking-wide text-slate-200 group-hover:text-white transition-colors">
+                        {isSyncingPull && syncProgress === 100 ? 'Success!' : isSyncingPull ? 'Downloading...' : 'Pull from Cloud'}
+                      </span>
+                    </div>
                   </button>
                 </div>
               </div>
 
-              {/* Table Row Counts */}
-              <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-5 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-                    <Database className="w-3.5 h-3.5 text-blue-400" />
-                    <span>LOCAL & CLOUD RECORDS</span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={loadTableCounts}
-                    className="text-[10px] font-bold text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer"
-                  >
-                    <RefreshCw className="w-3 h-3" />
-                    <span>Refresh Counts</span>
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="bg-slate-900 border border-slate-800 p-3 rounded-xl text-center">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase block">Members</span>
-                    <span className="text-lg font-black text-white font-mono">{tableCounts.members}</span>
-                  </div>
-                  <div className="bg-slate-900 border border-slate-800 p-3 rounded-xl text-center">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase block">Transactions</span>
-                    <span className="text-lg font-black text-white font-mono">{tableCounts.transactions}</span>
-                  </div>
-                  <div className="bg-slate-900 border border-slate-800 p-3 rounded-xl text-center">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase block">Expenses</span>
-                    <span className="text-lg font-black text-white font-mono">{tableCounts.expenses}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Cloud Sync Activity Logs - Exact style as Office Settings */}
+              {/* Cloud Sync Activity Logs - Exact style as Office Settings, ONLY Canteen logs */}
               <div className="mt-8">
                 <div className="flex items-center justify-between mb-4 px-2">
-                  <h4 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
                     Recent Sync Logs
                   </h4>
                   {syncLogs.length > 0 && (
                     <button
                       type="button"
                       onClick={handleClearSyncLogs}
-                      className="text-[10px] font-bold text-slate-500 hover:text-rose-400 flex items-center gap-1 cursor-pointer transition-colors"
+                      className="text-[10px] font-bold text-slate-400 hover:text-rose-400 flex items-center gap-1 cursor-pointer transition-colors"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                       <span>Clear Logs</span>
@@ -1351,7 +1269,7 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
                 </div>
 
                 {syncLogs.length === 0 ? (
-                  <div className="text-center py-8 bg-slate-800/30 rounded-2xl">
+                  <div className="text-center py-8 bg-slate-800/30 rounded-2xl border border-slate-800">
                     <p className="text-sm font-bold text-slate-500">No recent logs.</p>
                   </div>
                 ) : (

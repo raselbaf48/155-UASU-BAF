@@ -7,7 +7,7 @@ interface DateNavigatorProps {
   onChange: (val: string) => void;
   allowAll?: boolean;
   label?: string;
-  format?: 'dd_mm_yy' | 'dd_mm';
+  format?: 'dd_mm_yy' | 'dd_mm' | 'day_only';
   className?: string;
   compact?: boolean;
 }
@@ -43,15 +43,20 @@ export const formatDisplayDate = (val: string, format: string = 'dd_mm_yy'): str
   if (parts.length === 3) {
     const y = parts[0].slice(-2);
     const mIdx = parseInt(parts[1], 10) - 1;
-    const day = parts[2].padStart(2, '0');
+    const rawDay = parts[2];
+    const dayNumber = String(parseInt(rawDay, 10));
+    const day = rawDay.padStart(2, '0');
     const mon = MONTH_NAMES[mIdx] || parts[1];
+    if (format === 'day_only') return dayNumber;
     return format === 'dd_mm' ? `${day} ${mon}` : `${day} ${mon} ${y}`;
   }
   const d = new Date(val);
   if (!isNaN(d.getTime())) {
+    const dayNumber = String(d.getDate());
     const day = String(d.getDate()).padStart(2, '0');
     const mon = MONTH_NAMES[d.getMonth()];
     const y = String(d.getFullYear()).slice(-2);
+    if (format === 'day_only') return dayNumber;
     return format === 'dd_mm' ? `${day} ${mon}` : `${day} ${mon} ${y}`;
   }
   return val;

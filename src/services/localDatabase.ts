@@ -144,6 +144,7 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 export class LocalDatabaseEngine {
   public db: LocalStorageDB;
   private isFirebaseSyncing: boolean = false;
+  public isInitialPullDone: boolean = false;
   private isPushing: boolean = false;
   private saveTimeout: any = null;
   private lastSyncedDbStr: string = '';
@@ -196,6 +197,11 @@ export class LocalDatabaseEngine {
           const hasPendingSync = typeof window !== 'undefined' ? window.localStorage.getItem('baf_pending_sync') === 'true' : false;
           // Note: saveTimeout is handled by its own timeout, we only need to retry if hasPendingSync is true
           if (hasPendingSync && !this.saveTimeout) {
+            // Verify if there are ACTUAL differences before running retry push
+            if (this.lastSyncedDbStr && this.lastSyncedDbStr === JSON.stringify(this.db)) {
+              if (typeof window !== 'undefined') window.localStorage.removeItem('baf_pending_sync');
+              return;
+            }
             this.saveToFirebase(this.db, true).then((success) => {
                if (success !== false) this.syncFromFirebase();
             });
@@ -599,6 +605,7 @@ export class LocalDatabaseEngine {
       return false;
     } finally {
       this.isFirebaseSyncing = false;
+      this.isInitialPullDone = true;
     }
   }
 
@@ -637,13 +644,32 @@ export class LocalDatabaseEngine {
     }
     
     // Prevent accidental pushes if we haven't finished our initial sync pull yet
-    if (this.isFirebaseSyncing) {
-       console.warn('Prevented saveToFirebase because a pull sync is currently in progress. Will retry later.');
+    if (!immediate && (!this.isInitialPullDone || this.isFirebaseSyncing)) {
+       console.warn('Prevented saveToFirebase because initial cloud download is in progress or not finished yet. Changes will sync after download finishes.');
        return false;
+    }
+
+    // Check if data actually changed compared to what was last synced
+    const currentDbStr = JSON.stringify(dbToSave);
+    if (!immediate && this.lastSyncedDbStr && this.lastSyncedDbStr === currentDbStr) {
+      if (typeof window !== 'undefined') {
+        window.localStorage.removeItem('baf_pending_sync');
+      }
+      if (this.saveTimeout) {
+        clearTimeout(this.saveTimeout);
+        this.saveTimeout = null;
+      }
+      return true;
     }
     
     const doSave = async (): Promise<boolean> => {
       if (this.isPushing) return false;
+      if (!immediate && this.lastSyncedDbStr && this.lastSyncedDbStr === JSON.stringify(dbToSave)) {
+        if (typeof window !== 'undefined') {
+          window.localStorage.removeItem('baf_pending_sync');
+        }
+        return true;
+      }
       this.isPushing = true;
       try {
         let hasError = false;

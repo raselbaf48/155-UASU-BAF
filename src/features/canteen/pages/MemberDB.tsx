@@ -62,6 +62,7 @@ import { BulkImportInitialBillsModal } from '../components/BulkImportInitialBill
 import { SetInitialBillModal } from '../components/SetInitialBillModal';
 import { PrintableCanteenBillModal } from '../components/PrintableCanteenBillModal';
 import { EditMemberSeniorityModal } from '../components/EditMemberSeniorityModal';
+import { EditPaymentModal } from '../components/EditPaymentModal';
 import { restoreRawStockForSaleCancellation } from '../utils/recipeManager';
 import { pushKeyToCloud, pullKeyFromCloud, recordDeletedTxId, getDeletedTxIds } from '../utils/canteenCloudSync';
 import { syncImportHistoryToTransactions, deduplicateCanteenTransactions } from '../utils/importHistoryTxs';
@@ -72,6 +73,8 @@ import {
   formatBengaliMonthYear,
   toBengaliNum,
   getPaymentCycleMonthKey,
+  resolvePaymentBillMonth,
+  formatPrevMonthKey,
   isPaymentTx
 } from '../utils/exportCanteenBillExcel';
 import {
@@ -311,6 +314,10 @@ export const getTxMonthKey = (dateStr: any): string => {
 // and NEVER wrongly overwritten by payment dates or cycles.
 export const getTxEffectiveMonth = (tx: any): string => {
   if (!tx) return '';
+  const isPay = isPaymentTx(tx);
+  if (isPay) {
+    return resolvePaymentBillMonth(tx);
+  }
   const itemsStr = String(tx.items || '');
   if (itemsStr) {
     if (itemsStr.includes('সেপ্টেম্বর') || itemsStr.toLowerCase().includes('sep')) {
@@ -341,12 +348,6 @@ export const getTxEffectiveMonth = (tx: any): string => {
     return String(tx.monthKey).trim();
   }
 
-  // Payment date cycle fallback only if monthKey is not stored
-  const isPay = isPaymentTx(tx);
-  if (isPay) {
-    const cycle = getPaymentCycleMonthKey(tx?.date || tx?.timestamp || tx?.created_at || tx?.createdAt);
-    if (cycle) return cycle;
-  }
   return getTxMonthKey(tx?.date || tx?.timestamp || tx?.created_at || tx?.createdAt);
 };
 
@@ -593,6 +594,15 @@ export const formatCompactMonth = (monthKey: string): string => {
   return `${date.toLocaleDateString('en-US', { month: 'short' })} ${date.getFullYear()}`;
 };
 
+// Format month key to uppercase month name e.g. "OCTOBER" (or "ALL")
+export const formatMonthOnlyUpper = (monthKey: string): string => {
+  if (!monthKey || monthKey === 'ALL') return 'ALL';
+  const parts = monthKey.split('-');
+  if (parts.length < 2) return monthKey.toUpperCase();
+  const date = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, 1);
+  return date.toLocaleDateString('en-US', { month: 'long' }).toUpperCase();
+};
+
 // Format month key for Payment History: "October 26" format (e.g. October 26, September 26, August 26)
 export const formatPaymentHistoryMonth = (monthKey: string): string => {
   if (!monthKey || monthKey === 'ALL') return 'All Months';
@@ -835,6 +845,13 @@ export const MemberDB: React.FC = () => {
           if (isAdvanceRelated(tx) && (tx.airman_id || tx.bdNo || tx.memberName)) {
             modified = true;
             return { ...tx, airman_id: '', bdNo: '', memberName: '', isAdvance: true };
+          }
+          if (isPaymentTx(tx)) {
+            const resolved = resolvePaymentBillMonth(tx);
+            if (resolved && (tx.billMonth !== resolved || tx.monthKey !== resolved)) {
+              modified = true;
+              return { ...tx, billMonth: resolved, monthKey: resolved };
+            }
           }
           return tx;
         });
@@ -1332,15 +1349,12 @@ export const MemberDB: React.FC = () => {
   const [paymentSearch, setPaymentSearch] = useState('');
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<'ALL' | 'CASH' | 'UCB'>('ALL');
   const [paymentMonthFilter, setPaymentMonthFilter] = useState<string>(() => getRunningMonthKey());
-  const [paymentDateFilter, setPaymentDateFilter] = useState<string>(() => {
-    const d = new Date();
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  });
+  const [paymentDateFilter, setPaymentDateFilter] = useState<string>(''); // Default All dates selected
   const paymentDateInputRef = useRef<HTMLInputElement | null>(null);
   const [paymentToDelete, setPaymentToDelete] = useState<any | null>(null);
+  const [paymentToEdit, setPaymentToEdit] = useState<any | null>(null);
+  const [isSavingPaymentEdit, setIsSavingPaymentEdit] = useState(false);
+  const [paymentEditSuccessMsg, setPaymentEditSuccessMsg] = useState<string | null>(null);
   const [isDeletingPayment, setIsDeletingPayment] = useState(false);
   const [paymentDeleteSuccessMsg, setPaymentDeleteSuccessMsg] = useState<string | null>(null);
   const [paymentDeleteSuccessData, setPaymentDeleteSuccessData] = useState<{ amount: number; memberName: string; bdNo: string; successMsg: string } | null>(null);
@@ -2153,7 +2167,9 @@ export const MemberDB: React.FC = () => {
     const totalDue = getMemberTotalDue(member, selectedCategory);
     if (totalDue <= 0) return; // Prevent paying if Total Due is Nil
 
-    const defaultMonth = (selectedMonth && selectedMonth !== 'ALL') ? selectedMonth : getRunningMonthKey();
+    const defaultMonth = (selectedMonth && selectedMonth !== 'ALL') 
+      ? selectedMonth 
+      : formatPrevMonthKey(getRunningMonthKey());
     setPayBillMonth(defaultMonth);
 
     const todayStr = new Date().toISOString().split('T')[0];
@@ -2833,7 +2849,7 @@ export const MemberDB: React.FC = () => {
       // Bill month cycle that is being paid for
       const billMonthCycle = (payBillMonth && payBillMonth !== 'ALL')
         ? payBillMonth
-        : ((selectedMonth && selectedMonth !== 'ALL') ? selectedMonth : getRunningMonthKey());
+        : ((selectedMonth && selectedMonth !== 'ALL') ? selectedMonth : formatPrevMonthKey(getRunningMonthKey()));
       const billMonthLabelBn = formatBengaliMonthYear(billMonthCycle);
       const lastDateInfo = getLastDateOfMonth(billMonthCycle);
 
@@ -2849,7 +2865,7 @@ export const MemberDB: React.FC = () => {
         created_at: payDateObj.toISOString(),
         createdAt: payDateObj.toISOString(),
         timestamp: payDateObj.getTime(),
-        monthKey: getTxMonthKey(payDateObj),
+        monthKey: billMonthCycle,
         airman_id: payBillMember.airman_id,
         bdNo: payBillMember['BD No'] || payBillMember.airman_id,
         memberName: payeeName,
@@ -3170,6 +3186,84 @@ export const MemberDB: React.FC = () => {
       await handleRemoveTx(paymentToDelete, targetMember);
     } catch (err) {
       console.warn('Error deleting payment:', err);
+    }
+  };
+
+  const handleSavePaymentEdit = async (updatedPaymentData: any) => {
+    if (!paymentToEdit || isSavingPaymentEdit) return;
+    setIsSavingPaymentEdit(true);
+
+    try {
+      const rawStored = localStorage.getItem('canteen_txs');
+      let txs = rawStored ? JSON.parse(rawStored) : [];
+
+      const oldTx = txs.find((t: any) => t.id === paymentToEdit.id);
+      const oldAmount = Number(oldTx?.amount ?? paymentToEdit.amount ?? 0);
+      const newAmount = Number(updatedPaymentData.amount || 0);
+      const diff = newAmount - oldAmount;
+
+      const newBillMonth = updatedPaymentData.billMonth || paymentToEdit.billMonth || paymentToEdit.monthKey;
+      const billMonthLabelBn = formatBengaliMonthYear(newBillMonth);
+      const lastDateInfo = getLastDateOfMonth(newBillMonth);
+      const gatewayFormatted = updatedPaymentData.gateway === 'CASH' ? 'CASH' : 'UCB';
+      const formattedPayDate = updatedPaymentData.date || paymentToEdit.date;
+
+      const newItemsDesc = updatedPaymentData.items || 
+        `Bill Payment - ${gatewayFormatted} (${billMonthLabelBn} বিল | শেষ তারিখ: ${lastDateInfo.formatted} | পরিশোধ: ${formattedPayDate})`;
+
+      const updatedTxs = txs.map((t: any) => {
+        if (t.id === paymentToEdit.id) {
+          return {
+            ...t,
+            amount: newAmount,
+            date: formattedPayDate,
+            paymentDate: formattedPayDate,
+            billMonth: newBillMonth,
+            billMonthBn: billMonthLabelBn,
+            monthKey: newBillMonth,
+            gateway: gatewayFormatted,
+            billType: updatedPaymentData.billType || t.billType || 'ALL',
+            items: newItemsDesc,
+            lastDateCovered: lastDateInfo.formatted,
+            updated_at: new Date().toISOString()
+          };
+        }
+        return t;
+      });
+
+      localStorage.setItem('canteen_txs', JSON.stringify(updatedTxs));
+      setAllTxs(updatedTxs);
+      await pushKeyToCloud('canteen_txs', updatedTxs);
+
+      // Adjust target member due if amount changed
+      if (diff !== 0) {
+        const targetBdClean = String(paymentToEdit.bdNo || paymentToEdit.airman_id || '').replace(/\D/g, '');
+        setMembers(prev => prev.map(m => {
+          const mBdClean = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
+          if (mBdClean === targetBdClean) {
+            const curDue = Number(m.Due ?? m.due ?? 0);
+            const newDue = Math.max(0, curDue - diff);
+            return { ...m, Due: newDue, due: newDue, baki: newDue };
+          }
+          return m;
+        }));
+      }
+
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('canteen_txs_updated'));
+      window.dispatchEvent(new Event('baf_state_updated'));
+      window.dispatchEvent(new Event('storage'));
+
+      playPaymentSuccessSound();
+      setPaymentEditSuccessMsg('পেমেন্ট সফলভাবে আপডেট করা হয়েছে!');
+      setTimeout(() => {
+        setPaymentEditSuccessMsg(null);
+        setPaymentToEdit(null);
+      }, 900);
+    } catch (err) {
+      console.error('Failed to update payment:', err);
+    } finally {
+      setIsSavingPaymentEdit(false);
     }
   };
 
@@ -3557,18 +3651,14 @@ export const MemberDB: React.FC = () => {
 
     const term = searchTerm.toLowerCase().trim();
     const bdNo = String(m['BD No'] || '').toLowerCase();
-    const rank = String(m['Rank'] || '').toLowerCase();
-    const rankBn = (getMemberBanglaRank(m) || formatRankBn(m['Rank'])).toLowerCase();
     const surname = String(m['Surname'] || '').toLowerCase();
     const role = String(m['Role'] || '').toLowerCase();
     const bnName = (getMemberBanglaName(m) || formatMemberNameBn(m['Surname'])).toLowerCase();
     const contact = String(m['Contact'] || m['Mobile No'] || '').toLowerCase();
 
-    // 1. Text field search matching (BD No, Rank, Bangla Rank, Surname, Bangla Name, Role, Contact)
+    // 1. Text field search matching (BD No, Surname, Bangla Name, Role, Contact - Rank excluded per user request)
     if (
       bdNo.includes(term) ||
-      rank.includes(term) ||
-      rankBn.includes(term) ||
       surname.includes(term) ||
       role.includes(term) ||
       bnName.includes(term) ||
@@ -3934,9 +4024,8 @@ export const MemberDB: React.FC = () => {
                   const d = new Date();
                   const y = d.getFullYear();
                   const m = String(d.getMonth() + 1).padStart(2, '0');
-                  const day = String(d.getDate()).padStart(2, '0');
                   setPaymentMonthFilter(`${y}-${m}`);
-                  setPaymentDateFilter(`${y}-${m}-${day}`);
+                  setPaymentDateFilter(''); // default all dt select thakbe
                   setIsPaymentHistoryOpen(true);
                 }}
                 className="w-full sm:w-auto flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-indigo-900/40 transition-all cursor-pointer active:scale-95 border border-indigo-400/30 group"
@@ -4024,102 +4113,70 @@ export const MemberDB: React.FC = () => {
       </div>
 
       {/* Bill Category Tabs & Compact Month Selector */}
-      <div className="bg-slate-900/85 border border-slate-800 rounded-xl p-2.5 sm:p-3 space-y-2.5 shadow-sm">
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
-          {/* Bill Category Filter Pills: All, Canteen, Unit Fund, Others - Responsive grid on mobile so All is never pushed out */}
-          <div className="w-full sm:w-auto grid grid-cols-4 sm:flex items-center gap-1 sm:gap-1.5 p-1 bg-slate-950/90 rounded-xl border border-slate-800">
-            <button
-              type="button"
-              onClick={() => setSelectedCategory('ALL')}
-              className={`px-1.5 sm:px-2.5 py-1.5 rounded-lg text-[10px] sm:text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 ${
-                selectedCategory === 'ALL'
-                  ? 'bg-slate-700 text-white shadow-xs ring-1 ring-slate-400/50'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <Receipt className="w-3.5 h-3.5 text-slate-300 shrink-0" />
-              <span>All</span>
-            </button>
+      <div className="bg-slate-900/85 border border-slate-800 rounded-2xl p-2.5 sm:p-3.5 space-y-3 shadow-md">
+        {/* Bill Category Filter Pills: Full-width responsive box that adjusts across screen sizes */}
+        <div className="w-full grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2.5 p-1.5 bg-slate-950/90 rounded-2xl border border-slate-800 shadow-inner">
+          <button
+            type="button"
+            onClick={() => setSelectedCategory('ALL')}
+            className={`w-full py-2.5 sm:py-3 px-3 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-2 ${
+              selectedCategory === 'ALL'
+                ? 'bg-slate-700 text-white shadow-md ring-1 ring-slate-400/50 scale-[1.01]'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <Receipt className="w-4 h-4 text-slate-300 shrink-0" />
+            <span>ALL</span>
+          </button>
 
-            <button
-              type="button"
-              onClick={() => setSelectedCategory('CANTEEN')}
-              className={`px-1.5 sm:px-2.5 py-1.5 rounded-lg text-[10px] sm:text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 ${
-                selectedCategory === 'CANTEEN'
-                  ? 'bg-amber-600 text-white shadow-xs ring-1 ring-amber-400/50'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <Coffee className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              <span>Canteen</span>
-            </button>
+          <button
+            type="button"
+            onClick={() => setSelectedCategory('CANTEEN')}
+            className={`w-full py-2.5 sm:py-3 px-3 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-2 ${
+              selectedCategory === 'CANTEEN'
+                ? 'bg-amber-600 text-white shadow-md ring-1 ring-amber-400/50 scale-[1.01]'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <Coffee className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>CANTEEN</span>
+          </button>
 
-            <button
-              type="button"
-              onClick={() => setSelectedCategory('UNIT_FUND')}
-              className={`px-1.5 sm:px-2.5 py-1.5 rounded-lg text-[10px] sm:text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 ${
-                selectedCategory === 'UNIT_FUND'
-                  ? 'bg-indigo-600 text-white shadow-xs ring-1 ring-indigo-400/50'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <Landmark className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-              <span className="truncate">Unit Fund</span>
-            </button>
+          <button
+            type="button"
+            onClick={() => setSelectedCategory('UNIT_FUND')}
+            className={`w-full py-2.5 sm:py-3 px-3 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-2 ${
+              selectedCategory === 'UNIT_FUND'
+                ? 'bg-indigo-600 text-white shadow-md ring-1 ring-indigo-400/50 scale-[1.01]'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <Landmark className="w-4 h-4 text-indigo-400 shrink-0" />
+            <span className="truncate">UNIT FUND</span>
+          </button>
 
-            <button
-              type="button"
-              onClick={() => setSelectedCategory('OTHERS')}
-              className={`px-1.5 sm:px-2.5 py-1.5 rounded-lg text-[10px] sm:text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1 ${
-                selectedCategory === 'OTHERS'
-                  ? 'bg-cyan-600 text-white shadow-xs ring-1 ring-cyan-400/50'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <Layers className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-              <span>Others</span>
-            </button>
-          </div>
-
-          {/* Ultra-compact Month Selector (Clean, small, tight pill) */}
-          <div className="flex items-center justify-start sm:justify-end shrink-0">
-            <div className="inline-flex items-center bg-slate-950/90 rounded-lg p-0.5 border border-slate-800 shadow-xs">
-              <button
-                type="button"
-                onClick={handlePrevMonth}
-                className="w-6 h-6 flex items-center justify-center hover:bg-slate-800 text-slate-400 hover:text-white rounded transition-colors cursor-pointer active:scale-90"
-                title="পূর্ববর্তী মাস"
-              >
-                <ChevronLeft className="w-3.5 h-3.5 text-indigo-400" />
-              </button>
-
-              <div className="px-2 text-center select-none">
-                <span className="text-[11px] font-black uppercase tracking-wider flex items-center justify-center space-x-1 text-slate-200">
-                  <Calendar className="w-3 h-3 text-indigo-400 shrink-0" />
-                  <span className="font-mono">{formatCompactMonth(selectedMonth)}</span>
-                </span>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleNextMonth}
-                className="w-6 h-6 flex items-center justify-center hover:bg-slate-800 text-slate-400 hover:text-white rounded transition-colors cursor-pointer active:scale-90"
-                title="পরবর্তী মাস"
-              >
-                <ChevronRight className="w-3.5 h-3.5 text-indigo-400" />
-              </button>
-            </div>
-          </div>
+          <button
+            type="button"
+            onClick={() => setSelectedCategory('OTHERS')}
+            className={`w-full py-2.5 sm:py-3 px-3 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-2 ${
+              selectedCategory === 'OTHERS'
+                ? 'bg-cyan-600 text-white shadow-md ring-1 ring-cyan-400/50 scale-[1.01]'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <Layers className="w-4 h-4 text-cyan-400 shrink-0" />
+            <span>OTHERS</span>
+          </button>
         </div>
 
-        {/* Filter Info Strip with Total Billed & Quick Filter Switch */}
-        <div className="flex items-center justify-between text-[11px] font-bold text-slate-400 pt-2 border-t border-slate-800/60 flex-wrap gap-2">
+        {/* Filter Info Strip with Total Billed & Month Selector placed directly to the LEFT of All/Due */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between text-[11px] font-bold text-slate-400 pt-2.5 border-t border-slate-800/60 gap-2.5">
           <div className="flex items-center space-x-2 flex-wrap gap-y-1">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <span>
               Showing: <strong className="text-white">{selectedCategory === 'CANTEEN' ? 'Canteen' : selectedCategory === 'UNIT_FUND' ? 'Unit Fund' : selectedCategory === 'OTHERS' ? 'Others' : 'All Bills'}</strong>
               {' • '}
-              <strong className="text-indigo-300 font-mono">{formatCompactMonth(selectedMonth)}</strong>
+              <strong className="text-indigo-300 font-mono">{formatMonthOnlyUpper(selectedMonth)}</strong>
             </span>
             <span className="text-slate-500 hidden sm:inline">|</span>
             <span className="text-emerald-400 font-mono font-black">
@@ -4127,13 +4184,41 @@ export const MemberDB: React.FC = () => {
             </span>
           </div>
 
-          <div className="flex items-center space-x-2">
-            {/* Quick Toggle: All vs Only with Bills */}
+          <div className="flex items-center justify-end space-x-2.5 shrink-0 flex-wrap gap-2">
+            {/* Month Selector Box on the LEFT side of All/Due - Format: "OCTOBER" */}
+            <div className="inline-flex items-center bg-slate-950 rounded-xl p-0.5 border border-slate-800 shadow-xs">
+              <button
+                type="button"
+                onClick={handlePrevMonth}
+                className="w-7 h-7 flex items-center justify-center hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer active:scale-90"
+                title="পূর্ববর্তী মাস"
+              >
+                <ChevronLeft className="w-3.5 h-3.5 text-indigo-400" />
+              </button>
+
+              <div className="px-2.5 py-0.5 text-center select-none flex items-center space-x-1.5">
+                <Calendar className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                <span className="text-xs sm:text-sm font-black uppercase font-mono tracking-wider text-white">
+                  {formatMonthOnlyUpper(selectedMonth)}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleNextMonth}
+                className="w-7 h-7 flex items-center justify-center hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer active:scale-90"
+                title="পরবর্তী মাস"
+              >
+                <ChevronRight className="w-3.5 h-3.5 text-indigo-400" />
+              </button>
+            </div>
+
+            {/* Quick Toggle: All vs Only with Bills (Due) */}
             <div className="flex items-center bg-slate-950 rounded-xl p-0.5 border border-slate-800">
               <button
                 type="button"
                 onClick={() => setFilterMode('ALL')}
-                className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer ${
+                className={`px-3 py-1.5 rounded-lg text-[10px] sm:text-[11px] font-black uppercase transition-all cursor-pointer ${
                   !isDueFilterActive
                     ? 'bg-slate-800 text-white shadow-xs'
                     : 'text-slate-400 hover:text-white'
@@ -4144,7 +4229,7 @@ export const MemberDB: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setFilterMode('DUE')}
-                className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer ${
+                className={`px-3 py-1.5 rounded-lg text-[10px] sm:text-[11px] font-black uppercase transition-all cursor-pointer ${
                   isDueFilterActive
                     ? 'bg-indigo-600 text-white shadow-xs'
                     : 'text-slate-400 hover:text-white'
@@ -4163,7 +4248,7 @@ export const MemberDB: React.FC = () => {
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <input 
             type="text" 
-            placeholder="Search members by BD No, Rank, Surname, Bill, or বাংলা নাম..." 
+            placeholder="Search members by BD No, Surname, Bill, or বাংলা নাম..." 
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full bg-slate-900 border border-slate-700 rounded-2xl pl-12 pr-10 py-3 text-sm font-bold text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#4f46e5]/20 focus:border-[#4f46e5] transition-all shadow-sm"
@@ -6299,7 +6384,7 @@ export const MemberDB: React.FC = () => {
               {/* Row 2: Dt (Day) Navigator FIRST, then Month Navigator, then Quick Method Filters */}
               <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/60">
                 <div className="flex flex-wrap items-center gap-2">
-                  {/* Dt / Day Navigator with All button + Left/Right arrows + 09 Oct 26 display + CalendarPickerModal */}
+                  {/* Dt / Day Navigator with All button + Left/Right arrows + only day number (e.g. 9) display */}
                   <DateNavigator
                     value={paymentDateFilter}
                     onChange={(val) => {
@@ -6312,7 +6397,7 @@ export const MemberDB: React.FC = () => {
                       }
                     }}
                     allowAll={true}
-                    format="dd_mm_yy"
+                    format="day_only"
                   />
 
                   {/* 3. Month Navigator with Left/Right Arrows & "October 26" format */}
@@ -6506,6 +6591,19 @@ export const MemberDB: React.FC = () => {
                             </span>
                           </div>
                         </div>
+
+                        {/* Edit Button */}
+                        {!(tx.isReverted || tx.status === 'REVERTED') && (
+                          <button
+                            type="button"
+                            onClick={() => setPaymentToEdit({ ...tx, targetMember })}
+                            className="px-2.5 py-1.5 rounded-xl bg-indigo-950/40 hover:bg-indigo-900/60 text-indigo-300 hover:text-white border border-indigo-900/50 flex items-center space-x-1 text-xs font-bold transition-all cursor-pointer active:scale-95 shadow-xs"
+                            title="পেমেন্টের তথ্য সম্পাদনা করুন"
+                          >
+                            <Edit3 className="w-3.5 h-3.5 text-indigo-400" />
+                            <span className="text-[11px]">Edit</span>
+                          </button>
+                        )}
 
                         {/* Delete / Revert Status Button */}
                         {tx.isReverted || tx.status === 'REVERTED' ? (
@@ -6702,6 +6800,18 @@ export const MemberDB: React.FC = () => {
               )}
             </motion.div>
           </motion.div>
+        )}
+
+        {/* Edit Payment Modal */}
+        {paymentToEdit && (
+          <EditPaymentModal
+            isOpen={!!paymentToEdit}
+            onClose={() => setPaymentToEdit(null)}
+            payment={paymentToEdit}
+            availableMonths={availableMonths}
+            onSave={handleSavePaymentEdit}
+            isSaving={isSavingPaymentEdit}
+          />
         )}
 
         {/* Manager Management Modal (Moved from Settings to Member DB - PIN removed) */}

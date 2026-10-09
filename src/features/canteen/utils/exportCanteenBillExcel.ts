@@ -344,6 +344,88 @@ export const getPaymentCycleMonthKey = (dateVal: any): string => {
   return getTxMonthKey(dateVal);
 };
 
+export const formatPrevMonthKey = (monthKey: string): string => {
+  if (!monthKey || monthKey === 'ALL') return monthKey;
+  const parts = String(monthKey).split('-').map(Number);
+  if (parts.length < 2 || isNaN(parts[0]) || isNaN(parts[1])) return monthKey;
+  const prevDate = new Date(parts[0], parts[1] - 2, 1);
+  return `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
+};
+
+/**
+ * Accurately determines the BILLING month key (YYYY-MM) for a PAYMENT transaction.
+ * Resolves payments made in October for September's bill strictly to September.
+ */
+export const resolvePaymentBillMonth = (tx: any): string => {
+  if (!tx) return '';
+
+  // 1. Explicit billing month mentioned in items / description / billMonthBn
+  const text = `${tx.billMonthBn || ''} ${tx.items || ''} ${tx.description || ''} ${tx.desc || ''}`;
+  if (text) {
+    if (text.includes('সেপ্টেম্বর') || text.match(/\bsep(tember)?\b/i)) {
+      const yrMatch = text.match(/202\d/) || text.match(/২০২[০-৯]/);
+      let yr = '2026';
+      if (yrMatch) yr = yrMatch[0].replace(/[০-৯]/g, d => String('০১২৩৪৫৬৭৮৯'.indexOf(d)));
+      return `${yr}-09`;
+    }
+    if (text.includes('আগস্ট') || text.match(/\baug(ust)?\b/i)) {
+      const yrMatch = text.match(/202\d/) || text.match(/২০২[০-৯]/);
+      let yr = '2026';
+      if (yrMatch) yr = yrMatch[0].replace(/[০-৯]/g, d => String('০১২৩৪৫৬৭৮৯'.indexOf(d)));
+      return `${yr}-08`;
+    }
+    if (text.includes('জুলাই') || text.match(/\bjul(y)?\b/i)) {
+      const yrMatch = text.match(/202\d/) || text.match(/২০২[০-৯]/);
+      let yr = '2026';
+      if (yrMatch) yr = yrMatch[0].replace(/[০-৯]/g, d => String('০১২৩৪৫৬৭৮৯'.indexOf(d)));
+      return `${yr}-07`;
+    }
+    if (text.includes('অক্টোবর ২০২৬ বিল') || text.includes('অক্টোবর বিল') || text.match(/oct(ober)?.*bill/i)) {
+      return '2026-10';
+    }
+    if (text.includes('নভেম্বর') || text.match(/\bnov(ember)?\b/i)) return '2026-11';
+    if (text.includes('ডিসেম্বর') || text.match(/\bdec(ember)?\b/i)) return '2026-12';
+    if (text.includes('জানুয়ারি') || text.match(/\bjan(uary)?\b/i)) return '2026-01';
+  }
+
+  // 2. Check lastDateCovered (e.g. "30/09/2026" -> '2026-09')
+  if (tx.lastDateCovered) {
+    const dMatch = String(tx.lastDateCovered).match(/(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})/);
+    if (dMatch) {
+      return `${dMatch[3]}-${dMatch[2].padStart(2, '0')}`;
+    }
+  }
+
+  // 3. Explicit billMonth property (e.g. '2026-09')
+  if (tx.billMonth && /^\d{4}-\d{2}$/.test(String(tx.billMonth).trim())) {
+    const bm = String(tx.billMonth).trim();
+    const calKey = getPaymentCycleMonthKey(tx.date || tx.timestamp || tx.created_at || tx.createdAt);
+    // If recorded in October with billMonth '2026-10' without explicit October bill label,
+    // it was clearing the bill up to September
+    if (bm === '2026-10' && calKey === '2026-10' && !text.includes('অক্টোবর ২০২৬ বিল')) {
+      return '2026-09';
+    }
+    return bm;
+  }
+
+  // 4. If tx.monthKey is explicitly stored and differs from calendar payment date
+  const calKey = getPaymentCycleMonthKey(tx.date || tx.timestamp || tx.created_at || tx.createdAt);
+  if (tx.monthKey && /^\d{4}-\d{2}$/.test(String(tx.monthKey).trim())) {
+    const mk = String(tx.monthKey).trim();
+    if (mk !== calKey) {
+      return mk;
+    }
+  }
+
+  // 5. Standard billing cycle: When a bill is paid during month M (e.g. October 2026),
+  // it pays the preceding closed month (September 2026).
+  if (calKey) {
+    return formatPrevMonthKey(calKey);
+  }
+
+  return '';
+};
+
 export interface ExportCanteenBillParams {
   members: any[];
   allTxs: any[];
@@ -449,7 +531,7 @@ export async function exportCanteenBillToExcel({
 
   const getMonthKeyOfTx = (tx: any): string => {
     if (isPaymentTx(tx)) {
-      return getPaymentCycleMonthKey(tx.date || tx.timestamp || tx.created_at);
+      return resolvePaymentBillMonth(tx);
     }
     return tx.monthKey || getTxMonthKey(tx.date) || '';
   };

@@ -27,7 +27,7 @@ import { supabase } from '../../../supabase';
 import { pushKeyToCloud, pullKeyFromCloud, recordDeletedTxId } from '../utils/canteenCloudSync';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
-import { formatBengaliMonthYear, getPaymentCycleMonthKey } from '../utils/exportCanteenBillExcel';
+import { formatBengaliMonthYear, getPaymentCycleMonthKey, resolvePaymentBillMonth } from '../utils/exportCanteenBillExcel';
 import { getTxMonthKey, getTxEffectiveMonth } from '../pages/MemberDB';
 import { deduplicateCanteenTransactions, getFormattedDateForMonth } from '../utils/importHistoryTxs';
 import JSZip from 'jszip';
@@ -1055,7 +1055,7 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
       const getTxMonth = (tx: any) => {
         const isPay = tx.type === 'BILL PAYMENT' || tx.type === 'PAYMENT';
         if (isPay) {
-          return getPaymentCycleMonthKey(tx.date || tx.timestamp || tx.created_at || tx.createdAt) || tx.monthKey || '';
+          return resolvePaymentBillMonth(tx);
         }
         return tx.monthKey || getTxMonthKey(tx.date) || '';
       };
