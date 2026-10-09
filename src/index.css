@@ -1,5 +1,25 @@
 @import "tailwindcss";
 
+/* Universal calendar picker trigger: clicking anywhere in any date input opens the calendar */
+input[type="date"] {
+  cursor: pointer;
+  position: relative;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
 /* SuttonyMJ / SutonnyMJ Bengali font definitions */
 @font-face {
   font-family: 'SuttonyMJ';
@@ -281,6 +301,15 @@ body::-webkit-scrollbar-track,
 }
 .animate-countdown-bar {
   animation: countdownBar 4s linear forwards;
+}
+
+/* Date Input Enhancements: clicking anywhere on the box opens calendar */
+input[type="date"] {
+  cursor: pointer !important;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+  cursor: pointer !important;
 }
 
 

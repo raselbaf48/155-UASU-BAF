@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Search, 
@@ -56,6 +56,7 @@ import { supabase } from '../../../supabase';
 import { resolveImageUrl, fetchDirectImageUrl, getCanteenConfig, saveCanteenConfig } from '../utils/canteenSettings';
 import { processGalleryImage } from '../utils/imageUpload';
 import { formatCanteenDate } from '../utils/dateUtils';
+import { DateNavigator, getTodayYMD } from '../components/DateNavigator';
 import { SaveButton } from '../components/SaveButton';
 import { BulkImportInitialBillsModal } from '../components/BulkImportInitialBillsModal';
 import { SetInitialBillModal } from '../components/SetInitialBillModal';
@@ -592,6 +593,19 @@ export const formatCompactMonth = (monthKey: string): string => {
   return `${date.toLocaleDateString('en-US', { month: 'short' })} ${date.getFullYear()}`;
 };
 
+// Format month key for Payment History: "October 26" format (e.g. October 26, September 26, August 26)
+export const formatPaymentHistoryMonth = (monthKey: string): string => {
+  if (!monthKey || monthKey === 'ALL') return 'All Months';
+  const parts = monthKey.split('-');
+  if (parts.length < 2) return monthKey;
+  const year = parseInt(parts[0], 10);
+  const monthIdx = parseInt(parts[1], 10) - 1;
+  const d = new Date(year, monthIdx, 1);
+  const fullMonth = d.toLocaleDateString('en-US', { month: 'long' });
+  const shortYear = String(year).slice(-2);
+  return `${fullMonth} ${shortYear}`;
+};
+
 // Categorize transaction into CANTEEN, UNIT_FUND, or OTHERS
 export const getTxCategory = (tx: any): 'CANTEEN' | 'UNIT_FUND' | 'OTHERS' => {
   if (!tx) return 'CANTEEN';
@@ -1048,6 +1062,18 @@ export const MemberDB: React.FC = () => {
 
       // 1. Structured soldItems (from POS)
       if (Array.isArray(tx.soldItems) && tx.soldItems.length > 0) {
+        const isPaid = tx.status === 'PAID' || tx.paymentStatus === 'PAID' || String(tx.gateway || tx.paymentMethod || '').toUpperCase() === 'CASH';
+        const rowType = isPaid ? 'CASH_SALE' : (tx.type || 'SALE');
+        const txAmount = Number(tx.amount ?? tx.originalAmount ?? 0);
+        const txDiscount = Number(tx.discount || 0);
+
+        const grossSum = tx.soldItems.reduce((sum: number, si: any) => {
+          const qty = Number(si.qty || si.quantity || 1);
+          let price = Number(si.price || si.rate || 0);
+          if (price <= 0) price = lookupCatalogPrice(si.menuItemName || si.name, menuCatalog);
+          return sum + (price * qty);
+        }, 0);
+
         tx.soldItems.forEach((si: any, sIdx: number) => {
           const name = String(si.menuItemName || si.name || 'ক্যান্টিন খাদ্যদ্রব্য').trim();
           const qty = Number(si.qty || si.quantity || 1);
@@ -1055,17 +1081,31 @@ export const MemberDB: React.FC = () => {
           if (itemRate <= 0) {
             itemRate = lookupCatalogPrice(name, menuCatalog);
           }
-          const itemTotal = itemRate > 0 ? (itemRate * qty) : Math.round((Number(tx.amount || 0) / tx.soldItems.length) * 100) / 100;
+          const itemGross = itemRate > 0 ? (itemRate * qty) : (grossSum > 0 ? grossSum / tx.soldItems.length : txAmount);
+
+          // If discount was applied, calculate net item total based on tx.amount
+          let itemTotal = itemGross;
+          if (tx.soldItems.length === 1 && txAmount >= 0) {
+            itemTotal = txAmount;
+          } else if (grossSum > 0 && txAmount >= 0) {
+            itemTotal = Math.round((itemGross / grossSum) * txAmount * 100) / 100;
+          }
+
+          let desc = name;
+          if (txDiscount > 0) {
+            desc = `${name} (৳${txDiscount} ছাড়)`;
+          }
+
           rows.push({
             rowId: `${tx.id}_si_${sIdx}`,
             ser: currentSer++,
             tx,
             txId: tx.id,
             date: tx.date,
-            description: name,
+            description: desc,
             qty: qty,
             amount: itemTotal,
-            type: tx.type || 'SALE'
+            type: rowType
           });
         });
         return;
@@ -1073,8 +1113,13 @@ export const MemberDB: React.FC = () => {
 
       // 2. Comma-separated items in tx.items (e.g. "COLD COFFEE (1), CHICKEN ONION (1)")
       const itemsStr = String(tx.items || '').trim();
+      const isPaid = tx.status === 'PAID' || tx.paymentStatus === 'PAID' || String(tx.gateway || tx.paymentMethod || '').toUpperCase() === 'CASH';
+      const rowType = isPaid ? 'CASH_SALE' : (tx.type || 'SALE');
+      const txDiscount = Number(tx.discount || 0);
+
       if (itemsStr.includes(',')) {
         const parts = itemsStr.split(',').map((s: string) => s.trim()).filter(Boolean);
+        const txAmount = Number(tx.amount || 0);
         parts.forEach((part: string, pIdx: number) => {
           let name = part;
           let qty: number | string = 1;
@@ -1084,17 +1129,21 @@ export const MemberDB: React.FC = () => {
             qty = parseInt(match[2], 10) || 1;
           }
           let price = lookupCatalogPrice(name, menuCatalog);
-          const itemTotal = price > 0 ? (price * (Number(qty) || 1)) : Math.round((Number(tx.amount || 0) / parts.length) * 100) / 100;
+          const itemTotal = price > 0 ? (price * (Number(qty) || 1)) : Math.round((txAmount / parts.length) * 100) / 100;
+          let desc = name;
+          if (txDiscount > 0 && pIdx === 0) {
+            desc = `${name} (৳${txDiscount} ছাড়)`;
+          }
           rows.push({
             rowId: `${tx.id}_part_${pIdx}`,
             ser: currentSer++,
             tx,
             txId: tx.id,
             date: tx.date,
-            description: name,
+            description: desc,
             qty: qty,
             amount: itemTotal,
-            type: tx.type || 'SALE'
+            type: rowType
           });
         });
         return;
@@ -1110,6 +1159,9 @@ export const MemberDB: React.FC = () => {
           qtyText = match[2];
         }
       }
+      if (txDiscount > 0 && !descText.includes('ছাড়')) {
+        descText = `${descText} (৳${txDiscount} ছাড়)`;
+      }
       rows.push({
         rowId: `${tx.id}_single`,
         ser: currentSer++,
@@ -1118,8 +1170,8 @@ export const MemberDB: React.FC = () => {
         date: tx.date,
         description: descText,
         qty: qtyText,
-        amount: tx.amount,
-        type: tx.type || 'SALE'
+        amount: Number(tx.amount || 0),
+        type: rowType
       });
     });
 
@@ -1179,6 +1231,10 @@ export const MemberDB: React.FC = () => {
 
     txList.forEach((tx) => {
       if (!tx || isAdvanceRelated(tx) || tx.type === 'BILL PAYMENT' || tx.type === 'REVERTED' || tx.isReverted) return;
+
+      // Paid cash sales are settled immediately at the POS counter and do NOT constitute unpaid due
+      const isPaidSale = (tx.status === 'PAID' || tx.paymentStatus === 'PAID' || String(tx.gateway || tx.paymentMethod || '').toUpperCase() === 'CASH');
+      if (isPaidSale) return;
 
       const isInit = tx.type === 'INITIAL_BILL' || 
         tx.type === 'AMOUNT_CHANGE' ||
@@ -1276,9 +1332,19 @@ export const MemberDB: React.FC = () => {
   const [paymentSearch, setPaymentSearch] = useState('');
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<'ALL' | 'CASH' | 'UCB'>('ALL');
   const [paymentMonthFilter, setPaymentMonthFilter] = useState<string>(() => getRunningMonthKey());
+  const [paymentDateFilter, setPaymentDateFilter] = useState<string>(() => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  });
+  const paymentDateInputRef = useRef<HTMLInputElement | null>(null);
   const [paymentToDelete, setPaymentToDelete] = useState<any | null>(null);
   const [isDeletingPayment, setIsDeletingPayment] = useState(false);
   const [paymentDeleteSuccessMsg, setPaymentDeleteSuccessMsg] = useState<string | null>(null);
+  const [paymentDeleteSuccessData, setPaymentDeleteSuccessData] = useState<{ amount: number; memberName: string; bdNo: string; successMsg: string } | null>(null);
+  const [txDeleteSuccessData, setTxDeleteSuccessData] = useState<{ description: string; amount: number; type: string } | null>(null);
 
   // Soft harmonic celebration chime via Web Audio API
   const playPaymentSuccessSound = () => {
@@ -1364,6 +1430,30 @@ export const MemberDB: React.FC = () => {
         const txMonth = getPaymentCycleMonthKey(tx?.paymentDate || tx?.date || tx?.timestamp || tx?.created_at || tx?.createdAt) || getTxMonthKey(tx?.date);
         if (txMonth !== paymentMonthFilter) return false;
       }
+      if (paymentDateFilter) {
+        let isDateMatched = false;
+        if (tx.paymentDate && tx.paymentDate === paymentDateFilter) {
+          isDateMatched = true;
+        } else {
+          const txTime = parseTxTime(tx);
+          if (txTime) {
+            const d = new Date(txTime);
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            if (`${y}-${m}-${day}` === paymentDateFilter) {
+              isDateMatched = true;
+            }
+          }
+          if (!isDateMatched && tx.date) {
+            const formattedFilterDate = formatCanteenDate(paymentDateFilter);
+            if (String(tx.date).includes(formattedFilterDate) || String(tx.date).startsWith(paymentDateFilter)) {
+              isDateMatched = true;
+            }
+          }
+        }
+        if (!isDateMatched) return false;
+      }
       return true;
     });
 
@@ -1379,13 +1469,37 @@ export const MemberDB: React.FC = () => {
     });
 
     return { allCount, cashCount, ucbCount };
-  }, [allPaymentTxs, paymentMonthFilter]);
+  }, [allPaymentTxs, paymentMonthFilter, paymentDateFilter]);
 
   const filteredPaymentTxs = useMemo(() => {
     return allPaymentTxs.filter((tx: any) => {
       if (paymentMonthFilter !== 'ALL') {
         const txMonth = getPaymentCycleMonthKey(tx?.paymentDate || tx?.date || tx?.timestamp || tx?.created_at || tx?.createdAt) || getTxMonthKey(tx?.date);
         if (txMonth !== paymentMonthFilter) return false;
+      }
+      if (paymentDateFilter) {
+        let isDateMatched = false;
+        if (tx.paymentDate && tx.paymentDate === paymentDateFilter) {
+          isDateMatched = true;
+        } else {
+          const txTime = parseTxTime(tx);
+          if (txTime) {
+            const d = new Date(txTime);
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            if (`${y}-${m}-${day}` === paymentDateFilter) {
+              isDateMatched = true;
+            }
+          }
+          if (!isDateMatched && tx.date) {
+            const formattedFilterDate = formatCanteenDate(paymentDateFilter);
+            if (String(tx.date).includes(formattedFilterDate) || String(tx.date).startsWith(paymentDateFilter)) {
+              isDateMatched = true;
+            }
+          }
+        }
+        if (!isDateMatched) return false;
       }
       if (paymentMethodFilter !== 'ALL') {
         const gateway = String(tx.gateway || tx.items || '').toUpperCase();
@@ -1403,7 +1517,7 @@ export const MemberDB: React.FC = () => {
       }
       return true;
     });
-  }, [allPaymentTxs, paymentMonthFilter, paymentMethodFilter, paymentSearch]);
+  }, [allPaymentTxs, paymentMonthFilter, paymentDateFilter, paymentMethodFilter, paymentSearch]);
 
   const totalPaymentsAmount = useMemo(() => {
     return filteredPaymentTxs
@@ -1638,6 +1752,118 @@ export const MemberDB: React.FC = () => {
       const d = new Date(y, m, 1);
       const nextKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       setSelectedMonth(nextKey);
+    }
+  };
+
+  const getPaymentDayNumber = (dateStr: string): string => {
+    if (!dateStr) {
+      return String(new Date().getDate());
+    }
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      const num = parseInt(parts[2], 10);
+      return isNaN(num) ? parts[2] : String(num);
+    }
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) {
+      return String(d.getDate());
+    }
+    return dateStr;
+  };
+
+  const formatPaymentDateDisplay = (dateStr: string): string => {
+    const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    if (!dateStr) {
+      const today = new Date();
+      const day = String(today.getDate()).padStart(2, '0');
+      const mon = MONTH_SHORT[today.getMonth()];
+      return `${day} ${mon}`;
+    }
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      const day = parts[2].padStart(2, '0');
+      const mIdx = parseInt(parts[1], 10) - 1;
+      const mon = MONTH_SHORT[mIdx] || parts[1];
+      return `${day} ${mon}`;
+    }
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) {
+      const day = String(d.getDate()).padStart(2, '0');
+      const mon = MONTH_SHORT[d.getMonth()];
+      return `${day} ${mon}`;
+    }
+    return dateStr;
+  };
+
+  const handlePaymentPrevDay = () => {
+    const d = new Date();
+    const todayYMD = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const cur = paymentDateFilter || todayYMD;
+    const parts = cur.split('-').map(Number);
+    const dateObj = new Date(parts[0], parts[1] - 1, parts[2]);
+    dateObj.setDate(dateObj.getDate() - 1);
+    const y = dateObj.getFullYear();
+    const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const day = String(dateObj.getDate()).padStart(2, '0');
+    const prevYMD = `${y}-${m}-${day}`;
+    setPaymentDateFilter(prevYMD);
+    setPaymentMonthFilter(`${y}-${m}`);
+  };
+
+  const handlePaymentNextDay = () => {
+    const d = new Date();
+    const todayYMD = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const cur = paymentDateFilter || todayYMD;
+    const parts = cur.split('-').map(Number);
+    const dateObj = new Date(parts[0], parts[1] - 1, parts[2]);
+    dateObj.setDate(dateObj.getDate() + 1);
+    const y = dateObj.getFullYear();
+    const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const day = String(dateObj.getDate()).padStart(2, '0');
+    const nextYMD = `${y}-${m}-${day}`;
+    setPaymentDateFilter(nextYMD);
+    setPaymentMonthFilter(`${y}-${m}`);
+  };
+
+  const handlePaymentPrevMonth = () => {
+    let nextMonthKey = '';
+    if (paymentMonthFilter === 'ALL') {
+      nextMonthKey = getRunningMonthKey();
+    } else {
+      const idx = availableMonths.indexOf(paymentMonthFilter);
+      if (idx !== -1 && idx < availableMonths.length - 1) {
+        nextMonthKey = availableMonths[idx + 1];
+      } else {
+        const [y, m] = paymentMonthFilter.split('-').map(Number);
+        const d = new Date(y, m - 2, 1);
+        nextMonthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      }
+    }
+    setPaymentMonthFilter(nextMonthKey);
+    if (paymentDateFilter) {
+      const curDay = paymentDateFilter.split('-')[2] || '01';
+      setPaymentDateFilter(`${nextMonthKey}-${curDay}`);
+    }
+  };
+
+  const handlePaymentNextMonth = () => {
+    let nextMonthKey = '';
+    if (paymentMonthFilter === 'ALL') {
+      nextMonthKey = getRunningMonthKey();
+    } else {
+      const idx = availableMonths.indexOf(paymentMonthFilter);
+      if (idx > 0) {
+        nextMonthKey = availableMonths[idx - 1];
+      } else {
+        const [y, m] = paymentMonthFilter.split('-').map(Number);
+        const d = new Date(y, m, 1);
+        nextMonthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      }
+    }
+    setPaymentMonthFilter(nextMonthKey);
+    if (paymentDateFilter) {
+      const curDay = paymentDateFilter.split('-')[2] || '01';
+      setPaymentDateFilter(`${nextMonthKey}-${curDay}`);
     }
   };
 
@@ -2388,7 +2614,8 @@ export const MemberDB: React.FC = () => {
     previousDue: number,
     unitFundBill: number = 0,
     othersFundBill: number = 0,
-    monthKey: string = 'ALL'
+    monthKey: string = 'ALL',
+    totalDiscount: number = 0
   ) => {
     const rank = getMemberBanglaRank(member) || formatRankBn(member.Rank || member.rank || '');
     const surname = getMemberBanglaName(member) || formatMemberNameBn(member.Surname || member.surname || '');
@@ -2410,7 +2637,8 @@ export const MemberDB: React.FC = () => {
           effectivePayments,
           netPayable: totalDue,
           rankBn: rank,
-          nameBn: surname
+          nameBn: surname,
+          totalDiscount
         });
         if (blob) {
           file = new File([blob], fileName, { type: 'image/png' });
@@ -2461,7 +2689,15 @@ export const MemberDB: React.FC = () => {
     }
     const cleanPhone = contact.replace(/\D/g, '');
     const fullPhone = cleanPhone.startsWith('01') ? '88' + cleanPhone : cleanPhone;
-    window.open(fullPhone ? `https://wa.me/${fullPhone}` : `https://wa.me/`, '_blank');
+    try {
+      const waLink = document.createElement('a');
+      waLink.href = fullPhone ? `https://wa.me/${fullPhone}` : `https://wa.me/`;
+      waLink.target = '_blank';
+      waLink.rel = 'noopener noreferrer';
+      document.body.appendChild(waLink);
+      waLink.click();
+      document.body.removeChild(waLink);
+    } catch {}
   };
 
   // 2. Direct WhatsApp chat to specific member with pre-filled bill text & picture copied/saved
@@ -2473,7 +2709,8 @@ export const MemberDB: React.FC = () => {
     previousDue: number,
     unitFundBill: number = 0,
     othersFundBill: number = 0,
-    monthKey: string = 'ALL'
+    monthKey: string = 'ALL',
+    totalDiscount: number = 0
   ) => {
     const rank = getMemberBanglaRank(member) || formatRankBn(member.Rank || member.rank || '');
     const surname = getMemberBanglaName(member) || formatMemberNameBn(member.Surname || member.surname || '');
@@ -2506,7 +2743,8 @@ export const MemberDB: React.FC = () => {
           effectivePayments,
           netPayable: totalDue,
           rankBn: rank,
-          nameBn: surname
+          nameBn: surname,
+          totalDiscount
         });
         if (blob) {
           setStatementImageBlob(blob);
@@ -2544,11 +2782,27 @@ export const MemberDB: React.FC = () => {
     });
 
     if (phone) {
-      window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
+      try {
+        const waLink = document.createElement('a');
+        waLink.href = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+        waLink.target = '_blank';
+        waLink.rel = 'noopener noreferrer';
+        document.body.appendChild(waLink);
+        waLink.click();
+        document.body.removeChild(waLink);
+      } catch {}
       setWhatsAppNotice(`✅ ${rank} ${surname} (${isSenior ? 'সিনিয়র স্যার' : 'মেম্বার'}) এর চ্যাটে বিল ওপেন হয়েছে! স্লিপের ছবি গ্যালারিতে সেভ ও কপি হয়েছে। চ্যাটে 📎 (Gallery) বা Paste থেকে ছবিটি সেন্ড করুন।`);
       setTimeout(() => setWhatsAppNotice(null), 6000);
     } else {
-      window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+      try {
+        const waLink = document.createElement('a');
+        waLink.href = `https://wa.me/?text=${encodeURIComponent(msg)}`;
+        waLink.target = '_blank';
+        waLink.rel = 'noopener noreferrer';
+        document.body.appendChild(waLink);
+        waLink.click();
+        document.body.removeChild(waLink);
+      } catch {}
     }
   };
 
@@ -2687,6 +2941,21 @@ export const MemberDB: React.FC = () => {
 
     const amountToReverse = Number(txToRemove.amount || 0);
     let newDue = 0;
+
+    // 0ms instant feedback inside the modal: show animated green card & play sound immediately
+    if (txDeleteConfirmId) {
+      playTrashPopSound();
+      playPaymentSuccessSound();
+      setTxDeleteSuccessData({
+        description: txToRemove.items || txToRemove.description || 'রেকর্ড',
+        amount: amountToReverse,
+        type: txToRemove.type || 'RECORD'
+      });
+      setTimeout(() => {
+        setTxDeleteSuccessData(null);
+        setTxDeleteConfirmId(null);
+      }, 2500);
+    }
     
     if (targetMember) {
       const currentDue = Number(targetMember.Due ?? targetMember.due ?? targetMember.baki ?? 0);
@@ -2836,6 +3105,22 @@ export const MemberDB: React.FC = () => {
 
     // 6. Play dynamic audio feedback and show animated notification banner
     playTrashPopSound();
+    playPaymentSuccessSound();
+
+    if (txDeleteConfirmId) {
+      setTxDeleteSuccessData({
+        description: txToRemove.items || txToRemove.description || 'রেকর্ড',
+        amount: amountToReverse,
+        type: txToRemove.type || 'RECORD'
+      });
+      setTimeout(() => {
+        setTxDeleteSuccessData(null);
+        setTxDeleteConfirmId(null);
+      }, 2400);
+    } else {
+      setTxDeleteConfirmId(null);
+    }
+
     setDeletedTxNotice({
       description: txToRemove.items || txToRemove.description || 'রেকর্ড',
       amount: amountToReverse,
@@ -2846,30 +3131,45 @@ export const MemberDB: React.FC = () => {
     setTimeout(() => {
       setDeletedTxNotice(null);
     }, 4500);
-
-    setTxDeleteConfirmId(null);
   };
 
   const handleConfirmDeletePayment = async () => {
-    if (!paymentToDelete) return;
+    if (!paymentToDelete || isDeletingPayment) return;
     setIsDeletingPayment(true);
-    try {
-      const targetMember = members.find((m: any) => {
-        const txBdClean = String(paymentToDelete.bdNo || paymentToDelete.airman_id || '').replace(/\D/g, '');
-        const mBdClean = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
-        return (paymentToDelete.airman_id && m.airman_id === paymentToDelete.airman_id) || (txBdClean && mBdClean === txBdClean);
-      });
 
-      await handleRemoveTx(paymentToDelete, targetMember);
+    const targetMember = members.find((m: any) => {
+      const txBdClean = String(paymentToDelete.bdNo || paymentToDelete.airman_id || '').replace(/\D/g, '');
+      const mBdClean = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
+      return (paymentToDelete.airman_id && m.airman_id === paymentToDelete.airman_id) || (txBdClean && mBdClean === txBdClean);
+    });
 
-      const memName = targetMember ? `${targetMember.Rank || targetMember.rank || ''} ${targetMember.Surname || targetMember.surname || ''}`.trim() : (paymentToDelete.memberName || 'সদস্য');
-      setPaymentDeleteSuccessMsg(`৳${Number(paymentToDelete.amount || 0).toLocaleString()} টাকার পেমেন্ট বাতিল করা হয়েছে এবং ${memName}-এর বকেয়া আগের অবস্থায় ফিরিয়ে দেওয়া হয়েছে।`);
+    const memName = targetMember ? `${targetMember.Rank || targetMember.rank || ''} ${targetMember.Surname || targetMember.surname || ''}`.trim() : (paymentToDelete.memberName || 'সদস্য');
+    const amount = Number(paymentToDelete.amount || 0);
+    const cleanBd = String(paymentToDelete.bdNo || paymentToDelete.airman_id || '').replace(/\D/g, '');
+    const successMsg = `৳${amount.toLocaleString()} টাকার পেমেন্ট সফলভাবে বাতিল করা হয়েছে এবং ${memName}-এর বকেয়া পূর্বাবস্থায় ফিরিয়ে দেওয়া হয়েছে।`;
+
+    // 0ms instant feedback: play sound & show animated green card immediately inside the popup box
+    playPaymentSuccessSound();
+    setPaymentDeleteSuccessData({
+      amount,
+      memberName: memName,
+      bdNo: cleanBd,
+      successMsg
+    });
+    setPaymentDeleteSuccessMsg(successMsg);
+
+    // Keep popup open for 2.4s so user experiences dynamic animation & sound inside the popup box
+    setTimeout(() => {
+      setPaymentDeleteSuccessData(null);
       setPaymentToDelete(null);
-      setTimeout(() => setPaymentDeleteSuccessMsg(null), 5000);
+      setIsDeletingPayment(false);
+    }, 2400);
+    setTimeout(() => setPaymentDeleteSuccessMsg(null), 5000);
+
+    try {
+      await handleRemoveTx(paymentToDelete, targetMember);
     } catch (err) {
       console.warn('Error deleting payment:', err);
-    } finally {
-      setIsDeletingPayment(false);
     }
   };
 
@@ -3373,6 +3673,12 @@ export const MemberDB: React.FC = () => {
     return statementAggregatedItems.reduce((sum, r) => sum + r.total, 0);
   }, [statementAggregatedItems]);
 
+  const totalMonthDiscount = useMemo(() => {
+    return filteredStatementTxs
+      .filter((tx) => !tx.isReverted && tx.status !== 'REVERTED' && tx.type !== 'BILL PAYMENT')
+      .reduce((sum, tx) => sum + Number(tx.discount || 0), 0);
+  }, [filteredStatementTxs]);
+
   const unitFundBill = useMemo(() => {
     return filteredStatementTxs
       .filter((tx) => getTxCategory(tx) === 'UNIT_FUND' && tx.type !== 'BILL PAYMENT')
@@ -3387,9 +3693,12 @@ export const MemberDB: React.FC = () => {
 
   const memberTotalDue = statementMember ? getMemberTotalDue(statementMember, 'ALL') : 0;
 
+  // Net Canteen bill for month after discount
+  const netMonthCanteenBill = Math.max(0, totalMonthBill - totalMonthDiscount);
+
   // বকেয়া বিল হিসাব:
   let previousDue = 0;
-  const currentMonthCharges = totalMonthBill + unitFundBill + othersFundBill;
+  const currentMonthCharges = netMonthCanteenBill + unitFundBill + othersFundBill;
   if (memberTotalDue > currentMonthCharges) {
     previousDue = Math.max(0, Math.round((memberTotalDue - currentMonthCharges) * 100) / 100);
   } else if (memberTotalDue > 0 && currentMonthCharges === 0) {
@@ -3398,16 +3707,22 @@ export const MemberDB: React.FC = () => {
     previousDue = 0;
   }
 
-  // Payments belonging strictly to this statement month according to 25th-24th billing cycle
+  // Payments in this month (both Bill Payments and POS cash paid sales)
   const currentMonthPayments = filteredStatementTxs
-    .filter((tx) => isPaymentTx(tx) && !tx.isReverted && tx.status !== 'REVERTED')
-    .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+    .filter((tx) => !tx.isReverted && tx.status !== 'REVERTED')
+    .reduce((sum, tx) => {
+      if (isPaymentTx(tx)) return sum + Number(tx.amount || 0);
+      const isCashPaidSale = (tx.type === 'SALE' || tx.type === 'PURCHASE') && 
+        (tx.status === 'PAID' || tx.paymentStatus === 'PAID' || String(tx.gateway || tx.paymentMethod || '').toUpperCase() === 'CASH');
+      if (isCashPaidSale) return sum + Number(tx.amount || 0);
+      return sum;
+    }, 0);
 
   const effectivePayments = currentMonthPayments;
 
   const netPayable = memberTotalDue === 0
     ? 0
-    : Math.max(0, totalMonthBill + previousDue + unitFundBill + othersFundBill - effectivePayments);
+    : Math.max(0, netMonthCanteenBill + previousDue + unitFundBill + othersFundBill - effectivePayments);
 
   // Pre-render the statement slip into an image file so WhatsApp click has fresh user activation and instant image file ready
   useEffect(() => {
@@ -3434,7 +3749,8 @@ export const MemberDB: React.FC = () => {
       effectivePayments,
       netPayable,
       rankBn: rank,
-      nameBn: surname
+      nameBn: surname,
+      totalDiscount: totalMonthDiscount
     }).then((blob) => {
       if (isCancelled || !blob) return;
       setStatementImageBlob(blob);
@@ -3452,6 +3768,7 @@ export const MemberDB: React.FC = () => {
     statementMonth, 
     statementAggregatedItems, 
     totalMonthBill, 
+    totalMonthDiscount,
     previousDue, 
     unitFundBill,
     othersFundBill,
@@ -3480,7 +3797,8 @@ export const MemberDB: React.FC = () => {
           effectivePayments,
           netPayable,
           rankBn: rank,
-          nameBn: surname
+          nameBn: surname,
+          totalDiscount: totalMonthDiscount
         });
         if (blob) {
           setStatementImageBlob(blob);
@@ -3612,7 +3930,15 @@ export const MemberDB: React.FC = () => {
 
               <button
                 type="button"
-                onClick={() => setIsPaymentHistoryOpen(true)}
+                onClick={() => {
+                  const d = new Date();
+                  const y = d.getFullYear();
+                  const m = String(d.getMonth() + 1).padStart(2, '0');
+                  const day = String(d.getDate()).padStart(2, '0');
+                  setPaymentMonthFilter(`${y}-${m}`);
+                  setPaymentDateFilter(`${y}-${m}-${day}`);
+                  setIsPaymentHistoryOpen(true);
+                }}
                 className="w-full sm:w-auto flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-indigo-900/40 transition-all cursor-pointer active:scale-95 border border-indigo-400/30 group"
               >
                 <History className="w-4 h-4 text-indigo-200 group-hover:rotate-[-45deg] transition-transform" />
@@ -4710,7 +5036,7 @@ export const MemberDB: React.FC = () => {
                                     {toEnglishDate(row.date)}
                                   </span>
                                   <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase border ${
-                                    row.type === 'BILL PAYMENT'
+                                    row.type === 'BILL PAYMENT' || row.type === 'CASH_SALE'
                                       ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
                                       : row.type === 'AMOUNT_CHANGE'
                                       ? 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
@@ -4720,12 +5046,17 @@ export const MemberDB: React.FC = () => {
                                       ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
                                       : 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
                                   }`}>
-                                    {row.type === 'REVERTED' ? 'REVERTED / বাতিল' : row.type === 'BILL PAYMENT' ? 'পরিশোধ / PAYMENT' : row.type === 'AMOUNT_CHANGE' ? 'বিল সংশোধন / CHANGE' : row.type === 'INITIAL_BILL' ? 'ইম্পোর্ট / প্রারম্ভিক বিল' : (row.type || 'খাবার / SALE')}
+                                    {row.type === 'REVERTED' ? 'REVERTED / বাতিল' : row.type === 'BILL PAYMENT' ? 'পরিশোধ / PAYMENT' : row.type === 'CASH_SALE' ? 'নগদ পরিশোধ / CASH PAID' : row.type === 'AMOUNT_CHANGE' ? 'বিল সংশোধন / CHANGE' : row.type === 'INITIAL_BILL' ? 'ইম্পোর্ট / প্রারম্ভিক বিল' : (row.type || 'খাবার / SALE')}
                                   </span>
                                 </div>
 
                                 <div className={`text-xs font-bold ${row.type === 'REVERTED' ? 'text-slate-400 line-through' : 'text-white'} break-words flex items-center gap-1.5 flex-wrap`}>
                                   <span>{row.description}</span>
+                                  {row.type === 'CASH_SALE' && (
+                                    <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                                      নগদ পরিশোধ
+                                    </span>
+                                  )}
                                   {row.type === 'INITIAL_BILL' && (
                                     <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
                                       ইম্পোর্ট বিল
@@ -4748,7 +5079,7 @@ export const MemberDB: React.FC = () => {
                                     <span className={`text-sm font-black font-mono ${
                                       row.type === 'REVERTED'
                                         ? 'text-slate-400/70 line-through font-mono'
-                                        : row.type === 'BILL PAYMENT'
+                                        : row.type === 'BILL PAYMENT' || row.type === 'CASH_SALE'
                                         ? 'text-emerald-400'
                                         : row.type === 'INITIAL_BILL' || row.type === 'AMOUNT_CHANGE'
                                         ? 'text-amber-400'
@@ -4816,6 +5147,11 @@ export const MemberDB: React.FC = () => {
                                       <td className={`px-4 py-2.5 font-bold ${row.type === 'REVERTED' ? 'text-slate-400 line-through' : ''}`}>
                                         <div className="flex items-center space-x-1.5 flex-wrap">
                                           <span>{row.description}</span>
+                                          {row.type === 'CASH_SALE' && (
+                                            <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                                              নগদ পরিশোধ (PAID)
+                                            </span>
+                                          )}
                                           {row.type === 'INITIAL_BILL' && (
                                             <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
                                               ইম্পোর্ট বিল
@@ -4838,7 +5174,7 @@ export const MemberDB: React.FC = () => {
                                       <td className={`px-4 py-2.5 text-right font-black ${
                                         row.type === 'REVERTED'
                                           ? 'text-slate-400/70 line-through font-mono'
-                                          : row.type === 'BILL PAYMENT'
+                                          : row.type === 'BILL PAYMENT' || row.type === 'CASH_SALE'
                                           ? 'text-emerald-400 font-mono'
                                           : row.type === 'INITIAL_BILL' || row.type === 'AMOUNT_CHANGE'
                                           ? 'text-amber-400 font-mono'
@@ -4935,7 +5271,7 @@ export const MemberDB: React.FC = () => {
                 {/* 1. WHATSAPP Direct Chat with Member (Full breakdown & copied/saved statement picture) */}
                 <button 
                   type="button"
-                  onClick={() => handleDirectWhatsAppChat(statementMember, statementAggregatedItems, netPayable, totalMonthBill, previousDue, unitFundBill, othersFundBill, statementMonth)}
+                  onClick={() => handleDirectWhatsAppChat(statementMember, statementAggregatedItems, netPayable, totalMonthBill, previousDue, unitFundBill, othersFundBill, statementMonth, totalMonthDiscount)}
                   disabled={isCapturingPic}
                   className="flex items-center space-x-1.5 px-3.5 py-2 bg-[#25D366] hover:bg-[#20ba59] text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md shadow-[#25D366]/25 active:translate-y-0.5 whitespace-nowrap cursor-pointer disabled:opacity-60"
                   title="সরাসরি সদস্যের হোয়াটসঅ্যাপ চ্যাটে স্টেটমেন্ট ও ছবি পাঠান"
@@ -4947,7 +5283,7 @@ export const MemberDB: React.FC = () => {
                 {/* 2. Share Image via System Share (Attaches picture directly in WhatsApp) */}
                 <button 
                   type="button"
-                  onClick={() => handleShareWhatsAppImage(statementMember, statementAggregatedItems, netPayable, totalMonthBill, previousDue, unitFundBill, othersFundBill, statementMonth)}
+                  onClick={() => handleShareWhatsAppImage(statementMember, statementAggregatedItems, netPayable, totalMonthBill, previousDue, unitFundBill, othersFundBill, statementMonth, totalMonthDiscount)}
                   disabled={isCapturingPic}
                   className="flex items-center space-x-1.5 px-3 py-2 bg-emerald-800 hover:bg-emerald-700 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md shadow-emerald-800/25 active:translate-y-0.5 whitespace-nowrap cursor-pointer disabled:opacity-60"
                   title="ছবি সরাসরি হোয়াটসঅ্যাপে শেয়ার করুন"
@@ -5117,6 +5453,18 @@ export const MemberDB: React.FC = () => {
                         </td>
                         <td className="border border-black p-3 text-center font-black bg-white">
                           ৳{toBengaliNum(totalMonthBill)}
+                        </td>
+                      </tr>
+                    )}
+
+                    {/* ডিসকাউন্ট (যদি > ০ থাকে, মোট ক্যান্টিন বিল এর ঠিক নিচে) */}
+                    {totalMonthDiscount > 0 && (
+                      <tr className="bg-white">
+                        <td className="border border-black p-3 text-right font-black bg-white text-emerald-700" colSpan={3}>
+                          ডিসকাউন্ট
+                        </td>
+                        <td className="border border-black p-3 text-center font-black bg-white text-emerald-700">
+                          -৳{toBengaliNum(totalMonthDiscount)}
                         </td>
                       </tr>
                     )}
@@ -5571,35 +5919,80 @@ export const MemberDB: React.FC = () => {
               transition={{ type: 'spring', stiffness: 450, damping: 28 }}
               className="bg-slate-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-slate-800 text-center relative overflow-hidden"
             >
-              <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-rose-500 via-amber-500 to-rose-500" />
-              <div className="w-16 h-16 bg-rose-900/30 text-rose-500 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-rose-500/30 shadow-inner">
-                <Trash2 className="w-8 h-8 animate-pulse" />
-              </div>
-              <h3 className="text-lg font-black text-white uppercase tracking-tighter mb-2">
-                {txDeleteConfirmId.type === 'BILL PAYMENT' ? 'Revert Payment?' : 'Remove Record?'}
-              </h3>
-              <p className="text-sm font-bold text-slate-400 mb-6">
-                {txDeleteConfirmId.type === 'BILL PAYMENT'
-                  ? `Are you sure you want to revert this payment of ৳${txDeleteConfirmId.amount}? Member Due will be restored, and it will remain recorded as a Reverted Payment in History.`
-                  : 'Are you sure you want to remove this transaction record? Due will be reversed.'}
-              </p>
-              
-              <div className="flex space-x-3">
-                <button 
-                  type="button"
-                  onClick={() => setTxDeleteConfirmId(null)} 
-                  className="flex-1 py-3 bg-slate-800 text-slate-200 rounded-xl text-xs font-black tracking-widest hover:bg-slate-700 transition-colors cursor-pointer"
+              {txDeleteSuccessData ? (
+                /* Dynamic Success Animation View inside popup box */
+                <motion.div
+                  initial={{ scale: 0.85, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                  className="space-y-4 py-2"
                 >
-                  CANCEL
-                </button>
-                <button 
-                  type="button"
-                  onClick={() => handleRemoveTx(txDeleteConfirmId)} 
-                  className="flex-1 py-3 bg-rose-600 text-white rounded-xl text-xs font-black tracking-widest hover:bg-rose-500 transition-all shadow-md shadow-rose-500/30 active:scale-95 cursor-pointer"
-                >
-                  {txDeleteConfirmId.type === 'BILL PAYMENT' ? 'REVERT PAYMENT' : 'REMOVE'}
-                </button>
-              </div>
+                  <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-500" />
+                  <div className="w-16 h-16 bg-emerald-500/20 text-emerald-400 rounded-2xl flex items-center justify-center mx-auto border border-emerald-500/40 shadow-lg shadow-emerald-500/20">
+                    <CheckCircle2 className="w-9 h-9 animate-bounce text-emerald-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-white tracking-tight">
+                      রেকর্ড সফলভাবে মুছে ফেলা হয়েছে!
+                    </h3>
+                    <p className="text-xs text-slate-300 mt-1 line-clamp-2">
+                      {txDeleteSuccessData.description}
+                    </p>
+                  </div>
+                  <div className="p-3.5 bg-slate-950/80 rounded-2xl border border-slate-800 text-xs space-y-1.5 text-left">
+                    <div className="flex justify-between items-center text-slate-300">
+                      <span className="text-slate-400">সমন্বয়কৃত পরিমাণ:</span>
+                      <span className="font-mono font-bold text-emerald-400 text-sm">৳{txDeleteSuccessData.amount.toLocaleString()}</span>
+                    </div>
+                    <p className="text-[11px] text-emerald-400/90 font-medium flex items-center gap-1">
+                      <span>✓</span>
+                      <span>সদস্যের বকেয়া সফলভাবে আপডেট করা হয়েছে</span>
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTxDeleteSuccessData(null);
+                      setTxDeleteConfirmId(null);
+                    }}
+                    className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black tracking-wider transition-all cursor-pointer shadow-md shadow-emerald-950/50 active:scale-95"
+                  >
+                    ঠিক আছে (DONE)
+                  </button>
+                </motion.div>
+              ) : (
+                <>
+                  <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-rose-500 via-amber-500 to-rose-500" />
+                  <div className="w-16 h-16 bg-rose-900/30 text-rose-500 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-rose-500/30 shadow-inner">
+                    <Trash2 className="w-8 h-8 animate-pulse" />
+                  </div>
+                  <h3 className="text-lg font-black text-white uppercase tracking-tighter mb-2">
+                    {txDeleteConfirmId.type === 'BILL PAYMENT' ? 'Revert Payment?' : 'Remove Record?'}
+                  </h3>
+                  <p className="text-sm font-bold text-slate-400 mb-6">
+                    {txDeleteConfirmId.type === 'BILL PAYMENT'
+                      ? `Are you sure you want to revert this payment of ৳${txDeleteConfirmId.amount}? Member Due will be restored, and it will remain recorded as a Reverted Payment in History.`
+                      : 'Are you sure you want to remove this transaction record? Due will be reversed.'}
+                  </p>
+                  
+                  <div className="flex space-x-3">
+                    <button 
+                      type="button"
+                      onClick={() => setTxDeleteConfirmId(null)} 
+                      className="flex-1 py-3 bg-slate-800 text-slate-200 rounded-xl text-xs font-black tracking-widest hover:bg-slate-700 transition-colors cursor-pointer"
+                    >
+                      CANCEL
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={() => handleRemoveTx(txDeleteConfirmId)} 
+                      className="flex-1 py-3 bg-rose-600 text-white rounded-xl text-xs font-black tracking-widest hover:bg-rose-500 transition-all shadow-md shadow-rose-500/30 active:scale-95 cursor-pointer"
+                    >
+                      {txDeleteConfirmId.type === 'BILL PAYMENT' ? 'REVERT PAYMENT' : 'REMOVE'}
+                    </button>
+                  </div>
+                </>
+              )}
             </motion.div>
           </motion.div>
         )}
@@ -5868,40 +6261,113 @@ export const MemberDB: React.FC = () => {
             </div>
 
             {/* Filter and Stats Bar */}
-            <div className="p-3.5 sm:p-4 bg-slate-900/90 border-b border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shrink-0">
-              {/* Search Box */}
-              <div className="relative flex-1">
-                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Search by member name, BD No, date..."
-                  value={paymentSearch}
-                  onChange={(e) => setPaymentSearch(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2 text-xs font-bold text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-all"
-                />
+            <div className="p-3.5 sm:p-4 bg-slate-900/90 border-b border-slate-800 space-y-2.5 shrink-0">
+              {/* Row 1: Search Box & Total Collections Summary (Guaranteed never to overflow or go outside) */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+                {/* Search Box */}
+                <div className="relative flex-1 min-w-0">
+                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search by member name, BD No, date..."
+                    value={paymentSearch}
+                    onChange={(e) => setPaymentSearch(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-9 py-2 text-xs font-bold text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-all"
+                  />
+                  {paymentSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setPaymentSearch('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs font-bold p-1 cursor-pointer"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                {/* Total Collections Summary Box - Prominently positioned in Row 1 */}
+                <div className="px-3.5 py-1.5 bg-emerald-950/80 border border-emerald-500/40 rounded-xl flex items-center justify-between sm:justify-start space-x-2 text-xs shadow-sm shrink-0">
+                  <span className="text-emerald-300 text-[10px] uppercase font-black tracking-wider">
+                    Total Collected:
+                  </span>
+                  <span className="text-emerald-400 font-mono font-black text-sm">
+                    ৳{totalPaymentsAmount.toLocaleString()}
+                  </span>
+                </div>
               </div>
 
-              {/* Month Selector, Quick Method Filters & Total Summary */}
-              <div className="flex flex-wrap items-center gap-2 shrink-0 justify-between sm:justify-end">
-                {/* Month Dropdown with default Running Month */}
-                <div className="flex items-center space-x-1.5 bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1">
-                  <Calendar className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                  <select
-                    value={paymentMonthFilter}
-                    onChange={(e) => setPaymentMonthFilter(e.target.value)}
-                    className="bg-transparent text-xs font-bold text-white focus:outline-none cursor-pointer"
-                  >
-                    <option value="ALL" className="bg-slate-900 text-white">All Months</option>
-                    {availableMonths.map((m) => (
-                      <option key={m} value={m} className="bg-slate-900 text-white">
-                        {toEnglishDate(m)} {m === getRunningMonthKey() ? '(Current Month)' : ''}
-                      </option>
-                    ))}
-                  </select>
+              {/* Row 2: Dt (Day) Navigator FIRST, then Month Navigator, then Quick Method Filters */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/60">
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Dt / Day Navigator with All button + Left/Right arrows + 09 Oct 26 display + CalendarPickerModal */}
+                  <DateNavigator
+                    value={paymentDateFilter}
+                    onChange={(val) => {
+                      setPaymentDateFilter(val);
+                      if (val) {
+                        const [y, m] = val.split('-');
+                        if (y && m) {
+                          setPaymentMonthFilter(`${y}-${m}`);
+                        }
+                      }
+                    }}
+                    allowAll={true}
+                    format="dd_mm_yy"
+                  />
+
+                  {/* 3. Month Navigator with Left/Right Arrows & "October 26" format */}
+                  <div className="inline-flex items-center bg-slate-950 border border-slate-800 rounded-xl p-0.5 shadow-xs shrink-0">
+                    <button
+                      type="button"
+                      onClick={handlePaymentPrevMonth}
+                      className="w-6 h-6 flex items-center justify-center hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer active:scale-90"
+                      title="পূর্ববর্তী মাস"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5 text-indigo-400" />
+                    </button>
+
+                    <div className="relative px-2 py-0.5 text-center flex items-center space-x-1 cursor-pointer group">
+                      <Calendar className="w-3.5 h-3.5 text-indigo-400 shrink-0 pointer-events-none" />
+                      <span className="text-xs font-mono font-bold text-white tracking-tight pointer-events-none">
+                        {formatPaymentHistoryMonth(paymentMonthFilter)}
+                      </span>
+                      <select
+                        value={paymentMonthFilter}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setPaymentMonthFilter(val);
+                          if (val === 'ALL') {
+                            setPaymentDateFilter('');
+                          } else if (paymentDateFilter) {
+                            const curDay = paymentDateFilter.split('-')[2] || '01';
+                            setPaymentDateFilter(`${val}-${curDay}`);
+                          }
+                        }}
+                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10"
+                        title="মাস নির্বাচন করুন"
+                      >
+                        <option value="ALL" className="bg-slate-900 text-white">All Months</option>
+                        {availableMonths.map((m) => (
+                          <option key={m} value={m} className="bg-slate-900 text-white">
+                            {formatPaymentHistoryMonth(m)} {m === getRunningMonthKey() ? '(Current)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handlePaymentNextMonth}
+                      className="w-6 h-6 flex items-center justify-center hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer active:scale-90"
+                      title="পরবর্তী মাস"
+                    >
+                      <ChevronRight className="w-3.5 h-3.5 text-indigo-400" />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Method Buttons with Total Numbers */}
-                <div className="flex items-center bg-slate-950 rounded-xl p-0.5 border border-slate-800">
+                <div className="flex items-center bg-slate-950 rounded-xl p-0.5 border border-slate-800 shrink-0">
                   <button
                     type="button"
                     onClick={() => setPaymentMethodFilter('ALL')}
@@ -5938,12 +6404,6 @@ export const MemberDB: React.FC = () => {
                     <span>UCB</span>
                     <span className="opacity-90 font-mono">({paymentCountsByMethod.ucbCount})</span>
                   </button>
-                </div>
-
-                {/* Total Collections Summary */}
-                <div className="px-3 py-1 bg-emerald-950/60 border border-emerald-500/30 rounded-xl flex items-center space-x-1.5 text-xs">
-                  <span className="text-slate-400 text-[10px] uppercase font-bold">Total Collected:</span>
-                  <span className="text-emerald-400 font-mono font-black">৳{totalPaymentsAmount.toLocaleString()}</span>
                 </div>
               </div>
             </div>
@@ -6013,7 +6473,7 @@ export const MemberDB: React.FC = () => {
                           <div className="flex items-center space-x-2 text-[10px] text-slate-400 mt-0.5 flex-wrap">
                             <span className="font-mono text-indigo-300 flex items-center gap-1">
                               <Calendar className="w-3 h-3" />
-                              {toEnglishDate(tx.date)}
+                              {toEnglishDate(tx.date || tx.paymentDate || tx.timestamp || tx.created_at || tx.createdAt || (typeof tx.id === 'number' ? tx.id : undefined))}
                             </span>
                             <span>•</span>
                             <span className="text-slate-400 truncate max-w-[240px]">
@@ -6103,87 +6563,143 @@ export const MemberDB: React.FC = () => {
               transition={{ type: 'spring', stiffness: 450, damping: 28 }}
               className="bg-slate-900 border border-rose-500/50 rounded-3xl w-full max-w-md p-6 shadow-2xl space-y-4 relative overflow-hidden"
             >
-              <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-rose-500 via-amber-500 to-rose-500" />
-              <div className="w-14 h-14 rounded-2xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 mx-auto">
-                <AlertCircle className="w-7 h-7 animate-pulse" />
-              </div>
-
-              <div className="text-center space-y-1.5">
-                <h3 className="text-lg font-black text-white uppercase tracking-tight">
-                  Confirm Payment Reversal
-                </h3>
-                <p className="text-xs text-slate-400">
-                  Are you sure you want to revert this payment record?
-                </p>
-              </div>
-
-              {/* Transaction Summary Card */}
-              <div className="p-4 bg-slate-950/80 rounded-2xl border border-slate-800 space-y-2 text-xs">
-                <div className="flex justify-between items-center text-slate-300">
-                  <span className="text-slate-400">Member Name:</span>
-                  <span className="font-bold text-white">{paymentToDelete.memberName || 'Member'}</span>
-                </div>
-                <div className="flex justify-between items-center text-slate-300">
-                  <span className="text-slate-400">BD No:</span>
-                  <span className="font-mono font-bold text-white">BD/{String(paymentToDelete.bdNo || '').replace(/\D/g, '')}</span>
-                </div>
-                <div className="flex justify-between items-center text-slate-300">
-                  <span className="text-slate-400">Payment Date:</span>
-                  <span className="font-mono text-indigo-300">{toEnglishDate(paymentToDelete.date)}</span>
-                </div>
-                <div className="flex justify-between items-center text-slate-300">
-                  <span className="text-slate-400">Payment Method:</span>
-                  <span className="font-bold text-slate-200">{paymentToDelete.gateway || 'CASH'}</span>
-                </div>
-                <div className="flex justify-between items-center pt-2 border-t border-slate-800 text-sm">
-                  <span className="font-bold text-slate-300">Amount Paid:</span>
-                  <span className="font-mono font-black text-emerald-400 text-base">
-                    ৳{Number(paymentToDelete.amount || 0).toLocaleString()}
-                  </span>
-                </div>
-              </div>
-
-              {/* Consequence Notice */}
-              <div className="p-3 bg-rose-950/50 border border-rose-800/60 rounded-xl text-[11px] text-rose-200 space-y-1 leading-relaxed">
-                <p className="font-bold flex items-center gap-1.5 text-rose-300">
-                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                  <span>Due Restoration Notice:</span>
-                </p>
-                <p>
-                  Reverting this payment will immediately restore member due by <strong>৳{Number(paymentToDelete.amount || 0).toLocaleString()}</strong> and update the cloud database in real-time.
-                </p>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex items-center space-x-3 pt-2">
-                <button
-                  type="button"
-                  disabled={isDeletingPayment}
-                  onClick={() => setPaymentToDelete(null)}
-                  className="flex-1 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50 active:scale-95"
+              {paymentDeleteSuccessData ? (
+                /* Dynamic Success Animation View inside popup box */
+                <motion.div
+                  initial={{ scale: 0.85, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                  className="space-y-4 py-2 text-center"
                 >
-                  Cancel
-                </button>
+                  <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-500" />
+                  <div className="w-16 h-16 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 mx-auto shadow-lg shadow-emerald-500/20">
+                    <CheckCircle2 className="w-9 h-9 animate-bounce text-emerald-400" />
+                  </div>
 
-                <button
-                  type="button"
-                  disabled={isDeletingPayment}
-                  onClick={handleConfirmDeletePayment}
-                  className="flex-1 py-3 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1.5 shadow-lg shadow-rose-900/50 disabled:opacity-50 active:scale-95"
-                >
-                  {isDeletingPayment ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin text-white" />
-                      <span>Reverting...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Trash2 className="w-4 h-4" />
-                      <span>Yes, Revert</span>
-                    </>
-                  )}
-                </button>
-              </div>
+                  <div>
+                    <h3 className="text-lg font-black text-white uppercase tracking-tight">
+                      পেমেন্ট বাতিল সম্পন্ন হয়েছে!
+                    </h3>
+                    <p className="text-xs text-emerald-300 font-semibold mt-1">
+                      সদস্যের বকেয়া পূর্বাবস্থায় সফলভাবে ফিরিয়ে দেওয়া হয়েছে
+                    </p>
+                  </div>
+
+                  <div className="p-4 bg-slate-950/90 rounded-2xl border border-slate-800 text-xs space-y-2 text-left">
+                    <div className="flex justify-between items-center text-slate-300">
+                      <span className="text-slate-400">সদস্যের নাম:</span>
+                      <span className="font-bold text-white">{paymentDeleteSuccessData.memberName}</span>
+                    </div>
+                    {paymentDeleteSuccessData.bdNo && (
+                      <div className="flex justify-between items-center text-slate-300">
+                        <span className="text-slate-400">BD No:</span>
+                        <span className="font-mono font-bold text-white">BD/{paymentDeleteSuccessData.bdNo}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between items-center pt-2 border-t border-slate-800 text-sm">
+                      <span className="text-slate-400">বাতিলকৃত পেমেন্ট:</span>
+                      <span className="font-mono font-black text-emerald-400 text-base">
+                        ৳{paymentDeleteSuccessData.amount.toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPaymentDeleteSuccessData(null);
+                      setPaymentToDelete(null);
+                    }}
+                    className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black tracking-wider transition-all cursor-pointer shadow-lg shadow-emerald-950/50 active:scale-95"
+                  >
+                    ঠিক আছে (DONE)
+                  </button>
+                </motion.div>
+              ) : (
+                <>
+                  <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-rose-500 via-amber-500 to-rose-500" />
+                  <div className="w-14 h-14 rounded-2xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 mx-auto">
+                    <AlertCircle className="w-7 h-7 animate-pulse" />
+                  </div>
+
+                  <div className="text-center space-y-1.5">
+                    <h3 className="text-lg font-black text-white uppercase tracking-tight">
+                      Confirm Payment Reversal
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Are you sure you want to revert this payment record?
+                    </p>
+                  </div>
+
+                  {/* Transaction Summary Card */}
+                  <div className="p-4 bg-slate-950/80 rounded-2xl border border-slate-800 space-y-2 text-xs">
+                    <div className="flex justify-between items-center text-slate-300">
+                      <span className="text-slate-400">Member Name:</span>
+                      <span className="font-bold text-white">{paymentToDelete.memberName || 'Member'}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-slate-300">
+                      <span className="text-slate-400">BD No:</span>
+                      <span className="font-mono font-bold text-white">BD/{String(paymentToDelete.bdNo || '').replace(/\D/g, '')}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-slate-300">
+                      <span className="text-slate-400">Payment Date:</span>
+                      <span className="font-mono text-indigo-300">{toEnglishDate(paymentToDelete.date)}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-slate-300">
+                      <span className="text-slate-400">Payment Method:</span>
+                      <span className="font-bold text-slate-200">{paymentToDelete.gateway || 'CASH'}</span>
+                    </div>
+                    <div className="flex justify-between items-center pt-2 border-t border-slate-800 text-sm">
+                      <span className="text-slate-400">Amount Paid:</span>
+                      <span className="font-mono font-black text-emerald-400 text-base">
+                        ৳{Number(paymentToDelete.amount || 0).toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Consequence Notice */}
+                  <div className="p-3 bg-rose-950/50 border border-rose-800/60 rounded-xl text-[11px] text-rose-200 space-y-1 leading-relaxed">
+                    <p className="font-bold flex items-center gap-1.5 text-rose-300">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>Due Restoration Notice:</span>
+                    </p>
+                    <p>
+                      Reverting this payment will immediately restore member due by <strong>৳{Number(paymentToDelete.amount || 0).toLocaleString()}</strong> and update the cloud database in real-time.
+                    </p>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center space-x-3 pt-2">
+                    <button
+                      type="button"
+                      disabled={isDeletingPayment}
+                      onClick={() => setPaymentToDelete(null)}
+                      className="flex-1 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-50 active:scale-95"
+                    >
+                      Cancel
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isDeletingPayment}
+                      onClick={handleConfirmDeletePayment}
+                      className="flex-1 py-3 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-1.5 shadow-lg shadow-rose-900/50 disabled:opacity-50 active:scale-95"
+                    >
+                      {isDeletingPayment ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin text-white" />
+                          <span>Reverting...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Trash2 className="w-4 h-4" />
+                          <span>Yes, Revert</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </>
+              )}
             </motion.div>
           </motion.div>
         )}

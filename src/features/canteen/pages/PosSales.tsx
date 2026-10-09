@@ -11,6 +11,7 @@ import { DateNavigator, getTodayYMD } from '../components/DateNavigator';
 import { deductRawStockForSales, getRawInventoryItems, calculateMenuItemStockInfo, getMenuRecipes } from '../utils/recipeManager';
 import { pushKeyToCloud } from '../utils/canteenCloudSync';
 import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
+import { playSuccessChime, playTrashPopSound } from '../utils/audioFeedback';
 import { 
   getCanteenMenuCache, 
   fetchCanteenMenuOnce, 
@@ -145,6 +146,7 @@ export const PosSales: React.FC = () => {
   const [toastMessage, setToastMessage] = useState('');
   const [salesHistory, setSalesHistory] = useState<any[]>([]);
   const [txDeleteConfirmId, setTxDeleteConfirmId] = useState<string | null>(null);
+  const [deleteSuccessData, setDeleteSuccessData] = useState<{ desc: string; amount: number } | null>(null);
 
   useEffect(() => {
     const handleSyncStock = () => {
@@ -275,6 +277,18 @@ export const PosSales: React.FC = () => {
     const txToRemove = salesHistory.find(tx => tx.id === txId);
     if (!txToRemove) return;
 
+    // 0ms instant feedback: play sound and display success card in modal immediately
+    playTrashPopSound();
+    playSuccessChime();
+    setDeleteSuccessData({
+      desc: txToRemove.items || txToRemove.name || 'বিক্রয় রেকর্ড',
+      amount: Number(txToRemove.amount || 0)
+    });
+    setTimeout(() => {
+      setDeleteSuccessData(null);
+      setTxDeleteConfirmId(null);
+    }, 2200);
+
     // Reverse Due ONLY if transaction was DUE
     const isPaid = txToRemove.status === 'PAID' || txToRemove.paymentStatus === 'PAID' || String(txToRemove.gateway || txToRemove.paymentMethod || '').toUpperCase() === 'CASH';
     if (!isPaid) {
@@ -303,7 +317,6 @@ export const PosSales: React.FC = () => {
     window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
     window.dispatchEvent(new Event('canteen_inventory_updated'));
     window.dispatchEvent(new Event('storage'));
-    setTxDeleteConfirmId(null);
 
     setToastMessage(isPaid ? '✅ Cash sale record removed from history!' : '✅ Sale record removed and member due adjusted!');
     setTimeout(() => setToastMessage(''), 4000);
@@ -584,11 +597,12 @@ export const PosSales: React.FC = () => {
             </div>
 
             <div className="flex items-center space-x-2 flex-wrap gap-y-2">
-              {/* Sale Date Picker with Left/Right Arrows, '08 Oct 26' format, Today default */}
+              {/* Sale Date Picker with Left/Right Arrows, '09 Oct 26' format, Today default */}
               <DateNavigator 
                 value={saleDate} 
                 onChange={setSaleDate} 
-                label="Sale Date"
+                label="Dt"
+                format="dd_mm_yy"
               />
 
               {/* History Button (renamed to just History) */}
@@ -1283,33 +1297,75 @@ export const PosSales: React.FC = () => {
               transition={{ type: 'spring', stiffness: 450, damping: 28 }}
               className="bg-slate-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-slate-800 relative overflow-hidden"
             >
-              <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-rose-500 via-amber-500 to-rose-500" />
-              <div className="text-center">
-                <div className="w-16 h-16 bg-rose-900/30 text-rose-500 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-rose-500/30 shadow-inner">
-                  <Trash2 className="w-8 h-8 animate-pulse" />
-                </div>
-                <h3 className="text-lg font-black text-white uppercase tracking-tighter mb-2">Remove Record?</h3>
-                <p className="text-sm font-bold text-slate-400 mb-6">
-                  Are you sure you want to remove this sale record? Member due will be adjusted and inventory will be updated.
-                </p>
-                
-                <div className="flex space-x-3">
-                  <button 
+              {deleteSuccessData ? (
+                <motion.div
+                  initial={{ scale: 0.85, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                  className="space-y-4 py-2 text-center"
+                >
+                  <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-500" />
+                  <div className="w-16 h-16 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 mx-auto shadow-lg shadow-emerald-500/20">
+                    <CheckCircle2 className="w-9 h-9 animate-bounce text-emerald-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-white tracking-tight">
+                      রেকর্ড সফলভাবে মুছে ফেলা হয়েছে!
+                    </h3>
+                    <p className="text-xs text-slate-300 mt-1 line-clamp-2">
+                      {deleteSuccessData.desc}
+                    </p>
+                  </div>
+                  <div className="p-3.5 bg-slate-950/80 rounded-2xl border border-slate-800 text-xs space-y-1.5 text-left">
+                    <div className="flex justify-between items-center text-slate-300">
+                      <span className="text-slate-400">সমন্বয়কৃত পরিমাণ:</span>
+                      <span className="font-mono font-bold text-emerald-400 text-sm">৳{deleteSuccessData.amount.toLocaleString()}</span>
+                    </div>
+                    <p className="text-[11px] text-emerald-400/90 font-medium flex items-center gap-1">
+                      <span>✓</span>
+                      <span>সদস্যের বকেয়া ও ইনভেন্টরি সফলভাবে আপডেট করা হয়েছে</span>
+                    </p>
+                  </div>
+                  <button
                     type="button"
-                    onClick={() => setTxDeleteConfirmId(null)} 
-                    className="flex-1 py-3 bg-slate-800 text-slate-200 rounded-xl text-xs font-black tracking-widest hover:bg-slate-700 transition-colors cursor-pointer active:scale-95"
+                    onClick={() => {
+                      setDeleteSuccessData(null);
+                      setTxDeleteConfirmId(null);
+                    }}
+                    className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black tracking-wider transition-all cursor-pointer shadow-md shadow-emerald-950/50 active:scale-95"
                   >
-                    CANCEL
+                    ঠিক আছে (DONE)
                   </button>
-                  <button 
-                    type="button"
-                    onClick={() => removeHistoryItem(txDeleteConfirmId)} 
-                    className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black tracking-widest transition-all shadow-md shadow-rose-600/30 active:scale-95 cursor-pointer"
-                  >
-                    REMOVE
-                  </button>
+                </motion.div>
+              ) : (
+                <div className="text-center">
+                  <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-rose-500 via-amber-500 to-rose-500" />
+                  <div className="w-16 h-16 bg-rose-900/30 text-rose-500 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-rose-500/30 shadow-inner">
+                    <Trash2 className="w-8 h-8 animate-pulse" />
+                  </div>
+                  <h3 className="text-lg font-black text-white uppercase tracking-tighter mb-2">Remove Record?</h3>
+                  <p className="text-sm font-bold text-slate-400 mb-6">
+                    Are you sure you want to remove this sale record? Member due will be adjusted and inventory will be updated.
+                  </p>
+                  
+                  <div className="flex space-x-3">
+                    <button 
+                      type="button"
+                      onClick={() => setTxDeleteConfirmId(null)} 
+                      className="flex-1 py-3 bg-slate-800 text-slate-200 rounded-xl text-xs font-black tracking-widest hover:bg-slate-700 transition-colors cursor-pointer active:scale-95"
+                    >
+                      CANCEL
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={() => removeHistoryItem(txDeleteConfirmId)} 
+                      className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black tracking-widest transition-all shadow-md shadow-rose-600/30 active:scale-95 cursor-pointer"
+                    >
+                      REMOVE
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
             </motion.div>
           </motion.div>
         )}
@@ -1369,12 +1425,15 @@ export const PosSales: React.FC = () => {
                   )}
                 </div>
 
-                {/* Date-wise filter with Left/Right arrows, '08 Oct 26' format, Today default */}
-                <DateNavigator 
-                  value={historyDateFilter} 
-                  onChange={setHistoryDateFilter} 
-                  allowAll={true} 
-                />
+                {/* Date-wise filter with Left/Right arrows, '09 Oct 26' format, Today default */}
+                <div className="shrink-0 flex items-center">
+                  <DateNavigator 
+                    value={historyDateFilter} 
+                    onChange={setHistoryDateFilter} 
+                    allowAll={true} 
+                    format="dd_mm_yy"
+                  />
+                </div>
               </div>
             </div>
             
@@ -1393,7 +1452,8 @@ export const PosSales: React.FC = () => {
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="bg-slate-900/90 text-slate-400 font-mono text-[11px] uppercase tracking-wider border-b border-slate-800">
-                        <th className="py-3 px-3 font-black text-center w-16">Ser No</th>
+                        <th className="py-3 px-3 font-black text-center w-14">Ser No</th>
+                        <th className="py-3 px-3 font-black text-center w-24">Date</th>
                         <th className="py-3 px-3 font-black min-w-[150px]">Customer Name</th>
                         <th className="py-3 px-3 font-black min-w-[180px]">Item Name</th>
                         <th className="py-3 px-3 font-black text-center w-16">Qty</th>
@@ -1447,16 +1507,21 @@ export const PosSales: React.FC = () => {
                               {idx + 1}
                             </td>
 
+                            {/* Date (Added after Ser No) */}
+                            <td className="py-2.5 px-3 text-center font-mono font-bold text-indigo-300 text-xs whitespace-nowrap">
+                              {formatCanteenDate(tx.date || tx.paymentDate || tx.timestamp || tx.created_at || (typeof tx.id === 'number' ? tx.id : undefined))}
+                            </td>
+
                             {/* Customer Name */}
                             <td className="py-2.5 px-3">
                               <div className="font-black text-white text-xs">
                                 {memberRank ? `${memberRank} ` : ''}{memberSurname}
                               </div>
-                              <div className="flex items-center gap-1.5 mt-0.5 text-[10px] font-mono text-slate-400">
-                                {memberBdNo && <span>BD: {memberBdNo}</span>}
-                                <span>•</span>
-                                <span>{formatCanteenDate(tx.date)}</span>
-                              </div>
+                              {memberBdNo && (
+                                <div className="text-[10px] font-mono text-slate-400 mt-0.5">
+                                  BD: {memberBdNo}
+                                </div>
+                              )}
                             </td>
 
                             {/* Item Name */}

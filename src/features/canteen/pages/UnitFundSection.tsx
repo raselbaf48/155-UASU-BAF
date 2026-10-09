@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { UnitFundInflow, UnitFundExpense, UnitFundTransfer } from '../types/fundTypes';
+import { playSuccessChime } from '../utils/audioFeedback';
 
 const UNIT_INFLOWS_KEY = 'baf_unit_fund_inflows';
 const UNIT_EXPENSES_KEY = 'baf_unit_fund_expenses';
@@ -266,31 +267,36 @@ export const UnitFundSection: React.FC = () => {
 
   // Delete Confirmation Modal State
   const [deleteConfirmTx, setDeleteConfirmTx] = useState<{ id: string; type: 'INFLOW' | 'EXPENSE' | 'TRANSFER'; desc: string; amount: number } | null>(null);
+  const [deleteSuccessData, setDeleteSuccessData] = useState<{ desc: string; amount: number } | null>(null);
 
   // Direct Delete Handlers & Modal Confirm
   const executeDeleteRecord = () => {
     if (!deleteConfirmTx) return;
     const { id, type } = deleteConfirmTx;
+    const current = deleteConfirmTx;
     if (type === 'INFLOW') {
       const updated = inflows.filter(i => i.id !== id);
       setInflows(updated);
       localStorage.setItem(UNIT_INFLOWS_KEY, JSON.stringify(updated));
       triggerUpdate();
-      showToast('জমার রেকর্ড মুছে ফেলা হয়েছে');
     } else if (type === 'EXPENSE') {
       const updated = expenses.filter(e => e.id !== id);
       setExpenses(updated);
       localStorage.setItem(UNIT_EXPENSES_KEY, JSON.stringify(updated));
       triggerUpdate();
-      showToast('খরচের রেকর্ড মুছে ফেলা হয়েছে');
     } else if (type === 'TRANSFER') {
       const updated = transfers.filter(t => t.id !== id);
       setTransfers(updated);
       localStorage.setItem(UNIT_TRANSFERS_KEY, JSON.stringify(updated));
       triggerUpdate();
-      showToast('ট্রান্সফার রেকর্ড মুছে ফেলা হয়েছে');
     }
-    setDeleteConfirmTx(null);
+
+    playSuccessChime();
+    setDeleteSuccessData({ desc: current.desc, amount: current.amount });
+    setTimeout(() => {
+      setDeleteSuccessData(null);
+      setDeleteConfirmTx(null);
+    }, 2000);
   };
 
   // Combined and sorted transactions
@@ -1035,34 +1041,64 @@ export const UnitFundSection: React.FC = () => {
       {/* DELETE TRANSACTION CONFIRMATION MODAL */}
       {deleteConfirmTx && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-slate-900 border border-rose-500/30 rounded-3xl w-full max-w-sm p-6 shadow-2xl relative text-white space-y-4 animate-in zoom-in-95">
-            <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
-              <Trash2 className="w-6 h-6" />
-            </div>
-            <div className="text-center space-y-1">
-              <h4 className="text-base font-black text-white">রেকর্ড মুছে ফেলতে চান?</h4>
-              <p className="text-xs text-slate-400">
-                আপনি কি নিশ্চিত যে <strong className="text-white">"{deleteConfirmTx.desc}"</strong>-এর{' '}
-                <strong className="text-rose-400 font-mono">৳{deleteConfirmTx.amount.toLocaleString()}</strong> রেকর্ডটি মুছে ফেলতে চান?
-              </p>
-            </div>
-            <div className="grid grid-cols-2 gap-2.5 pt-2">
-              <button
-                type="button"
-                onClick={() => setDeleteConfirmTx(null)}
-                className="py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-colors cursor-pointer"
-              >
-                বাতিল
-              </button>
-              <button
-                type="button"
-                onClick={executeDeleteRecord}
-                className="py-2.5 px-4 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs transition-colors flex items-center justify-center space-x-1.5 shadow-lg shadow-rose-950/50 cursor-pointer"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>মুছে ফেলুন</span>
-              </button>
-            </div>
+          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl w-full max-w-sm p-6 shadow-2xl relative text-white space-y-4 animate-in zoom-in-95 overflow-hidden">
+            {deleteSuccessData ? (
+              <div className="text-center space-y-3 py-2">
+                <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-500" />
+                <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/20">
+                  <CheckCircle2 className="w-8 h-8 animate-bounce" />
+                </div>
+                <div>
+                  <h4 className="text-base font-black text-white">রেকর্ড সফলভাবে মুছে ফেলা হয়েছে!</h4>
+                  <p className="text-xs text-slate-300 mt-1 line-clamp-2">{deleteSuccessData.desc}</p>
+                </div>
+                <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800 text-xs flex justify-between items-center text-slate-300">
+                  <span>মুছে ফেলা পরিমাণ:</span>
+                  <span className="font-mono font-bold text-emerald-400">৳{deleteSuccessData.amount.toLocaleString()}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDeleteSuccessData(null);
+                    setDeleteConfirmTx(null);
+                  }}
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                >
+                  ঠিক আছে (DONE)
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-rose-500 via-amber-500 to-rose-500" />
+                <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
+                  <Trash2 className="w-6 h-6 animate-pulse" />
+                </div>
+                <div className="text-center space-y-1">
+                  <h4 className="text-base font-black text-white">রেকর্ড মুছে ফেলতে চান?</h4>
+                  <p className="text-xs text-slate-400">
+                    আপনি কি নিশ্চিত যে <strong className="text-white">"{deleteConfirmTx.desc}"</strong>-এর{' '}
+                    <strong className="text-rose-400 font-mono">৳{deleteConfirmTx.amount.toLocaleString()}</strong> রেকর্ডটি মুছে ফেলতে চান?
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setDeleteConfirmTx(null)}
+                    className="py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                  >
+                    বাতিল
+                  </button>
+                  <button
+                    type="button"
+                    onClick={executeDeleteRecord}
+                    className="py-2.5 px-4 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs transition-colors flex items-center justify-center space-x-1.5 shadow-lg shadow-rose-950/50 cursor-pointer active:scale-95"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>মুছে ফেলুন</span>
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

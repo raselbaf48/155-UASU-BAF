@@ -19,6 +19,7 @@ export interface StatementCanvasData {
   netPayable: number;
   rankBn?: string;
   nameBn?: string;
+  totalDiscount?: number;
 }
 
 /**
@@ -59,7 +60,8 @@ export function generateStatementCanvas(data: StatementCanvasData): HTMLCanvasEl
     effectivePayments,
     netPayable,
     rankBn,
-    nameBn
+    nameBn,
+    totalDiscount = 0
   } = data;
 
   const rank = rankBn || formatRankBn(statementMember?.Rank || statementMember?.rank || '');
@@ -79,6 +81,7 @@ export function generateStatementCanvas(data: StatementCanvasData): HTMLCanvasEl
   // Calculate table rows count
   let summaryRowsCount = 1; // সর্বমোট প্রদেয় বিল
   if (totalMonthBill > 0) summaryRowsCount++;
+  if (totalDiscount && totalDiscount > 0) summaryRowsCount++;
   if (previousDue > 0) summaryRowsCount++;
   if (unitFundBill > 0) summaryRowsCount++;
   if (othersFundBill > 0) summaryRowsCount++;
@@ -295,6 +298,11 @@ export function generateStatementCanvas(data: StatementCanvasData): HTMLCanvasEl
   // 1. মোট ক্যান্টিন বিল (only if > 0)
   if (totalMonthBill > 0) {
     drawSummaryRow('মোট ক্যান্টিন বিল', `৳${toBengaliNum(totalMonthBill)}`, '#000000');
+  }
+
+  // 1.1 ডিসকাউন্ট (if > 0, right below মোট ক্যান্টিন বিল)
+  if (totalDiscount && totalDiscount > 0) {
+    drawSummaryRow('ডিসকাউন্ট', `-৳${toBengaliNum(totalDiscount)}`, '#059669');
   }
 
   // 2. বকেয়া বিল (if > 0)

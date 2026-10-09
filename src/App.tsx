@@ -65,6 +65,44 @@ export default function App() {
     }
   }, [role, activeTab]);
 
+  // Global click handler: Clicking anywhere on a date input or its container opens the calendar
+  useEffect(() => {
+    const handleGlobalDateClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+
+      // Skip if clicking a clear button or an action button inside the box
+      if (target.closest('button, [role="button"]') && !target.closest('button[data-date-trigger]')) {
+        return;
+      }
+      
+      // If clicking an input[type="date"]
+      if (target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'date') {
+        const input = target as HTMLInputElement;
+        if (typeof (input as any).showPicker === 'function') {
+          try {
+            (input as any).showPicker();
+          } catch {}
+        }
+        return;
+      }
+
+      // If clicking inside a date container, label, or date-box
+      const container = target.closest('[data-date-box], label, .date-picker-wrapper, .date-input-container');
+      if (container) {
+        const input = container.querySelector('input[type="date"]') as HTMLInputElement | null;
+        if (input && typeof (input as any).showPicker === 'function') {
+          try {
+            (input as any).showPicker();
+          } catch {}
+        }
+      }
+    };
+
+    document.addEventListener('click', handleGlobalDateClick, true);
+    return () => document.removeEventListener('click', handleGlobalDateClick, true);
+  }, []);
+
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
   const [hasSeenNotice, setHasSeenNotice] = useState<boolean>(false);
 
@@ -317,7 +355,7 @@ return () => mediaQuery.removeEventListener('change', listener);
         if (myDetail) {
           if (myDetail.status !== 'ACTIVE') {
             handleUserLogout();
-            alert('Your account has been suspended or disabled by admin.');
+            console.warn('Your account has been suspended or disabled by admin.');
           } else {
             // Only demote if their current active role is higher than what's allowed in myDetail
             const roleHierarchy = { 'OWNER': 4, 'SUPER_ADMIN': 3, 'ADMIN': 2, 'USER': 1 };

@@ -12,7 +12,14 @@ import {
   fetchCanteenConfigFromCloud, checkPreOrderWindow, CanteenConfig,
   ItemDisplayLanguage, checkAndEnforceDailyMenuReset
 } from '../utils/canteenSettings';
-import { pullAllCanteenDataFromCloud } from '../utils/canteenCloudSync';
+import { 
+  pullAllCanteenDataFromCloud, 
+  pushAllLocalDataToCloud,
+  getCanteenSyncLogs, 
+  clearCanteenSyncLogs, 
+  CanteenSyncLog,
+  queuePushKeyToCloud 
+} from '../utils/canteenCloudSync';
 import { getCanteenMembersCache, fetchCanteenMembersOnce } from '../utils/canteenMenuData';
 import { supabase } from '../../../supabase';
 import { SaveButton } from '../components/SaveButton';
@@ -28,33 +35,6 @@ interface SectionMeta {
   color: string;
   badge?: string;
 }
-
-export interface CanteenSyncLog {
-  id: string;
-  type: 'PUSH' | 'PULL';
-  message: string;
-  status: 'SUCCESS' | 'ERROR';
-  timestamp: string;
-}
-
-const CANTEEN_SYNC_LOGS_KEY = 'canteen_sync_logs';
-
-const INITIAL_SYNC_LOGS: CanteenSyncLog[] = [
-  {
-    id: 'sync-log-1',
-    type: 'PULL',
-    message: 'Automatic cloud sync completed for Canteen_Member & Canteen_Config.',
-    status: 'SUCCESS',
-    timestamp: new Date(Date.now() - 1000 * 60 * 10).toLocaleString()
-  },
-  {
-    id: 'sync-log-2',
-    type: 'PUSH',
-    message: 'Database connection verified. Central Supabase realtime channel active.',
-    status: 'SUCCESS',
-    timestamp: new Date(Date.now() - 1000 * 60 * 45).toLocaleString()
-  }
-];
 
 interface CanteenSettingsProps {
   onClose?: () => void;
@@ -108,32 +88,22 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
     expenses: 0
   });
 
-  // Cloud Sync Logs state
-  const [syncLogs, setSyncLogs] = useState<CanteenSyncLog[]>(() => {
-    try {
-      const saved = localStorage.getItem(CANTEEN_SYNC_LOGS_KEY);
-      return saved ? JSON.parse(saved) : INITIAL_SYNC_LOGS;
-    } catch {
-      return INITIAL_SYNC_LOGS;
-    }
-  });
+  // Cloud Sync Logs state - connected live to global Canteen Cloud Sync engine
+  const [syncLogs, setSyncLogs] = useState<CanteenSyncLog[]>(() => getCanteenSyncLogs());
 
-  const addSyncLog = (entry: Omit<CanteenSyncLog, 'id' | 'timestamp'>) => {
-    const newLog: CanteenSyncLog = {
-      id: 'sync-log-' + Date.now(),
-      timestamp: new Date().toLocaleString(),
-      ...entry
+  useEffect(() => {
+    const handleSyncLogsUpdated = (e: any) => {
+      setSyncLogs(e?.detail || getCanteenSyncLogs());
     };
-    const updated = [newLog, ...syncLogs].slice(0, 30);
-    setSyncLogs(updated);
-    try {
-      localStorage.setItem(CANTEEN_SYNC_LOGS_KEY, JSON.stringify(updated));
-    } catch { /* empty */ }
-  };
+    window.addEventListener('canteen_sync_logs_updated', handleSyncLogsUpdated);
+    return () => {
+      window.removeEventListener('canteen_sync_logs_updated', handleSyncLogsUpdated);
+    };
+  }, []);
 
   const handleClearSyncLogs = () => {
+    clearCanteenSyncLogs();
     setSyncLogs([]);
-    localStorage.removeItem(CANTEEN_SYNC_LOGS_KEY);
   };
 
   const loadTableCounts = () => {
@@ -169,14 +139,11 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
   const handleSaveAll = async () => {
     setIsSaving(true);
     saveCanteenConfig(settings);
+    // Queue config to be backed up to Supabase
+    queuePushKeyToCloud('baf_canteen_settings_v1', settings);
     setIsSaving(false);
     setLastSyncedTime(new Date().toLocaleTimeString());
     showSavedFeedback();
-    addSyncLog({
-      type: 'PUSH',
-      message: 'Canteen settings saved and synced to Supabase cloud.',
-      status: 'SUCCESS'
-    });
   };
 
   // Push to Cloud
@@ -190,26 +157,21 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
 
     try {
       saveCanteenConfig(settings);
-      setSyncProgress(100);
-      setSyncStatusText('Cloud Upload Completed Successfully! ✓');
-      setLastSyncedTime(new Date().toLocaleTimeString());
-      showSavedFeedback();
-      addSyncLog({
-        type: 'PUSH',
-        message: 'Successfully uploaded canteen parameters and local data to Supabase.',
-        status: 'SUCCESS'
-      });
+      const success = await pushAllLocalDataToCloud();
+      if (success) {
+        setSyncProgress(100);
+        setSyncStatusText('Cloud Upload Completed Successfully! ✓');
+        setLastSyncedTime(new Date().toLocaleTimeString());
+        showSavedFeedback();
+      } else {
+        setSyncStatusText('Upload Failed. Check network connection.');
+      }
       setTimeout(() => {
         setSyncProgress(0);
         setSyncStatusText('');
       }, 2500);
     } catch (err: any) {
       setSyncStatusText(`Upload Failed: ${err?.message || 'Network error'}`);
-      addSyncLog({
-        type: 'PUSH',
-        message: err?.message || 'Error pushing data to Supabase.',
-        status: 'ERROR'
-      });
     } finally {
       setIsSyncingPush(false);
     }
@@ -233,22 +195,12 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
       setSyncStatusText('Cloud Download Completed Successfully! ✓');
       setLastSyncedTime(new Date().toLocaleTimeString());
       showSavedFeedback();
-      addSyncLog({
-        type: 'PULL',
-        message: 'Successfully pulled latest canteen data and config from Supabase.',
-        status: 'SUCCESS'
-      });
       setTimeout(() => {
         setSyncProgress(0);
         setSyncStatusText('');
       }, 2500);
     } catch (err: any) {
       setSyncStatusText(`Download Failed: ${err?.message || 'Network error'}`);
-      addSyncLog({
-        type: 'PULL',
-        message: err?.message || 'Error pulling data from Supabase.',
-        status: 'ERROR'
-      });
     } finally {
       setIsSyncingPull(false);
     }
@@ -1380,50 +1332,46 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
                 </div>
               </div>
 
-              {/* Cloud Sync Activity Logs */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-                    <History className="w-3.5 h-3.5 text-indigo-400" />
-                    <span>SYNC ACTIVITY LOGS ({syncLogs.length})</span>
-                  </span>
+              {/* Cloud Sync Activity Logs - Exact style as Office Settings */}
+              <div className="mt-8">
+                <div className="flex items-center justify-between mb-4 px-2">
+                  <h4 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                    Recent Sync Logs
+                  </h4>
                   {syncLogs.length > 0 && (
                     <button
                       type="button"
                       onClick={handleClearSyncLogs}
-                      className="text-[10px] font-bold text-slate-500 hover:text-rose-400 flex items-center gap-1 cursor-pointer"
+                      className="text-[10px] font-bold text-slate-500 hover:text-rose-400 flex items-center gap-1 cursor-pointer transition-colors"
                     >
-                      <Trash2 className="w-3 h-3" />
+                      <Trash2 className="w-3.5 h-3.5" />
                       <span>Clear Logs</span>
                     </button>
                   )}
                 </div>
 
                 {syncLogs.length === 0 ? (
-                  <div className="bg-slate-950 border border-slate-800/80 rounded-2xl p-6 text-center text-xs text-slate-500">
-                    No sync activity logs recorded yet.
+                  <div className="text-center py-8 bg-slate-800/30 rounded-2xl">
+                    <p className="text-sm font-bold text-slate-500">No recent logs.</p>
                   </div>
                 ) : (
-                  <div className="bg-slate-950 border border-slate-800/80 rounded-2xl p-3 divide-y divide-slate-850 max-h-56 overflow-y-auto space-y-1">
-                    {syncLogs.map((log) => (
-                      <div key={log.id} className="py-2.5 px-3 flex items-start justify-between gap-3 text-xs">
-                        <div className="flex items-start space-x-2.5 min-w-0">
-                          <span className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold shrink-0 mt-0.5 ${
-                            log.type === 'PUSH' 
-                              ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' 
-                              : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                          }`}>
-                            {log.type}
-                          </span>
-                          <div className="min-w-0">
-                            <p className="font-bold text-white text-xs truncate">
-                              {log.status === 'SUCCESS' ? 'Sync Completed' : 'Sync Error'}
+                  <div className="space-y-3">
+                    {syncLogs.map((log: any) => (
+                      <div key={log.id} className="p-4 bg-[#1b2234] border border-slate-700/50 rounded-xl flex justify-between items-start">
+                        <div className="flex gap-3">
+                          <div className="pt-1.5 shrink-0">
+                            <div className={`w-2.5 h-2.5 rounded-full ${log.status === 'SUCCESS' ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold text-white mb-1">
+                              {log.type === 'PULL' ? 'Downloaded from Cloud' : 'Uploaded to Cloud'}
                             </p>
                             <p className="text-xs text-slate-400">{log.message}</p>
                           </div>
                         </div>
                         <div className="text-[10px] text-slate-400 font-mono text-right shrink-0 mt-1">
-                          {log.timestamp}
+                          {new Date(log.timestamp).toLocaleDateString()}<br/>
+                          {new Date(log.timestamp).toLocaleTimeString()}
                         </div>
                       </div>
                     ))}

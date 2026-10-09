@@ -461,6 +461,10 @@ export async function exportCanteenBillToExcel({
     txList.forEach((tx) => {
       if (!tx || isPaymentTx(tx) || tx.type === 'REVERTED' || tx.isReverted || tx.status === 'REVERTED' || String(tx.items || '').includes('[বাতিল')) return;
 
+      // Paid cash sales are settled instantly at counter and do NOT constitute unpaid due
+      const isPaidSale = (tx.status === 'PAID' || tx.paymentStatus === 'PAID' || String(tx.gateway || tx.paymentMethod || '').toUpperCase() === 'CASH');
+      if (isPaidSale) return;
+
       const isInit = tx.type === 'INITIAL_BILL' || 
         tx.type === 'AMOUNT_CHANGE' ||
         tx.isAmountChange ||

@@ -57,6 +57,57 @@ export interface CloudSyncStatus {
   errorMessage?: string;
 }
 
+export interface CanteenSyncLog {
+  id: string;
+  type: 'PUSH' | 'PULL';
+  status: 'SUCCESS' | 'ERROR';
+  message: string;
+  timestamp: string;
+}
+
+const CANTEEN_SYNC_LOGS_STORAGE_KEY = 'canteen_sync_logs';
+
+let canteenSyncLogs: CanteenSyncLog[] = (() => {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.sessionStorage.getItem(CANTEEN_SYNC_LOGS_STORAGE_KEY) || window.localStorage.getItem(CANTEEN_SYNC_LOGS_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+})();
+
+export const getCanteenSyncLogs = (): CanteenSyncLog[] => canteenSyncLogs;
+
+export const addCanteenSyncLog = (log: Omit<CanteenSyncLog, 'id'>): CanteenSyncLog => {
+  const newLog: CanteenSyncLog = {
+    ...log,
+    id: 'canteen-sync-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6)
+  };
+  canteenSyncLogs = [newLog, ...canteenSyncLogs].slice(0, 30);
+  if (typeof window !== 'undefined') {
+    try {
+      window.sessionStorage.setItem(CANTEEN_SYNC_LOGS_STORAGE_KEY, JSON.stringify(canteenSyncLogs));
+      window.localStorage.setItem(CANTEEN_SYNC_LOGS_STORAGE_KEY, JSON.stringify(canteenSyncLogs));
+    } catch {
+      // ignore storage errors
+    }
+    window.dispatchEvent(new CustomEvent('canteen_sync_logs_updated', { detail: canteenSyncLogs }));
+  }
+  return newLog;
+};
+
+export const clearCanteenSyncLogs = () => {
+  canteenSyncLogs = [];
+  if (typeof window !== 'undefined') {
+    try {
+      window.sessionStorage.removeItem(CANTEEN_SYNC_LOGS_STORAGE_KEY);
+      window.localStorage.removeItem(CANTEEN_SYNC_LOGS_STORAGE_KEY);
+    } catch {}
+    window.dispatchEvent(new CustomEvent('canteen_sync_logs_updated', { detail: [] }));
+  }
+};
+
 let syncStatus: CloudSyncStatus = {
   status: 'idle',
   lastSyncTime: null
@@ -70,6 +121,161 @@ const notifyStatus = (status: Partial<CloudSyncStatus>) => {
 };
 
 export const getCanteenCloudSyncStatus = (): CloudSyncStatus => syncStatus;
+
+// Dirty change tracking for 10-second automatic backup to Supabase
+const dirtyCanteenKeys = new Set<string>();
+const dirtyCanteenValues = new Map<string, any>();
+let canteenBackupTimeout: any = null;
+let isCanteenBackingUp = false;
+
+/**
+ * Mark a canteen key as dirty.
+ * If data is provided, it is immediately saved to localStorage so local cloud is instant!
+ * Schedules a backup to Supabase after 10 seconds of change.
+ */
+export function markCanteenDirty(key: string, data?: any) {
+  if (typeof window !== 'undefined' && data !== undefined) {
+    try {
+      if (typeof data === 'string') {
+        localStorage.setItem(key, data);
+      } else {
+        localStorage.setItem(key, JSON.stringify(data));
+      }
+    } catch (err) {
+      console.warn(`[CanteenCloudSync] LocalStorage save warning for ${key}:`, err);
+    }
+  }
+
+  dirtyCanteenKeys.add(key);
+  if (data !== undefined) {
+    dirtyCanteenValues.set(key, data);
+  }
+
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('canteen_pending_sync', 'true');
+  }
+
+  // Schedule / debounce backup after 10 seconds
+  if (canteenBackupTimeout) {
+    clearTimeout(canteenBackupTimeout);
+  }
+  canteenBackupTimeout = setTimeout(() => {
+    performCanteenBackup();
+  }, 10000);
+}
+
+/**
+ * Back up pending/dirty Canteen changes to Supabase.
+ * ONLY runs if there are actual changes (dirtyCanteenKeys > 0 or forced).
+ * If no changes occurred, does nothing!
+ */
+export async function performCanteenBackup(forceAll = false): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+
+  if (isCanteenBackingUp) {
+    return false;
+  }
+
+  // If nothing changed and not forced, DO NOT make any unnecessary backup!
+  if (!forceAll && dirtyCanteenKeys.size === 0) {
+    return true;
+  }
+
+  isCanteenBackingUp = true;
+  if (canteenBackupTimeout) {
+    clearTimeout(canteenBackupTimeout);
+    canteenBackupTimeout = null;
+  }
+
+  notifyStatus({ status: 'syncing' });
+
+  try {
+    const keysToBackup = forceAll 
+      ? Array.from(new Set([...CANTEEN_CLOUD_KEYS, ...Array.from(dirtyCanteenKeys)])) 
+      : Array.from(dirtyCanteenKeys);
+
+    if (keysToBackup.length === 0) {
+      isCanteenBackingUp = false;
+      return true;
+    }
+
+    const promises: Promise<any>[] = [];
+    const backedUpKeys: string[] = [];
+
+    for (const key of keysToBackup) {
+      let valToPush = dirtyCanteenValues.get(key);
+      if (valToPush === undefined) {
+        const raw = localStorage.getItem(key);
+        if (raw !== null) {
+          try {
+            valToPush = JSON.parse(raw);
+          } catch {
+            valToPush = raw;
+          }
+        }
+      }
+
+      if (valToPush !== undefined) {
+        backedUpKeys.push(key);
+        promises.push(pushKeyToCloud(key, valToPush));
+      }
+    }
+
+    const results = await Promise.allSettled(promises);
+    const hasFailures = results.some(r => r.status === 'rejected' || (r.status === 'fulfilled' && r.value === false));
+
+    if (!hasFailures) {
+      // Clear backed up dirty keys
+      backedUpKeys.forEach(k => {
+        dirtyCanteenKeys.delete(k);
+        dirtyCanteenValues.delete(k);
+      });
+
+      if (dirtyCanteenKeys.size === 0) {
+        localStorage.removeItem('canteen_pending_sync');
+      }
+
+      const readableKeys = backedUpKeys
+        .map(k => k.replace(/^canteen_/, '').replace(/_/g, ' '))
+        .slice(0, 4)
+        .join(', ');
+      const moreCount = backedUpKeys.length > 4 ? ` +${backedUpKeys.length - 4} more` : '';
+      const summaryMsg = `Uploaded changes (${readableKeys}${moreCount}) to Cloud database.`;
+
+      addCanteenSyncLog({
+        timestamp: new Date().toISOString(),
+        type: 'PUSH',
+        status: 'SUCCESS',
+        message: summaryMsg
+      });
+
+      notifyStatus({ status: 'synced', lastSyncTime: new Date().toLocaleTimeString() });
+      isCanteenBackingUp = false;
+      return true;
+    } else {
+      addCanteenSyncLog({
+        timestamp: new Date().toISOString(),
+        type: 'PUSH',
+        status: 'ERROR',
+        message: 'Cloud backup partially failed. Will retry automatically.'
+      });
+
+      notifyStatus({ status: 'error', errorMessage: 'Sync failed' });
+      isCanteenBackingUp = false;
+      return false;
+    }
+  } catch (err: any) {
+    addCanteenSyncLog({
+      timestamp: new Date().toISOString(),
+      type: 'PUSH',
+      status: 'ERROR',
+      message: 'Cloud backup error: ' + (err?.message || 'Network error')
+    });
+    notifyStatus({ status: 'error', errorMessage: err?.message || 'Network error' });
+    isCanteenBackingUp = false;
+    return false;
+  }
+}
 
 /**
  * Deleted Transaction Tombstones to prevent deleted records from resurrecting on cloud sync
@@ -272,42 +478,11 @@ export async function pullKeyFromCloud(key: string): Promise<any | null> {
   }
 }
 
-// Debounce map for pushing to avoid flooding Supabase
-const pushTimeouts = new Map<string, NodeJS.Timeout>();
-
-export function queuePushKeyToCloud(key: string, data?: any, delay = 600) {
-  if (pushTimeouts.has(key)) {
-    clearTimeout(pushTimeouts.get(key)!);
+export function queuePushKeyToCloud(key: string, data?: any, delay = 10000) {
+  markCanteenDirty(key, data);
+  if (delay === 0) {
+    performCanteenBackup(false);
   }
-
-  const timer = setTimeout(async () => {
-    pushTimeouts.delete(key);
-    let valueToPush = data;
-    if (valueToPush === undefined && typeof window !== 'undefined') {
-      try {
-        const raw = localStorage.getItem(key);
-        if (raw !== null) {
-          try {
-            valueToPush = JSON.parse(raw);
-          } catch {
-            valueToPush = raw;
-          }
-        }
-      } catch {}
-    }
-
-    if (valueToPush !== undefined) {
-      notifyStatus({ status: 'syncing' });
-      const ok = await pushKeyToCloud(key, valueToPush);
-      if (ok) {
-        notifyStatus({ status: 'synced', lastSyncTime: new Date().toLocaleTimeString() });
-      } else {
-        notifyStatus({ status: 'error' });
-      }
-    }
-  }, delay);
-
-  pushTimeouts.set(key, timer);
 }
 
 /**
@@ -509,17 +684,29 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
     }
 
     notifyStatus({ status: 'synced', lastSyncTime: new Date().toLocaleTimeString() });
+    addCanteenSyncLog({
+      timestamp: new Date().toISOString(),
+      type: 'PULL',
+      status: 'SUCCESS',
+      message: `Downloaded latest canteen dataset (${cloudKeyMap.size} records) from Supabase.`
+    });
   } catch (err: any) {
     console.warn('[CanteenCloudSync] Pull exception:', err);
     notifyStatus({ status: 'error', errorMessage: err?.message || 'Network error' });
+    addCanteenSyncLog({
+      timestamp: new Date().toISOString(),
+      type: 'PULL',
+      status: 'ERROR',
+      message: 'Failed to download updates from Supabase: ' + (err?.message || 'Network error')
+    });
   }
 }
 
 /**
  * Push all local Canteen data to Cloud (useful for initial seeding or manual backup)
  */
-export async function pushAllLocalDataToCloud(): Promise<void> {
-  if (typeof window === 'undefined') return;
+export async function pushAllLocalDataToCloud(): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
   notifyStatus({ status: 'syncing' });
 
   const promises: Promise<any>[] = [];
@@ -536,8 +723,36 @@ export async function pushAllLocalDataToCloud(): Promise<void> {
     }
   }
 
-  await Promise.allSettled(promises);
-  notifyStatus({ status: 'synced', lastSyncTime: new Date().toLocaleTimeString() });
+  try {
+    const cfg = localStorage.getItem('baf_canteen_settings_v1') || localStorage.getItem('canteen_config');
+    if (cfg) promises.push(pushKeyToCloud('baf_canteen_settings_v1', JSON.parse(cfg)));
+  } catch {}
+
+  const results = await Promise.allSettled(promises);
+  const ok = !results.some(r => r.status === 'rejected' || (r.status === 'fulfilled' && r.value === false));
+
+  if (ok) {
+    dirtyCanteenKeys.clear();
+    dirtyCanteenValues.clear();
+    localStorage.removeItem('canteen_pending_sync');
+    addCanteenSyncLog({
+      timestamp: new Date().toISOString(),
+      type: 'PUSH',
+      status: 'SUCCESS',
+      message: 'Manual backup of all Canteen tables & settings to Supabase completed.'
+    });
+    notifyStatus({ status: 'synced', lastSyncTime: new Date().toLocaleTimeString() });
+    return true;
+  } else {
+    addCanteenSyncLog({
+      timestamp: new Date().toISOString(),
+      type: 'PUSH',
+      status: 'ERROR',
+      message: 'Manual backup to Supabase failed for some records.'
+    });
+    notifyStatus({ status: 'error', errorMessage: 'Upload failed' });
+    return false;
+  }
 }
 
 const preloadedImageUrls = new Set<string>();
@@ -954,7 +1169,7 @@ export function initCanteenCloudSync(): () => void {
     )
     .subscribe();
 
-  // 4. Listen to local DOM events to auto-queue pushes to cloud
+  // 4. Listen to local DOM events to mark dirty and auto-backup to cloud after 10s
   const handleLocalTxs = () => queuePushKeyToCloud('canteen_txs');
   const handleLocalOrders = () => queuePushKeyToCloud('canteen_pre_orders');
   const handleLocalExpenses = () => queuePushKeyToCloud('canteen_expenses');
@@ -964,16 +1179,22 @@ export function initCanteenCloudSync(): () => void {
   const handleLocalRecipes = () => queuePushKeyToCloud('canteen_menu_recipes_v2');
   const handleLocalStockLogs = () => queuePushKeyToCloud('canteen_raw_stock_logs_v2');
   const handleLocalRawInventory = () => queuePushKeyToCloud('canteen_raw_inventory_items_v2');
+  const handleLocalMembers = () => queuePushKeyToCloud('canteen_members_cache');
+  const handleLocalSettings = (e: any) => {
+    if (e?.detail) {
+      queuePushKeyToCloud('baf_canteen_settings_v1', e.detail);
+    }
+  };
   const handleLocalDailyMenu = () => {
     try {
       const rawMenu = localStorage.getItem('canteen_daily_menu');
       const parsedMenu = rawMenu ? JSON.parse(rawMenu) : [];
-      queuePushKeyToCloud('canteen_daily_menu', parsedMenu, 50);
+      queuePushKeyToCloud('canteen_daily_menu', parsedMenu);
     } catch {
-      queuePushKeyToCloud('canteen_daily_menu', [], 50);
+      queuePushKeyToCloud('canteen_daily_menu', []);
     }
     const rawTime = localStorage.getItem('canteen_daily_menu_updated_at') || new Date().toISOString();
-    queuePushKeyToCloud('canteen_daily_menu_updated_at', rawTime, 50);
+    queuePushKeyToCloud('canteen_daily_menu_updated_at', rawTime);
   };
 
   window.addEventListener('canteen_txs_updated', handleLocalTxs);
@@ -986,6 +1207,29 @@ export function initCanteenCloudSync(): () => void {
   window.addEventListener('canteen_raw_stock_logs_updated', handleLocalStockLogs);
   window.addEventListener('canteen_raw_inventory_updated', handleLocalRawInventory);
   window.addEventListener('canteen_daily_menu_updated', handleLocalDailyMenu);
+  window.addEventListener('canteen_members_updated', handleLocalMembers);
+  window.addEventListener('canteen_settings_updated', handleLocalSettings);
+
+  // 10-Second interval:
+  // Backs up ONLY if something changed! If dirtyCanteenKeys is empty, does nothing!
+  const tenSecBackupTicker = setInterval(() => {
+    if (dirtyCanteenKeys.size > 0 && !isCanteenBackingUp) {
+      performCanteenBackup();
+    }
+  }, 10000);
+
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === 'hidden' && dirtyCanteenKeys.size > 0) {
+      performCanteenBackup();
+    }
+  };
+  const handleBeforeUnload = () => {
+    if (dirtyCanteenKeys.size > 0) {
+      performCanteenBackup();
+    }
+  };
+  window.addEventListener('visibilitychange', handleVisibilityChange);
+  window.addEventListener('beforeunload', handleBeforeUnload);
 
   return () => {
     supabase.removeChannel(channel);
@@ -998,7 +1242,12 @@ export function initCanteenCloudSync(): () => void {
     window.removeEventListener('canteen_menu_recipes_updated', handleLocalRecipes);
     window.removeEventListener('canteen_raw_stock_logs_updated', handleLocalStockLogs);
     window.removeEventListener('canteen_raw_inventory_updated', handleLocalRawInventory);
+    window.removeEventListener('canteen_members_updated', handleLocalMembers);
+    window.removeEventListener('canteen_settings_updated', handleLocalSettings);
     clearInterval(autoResetTimer);
+    clearInterval(tenSecBackupTicker);
+    window.removeEventListener('visibilitychange', handleVisibilityChange);
+    window.removeEventListener('beforeunload', handleBeforeUnload);
     window.removeEventListener('canteen_daily_menu_updated', handleLocalDailyMenu);
     isInitialized = false;
   };

@@ -263,6 +263,10 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
     txList.forEach((tx) => {
       if (!tx || isPaymentTx(tx) || tx.type === 'REVERTED' || tx.isReverted || tx.status === 'REVERTED' || String(tx.items || '').includes('[বাতিল')) return;
 
+      // Paid cash sales are settled instantly at counter and do NOT constitute unpaid due
+      const isPaidSale = (tx.status === 'PAID' || tx.paymentStatus === 'PAID' || String(tx.gateway || tx.paymentMethod || '').toUpperCase() === 'CASH');
+      if (isPaidSale) return;
+
       const isInit = tx.type === 'INITIAL_BILL' || 
         tx.type === 'AMOUNT_CHANGE' ||
         tx.isAmountChange ||
@@ -817,13 +821,24 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
       }
 
       // Open WhatsApp with pre-filled message
-      window.open(`https://wa.me/?text=${encodeURIComponent(shareMessage)}`, '_blank');
+      try {
+        const waLink = document.createElement('a');
+        waLink.href = `https://wa.me/?text=${encodeURIComponent(shareMessage)}`;
+        waLink.target = '_blank';
+        waLink.rel = 'noopener noreferrer';
+        document.body.appendChild(waLink);
+        waLink.click();
+        document.body.removeChild(waLink);
+      } catch (openErr) {
+        console.warn('Could not open WhatsApp window:', openErr);
+      }
       setWhatsAppShareSuccess('✅ বিলের ছবি ডাউনলোড হয়েছে এবং মেসেজ কপি হয়েছে! হোয়াটসঅ্যাপে ছবি ও মেসেজ পেস্ট করে পাঠান।');
       setTimeout(() => setWhatsAppShareSuccess(null), 7000);
 
     } catch (err: any) {
       console.error('WhatsApp share error:', err);
-      alert('ছবি তৈরি করতে সমস্যা হয়েছে: ' + (err.message || 'Error'));
+      setWhatsAppShareSuccess('❌ ছবি তৈরি করতে সমস্যা হয়েছে: ' + (err.message || 'Error'));
+      setTimeout(() => setWhatsAppShareSuccess(null), 7000);
     } finally {
       setIsSharingWhatsApp(false);
     }

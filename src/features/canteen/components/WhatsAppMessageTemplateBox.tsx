@@ -58,13 +58,11 @@ export const WhatsAppMessageTemplateBox: React.FC<WhatsAppMessageTemplateBoxProp
   };
 
   const handleReset = () => {
-    if (window.confirm('আপনি কি ডিফল্ট মেসেজ ফরম্যাটে ফিরে যেতে চান?')) {
-      setConfig({ ...DEFAULT_WHATSAPP_TEMPLATE_CONFIG });
-      saveWhatsAppTemplateConfig({ ...DEFAULT_WHATSAPP_TEMPLATE_CONFIG });
-      setSaveSuccessMsg('ডিফল্ট ফরম্যাট রিস্টোর করা হয়েছে!');
-      setTimeout(() => setSaveSuccessMsg(null), 3500);
-      if (onSaved) onSaved();
-    }
+    setConfig({ ...DEFAULT_WHATSAPP_TEMPLATE_CONFIG });
+    saveWhatsAppTemplateConfig({ ...DEFAULT_WHATSAPP_TEMPLATE_CONFIG });
+    setSaveSuccessMsg('ডিফল্ট ফরম্যাট রিস্টোর করা হয়েছে!');
+    setTimeout(() => setSaveSuccessMsg(null), 3500);
+    if (onSaved) onSaved();
   };
 
   // Sample data for Live Preview

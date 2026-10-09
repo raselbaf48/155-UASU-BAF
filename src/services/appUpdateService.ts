@@ -207,12 +207,18 @@ export async function downloadAppUpdate(apkUrl: string): Promise<boolean> {
     });
     return true;
   } catch (err) {
-    console.warn('[AppUpdate] Capacitor Browser.open failed, falling back to window.open:', err);
+    console.warn('[AppUpdate] Capacitor Browser.open failed, falling back to link download:', err);
     try {
-      window.open(apkUrl, '_blank');
+      const link = document.createElement('a');
+      link.href = apkUrl;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
       return true;
-    } catch (winErr) {
-      console.error('[AppUpdate] Fallback window.open also failed:', winErr);
+    } catch (linkErr) {
+      console.error('[AppUpdate] Fallback link navigation also failed:', linkErr);
       return false;
     }
   }

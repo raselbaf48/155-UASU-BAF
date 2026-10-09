@@ -63,7 +63,12 @@ export const AllFundsOverviewSection: React.FC<AllFundsOverviewProps> = ({ onSel
 
   // 1. Canteen Fund Calc
   const billPaymentCash = canteenTxs
-    .filter(r => r.type === 'BILL PAYMENT' && String(r.gateway || '').toUpperCase() === 'CASH')
+    .filter(r => {
+      const isGwCash = String(r.gateway || r.paymentMethod || '').toUpperCase() === 'CASH';
+      const isCollection = r.type === 'BILL PAYMENT' || r.type === 'BAZAR_RETURN' || r.type === 'ADVANCE_RETURN';
+      const isPaidSale = (r.type === 'SALE' || r.type === 'PURCHASE') && (r.status === 'PAID' || r.paymentStatus === 'PAID' || isGwCash);
+      return (isCollection || isPaidSale) && isGwCash;
+    })
     .reduce((a, b) => a + (Number(b.amount) || 0), 0);
   const billPaymentUCB = canteenTxs
     .filter(r => r.type === 'BILL PAYMENT' && String(r.gateway || '').toUpperCase() === 'UCB')

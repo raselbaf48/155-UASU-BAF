@@ -21,6 +21,7 @@ export const DutyConflictMonitor: React.FC<DutyConflictMonitorProps> = ({
   const [loading, setLoading] = useState<boolean>(true);
   const [solvingId, setSolvingId] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string>('');
+  const [errorMsg, setErrorMsg] = useState<string>('');
 
   const fetchAlerts = async () => {
     setLoading(true);
@@ -120,7 +121,8 @@ export const DutyConflictMonitor: React.FC<DutyConflictMonitorProps> = ({
       setTimeout(() => setSuccessMsg(''), 3000);
     } catch (err: any) {
       console.error('Error solving conflict:', err);
-      window.alert(`Failed to auto-resolve conflict: ${err.message}`);
+      setErrorMsg(`Failed to auto-resolve conflict: ${err.message}`);
+      setTimeout(() => setErrorMsg(''), 4000);
     } finally {
       setSolvingId(null);
     }
@@ -211,6 +213,13 @@ export const DutyConflictMonitor: React.FC<DutyConflictMonitorProps> = ({
         <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-700 rounded-xl text-emerald-800 dark:text-emerald-200 text-xs font-bold text-center flex items-center justify-center space-x-2">
           <Check className="w-4 h-4 text-emerald-600" />
           <span>{successMsg}</span>
+        </div>
+      )}
+
+      {errorMsg && (
+        <div className="p-3.5 bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-700 rounded-xl text-rose-800 dark:text-rose-200 text-xs font-bold text-center flex items-center justify-center space-x-2">
+          <AlertTriangle className="w-4 h-4 text-rose-600" />
+          <span>{errorMsg}</span>
         </div>
       )}
 

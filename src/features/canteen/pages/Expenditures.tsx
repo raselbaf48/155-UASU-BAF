@@ -2642,15 +2642,28 @@ export const Expenditures: React.FC = () => {
               <div className="p-5 sm:p-6 space-y-4">
                 {/* 1. DATE / তারিখ (Box click opens calendar) */}
                 <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
-                      DATE (তারিখ - বক্সে ক্লিক করলে ক্যালেন্ডার ওপেন হবে)
-                    </label>
-                    <span className="text-[10px] font-mono font-bold text-amber-400">
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1.5">
+                    DATE (তারিখ)
+                  </label>
+                  <div 
+                    onClick={() => {
+                      const input = document.getElementById('adv-date-picker-input') as HTMLInputElement | null;
+                      if (input && typeof (input as any).showPicker === 'function') {
+                        try {
+                          (input as any).showPicker();
+                        } catch {
+                          input.focus();
+                        }
+                      } else if (input) {
+                        input.focus();
+                      }
+                    }}
+                    className="relative inline-flex items-center space-x-2 bg-slate-950 hover:bg-slate-900 border border-slate-700 hover:border-amber-500 focus:border-amber-500 rounded-xl px-3 py-1.5 cursor-pointer transition-colors group select-none shadow-xs"
+                  >
+                    <Calendar className="w-3.5 h-3.5 text-amber-400 group-hover:scale-110 transition-transform shrink-0" />
+                    <span className="text-xs font-mono font-bold text-white tracking-wide">
                       {formatCanteenDate(advDate)}
                     </span>
-                  </div>
-                  <div className="relative">
                     <input
                       id="adv-date-picker-input"
                       type="date"
@@ -2660,12 +2673,7 @@ export const Expenditures: React.FC = () => {
                           setAdvDate(formatCanteenDate(e.target.value));
                         }
                       }}
-                      onClick={(e) => {
-                        try {
-                          (e.currentTarget as any).showPicker?.();
-                        } catch {}
-                      }}
-                      className="w-full bg-slate-950 border border-slate-700 hover:border-amber-500 focus:border-amber-500 rounded-xl px-4 py-3 text-xs font-mono font-bold text-white focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer [color-scheme:dark]"
+                      className="absolute inset-0 opacity-0 pointer-events-none w-full h-full"
                     />
                   </div>
                 </div>
