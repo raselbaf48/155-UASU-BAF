@@ -2587,7 +2587,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
       {/* MODAL: Add / Edit Raw Item */}
       {showAddModal && !readOnly && (
         <div className="fixed inset-0 z-[250] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 w-full max-w-xl shadow-2xl animate-in zoom-in-95 max-h-[90vh] flex flex-col">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 w-full max-w-xl shadow-2xl animate-in zoom-in-95 h-[85vh] min-h-[550px] max-h-[90vh] flex flex-col">
             <div className="flex justify-between items-center pb-4 border-b border-slate-800 shrink-0">
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
@@ -3246,7 +3246,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
 
                           if (itemLogs.length === 0) {
                             return (
-                              <div className="p-10 text-center text-slate-500">
+                              <div className="flex-1 flex flex-col items-center justify-center p-10 text-center text-slate-500 min-h-[260px]">
                                 <History className="w-8 h-8 mx-auto mb-2 opacity-40 text-slate-600" />
                                 <p className="text-xs font-semibold">
                                   {itemHistoryDateFilter ? 'No transactions found on this date.' : 'No transaction history recorded yet.'}
@@ -3716,7 +3716,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
       {/* MODAL: Stock Transaction Logs */}
       {showLogsModal && (
         <div className="fixed inset-0 z-[250] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 w-full max-w-4xl shadow-2xl animate-in zoom-in-95 max-h-[85vh] flex flex-col">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 w-full max-w-4xl shadow-2xl animate-in zoom-in-95 h-[85vh] min-h-[550px] max-h-[90vh] flex flex-col">
             <div className="flex justify-between items-center pb-4 border-b border-slate-800 shrink-0">
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
@@ -3796,7 +3796,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
             </div>
 
             {/* Logs List */}
-            <div className="flex-1 overflow-y-auto py-3 space-y-2 pr-1">
+            <div className="flex-1 overflow-y-auto py-3 space-y-2 pr-1 flex flex-col min-h-0">
               {(() => {
                 const filteredLogs = logs.filter(l => {
                   if (logFilter !== 'ALL' && l.type !== logFilter) return false;
@@ -3816,7 +3816,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
 
                 if (filteredLogs.length === 0) {
                   return (
-                    <div className="text-center py-12 text-slate-500 font-bold">
+                    <div className="flex-1 flex flex-col items-center justify-center text-center py-12 text-slate-500 font-bold min-h-[300px]">
                       <Boxes className="w-8 h-8 mx-auto text-slate-600 mb-2 opacity-50" />
                       <p>{globalLogDateFilter ? 'No movement logs found on this date' : 'No movement logs found'}</p>
                     </div>

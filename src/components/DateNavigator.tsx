@@ -77,9 +77,9 @@ export function DateNavigator({
           type="button"
           disabled={disabled}
           onClick={(e) => { e.preventDefault(); addDays(-1); }}
-          className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer disabled:opacity-50 transition-colors shrink-0 border border-slate-200 dark:border-slate-700 shadow-xs"
+          className="w-7 h-7 flex items-center justify-center bg-gradient-to-b from-slate-100 via-slate-200 to-slate-300 dark:from-slate-700 dark:via-slate-800 dark:to-slate-900 hover:from-white hover:to-slate-250 dark:hover:from-slate-600 dark:hover:to-slate-750 text-slate-700 dark:text-indigo-300 hover:text-slate-900 dark:hover:text-white rounded-lg transition-all cursor-pointer disabled:opacity-50 shrink-0 border-t border-white/60 dark:border-t-slate-600/80 border-x border-slate-300 dark:border-slate-700/80 border-b-[2.5px] border-b-slate-400 dark:border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.1),inset_0_1px_0_rgba(255,255,255,0.7)] dark:shadow-[0_2px_4px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.5)]"
         >
-          <ChevronLeft className="w-4 h-4" />
+          <ChevronLeft className="w-3.5 h-3.5 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.4)]" />
         </button>
       )}
       
@@ -114,9 +114,9 @@ export function DateNavigator({
           type="button"
           disabled={disabled}
           onClick={(e) => { e.preventDefault(); addDays(1); }}
-          className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-200 dark:hover:bg-slate-700 cursor-pointer disabled:opacity-50 transition-colors shrink-0 border border-slate-200 dark:border-slate-700 shadow-xs"
+          className="w-7 h-7 flex items-center justify-center bg-gradient-to-b from-slate-100 via-slate-200 to-slate-300 dark:from-slate-700 dark:via-slate-800 dark:to-slate-900 hover:from-white hover:to-slate-250 dark:hover:from-slate-600 dark:hover:to-slate-750 text-slate-700 dark:text-indigo-300 hover:text-slate-900 dark:hover:text-white rounded-lg transition-all cursor-pointer disabled:opacity-50 shrink-0 border-t border-white/60 dark:border-t-slate-600/80 border-x border-slate-300 dark:border-slate-700/80 border-b-[2.5px] border-b-slate-400 dark:border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.1),inset_0_1px_0_rgba(255,255,255,0.7)] dark:shadow-[0_2px_4px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.5)]"
         >
-          <ChevronRight className="w-4 h-4" />
+          <ChevronRight className="w-3.5 h-3.5 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.4)]" />
         </button>
       )}
 

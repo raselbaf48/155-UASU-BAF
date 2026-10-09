@@ -962,10 +962,10 @@ export const PosSales: React.FC = () => {
             </div>
 
             {/* Members Grid: Multi-column responsive grid based on screen size, approx 3 rows visible */}
-            <div className="max-h-[195px] overflow-y-auto pr-1">
+            <div className="h-[195px] min-h-[195px] max-h-[195px] overflow-y-auto pr-1 flex flex-col">
               {filteredMembers.length === 0 ? (
-                <div className="text-center py-12 text-slate-400 bg-slate-900/40 rounded-2xl border border-slate-800 p-6">
-                  <Users className="w-10 h-10 mx-auto opacity-20 mb-2" />
+                <div className="flex-1 flex flex-col items-center justify-center text-center py-4 text-slate-400 bg-slate-900/40 rounded-2xl border border-slate-800 p-6">
+                  <Users className="w-8 h-8 mx-auto opacity-20 mb-2" />
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-300">No Members Found</p>
                   <p className="text-[11px] text-slate-500 mt-1">Check search filters or try another rank category.</p>
                 </div>
@@ -1374,7 +1374,7 @@ export const PosSales: React.FC = () => {
       {/* History Modal - Table Format (Ser No, Customer Name, Item Name, Qty, Total, Status) */}
       {showHistoryModal && (
         <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-2 sm:p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl sm:rounded-[2rem] w-full max-w-4xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden animate-in zoom-in-95">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl sm:rounded-[2rem] w-full max-w-4xl shadow-2xl flex flex-col h-[85vh] min-h-[550px] max-h-[92vh] overflow-hidden animate-in zoom-in-95">
             
             {/* Header (Renamed to 'History' as requested) */}
             <div className="p-4 sm:p-5 border-b border-slate-800 bg-slate-900/95 space-y-3 shrink-0">
@@ -1408,7 +1408,7 @@ export const PosSales: React.FC = () => {
                 <div className="relative flex-1">
                   <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input 
-                    type="text"
+                    type="text" 
                     value={historySearchTerm}
                     onChange={(e) => setHistorySearchTerm(e.target.value)}
                     placeholder="Search by customer, BD No, item, or date..."
@@ -1438,9 +1438,9 @@ export const PosSales: React.FC = () => {
             </div>
             
             {/* Scrollable Table Body */}
-            <div className="p-3 sm:p-5 overflow-y-auto flex-1">
+            <div className="p-3 sm:p-5 overflow-y-auto flex-1 flex flex-col min-h-0">
               {filteredSalesHistory.length === 0 ? (
-                <div className="text-center py-12 text-slate-400 bg-slate-950/40 rounded-2xl border border-slate-800/80 p-6">
+                <div className="flex-1 flex flex-col items-center justify-center text-center py-12 text-slate-400 bg-slate-950/40 rounded-2xl border border-slate-800/80 p-6 min-h-[250px]">
                   <History className="w-12 h-12 mx-auto opacity-20 mb-3" />
                   <p className="text-xs font-bold uppercase tracking-widest text-slate-300">No Sales Records Found</p>
                   <p className="text-[11px] text-slate-500 mt-1">
@@ -1448,7 +1448,7 @@ export const PosSales: React.FC = () => {
                   </p>
                 </div>
               ) : (
-                <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-950/60 shadow-inner">
+                <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-950/60 shadow-inner flex-1">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="bg-slate-900/90 text-slate-400 font-mono text-[11px] uppercase tracking-wider border-b border-slate-800">
@@ -1585,12 +1585,10 @@ export const PosSales: React.FC = () => {
             </div>
 
             {/* Footer Summary Bar */}
-            {filteredSalesHistory.length > 0 && (
-              <div className="p-3 sm:p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-between text-xs font-mono font-bold text-slate-400 shrink-0">
-                <span>Total Records: <strong className="text-white">{filteredSalesHistory.length}</strong></span>
-                <span>Grand Total: <strong className="text-emerald-400 text-sm">৳{filteredSalesHistory.reduce((sum, t) => sum + Number(t.amount || 0), 0).toLocaleString()}</strong></span>
-              </div>
-            )}
+            <div className="p-3 sm:p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-between text-xs font-mono font-bold text-slate-400 shrink-0">
+              <span>Total Records: <strong className="text-white">{filteredSalesHistory.length}</strong></span>
+              <span>Grand Total: <strong className="text-emerald-400 text-sm">৳{filteredSalesHistory.reduce((sum, t) => sum + Number(t.amount || 0), 0).toLocaleString()}</strong></span>
+            </div>
           </div>
         </div>
       )}

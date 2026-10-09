@@ -1036,7 +1036,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       {/* Unified Item Details & Recipe Modal */}
       {selectedItemForModal && !readOnly && (
          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in zoom-in-95">
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-4xl shadow-2xl flex flex-col max-h-[92vh]">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-4xl shadow-2xl flex flex-col h-[85vh] min-h-[580px] max-h-[92vh]">
                {/* Modal Header */}
                <div className="flex items-center justify-between pb-4 border-b border-slate-800 shrink-0">
                   <div className="flex items-center space-x-3">
@@ -1294,8 +1294,8 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                      </div>
                   ) : (
                      /* Tab 2: Sales & Issued History */
-                     <div className="space-y-4">
-                        <div className="flex items-center justify-between">
+                     <div className="space-y-4 flex-1 flex flex-col min-h-0">
+                        <div className="flex items-center justify-between shrink-0">
                            <div className="flex items-center space-x-2.5">
                               <button
                                  type="button"
@@ -1332,49 +1332,56 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                            </div>
                         </div>
 
-                        {itemSalesHistory.length === 0 ? (
-                           <div className="bg-slate-950/60 border border-dashed border-slate-800 rounded-2xl p-12 text-center">
-                              <ShoppingBag className="w-10 h-10 text-slate-600 mx-auto mb-2" />
-                              <p className="text-xs font-bold text-slate-400">No sales transactions found for this item.</p>
-                           </div>
-                        ) : (
-                           <div className="bg-slate-950 border border-slate-800/80 rounded-2xl overflow-hidden max-h-80 overflow-y-auto">
-                              <table className="w-full text-left text-xs">
-                                 <thead className="bg-slate-900 text-slate-400 text-[10px] uppercase font-bold tracking-wider border-b border-slate-800">
-                                    <tr>
-                                       <th className="py-2.5 px-3 text-center w-12">SL</th>
-                                       <th className="py-2.5 px-3">Date</th>
-                                       <th className="py-2.5 px-3">Member / Buyer</th>
-                                       <th className="py-2.5 px-3 text-center">Qty</th>
-                                       <th className="py-2.5 px-3 text-right">Total</th>
-                                       <th className="py-2.5 px-3">Payment</th>
-                                    </tr>
-                                 </thead>
-                                 <tbody className="divide-y divide-slate-800/60 text-slate-300">
-                                    {itemSalesHistory
-                                       .filter(tx => {
-                                          if (historyDateFilter) {
-                                             const txDateStr = String(tx.date || tx.timestamp || '');
-                                             if (!txDateStr.includes(historyDateFilter)) {
-                                                const d = new Date(txDateStr);
-                                                if (!isNaN(d.getTime())) {
-                                                   const iso = d.toISOString().split('T')[0];
-                                                   const local = d.toLocaleDateString('en-CA');
-                                                   if (iso !== historyDateFilter && local !== historyDateFilter) return false;
-                                                } else {
-                                                   return false;
-                                                }
-                                             }
-                                          }
-                                          if (historySearchTerm) {
-                                             const term = historySearchTerm.toLowerCase();
-                                             return (tx.memberName || "").toLowerCase().includes(term) ||
-                                                    (tx.memberBd || "").toLowerCase().includes(term) ||
-                                                    (tx.date || "").includes(term);
-                                          }
-                                          return true;
-                                       })
-                                       .map((tx, idx) => (
+                        {(() => {
+                           const filteredTx = itemSalesHistory.filter(tx => {
+                              if (historyDateFilter) {
+                                 const txDateStr = String(tx.date || tx.timestamp || '');
+                                 if (!txDateStr.includes(historyDateFilter)) {
+                                    const d = new Date(txDateStr);
+                                    if (!isNaN(d.getTime())) {
+                                       const iso = d.toISOString().split('T')[0];
+                                       const local = d.toLocaleDateString('en-CA');
+                                       if (iso !== historyDateFilter && local !== historyDateFilter) return false;
+                                    } else {
+                                       return false;
+                                    }
+                                 }
+                              }
+                              if (historySearchTerm) {
+                                 const term = historySearchTerm.toLowerCase();
+                                 return (tx.memberName || "").toLowerCase().includes(term) ||
+                                        (tx.memberBd || "").toLowerCase().includes(term) ||
+                                        (tx.date || "").includes(term);
+                              }
+                              return true;
+                           });
+
+                           if (filteredTx.length === 0) {
+                              return (
+                                 <div className="bg-slate-950/60 border border-dashed border-slate-800 rounded-2xl p-12 text-center flex-1 flex flex-col items-center justify-center min-h-[320px]">
+                                    <ShoppingBag className="w-10 h-10 text-slate-600 mx-auto mb-2" />
+                                    <p className="text-xs font-bold text-slate-400">
+                                       {historyDateFilter ? 'No sales transactions found on this date.' : 'No sales transactions found for this item.'}
+                                    </p>
+                                 </div>
+                              );
+                           }
+
+                           return (
+                              <div className="bg-slate-950 border border-slate-800/80 rounded-2xl overflow-hidden flex-1 overflow-y-auto min-h-[320px]">
+                                 <table className="w-full text-left text-xs">
+                                    <thead className="bg-slate-900 text-slate-400 text-[10px] uppercase font-bold tracking-wider border-b border-slate-800 sticky top-0">
+                                       <tr>
+                                          <th className="py-2.5 px-3 text-center w-12">SL</th>
+                                          <th className="py-2.5 px-3">Date</th>
+                                          <th className="py-2.5 px-3">Member / Buyer</th>
+                                          <th className="py-2.5 px-3 text-center">Qty</th>
+                                          <th className="py-2.5 px-3 text-right">Total</th>
+                                          <th className="py-2.5 px-3">Payment</th>
+                                       </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-800/60 text-slate-300">
+                                       {filteredTx.map((tx, idx) => (
                                           <tr key={idx} className="hover:bg-slate-900/40 transition-colors">
                                              <td className="py-2 px-3 text-center font-mono text-[11px] text-slate-400 font-bold">{idx + 1}</td>
                                              <td className="py-2 px-3 font-mono text-[11px] text-slate-400">{formatCanteenDate(tx.date || tx.timestamp) || tx.date || tx.timestamp || "—"}</td>
@@ -1388,10 +1395,11 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                                              </td>
                                           </tr>
                                        ))}
-                                 </tbody>
-                              </table>
-                           </div>
-                        )}
+                                    </tbody>
+                                 </table>
+                              </div>
+                           );
+                        })()}
                      </div>
                   )}
                </div>

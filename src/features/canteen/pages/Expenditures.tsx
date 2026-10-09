@@ -3169,7 +3169,7 @@ export const Expenditures: React.FC = () => {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-slate-900 border border-indigo-500/40 rounded-3xl w-full max-w-2xl max-h-[85vh] shadow-2xl flex flex-col overflow-hidden"
+              className="bg-slate-900 border border-indigo-500/40 rounded-3xl w-full max-w-2xl h-[85vh] min-h-[550px] max-h-[90vh] shadow-2xl flex flex-col overflow-hidden"
             >
               {/* Header */}
               <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/80">

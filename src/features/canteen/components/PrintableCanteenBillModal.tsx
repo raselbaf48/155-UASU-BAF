@@ -870,14 +870,14 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
 
         <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full sm:w-auto justify-between sm:justify-start">
           {/* Month Selector with Left and Right Arrows */}
-          <div className="flex items-center bg-slate-800/90 rounded-xl px-1.5 py-1 border border-slate-700">
+          <div className="flex items-center bg-slate-800/90 rounded-xl px-1.5 py-1 border border-slate-700 shadow-inner">
             <button
               type="button"
               onClick={handlePrevMonth}
-              className="p-1 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors cursor-pointer"
+              className="w-7 h-7 flex items-center justify-center bg-gradient-to-b from-slate-700 via-slate-800 to-slate-900 hover:from-slate-600 hover:to-slate-750 text-indigo-300 hover:text-white rounded-lg transition-all cursor-pointer border-t border-slate-600/80 border-x border-slate-700/80 border-b-[2.5px] border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.6)]"
               title="পূর্ববর্তী মাস (Previous Month)"
             >
-              <ChevronLeft className="w-4 h-4 text-indigo-400" />
+              <ChevronLeft className="w-3.5 h-3.5 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]" />
             </button>
             <div className="px-2.5 py-0.5 text-center min-w-[100px] select-none">
               <span className="text-xs font-black text-white flex items-center justify-center space-x-1">
@@ -888,10 +888,10 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
             <button
               type="button"
               onClick={handleNextMonth}
-              className="p-1 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors cursor-pointer"
+              className="w-7 h-7 flex items-center justify-center bg-gradient-to-b from-slate-700 via-slate-800 to-slate-900 hover:from-slate-600 hover:to-slate-750 text-indigo-300 hover:text-white rounded-lg transition-all cursor-pointer border-t border-slate-600/80 border-x border-slate-700/80 border-b-[2.5px] border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.6)]"
               title="পরবর্তী মাস (Next Month)"
             >
-              <ChevronRight className="w-4 h-4 text-indigo-400" />
+              <ChevronRight className="w-3.5 h-3.5 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]" />
             </button>
           </div>
 

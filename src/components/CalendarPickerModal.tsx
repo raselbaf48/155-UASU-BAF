@@ -161,10 +161,10 @@ export const CalendarPickerModal: React.FC<CalendarPickerModalProps> = ({
             <button
               type="button"
               onClick={handlePrevMonth}
-              className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700 shadow-xs transition-colors cursor-pointer"
+              className="w-8 h-8 flex items-center justify-center bg-gradient-to-b from-white via-slate-100 to-slate-200 dark:from-slate-700 dark:via-slate-800 dark:to-slate-900 hover:from-slate-50 hover:to-slate-200 dark:hover:from-slate-650 dark:hover:to-slate-800 text-slate-700 dark:text-indigo-300 hover:text-slate-900 dark:hover:text-white rounded-lg transition-all cursor-pointer border-t border-white dark:border-t-slate-600/80 border-x border-slate-250 dark:border-slate-700/80 border-b-[2.5px] border-b-slate-400 dark:border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.1),inset_0_1px_0_rgba(255,255,255,0.8)] dark:shadow-[0_2px_4px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.5)]"
               title="Previous Month"
             >
-              <ChevronLeft className="w-4 h-4" />
+              <ChevronLeft className="w-4 h-4 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.4)]" />
             </button>
 
             <div className="flex items-center space-x-1.5">
@@ -198,10 +198,10 @@ export const CalendarPickerModal: React.FC<CalendarPickerModalProps> = ({
             <button
               type="button"
               onClick={handleNextMonth}
-              className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700 shadow-xs transition-colors cursor-pointer"
+              className="w-8 h-8 flex items-center justify-center bg-gradient-to-b from-white via-slate-100 to-slate-200 dark:from-slate-700 dark:via-slate-800 dark:to-slate-900 hover:from-slate-50 hover:to-slate-200 dark:hover:from-slate-650 dark:hover:to-slate-800 text-slate-700 dark:text-indigo-300 hover:text-slate-900 dark:hover:text-white rounded-lg transition-all cursor-pointer border-t border-white dark:border-t-slate-600/80 border-x border-slate-250 dark:border-slate-700/80 border-b-[2.5px] border-b-slate-400 dark:border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.1),inset_0_1px_0_rgba(255,255,255,0.8)] dark:shadow-[0_2px_4px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.5)]"
               title="Next Month"
             >
-              <ChevronRight className="w-4 h-4" />
+              <ChevronRight className="w-4 h-4 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.4)]" />
             </button>
           </div>
 

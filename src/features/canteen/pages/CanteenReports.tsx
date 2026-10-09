@@ -548,7 +548,7 @@ export const CanteenReports: React.FC = () => {
 
       {/* VIEW MODE 1: STANDARD AUDIT TRAIL */}
       {activeTab === 'AUDIT' && (
-         <div className="bg-slate-900 rounded-[2rem] shadow-sm border border-slate-800 overflow-hidden">
+         <div className="bg-slate-900 rounded-[2rem] shadow-sm border border-slate-800 overflow-hidden min-h-[460px] flex flex-col">
             {/* Filter Bar */}
             <div className="p-5 sm:p-6 border-b border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
                <div className="flex items-center space-x-3">

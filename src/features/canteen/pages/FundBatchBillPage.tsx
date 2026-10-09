@@ -1458,9 +1458,9 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
               )}
 
               {/* Members Selection List */}
-              <div className="max-h-[520px] overflow-y-auto space-y-2 pr-1 scrollbar-none">
+              <div className="h-[480px] min-h-[420px] max-h-[520px] overflow-y-auto space-y-2 pr-1 scrollbar-none flex flex-col">
                 {filteredMembers.length === 0 ? (
-                  <div className="p-8 text-center text-slate-400 text-xs font-bold">
+                  <div className="flex-1 flex items-center justify-center p-8 text-center text-slate-400 text-xs font-bold">
                     No matching members found
                   </div>
                 ) : (
@@ -1607,7 +1607,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
             )}
           </div>
 
-          <div className="overflow-x-auto border border-slate-800 rounded-2xl">
+          <div className="overflow-x-auto border border-slate-800 rounded-2xl min-h-[360px]">
             <table className="w-full text-left text-xs whitespace-nowrap">
               <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] font-black border-b border-slate-800">
                 <tr>
@@ -1621,7 +1621,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
               <tbody className="divide-y divide-slate-800/60 font-medium">
                 {filteredHistoryTransactions.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-slate-500 font-bold">
+                    <td colSpan={5} className="px-4 py-24 text-center text-slate-500 font-bold">
                       {historySearch ? 'No matching records found' : 'No transaction records found for this category'}
                     </td>
                   </tr>

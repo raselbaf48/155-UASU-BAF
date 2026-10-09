@@ -113,7 +113,7 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
         <button
           type="button"
           onClick={handleToggleAll}
-          className={`px-2.5 py-1 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer border shrink-0 ${
+          className={`h-8 min-h-[32px] px-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer border shrink-0 flex items-center justify-center ${
             isAll
               ? 'bg-indigo-600 border-indigo-500 text-white shadow-xs ring-1 ring-indigo-400/50'
               : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white hover:bg-slate-900'
@@ -125,17 +125,17 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
       )}
 
       {/* Date Navigation Pill - Snug, compact with Left Arrow, Date + Calendar Icon, Right Arrow */}
-      <div className={`inline-flex items-center bg-slate-950 border rounded-xl p-0.5 shadow-xs shrink-0 transition-colors ${
+      <div className={`inline-flex items-center bg-slate-950 border rounded-xl p-0.5 shadow-xs shrink-0 transition-colors h-8 min-h-[32px] ${
         !isAll ? 'border-indigo-500/60 bg-indigo-950/20' : 'border-slate-800 hover:border-slate-700'
       }`}>
-        {/* Left Arrow (Previous Day) */}
+        {/* Left Arrow (Previous Day) - 3D Tactile Button */}
         <button
           type="button"
           onClick={handlePrev}
           title="Previous day"
-          className="w-6 h-6 flex items-center justify-center hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer active:scale-90"
+          className="w-7 h-7 flex items-center justify-center bg-gradient-to-b from-slate-700 via-slate-800 to-slate-900 hover:from-slate-600 hover:to-slate-750 text-indigo-300 hover:text-white rounded-lg transition-all cursor-pointer border-t border-slate-600/80 border-x border-slate-700/80 border-b-[2.5px] border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.6)]"
         >
-          <ChevronLeft className="w-3.5 h-3.5 text-indigo-400" />
+          <ChevronLeft className="w-3.5 h-3.5 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]" />
         </button>
 
         {/* Center Date Display - Clicking opens rich CalendarPickerModal */}
@@ -143,24 +143,24 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
           data-date-box="true"
           title="Click to select specific date from calendar"
           onClick={() => setIsCalendarOpen(true)}
-          className="relative flex items-center space-x-1.5 px-2 py-0.5 rounded-lg hover:bg-slate-900 cursor-pointer transition-colors group select-none"
+          className="relative flex items-center justify-center space-x-1.5 px-2.5 h-7 min-h-[28px] rounded-lg hover:bg-slate-900 cursor-pointer transition-colors group select-none min-w-[36px]"
         >
           <span className={`text-xs font-mono font-bold tracking-tight whitespace-nowrap pointer-events-none ${
             !isAll ? 'text-white' : 'text-slate-300'
           }`}>
-            {displayFormatted}
+            {displayFormatted || '—'}
           </span>
           <Calendar className="w-3.5 h-3.5 text-indigo-400 group-hover:scale-110 transition-transform shrink-0 pointer-events-none" />
         </div>
 
-        {/* Right Arrow (Next Day) */}
+        {/* Right Arrow (Next Day) - 3D Tactile Button */}
         <button
           type="button"
           onClick={handleNext}
           title="Next day"
-          className="w-6 h-6 flex items-center justify-center hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer active:scale-90"
+          className="w-7 h-7 flex items-center justify-center bg-gradient-to-b from-slate-700 via-slate-800 to-slate-900 hover:from-slate-600 hover:to-slate-750 text-indigo-300 hover:text-white rounded-lg transition-all cursor-pointer border-t border-slate-600/80 border-x border-slate-700/80 border-b-[2.5px] border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.6)]"
         >
-          <ChevronRight className="w-3.5 h-3.5 text-indigo-400" />
+          <ChevronRight className="w-3.5 h-3.5 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]" />
         </button>
       </div>
 

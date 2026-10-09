@@ -4190,10 +4190,10 @@ export const MemberDB: React.FC = () => {
               <button
                 type="button"
                 onClick={handlePrevMonth}
-                className="w-7 h-7 flex items-center justify-center hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer active:scale-90"
+                className="w-7 h-7 flex items-center justify-center bg-gradient-to-b from-slate-700 via-slate-800 to-slate-900 hover:from-slate-600 hover:to-slate-750 text-indigo-300 hover:text-white rounded-lg transition-all cursor-pointer border-t border-slate-600/80 border-x border-slate-700/80 border-b-[2.5px] border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.6)]"
                 title="পূর্ববর্তী মাস"
               >
-                <ChevronLeft className="w-3.5 h-3.5 text-indigo-400" />
+                <ChevronLeft className="w-3.5 h-3.5 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]" />
               </button>
 
               <div className="px-2.5 py-0.5 text-center select-none flex items-center space-x-1.5">
@@ -4206,10 +4206,10 @@ export const MemberDB: React.FC = () => {
               <button
                 type="button"
                 onClick={handleNextMonth}
-                className="w-7 h-7 flex items-center justify-center hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer active:scale-90"
+                className="w-7 h-7 flex items-center justify-center bg-gradient-to-b from-slate-700 via-slate-800 to-slate-900 hover:from-slate-600 hover:to-slate-750 text-indigo-300 hover:text-white rounded-lg transition-all cursor-pointer border-t border-slate-600/80 border-x border-slate-700/80 border-b-[2.5px] border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.6)]"
                 title="পরবর্তী মাস"
               >
-                <ChevronRight className="w-3.5 h-3.5 text-indigo-400" />
+                <ChevronRight className="w-3.5 h-3.5 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]" />
               </button>
             </div>
 
@@ -6316,7 +6316,7 @@ export const MemberDB: React.FC = () => {
       {/* Payment History Modal */}
       {isPaymentHistoryOpen && (
         <div className="fixed inset-0 z-[200] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 overflow-y-auto animate-fadeIn">
-          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl w-full max-w-4xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl w-full max-w-4xl shadow-2xl flex flex-col h-[85vh] min-h-[550px] max-h-[90vh] overflow-hidden">
             {/* Modal Header */}
             <div className="p-5 border-b border-slate-800 bg-slate-950/60 flex items-center justify-between shrink-0">
               <div className="flex items-center space-x-3">
@@ -6401,14 +6401,14 @@ export const MemberDB: React.FC = () => {
                   />
 
                   {/* 3. Month Navigator with Left/Right Arrows & "October 26" format */}
-                  <div className="inline-flex items-center bg-slate-950 border border-slate-800 rounded-xl p-0.5 shadow-xs shrink-0">
+                  <div className="inline-flex items-center bg-slate-950 border border-slate-800 rounded-xl p-0.5 shadow-xs shrink-0 h-8 min-h-[32px]">
                     <button
                       type="button"
                       onClick={handlePaymentPrevMonth}
-                      className="w-6 h-6 flex items-center justify-center hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer active:scale-90"
+                      className="w-7 h-7 flex items-center justify-center bg-gradient-to-b from-slate-700 via-slate-800 to-slate-900 hover:from-slate-600 hover:to-slate-750 text-indigo-300 hover:text-white rounded-lg transition-all cursor-pointer border-t border-slate-600/80 border-x border-slate-700/80 border-b-[2.5px] border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.6)]"
                       title="পূর্ববর্তী মাস"
                     >
-                      <ChevronLeft className="w-3.5 h-3.5 text-indigo-400" />
+                      <ChevronLeft className="w-3.5 h-3.5 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]" />
                     </button>
 
                     <div className="relative px-2 py-0.5 text-center flex items-center space-x-1 cursor-pointer group">
@@ -6443,20 +6443,20 @@ export const MemberDB: React.FC = () => {
                     <button
                       type="button"
                       onClick={handlePaymentNextMonth}
-                      className="w-6 h-6 flex items-center justify-center hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer active:scale-90"
+                      className="w-7 h-7 flex items-center justify-center bg-gradient-to-b from-slate-700 via-slate-800 to-slate-900 hover:from-slate-600 hover:to-slate-750 text-indigo-300 hover:text-white rounded-lg transition-all cursor-pointer border-t border-slate-600/80 border-x border-slate-700/80 border-b-[2.5px] border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.6)]"
                       title="পরবর্তী মাস"
                     >
-                      <ChevronRight className="w-3.5 h-3.5 text-indigo-400" />
+                      <ChevronRight className="w-3.5 h-3.5 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]" />
                     </button>
                   </div>
                 </div>
 
                 {/* Method Buttons with Total Numbers */}
-                <div className="flex items-center bg-slate-950 rounded-xl p-0.5 border border-slate-800 shrink-0">
+                <div className="flex items-center bg-slate-950 rounded-xl p-0.5 border border-slate-800 shrink-0 h-8 min-h-[32px]">
                   <button
                     type="button"
                     onClick={() => setPaymentMethodFilter('ALL')}
-                    className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer flex items-center space-x-1 ${
+                    className={`h-7 px-2.5 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer flex items-center space-x-1 ${
                       paymentMethodFilter === 'ALL'
                         ? 'bg-indigo-600 text-white shadow-xs'
                         : 'text-slate-400 hover:text-white'
@@ -6468,7 +6468,7 @@ export const MemberDB: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setPaymentMethodFilter('CASH')}
-                    className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer flex items-center space-x-1 ${
+                    className={`h-7 px-2.5 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer flex items-center space-x-1 ${
                       paymentMethodFilter === 'CASH'
                         ? 'bg-emerald-600 text-white shadow-xs'
                         : 'text-slate-400 hover:text-white'
@@ -6480,7 +6480,7 @@ export const MemberDB: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setPaymentMethodFilter('UCB')}
-                    className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer flex items-center space-x-1 ${
+                    className={`h-7 px-2.5 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer flex items-center space-x-1 ${
                       paymentMethodFilter === 'UCB'
                         ? 'bg-blue-600 text-white shadow-xs'
                         : 'text-slate-400 hover:text-white'
@@ -6494,13 +6494,13 @@ export const MemberDB: React.FC = () => {
             </div>
 
             {/* Payments List Area */}
-            <div className="flex-1 overflow-y-auto p-3.5 sm:p-5 space-y-2.5 divide-y divide-slate-800/60">
+            <div className="flex-1 overflow-y-auto p-3.5 sm:p-5 space-y-2.5 divide-y divide-slate-800/60 flex flex-col">
               {filteredPaymentTxs.length === 0 ? (
-                <div className="py-12 text-center text-slate-500 space-y-2">
-                  <Receipt className="w-10 h-10 mx-auto text-slate-600 opacity-60" />
+                <div className="flex-1 flex flex-col items-center justify-center py-12 text-center text-slate-500 space-y-2 min-h-[280px]">
+                  <Receipt className="w-12 h-12 mx-auto text-slate-600 opacity-60" />
                   <p className="text-sm font-bold text-slate-400">No payment history found</p>
                   <p className="text-xs text-slate-500">
-                    {paymentSearch ? 'No records match search.' : 'No bill payments recorded yet.'}
+                    {paymentSearch ? 'No records match search.' : 'No bill payments recorded for this date filter.'}
                   </p>
                 </div>
               ) : (
