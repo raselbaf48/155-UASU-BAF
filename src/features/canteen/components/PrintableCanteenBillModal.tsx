@@ -244,7 +244,7 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
   }, [filteredMembers]);
 
   // Helper to extract comparable YYYY-MM key from any transaction
-  // Payments follow the 25th-24th billing cycle: 25 Sep - 24 Oct belongs to Sep (2026-09), 25 Oct - 24 Nov belongs to Oct (2026-10)
+  // Payments strictly belong to the month they were paid in (25th-24th shifting rule removed)
   const getMonthKeyOfTx = (tx: any): string => {
     if (isPaymentTx(tx)) {
       const cycleKey = getPaymentCycleMonthKey(tx.date || tx.timestamp || tx.created_at || tx.createdAt);

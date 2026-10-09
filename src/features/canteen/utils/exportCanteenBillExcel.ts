@@ -240,12 +240,8 @@ export const isPaymentTx = (tx: any): boolean => {
 };
 
 /**
- * Resolves the billing month key for a PAYMENT transaction according to the 25th-to-24th billing cycle:
- * - Payments made between 25th of month M and 24th of month M+1 count as payments for month M.
- *   Example: 25 Sep to 24 Oct -> "2026-09"
- *            25 Oct to 24 Nov -> "2026-10"
- *            25 Nov to 24 Dec -> "2026-11"
- *            25 Dec to 24 Jan -> "2026-12"
+ * Resolves the billing month key for a PAYMENT transaction:
+ * Whichever calendar month the bill was paid in, it belongs directly to that month (the 25th-24th shifting rule is removed).
  */
 export const getPaymentCycleMonthKey = (dateVal: any): string => {
   if (!dateVal) return '';
@@ -341,18 +337,8 @@ export const getPaymentCycleMonthKey = (dateVal: any): string => {
     }
   }
 
-  if (year && month && day) {
-    if (day >= 25) {
-      return `${year}-${String(month).padStart(2, '0')}`;
-    } else {
-      let prevM = month - 1;
-      let prevY = year;
-      if (prevM < 1) {
-        prevM = 12;
-        prevY -= 1;
-      }
-      return `${prevY}-${String(prevM).padStart(2, '0')}`;
-    }
+  if (year && month) {
+    return `${year}-${String(month).padStart(2, '0')}`;
   }
 
   return getTxMonthKey(dateVal);

@@ -4,7 +4,7 @@ import {
   Search, Plus, Edit2, Trash2, ImageIcon, Save, X, Loader2, 
   AlertTriangle, CheckCircle2, ChefHat, Sparkles, AlertCircle, 
   ShoppingBag, History, TrendingUp, DollarSign, Calendar, User, 
-  Percent, ArrowRight, UtensilsCrossed, Info, Lock, Eye, EyeOff,
+  Percent, ArrowRight, ArrowLeft, UtensilsCrossed, Info, Lock, Eye, EyeOff,
   Upload
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
@@ -12,6 +12,8 @@ import { resolveImageUrl, fetchDirectImageUrl, getCanteenConfig, getItemDisplayN
 import { getCanteenMenuCache, fetchCanteenMenuOnce } from '../utils/canteenMenuData';
 import { processGalleryImage } from '../utils/imageUpload';
 import { SaveButton } from '../components/SaveButton';
+import { formatCanteenDate } from '../utils/dateUtils';
+import { DateNavigator, getTodayYMD } from '../components/DateNavigator';
 import { 
   RecipeIngredient, 
   getRecipeForMenuItem, 
@@ -255,6 +257,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
   const [resolvingModalDp, setResolvingModalDp] = useState(false);
   const [modalNotice, setModalNotice] = useState<string>('');
   const [historySearchTerm, setHistorySearchTerm] = useState('');
+  const [historyDateFilter, setHistoryDateFilter] = useState(() => getTodayYMD());
 
   const handleOpenItemModal = (item: any) => {
     if (readOnly) return;
@@ -264,6 +267,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     setModalTab('EDIT');
     setModalNotice('');
     setHistorySearchTerm('');
+    setHistoryDateFilter(getTodayYMD());
     const existingRecipe = getRecipeForMenuItem(item.id, item.name);
     const normalizedRecipe = existingRecipe.map(ing => {
       const raw = rawList.find(r => r.id === ing.rawItemId || (r.name && ing.rawItemName && r.name.toLowerCase() === ing.rawItemName.toLowerCase()));
@@ -928,14 +932,10 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                            )}
                         </div>
 
-                        <div className="flex flex-col items-end space-y-1.5">
+                        <div className="flex flex-col items-end">
                            <span className="px-3 py-1 rounded-full text-[10px] font-black tracking-wider uppercase bg-indigo-950/80 text-indigo-300 border border-indigo-500/30 shadow-sm">
                               {item.category || "SNACKS"}
                            </span>
-                           <div className="flex items-center space-x-1 text-slate-400 text-xs">
-                              <ChefHat className="w-3.5 h-3.5 text-indigo-400" />
-                              <span>{displayCost > 0 ? "Recipe Formula (20 Pax)" : "রেসিপি নেই"}</span>
-                           </div>
                         </div>
                      </div>
 
@@ -1056,51 +1056,41 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                      </div>
                   </div>
 
-                  <div className="flex items-center space-x-2">
+                  {/* Upper Right Corner: Prominent History & Close Button */}
+                  <div className="flex items-center space-x-2.5">
                      <button
+                        type="button"
+                        onClick={() => setModalTab(modalTab === "HISTORY" ? "EDIT" : "HISTORY")}
+                        className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer border shadow-sm ${
+                           modalTab === "HISTORY" 
+                              ? "bg-indigo-600 text-white border-indigo-500 shadow-indigo-600/30 ring-2 ring-indigo-400/30" 
+                              : "bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border-slate-700 hover:border-slate-600"
+                        }`}
+                        title="View item sales & issue history"
+                     >
+                        <History className="w-4 h-4 text-indigo-300" />
+                        <span>History</span>
+                        <span className="px-1.5 py-0.5 rounded-md bg-black/40 text-[10px] font-mono font-black text-indigo-200">
+                           {itemSalesHistory.length}
+                        </span>
+                     </button>
+
+                     <button
+                        type="button"
                         onClick={() => setSelectedItemForModal(null)}
-                        className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition-colors cursor-pointer"
+                        className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl transition-colors cursor-pointer"
                      >
                         <X className="w-5 h-5" />
                      </button>
                   </div>
                </div>
 
-               {/* Tabs */}
-               <div className="flex items-center space-x-2 border-b border-slate-800 pt-3 pb-2 shrink-0">
-                  <button
-                     onClick={() => setModalTab("EDIT")}
-                     className={`flex items-center space-x-1.5 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
-                        modalTab === "EDIT" 
-                           ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30" 
-                           : "text-slate-400 hover:text-white hover:bg-slate-800"
-                     }`}
-                  >
-                     <Edit2 className="w-3.5 h-3.5" />
-                     <span>Details & Pricing</span>
-                  </button>
-
-                  <button
-                     onClick={() => setModalTab("HISTORY")}
-                     className={`flex items-center space-x-1.5 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
-                        modalTab === "HISTORY" 
-                           ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30" 
-                           : "text-slate-400 hover:text-white hover:bg-slate-800"
-                     }`}
-                  >
-                     <History className="w-3.5 h-3.5" />
-                     <span>History ({itemSalesHistory.length})</span>
-                  </button>
-               </div>
-
                {/* Tab Content */}
                <div className="flex-1 overflow-y-auto py-4 space-y-6 pr-1">
                   {modalTab === "EDIT" ? (
                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        {/* Left: General Details */}
+                        {/* Left Column: General Details & Media */}
                         <div className="space-y-4">
-                           
-
                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                               <div>
                                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
@@ -1163,7 +1153,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                               </div>
                            </div>
 
-                           {/* Photo Upload Section (Browse Gallery & Remove only - No Link Box) */}
+                           {/* Photo Upload Section */}
                            <div className="bg-slate-950/70 border border-slate-800/80 rounded-2xl p-4 space-y-3">
                               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Photo</label>
                               <div className="flex items-center space-x-4">
@@ -1211,8 +1201,11 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                                  </div>
                               </div>
                            </div>
+                        </div>
 
-                           {/* Financial Summary */}
+                        {/* Right Column: Financial Metrics & Live Inventory (Recipe Formulation Option Hidden) */}
+                        <div className="space-y-4">
+                           {/* Financial Summary: COST, PRICE, PROFIT */}
                            {(() => {
                               const calcCost = calculateMenuPortionCostFrom20Pax(
                                  { id: selectedItemForModal.id, name: modalFormData.name || selectedItemForModal.name, cost: modalFormData.cost },
@@ -1224,19 +1217,19 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                               const marginPct = selling > 0 ? ((profit / selling) * 100).toFixed(1) : "0";
 
                               return (
-                                 <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 grid grid-cols-3 gap-2 text-center">
-                                    <div>
-                                       <span className="text-[10px] font-bold text-slate-400 block">PRICE</span>
-                                       <span className="text-sm font-black text-white font-mono">৳{selling}</span>
+                                 <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 grid grid-cols-3 gap-2.5 text-center">
+                                    <div className="p-2.5 rounded-xl bg-slate-900/70 border border-slate-800/80">
+                                       <span className="text-[10px] font-bold text-slate-400 block uppercase tracking-wider">COST</span>
+                                       <span className="text-base font-black text-amber-400 font-mono">৳{calcCost.toFixed(1)}</span>
                                     </div>
-                                    <div>
-                                       <span className="text-[10px] font-bold text-slate-400 block">COST (20 PAX)</span>
-                                       <span className="text-sm font-black text-amber-400 font-mono">৳{calcCost.toFixed(1)}</span>
+                                    <div className="p-2.5 rounded-xl bg-slate-900/70 border border-slate-800/80">
+                                       <span className="text-[10px] font-bold text-slate-400 block uppercase tracking-wider">PRICE</span>
+                                       <span className="text-base font-black text-white font-mono">৳{selling}</span>
                                     </div>
-                                    <div>
-                                       <span className="text-[10px] font-bold text-slate-400 block">PROFIT ({marginPct}%)</span>
-                                       <span className={`text-sm font-black font-mono ${profit >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                                          ৳{profit.toFixed(1)}
+                                    <div className="p-2.5 rounded-xl bg-slate-900/70 border border-slate-800/80">
+                                       <span className="text-[10px] font-bold text-slate-400 block uppercase tracking-wider">PROFIT ({marginPct}%)</span>
+                                       <span className={`text-base font-black font-mono ${profit >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                                          {profit < 0 ? '-' : ''}৳{Math.abs(profit).toFixed(1)}
                                        </span>
                                     </div>
                                  </div>
@@ -1279,7 +1272,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                                     {stockInfo.ingredientsBreakdown.length > 0 && stockInfo.isRecipeBased && (
                                        <div className="space-y-1.5">
                                           <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 block">কাঁচামাল অনুযায়ী প্রাপ্যতা:</span>
-                                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-36 overflow-y-auto pr-1">
+                                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto pr-1">
                                              {stockInfo.ingredientsBreakdown.map((b, i) => (
                                                 <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800 text-[11px]">
                                                    <span className="text-slate-300 font-medium truncate max-w-[120px]" title={b.rawItemName}>{b.rawItemName}</span>
@@ -1298,95 +1291,44 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                               );
                            })()}
                         </div>
-
-                        {/* Right: Recipe Formulation & Cost Info */}
-                        <div className="space-y-4">
-                           <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-5 space-y-4">
-                              <div className="flex items-center space-x-2.5 text-emerald-400">
-                                 <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-                                    <ChefHat className="w-5 h-5 text-emerald-400" />
-                                 </div>
-                                 <div>
-                                    <h4 className="text-xs font-black uppercase tracking-wider text-white">
-                                       Recipe Formulation
-                                    </h4>
-                                    <p className="text-[10px] text-slate-400">
-                                       Standard 20-portion production matrix
-                                    </p>
-                                 </div>
-                              </div>
-
-                              {(() => {
-                                 const displayModalCost = calculateMenuPortionCostFrom20Pax(
-                                    { id: selectedItemForModal.id, name: modalFormData.name || selectedItemForModal.name },
-                                    recipes20Pax,
-                                    availableRawItems
-                                 );
-                                 const p = Number(modalFormData.price) || 0;
-                                 const profit = p - displayModalCost;
-                                 const marginPct = p > 0 ? Math.round((profit / p) * 100) : 0;
-
-                                 return (
-                                    <>
-                                       <div className="bg-slate-900/90 p-4 rounded-xl border border-slate-800 flex items-center justify-between">
-                                          <div className="space-y-0.5">
-                                             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                                                Live Portion Ready Cost (খরচ)
-                                             </span>
-                                             <span className="text-2xl font-black font-mono text-emerald-400">
-                                                ৳{displayModalCost.toFixed(1)}
-                                             </span>
-                                          </div>
-                                          <div className="text-right space-y-0.5">
-                                             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                                                Selling Price (মূল্য)
-                                             </span>
-                                             <span className="text-2xl font-black font-mono text-white">
-                                                ৳{p}
-                                             </span>
-                                          </div>
-                                       </div>
-
-                                       <div className="p-3 bg-indigo-950/40 border border-indigo-500/30 rounded-xl space-y-1 text-xs text-indigo-200">
-                                          <div className="flex items-center space-x-1.5 font-bold text-indigo-300">
-                                             <Info className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                                             <span>Real-time Cost Synchronization</span>
-                                          </div>
-                                          <p className="text-[11px] text-slate-400 leading-relaxed">
-                                             All raw material ingredients and 20-portion cooking formulas are centralized in <strong>Recipe Formulation</strong>. Whenever ingredient quantities or inventory rates change, this ready cost updates automatically in real-time.
-                                          </p>
-                                       </div>
-
-                                       <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between">
-                                          <span className="text-xs font-bold text-slate-300">Estimated Gross Margin:</span>
-                                          <span className={`font-mono font-bold text-xs ${profit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                             ৳{profit.toFixed(1)} ({marginPct}%)
-                                          </span>
-                                       </div>
-                                    </>
-                                 );
-                              })()}
-                           </div>
-                        </div>
                      </div>
                   ) : (
                      /* Tab 2: Sales & Issued History */
                      <div className="space-y-4">
                         <div className="flex items-center justify-between">
-                           <h4 className="text-xs font-black text-slate-300 uppercase tracking-wider flex items-center space-x-1.5">
-                              <History className="w-4 h-4 text-indigo-400" />
-                              <span>Sales & Consumption Log</span>
-                           </h4>
+                           <div className="flex items-center space-x-2.5">
+                              <button
+                                 type="button"
+                                 onClick={() => setModalTab("EDIT")}
+                                 className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-white text-xs font-bold transition-all border border-slate-700 cursor-pointer"
+                              >
+                                 <ArrowLeft className="w-3.5 h-3.5" />
+                                 <span>Back to Details</span>
+                              </button>
+                              <span className="text-slate-600 font-bold">•</span>
+                              <h4 className="text-xs font-black text-slate-300 uppercase tracking-wider flex items-center space-x-1.5">
+                                 <History className="w-4 h-4 text-indigo-400" />
+                                 <span>Sales & Consumption Log</span>
+                              </h4>
+                           </div>
 
-                           <div className="relative w-64">
-                              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                              <input 
-                                 type="text" 
-                                 placeholder="Search transactions..."
-                                 value={historySearchTerm ?? ""}
-                                 onChange={(e) => setHistorySearchTerm(e.target.value)}
-                                 className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl pl-8 pr-3 py-1.5 text-xs focus:outline-none"
+                           <div className="flex flex-wrap items-center gap-2">
+                              <DateNavigator 
+                                 value={historyDateFilter} 
+                                 onChange={setHistoryDateFilter} 
+                                 allowAll={true} 
                               />
+
+                              <div className="relative w-52">
+                                 <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                 <input 
+                                    type="text" 
+                                    placeholder="Search buyer/bd..."
+                                    value={historySearchTerm ?? ""}
+                                    onChange={(e) => setHistorySearchTerm(e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl pl-8 pr-3 py-1.5 text-xs focus:outline-none"
+                                 />
+                              </div>
                            </div>
                         </div>
 
@@ -1400,6 +1342,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                               <table className="w-full text-left text-xs">
                                  <thead className="bg-slate-900 text-slate-400 text-[10px] uppercase font-bold tracking-wider border-b border-slate-800">
                                     <tr>
+                                       <th className="py-2.5 px-3 text-center w-12">SL</th>
                                        <th className="py-2.5 px-3">Date</th>
                                        <th className="py-2.5 px-3">Member / Buyer</th>
                                        <th className="py-2.5 px-3 text-center">Qty</th>
@@ -1410,15 +1353,31 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                                  <tbody className="divide-y divide-slate-800/60 text-slate-300">
                                     {itemSalesHistory
                                        .filter(tx => {
-                                          if (!historySearchTerm) return true;
-                                          const term = historySearchTerm.toLowerCase();
-                                          return (tx.memberName || "").toLowerCase().includes(term) ||
-                                                 (tx.memberBd || "").toLowerCase().includes(term) ||
-                                                 (tx.date || "").includes(term);
+                                          if (historyDateFilter) {
+                                             const txDateStr = String(tx.date || tx.timestamp || '');
+                                             if (!txDateStr.includes(historyDateFilter)) {
+                                                const d = new Date(txDateStr);
+                                                if (!isNaN(d.getTime())) {
+                                                   const iso = d.toISOString().split('T')[0];
+                                                   const local = d.toLocaleDateString('en-CA');
+                                                   if (iso !== historyDateFilter && local !== historyDateFilter) return false;
+                                                } else {
+                                                   return false;
+                                                }
+                                             }
+                                          }
+                                          if (historySearchTerm) {
+                                             const term = historySearchTerm.toLowerCase();
+                                             return (tx.memberName || "").toLowerCase().includes(term) ||
+                                                    (tx.memberBd || "").toLowerCase().includes(term) ||
+                                                    (tx.date || "").includes(term);
+                                          }
+                                          return true;
                                        })
                                        .map((tx, idx) => (
                                           <tr key={idx} className="hover:bg-slate-900/40 transition-colors">
-                                             <td className="py-2 px-3 font-mono text-[11px] text-slate-400">{tx.date || tx.timestamp || "—"}</td>
+                                             <td className="py-2 px-3 text-center font-mono text-[11px] text-slate-400 font-bold">{idx + 1}</td>
+                                             <td className="py-2 px-3 font-mono text-[11px] text-slate-400">{formatCanteenDate(tx.date || tx.timestamp) || tx.date || tx.timestamp || "—"}</td>
                                              <td className="py-2 px-3 font-bold text-white">{tx.memberName || tx.memberBd || "Guest"}</td>
                                              <td className="py-2 px-3 text-center font-mono font-bold text-indigo-400">{tx.quantity || 1}</td>
                                              <td className="py-2 px-3 text-right font-mono font-bold text-emerald-400">৳{tx.totalAmount || tx.amount || 0}</td>

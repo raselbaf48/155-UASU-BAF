@@ -264,32 +264,33 @@ export const UnitFundSection: React.FC = () => {
     showToast(`৳${amt.toLocaleString('en-US')} সফলভাবে ${transferFrom} থেকে ${transferTo}-এ স্থানান্তর করা হয়েছে!`);
   };
 
-  // Delete handlers
-  const handleDeleteInflow = (id: string) => {
-    if (!window.confirm('আপনি কি এই জমার রেকর্ডটি মুছে ফেলতে চান?')) return;
-    const updated = inflows.filter(i => i.id !== id);
-    setInflows(updated);
-    localStorage.setItem(UNIT_INFLOWS_KEY, JSON.stringify(updated));
-    triggerUpdate();
-    showToast('জমার রেকর্ড মুছে ফেলা হয়েছে');
-  };
+  // Delete Confirmation Modal State
+  const [deleteConfirmTx, setDeleteConfirmTx] = useState<{ id: string; type: 'INFLOW' | 'EXPENSE' | 'TRANSFER'; desc: string; amount: number } | null>(null);
 
-  const handleDeleteExpense = (id: string) => {
-    if (!window.confirm('আপনি কি এই খরচের রেকর্ডটি মুছে ফেলতে চান?')) return;
-    const updated = expenses.filter(e => e.id !== id);
-    setExpenses(updated);
-    localStorage.setItem(UNIT_EXPENSES_KEY, JSON.stringify(updated));
-    triggerUpdate();
-    showToast('খরচের রেকর্ড মুছে ফেলা হয়েছে');
-  };
-
-  const handleDeleteTransfer = (id: string) => {
-    if (!window.confirm('আপনি কি এই ট্রান্সফারের রেকর্ডটি মুছে ফেলতে চান?')) return;
-    const updated = transfers.filter(t => t.id !== id);
-    setTransfers(updated);
-    localStorage.setItem(UNIT_TRANSFERS_KEY, JSON.stringify(updated));
-    triggerUpdate();
-    showToast('ট্রান্সফার রেকর্ড মুছে ফেলা হয়েছে');
+  // Direct Delete Handlers & Modal Confirm
+  const executeDeleteRecord = () => {
+    if (!deleteConfirmTx) return;
+    const { id, type } = deleteConfirmTx;
+    if (type === 'INFLOW') {
+      const updated = inflows.filter(i => i.id !== id);
+      setInflows(updated);
+      localStorage.setItem(UNIT_INFLOWS_KEY, JSON.stringify(updated));
+      triggerUpdate();
+      showToast('জমার রেকর্ড মুছে ফেলা হয়েছে');
+    } else if (type === 'EXPENSE') {
+      const updated = expenses.filter(e => e.id !== id);
+      setExpenses(updated);
+      localStorage.setItem(UNIT_EXPENSES_KEY, JSON.stringify(updated));
+      triggerUpdate();
+      showToast('খরচের রেকর্ড মুছে ফেলা হয়েছে');
+    } else if (type === 'TRANSFER') {
+      const updated = transfers.filter(t => t.id !== id);
+      setTransfers(updated);
+      localStorage.setItem(UNIT_TRANSFERS_KEY, JSON.stringify(updated));
+      triggerUpdate();
+      showToast('ট্রান্সফার রেকর্ড মুছে ফেলা হয়েছে');
+    }
+    setDeleteConfirmTx(null);
   };
 
   // Combined and sorted transactions
@@ -627,9 +628,12 @@ export const UnitFundSection: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => {
-                          if (tx.type === 'INFLOW') handleDeleteInflow(tx.id);
-                          else if (tx.type === 'EXPENSE') handleDeleteExpense(tx.id);
-                          else if (tx.type === 'TRANSFER') handleDeleteTransfer(tx.id);
+                          setDeleteConfirmTx({
+                            id: tx.id,
+                            type: tx.type,
+                            desc: tx.description || tx.category || 'রেকর্ড',
+                            amount: tx.amount
+                          });
                         }}
                         className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
                         title="Delete Record"
@@ -1024,6 +1028,41 @@ export const UnitFundSection: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE TRANSACTION CONFIRMATION MODAL */}
+      {deleteConfirmTx && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-slate-900 border border-rose-500/30 rounded-3xl w-full max-w-sm p-6 shadow-2xl relative text-white space-y-4 animate-in zoom-in-95">
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div className="text-center space-y-1">
+              <h4 className="text-base font-black text-white">রেকর্ড মুছে ফেলতে চান?</h4>
+              <p className="text-xs text-slate-400">
+                আপনি কি নিশ্চিত যে <strong className="text-white">"{deleteConfirmTx.desc}"</strong>-এর{' '}
+                <strong className="text-rose-400 font-mono">৳{deleteConfirmTx.amount.toLocaleString()}</strong> রেকর্ডটি মুছে ফেলতে চান?
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmTx(null)}
+                className="py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+              >
+                বাতিল
+              </button>
+              <button
+                type="button"
+                onClick={executeDeleteRecord}
+                className="py-2.5 px-4 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs transition-colors flex items-center justify-center space-x-1.5 shadow-lg shadow-rose-950/50 cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>মুছে ফেলুন</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

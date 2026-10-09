@@ -125,9 +125,14 @@ export const CanteenFund: React.FC = () => {
     };
   }, []);
 
-  // 1. Inflow from Bill Payments & Bazar Advance Returns
+  // 1. Inflow from Bill Payments, Bazar Advance Returns & POS Paid Cash Sales (Manager Cash)
   const billPaymentCash = reports
-    .filter(r => (r.type === 'BILL PAYMENT' || r.type === 'BAZAR_RETURN' || r.type === 'ADVANCE_RETURN') && String(r.gateway || '').toUpperCase() === 'CASH')
+    .filter(r => {
+      const isGwCash = String(r.gateway || r.paymentMethod || '').toUpperCase() === 'CASH';
+      const isCollection = r.type === 'BILL PAYMENT' || r.type === 'BAZAR_RETURN' || r.type === 'ADVANCE_RETURN';
+      const isPaidSale = (r.type === 'SALE' || r.type === 'PURCHASE') && (r.status === 'PAID' || r.paymentStatus === 'PAID' || isGwCash);
+      return (isCollection || isPaidSale) && isGwCash;
+    })
     .reduce((a, b) => a + (Number(b.amount) || 0), 0);
 
   const billPaymentUCB = reports
@@ -180,7 +185,12 @@ export const CanteenFund: React.FC = () => {
   const managerCash = Math.max(0, totalCash - staffAdvanceAmount);
 
   // Lists for logs
-  const cashPayments = reports.filter(r => (r.type === 'BILL PAYMENT' || r.type === 'BAZAR_RETURN' || r.type === 'ADVANCE_RETURN') && String(r.gateway || '').toUpperCase() === 'CASH');
+  const cashPayments = reports.filter(r => {
+    const isGwCash = String(r.gateway || r.paymentMethod || '').toUpperCase() === 'CASH';
+    const isCollection = r.type === 'BILL PAYMENT' || r.type === 'BAZAR_RETURN' || r.type === 'ADVANCE_RETURN';
+    const isPaidSale = (r.type === 'SALE' || r.type === 'PURCHASE') && (r.status === 'PAID' || r.paymentStatus === 'PAID' || isGwCash);
+    return (isCollection || isPaidSale) && isGwCash;
+  });
   const ucbPayments = reports.filter(r => (r.type === 'BILL PAYMENT' || r.type === 'BAZAR_RETURN' || r.type === 'ADVANCE_RETURN') && String(r.gateway || '').toUpperCase() === 'UCB');
 
   const cashExpenses = expenses.filter(e => {
@@ -211,9 +221,12 @@ export const CanteenFund: React.FC = () => {
 
     // 1. Inflows (Cash & UCB)
     reports.forEach((r, idx) => {
+      const isGwCash = String(r.gateway || r.paymentMethod || '').toUpperCase() === 'CASH';
+      const isGwUcb = String(r.gateway || r.paymentMethod || '').toUpperCase() === 'UCB';
       const isCollection = r.type === 'BILL PAYMENT' || r.type === 'BAZAR_RETURN' || r.type === 'ADVANCE_RETURN';
-      if (!isCollection) return;
-      const gw = String(r.gateway || 'CASH').toUpperCase();
+      const isPaidSale = (r.type === 'SALE' || r.type === 'PURCHASE') && (r.status === 'PAID' || r.paymentStatus === 'PAID' || isGwCash);
+      if (!isCollection && !isPaidSale) return;
+      const gw = isGwCash ? 'CASH' : isGwUcb ? 'UCB' : 'CASH';
       const amt = Number(r.amount) || 0;
       if (amt <= 0) return;
       const dStr = r.date || '';
@@ -223,8 +236,14 @@ export const CanteenFund: React.FC = () => {
         id: `inflow-${r.id || idx}`,
         date: dStr,
         logType: isRefund ? 'CASH_REFUND' : 'INFLOW',
-        title: isRefund ? `Cash Refund: ${r.memberName || 'Staff'}` : (r.memberName || r.airman_id || 'Collection'),
-        subtitle: isRefund 
+        title: isPaidSale 
+          ? `POS Cash Sale: ${r.memberName || r.customerName || 'Customer'}`
+          : isRefund 
+          ? `Cash Refund: ${r.memberName || 'Staff'}` 
+          : (r.memberName || r.airman_id || 'Collection'),
+        subtitle: isPaidSale
+          ? `Cash Sale • ${r.items || 'Menu Items'} (Manager Cash Drawer)`
+          : isRefund 
           ? `Advance Return / Settle Surplus • Returned to Cash (${r.memberName || ''})`
           : (r.items || 'Bill Payment') + (r.bdNo ? ` (BD-${r.bdNo})` : ''),
         channel: gw,

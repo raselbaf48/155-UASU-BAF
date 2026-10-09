@@ -8,6 +8,7 @@ import {
   X, 
   Plus, 
   Trash2, 
+  Loader2,
   Calendar, 
   Coins, 
   Users, 
@@ -68,7 +69,23 @@ interface FundBatchBillPageProps {
   formatMemberNameBn: (n: string) => string;
   getMemberTotalDue: (member: any, category: BillCategory) => number;
   getMemberFilteredBill: (member: any, category: BillCategory, month: string) => number;
+  onRemoveTx?: (tx: any) => Promise<void> | void;
 }
+
+export const formatActiveMonth = (monthKey: string): string => {
+  if (!monthKey || monthKey === 'ALL') return 'All Months';
+  const parts = String(monthKey).split('-');
+  if (parts.length < 2) return monthKey;
+  const year = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10);
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+  const name = monthNames[month - 1] || parts[1];
+  const yy = String(year).slice(-2);
+  return `${name}-${yy}`;
+};
 
 export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
   category,
@@ -89,6 +106,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
   formatMemberNameBn,
   getMemberTotalDue,
   getMemberFilteredBill,
+  onRemoveTx,
 }) => {
   const isUnitFund = category === 'UNIT_FUND';
   const categoryTitle = isUnitFund ? 'UNIT FUND' : 'OTHERS BILL';
@@ -111,6 +129,11 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
   const [selectedStaffName, setSelectedStaffName] = useState<string>('Civ Tanvir');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  // Transaction delete confirmation state
+  const [txToDelete, setTxToDelete] = useState<any | null>(null);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
+  const [deletedTxIds, setDeletedTxIds] = useState<Set<string>>(new Set());
 
   const canteenConfig = useMemo(() => getCanteenConfig(), []);
   const managerName = canteenConfig?.managerName || 'LAC Nishad';
@@ -199,6 +222,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
   const [dueListFilter, setDueListFilter] = useState<'ALL' | 'WITH_DUE'>('ALL');
   const [viewMode, setViewMode] = useState<'CARDS' | 'TABLE'>('TABLE');
   const [activeTab, setActiveTab] = useState<'ADD_BATCH' | 'RECENT_LOG'>('ADD_BATCH');
+  const [historySearch, setHistorySearch] = useState<string>('');
 
   // Quick preset notes for Others fund
   const quickNotes = [
@@ -280,13 +304,25 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
   // Filter category transactions for recent log
   const categoryTransactions = useMemo(() => {
     return (allTxs || [])
-      .filter((tx) => getTxCategory(tx) === category)
+      .filter((tx) => getTxCategory(tx) === category && !deletedTxIds.has(String(tx.id)))
       .sort((a, b) => {
         const timeA = new Date(a.date || a.created_at || 0).getTime() || a.timestamp || 0;
         const timeB = new Date(b.date || b.created_at || 0).getTime() || b.timestamp || 0;
         return timeB - timeA;
       });
-  }, [allTxs, category]);
+  }, [allTxs, category, deletedTxIds]);
+
+  const filteredHistoryTransactions = useMemo(() => {
+    if (!historySearch.trim()) return categoryTransactions;
+    const q = historySearch.toLowerCase().trim();
+    return categoryTransactions.filter((tx) => {
+      const name = String(tx.memberName || tx.name || '').toLowerCase();
+      const bd = String(tx.bdNo || tx.airman_id || '').toLowerCase();
+      const items = String(tx.items || tx.note || '').toLowerCase();
+      const date = String(tx.date || tx.monthKey || '').toLowerCase();
+      return name.includes(q) || bd.includes(q) || items.includes(q) || date.includes(q);
+    });
+  }, [categoryTransactions, historySearch]);
 
   // Selection helpers
   const handleToggleMember = (airmanId: string) => {
@@ -575,13 +611,19 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
     }
   };
 
-  // Delete an individual transaction
-  const handleDeleteTx = async (txId: string) => {
-    if (!window.confirm('Are you sure you want to delete this bill transaction?')) {
-      return;
-    }
+  // Delete an individual transaction with in-app confirmation & proper member due reversal
+  const confirmDeleteTx = async () => {
+    if (!txToDelete) return;
+    const tx = txToDelete;
+    const txIdStr = String(tx.id);
+    setIsDeleting(true);
 
     try {
+      // 1. Immediately record in permanently deleted IDs so it never comes back
+      recordDeletedTxId(txIdStr);
+      setDeletedTxIds((prev) => new Set(prev).add(txIdStr));
+
+      // 2. Remove from canteen_txs in localStorage and cloud immediately
       const existingTxs = (() => {
         try {
           return JSON.parse(localStorage.getItem('canteen_txs') || '[]');
@@ -589,11 +631,70 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
           return [];
         }
       })();
-
-      const filtered = existingTxs.filter((t: any) => String(t.id) !== String(txId));
+      const filtered = existingTxs.filter((t: any) => String(t.id) !== txIdStr);
       localStorage.setItem('canteen_txs', JSON.stringify(filtered));
-      recordDeletedTxId(txId);
       await pushKeyToCloud('canteen_txs', filtered);
+
+      // 3. Delegate to onRemoveTx if provided from parent (MemberDB)
+      if (onRemoveTx) {
+        try {
+          await onRemoveTx(tx);
+        } catch (e) {
+          console.warn('onRemoveTx call error in FundBatchBillPage:', e);
+        }
+      }
+
+      // 4. Find target member to reverse their Due locally and in Supabase
+      const targetMember = members.find((m: any) => {
+        if (!m) return false;
+        if (tx.airman_id && m.airman_id === tx.airman_id) return true;
+        const txBd = String(tx.bdNo || tx['BD No'] || '').trim();
+        const mBd = String(m['BD No'] || m.bdNo || '').trim();
+        if (txBd && mBd && txBd.toLowerCase() === mBd.toLowerCase()) return true;
+        const txBdClean = txBd.replace(/\D/g, '');
+        const mBdClean = mBd.replace(/\D/g, '');
+        if (txBdClean && mBdClean && txBdClean === mBdClean) return true;
+        const txName = String(tx.memberName || tx.name || '').trim().toLowerCase();
+        const mSurname = String(m.Surname || m.surname || '').trim().toLowerCase();
+        if (txName && mSurname && (txName.includes(mSurname) || mSurname.includes(txName))) return true;
+        return false;
+      });
+
+      if (targetMember) {
+        const amountToReverse = Number(tx.amount || 0);
+        const currentDue = Number(targetMember.Due ?? targetMember.due ?? targetMember.baki ?? 0);
+        const newDue = Math.max(0, currentDue - amountToReverse);
+
+        try {
+          if (targetMember.airman_id) {
+            await supabase
+              .from('Canteen_Member')
+              .update({ Due: newDue })
+              .eq('airman_id', targetMember.airman_id);
+          }
+          if (targetMember['BD No']) {
+            await supabase
+              .from('Canteen_Member')
+              .update({ Due: newDue })
+              .eq('BD No', String(targetMember['BD No']).trim());
+          }
+        } catch (e) {
+          console.warn('Supabase member due update on delete:', e);
+        }
+
+        targetMember.Due = newDue;
+        targetMember.due = newDue;
+        targetMember.baki = newDue;
+
+        const cleanBd = String(targetMember['BD No'] || targetMember.airman_id || '').replace(/\D/g, '').toLowerCase();
+        if (cleanBd) {
+          try {
+            const rawStored = localStorage.getItem(`canteen_member_${cleanBd}`);
+            const stored = rawStored ? JSON.parse(rawStored) : {};
+            localStorage.setItem(`canteen_member_${cleanBd}`, JSON.stringify({ ...stored, Due: newDue, due: newDue, baki: newDue }));
+          } catch {}
+        }
+      }
 
       window.dispatchEvent(new Event('canteen_txs_updated'));
       window.dispatchEvent(new Event('canteen_state_updated'));
@@ -601,9 +702,12 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       window.dispatchEvent(new Event('storage'));
 
       showToast('Transaction record deleted successfully');
-      onSuccess();
+      setTxToDelete(null);
+      if (onSuccess) onSuccess();
     } catch (err: any) {
       showToast(`Delete failed: ${err.message}`, 'error');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -630,7 +734,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       )}
 
       {/* Top Header & Navigation Strip */}
-      <div className="flex items-center justify-between gap-4 bg-slate-900/90 border border-slate-800 p-4 sm:p-5 rounded-3xl shadow-sm">
+      <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 bg-slate-900/90 border border-slate-800 p-4 sm:p-5 rounded-3xl shadow-sm">
         <div className="flex items-center space-x-3.5">
           <button
             type="button"
@@ -642,16 +746,16 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
           </button>
 
           <div className="flex items-center space-x-3">
-            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border ${
+            <div className={`w-11 h-11 sm:w-12 sm:h-12 rounded-2xl flex items-center justify-center shrink-0 border ${
               isUnitFund 
                 ? 'bg-indigo-500/15 border-indigo-500/30 text-indigo-400 shadow-md shadow-indigo-500/10' 
                 : 'bg-cyan-500/15 border-cyan-500/30 text-cyan-400 shadow-md shadow-cyan-500/10'
             }`}>
-              {isUnitFund ? <Landmark className="w-6 h-6" /> : <Layers className="w-6 h-6" />}
+              {isUnitFund ? <Landmark className="w-5 h-5 sm:w-6 sm:h-6" /> : <Layers className="w-5 h-5 sm:w-6 sm:h-6" />}
             </div>
             <div>
-              <div className="flex items-center space-x-2">
-                <h1 className="text-xl sm:text-2xl font-black text-white uppercase tracking-tight">
+              <div className="flex items-center space-x-2 flex-wrap">
+                <h1 className="text-lg sm:text-2xl font-black text-white uppercase tracking-tight">
                   {isUnitFund ? 'UNIT FUND MANAGEMENT' : 'OTHERS BILL MANAGEMENT'}
                 </h1>
                 <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase font-mono border ${
@@ -660,7 +764,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                   {isUnitFund ? 'UNIT FUND' : 'OTHERS BILL'}
                 </span>
               </div>
-              <p className="text-xs text-slate-400 font-bold mt-0.5">
+              <p className="text-[11px] sm:text-xs text-slate-400 font-bold mt-0.5">
                 {isUnitFund 
                   ? 'Batch assign and record fixed monthly Unit Fund subscriptions for members' 
                   : 'Batch charge specific expenses to members with automatic fund deductions'}
@@ -668,36 +772,79 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Upper Right Corner: Prominent History & Action Control */}
+        <div className="flex items-center space-x-2 shrink-0 self-end sm:self-auto">
+          {activeTab === 'ADD_BATCH' ? (
+            <button
+              type="button"
+              onClick={() => setActiveTab('RECENT_LOG')}
+              className={`flex items-center space-x-2 px-4 py-2.5 rounded-2xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer shadow-lg active:scale-95 border ${
+                isUnitFund
+                  ? 'bg-slate-950 hover:bg-indigo-950/60 text-slate-200 hover:text-white border-slate-800 hover:border-indigo-500/50 shadow-black/40'
+                  : 'bg-slate-950 hover:bg-cyan-950/60 text-slate-200 hover:text-white border-slate-800 hover:border-cyan-500/50 shadow-black/40'
+              } group`}
+              title="View Audited Transaction History"
+            >
+              <Clock className={`w-4 h-4 transition-transform group-hover:rotate-[-30deg] ${
+                isUnitFund ? 'text-indigo-400' : 'text-cyan-400'
+              }`} />
+              <span>History</span>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-black ${
+                isUnitFund 
+                  ? 'bg-indigo-950 text-indigo-300 border border-indigo-500/40'
+                  : 'bg-cyan-950 text-cyan-300 border border-cyan-500/40'
+              }`}>
+                {categoryTransactions.length}
+              </span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setActiveTab('ADD_BATCH')}
+              className={`flex items-center space-x-2 px-4 py-2.5 rounded-2xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer shadow-lg active:scale-95 border ${
+                isUnitFund
+                  ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white border-indigo-400/40 shadow-indigo-900/40'
+                  : 'bg-gradient-to-r from-cyan-600 to-cyan-700 hover:from-cyan-500 hover:to-cyan-600 text-white border-cyan-400/40 shadow-cyan-900/40'
+              }`}
+            >
+              <Plus className="w-4 h-4" />
+              <span>New Batch Bill</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Summary KPI Cards & Month Selector */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        {/* Month Selector Card */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 shadow-sm flex flex-col justify-between">
+        {/* Month Selector Card - Clean, High Contrast with Active Month formatted (e.g. October-26) */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center space-x-1.5">
               <Calendar className="w-3.5 h-3.5 text-indigo-400" />
               <span>ACTIVE MONTH</span>
             </span>
-            <span className="text-[11px] font-mono font-bold text-slate-400">{currentMonth}</span>
+            <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-black bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+              {formatActiveMonth(currentMonth)}
+            </span>
           </div>
 
-          <div className="flex items-center justify-between bg-slate-950/80 rounded-xl p-1 border border-slate-800">
+          <div className="flex items-center justify-between bg-slate-950/90 rounded-xl p-1 border border-slate-800 shadow-inner">
             <button
               type="button"
               onClick={handlePrevMonth}
-              className="p-1 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
+              className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
               title="Previous Month"
             >
               <ChevronLeft className="w-4 h-4 text-indigo-400" />
             </button>
-            <div className="text-center font-bold text-xs sm:text-sm text-slate-100 font-mono">
-              {currentMonth}
+            <div className="text-center font-black text-xs sm:text-sm text-white font-mono tracking-wide">
+              {formatActiveMonth(currentMonth)}
             </div>
             <button
               type="button"
               onClick={handleNextMonth}
-              className="p-1 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
+              className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
               title="Next Month"
             >
               <ChevronRight className="w-4 h-4 text-indigo-400" />
@@ -708,7 +855,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
         {/* Monthly Billed & Total Due: Compact & Side-by-Side (grid-cols-2) */}
         <div className="md:col-span-2 grid grid-cols-2 gap-2.5 sm:gap-3">
           {/* Monthly Billed */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 shadow-sm flex flex-col justify-between">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 shadow-sm flex flex-col justify-between">
             <div className="flex items-center justify-between mb-1">
               <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 truncate">
                 MONTHLY BILLED
@@ -724,13 +871,13 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                 ৳{stats.totalMonthBilled.toLocaleString()}
               </div>
               <p className="text-[10px] font-bold text-slate-400 truncate mt-0.5">
-                Total billed in {currentMonth}
+                Total billed in {formatActiveMonth(currentMonth)}
               </p>
             </div>
           </div>
 
           {/* Total Overall Due */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 shadow-sm flex flex-col justify-between">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 shadow-sm flex flex-col justify-between">
             <div className="flex items-center justify-between mb-1">
               <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 truncate">
                 TOTAL {categoryTitle} DUE
@@ -748,41 +895,6 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
               </p>
             </div>
           </div>
-        </div>
-      </div>
-
-      {/* Main Mode Navigation (Add Batch Bill vs Recent Log) */}
-      <div className="flex items-center justify-between border-b border-slate-800 pb-3 flex-wrap gap-2">
-        <div className="flex items-center space-x-2">
-          <button
-            type="button"
-            onClick={() => setActiveTab('ADD_BATCH')}
-            className={`px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider flex items-center space-x-2 transition-all cursor-pointer ${
-              activeTab === 'ADD_BATCH'
-                ? isUnitFund
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                  : 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30'
-                : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
-            }`}
-          >
-            <Plus className="w-4 h-4" />
-            <span>Batch Bill Generator</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('RECENT_LOG')}
-            className={`px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider flex items-center space-x-2 transition-all cursor-pointer ${
-              activeTab === 'RECENT_LOG'
-                ? isUnitFund
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                  : 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30'
-                : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
-            }`}
-          >
-            <Clock className="w-4 h-4" />
-            <span>Transaction History & Audit Log ({categoryTransactions.length})</span>
-          </button>
         </div>
       </div>
 
@@ -1254,18 +1366,53 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       {/* ================= RECENT TRANSACTION AUDIT LOG ================= */}
       {activeTab === 'RECENT_LOG' && (
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-            <div>
-              <h3 className="text-base font-black text-white uppercase tracking-tight">
-                {categoryTitle} Transaction History & Audit Log
-              </h3>
-              <p className="text-xs text-slate-400 font-bold mt-0.5">
-                Audited list of recently billed transactions • Delete incorrect entries anytime
-              </p>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-800 pb-4 gap-3">
+            <div className="flex items-center space-x-3">
+              <button
+                type="button"
+                onClick={() => setActiveTab('ADD_BATCH')}
+                className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer text-xs font-bold flex items-center space-x-1.5 border border-slate-700/80 active:scale-95"
+                title="Back to Generator"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>Back to Generator</span>
+              </button>
+              <div>
+                <h3 className="text-base font-black text-white uppercase tracking-tight flex items-center space-x-2">
+                  <Clock className={`w-4 h-4 ${isUnitFund ? 'text-indigo-400' : 'text-cyan-400'}`} />
+                  <span>{categoryTitle} Transaction History & Audit Log</span>
+                </h3>
+                <p className="text-xs text-slate-400 font-bold mt-0.5">
+                  Audited list of recently billed transactions • Delete incorrect entries anytime
+                </p>
+              </div>
             </div>
-            <span className="text-xs font-mono font-bold text-slate-400">
-              Total Records: {categoryTransactions.length}
-            </span>
+            <div className="flex items-center space-x-2">
+              <span className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono font-bold text-slate-300">
+                Total Records: <strong className="text-white font-mono">{categoryTransactions.length}</strong>
+              </span>
+            </div>
+          </div>
+
+          {/* Search bar inside History */}
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Search history by member name, BD No, or description..."
+              value={historySearch}
+              onChange={(e) => setHistorySearch(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-700 rounded-2xl pl-10 pr-4 py-2.5 text-xs font-bold text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 shadow-inner"
+            />
+            {historySearch && (
+              <button
+                type="button"
+                onClick={() => setHistorySearch('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
 
           <div className="overflow-x-auto border border-slate-800 rounded-2xl">
@@ -1280,14 +1427,14 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 font-medium">
-                {categoryTransactions.length === 0 ? (
+                {filteredHistoryTransactions.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="px-4 py-8 text-center text-slate-500 font-bold">
-                      No transaction records found for this category
+                      {historySearch ? 'No matching records found' : 'No transaction records found for this category'}
                     </td>
                   </tr>
                 ) : (
-                  categoryTransactions.slice(0, 50).map((tx, idx) => (
+                  filteredHistoryTransactions.map((tx, idx) => (
                     <tr key={tx.id || idx} className="hover:bg-slate-800/40 transition-colors">
                       <td className="px-4 py-3 font-mono text-slate-300">
                         {tx.date || tx.created_at?.split('T')[0] || '-'}
@@ -1318,7 +1465,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                       <td className="px-4 py-3 text-center">
                         <button
                           type="button"
-                          onClick={() => handleDeleteTx(tx.id)}
+                          onClick={() => setTxToDelete(tx)}
                           className="p-1.5 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 rounded-lg transition-colors cursor-pointer"
                           title="Delete this transaction record"
                         >
@@ -1330,6 +1477,44 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Transaction Confirmation Modal */}
+      {txToDelete && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[999] flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-sm w-full shadow-2xl animate-in zoom-in-95 space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div className="text-center space-y-1">
+              <h4 className="text-base font-black text-white">Delete Transaction?</h4>
+              <p className="text-xs text-slate-400">
+                Are you sure you want to delete this bill of <strong className="text-white font-mono">৳{Number(txToDelete.amount || 0).toLocaleString()}</strong> for <strong>{txToDelete.memberName || txToDelete.name || `BD/${txToDelete.bdNo}`}</strong>?
+              </p>
+              <p className="text-[11px] text-amber-400/90 font-medium">
+                Member's due will be automatically reversed.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setTxToDelete(null)}
+                className="py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteTx}
+                disabled={isDeleting}
+                className="py-2.5 px-4 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs transition-colors flex items-center justify-center space-x-1.5 shadow-lg shadow-rose-950/50 cursor-pointer disabled:opacity-50"
+              >
+                {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                <span>{isDeleting ? 'Deleting...' : 'Delete'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

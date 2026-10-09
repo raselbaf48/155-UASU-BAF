@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Search, Plus, Edit2, Trash2, PackagePlus, AlertTriangle, 
-  CheckCircle2, RotateCcw, Layers, ArrowDownRight, ArrowUpRight, 
+  CheckCircle2, RotateCcw, Layers, ArrowDownRight, ArrowUpRight, ArrowLeft,
   History, Filter, ShoppingBag, X, Save, AlertCircle, FileSpreadsheet,
-  Boxes, ChefHat, Sparkles, Percent, LayoutGrid, List,
+  Boxes, ChefHat, Sparkles, Percent, LayoutGrid, List, Calendar,
   Upload, Image as ImageIcon, Camera, Loader2
 } from 'lucide-react';
 import { processGalleryImage } from '../utils/imageUpload';
@@ -30,6 +30,7 @@ import {
 import { queuePushKeyToCloud } from '../utils/canteenCloudSync';
 import { SaveButton } from '../components/SaveButton';
 import { formatCanteenDate } from '../utils/dateUtils';
+import { DateNavigator, getTodayYMD } from '../components/DateNavigator';
 import { getCanteenConfig, getItemDisplayName, CanteenConfig } from '../utils/canteenSettings';
 import { ImportStockModal } from '../components/ImportStockModal';
 
@@ -797,6 +798,8 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
   const [showLogsModal, setShowLogsModal] = useState(false);
   const [editingItem, setEditingItem] = useState<RawInventoryItem | null>(null);
   const [editModalTab, setEditModalTab] = useState<'DETAILS' | 'HISTORY'>('DETAILS');
+  const [itemHistoryDateFilter, setItemHistoryDateFilter] = useState(() => getTodayYMD());
+  const [globalLogDateFilter, setGlobalLogDateFilter] = useState('');
 
   // Form states
   const [selectedItemId, setSelectedItemId] = useState('');
@@ -1360,23 +1363,17 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
           const rawSub = (newItemData.subUnit || '').toLowerCase().trim();
           const isSameUnit = Boolean(u && rawSub && u === rawSub);
 
-          const hasSubUnits = (isPcs || isSameUnit) 
+          const hasSubUnits = (isPcs || isSameUnit || newItemData.hasSubUnits === false) 
             ? false 
-            : (isKg || isLtr || isCase) 
-            ? true 
             : Boolean(newItemData.hasSubUnits);
 
-          const packSize = (isPcs || isSameUnit || !hasSubUnits)
+          const packSize = (!hasSubUnits)
             ? 1
-            : (isKg || isLtr) 
-            ? (Number(newItemData.packSize) > 1 ? Number(newItemData.packSize) : 1000) 
-            : isCase
-            ? (Number(newItemData.packSize) > 1 ? Number(newItemData.packSize) : 30)
-            : (Number(newItemData.packSize) > 1 ? Number(newItemData.packSize) : 1);
+            : (Number(newItemData.packSize) > 1 ? Number(newItemData.packSize) : (isKg || isLtr ? 1000 : isCase ? 30 : 100));
 
-          const subUnit = (isPcs || isSameUnit || !hasSubUnits)
+          const subUnit = (!hasSubUnits)
             ? undefined
-            : isKg ? 'gm' : isLtr ? 'ml' : isCase ? 'pcs' : (newItemData.subUnit ? newItemData.subUnit.trim() : undefined);
+            : (newItemData.subUnit ? newItemData.subUnit.trim() : (isKg ? 'gm' : isLtr ? 'ml' : isCase ? 'pcs' : undefined));
 
           const parsedStock = (newItemData.currentStock !== '' && newItemData.currentStock !== undefined && !isNaN(Number(newItemData.currentStock)))
             ? Number(newItemData.currentStock)
@@ -1452,7 +1449,6 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
       saveRawInventoryItems(updatedList);
       return updatedList;
     });
-    setEditingItem(null);
     } else {
       // Add new
       const parsedStock = (newItemData.currentStock !== '' && newItemData.currentStock !== undefined && !isNaN(Number(newItemData.currentStock)))
@@ -1487,23 +1483,17 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
       const rawSub = (newItemData.subUnit || '').toLowerCase().trim();
       const isSameUnit = Boolean(u && rawSub && u === rawSub);
 
-      const hasSubUnits = (isPcs || isSameUnit) 
+      const hasSubUnits = (isPcs || isSameUnit || newItemData.hasSubUnits === false) 
         ? false 
-        : (isKg || isLtr || isCase) 
-        ? true 
         : Boolean(newItemData.hasSubUnits);
 
-      const packSize = (isPcs || isSameUnit || !hasSubUnits)
+      const packSize = (!hasSubUnits)
         ? 1
-        : (isKg || isLtr) 
-        ? (Number(newItemData.packSize) > 1 ? Number(newItemData.packSize) : 1000) 
-        : isCase
-        ? (Number(newItemData.packSize) > 1 ? Number(newItemData.packSize) : 30)
-        : (Number(newItemData.packSize) > 1 ? Number(newItemData.packSize) : 1);
+        : (Number(newItemData.packSize) > 1 ? Number(newItemData.packSize) : (isKg || isLtr ? 1000 : isCase ? 30 : 100));
 
-      const subUnit = (isPcs || isSameUnit || !hasSubUnits)
+      const subUnit = (!hasSubUnits)
         ? undefined
-        : isKg ? 'gm' : isLtr ? 'ml' : isCase ? 'pcs' : (newItemData.subUnit ? newItemData.subUnit.trim() : undefined);
+        : (newItemData.subUnit ? newItemData.subUnit.trim() : (isKg ? 'gm' : isLtr ? 'ml' : isCase ? 'pcs' : undefined));
 
       const effectiveDp = newItemData.dp?.trim() || undefined;
       const resolvedItemType: InventoryItemType = newItemData.itemType || (inventoryTypeFilter === 'READY_MADE' ? 'READY_MADE' : 'RAW');
@@ -1610,7 +1600,8 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
       setIsSavedItem(false);
       setIsSavingItem(false);
       setShowAddModal(false);
-    }, 1050);
+      setEditingItem(null);
+    }, 600);
   };
 
   // Direct toggle handler for classification (Raw Item <-> Readymate Item)
@@ -1664,15 +1655,19 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
   const handleEditItem = (item: RawInventoryItem) => {
     setEditingItem(item);
     setEditModalTab('DETAILS');
+    setItemHistoryDateFilter(getTodayYMD());
     const u = (item.unit || '').toLowerCase().trim();
     const isPcs = ['pcs', 'pc', 'piece', 'টি', 'টা'].includes(u);
     const isKg = !isPcs && u === 'kg';
     const isLtr = !isPcs && ['liter', 'ltr', 'litre'].includes(u);
     const isCase = !isPcs && ['case', 'crate'].includes(u);
     const isPkt = !isPcs && ['packet', 'pkt', 'box'].includes(u);
-    const hasConfiguredSub = !isPcs && Boolean(
-      (isKg || isLtr || isPkt || isCase) ||
-      (item.hasSubUnits && item.subUnit && item.subUnit.toLowerCase().trim() !== u && item.packSize && item.packSize > 1)
+    const meta = decodeNotesMeta(item.notes);
+    const explicitlyDisabled = item.hasSubUnits === false || meta.hasSubUnits === false;
+    const hasConfiguredSub = !isPcs && !explicitlyDisabled && Boolean(
+      item.hasSubUnits === true ||
+      (item.subUnit && item.subUnit.toLowerCase().trim() !== u && item.packSize && item.packSize > 1) ||
+      (isKg || isLtr || isPkt || isCase)
     );
 
     setNewItemData({
@@ -1686,11 +1681,8 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
       notes: item.notes || '',
       wastagePercentage: item.wastagePercentage || 0,
       hasSubUnits: hasConfiguredSub,
-      packSize: isPcs ? 1 : isKg ? (item.packSize && item.packSize > 1 ? item.packSize : 1000) 
-        : isLtr ? (item.packSize && item.packSize > 1 ? item.packSize : 1000) 
-        : isCase ? (item.packSize && item.packSize > 1 ? item.packSize : 30)
-        : (item.packSize && item.packSize > 1 ? item.packSize : (isPkt ? 24 : 1)),
-      subUnit: isPcs ? undefined : isKg ? 'gm' : isLtr ? 'ml' : isCase ? 'pcs' : (hasConfiguredSub && item.subUnit && item.subUnit.toLowerCase().trim() !== u ? item.subUnit : (isPkt ? 'pcs' : undefined)),
+      packSize: !hasConfiguredSub ? 1 : (item.packSize && item.packSize > 1 ? item.packSize : (isKg || isLtr ? 1000 : isCase ? 30 : isPkt ? 24 : 100)),
+      subUnit: !hasConfiguredSub ? undefined : (item.subUnit && item.subUnit.toLowerCase().trim() !== u ? item.subUnit : (isKg ? 'gm' : isLtr ? 'ml' : isCase ? 'pcs' : 'pcs')),
       itemType: item.itemType || (isReadymadeItem(item) ? 'READY_MADE' : 'RAW'),
       dp: item.dp || item.DP || item.image || ''
     });
@@ -2607,75 +2599,64 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                   </h3>
                   {editingItem && (
                     <p className="text-xs text-slate-400">
-                      {editingItem.name} <span className="text-slate-500">({editingItem.nameBn})</span>
+                      {newItemData.name || editingItem.name} <span className="text-slate-500">({newItemData.nameBn || editingItem.nameBn || newItemData.name || editingItem.name})</span>
                     </p>
                   )}
                 </div>
               </div>
-              <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+              <div className="flex items-center space-x-2.5">
+                {editingItem && (
+                  <button
+                    type="button"
+                    onClick={() => setEditModalTab(editModalTab === 'HISTORY' ? 'DETAILS' : 'HISTORY')}
+                    className={`flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer border shadow-sm ${
+                      editModalTab === 'HISTORY'
+                        ? 'bg-indigo-600 text-white border-indigo-500 shadow-indigo-600/30 ring-2 ring-indigo-400/30'
+                        : 'bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border-slate-700 hover:border-slate-600'
+                    }`}
+                    title="View item transaction history"
+                  >
+                    <History className="w-3.5 h-3.5 text-indigo-300" />
+                    <span>History</span>
+                    <span className="px-1.5 py-0.5 rounded-md bg-black/40 text-[10px] font-mono font-black text-indigo-200">
+                      {logs.filter(l => l.itemId === editingItem.id).length}
+                    </span>
+                  </button>
+                )}
 
-            {/* If editing item, show Tabs for Details vs Transaction History */}
-            {editingItem && (
-              <div className="flex items-center gap-2 pt-3 pb-1 border-b border-slate-800/80 shrink-0">
-                <button
+                <button 
                   type="button"
-                  onClick={() => setEditModalTab('DETAILS')}
-                  className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                    editModalTab === 'DETAILS'
-                      ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
-                      : 'bg-slate-800/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                  }`}
+                  onClick={() => { setShowAddModal(false); setEditingItem(null); }} 
+                  className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl transition-colors cursor-pointer"
                 >
-                  <Edit2 className="w-3.5 h-3.5" />
-                  <span>Item Details</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setEditModalTab('HISTORY')}
-                  className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                    editModalTab === 'HISTORY'
-                      ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
-                      : 'bg-slate-800/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                  }`}
-                >
-                  <History className="w-3.5 h-3.5" />
-                  <span>History</span>
-                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-                    editModalTab === 'HISTORY' ? 'bg-indigo-700 text-white' : 'bg-slate-700 text-slate-300'
-                  }`}>
-                    {logs.filter(l => l.itemId === editingItem.id).length}
-                  </span>
+                  <X className="w-5 h-5" />
                 </button>
               </div>
-            )}
+            </div>
 
             {/* TAB CONTENT */}
             {(!editingItem || editModalTab === 'DETAILS') ? (
               <form onSubmit={handleSaveItem} className="space-y-4 pt-4 overflow-y-auto pr-1">
                 {/* Item Display Picture (DP) */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-1.5">Item Photo (DP) — Cloud Sync</label>
+                  <label className="block text-xs font-bold text-slate-400 mb-1.5">Item Photo (DP)</label>
                   <div className="flex items-center gap-3.5 p-3.5 bg-slate-950/60 border border-slate-800 rounded-2xl">
-                    <div className="relative w-18 h-18 rounded-2xl bg-slate-800 border-2 border-dashed border-slate-700 flex items-center justify-center overflow-hidden shrink-0 shadow-inner">
+                    <div className="relative w-16 h-16 rounded-2xl bg-slate-800 border-2 border-dashed border-slate-700 flex items-center justify-center overflow-hidden shrink-0 shadow-inner">
                       {newItemData.dp ? (
                         <img src={newItemData.dp} alt="Item DP" className="w-full h-full object-cover" />
                       ) : (
                         <div className="flex flex-col items-center justify-center text-slate-500 p-2 text-center">
-                          <ImageIcon className="w-6 h-6 opacity-60" />
+                          <ImageIcon className="w-5 h-5 opacity-60" />
                           <span className="text-[9px] font-bold uppercase mt-0.5 text-slate-500">No Photo</span>
                         </div>
                       )}
                     </div>
 
-                    <div className="flex-1 space-y-2">
+                    <div className="flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <label className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer active:scale-95">
                           <Upload className="w-3.5 h-3.5" />
-                          <span>Upload File / Camera</span>
+                          <span>Upload Photo</span>
                           <input 
                             type="file" 
                             accept="image/*" 
@@ -2706,21 +2687,11 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                           </button>
                         )}
                       </div>
-
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          placeholder="Or paste image URL (https://...)"
-                          value={newItemData.dp?.startsWith('data:') ? '' : (newItemData.dp || '')}
-                          onChange={(e) => setNewItemData(prev => ({ ...prev, dp: e.target.value }))}
-                          className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700/80 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-                        />
-                      </div>
                     </div>
                   </div>
                 </div>
 
-                {/* 2 Options for Inventory Items */}
+                {/* 2 Options for Inventory Items (Classification Names Only - Descriptions Removed) */}
                 <div className="space-y-1.5">
                   <label className="block text-xs font-bold text-slate-300">
                     আইটেমের ধরণ / Inventory Classification *
@@ -2729,31 +2700,28 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                     {/* Option 1: RAW Item */}
                     <div
                       onClick={() => setNewItemData(prev => ({ ...prev, itemType: 'RAW' }))}
-                      className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-3 ${
+                      className={`p-3 rounded-2xl border-2 transition-all cursor-pointer flex items-center justify-between ${
                         (newItemData.itemType || 'RAW') === 'RAW'
                           ? 'bg-blue-950/40 border-blue-500 shadow-md shadow-blue-500/10 ring-1 ring-blue-400/40'
                           : 'bg-slate-950/40 border-slate-800 hover:border-slate-700'
                       }`}
                     >
-                      <input
-                        type="radio"
-                        name="itemTypeOption"
-                        checked={(newItemData.itemType || 'RAW') === 'RAW'}
-                        onChange={() => setNewItemData(prev => ({ ...prev, itemType: 'RAW' }))}
-                        className="mt-1 text-blue-600 focus:ring-blue-500"
-                      />
-                      <div className="min-w-0">
-                        <div className="font-black text-sm text-white flex items-center gap-1.5">
-                          <span>🌾 1. RAW Item</span>
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 font-bold">কাঁচামাল</span>
-                        </div>
-                        <p className="text-[11px] text-slate-300 mt-1 leading-snug">
-                          যা দিয়ে প্রসেস করে Menu Ready করা হয় (রান্নার উপাদান: চাল, ডাল, তেল, মুরগি, গুঁড়া দুধ, মসলা ইত্যাদি)
-                        </p>
+                      <div className="flex items-center gap-2.5">
+                        <input
+                          type="radio"
+                          name="itemTypeOption"
+                          checked={(newItemData.itemType || 'RAW') === 'RAW'}
+                          onChange={() => setNewItemData(prev => ({ ...prev, itemType: 'RAW' }))}
+                          className="text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="font-black text-sm text-white">🌾 1. RAW Item</span>
                       </div>
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 font-bold border border-blue-500/30">
+                        কাঁচামাল
+                      </span>
                     </div>
 
-                    {/* Option 2: Readymate Items */}
+                    {/* Option 2: Readymade Items */}
                     <div
                       onClick={() => setNewItemData(prev => ({ 
                         ...prev, 
@@ -2762,34 +2730,31 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                         wastagePercentage: 0,
                         hasSubUnits: false
                       }))}
-                      className={`p-3.5 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-3 ${
+                      className={`p-3 rounded-2xl border-2 transition-all cursor-pointer flex items-center justify-between ${
                         newItemData.itemType === 'READY_MADE'
                           ? 'bg-emerald-950/40 border-emerald-500 shadow-md shadow-emerald-500/10 ring-1 ring-emerald-400/40'
                           : 'bg-slate-950/40 border-slate-800 hover:border-slate-700'
                       }`}
                     >
-                      <input
-                        type="radio"
-                        name="itemTypeOption"
-                        checked={newItemData.itemType === 'READY_MADE'}
-                        onChange={() => setNewItemData(prev => ({ 
-                          ...prev, 
-                          itemType: 'READY_MADE',
-                          unit: (prev.unit === 'kg' || prev.unit === 'liter') ? 'pcs' : (prev.unit || 'pcs'),
-                          wastagePercentage: 0,
-                          hasSubUnits: false
-                        }))}
-                        className="mt-1 text-emerald-600 focus:ring-emerald-500"
-                      />
-                      <div className="min-w-0">
-                        <div className="font-black text-sm text-white flex items-center gap-1.5">
-                          <span>🥐 2. Readymate Items</span>
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold">রেডিমেট পণ্য</span>
-                        </div>
-                        <p className="text-[11px] text-slate-300 mt-1 leading-snug">
-                          যা সরাসরি বাহিরে কোথাও থেকে কিনে এনে কোনো প্রসেস ছাড়াই Sell দেওয়া যায় (যেমন: Butter Ban, Sandwich, Swarma, Normal Biscuit, Dry Cake, Singara, Puri, Hotel Porota, Hotel Banana)
-                        </p>
+                      <div className="flex items-center gap-2.5">
+                        <input
+                          type="radio"
+                          name="itemTypeOption"
+                          checked={newItemData.itemType === 'READY_MADE'}
+                          onChange={() => setNewItemData(prev => ({ 
+                            ...prev, 
+                            itemType: 'READY_MADE',
+                            unit: (prev.unit === 'kg' || prev.unit === 'liter') ? 'pcs' : (prev.unit || 'pcs'),
+                            wastagePercentage: 0,
+                            hasSubUnits: false
+                          }))}
+                          className="text-emerald-600 focus:ring-emerald-500"
+                        />
+                        <span className="font-black text-sm text-white">🥐 2. Readymade Items</span>
                       </div>
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">
+                        রেডিমেট পণ্য
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -3177,16 +3142,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-1">Notes</label>
-                  <textarea
-                    rows={2}
-                    value={newItemData.notes || ''}
-                    onChange={(e) => setNewItemData({ ...newItemData, notes: e.target.value })}
-                    placeholder="Optional notes or specifications..."
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500"
-                  ></textarea>
-                </div>
+
 
                 <div className="flex items-center justify-between pt-3 border-t border-slate-800">
                   {editingItem ? (
@@ -3226,9 +3182,28 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
             ) : (
               /* TAB: History */
               <div className="pt-4 flex-1 flex flex-col min-h-0">
-                <div className="flex items-center gap-1.5 mb-3 text-xs text-slate-300 font-bold">
-                  <History className="w-4 h-4 text-indigo-400" />
-                  <span>Transaction History</span>
+                <div className="flex flex-wrap items-center justify-between gap-2.5 mb-3">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditModalTab('DETAILS')}
+                      className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-white text-xs font-bold transition-all border border-slate-700 cursor-pointer"
+                    >
+                      <ArrowLeft className="w-3.5 h-3.5" />
+                      <span>Back to Details</span>
+                    </button>
+                    <div className="flex items-center gap-1.5 text-xs text-slate-400 font-bold">
+                      <History className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>Transaction History</span>
+                    </div>
+                  </div>
+
+                  {/* Date-wise filter with Left/Right arrows, '08 Oct 26' format, today default */}
+                  <DateNavigator 
+                    value={itemHistoryDateFilter} 
+                    onChange={setItemHistoryDateFilter} 
+                    allowAll={true} 
+                  />
                 </div>
 
                 {/* History Log Table */}
@@ -3236,105 +3211,129 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                   <div className="overflow-x-auto flex-1 flex flex-col min-h-0">
                     <div className="min-w-[480px] flex-1 flex flex-col min-h-0">
                       {/* Fixed Table Heading Row */}
-                      <div className="grid grid-cols-12 gap-3 px-4 py-3 bg-slate-900 border-b border-slate-800 text-[11px] font-black text-slate-300 uppercase tracking-wider shrink-0 select-none items-center">
+                      <div className="grid grid-cols-12 gap-2 px-3 py-2.5 bg-slate-900 border-b border-slate-800 text-[10px] font-black text-slate-300 uppercase tracking-wider shrink-0 select-none items-center">
+                        <div className="col-span-1 text-center">SL</div>
                         <div className="col-span-3 text-left">Date</div>
                         <div className="col-span-4 text-left">Menu</div>
                         <div className="col-span-2 text-right">Qty</div>
-                        <div className="col-span-3 text-right">Available</div>
+                        <div className="col-span-2 text-right">Available</div>
                       </div>
 
                       {/* Scrollable Table Rows (Newest on top) */}
                       <div className="overflow-y-auto flex-1 divide-y divide-slate-800/60 max-h-[48vh]">
-                        {logs.filter(l => l.itemId === editingItem.id).length === 0 ? (
-                          <div className="p-10 text-center text-slate-500">
-                            <History className="w-8 h-8 mx-auto mb-2 opacity-40 text-slate-600" />
-                            <p className="text-xs font-semibold">No transaction history recorded yet.</p>
-                          </div>
-                        ) : (
-                          logs
+                        {(() => {
+                          const itemLogs = logs
                             .filter(l => l.itemId === editingItem.id)
+                            .filter(l => {
+                              if (!itemHistoryDateFilter) return true;
+                              const logDateStr = String(l.date || '');
+                              if (logDateStr.includes(itemHistoryDateFilter)) return true;
+                              const d = new Date(l.date);
+                              if (!isNaN(d.getTime())) {
+                                const iso = d.toISOString().split('T')[0];
+                                const local = d.toLocaleDateString('en-CA');
+                                return iso === itemHistoryDateFilter || local === itemHistoryDateFilter;
+                              }
+                              return false;
+                            })
                             .slice()
                             .sort((a, b) => {
                               const timeA = new Date(a.date).getTime() || 0;
                               const timeB = new Date(b.date).getTime() || 0;
                               if (timeA !== timeB) return timeB - timeA;
                               return (b.id || '').localeCompare(a.id || '');
-                            })
-                            .map(log => {
-                              const isRestock = log.type === 'RESTOCK';
+                            });
 
-                              // Extract clean Menu / Item description
-                              let menuDesc = '-';
-                              if (log.notes) {
-                                let clean = log.notes
-                                  .replace(/\[AUTO ISSUE - MENU SALE\]/gi, '')
-                                  .replace(/\[AUTO RESTOCK - EXPENDITURE\]/gi, '')
-                                  .replace(/\[AUTO ISSUE - ORDER\]/gi, '')
-                                  .replace(/^Restocked via:?/i, '')
-                                  .replace(/^Restocked from:?/i, '')
-                                  .replace(/^Auto restock from:?/i, '')
-                                  .trim();
-                                if (clean.startsWith(':')) clean = clean.substring(1).trim();
-                                
-                                // If clean contains multiple items separated by comma, filter down to only ones that actually use this raw item
-                                if (clean.includes(',')) {
-                                  const parts = clean.split(',').map(p => p.trim()).filter(Boolean);
-                                  const matchedParts = parts.filter(part => {
-                                    const pureName = part.replace(/\s*x\s*\d+(\.\d+)?$/i, '').trim();
-                                    const recipe = getRecipeForMenuItem('', pureName);
-                                    return recipe && recipe.some(ing => 
-                                      ing.rawItemId === editingItem.id ||
-                                      (ing.rawItemName && ing.rawItemName.toLowerCase() === editingItem.name.toLowerCase())
-                                    );
-                                  });
-                                  if (matchedParts.length > 0) {
-                                    clean = matchedParts.join(', ');
-                                  }
+                          if (itemLogs.length === 0) {
+                            return (
+                              <div className="p-10 text-center text-slate-500">
+                                <History className="w-8 h-8 mx-auto mb-2 opacity-40 text-slate-600" />
+                                <p className="text-xs font-semibold">
+                                  {itemHistoryDateFilter ? 'No transactions found on this date.' : 'No transaction history recorded yet.'}
+                                </p>
+                              </div>
+                            );
+                          }
+
+                          return itemLogs.map((log, idx) => {
+                            const isRestock = log.type === 'RESTOCK';
+
+                            // Extract clean Menu / Item description
+                            let menuDesc = '-';
+                            if (log.notes) {
+                              let clean = log.notes
+                                .replace(/\[AUTO ISSUE - MENU SALE\]/gi, '')
+                                .replace(/\[AUTO RESTOCK - EXPENDITURE\]/gi, '')
+                                .replace(/\[AUTO ISSUE - ORDER\]/gi, '')
+                                .replace(/^Restocked via:?/i, '')
+                                .replace(/^Restocked from:?/i, '')
+                                .replace(/^Auto restock from:?/i, '')
+                                .trim();
+                              if (clean.startsWith(':')) clean = clean.substring(1).trim();
+                              
+                              if (clean.includes(',')) {
+                                const parts = clean.split(',').map(p => p.trim()).filter(Boolean);
+                                const matchedParts = parts.filter(part => {
+                                  const pureName = part.replace(/\s*x\s*\d+(\.\d+)?$/i, '').trim();
+                                  const recipe = getRecipeForMenuItem('', pureName);
+                                  return recipe && recipe.some(ing => 
+                                    ing.rawItemId === editingItem.id ||
+                                    (ing.rawItemName && ing.rawItemName.toLowerCase() === editingItem.name.toLowerCase())
+                                  );
+                                });
+                                if (matchedParts.length > 0) {
+                                  clean = matchedParts.join(', ');
                                 }
-                                if (clean) menuDesc = clean;
                               }
-                              if (menuDesc === '-' && log.recordedBy) {
-                                menuDesc = log.recordedBy;
-                              }
+                              if (clean) menuDesc = clean;
+                            }
+                            if (menuDesc === '-' && log.recordedBy) {
+                              menuDesc = log.recordedBy;
+                            }
 
-                              return (
-                                <div 
-                                  key={log.id} 
-                                  className="grid grid-cols-12 gap-3 px-4 py-3 items-center hover:bg-slate-900/40 transition-colors text-xs"
-                                >
-                                  {/* 1. Date */}
-                                  <div className="col-span-3 font-mono font-medium text-slate-300 text-[11px] whitespace-nowrap" title={formatCanteenDate(log.date)}>
-                                    {formatCanteenDate(log.date)}
-                                  </div>
-
-                                  {/* 2. Menu */}
-                                  <div className="col-span-4 font-bold text-white text-xs break-words pr-1 leading-snug" title={menuDesc}>
-                                    {menuDesc}
-                                  </div>
-
-                                  {/* 3. Qty */}
-                                  <div className="col-span-2 text-right whitespace-nowrap">
-                                    <span className={`font-black font-mono text-xs ${isRestock ? 'text-emerald-400' : 'text-amber-400'}`}>
-                                      {isRestock ? '+' : '-'}{log.quantity}
-                                    </span>
-                                    <span className="text-[10px] font-bold text-slate-400 uppercase ml-1">
-                                      {log.unit}
-                                    </span>
-                                  </div>
-
-                                  {/* 4. Available */}
-                                  <div className="col-span-3 text-right whitespace-nowrap">
-                                    <span className="font-mono font-bold text-slate-100 text-xs">
-                                      {log.newStock}
-                                    </span>
-                                    <span className="text-[10px] font-bold text-slate-400 uppercase ml-1">
-                                      {log.unit}
-                                    </span>
-                                  </div>
+                            return (
+                              <div 
+                                key={log.id} 
+                                className="grid grid-cols-12 gap-2 px-3 py-2.5 items-center hover:bg-slate-900/40 transition-colors text-xs"
+                              >
+                                {/* 0. SL */}
+                                <div className="col-span-1 text-center font-mono font-bold text-slate-400 text-xs">
+                                  {idx + 1}
                                 </div>
-                              );
-                            })
-                        )}
+
+                                {/* 1. Date */}
+                                <div className="col-span-3 font-mono font-medium text-slate-300 text-[11px] whitespace-nowrap" title={formatCanteenDate(log.date)}>
+                                  {formatCanteenDate(log.date)}
+                                </div>
+
+                                {/* 2. Menu */}
+                                <div className="col-span-4 font-bold text-white text-xs break-words pr-1 leading-snug" title={menuDesc}>
+                                  {menuDesc}
+                                </div>
+
+                                {/* 3. Qty */}
+                                <div className="col-span-2 text-right whitespace-nowrap">
+                                  <span className={`font-black font-mono text-xs ${isRestock ? 'text-emerald-400' : 'text-amber-400'}`}>
+                                    {isRestock ? '+' : '-'}{log.quantity}
+                                  </span>
+                                  <span className="text-[10px] font-bold text-slate-400 uppercase ml-1">
+                                    {log.unit}
+                                  </span>
+                                </div>
+
+                                {/* 4. Available */}
+                                <div className="col-span-2 text-right whitespace-nowrap">
+                                  <span className="font-mono font-bold text-slate-100 text-xs">
+                                    {log.newStock}
+                                  </span>
+                                  <span className="text-[10px] font-bold text-slate-400 uppercase ml-1">
+                                    {log.unit}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          });
+                        })()}
                       </div>
                     </div>
                   </div>
@@ -3784,8 +3783,15 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                 </button>
               </div>
 
-              <div className="text-[11px] text-slate-400">
-                Total Logs: <span className="font-bold text-white">{logs.length}</span>
+              <div className="flex items-center gap-2">
+                <DateNavigator 
+                  value={globalLogDateFilter} 
+                  onChange={setGlobalLogDateFilter} 
+                  allowAll={true} 
+                />
+                <div className="text-[11px] text-slate-400 ml-1">
+                  Total: <span className="font-bold text-white">{logs.length}</span>
+                </div>
               </div>
             </div>
 
@@ -3793,22 +3799,33 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
             <div className="flex-1 overflow-y-auto py-3 space-y-2 pr-1">
               {(() => {
                 const filteredLogs = logs.filter(l => {
-                  if (logFilter === 'ALL') return true;
-                  return l.type === logFilter;
+                  if (logFilter !== 'ALL' && l.type !== logFilter) return false;
+                  if (globalLogDateFilter) {
+                    const logDateStr = String(l.date || '');
+                    if (logDateStr.includes(globalLogDateFilter)) return true;
+                    const d = new Date(l.date);
+                    if (!isNaN(d.getTime())) {
+                      const iso = d.toISOString().split('T')[0];
+                      const local = d.toLocaleDateString('en-CA');
+                      return iso === globalLogDateFilter || local === globalLogDateFilter;
+                    }
+                    return false;
+                  }
+                  return true;
                 });
 
                 if (filteredLogs.length === 0) {
                   return (
                     <div className="text-center py-12 text-slate-500 font-bold">
                       <Boxes className="w-8 h-8 mx-auto text-slate-600 mb-2 opacity-50" />
-                      <p>No movement logs found</p>
+                      <p>{globalLogDateFilter ? 'No movement logs found on this date' : 'No movement logs found'}</p>
                     </div>
                   );
                 }
 
                 return (
                   <div className="divide-y divide-slate-800/60">
-                    {filteredLogs.map(log => {
+                    {filteredLogs.map((log, idx) => {
                       const isRestock = log.type === 'RESTOCK';
                       const isAutoRestock = log.notes?.includes('AUTO RESTOCK') || log.notes?.includes('Expenditure') || log.recordedBy?.includes('Expenditure');
                       const isAutoIssue = log.notes?.includes('AUTO ISSUE') || log.notes?.includes('POS') || log.recordedBy?.includes('POS');
@@ -3831,6 +3848,9 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                             </div>
                             <div className="min-w-0">
                               <div className="flex items-center flex-wrap gap-2">
+                                <span className="px-1.5 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-slate-400 font-mono font-bold text-[10px]">
+                                  #{idx + 1}
+                                </span>
                                 <span className="font-extrabold text-sm text-white">
                                   {log.itemName}
                                 </span>

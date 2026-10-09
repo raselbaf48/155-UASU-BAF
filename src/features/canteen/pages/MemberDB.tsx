@@ -1361,7 +1361,7 @@ export const MemberDB: React.FC = () => {
   const paymentCountsByMethod = useMemo(() => {
     const monthFiltered = allPaymentTxs.filter((tx: any) => {
       if (paymentMonthFilter !== 'ALL') {
-        const txMonth = getPaymentCycleMonthKey(tx?.date || tx?.timestamp || tx?.created_at) || tx?.monthKey || getTxMonthKey(tx?.date);
+        const txMonth = getPaymentCycleMonthKey(tx?.paymentDate || tx?.date || tx?.timestamp || tx?.created_at || tx?.createdAt) || getTxMonthKey(tx?.date);
         if (txMonth !== paymentMonthFilter) return false;
       }
       return true;
@@ -1384,7 +1384,7 @@ export const MemberDB: React.FC = () => {
   const filteredPaymentTxs = useMemo(() => {
     return allPaymentTxs.filter((tx: any) => {
       if (paymentMonthFilter !== 'ALL') {
-        const txMonth = getPaymentCycleMonthKey(tx?.date || tx?.timestamp || tx?.created_at) || tx?.monthKey || getTxMonthKey(tx?.date);
+        const txMonth = getPaymentCycleMonthKey(tx?.paymentDate || tx?.date || tx?.timestamp || tx?.created_at || tx?.createdAt) || getTxMonthKey(tx?.date);
         if (txMonth !== paymentMonthFilter) return false;
       }
       if (paymentMethodFilter !== 'ALL') {
@@ -1933,8 +1933,10 @@ export const MemberDB: React.FC = () => {
     const todayStr = new Date().toISOString().split('T')[0];
     setPayDate(todayStr);
 
-    const monthDue = getMemberDueUpToMonth(member, defaultMonth, selectedCategory);
-    const initialPay = monthDue > 0 ? monthDue : totalDue;
+    const monthDue = defaultMonth === 'ALL' 
+      ? totalDue 
+      : getMemberDueUpToMonth(member, defaultMonth, selectedCategory);
+    const initialPay = Math.max(0, monthDue);
 
     setPayBillMember({
       ...member,
@@ -1943,7 +1945,7 @@ export const MemberDB: React.FC = () => {
       baki: totalDue
     });
     setPayBillCategory(selectedCategory);
-    setPayAmount(initialPay > 0 ? String(initialPay) : '');
+    setPayAmount(String(initialPay));
     setPayMethod('UCB');
   };
 
@@ -2569,20 +2571,15 @@ export const MemberDB: React.FC = () => {
       const catLabel = payBillCategory === 'ALL' ? 'ALL BILLS' : payBillCategory.replace('_', ' ');
       const payeeName = `${payBillMember.Rank || payBillMember.rank || ''} ${payBillMember.Surname || payBillMember['Surname'] || payBillMember.name || ''}`.trim();
 
-      // Resolve selected payment date
-      const payDateObj = (() => {
-        if (payDate && /^\d{4}-\d{2}-\d{2}$/.test(payDate)) {
-          const [y, m, d] = payDate.split('-').map(Number);
-          return new Date(y, m - 1, d, 12, 0, 0);
-        }
-        return new Date();
-      })();
+      // Automatically record payment date as today's current date
+      const payDateObj = new Date();
+      const todayIsoDate = payDateObj.toISOString().split('T')[0];
       const formattedPayDate = formatCanteenDate(payDateObj);
 
       // Bill month cycle that is being paid for
       const billMonthCycle = (payBillMonth && payBillMonth !== 'ALL')
         ? payBillMonth
-        : ((selectedMonth && selectedMonth !== 'ALL') ? selectedMonth : getPaymentCycleMonthKey(payDateObj));
+        : ((selectedMonth && selectedMonth !== 'ALL') ? selectedMonth : getRunningMonthKey());
       const billMonthLabelBn = formatBengaliMonthYear(billMonthCycle);
       const lastDateInfo = getLastDateOfMonth(billMonthCycle);
 
@@ -2591,14 +2588,14 @@ export const MemberDB: React.FC = () => {
       const tx = {
         id: 'tx-pay-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
         date: formattedPayDate,
-        paymentDate: payDate,
+        paymentDate: todayIsoDate,
         billMonth: billMonthCycle,
         billMonthBn: billMonthLabelBn,
         lastDateCovered: lastDateInfo.formatted,
         created_at: payDateObj.toISOString(),
         createdAt: payDateObj.toISOString(),
         timestamp: payDateObj.getTime(),
-        monthKey: billMonthCycle,
+        monthKey: getTxMonthKey(payDateObj),
         airman_id: payBillMember.airman_id,
         bdNo: payBillMember['BD No'] || payBillMember.airman_id,
         memberName: payeeName,
@@ -2674,41 +2671,48 @@ export const MemberDB: React.FC = () => {
   const handleRemoveTx = async (txToRemove: any, explicitMember?: any) => {
     if (!txToRemove) return;
     const targetMember = explicitMember || profileMember || statementMember || members.find((m: any) => {
-      const txBdClean = String(txToRemove.bdNo || txToRemove.airman_id || '').replace(/\D/g, '');
-      const mBdClean = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
-      return (txToRemove.airman_id && m.airman_id === txToRemove.airman_id) || (txBdClean && mBdClean === txBdClean);
+      if (!m) return false;
+      if (txToRemove.airman_id && m.airman_id === txToRemove.airman_id) return true;
+      const txBd = String(txToRemove.bdNo || txToRemove['BD No'] || '').trim();
+      const mBd = String(m['BD No'] || m.bdNo || '').trim();
+      if (txBd && mBd && txBd.toLowerCase() === mBd.toLowerCase()) return true;
+      const txBdClean = txBd.replace(/\D/g, '');
+      const mBdClean = mBd.replace(/\D/g, '');
+      if (txBdClean && mBdClean && txBdClean === mBdClean) return true;
+      const txName = String(txToRemove.memberName || txToRemove.name || '').trim().toLowerCase();
+      const mSurname = String(m.Surname || m.surname || '').trim().toLowerCase();
+      if (txName && mSurname && (txName.includes(mSurname) || mSurname.includes(txName))) return true;
+      return false;
     });
-    if (!targetMember) {
-      setTxDeleteConfirmId(null);
-      return;
-    }
 
     const amountToReverse = Number(txToRemove.amount || 0);
-    const currentDue = Number(targetMember.Due ?? targetMember.due ?? targetMember.baki ?? 0);
-    let newDue = currentDue;
+    let newDue = 0;
     
-    if (txToRemove.type === 'BILL PAYMENT') {
-      newDue = currentDue + amountToReverse;
-    } else {
-      newDue = Math.max(0, currentDue - amountToReverse);
-    }
-    
-    // 1. Update Supabase Canteen_Member table
-    try {
-      if (targetMember.airman_id) {
-        await supabase
-          .from('Canteen_Member')
-          .update({ Due: newDue })
-          .eq('airman_id', targetMember.airman_id);
+    if (targetMember) {
+      const currentDue = Number(targetMember.Due ?? targetMember.due ?? targetMember.baki ?? 0);
+      if (txToRemove.type === 'BILL PAYMENT') {
+        newDue = currentDue + amountToReverse;
+      } else {
+        newDue = Math.max(0, currentDue - amountToReverse);
       }
-      if (targetMember['BD No']) {
-        await supabase
-          .from('Canteen_Member')
-          .update({ Due: newDue })
-          .eq('BD No', String(targetMember['BD No']).trim());
+      
+      // 1. Update Supabase Canteen_Member table
+      try {
+        if (targetMember.airman_id) {
+          await supabase
+            .from('Canteen_Member')
+            .update({ Due: newDue })
+            .eq('airman_id', targetMember.airman_id);
+        }
+        if (targetMember['BD No']) {
+          await supabase
+            .from('Canteen_Member')
+            .update({ Due: newDue })
+            .eq('BD No', String(targetMember['BD No']).trim());
+        }
+      } catch (e) {
+        console.warn('Error updating member Due in Supabase on remove tx:', e);
       }
-    } catch (e) {
-      console.warn('Error updating member Due in Supabase on remove tx:', e);
     }
 
     // 1b. Restore raw stock back to inventory if this was a sale/item order
@@ -2783,44 +2787,46 @@ export const MemberDB: React.FC = () => {
     // 3. Update allTxs React state so all calculations and cards recompute immediately
     setAllTxs(newTxs);
     
-    // 4. Update member object in all states and local cache
-    const updatedMember = { 
-      ...targetMember, 
-      Due: newDue, 
-      due: newDue, 
-      baki: newDue 
-    };
+    // 4. Update member object in all states and local cache if targetMember exists
+    if (targetMember) {
+      const updatedMember = { 
+        ...targetMember, 
+        Due: newDue, 
+        due: newDue, 
+        baki: newDue 
+      };
 
-    setMembers(prev => {
-      const next = prev.map(m => 
-        (m.airman_id === updatedMember.airman_id || (m['BD No'] && m['BD No'] === updatedMember['BD No'])) 
-          ? updatedMember 
-          : m
-      );
-      try {
-        localStorage.setItem('canteen_members_cache', JSON.stringify(next));
-      } catch {}
-      return next;
-    });
-    
-    if (profileMember) {
-      setProfileMember(updatedMember);
-      setProfileTx(prev => prev.filter(t => String(t.id) !== txIdStr));
-    }
+      setMembers(prev => {
+        const next = prev.map(m => 
+          (m.airman_id === updatedMember.airman_id || (m['BD No'] && m['BD No'] === updatedMember['BD No'])) 
+            ? updatedMember 
+            : m
+        );
+        try {
+          localStorage.setItem('canteen_members_cache', JSON.stringify(next));
+        } catch {}
+        return next;
+      });
+      
+      if (profileMember) {
+        setProfileMember(updatedMember);
+        setProfileTx(prev => prev.filter(t => String(t.id) !== txIdStr));
+      }
 
-    if (statementMember) {
-      setStatementMember(updatedMember);
-      setStatementTx(prev => prev.filter(t => String(t.id) !== txIdStr));
-    }
+      if (statementMember) {
+        setStatementMember(updatedMember);
+        setStatementTx(prev => prev.filter(t => String(t.id) !== txIdStr));
+      }
 
-    // Update individual member local cache
-    const cleanBd = String(targetMember['BD No'] || targetMember.airman_id || '').replace(/\D/g, '').toLowerCase();
-    if (cleanBd) {
-      try {
-        const rawStored = localStorage.getItem(`canteen_member_${cleanBd}`);
-        const stored = rawStored ? JSON.parse(rawStored) : {};
-        localStorage.setItem(`canteen_member_${cleanBd}`, JSON.stringify({ ...stored, Due: newDue, due: newDue, baki: newDue }));
-      } catch {}
+      // Update individual member local cache
+      const cleanBd = String(targetMember['BD No'] || targetMember.airman_id || '').replace(/\D/g, '').toLowerCase();
+      if (cleanBd) {
+        try {
+          const rawStored = localStorage.getItem(`canteen_member_${cleanBd}`);
+          const stored = rawStored ? JSON.parse(rawStored) : {};
+          localStorage.setItem(`canteen_member_${cleanBd}`, JSON.stringify({ ...stored, Due: newDue, due: newDue, baki: newDue }));
+        } catch {}
+      }
     }
 
     // 5. Notify all listeners
@@ -3576,6 +3582,7 @@ export const MemberDB: React.FC = () => {
           formatMemberNameBn={formatMemberNameBn}
           getMemberTotalDue={getMemberTotalDue}
           getMemberFilteredBill={getMemberFilteredBill}
+          onRemoveTx={handleRemoveTx}
         />
       ) : (
         <>
@@ -5209,8 +5216,12 @@ export const MemberDB: React.FC = () => {
                   onChange={(e) => {
                     const newMonth = e.target.value;
                     setPayBillMonth(newMonth);
-                    const newDue = getMemberDueUpToMonth(payBillMember, newMonth, payBillCategory || selectedCategory);
-                    setPayAmount(newDue > 0 ? String(newDue) : String(totalOverallDue || ''));
+                    if (newMonth === 'ALL') {
+                      setPayAmount(String(totalOverallDue || 0));
+                    } else {
+                      const newDue = getMemberDueUpToMonth(payBillMember, newMonth, payBillCategory || selectedCategory);
+                      setPayAmount(String(Math.max(0, newDue)));
+                    }
                   }}
                   className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-xs font-bold font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
                 >
@@ -5251,27 +5262,6 @@ export const MemberDB: React.FC = () => {
               </div>
 
               <div className="space-y-4">
-                {/* Payment Date Input */}
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
-                    PAYMENT DATE (পরিশোধের তারিখ)
-                  </label>
-                  <input 
-                    type="date"
-                    value={payDate}
-                    onChange={(e) => setPayDate(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  />
-                  <p className="text-[10px] text-emerald-400/90 font-medium mt-1">
-                    পরিশোধ হিসেবে রেকর্ড হবে: {(() => {
-                      if (payDate && /^\d{4}-\d{2}-\d{2}$/.test(payDate)) {
-                        const [y, m, d] = payDate.split('-').map(Number);
-                        return formatCanteenDate(new Date(y, m - 1, d, 12, 0, 0));
-                      }
-                      return formatCanteenDate(new Date());
-                    })()}
-                  </p>
-                </div>
 
                 {/* Payment Amount Input & Quick Fill Pills */}
                 <div>
@@ -5280,20 +5270,18 @@ export const MemberDB: React.FC = () => {
                       PAYMENT AMOUNT (৳)
                     </label>
                     <div className="flex gap-1.5">
-                      {dueUpTo > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => setPayAmount(String(dueUpTo))}
-                          className="text-[10px] px-2 py-0.5 rounded-md bg-indigo-600/30 text-indigo-300 hover:bg-indigo-600/50 font-mono font-bold"
-                        >
-                          বকেয়া ৳{dueUpTo}
-                        </button>
-                      )}
-                      {singleMonthBill > 0 && singleMonthBill !== dueUpTo && (
+                      <button
+                        type="button"
+                        onClick={() => setPayAmount(String(dueUpTo))}
+                        className="text-[10px] px-2 py-0.5 rounded-md bg-indigo-600/30 text-indigo-300 hover:bg-indigo-600/50 font-mono font-bold cursor-pointer"
+                      >
+                        {payBillMonth === 'ALL' ? `বকেয়া ৳${dueUpTo}` : `বকেয়া ৳${dueUpTo}`}
+                      </button>
+                      {singleMonthBill > 0 && singleMonthBill !== dueUpTo && payBillMonth !== 'ALL' && (
                         <button
                           type="button"
                           onClick={() => setPayAmount(String(singleMonthBill))}
-                          className="text-[10px] px-2 py-0.5 rounded-md bg-amber-600/30 text-amber-300 hover:bg-amber-600/50 font-mono font-bold"
+                          className="text-[10px] px-2 py-0.5 rounded-md bg-amber-600/30 text-amber-300 hover:bg-amber-600/50 font-mono font-bold cursor-pointer"
                         >
                           মাসিক ৳{singleMonthBill}
                         </button>
