@@ -32,13 +32,15 @@ import {
   Wallet,
   CreditCard,
   ShieldCheck,
-  AlertTriangle
+  AlertTriangle,
+  Pencil
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { pushKeyToCloud, recordDeletedTxId } from '../utils/canteenCloudSync';
 import { resolveImageUrl, getCanteenConfig } from '../utils/canteenSettings';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { formatBengaliMonthYear } from '../utils/exportCanteenBillExcel';
+import { DateNavigator, getTodayYMD } from '../components/DateNavigator';
 import { 
   BillCategory, 
   isOfficerMember, 
@@ -118,19 +120,40 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
 
   // Batch Add Form State
   const [amount, setAmount] = useState<string>('');
-  const [txDate, setTxDate] = useState<string>(() => {
-    const now = new Date();
-    return now.toISOString().split('T')[0];
+  const [txDate, setTxDate] = useState<string>(() => getTodayYMD());
+  
+  // Purpose Presets & Notes State
+  const DEFAULT_PURPOSE_PRESETS = [
+    'বাজার',
+    'ফরম-৭৯৩',
+    'অন্য ক্যান্টিন বিল',
+    'Mess Dinner Fee',
+    'Picnic & Refreshment'
+  ];
+  const [purposePresets, setPurposePresets] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('canteen_purpose_presets');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return DEFAULT_PURPOSE_PRESETS;
   });
-  const dateInputRef = useRef<HTMLInputElement>(null);
-  const [note, setNote] = useState<string>('');
+  const [purpose, setPurpose] = useState<string>('বাজার');
+  const [notes, setNotes] = useState<string>('');
+  const [newPresetInput, setNewPresetInput] = useState<string>('');
+  const [isAddingPreset, setIsAddingPreset] = useState<boolean>(false);
+
   const [othersFundSource, setOthersFundSource] = useState<'Cash' | 'UCB'>('Cash');
   const [cashDeductTarget, setCashDeductTarget] = useState<'MANAGER' | 'STAFF'>('MANAGER');
   const [selectedStaffName, setSelectedStaffName] = useState<string>('Civ Tanvir');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
-  // Transaction delete confirmation state
+  // Officer rank filter state
+  const [officerRankFilter, setOfficerRankFilter] = useState<string>('ALL');
+
+  // Transaction edit & delete state
+  const [txToEdit, setTxToEdit] = useState<any | null>(null);
+  const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
   const [txToDelete, setTxToDelete] = useState<any | null>(null);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [deletedTxIds, setDeletedTxIds] = useState<Set<string>>(new Set());
@@ -242,11 +265,56 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
     setTimeout(() => setToastMessage(null), 4000);
   };
 
+  // Add custom purpose preset handler
+  const handleAddPreset = () => {
+    const trimmed = newPresetInput.trim();
+    if (!trimmed) return;
+    if (!purposePresets.includes(trimmed)) {
+      const updated = [...purposePresets, trimmed];
+      setPurposePresets(updated);
+      try {
+        localStorage.setItem('canteen_purpose_presets', JSON.stringify(updated));
+      } catch {}
+    }
+    setPurpose(trimmed);
+    setNewPresetInput('');
+    setIsAddingPreset(false);
+  };
+
+  // Distinct officer ranks for officer rank filter
+  const officerRanks = useMemo(() => {
+    const ranksSet = new Set<string>();
+    members.forEach((m) => {
+      if (isOfficerMember(m)) {
+        const r = String(m['Rank'] || m.rank || '').trim().toUpperCase();
+        if (r && r !== '-') ranksSet.add(r);
+      }
+    });
+    const standardOrder = [
+      'AIR CHIEF MSHL', 'AIR MSHL', 'AVM', 'AIR CDRE', 'GP CAPT', 
+      'WG CDR', 'SQN LDR', 'FLT LT', 'FLG OFFR', 'FG OFFR', 'PLT OFFR'
+    ];
+    return Array.from(ranksSet).sort((a, b) => {
+      const idxA = standardOrder.findIndex(o => a.includes(o));
+      const idxB = standardOrder.findIndex(o => b.includes(o));
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return a.localeCompare(b);
+    });
+  }, [members]);
+
   // Filter members based on search and memberFilter, maintaining strict Rank Seniority (Officers > JCOs > Airmen > Civilians)
   const filteredMembers = useMemo(() => {
     const list = members.filter((m) => {
       // Role / Rank Filter
-      if (memberFilter === 'OFFICER' && !isOfficerMember(m)) return false;
+      if (memberFilter === 'OFFICER') {
+        if (!isOfficerMember(m)) return false;
+        if (officerRankFilter !== 'ALL') {
+          const mRank = String(m['Rank'] || m.rank || '').trim().toUpperCase();
+          if (!mRank.includes(officerRankFilter)) return false;
+        }
+      }
       if (memberFilter === 'AIRMEN' && !isAirmanMember(m)) return false;
       if (memberFilter === 'CIVILIAN' && !isCivilianMember(m)) return false;
 
@@ -267,7 +335,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
     });
 
     return sortCanteenMembersByOfficeSeniority(list);
-  }, [members, memberFilter, searchQuery, getMemberBanglaName, getMemberBanglaRank]);
+  }, [members, memberFilter, officerRankFilter, searchQuery, getMemberBanglaName, getMemberBanglaRank]);
 
   // Members for the dues table/cards
   const displayedMembersForDues = useMemo(() => {
@@ -407,8 +475,8 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       return;
     }
 
-    if (!isUnitFund && !note.trim()) {
-      showToast('A description note is required for Others Bill', 'error');
+    if (!isUnitFund && !purpose.trim()) {
+      showToast('A description note or purpose is required for Others Bill', 'error');
       return;
     }
 
@@ -452,21 +520,16 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       );
 
       const now = Date.now();
-      const finalNote = note.trim();
+      const finalPurpose = purpose.trim() || (isUnitFund ? 'Unit Fund Subscription' : 'Others Bill');
+      const finalNotes = notes.trim();
       const defaultDesc = isUnitFund
-        ? (finalNote ? `Unit Fund (${finalNote})` : 'Unit Fund Bill')
-        : (finalNote ? `Others: ${finalNote}` : 'Others Bill');
+        ? (finalPurpose ? `Unit Fund (${finalPurpose})` : 'Unit Fund Bill')
+        : finalPurpose;
 
-      // Format date for display (e.g. 06 Oct 26)
-      const dateObj = new Date(txDate);
-      const enMonths = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      const formattedTxDate = !isNaN(dateObj.getTime())
-        ? `${String(dateObj.getDate()).padStart(2, '0')} ${enMonths[dateObj.getMonth()]} ${String(dateObj.getFullYear()).slice(-2)}`
-        : formatCanteenDate(new Date());
+      // Format date for display matching POS Sales (e.g. 09 Oct 26)
+      const formattedTxDate = formatCanteenDate(txDate);
 
-      const targetMonth = !isNaN(dateObj.getTime())
-        ? `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`
-        : currentMonth;
+      const targetMonth = targetMonthKey || currentMonth;
 
       const newBatchTxs = selectedMemberList.map((m, idx) => {
         const cleanBdNo = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
@@ -482,7 +545,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
           memberName: `${m['Rank'] || ''} ${m['Surname'] || ''}`.trim(),
           rank: m['Rank'] || m.rank || '',
           items: defaultDesc,
-          note: finalNote || undefined,
+          note: finalNotes || undefined,
           soldItems: [],
           amount: numAmount,
           type: 'INITIAL_BILL',
@@ -515,8 +578,8 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
         const othersExpenseRecord = {
           id: `exp-others-${now}`,
           date: formattedTxDate,
-          desc: `OTHERS BILL: ${finalNote}`.toUpperCase(),
-          subdesc: `Bill charged to ${selectedMemberList.length} members (৳${numAmount.toLocaleString()} per member) [${othersFundSource === 'Cash' ? (cashDeductTarget === 'STAFF' ? `Staff: ${selectedStaffName}` : `Manager: ${managerName}`) : 'UCB Bank'}]`,
+          desc: `OTHERS BILL: ${finalPurpose}`.toUpperCase(),
+          subdesc: `Bill charged to ${selectedMemberList.length} members (৳${numAmount.toLocaleString()} per member)${finalNotes ? ` • Note: ${finalNotes}` : ''} [${othersFundSource === 'Cash' ? (cashDeductTarget === 'STAFF' ? `Staff: ${selectedStaffName}` : `Manager: ${managerName}`) : 'UCB Bank'}]`,
           category: 'Others Bill',
           paymentMethod: othersFundSource, // 'Cash' | 'UCB'
           amount: totalOthersDeduction,
@@ -554,7 +617,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
               spentAmount: totalOthersDeduction,
               returnAmount: 0,
               channel: 'CASH',
-              purpose: `OTHERS BILL: ${finalNote}`.toUpperCase(),
+              purpose: `OTHERS BILL: ${finalPurpose}`.toUpperCase(),
               status: 'ACTIVE',
               notes: `Auto deducted for Others Bill (${selectedMemberList.length} members)`
             };
@@ -600,7 +663,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
 
       // Reset form
       setAmount('');
-      if (!isUnitFund) setNote('');
+      setNotes('');
       setSelectedAirmanIds(new Set());
       onSuccess();
     } catch (err: any) {
@@ -608,6 +671,116 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       showToast(`Failed to post batch bills: ${err?.message || 'Unknown error'}`, 'error');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  // Save edited transaction
+  const handleSaveEditTx = async (updatedData: {
+    amount: number;
+    date: string;
+    items: string;
+    note?: string;
+    monthKey: string;
+  }) => {
+    if (!txToEdit) return;
+    setIsSavingEdit(true);
+
+    try {
+      const existingTxs = (() => {
+        try {
+          return JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+        } catch {
+          return [];
+        }
+      })();
+
+      const oldAmount = Number(txToEdit.amount || 0);
+      const newAmount = Number(updatedData.amount || 0);
+      const amountDiff = newAmount - oldAmount;
+
+      const formattedDate = formatCanteenDate(updatedData.date);
+
+      const updatedTxs = existingTxs.map((t: any) => {
+        if (String(t.id) === String(txToEdit.id)) {
+          return {
+            ...t,
+            amount: newAmount,
+            date: formattedDate,
+            items: updatedData.items,
+            note: updatedData.note || undefined,
+            monthKey: updatedData.monthKey
+          };
+        }
+        return t;
+      });
+
+      localStorage.setItem('canteen_txs', JSON.stringify(updatedTxs));
+      await pushKeyToCloud('canteen_txs', updatedTxs);
+
+      // Adjust member Due if amount changed
+      if (amountDiff !== 0) {
+        const targetMember = members.find((m: any) => {
+          if (!m) return false;
+          if (txToEdit.airman_id && m.airman_id === txToEdit.airman_id) return true;
+          const txBd = String(txToEdit.bdNo || txToEdit['BD No'] || '').trim();
+          const mBd = String(m['BD No'] || m.bdNo || '').trim();
+          if (txBd && mBd && txBd.toLowerCase() === mBd.toLowerCase()) return true;
+          const txBdClean = txBd.replace(/\D/g, '');
+          const mBdClean = mBd.replace(/\D/g, '');
+          if (txBdClean && mBdClean && txBdClean === mBdClean) return true;
+          return false;
+        });
+
+        if (targetMember) {
+          const currentDue = Number(targetMember.Due ?? targetMember.due ?? targetMember.baki ?? 0);
+          const newDue = Math.max(0, currentDue + amountDiff);
+
+          try {
+            if (targetMember.airman_id) {
+              await supabase
+                .from('Canteen_Member')
+                .update({ Due: newDue })
+                .eq('airman_id', targetMember.airman_id);
+            }
+            if (targetMember['BD No']) {
+              await supabase
+                .from('Canteen_Member')
+                .update({ Due: newDue })
+                .eq('BD No', String(targetMember['BD No']).trim());
+            }
+          } catch (e) {
+            console.warn('Supabase member due update on tx edit:', e);
+          }
+
+          targetMember.Due = newDue;
+          targetMember.due = newDue;
+          targetMember.baki = newDue;
+
+          const cleanBd = String(targetMember['BD No'] || targetMember.airman_id || '').replace(/\D/g, '').toLowerCase();
+          if (cleanBd) {
+            try {
+              const rawStored = localStorage.getItem(`canteen_member_${cleanBd}`);
+              const stored = rawStored ? JSON.parse(rawStored) : {};
+              localStorage.setItem(`canteen_member_${cleanBd}`, JSON.stringify({ ...stored, Due: newDue, due: newDue, baki: newDue }));
+            } catch {}
+          }
+        }
+      }
+
+      window.dispatchEvent(new Event('canteen_txs_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('canteen_members_updated'));
+      window.dispatchEvent(new Event('canteen_expenses_updated'));
+      window.dispatchEvent(new Event('storage'));
+
+      showToast('Transaction updated successfully!');
+      setTxToEdit(null);
+      if (onSuccess) onSuccess();
+    } catch (err: any) {
+      console.error('Edit transaction error:', err);
+      showToast(`Failed to update transaction: ${err?.message || 'Error'}`, 'error');
+    } finally {
+      setIsSavingEdit(false);
     }
   };
 
@@ -815,85 +988,47 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
         </div>
       </div>
 
-      {/* Summary KPI Cards & Month Selector */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        {/* Month Selector Card - Clean, High Contrast with Active Month formatted (e.g. October-26) */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 shadow-sm flex flex-col justify-between">
+      {/* Summary KPI Cards (without Active Month) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {/* Monthly Billed */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center space-x-1.5">
-              <Calendar className="w-3.5 h-3.5 text-indigo-400" />
-              <span>ACTIVE MONTH</span>
+            <span className="text-[11px] font-black uppercase tracking-wider text-slate-400 truncate">
+              MONTHLY BILLED
             </span>
-            <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-black bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
-              {formatActiveMonth(currentMonth)}
-            </span>
-          </div>
-
-          <div className="flex items-center justify-between bg-slate-950/90 rounded-xl p-1 border border-slate-800 shadow-inner">
-            <button
-              type="button"
-              onClick={handlePrevMonth}
-              className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
-              title="Previous Month"
-            >
-              <ChevronLeft className="w-4 h-4 text-indigo-400" />
-            </button>
-            <div className="text-center font-black text-xs sm:text-sm text-white font-mono tracking-wide">
-              {formatActiveMonth(currentMonth)}
+            <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
+              isUnitFund ? 'bg-indigo-500/10 text-indigo-400' : 'bg-cyan-500/10 text-cyan-400'
+            }`}>
+              <Coins className="w-4 h-4" />
             </div>
-            <button
-              type="button"
-              onClick={handleNextMonth}
-              className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
-              title="Next Month"
-            >
-              <ChevronRight className="w-4 h-4 text-indigo-400" />
-            </button>
+          </div>
+          <div>
+            <div className="text-xl sm:text-2xl font-black font-mono text-white">
+              ৳{stats.totalMonthBilled.toLocaleString()}
+            </div>
+            <p className="text-[11px] font-bold text-slate-400 truncate mt-1">
+              Total billed for this month
+            </p>
           </div>
         </div>
 
-        {/* Monthly Billed & Total Due: Compact & Side-by-Side (grid-cols-2) */}
-        <div className="md:col-span-2 grid grid-cols-2 gap-2.5 sm:gap-3">
-          {/* Monthly Billed */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 shadow-sm flex flex-col justify-between">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 truncate">
-                MONTHLY BILLED
-              </span>
-              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
-                isUnitFund ? 'bg-indigo-500/10 text-indigo-400' : 'bg-cyan-500/10 text-cyan-400'
-              }`}>
-                <Coins className="w-3.5 h-3.5" />
-              </div>
-            </div>
-            <div>
-              <div className="text-lg sm:text-xl font-black font-mono text-white">
-                ৳{stats.totalMonthBilled.toLocaleString()}
-              </div>
-              <p className="text-[10px] font-bold text-slate-400 truncate mt-0.5">
-                Total billed in {formatActiveMonth(currentMonth)}
-              </p>
+        {/* Total Overall Due */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm flex flex-col justify-between">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[11px] font-black uppercase tracking-wider text-slate-400 truncate">
+              TOTAL {categoryTitle} DUE
+            </span>
+            <div className="w-8 h-8 rounded-xl bg-rose-500/10 text-rose-400 flex items-center justify-center shrink-0">
+              <Banknote className="w-4 h-4" />
             </div>
           </div>
-
-          {/* Total Overall Due */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 shadow-sm flex flex-col justify-between">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 truncate">
-                TOTAL {categoryTitle} DUE
-              </span>
-              <div className="w-7 h-7 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center shrink-0">
-                <Banknote className="w-3.5 h-3.5" />
-              </div>
+          <div>
+            <div className="text-xl sm:text-2xl font-black font-mono text-rose-300">
+              ৳{stats.totalDue.toLocaleString()}
             </div>
-            <div>
-              <div className="text-lg sm:text-xl font-black font-mono text-rose-300">
-                ৳{stats.totalDue.toLocaleString()}
-              </div>
-              <p className="text-[10px] font-bold text-slate-400 truncate mt-0.5">
-                {stats.membersWithDue} members with outstanding due
-              </p>
-            </div>
+            <p className="text-[11px] font-bold text-slate-400 truncate mt-1">
+              {stats.membersWithDue} members with outstanding due
+            </p>
           </div>
         </div>
       </div>
@@ -954,83 +1089,118 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                 </div>
               </div>
 
-              {/* Date Input - Compact with Calendar Icon click trigger */}
+              {/* Billing Date using DateNavigator in POS Sales format */}
               <div>
-                <label className="block text-xs font-black uppercase text-slate-300 mb-1.5 flex items-center justify-between">
-                  <span>Billing Date</span>
-                  <span className="text-[10px] font-mono text-slate-400">Target Month: {targetMonthKey}</span>
+                <label className="block text-xs font-black uppercase text-slate-300 mb-1.5">
+                  Billing Date
                 </label>
-                <div 
-                  onClick={() => {
-                    try {
-                      dateInputRef.current?.showPicker();
-                    } catch (e) {
-                      dateInputRef.current?.focus();
-                    }
-                  }}
-                  className="inline-flex items-center space-x-2 bg-slate-950 border border-slate-700 hover:border-indigo-500/70 rounded-2xl px-3 py-2 cursor-pointer transition-all shadow-inner group"
-                >
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      try {
-                        dateInputRef.current?.showPicker();
-                      } catch (err) {
-                        dateInputRef.current?.focus();
-                      }
-                    }}
-                    className="p-1 rounded-lg text-slate-400 group-hover:text-indigo-400 hover:bg-slate-800 transition-colors cursor-pointer"
-                    title="Click to open calendar"
-                  >
-                    <Calendar className="w-4 h-4" />
-                  </button>
+                <DateNavigator 
+                  value={txDate} 
+                  onChange={setTxDate} 
+                  label="Dt"
+                  format="dd_mm_yy"
+                />
+              </div>
+
+              {/* Purpose with Presets, Custom Add, and Notes underneath */}
+              <div className="space-y-3">
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-black uppercase text-slate-300 flex items-center space-x-1.5">
+                      <Tag className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>
+                        Purpose {!isUnitFund && <span className="text-rose-400">*</span>}
+                      </span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingPreset(!isAddingPreset)}
+                      className="text-[11px] font-bold text-indigo-400 hover:text-indigo-300 transition-colors flex items-center space-x-1 cursor-pointer"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>{isAddingPreset ? 'Close' : 'Preset যোগ'}</span>
+                    </button>
+                  </div>
+
+                  {/* Add Preset Input Form */}
+                  {isAddingPreset && (
+                    <div className="flex items-center space-x-1.5 mb-2.5 p-2 bg-slate-950 rounded-xl border border-indigo-500/40">
+                      <input
+                        type="text"
+                        placeholder="নতুন প্রিসেটের নাম লিখুন..."
+                        value={newPresetInput}
+                        onChange={(e) => setNewPresetInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddPreset();
+                          }
+                        }}
+                        className="flex-1 bg-transparent text-xs font-bold text-white px-2 py-1 focus:outline-none placeholder:text-slate-500"
+                        autoFocus
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddPreset}
+                        className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-all cursor-pointer shrink-0"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Purpose Presets Chips */}
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {purposePresets.map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setPurpose(preset)}
+                        className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                          purpose === preset
+                            ? 'bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-400'
+                            : 'bg-slate-950 text-slate-300 hover:bg-slate-800 border border-slate-800'
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Purpose Text Input */}
                   <input
-                    ref={dateInputRef}
-                    type="date"
-                    value={txDate}
-                    onChange={(e) => setTxDate(e.target.value)}
-                    className="bg-transparent text-xs font-mono font-bold text-white focus:outline-none cursor-pointer w-28 sm:w-32"
+                    type="text"
+                    value={purpose}
+                    onChange={(e) => setPurpose(e.target.value)}
+                    placeholder="উদ্দেশ্য লিখুন বা ওপরের প্রিসেট থেকে নির্বাচন করুন..."
+                    className="w-full bg-slate-950 border border-slate-700 rounded-2xl px-3.5 py-2.5 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 shadow-inner"
+                    required={!isUnitFund}
+                  />
+                </div>
+
+                {/* Notes (niche nootes er option rakhba) */}
+                <div>
+                  <label className="block text-xs font-black uppercase text-slate-300 mb-1.5 flex items-center space-x-1.5">
+                    <FileText className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Notes / বিশেষ বিবরণ (ঐচ্ছিক)</span>
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="প্রয়োজনীয় কোনো বাড়তি নোট বা বিবরণ লিখুন..."
+                    className="w-full bg-slate-950 border border-slate-700 rounded-2xl p-3 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 shadow-inner resize-none"
                   />
                 </div>
               </div>
 
-              {/* NOTE / REASON FIELD (PROMINENT AND CRITICAL FOR OTHERS) */}
-              <div>
-                <label className="block text-xs font-black uppercase text-slate-300 mb-1.5 flex items-center justify-between">
-                  <span>
-                    Description / Purpose{' '}
-                    {!isUnitFund && <span className="text-rose-400">*</span>}
-                  </span>
-                  {!isUnitFund && (
-                    <span className="text-[10px] font-bold text-cyan-400 font-mono">Required</span>
-                  )}
-                </label>
-                <textarea
-                  rows={2}
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder={
-                    isUnitFund
-                      ? 'Optional reference note (e.g. Welfare subscription)'
-                      : 'Detailed purpose of charge (e.g. Mess Dinner Fee, Refreshments...)'
-                  }
-                  className={`w-full bg-slate-950 border rounded-2xl p-3 text-xs font-bold text-white focus:outline-none shadow-inner resize-none ${
-                    !isUnitFund && !note.trim()
-                      ? 'border-cyan-500/50 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20'
-                      : 'border-slate-700 focus:border-indigo-500'
-                  }`}
-                  required={!isUnitFund}
-                />
-              </div>
-
-              {/* For Others Bill: Fund Deduction Source (Cash or UCB) */}
+              {/* Payment Method (Cash / UCB) - replaces Deduct from Fund */}
               {!isUnitFund && (
-                <div className="bg-slate-950/80 rounded-2xl p-3 border border-cyan-500/30 space-y-2.5">
-                  <label className="block text-[11px] font-black uppercase text-cyan-300 flex items-center justify-between">
+                <div className="bg-slate-950/80 rounded-2xl p-3.5 border border-cyan-500/30 space-y-3">
+                  <label className="block text-xs font-black uppercase text-cyan-300 flex items-center justify-between">
                     <span className="flex items-center space-x-1.5">
                       <Wallet className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>Deduct from Fund Account *</span>
+                      <span>Payment Method *</span>
                     </span>
                     <span className="text-[10px] text-slate-400 font-mono font-normal">Canteen Fund</span>
                   </label>
@@ -1045,7 +1215,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                       }`}
                     >
                       <Wallet className="w-3.5 h-3.5" />
-                      <span>Cash (Drawer)</span>
+                      <span>Cash</span>
                     </button>
                     <button
                       type="button"
@@ -1057,56 +1227,35 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                       }`}
                     >
                       <CreditCard className="w-3.5 h-3.5" />
-                      <span>UCB (Bank)</span>
+                      <span>UCB</span>
                     </button>
                   </div>
 
-                  {/* Cash Account Options: Manager vs Staff */}
+                  {/* When Cash is selected: Staff option toggle & selection */}
                   {othersFundSource === 'Cash' && (
-                    <div className="bg-slate-900/90 rounded-xl p-2.5 border border-slate-800/90 space-y-2 mt-1">
+                    <div className="bg-slate-900/90 rounded-xl p-3 border border-slate-800 space-y-2.5">
                       <div className="flex items-center justify-between">
-                        <label className="text-[10px] font-black uppercase text-slate-300 flex items-center space-x-1.5">
-                          <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
-                          <span>Deduct Cash From *</span>
+                        <label className="flex items-center space-x-2 cursor-pointer select-none">
+                          <input 
+                            type="checkbox"
+                            checked={cashDeductTarget === 'STAFF'}
+                            onChange={(e) => setCashDeductTarget(e.target.checked ? 'STAFF' : 'MANAGER')}
+                            className="w-4 h-4 rounded text-emerald-600 bg-slate-950 border-slate-700 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                          />
+                          <span className="text-xs font-bold text-slate-200">
+                            Staff অপশন নির্বাচন (Staff Account)
+                          </span>
                         </label>
-                        <span className="text-[9px] text-slate-400 font-mono">
-                          {cashDeductTarget === 'MANAGER' ? 'Manager Cash' : 'Staff Account'}
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-950 text-slate-400 border border-slate-800">
+                          {cashDeductTarget === 'STAFF' ? 'Staff Account' : 'Auto Manager Cash'}
                         </span>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setCashDeductTarget('MANAGER')}
-                          className={`py-1.5 px-2.5 rounded-lg text-[11px] font-black flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
-                            cashDeductTarget === 'MANAGER'
-                              ? 'bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-400'
-                              : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
-                          }`}
-                        >
-                          <ShieldCheck className="w-3.5 h-3.5 text-indigo-200" />
-                          <span className="truncate">Manager ({managerName})</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => setCashDeductTarget('STAFF')}
-                          className={`py-1.5 px-2.5 rounded-lg text-[11px] font-black flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
-                            cashDeductTarget === 'STAFF'
-                              ? 'bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-400'
-                              : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
-                          }`}
-                        >
-                          <Users className="w-3.5 h-3.5 text-emerald-200" />
-                          <span>Staff</span>
-                        </button>
-                      </div>
-
-                      {/* Staff member selection list */}
-                      {cashDeductTarget === 'STAFF' && (
-                        <div className="space-y-1.5 pt-1 border-t border-slate-800/80">
+                      {/* If Staff is selected, show list of staff names */}
+                      {cashDeductTarget === 'STAFF' ? (
+                        <div className="space-y-1.5 pt-1.5 border-t border-slate-800">
                           <label className="block text-[10px] font-black uppercase text-slate-400">
-                            Select Staff Member Account *
+                            Select Staff Member *
                           </label>
                           <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
                             {civilianStaffList.map((st) => (
@@ -1126,20 +1275,25 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                             ))}
                           </div>
                         </div>
+                      ) : (
+                        <div className="p-2 rounded-lg bg-indigo-950/30 border border-indigo-900/40 text-[11px] text-indigo-300 font-bold flex items-center space-x-2">
+                          <ShieldCheck className="w-4 h-4 text-indigo-400 shrink-0" />
+                          <span>Staff নির্বাচন না করায় স্বয়ংক্রিয়ভাবে Manager ({managerName}) এর Cash থেকে টাকা কেটে যাবে।</span>
+                        </div>
                       )}
                     </div>
                   )}
 
                   <p className="text-[10px] text-slate-400 font-bold leading-relaxed">
-                    💡 Total bill {numAmount > 0 && selectedCount > 0 ? `৳${totalBatchAmount.toLocaleString()}` : 'amount'} will be automatically deducted from{' '}
+                    💡 Total bill {numAmount > 0 && selectedCount > 0 ? `৳${totalBatchAmount.toLocaleString()}` : 'amount'} will be deducted from{' '}
                     {othersFundSource === 'Cash' ? (
                       cashDeductTarget === 'STAFF' ? (
                         <strong className="text-emerald-400">{selectedStaffName} এর Account / Advance</strong>
                       ) : (
-                        <strong className="text-indigo-300">Manager ({managerName}) এর Cash Drawer</strong>
+                        <strong className="text-indigo-300">Manager ({managerName}) এর Cash</strong>
                       )
                     ) : (
-                      <strong className="text-cyan-300">UCB Bank Fund</strong>
+                      <strong className="text-cyan-300">UCB Fund</strong>
                     )}{' '}
                     upon posting.
                   </p>
@@ -1169,10 +1323,10 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
               {/* Action Submit Button */}
               <button
                 type="button"
-                disabled={isSubmitting || selectedCount === 0 || numAmount <= 0 || (!isUnitFund && !note.trim())}
+                disabled={isSubmitting || selectedCount === 0 || numAmount <= 0 || (!isUnitFund && !purpose.trim())}
                 onClick={handleBatchAddBill}
                 className={`w-full py-3.5 rounded-2xl text-xs font-black uppercase tracking-wider flex items-center justify-center space-x-2 transition-all cursor-pointer shadow-lg active:scale-98 ${
-                  selectedCount > 0 && numAmount > 0 && (isUnitFund || note.trim())
+                  selectedCount > 0 && numAmount > 0 && (isUnitFund || purpose.trim())
                     ? isUnitFund
                       ? 'bg-gradient-to-r from-indigo-600 to-teal-600 hover:from-indigo-500 hover:to-teal-500 text-white shadow-indigo-600/30'
                       : 'bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white shadow-cyan-600/30'
@@ -1245,7 +1399,10 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                     <button
                       key={cat}
                       type="button"
-                      onClick={() => setMemberFilter(cat)}
+                      onClick={() => {
+                        setMemberFilter(cat);
+                        if (cat !== 'OFFICER') setOfficerRankFilter('ALL');
+                      }}
                       className={`px-3 py-1 rounded-xl text-[11px] font-black uppercase transition-all cursor-pointer ${
                         memberFilter === cat
                           ? 'bg-slate-700 text-white shadow-xs'
@@ -1264,6 +1421,41 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                   </span>
                 </div>
               </div>
+
+              {/* Rank-wise secondary filter when OFFICER is selected */}
+              {memberFilter === 'OFFICER' && officerRanks.length > 0 && (
+                <div className="flex items-center space-x-1.5 overflow-x-auto scrollbar-none py-2 px-2.5 bg-slate-950/90 rounded-2xl border border-indigo-500/30">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-indigo-400 shrink-0 mr-1 flex items-center space-x-1">
+                    <Filter className="w-3 h-3" />
+                    <span>Officer Rank:</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setOfficerRankFilter('ALL')}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all shrink-0 cursor-pointer ${
+                      officerRankFilter === 'ALL'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                    }`}
+                  >
+                    ALL RANKS
+                  </button>
+                  {officerRanks.map((r) => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => setOfficerRankFilter(r)}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all shrink-0 cursor-pointer ${
+                        officerRankFilter === r
+                          ? 'bg-indigo-600 text-white shadow-xs'
+                          : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                      }`}
+                    >
+                      {r}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {/* Members Selection List */}
               <div className="max-h-[520px] overflow-y-auto space-y-2 pr-1 scrollbar-none">
@@ -1463,14 +1655,24 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                         ৳{Number(tx.amount || 0).toLocaleString()}
                       </td>
                       <td className="px-4 py-3 text-center">
-                        <button
-                          type="button"
-                          onClick={() => setTxToDelete(tx)}
-                          className="p-1.5 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 rounded-lg transition-colors cursor-pointer"
-                          title="Delete this transaction record"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center justify-center space-x-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setTxToEdit(tx)}
+                            className="p-1.5 hover:bg-indigo-500/20 text-slate-400 hover:text-indigo-400 rounded-lg transition-colors cursor-pointer"
+                            title="Edit this transaction record"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setTxToDelete(tx)}
+                            className="p-1.5 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 rounded-lg transition-colors cursor-pointer"
+                            title="Delete this transaction record"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -1479,6 +1681,18 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
             </table>
           </div>
         </div>
+      )}
+
+      {/* Edit Transaction Modal */}
+      {txToEdit && (
+        <EditFundTxModal
+          isOpen={Boolean(txToEdit)}
+          onClose={() => setTxToEdit(null)}
+          tx={txToEdit}
+          onSave={handleSaveEditTx}
+          isSaving={isSavingEdit}
+          purposePresets={purposePresets}
+        />
       )}
 
       {/* Delete Transaction Confirmation Modal */}
@@ -1518,6 +1732,274 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
           </div>
         </div>
       )}
+    </div>
+  );
+};
+
+interface EditFundTxModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  tx: any | null;
+  onSave: (data: {
+    amount: number;
+    date: string;
+    items: string;
+    note?: string;
+    monthKey: string;
+  }) => Promise<void>;
+  isSaving: boolean;
+  purposePresets: string[];
+}
+
+export const EditFundTxModal: React.FC<EditFundTxModalProps> = ({
+  isOpen,
+  onClose,
+  tx,
+  onSave,
+  isSaving,
+  purposePresets
+}) => {
+  if (!isOpen || !tx) return null;
+
+  const parseTxDateToYMD = (val: any): string => {
+    if (!val) return getTodayYMD();
+    if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val.trim())) return val.trim();
+    if (typeof val === 'string') {
+      const parts = val.trim().split(/\s+/);
+      if (parts.length === 3) {
+        const day = parts[0].padStart(2, '0');
+        const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+        const mIdx = monthNames.indexOf(parts[1].toLowerCase());
+        if (mIdx !== -1) {
+          const m = String(mIdx + 1).padStart(2, '0');
+          let yr = parts[2];
+          if (yr.length === 2) yr = `20${yr}`;
+          return `${yr}-${m}-${day}`;
+        }
+      }
+    }
+    const d = new Date(val);
+    if (!isNaN(d.getTime())) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    }
+    return getTodayYMD();
+  };
+
+  const [editAmount, setEditAmount] = useState<string>(String(tx.amount || ''));
+  const [editDate, setEditDate] = useState<string>(() => parseTxDateToYMD(tx.date || tx.created_at || tx.timestamp));
+  const [editItems, setEditItems] = useState<string>(tx.items || '');
+  const [editNote, setEditNote] = useState<string>(tx.note || '');
+  const [editMonthKey, setEditMonthKey] = useState<string>(tx.monthKey || '2026-10');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (tx) {
+      setEditAmount(String(tx.amount || ''));
+      setEditDate(parseTxDateToYMD(tx.date || tx.created_at || tx.timestamp));
+      setEditItems(tx.items || '');
+      setEditNote(tx.note || '');
+      setEditMonthKey(tx.monthKey || '2026-10');
+      setErrorMsg(null);
+    }
+  }, [tx]);
+
+  useEffect(() => {
+    if (editDate) {
+      const parts = editDate.split('-');
+      if (parts.length >= 2) {
+        setEditMonthKey(`${parts[0]}-${parts[1]}`);
+      }
+    }
+  }, [editDate]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const num = parseFloat(editAmount);
+    if (isNaN(num) || num <= 0) {
+      setErrorMsg('সঠিক টাকার পরিমাণ দিন (০ এর বেশি)');
+      return;
+    }
+    if (!editItems.trim()) {
+      setErrorMsg('উদ্দেশ্য বা বিবরণ খালি রাখা যাবে না');
+      return;
+    }
+
+    try {
+      await onSave({
+        amount: num,
+        date: editDate,
+        items: editItems.trim(),
+        note: editNote.trim() || undefined,
+        monthKey: editMonthKey
+      });
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'সংরক্ষণ ব্যর্থ হয়েছে');
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[999] flex items-center justify-center p-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6 max-w-md w-full shadow-2xl animate-in zoom-in-95 space-y-4 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div className="flex items-center space-x-2.5">
+            <div className="w-9 h-9 rounded-xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-400 flex items-center justify-center">
+              <Pencil className="w-4 h-4" />
+            </div>
+            <div>
+              <h4 className="text-sm font-black text-white uppercase tracking-tight">Edit Transaction</h4>
+              <p className="text-[11px] text-slate-400 font-bold">
+                {tx.memberName || tx.name || `BD/${tx.bdNo}`} {tx.bdNo ? `(BD/${tx.bdNo})` : ''}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {errorMsg && (
+          <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-bold">
+            {errorMsg}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-3.5">
+          {/* Amount */}
+          <div>
+            <label className="block text-xs font-black uppercase text-slate-300 mb-1">
+              Amount (টাকা) <span className="text-rose-400">*</span>
+            </label>
+            <div className="relative">
+              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-mono font-black text-slate-400 text-sm">
+                ৳
+              </span>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={editAmount}
+                onChange={(e) => setEditAmount(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-sm font-mono font-black text-white focus:outline-none focus:border-indigo-500"
+                required
+              />
+            </div>
+            <div className="flex flex-wrap gap-1 mt-1.5">
+              {[100, 200, 300, 500, 1000].map((q) => (
+                <button
+                  key={q}
+                  type="button"
+                  onClick={() => setEditAmount(String(q))}
+                  className={`px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold transition-all cursor-pointer ${
+                    editAmount === String(q)
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  }`}
+                >
+                  ৳{q}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Date with POS Sales DateNavigator */}
+          <div>
+            <label className="block text-xs font-black uppercase text-slate-300 mb-1">
+              Billing Date
+            </label>
+            <DateNavigator
+              value={editDate}
+              onChange={setEditDate}
+              label="Dt"
+              format="dd_mm_yy"
+            />
+          </div>
+
+          {/* Month Key */}
+          <div>
+            <label className="block text-xs font-black uppercase text-slate-300 mb-1">
+              Billing Month Key
+            </label>
+            <input
+              type="text"
+              value={editMonthKey}
+              onChange={(e) => setEditMonthKey(e.target.value)}
+              placeholder="e.g. 2026-10"
+              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+
+          {/* Purpose / Items */}
+          <div>
+            <label className="block text-xs font-black uppercase text-slate-300 mb-1">
+              Purpose / Description <span className="text-rose-400">*</span>
+            </label>
+            <div className="flex flex-wrap gap-1 mb-1.5">
+              {purposePresets.map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => setEditItems(preset)}
+                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                    editItems === preset
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  }`}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+            <input
+              type="text"
+              value={editItems}
+              onChange={(e) => setEditItems(e.target.value)}
+              placeholder="উদ্দেশ্য বা বিবরণ লিখুন..."
+              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-indigo-500"
+              required
+            />
+          </div>
+
+          {/* Note */}
+          <div>
+            <label className="block text-xs font-black uppercase text-slate-300 mb-1">
+              Notes / বিশেষ মন্তব্য (ঐচ্ছিক)
+            </label>
+            <input
+              type="text"
+              value={editNote}
+              onChange={(e) => setEditNote(e.target.value)}
+              placeholder="অতিরিক্ত মন্তব্য..."
+              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-slate-800">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isSaving}
+              className="py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSaving}
+              className="py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs transition-colors flex items-center justify-center space-x-1.5 shadow-lg shadow-indigo-950/50 cursor-pointer disabled:opacity-50"
+            >
+              {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+              <span>{isSaving ? 'Saving...' : 'Save Changes'}</span>
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 };
