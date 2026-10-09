@@ -37,7 +37,7 @@ import {
   Settings
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
-import { pushKeyToCloud, recordDeletedTxId } from '../utils/canteenCloudSync';
+import { pushKeyToCloud, recordDeletedTxId, reconcileExpenseOnFundTxDelete } from '../utils/canteenCloudSync';
 import { resolveImageUrl, getCanteenConfig } from '../utils/canteenSettings';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { formatBengaliMonthYear } from '../utils/exportCanteenBillExcel';
@@ -652,6 +652,11 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       const formattedTxDate = formatCanteenDate(txDate);
 
       const targetMonth = targetMonthKey;
+      const batchExpenseId = `exp-${category.toLowerCase()}-${now}`;
+
+      const paymentMethodFormatted = othersFundSource === 'Cash'
+        ? `Cash (${cashDeductTarget === 'STAFF' ? (selectedStaffName || 'Civ Tanvir') : (managerName || 'Manager')})`
+        : 'UCB';
 
       const newBatchTxs = selectedMemberList.map((m, idx) => {
         const cleanBdNo = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
@@ -676,7 +681,13 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
           amount: memberAmt,
           type: 'INITIAL_BILL',
           gateway: 'DUE',
-          billType: category
+          billType: category,
+          batchExpenseId,
+          paymentMethod: paymentMethodFormatted,
+          method: paymentMethodFormatted,
+          source: othersFundSource,
+          staffName: cashDeductTarget === 'STAFF' ? (selectedStaffName || 'Civ Tanvir') : (managerName || 'Manager'),
+          cashDeductTarget
         };
       });
 
@@ -693,19 +704,36 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
         }
       })();
 
-      const detailedPerson = othersFundSource === 'Cash'
-        ? (cashDeductTarget === 'STAFF' ? selectedStaffName : managerName)
-        : 'UCB Bank';
+      const memberBreakdown = selectedMemberList.map((m) => {
+        const cleanBdNo = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
+        const mId = String(m.airman_id || m['BD No']);
+        const raw = memberCustomAmounts[mId] !== undefined ? memberCustomAmounts[mId] : amount;
+        const memberAmt = parseFloat(raw || '0') || 0;
+        const name = `${m['Rank'] || ''} ${m['Surname'] || ''}`.trim() || `BD-${cleanBdNo}`;
+        return {
+          airman_id: m.airman_id,
+          bdNo: m['BD No'] || m.bdNo,
+          name,
+          amount: memberAmt,
+          label: `${name}${m['BD No'] ? ` (BD-${m['BD No']})` : ''}: ৳${memberAmt.toLocaleString('en-US')}`
+        };
+      });
+
+      const memberNamesStr = memberBreakdown.map(mb => mb.label).join(' • ');
+      const detailedPersonDisplay = memberBreakdown.length === 1 
+        ? memberBreakdown[0].label 
+        : `${memberBreakdown.length} Members: ${memberNamesStr}`;
 
       const fundExpenseRecord = {
-        id: `exp-${category.toLowerCase()}-${now}`,
+        id: batchExpenseId,
         date: formattedTxDate,
         desc: `${isUnitFund ? 'UNIT FUND' : 'OTHERS BILL'}: ${finalPurpose}`.toUpperCase(),
-        subdesc: `Batch Bill: ${selectedMemberList.length} members (Total: ৳${totalBatchAmount.toLocaleString()})${finalNotes ? ` • Note: ${finalNotes}` : ''} [${othersFundSource === 'Cash' ? (cashDeductTarget === 'STAFF' ? `Staff: ${selectedStaffName}` : `Manager: ${managerName}`) : 'UCB Bank'}]`,
+        subdesc: `Kar Jonno: ${memberNamesStr}${finalNotes ? ` • Note: ${finalNotes}` : ''} [${paymentMethodFormatted}]`,
         category: isUnitFund ? 'Unit Fund' : 'Others Bill',
-        paymentMethod: othersFundSource, // 'Cash' | 'UCB'
+        paymentMethod: paymentMethodFormatted,
         amount: totalBatchDeduction,
-        detailedPerson: detailedPerson,
+        detailedPerson: detailedPersonDisplay,
+        memberBreakdown: memberBreakdown,
         isCustom: true
       };
 
@@ -987,6 +1015,13 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       window.dispatchEvent(new Event('canteen_state_updated'));
       window.dispatchEvent(new Event('canteen_members_updated'));
       window.dispatchEvent(new Event('storage'));
+
+      // Automatically reconcile and delete/update corresponding expense from canteen_expenses (Capital Log)
+      try {
+        reconcileExpenseOnFundTxDelete(tx, filtered);
+      } catch (err) {
+        console.warn('Error updating canteen_expenses on tx delete in FundBatchBillPage:', err);
+      }
 
       // Perform background cloud and Supabase sync non-blockingly
       (async () => {

@@ -400,6 +400,126 @@ export function recordDeletedExpenseId(expId: string | number) {
 }
 
 /**
+ * Automatically reconciles and updates/deletes corresponding expense from canteen_expenses (Capital Log)
+ * when an OTHERS or UNIT_FUND transaction is deleted.
+ */
+export function reconcileExpenseOnFundTxDelete(deletedTx: any, remainingTxs?: any[]): void {
+  if (!deletedTx) return;
+  try {
+    const rawExpenses = localStorage.getItem('canteen_expenses');
+    if (!rawExpenses) return;
+    const exps: any[] = JSON.parse(rawExpenses);
+    if (!Array.isArray(exps) || exps.length === 0) return;
+
+    const txIdStr = String(deletedTx.id || '').toLowerCase();
+    const txItemsStr = String(deletedTx.items || '').toLowerCase();
+    const isOthers = 
+      deletedTx.billType === 'OTHERS' || 
+      deletedTx.category === 'OTHERS' || 
+      txIdStr.includes('others') || 
+      txItemsStr.includes('others bill') || 
+      txItemsStr.includes('other bill') ||
+      txItemsStr.includes('others fund');
+
+    const isUnitFund = 
+      deletedTx.billType === 'UNIT_FUND' || 
+      deletedTx.category === 'UNIT_FUND' || 
+      txIdStr.includes('unit_fund') || 
+      txIdStr.includes('unit-fund') || 
+      txItemsStr.includes('unit fund');
+
+    if (!isOthers && !isUnitFund && !deletedTx.batchExpenseId) return;
+
+    // Get current remaining transactions from param or localStorage
+    const allRemainingTxs = remainingTxs || (() => {
+      try {
+        return JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+      } catch {
+        return [];
+      }
+    })();
+
+    let expModified = false;
+
+    // 1. Locate matching expense
+    let targetExpIdx = exps.findIndex(e => deletedTx.batchExpenseId && String(e.id) === String(deletedTx.batchExpenseId));
+
+    if (targetExpIdx === -1) {
+      const txDate = deletedTx.date;
+      targetExpIdx = exps.findIndex(e => {
+        const eDate = e.date;
+        const eDesc = String(e.desc || '').toLowerCase();
+        const eCat = String(e.category || '').toLowerCase();
+        const isCatMatch = isOthers
+          ? (eCat.includes('others') || eDesc.includes('others'))
+          : (eCat.includes('unit') || eDesc.includes('unit'));
+        return isCatMatch && (eDate === txDate || Math.abs(new Date(eDate).getTime() - new Date(txDate).getTime()) < 86400000);
+      });
+    }
+
+    if (targetExpIdx !== -1) {
+      const targetExp = exps[targetExpIdx];
+      // Find remaining active transactions belonging to this exact batch / expense
+      const remainingTxsInBatch = allRemainingTxs.filter((t: any) => {
+        if (!t || String(t.id) === String(deletedTx.id)) return false;
+        if (deletedTx.batchExpenseId && t.batchExpenseId === deletedTx.batchExpenseId) return true;
+        if (targetExp.id && t.batchExpenseId === targetExp.id) return true;
+        return (
+          String(t.items || '') === String(deletedTx.items || '') && 
+          String(t.date || '') === String(deletedTx.date || '') && 
+          (t.billType === deletedTx.billType || (isOthers && String(t.id || '').includes('others')))
+        );
+      });
+
+      if (remainingTxsInBatch.length === 0) {
+        // No remaining transactions in this batch! Delete the entire expense!
+        recordDeletedExpenseId(String(targetExp.id));
+        exps.splice(targetExpIdx, 1);
+        expModified = true;
+      } else {
+        // Compute exact remaining amount from active transactions
+        const remainingSum = remainingTxsInBatch.reduce((sum: number, t: any) => sum + (Number(t.amount) || 0), 0);
+        if (remainingSum <= 0) {
+          recordDeletedExpenseId(String(targetExp.id));
+          exps.splice(targetExpIdx, 1);
+        } else {
+          targetExp.amount = remainingSum;
+          const memberList = remainingTxsInBatch.map((t: any) => {
+            const name = String(t.memberName || t.name || '').trim() || (t.bdNo ? `BD-${t.bdNo}` : 'Member');
+            const bd = t.bdNo ? ` (BD-${t.bdNo})` : '';
+            const amt = Number(t.amount) || 0;
+            return {
+              name,
+              bdNo: t.bdNo,
+              amount: amt,
+              label: `${name}${bd}: ৳${amt.toLocaleString('en-US')}`
+            };
+          });
+          targetExp.memberBreakdown = memberList;
+          if (memberList.length === 1) {
+            targetExp.detailedPerson = memberList[0].label;
+          } else {
+            targetExp.detailedPerson = memberList.map(m => m.label).join(' • ');
+          }
+          targetExp.subdesc = `Kar Jonno: ${memberList.map(m => m.label).join(', ')} [${targetExp.paymentMethod || 'Cash'}]`;
+        }
+        expModified = true;
+      }
+    }
+
+    if (expModified) {
+      localStorage.setItem('canteen_expenses', JSON.stringify(exps));
+      pushKeyToCloud('canteen_expenses', exps).catch(() => {});
+      window.dispatchEvent(new Event('canteen_expenses_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
+    }
+  } catch (err) {
+    console.warn('[reconcileExpenseOnFundTxDelete] Error:', err);
+  }
+}
+
+/**
  * Merge two arrays of objects by unique identifier (id or orderId or key)
  * Also safely supports arrays of string IDs (such as canteen_daily_menu).
  */

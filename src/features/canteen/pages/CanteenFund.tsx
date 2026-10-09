@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Wallet, Landmark, CreditCard, Receipt, ArrowRightLeft, 
-  X, RefreshCw, CheckCircle2, AlertCircle, Building2, Briefcase, PieChart, Layers
+  X, RefreshCw, CheckCircle2, AlertCircle, Building2, Briefcase, PieChart, Layers, Trash2, Loader2
 } from 'lucide-react';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { ExpenseRecord, BazarAdvance } from './Expenditures';
 import { UnitFundSection } from './UnitFundSection';
 import { OthersFundSection } from './OthersFundSection';
 import { AllFundsOverviewSection } from './AllFundsOverviewSection';
+import { getTxCategory } from './MemberDB';
+import { pushKeyToCloud, recordDeletedExpenseId, recordDeletedTxId } from '../utils/canteenCloudSync';
+import { playSuccessChime } from '../utils/audioFeedback';
 
 export interface FundTransfer {
   id: string;
@@ -45,19 +48,189 @@ export const CanteenFund: React.FC = () => {
   const [transferNote, setTransferNote] = useState<string>('');
   const [transferError, setTransferError] = useState<string>('');
   const [toastMessage, setToastMessage] = useState<string>('');
+  const [expToDelete, setExpToDelete] = useState<any | null>(null);
+  const [isDeletingExp, setIsDeletingExp] = useState(false);
 
   const loadData = () => {
     try {
       const rawTxs = localStorage.getItem(TXS_KEY);
-      const txs = rawTxs ? JSON.parse(rawTxs) : [];
+      const txs: any[] = rawTxs ? JSON.parse(rawTxs) : [];
       setReports(Array.isArray(txs) ? txs : []);
-    } catch (_err) {
-      setReports([]);
-    }
 
-    try {
       const rawExps = localStorage.getItem(EXPENSES_KEY);
-      const exps = rawExps ? JSON.parse(rawExps) : [];
+      let exps: any[] = rawExps ? JSON.parse(rawExps) : [];
+
+      // Automatically clean up any orphaned Others/Unit Fund batch bill expenses
+      // whose underlying transactions were deleted from Others/Unit Fund history
+      if (Array.isArray(exps) && Array.isArray(txs)) {
+        let cleaned = false;
+
+        // Collect all active others and unit fund transactions
+        const activeOtherTxs = txs.filter((t: any) => {
+          if (!t) return false;
+          const bType = String(t.billType || t.category || '').toUpperCase();
+          const tId = String(t.id || '').toLowerCase();
+          const tItems = String(t.items || '').toLowerCase();
+          return bType === 'OTHERS' || tId.includes('others') || tItems.includes('others bill') || tItems.includes('other bill');
+        });
+
+        const activeUnitTxs = txs.filter((t: any) => {
+          if (!t) return false;
+          const bType = String(t.billType || t.category || '').toUpperCase();
+          const tId = String(t.id || '').toLowerCase();
+          const tItems = String(t.items || '').toLowerCase();
+          return bType === 'UNIT_FUND' || tId.includes('unit_fund') || tItems.includes('unit fund');
+        });
+
+        const matchedTxIds = new Set<string>();
+
+        const filteredExps = exps.filter((e: any) => {
+          if (!e) return false;
+          const eDesc = String(e.desc || '').toUpperCase();
+          const eCat = String(e.category || '').toLowerCase();
+          const eId = String(e.id || '').toLowerCase();
+
+          const isOthersExp = 
+            eCat.includes('others') || 
+            eDesc.startsWith('OTHERS BILL') || 
+            eId.startsWith('exp-others-');
+          const isUnitExp = 
+            eCat.includes('unit') || 
+            eDesc.startsWith('UNIT FUND') || 
+            eId.startsWith('exp-unit_fund-');
+
+          if (!isOthersExp && !isUnitExp) {
+            return true;
+          }
+
+          const candidateTxs = isOthersExp ? activeOtherTxs : activeUnitTxs;
+
+          // 1. Exact match by batchExpenseId
+          let matchingTxs = candidateTxs.filter((t: any) => 
+            t.batchExpenseId && String(t.batchExpenseId).toLowerCase() === eId
+          );
+
+          // 2. If no direct batchExpenseId match and expense was not an exp- batch, match unassigned txs
+          if (matchingTxs.length === 0 && !eId.startsWith('exp-')) {
+            const eDate = e.date || '';
+            matchingTxs = candidateTxs.filter((t: any) => {
+              if (matchedTxIds.has(String(t.id))) return false;
+              if (t.batchExpenseId) return false;
+              const tDate = t.date || '';
+              return tDate === eDate || (Math.abs(new Date(tDate).getTime() - new Date(eDate).getTime()) < 86400000);
+            });
+          }
+
+          // If no active transactions exist for this batch, delete it permanently!
+          if (matchingTxs.length === 0) {
+            recordDeletedExpenseId(String(e.id));
+            cleaned = true;
+            return false;
+          }
+
+          // Mark transactions as matched
+          matchingTxs.forEach((t: any) => matchedTxIds.add(String(t.id)));
+
+          // Compute exact remaining active sum
+          const activeBatchSum = matchingTxs.reduce((sum: number, t: any) => sum + (Number(t.amount) || 0), 0);
+          if (activeBatchSum <= 0) {
+            recordDeletedExpenseId(String(e.id));
+            cleaned = true;
+            return false;
+          }
+
+          if (Math.abs(Number(e.amount) - activeBatchSum) > 0.01) {
+            e.amount = activeBatchSum;
+            cleaned = true;
+          }
+
+          // Build dynamic member breakdown: "kar jonno kto amount"
+          const memberList = matchingTxs.map((t: any) => {
+            const name = String(t.memberName || t.name || '').trim() || (t.bdNo ? `BD-${t.bdNo}` : 'Member');
+            const bd = t.bdNo ? ` (BD-${t.bdNo})` : '';
+            const amt = Number(t.amount) || 0;
+            return {
+              name,
+              bdNo: t.bdNo,
+              amount: amt,
+              label: `${name}${bd}: ৳${amt.toLocaleString('en-US')}`
+            };
+          });
+
+          e.memberBreakdown = memberList;
+          if (memberList.length === 1) {
+            e.detailedPerson = memberList[0].label;
+          } else {
+            e.detailedPerson = memberList.map(m => m.label).join(' • ');
+          }
+          e.subdesc = `Kar Jonno: ${memberList.map(m => m.label).join(', ')}`;
+
+          return true;
+        });
+
+        // Reverse Reconciliation: Ensure ANY active Others / Unit Fund transactions in canteen_txs
+        // that are not yet in Capital (canteen_expenses) get automatically created and displayed!
+        const allActiveFundTxs = [...activeOtherTxs, ...activeUnitTxs];
+        const unmatchedTxs = allActiveFundTxs.filter((t: any) => !matchedTxIds.has(String(t.id)));
+
+        if (unmatchedTxs.length > 0) {
+          const groups = new Map<string, any[]>();
+          unmatchedTxs.forEach((t: any) => {
+            const key = t.batchExpenseId || `grp-${getTxCategory(t)}-${t.date || t.created_at || t.id}`;
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key)!.push(t);
+          });
+
+          groups.forEach((grpTxs, grpKey) => {
+            const sample = grpTxs[0];
+            const cat = getTxCategory(sample);
+            const isUnit = cat === 'UNIT_FUND';
+            const grpSum = grpTxs.reduce((s: number, t: any) => s + (Number(t.amount) || 0), 0);
+            if (grpSum <= 0) return;
+
+            const memberList = grpTxs.map((t: any) => {
+              const name = String(t.memberName || t.name || '').trim() || (t.bdNo ? `BD-${t.bdNo}` : 'Member');
+              const bd = t.bdNo ? ` (BD-${t.bdNo})` : '';
+              const amt = Number(t.amount) || 0;
+              return {
+                name,
+                bdNo: t.bdNo,
+                amount: amt,
+                label: `${name}${bd}: ৳${amt.toLocaleString('en-US')}`
+              };
+            });
+
+            const methodStr = String(sample.paymentMethod || sample.method || sample.source || 'Cash');
+            const isUcb = methodStr.toLowerCase().includes('ucb') || methodStr.toLowerCase().includes('bank');
+            const targetStaff = sample.staffName || (sample.note && sample.note.includes('Tanvir') ? 'Civ Tanvir' : undefined);
+            const finalMethod = isUcb ? 'UCB' : (methodStr.startsWith('Cash (') ? methodStr : (targetStaff ? `Cash (${targetStaff})` : 'Cash (Manager)'));
+
+            const detailedPerson = memberList.length === 1 ? memberList[0].label : memberList.map(m => m.label).join(' • ');
+            const autoExpId = sample.batchExpenseId || (grpKey.startsWith('grp-') ? `exp-${grpKey.slice(4)}` : grpKey);
+
+            filteredExps.unshift({
+              id: autoExpId,
+              date: sample.date || formatCanteenDate(new Date().toISOString()),
+              desc: `${isUnit ? 'UNIT FUND' : 'OTHERS BILL'}: ${sample.items || sample.purpose || (isUnit ? 'Unit Fund Subscription' : 'Others Bill')}`.toUpperCase(),
+              subdesc: `Kar Jonno: ${memberList.map(m => m.label).join(', ')} [${finalMethod}]`,
+              category: isUnit ? 'Unit Fund' : 'Others Bill',
+              paymentMethod: finalMethod,
+              amount: grpSum,
+              detailedPerson,
+              memberBreakdown: memberList,
+              isCustom: true
+            });
+            cleaned = true;
+          });
+        }
+
+        exps = filteredExps;
+        if (cleaned) {
+          localStorage.setItem(EXPENSES_KEY, JSON.stringify(exps));
+          pushKeyToCloud(EXPENSES_KEY, exps).catch(() => {});
+        }
+      }
+
       setExpenses(Array.isArray(exps) ? exps : []);
     } catch (_err) {
       setExpenses([]);
@@ -140,12 +313,21 @@ export const CanteenFund: React.FC = () => {
     .reduce((a, b) => a + (Number(b.amount) || 0), 0);
 
   // 2. Outflow from Expenditures
+  const isCashMethod = (m?: string) => {
+    const lower = String(m || 'cash').toLowerCase().trim();
+    return lower === 'cash' || lower.startsWith('cash');
+  };
+  const isUcbMethod = (m?: string) => {
+    const lower = String(m || '').toLowerCase().trim();
+    return lower === 'ucb' || lower.startsWith('ucb') || lower.includes('bank');
+  };
+
   const expenseCash = expenses
-    .filter(exp => String(exp.paymentMethod || 'Cash').toLowerCase() === 'cash')
+    .filter(exp => isCashMethod(exp.paymentMethod))
     .reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
 
   const expenseUCB = expenses
-    .filter(exp => String(exp.paymentMethod || '').toLowerCase() === 'ucb')
+    .filter(exp => isUcbMethod(exp.paymentMethod))
     .reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
 
   // 3. Transfers In/Out
@@ -194,22 +376,91 @@ export const CanteenFund: React.FC = () => {
   const ucbPayments = reports.filter(r => (r.type === 'BILL PAYMENT' || r.type === 'BAZAR_RETURN' || r.type === 'ADVANCE_RETURN') && String(r.gateway || '').toUpperCase() === 'UCB');
 
   const cashExpenses = expenses.filter(e => {
-    const m = String(e.paymentMethod || 'Cash').toLowerCase();
     const d = String(e.desc || '').toLowerCase();
-    return m === 'cash' && !d.includes('advance settle payout') && !d.includes('cash advance');
+    return isCashMethod(e.paymentMethod) && !d.includes('advance settle payout') && !d.includes('cash advance');
   });
   const ucbExpenses = expenses.filter(e => {
-    const m = String(e.paymentMethod || '').toLowerCase();
     const d = String(e.desc || '').toLowerCase();
-    return m === 'ucb' && !d.includes('advance settle payout') && !d.includes('cash advance');
+    return isUcbMethod(e.paymentMethod) && !d.includes('advance settle payout') && !d.includes('cash advance');
   });
+
+  // Helper to extract upto month text for Bill Payments (e.g., "upto Sep 26")
+  const getBillPaymentUptoText = (r: any): string => {
+    const monthNames: Record<string, string> = {
+      '01': 'Jan', '02': 'Feb', '03': 'Mar', '04': 'Apr', '05': 'May', '06': 'Jun',
+      '07': 'Jul', '08': 'Aug', '09': 'Sep', '10': 'Oct', '11': 'Nov', '12': 'Dec'
+    };
+
+    // 1. If r.billMonth is YYYY-MM
+    const mKey = r.billMonth || r.monthKey;
+    if (mKey && /^\d{4}-\d{2}$/.test(mKey)) {
+      const [y, m] = mKey.split('-');
+      const mName = monthNames[m] || 'Sep';
+      const yShort = y.slice(-2);
+      return `upto ${mName} ${yShort}`;
+    }
+
+    // 2. If r.lastDateCovered is present (e.g. "26/09/2026" or "Sep 26")
+    if (r.lastDateCovered) {
+      const lastDate = String(r.lastDateCovered).trim();
+      if (lastDate.toLowerCase().includes('upto')) {
+        return lastDate.replace(/^\(?upto\s*/i, 'upto ').replace(/\)$/, '').trim();
+      }
+      const parts = lastDate.split('/');
+      if (parts.length === 3) {
+        const mName = monthNames[parts[1].padStart(2, '0')] || parts[1];
+        const yShort = parts[2].slice(-2);
+        return `upto ${mName} ${yShort}`;
+      }
+      if (/^[A-Za-z]{3}\s*\d{2,4}$/.test(lastDate)) {
+        const p = lastDate.split(/\s+/);
+        return `upto ${p[0]} ${p[1].slice(-2)}`;
+      }
+    }
+
+    // 3. Extract from r.items if it contains date or Bengali month
+    const itemsStr = String(r.items || '');
+    if (itemsStr) {
+      const bnMonths: Record<string, string> = {
+        'জানুয়ারি': 'Jan', 'ফেব্রুয়ারি': 'Feb', 'মার্চ': 'Mar', 'এপ্রিল': 'Apr',
+        'মে': 'May', 'জুন': 'Jun', 'জুলাই': 'Jul', 'আগস্ট': 'Aug',
+        'সেপ্টেম্বর': 'Sep', 'অক্টোবর': 'Oct', 'নভেম্বর': 'Nov', 'ডিসেম্বর': 'Dec'
+      };
+      for (const [bnM, enM] of Object.entries(bnMonths)) {
+        if (itemsStr.includes(bnM)) {
+          const yearMatch = itemsStr.match(/20(\d{2})/);
+          const yShort = yearMatch ? yearMatch[1] : '26';
+          return `upto ${enM} ${yShort}`;
+        }
+      }
+      const dateMatch = itemsStr.match(/(\d{2})\/(\d{2})\/(?:20)?(\d{2})/);
+      if (dateMatch) {
+        const mName = monthNames[dateMatch[2]] || 'Sep';
+        return `upto ${mName} ${dateMatch[3]}`;
+      }
+    }
+
+    // 4. Fallback from r.date or previous month of payment
+    if (r.date) {
+      const d = new Date(r.date);
+      if (!isNaN(d.getTime())) {
+        const enMonths = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const prevMIdx = (d.getMonth() === 0 ? 11 : d.getMonth() - 1);
+        const prevYear = d.getMonth() === 0 ? d.getFullYear() - 1 : d.getFullYear();
+        return `upto ${enMonths[prevMIdx]} ${String(prevYear).slice(-2)}`;
+      }
+    }
+
+    return 'upto Sep 26';
+  };
 
   // Unified All Fund Logs list ("Capital e Fund logs e akta all option add korba jekhane sob dekha jbe")
   const allLogs = useMemo(() => {
     interface UnifiedLogItem {
       id: string;
+      rawExp?: any;
       date: string;
-      logType: 'INFLOW' | 'EXPENSE' | 'TRANSFER' | 'CASH_ADVANCE' | 'CASH_REFUND';
+      logType: 'INFLOW' | 'EXPENSE' | 'TRANSFER' | 'CASH_ADVANCE' | 'CASH_REFUND' | 'PAYMENT';
       title: string;
       subtitle?: string;
       channel: string;
@@ -232,20 +483,41 @@ export const CanteenFund: React.FC = () => {
       const dStr = r.date || '';
       const dVal = new Date(dStr).getTime() || 0;
       const isRefund = r.type === 'BAZAR_RETURN' || r.type === 'ADVANCE_RETURN';
+      const isBillPayment = r.type === 'BILL PAYMENT' || (!isPaidSale && !isRefund);
+
+      let logType: 'INFLOW' | 'CASH_REFUND' | 'PAYMENT' = 'INFLOW';
+      let title = '';
+      let subtitle: string | undefined = undefined;
+
+      if (isRefund) {
+        logType = 'CASH_REFUND';
+        // As requested: "Refund korle / type hbe Refund / Description - Civ Tanvir"
+        title = r.memberName || 'Civ Tanvir';
+        subtitle = undefined;
+      } else if (isBillPayment) {
+        logType = 'PAYMENT';
+        // As requested:
+        // "BIL payment  korle
+        // type hbe Payment 
+        // Description - 
+        // Civ Tanvir  enter diye niche
+        // (upto Sep 26)"
+        const person = r.memberName || r.customerName || (r.bdNo ? `BD-${r.bdNo}` : 'Civ Tanvir');
+        const uptoStr = getBillPaymentUptoText(r);
+        title = `${person}\n(${uptoStr})`;
+        subtitle = undefined;
+      } else {
+        logType = 'INFLOW';
+        title = `POS Cash Sale: ${r.memberName || r.customerName || 'Customer'}`;
+        subtitle = `Cash Sale • ${r.items || 'Menu Items'} (Manager Cash Drawer)`;
+      }
+
       items.push({
         id: `inflow-${r.id || idx}`,
         date: dStr,
-        logType: isRefund ? 'CASH_REFUND' : 'INFLOW',
-        title: isPaidSale 
-          ? `POS Cash Sale: ${r.memberName || r.customerName || 'Customer'}`
-          : isRefund 
-          ? `Cash Refund: ${r.memberName || 'Staff'}` 
-          : (r.memberName || r.airman_id || 'Collection'),
-        subtitle: isPaidSale
-          ? `Cash Sale • ${r.items || 'Menu Items'} (Manager Cash Drawer)`
-          : isRefund 
-          ? `Advance Return / Settle Surplus • Returned to Cash (${r.memberName || ''})`
-          : (r.items || 'Bill Payment') + (r.bdNo ? ` (BD-${r.bdNo})` : ''),
+        logType,
+        title,
+        subtitle,
         channel: gw,
         amount: amt,
         rawDate: dVal
@@ -254,8 +526,9 @@ export const CanteenFund: React.FC = () => {
 
     // 2. Expenses (Cash & UCB)
     expenses.forEach((e, idx) => {
-      const method = String(e.paymentMethod || 'Cash').toLowerCase();
-      if (method !== 'cash' && method !== 'ucb') return;
+      const isCash = isCashMethod(e.paymentMethod);
+      const isUcb = isUcbMethod(e.paymentMethod);
+      if (!isCash && !isUcb) return;
       const descLower = String(e.desc || '').toLowerCase();
       if (e.category === 'Refund' || descLower.includes('cash refund') || descLower.includes('উদ্বৃত্ত ফেরত')) return;
       const amt = Number(e.amount) || 0;
@@ -264,15 +537,59 @@ export const CanteenFund: React.FC = () => {
       const dVal = new Date(dStr).getTime() || 0;
       const isAdvanceDesc = descLower.includes('advance') || descLower.includes('অগ্রিম');
 
+      const isOthersOrUnit = 
+        String(e.category || '').toLowerCase().includes('others') || 
+        String(e.category || '').toLowerCase().includes('unit') ||
+        descLower.startsWith('others bill') || 
+        descLower.startsWith('unit fund');
+
+      let title = e.desc || 'Expense Item';
+      let subtitle: string | undefined = undefined;
+
+      if (isAdvanceDesc) {
+        // As requested: "Cash Advance nile / type hbe Advance / Description - Civ Tanvir"
+        title = e.detailedPerson || 'Civ Tanvir';
+        subtitle = undefined;
+      } else if (isOthersOrUnit) {
+        // As requested:
+        // "বাজার ও সিংগারা এর নিচে Enter diye
+        // (Sqn Ldr Tareq)"
+        let cleanPurpose = String(e.desc || '')
+          .replace(/^OTHERS\s*BILL\s*:\s*/i, '')
+          .replace(/^OTHER\s*BILL\s*:\s*/i, '')
+          .replace(/^UNIT\s*FUND\s*:\s*/i, '')
+          .replace(/^UNIT\s*FUND\s*BILL\s*:\s*/i, '')
+          .trim() || (String(e.category || '').toLowerCase().includes('unit') ? 'Unit Fund Bill' : 'Others Bill');
+
+        let memberNamesList: string[] = [];
+        if (e.memberBreakdown && Array.isArray(e.memberBreakdown) && e.memberBreakdown.length > 0) {
+          memberNamesList = e.memberBreakdown
+            .map((m: any) => String(m.name || '').trim())
+            .filter(Boolean);
+        } else if (e.detailedPerson && !e.detailedPerson.startsWith('Staff:') && !e.detailedPerson.startsWith('Manager:') && e.detailedPerson !== 'Civ Tanvir') {
+          const cleanP = e.detailedPerson.split(':')[0].replace(/\(BD-[^)]+\)/i, '').trim();
+          if (cleanP) memberNamesList.push(cleanP);
+        }
+
+        const memberStr = memberNamesList.join(', ');
+        title = memberStr ? `${cleanPurpose}\n(${memberStr})` : cleanPurpose;
+        subtitle = undefined;
+      } else {
+        subtitle = `${e.detailedPerson ? `Staff: ${e.detailedPerson}` : 'Canteen Expense'} • ${e.category || 'General'}`;
+      }
+
+      const channelDisplay = isUcb 
+        ? 'UCB' 
+        : (e.paymentMethod && String(e.paymentMethod).startsWith('Cash (') ? String(e.paymentMethod).toUpperCase() : 'CASH');
+
       items.push({
         id: `exp-${e.id || idx}`,
+        rawExp: e,
         date: dStr,
         logType: isAdvanceDesc ? 'CASH_ADVANCE' : 'EXPENSE',
-        title: isAdvanceDesc ? `Cash Advance: ${e.detailedPerson || 'Staff'}` : (e.desc || 'Expense Item'),
-        subtitle: isAdvanceDesc
-          ? `Staff Advance • ${e.desc || ''}`
-          : `${e.detailedPerson ? `Staff: ${e.detailedPerson}` : 'Canteen Expense'} • ${e.category || 'General'}`,
-        channel: method.toUpperCase(),
+        title,
+        subtitle,
+        channel: channelDisplay,
         amount: amt,
         rawDate: dVal
       });
@@ -300,6 +617,7 @@ export const CanteenFund: React.FC = () => {
     // "Cash advance er log expence hbe na oita Cash Advance hbe, back asle oita Cash Refund hbe"
     advances.forEach((a, idx) => {
       // 4a. Advance Add / Issue
+      // As requested: "Cash Advance nile / type hbe Advance / Description - Civ Tanvir"
       if (Number(a.amount) > 0 && !a.id.includes('settle-topup')) {
         const dStr = a.date || '';
         const dVal = new Date(dStr).getTime() || 0;
@@ -307,8 +625,8 @@ export const CanteenFund: React.FC = () => {
           id: `adv-add-${a.id || idx}`,
           date: dStr,
           logType: 'CASH_ADVANCE',
-          title: `Cash Advance: ${a.personName || 'Staff'}`,
-          subtitle: `Staff Advance Issued • ${a.purpose || 'Daily Bazar Advance'} (${a.status || 'ACTIVE'})`,
+          title: a.personName || 'Civ Tanvir',
+          subtitle: undefined,
           channel: 'CASH',
           amount: Number(a.amount) || 0,
           rawDate: dVal
@@ -316,6 +634,7 @@ export const CanteenFund: React.FC = () => {
       }
 
       // 4b. Settle Return to Cash (if not already recorded in reports)
+      // As requested: "Refund korle / type hbe Refund / Description - Civ Tanvir"
       if (Number(a.returnAmount) > 0) {
         const alreadyInReports = reports.some(r => 
           (r.type === 'ADVANCE_RETURN' || r.type === 'BAZAR_RETURN') && 
@@ -329,8 +648,8 @@ export const CanteenFund: React.FC = () => {
             id: `adv-return-${a.id || idx}`,
             date: dStr,
             logType: 'CASH_REFUND',
-            title: `Cash Refund: ${a.personName || 'Staff'}`,
-            subtitle: `Advance Return / Settle Surplus • ${a.notes || 'Surplus returned to Cash'}`,
+            title: a.personName || 'Civ Tanvir',
+            subtitle: undefined,
             channel: 'CASH',
             amount: Number(a.returnAmount) || 0,
             rawDate: dVal
@@ -346,8 +665,8 @@ export const CanteenFund: React.FC = () => {
           id: `adv-topup-${a.id || idx}`,
           date: dStr,
           logType: 'CASH_ADVANCE',
-          title: `Cash Advance (Top-Up): ${a.personName || 'Staff'}`,
-          subtitle: `Settle Deficit Paid • ${a.notes || 'Paid from Cash to staff'}`,
+          title: a.personName || 'Civ Tanvir',
+          subtitle: undefined,
           channel: 'CASH',
           amount: Number(a.amount) || 0,
           rawDate: dVal
@@ -361,6 +680,33 @@ export const CanteenFund: React.FC = () => {
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(''), 3500);
+  };
+
+  const handleConfirmDeleteExp = async () => {
+    if (!expToDelete || isDeletingExp) return;
+    setIsDeletingExp(true);
+    try {
+      const targetId = String(expToDelete.id);
+      recordDeletedExpenseId(targetId);
+
+      const rawExps = localStorage.getItem(EXPENSES_KEY);
+      const exps = rawExps ? JSON.parse(rawExps) : [];
+      const updated = exps.filter((e: any) => String(e.id) !== targetId);
+      localStorage.setItem(EXPENSES_KEY, JSON.stringify(updated));
+      await pushKeyToCloud(EXPENSES_KEY, updated).catch(() => {});
+      setExpenses(updated);
+      window.dispatchEvent(new Event('canteen_expenses_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
+      playSuccessChime();
+      showToast('খরচ রেকর্ড সফলভাবে ডিলিট করা হয়েছে!');
+    } catch (e) {
+      console.error('Delete expense error:', e);
+      showToast('ডিলিট করতে সমস্যা হয়েছে');
+    } finally {
+      setIsDeletingExp(false);
+      setExpToDelete(null);
+    }
   };
 
   // Handle Transfer Submit
@@ -693,15 +1039,16 @@ export const CanteenFund: React.FC = () => {
                 <tr className="bg-slate-900/50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-800">
                   <th className="p-4">Date</th>
                   <th className="p-4">Type</th>
-                  <th className="p-4">Description / Entity</th>
+                  <th className="p-4">Description / কার জন্য কত খরচ</th>
                   <th className="p-4">Channel / Account</th>
                   <th className="p-4 text-right">Amount</th>
+                  <th className="p-4 text-center">Action</th>
                 </tr>
               </thead>
               <tbody className="text-xs text-slate-300 font-medium">
                 {allLogs.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="p-8 text-center text-slate-400 font-bold">
+                    <td colSpan={6} className="p-8 text-center text-slate-400 font-bold">
                       No fund activity logs found
                     </td>
                   </tr>
@@ -711,33 +1058,33 @@ export const CanteenFund: React.FC = () => {
                       <td className="p-4 font-mono text-slate-400">{formatCanteenDate(item.date)}</td>
                       <td className="p-4">
                         {item.logType === 'CASH_REFUND' ? (
-                          <span className="px-2 py-0.5 rounded text-[8px] font-black tracking-widest uppercase bg-emerald-950/70 text-emerald-300 border border-emerald-500/40">
-                            + CASH REFUND
+                          <span className="px-2.5 py-1 rounded-md text-[9px] font-black uppercase tracking-wider bg-emerald-950/70 text-emerald-300 border border-emerald-500/40">
+                            Refund
                           </span>
                         ) : item.logType === 'CASH_ADVANCE' ? (
-                          <span className="px-2 py-0.5 rounded text-[8px] font-black tracking-widest uppercase bg-amber-950/70 text-amber-400 border border-amber-500/40">
-                            - CASH ADVANCE
+                          <span className="px-2.5 py-1 rounded-md text-[9px] font-black uppercase tracking-wider bg-amber-950/70 text-amber-400 border border-amber-500/40">
+                            Advance
                           </span>
-                        ) : item.logType === 'INFLOW' ? (
-                          <span className="px-2 py-0.5 rounded text-[8px] font-black tracking-widest uppercase bg-emerald-950/60 text-emerald-400 border border-emerald-500/30">
-                            + INFLOW
+                        ) : item.logType === 'PAYMENT' || item.logType === 'INFLOW' ? (
+                          <span className="px-2.5 py-1 rounded-md text-[9px] font-black uppercase tracking-wider bg-emerald-950/60 text-emerald-400 border border-emerald-500/30">
+                            Payment
                           </span>
                         ) : item.logType === 'EXPENSE' ? (
-                          <span className="px-2 py-0.5 rounded text-[8px] font-black tracking-widest uppercase bg-rose-950/60 text-rose-400 border border-rose-500/30">
-                            - EXPENSE
+                          <span className="px-2.5 py-1 rounded-md text-[9px] font-black uppercase tracking-wider bg-rose-950/60 text-rose-400 border border-rose-500/30">
+                            Expense
                           </span>
                         ) : (
-                          <span className="px-2 py-0.5 rounded text-[8px] font-black tracking-widest uppercase bg-indigo-950/60 text-indigo-400 border border-indigo-500/30">
-                            ⇄ TRANSFER
+                          <span className="px-2.5 py-1 rounded-md text-[9px] font-black uppercase tracking-wider bg-indigo-950/60 text-indigo-400 border border-indigo-500/30">
+                            ⇄ Transfer
                           </span>
                         )}
                       </td>
                       <td className="p-4">
-                        <div className="font-bold text-white uppercase text-xs">
+                        <div className="font-bold text-white text-xs whitespace-pre-line leading-relaxed">
                           {item.title}
                         </div>
                         {item.subtitle && (
-                          <div className="text-[10px] text-slate-400 font-normal mt-0.5">
+                          <div className="text-[10px] text-slate-400 font-normal mt-0.5 whitespace-pre-line">
                             {item.subtitle}
                           </div>
                         )}
@@ -756,7 +1103,7 @@ export const CanteenFund: React.FC = () => {
                         </span>
                       </td>
                       <td className={`p-4 text-right font-black font-mono text-xs ${
-                        item.logType === 'INFLOW' || item.logType === 'CASH_REFUND'
+                        item.logType === 'INFLOW' || item.logType === 'CASH_REFUND' || item.logType === 'PAYMENT'
                           ? 'text-emerald-400' 
                           : item.logType === 'CASH_ADVANCE'
                           ? 'text-amber-400'
@@ -764,13 +1111,27 @@ export const CanteenFund: React.FC = () => {
                           ? 'text-rose-400' 
                           : 'text-indigo-400'
                       }`}>
-                        {item.logType === 'INFLOW' || item.logType === 'CASH_REFUND'
+                        {item.logType === 'INFLOW' || item.logType === 'CASH_REFUND' || item.logType === 'PAYMENT'
                           ? `+৳${item.amount.toLocaleString('en-US')}` 
                           : item.logType === 'CASH_ADVANCE'
                           ? `-৳${item.amount.toLocaleString('en-US')}`
                           : item.logType === 'EXPENSE' 
                           ? `-৳${item.amount.toLocaleString('en-US')}` 
                           : `৳${item.amount.toLocaleString('en-US')}`}
+                      </td>
+                      <td className="p-4 text-center">
+                        {item.rawExp ? (
+                          <button
+                            type="button"
+                            onClick={() => setExpToDelete(item.rawExp)}
+                            title="Delete Expense Record"
+                            className="p-1.5 rounded-lg text-rose-400 hover:text-white hover:bg-rose-950/70 border border-transparent hover:border-rose-500/40 transition-all cursor-pointer"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        ) : (
+                          <span className="text-slate-600 text-xs">-</span>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -834,40 +1195,65 @@ export const CanteenFund: React.FC = () => {
               <thead>
                 <tr className="bg-slate-900/50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-800">
                   <th className="p-4">Date</th>
-                  <th className="p-4">Item Name</th>
-                  <th className="p-4">Detailed Person</th>
+                  <th className="p-4">Item Name & Member Details</th>
+                  <th className="p-4">কার জন্য (Member / Recipient)</th>
                   <th className="p-4">Paid From</th>
                   <th className="p-4 text-right">Deducted Amount</th>
+                  <th className="p-4 text-center">Action</th>
                 </tr>
               </thead>
               <tbody className="text-xs text-slate-300 font-medium">
-                {expenses.filter(e => {
-                  const m = String(e.paymentMethod || 'Cash').toLowerCase();
-                  return m === 'cash' || m === 'ucb';
-                }).length === 0 ? (
+                {expenses.filter(e => isCashMethod(e.paymentMethod) || isUcbMethod(e.paymentMethod)).length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="p-8 text-center text-slate-400 font-bold">
+                    <td colSpan={6} className="p-8 text-center text-slate-400 font-bold">
                       No expenditure deductions found for Cash or UCB
                     </td>
                   </tr>
                 ) : (
                   expenses
-                    .filter(e => {
-                      const m = String(e.paymentMethod || 'Cash').toLowerCase();
-                      return m === 'cash' || m === 'ucb';
-                    })
+                    .filter(e => isCashMethod(e.paymentMethod) || isUcbMethod(e.paymentMethod))
                     .map((exp) => (
                       <tr key={exp.id} className="border-b border-slate-800/50 hover:bg-slate-800/50 transition-colors">
                         <td className="p-4 font-mono">{formatCanteenDate(exp.date)}</td>
-                        <td className="p-4 font-bold text-white uppercase">{exp.desc}</td>
-                        <td className="p-4 text-slate-400">{exp.detailedPerson || 'Civ Tanvir'}</td>
+                        <td className="p-4 font-bold text-white text-xs">
+                          <div>
+                            {(() => {
+                              let clean = String(exp.desc || '')
+                                .replace(/^OTHERS\s*BILL\s*:\s*/i, '')
+                                .replace(/^OTHER\s*BILL\s*:\s*/i, '')
+                                .replace(/^UNIT\s*FUND\s*:\s*/i, '')
+                                .replace(/^UNIT\s*FUND\s*BILL\s*:\s*/i, '')
+                                .trim();
+                              let mNames = '';
+                              if (exp.memberBreakdown && Array.isArray(exp.memberBreakdown) && exp.memberBreakdown.length > 0) {
+                                mNames = exp.memberBreakdown.map((m: any) => m.name).filter(Boolean).join(', ');
+                              }
+                              return mNames ? `${clean} (${mNames})` : clean;
+                            })()}
+                          </div>
+                        </td>
+                        <td className="p-4 text-slate-300 font-medium">
+                          {exp.memberBreakdown && Array.isArray(exp.memberBreakdown) && exp.memberBreakdown.length > 0
+                            ? exp.memberBreakdown.map((m: any) => `${m.name}${m.bdNo ? ` (BD-${m.bdNo})` : ''}`).join(', ')
+                            : (exp.detailedPerson || 'Civ Tanvir')}
+                        </td>
                         <td className="p-4">
-                          <span className={`px-2 py-1 rounded text-[8px] font-black tracking-widest uppercase ${String(exp.paymentMethod).toLowerCase() === 'ucb' ? 'bg-blue-900/30 text-blue-400 border border-blue-800/40' : 'bg-emerald-900/30 text-emerald-400 border border-emerald-800/40'}`}>
+                          <span className={`px-2 py-1 rounded text-[9px] font-black tracking-wider uppercase border ${isUcbMethod(exp.paymentMethod) ? 'bg-blue-900/30 text-blue-400 border-blue-800/40' : 'bg-emerald-900/30 text-emerald-400 border-emerald-800/40'}`}>
                             {exp.paymentMethod || 'Cash'}
                           </span>
                         </td>
                         <td className="p-4 text-right font-black text-rose-400 font-mono">
                           -৳{Number(exp.amount || 0).toLocaleString('en-US')}
+                        </td>
+                        <td className="p-4 text-center">
+                          <button
+                            type="button"
+                            onClick={() => setExpToDelete(exp)}
+                            title="Delete Expense Record"
+                            className="p-1.5 rounded-lg text-rose-400 hover:text-white hover:bg-rose-950/70 border border-transparent hover:border-rose-500/40 transition-all cursor-pointer"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </td>
                       </tr>
                     ))
@@ -1039,6 +1425,40 @@ export const CanteenFund: React.FC = () => {
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* Delete Expense Record Confirmation Modal */}
+      {expToDelete && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl p-6 w-full max-w-sm shadow-2xl relative">
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center mx-auto mb-4">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <h4 className="text-base font-black text-white text-center">খরচ রেকর্ড ডিলিট করবেন?</h4>
+            <p className="text-xs text-slate-300 text-center mt-2 leading-relaxed">
+              আপনি কি নিশ্চিত যে <strong className="text-white font-bold">"{expToDelete.desc}"</strong> বাবদ{' '}
+              <strong className="text-rose-400 font-mono font-bold">৳{Number(expToDelete.amount || 0).toLocaleString()}</strong> এর খরচ রেকর্ডটি ক্যাপিটাল লগ থেকে সম্পূর্ণ মুছে ফেলতে চান?
+            </p>
+            <div className="flex items-center space-x-3 mt-6">
+              <button
+                type="button"
+                onClick={() => setExpToDelete(null)}
+                className="flex-1 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-black uppercase tracking-wider transition-colors cursor-pointer"
+              >
+                বাতিল
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteExp}
+                disabled={isDeletingExp}
+                className="flex-1 py-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-rose-600/30 flex items-center justify-center space-x-2 cursor-pointer active:scale-95"
+              >
+                {isDeletingExp && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>ডিলিট করুন</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

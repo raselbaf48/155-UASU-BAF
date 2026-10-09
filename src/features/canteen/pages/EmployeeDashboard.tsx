@@ -225,7 +225,7 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ onManagerP
                      </span>
                   </div>
                   <p className="text-xl md:text-2xl font-black text-white leading-tight mt-1">
-                     {canteenConfig.managerName || 'LAC Nishad'}
+                     {canteenConfig.managerName || 'Canteen Manager'}
                   </p>
                   <div className="flex items-center space-x-2 mt-1.5 flex-wrap gap-y-1.5">
                      <button 

@@ -29,12 +29,12 @@ export interface CanteenConfig {
 
 export const DEFAULT_CANTEEN_CONFIG: CanteenConfig = {
   name: 'CAFE UAV',
-  logoUrl: 'https://i.postimg.cc/gcqqCXCL/Logo-(1).png',
-  managerName: 'LAC Nishad',
-  adminImage: 'https://lh3.googleusercontent.com/pw/AP1GczPXDD5Dohq-6TWemgeYREoimsS-iXc6KjQoxxRgI0hjRf2tESul2P6eQYmPbFDBUzcP7tRKaBH8HkHHoBqJb83Ng8bbo5mKFhfT4YkiEcEVrCc3Nd39=s800',
-  phone: '+880 1601-676760',
+  logoUrl: '',
+  managerName: '',
+  adminImage: '',
+  phone: '',
   password: '1111',
-  managerBdNo: '475268',
+  managerBdNo: '',
   footer: 'Official Canteen of UAV | Integrity and Service',
   preOrderEnabled: true,
   preOrderStartTime: '18:00',
@@ -641,8 +641,15 @@ export function getCanteenConfig(): CanteenConfig {
     if (!raw) return DEFAULT_CANTEEN_CONFIG;
     const parsed = JSON.parse(raw);
     const cfg = { ...DEFAULT_CANTEEN_CONFIG, ...parsed };
-    if (!cfg.managerBdNo) {
-      cfg.managerBdNo = '475268';
+    // Clean out deprecated hardcoded placeholder images
+    if (cfg.adminImage && cfg.adminImage.includes('AP1GczPXDD5Dohq')) {
+      cfg.adminImage = '';
+    }
+    if (cfg.logoUrl && (cfg.logoUrl.includes('gcqqCXCL') || cfg.logoUrl.includes('Logo-(1).png'))) {
+      cfg.logoUrl = '';
+    }
+    if (cfg.managerName === 'LAC Nishad' && !cfg.managerBdNo) {
+      cfg.managerName = '';
     }
     return cfg;
   } catch (e) {
@@ -666,6 +673,15 @@ export async function fetchCanteenConfigFromCloud(): Promise<CanteenConfig> {
     if (!error && data?.setting_value) {
       const parsed = JSON.parse(data.setting_value);
       const updated: CanteenConfig = { ...DEFAULT_CANTEEN_CONFIG, ...parsed };
+      if (updated.adminImage && updated.adminImage.includes('AP1GczPXDD5Dohq')) {
+        updated.adminImage = '';
+      }
+      if (updated.logoUrl && (updated.logoUrl.includes('gcqqCXCL') || updated.logoUrl.includes('Logo-(1).png'))) {
+        updated.logoUrl = '';
+      }
+      if (updated.managerName === 'LAC Nishad' && !updated.managerBdNo) {
+        updated.managerName = '';
+      }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
       setTimeout(() => {
         window.dispatchEvent(new CustomEvent('canteen_settings_updated', { detail: updated }));

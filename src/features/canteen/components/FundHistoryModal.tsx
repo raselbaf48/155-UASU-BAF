@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { DateNavigator, getTodayYMD } from './DateNavigator';
 import { supabase } from '../../../supabase';
-import { pushKeyToCloud, recordDeletedTxId, getDeletedTxIds } from '../utils/canteenCloudSync';
+import { pushKeyToCloud, recordDeletedTxId, getDeletedTxIds, recordDeletedExpenseId, reconcileExpenseOnFundTxDelete } from '../utils/canteenCloudSync';
 import { getTxCategory, getTxMonthKey } from '../pages/MemberDB';
 import { EditFundTxModal } from '../pages/FundBatchBillPage';
 
@@ -410,10 +410,12 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
         return false;
       });
 
+      const amountToReverse = Number(tx.amount || 0);
+      let newDue: number | null = null;
+
       if (targetMember) {
-        const amountToReverse = Number(tx.amount || 0);
         const currentDue = Number(targetMember.Due ?? targetMember.due ?? targetMember.baki ?? 0);
-        const newDue = Math.max(0, currentDue - amountToReverse);
+        newDue = Math.max(0, currentDue - amountToReverse);
 
         targetMember.Due = newDue;
         targetMember.due = newDue;
@@ -446,6 +448,13 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
       window.dispatchEvent(new Event('canteen_members_updated'));
       window.dispatchEvent(new Event('storage'));
 
+      // Automatically reconcile and delete/update corresponding expense from canteen_expenses (Capital Log)
+      try {
+        reconcileExpenseOnFundTxDelete(tx, filtered);
+      } catch (err) {
+        console.warn('Error updating canteen_expenses on tx delete:', err);
+      }
+
       // Perform background cloud and Supabase sync non-blockingly
       (async () => {
         try {
@@ -453,7 +462,7 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
           if (onRemoveTx) {
             await onRemoveTx(tx).catch(() => {});
           }
-          if (targetMember) {
+          if (targetMember && newDue !== null) {
             if (targetMember.airman_id) {
               await supabase
                 .from('Canteen_Member')
@@ -725,7 +734,50 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
                     {filteredTransactions.map((tx, idx) => {
                       const txCat = getTxCategory(tx);
                       const isUnit = txCat === 'UNIT_FUND';
-                      const txMethod = tx.paymentMethod || tx.method || (tx.staffName ? `Cash (${tx.staffName})` : 'Cash');
+                      
+                      const txMethod = (() => {
+                        const pm = String(tx.paymentMethod || tx.method || tx.source || '').trim();
+                        if (pm.startsWith('Cash (') || pm === 'UCB') {
+                          return pm;
+                        }
+                        if (pm.toLowerCase().includes('ucb') || pm.toLowerCase().includes('bank')) {
+                          return 'UCB';
+                        }
+                        if (tx.staffName) {
+                          return `Cash (${tx.staffName})`;
+                        }
+                        if (tx.targetStaff) {
+                          return `Cash (${tx.targetStaff})`;
+                        }
+                        if (tx.batchExpenseId) {
+                          try {
+                            const raw = localStorage.getItem('canteen_expenses');
+                            if (raw) {
+                              const exps = JSON.parse(raw);
+                              const match = exps.find((e: any) => e && (e.id === tx.batchExpenseId || String(e.id) === String(tx.batchExpenseId)));
+                              if (match) {
+                                const ePm = String(match.paymentMethod || '').trim();
+                                if (ePm.startsWith('Cash (') || ePm === 'UCB') return ePm;
+                                if (ePm.toLowerCase().includes('ucb')) return 'UCB';
+                                const subdesc = String(match.subdesc || '');
+                                if (subdesc.includes('Staff:')) {
+                                  const matchStaff = subdesc.match(/Staff:\s*([^\]•,)]+)/);
+                                  if (matchStaff && matchStaff[1]) return `Cash (${matchStaff[1].trim()})`;
+                                }
+                                if (subdesc.includes('Manager:')) {
+                                  const matchMgr = subdesc.match(/Manager:\s*([^\]•,)]+)/);
+                                  if (matchMgr && matchMgr[1]) return `Cash (${matchMgr[1].trim()})`;
+                                }
+                              }
+                            }
+                          } catch {}
+                        }
+                        const noteCombined = String(tx.note || tx.items || '').toLowerCase();
+                        if (noteCombined.includes('tanvir') || noteCombined.includes('civ tanvir')) {
+                          return 'Cash (Civ Tanvir)';
+                        }
+                        return 'Cash (Manager)';
+                      })();
                       
                       const memberObj = members.find((m) => {
                         if (tx.airman_id && m.airman_id === tx.airman_id) return true;
@@ -794,7 +846,11 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
                             </div>
                           </td>
                           <td className="py-3 px-3 text-center">
-                            <span className="px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-800 text-[11px] font-medium text-slate-300">
+                            <span className={`px-2 py-0.5 rounded-lg text-[11px] font-semibold border ${
+                              txMethod.startsWith('Cash')
+                                ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/30'
+                                : 'bg-blue-950/60 text-blue-300 border-blue-500/30'
+                            }`}>
                               {txMethod}
                             </span>
                           </td>

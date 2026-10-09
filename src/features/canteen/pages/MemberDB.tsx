@@ -65,7 +65,7 @@ import { PrintableCanteenBillModal } from '../components/PrintableCanteenBillMod
 import { EditMemberSeniorityModal } from '../components/EditMemberSeniorityModal';
 import { EditPaymentModal } from '../components/EditPaymentModal';
 import { restoreRawStockForSaleCancellation } from '../utils/recipeManager';
-import { pushKeyToCloud, pullKeyFromCloud, recordDeletedTxId, getDeletedTxIds } from '../utils/canteenCloudSync';
+import { pushKeyToCloud, pullKeyFromCloud, recordDeletedTxId, getDeletedTxIds, reconcileExpenseOnFundTxDelete } from '../utils/canteenCloudSync';
 import { syncImportHistoryToTransactions, deduplicateCanteenTransactions } from '../utils/importHistoryTxs';
 import {
   exportCanteenBillToExcel,
@@ -783,6 +783,7 @@ export const MemberDB: React.FC = () => {
   const [statementTx, setStatementTx] = useState<any[]>([]);
   const [statementCategory, setStatementCategory] = useState<BillCategory>('ALL');
   const [statementMonth, setStatementMonth] = useState<string>(() => getRunningMonthKey());
+  const [statementViewMode, setStatementViewMode] = useState<'ITEM' | 'DATE'>('ITEM');
   const [isCapturingPic, setIsCapturingPic] = useState(false);
   const [statementImageFile, setStatementImageFile] = useState<File | null>(null);
   const [statementImageBlob, setStatementImageBlob] = useState<Blob | null>(null);
@@ -2657,7 +2658,16 @@ export const MemberDB: React.FC = () => {
           netPayable: totalDue,
           rankBn: rank,
           nameBn: surname,
-          totalDiscount
+          totalDiscount,
+          viewMode: statementViewMode,
+          dateWiseRows: statementDateWiseRows.map(r => ({
+            date: r.displayDateBn,
+            itemsText: r.itemsText,
+            qty: r.qty,
+            rate: r.rate,
+            total: r.total,
+            isMerged: r.isMerged
+          }))
         });
         if (blob) {
           file = new File([blob], fileName, { type: 'image/png' });
@@ -2763,7 +2773,16 @@ export const MemberDB: React.FC = () => {
           netPayable: totalDue,
           rankBn: rank,
           nameBn: surname,
-          totalDiscount
+          totalDiscount,
+          viewMode: statementViewMode,
+          dateWiseRows: statementDateWiseRows.map(r => ({
+            date: r.displayDateBn,
+            itemsText: r.itemsText,
+            qty: r.qty,
+            rate: r.rate,
+            total: r.total,
+            isMerged: r.isMerged
+          }))
         });
         if (blob) {
           setStatementImageBlob(blob);
@@ -3068,6 +3087,13 @@ export const MemberDB: React.FC = () => {
       newTxs = txs.filter((t: any) => String(t.id) !== txIdStr);
       localStorage.setItem('canteen_txs', JSON.stringify(newTxs));
       await pushKeyToCloud('canteen_txs', newTxs);
+
+      // Automatically reconcile and delete/update corresponding expense from canteen_expenses (Capital Log)
+      try {
+        reconcileExpenseOnFundTxDelete(txToRemove, newTxs);
+      } catch (err) {
+        console.warn('Error updating canteen_expenses on remove tx in MemberDB:', err);
+      }
     } catch (e) {
       console.warn('Error updating canteen_txs on remove tx:', e);
     }
@@ -3762,6 +3788,282 @@ export const MemberDB: React.FC = () => {
     return parseStatementAggregatedItems(filteredStatementTxs);
   }, [filteredStatementTxs, menuCatalog]);
 
+  // Date-wise rows calculation for Statement modal ('Dt wise')
+  const statementDateWiseRows = useMemo(() => {
+    // 1. Group/deduplicate initial bills per month & category (identical to parseStatementAggregatedItems)
+    const initialTxsByGroup = new Map<string, any>();
+    const regularTxs: any[] = [];
+
+    (filteredStatementTxs || []).forEach((tx) => {
+      if (!tx || tx.type === 'BILL PAYMENT' || tx.type === 'REVERTED' || tx.isReverted || tx.status === 'REVERTED' || String(tx.items || '').includes('[বাতিল')) return;
+
+      const isInit = tx.type === 'INITIAL_BILL' || 
+        tx.type === 'AMOUNT_CHANGE' ||
+        tx.isAmountChange ||
+        String(tx.id || '').startsWith('tx-init-') || 
+        String(tx.id || '').startsWith('init-') || 
+        String(tx.items || '').includes('ক্যান্টিন বিল') || 
+        String(tx.items || '').includes('বকেয়া বিল') ||
+        String(tx.items || '').includes('Changed amount from');
+
+      if (isInit) {
+        const mKey = tx.monthKey || getTxMonthKey(tx.date) || 'DEFAULT';
+        const cKey = getTxCategory(tx);
+        const groupKey = `${mKey}__${cKey}`;
+        const existing = initialTxsByGroup.get(groupKey);
+        if (!existing) {
+          initialTxsByGroup.set(groupKey, tx);
+        } else {
+          const timeA = new Date(existing.created_at || existing.createdAt || existing.timestamp || 0).getTime() || 0;
+          const timeB = new Date(tx.created_at || tx.createdAt || tx.timestamp || 0).getTime() || 0;
+          if (timeB >= timeA) {
+            initialTxsByGroup.set(groupKey, tx);
+          }
+        }
+      } else {
+        regularTxs.push(tx);
+      }
+    });
+
+    const effectiveTxs = [...regularTxs, ...Array.from(initialTxsByGroup.values())];
+
+    const parseDateComponents = (val: any) => {
+      const bnDigits: Record<string, string> = {
+        '০': '0', '১': '1', '২': '2', '৩': '3', '৪': '4',
+        '৫': '5', '৬': '6', '৭': '7', '৮': '8', '৯': '9'
+      };
+      const monthAbbrs = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const bnMonthShort = [
+        'জানু', 'ফেব্রু', 'মার্চ', 'এপ্রিল', 'মে', 'জুন',
+        'জুলাই', 'আগস্ট', 'সেপ্ট', 'অক্টো', 'নভে', 'ডিসে'
+      ];
+      let str = String(val || '').trim().replace(/[০-৯]/g, ch => bnDigits[ch] || ch);
+
+      // Check DD/MM/YYYY or DD-MM-YYYY
+      const dmy = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
+      if (dmy) {
+        const d = dmy[1].padStart(2, '0');
+        const m = dmy[2].padStart(2, '0');
+        let y = dmy[3];
+        if (y.length === 2) y = `20${y}`;
+        const monIdx = parseInt(m, 10) - 1;
+        const monName = (monIdx >= 0 && monIdx < 12) ? monthAbbrs[monIdx] : m;
+        const monBn = (monIdx >= 0 && monIdx < 12) ? bnMonthShort[monIdx] : toBengaliNum(m);
+        const dayBnNoZero = toBengaliNum(parseInt(d, 10));
+        return {
+          iso: `${y}-${m}-${d}`,
+          displayBn: `${dayBnNoZero} ${monBn}`,
+          displayEn: `${d} ${monName}`
+        };
+      }
+
+      // Check YYYY-MM-DD
+      const ymd = str.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+      if (ymd) {
+        const y = ymd[1];
+        const m = ymd[2].padStart(2, '0');
+        const d = ymd[3].padStart(2, '0');
+        const monIdx = parseInt(m, 10) - 1;
+        const monName = (monIdx >= 0 && monIdx < 12) ? monthAbbrs[monIdx] : m;
+        const monBn = (monIdx >= 0 && monIdx < 12) ? bnMonthShort[monIdx] : toBengaliNum(m);
+        const dayBnNoZero = toBengaliNum(parseInt(d, 10));
+        return {
+          iso: `${y}-${m}-${d}`,
+          displayBn: `${dayBnNoZero} ${monBn}`,
+          displayEn: `${d} ${monName}`
+        };
+      }
+
+      // Check timestamp or date string
+      const dObj = new Date(/^[0-9]{10,13}$/.test(str) ? Number(str) : str);
+      if (!isNaN(dObj.getTime())) {
+        const y = String(dObj.getFullYear());
+        const m = String(dObj.getMonth() + 1).padStart(2, '0');
+        const d = String(dObj.getDate()).padStart(2, '0');
+        const monIdx = dObj.getMonth();
+        const monName = monthAbbrs[monIdx];
+        const monBn = bnMonthShort[monIdx] || toBengaliNum(m);
+        const dayBnNoZero = toBengaliNum(parseInt(d, 10));
+        return {
+          iso: `${y}-${m}-${d}`,
+          displayBn: `${dayBnNoZero} ${monBn}`,
+          displayEn: `${d} ${monName}`
+        };
+      }
+
+      return {
+        iso: '2026-10-01',
+        displayBn: '১ অক্টো',
+        displayEn: '01 Oct'
+      };
+    };
+
+    const dateMap = new Map<string, {
+      dateBn: string;
+      dateEn: string;
+      itemsMap: Map<string, { qty: number; total: number; rates: number[] }>;
+    }>();
+
+    effectiveTxs.forEach((tx) => {
+      if (tx.type === 'BILL PAYMENT') return;
+
+      const itemsStr = String(tx.items || '').trim();
+      const itemsStrLower = itemsStr.toLowerCase();
+      if (itemsStr.includes('বকেয়া বিল')) return;
+
+      const cat = getTxCategory(tx);
+      const rawDate = tx.date || tx.created_at || tx.createdAt || tx.timestamp;
+      const dateInfo = parseDateComponents(rawDate);
+
+      if (!dateMap.has(dateInfo.iso)) {
+        dateMap.set(dateInfo.iso, {
+          dateBn: dateInfo.displayBn,
+          dateEn: dateInfo.displayEn,
+          itemsMap: new Map()
+        });
+      }
+      const dateEntry = dateMap.get(dateInfo.iso)!;
+
+      const addItem = (rawName: string, qty: number, total: number, rate?: number) => {
+        const name = String(rawName).trim();
+        if (!dateEntry.itemsMap.has(name)) {
+          dateEntry.itemsMap.set(name, { qty: 0, total: 0, rates: [] });
+        }
+        const rec = dateEntry.itemsMap.get(name)!;
+        rec.qty += qty;
+        rec.total += total;
+        if (rate && rate > 0) rec.rates.push(rate);
+      };
+
+      // 1. If Category is OTHERS or UNIT_FUND, include them in the date-wise table with merged flag
+      if (cat === 'OTHERS' || cat === 'UNIT_FUND' || itemsStrLower.includes('unit fund') || itemsStrLower.includes('ইউনিট ফান্ড') || itemsStrLower.includes('others') || itemsStrLower.includes('অন্যান্য')) {
+        let name = itemsStr || (cat === 'UNIT_FUND' ? 'ইউনিট ফান্ড' : 'অন্যান্য বিল');
+        const isOthers = cat === 'OTHERS' || itemsStrLower.includes('others') || itemsStrLower.includes('অন্যান্য');
+        if (isOthers && !name.includes('অন্যান্য')) {
+          name = `অন্যান্য (${name})`;
+        } else if (!isOthers && !name.includes('ইউনিট ফান্ড')) {
+          name = `ইউনিট ফান্ড (${name})`;
+        }
+        const amt = Number(tx.amount || 0);
+        addItem(name, 1, amt, amt);
+        return;
+      }
+
+      if (Array.isArray(tx.soldItems) && tx.soldItems.length > 0) {
+        tx.soldItems.forEach((si: any) => {
+          const name = String(si.menuItemName || si.name || 'ক্যান্টিন খাদ্যদ্রব্য').trim();
+          const qty = Number(si.qty || si.quantity || 1);
+          let itemRate = Number(si.price || si.rate || 0);
+          if (itemRate <= 0) itemRate = lookupCatalogPrice(name, menuCatalog);
+          const itemTotal = itemRate > 0 ? itemRate * qty : (Number(tx.amount || 0) / (tx.soldItems.length || 1));
+          addItem(name, qty, itemTotal, itemRate);
+        });
+        return;
+      }
+
+      const parts = String(itemsStr || 'ক্যান্টিন খরচ').split(',').map(s => s.trim()).filter(Boolean);
+      if (parts.length === 1) {
+        const match = parts[0].match(/^(.+?)\s*\(([0-9]+)\)$/);
+        if (match) {
+          const name = match[1].trim();
+          const qty = parseInt(match[2], 10) || 1;
+          const total = Number(tx.amount || 0);
+          let rate = lookupCatalogPrice(name, menuCatalog);
+          if (rate <= 0) rate = qty > 0 ? Math.round((total / qty) * 100) / 100 : total;
+          addItem(name, qty, total, rate);
+        } else {
+          let name = parts[0].trim();
+          if (name.includes('Changed amount') || tx.isAmountChange) {
+            name = `ক্যান্টিন বিল (${formatBengaliMonthYear(tx.monthKey || statementMonth)})`;
+          }
+          const total = Number(tx.amount || 0);
+          let rate = lookupCatalogPrice(name, menuCatalog);
+          if (rate <= 0) rate = total;
+          addItem(name, 1, total, rate);
+        }
+      } else if (parts.length > 1) {
+        let parsed: { name: string; qty: number; rate: number }[] = [];
+        parts.forEach((p) => {
+          const match = p.match(/^(.+?)\s*\(([0-9]+)\)$/);
+          if (match) {
+            const q = parseInt(match[2], 10) || 1;
+            const nm = match[1].trim();
+            const r = lookupCatalogPrice(nm, menuCatalog);
+            parsed.push({ name: nm, qty: q, rate: r });
+          } else {
+            const nm = p.trim();
+            const r = lookupCatalogPrice(nm, menuCatalog);
+            parsed.push({ name: nm, qty: 1, rate: r });
+          }
+        });
+        const txAmount = Number(tx.amount || 0);
+        parsed.forEach((item) => {
+          let itemRate = item.rate;
+          let subTotal = 0;
+          if (itemRate > 0) {
+            subTotal = itemRate * item.qty;
+          } else {
+            const totalQty = parsed.reduce((sum, p) => sum + p.qty, 0);
+            itemRate = totalQty > 0 ? Math.round((txAmount / totalQty) * 100) / 100 : txAmount / parts.length;
+            subTotal = Math.round(itemRate * item.qty * 100) / 100;
+          }
+          addItem(item.name, item.qty, subTotal, itemRate);
+        });
+      } else if (itemsStr.length > 0 && Number(tx.amount || 0) > 0) {
+        const amt = Number(tx.amount || 0);
+        addItem(itemsStr, 1, amt, amt);
+      }
+    });
+
+    const isNonCanteenBill = (name: string): boolean => {
+      const lower = name.toLowerCase();
+      return (
+        lower.includes('unit fund') ||
+        lower.includes('ইউনিট ফান্ড') ||
+        lower.includes('others') ||
+        lower.includes('অন্যান্য')
+      );
+    };
+
+    const sortedDates = Array.from(dateMap.keys()).sort();
+    const rows: {
+      dateKey: string;
+      displayDateBn: string;
+      displayDateEn: string;
+      itemsText: string;
+      qty: number;
+      rate: number;
+      total: number;
+      isMerged: boolean;
+    }[] = [];
+
+    sortedDates.forEach((isoKey) => {
+      const entry = dateMap.get(isoKey)!;
+      let dateHasPrinted = false;
+
+      entry.itemsMap.forEach((val, name) => {
+        const isGeneric = isGenericCanteenBill(name);
+        const displayName = isGeneric ? `ক্যান্টিন বিল (${formatBengaliMonthYear(statementMonth)})` : formatItemNameBn(name);
+        const merged = isNonCanteenBill(name);
+        const rate = val.rates.length > 0 ? val.rates[0] : (val.qty > 0 ? Math.round((val.total / val.qty) * 100) / 100 : val.total);
+
+        rows.push({
+          dateKey: isoKey,
+          displayDateBn: !dateHasPrinted ? entry.dateBn : '',
+          displayDateEn: !dateHasPrinted ? entry.dateEn : '',
+          itemsText: displayName,
+          qty: val.qty,
+          rate,
+          total: val.total,
+          isMerged: merged
+        });
+        dateHasPrinted = true;
+      });
+    });
+
+    return rows;
+  }, [filteredStatementTxs, menuCatalog, statementMonth]);
+
   const totalMonthBill = useMemo(() => {
     return statementAggregatedItems.reduce((sum, r) => sum + r.total, 0);
   }, [statementAggregatedItems]);
@@ -3843,7 +4145,16 @@ export const MemberDB: React.FC = () => {
       netPayable,
       rankBn: rank,
       nameBn: surname,
-      totalDiscount: totalMonthDiscount
+      totalDiscount: totalMonthDiscount,
+      viewMode: statementViewMode,
+      dateWiseRows: statementDateWiseRows.map(r => ({
+        date: r.displayDateBn,
+        itemsText: r.itemsText,
+        qty: r.qty,
+        rate: r.rate,
+        total: r.total,
+        isMerged: r.isMerged
+      }))
     }).then((blob) => {
       if (isCancelled || !blob) return;
       setStatementImageBlob(blob);
@@ -3859,7 +4170,9 @@ export const MemberDB: React.FC = () => {
   }, [
     statementMember?.airman_id, 
     statementMonth, 
+    statementViewMode,
     statementAggregatedItems, 
+    statementDateWiseRows,
     totalMonthBill, 
     totalMonthDiscount,
     previousDue, 
@@ -3891,7 +4204,16 @@ export const MemberDB: React.FC = () => {
           netPayable,
           rankBn: rank,
           nameBn: surname,
-          totalDiscount: totalMonthDiscount
+          totalDiscount: totalMonthDiscount,
+          viewMode: statementViewMode,
+          dateWiseRows: statementDateWiseRows.map(r => ({
+            date: r.displayDateBn,
+            itemsText: r.itemsText,
+            qty: r.qty,
+            rate: r.rate,
+            total: r.total,
+            isMerged: r.isMerged
+          }))
         });
         if (blob) {
           setStatementImageBlob(blob);
@@ -5455,24 +5777,106 @@ export const MemberDB: React.FC = () => {
             <div className="px-5 py-3 bg-slate-950/80 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 print:hidden">
               <div className="flex items-center space-x-2 text-xs font-bold text-slate-300">
                 <Receipt className="w-4 h-4 text-indigo-400" />
-                <span>মাসিক হিসাব বিবরণী (Monthly Itemized Statement)</span>
+                <span>
+                  {statementViewMode === 'DATE'
+                    ? 'তারিখ ভিত্তিক হিসাব বিবরণী (Date-wise Statement)'
+                    : 'মাসিক হিসাব বিবরণী (Monthly Itemized Statement)'}
+                </span>
               </div>
 
-              {/* Month selector in statement modal */}
-              <div className="flex items-center space-x-2">
-                <Calendar className="w-3.5 h-3.5 text-indigo-400" />
-                <span className="text-xs font-bold text-slate-400">মাস নির্বাচন:</span>
-                <select
-                  value={statementMonth}
-                  onChange={(e) => setStatementMonth(e.target.value)}
-                  className="bg-slate-900 border border-slate-700 text-white rounded-lg px-2.5 py-1 text-xs font-bold font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
-                >
-                  {availableMonths.map((m) => (
-                    <option key={m} value={m}>
-                      {formatBengaliMonthYear(m)}
-                    </option>
-                  ))}
-                </select>
+              {/* Month selector & Dt wise toggle in statement modal */}
+              <div className="flex items-center space-x-2.5 flex-wrap gap-y-2">
+                {/* Month Selector with Left/Right Arrows (No "মাস নির্বাচন" text) */}
+                <div className="flex items-center bg-slate-900 border border-slate-700/80 rounded-xl p-1 shadow-inner">
+                  {/* Left Arrow Button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      let target = statementMonth;
+                      if (!target || target === 'ALL') target = getRunningMonthKey();
+                      const idx = availableMonths.indexOf(target);
+                      let prevMonth = '';
+                      if (idx !== -1 && idx < availableMonths.length - 1) {
+                        prevMonth = availableMonths[idx + 1];
+                      } else {
+                        const [y, m] = target.split('-').map(Number);
+                        const d = new Date(y, m - 2, 1);
+                        prevMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                      }
+                      setStatementMonth(prevMonth);
+                    }}
+                    className="w-8 h-8 flex items-center justify-center bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-white rounded-lg transition-all cursor-pointer border border-slate-700/60 shadow-sm active:scale-95"
+                    title="Previous Month (পূর্ববর্তী মাস)"
+                  >
+                    <ChevronLeft className="w-4 h-4 stroke-[2.5]" />
+                  </button>
+
+                  {/* Month Display (e.g. "OCTOBER 2026") */}
+                  <div className="px-3 py-0.5 text-center select-none flex items-center space-x-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                    <span className="text-xs sm:text-sm font-black uppercase font-mono tracking-wider text-white">
+                      {statementMonth === 'ALL' ? 'ALL MONTHS' : formatMonthOnlyUpper(statementMonth)}
+                    </span>
+                    {statementMonth !== 'ALL' && (
+                      <span className="text-xs font-mono font-bold text-slate-400">
+                        {statementMonth.split('-')[0]}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Right Arrow Button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      let target = statementMonth;
+                      if (!target || target === 'ALL') target = getRunningMonthKey();
+                      const idx = availableMonths.indexOf(target);
+                      let nextMonth = '';
+                      if (idx > 0) {
+                        nextMonth = availableMonths[idx - 1];
+                      } else {
+                        const [y, m] = target.split('-').map(Number);
+                        const d = new Date(y, m, 1);
+                        nextMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                      }
+                      setStatementMonth(nextMonth);
+                    }}
+                    className="w-8 h-8 flex items-center justify-center bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-white rounded-lg transition-all cursor-pointer border border-slate-700/60 shadow-sm active:scale-95"
+                    title="Next Month (পরবর্তী মাস)"
+                  >
+                    <ChevronRight className="w-4 h-4 stroke-[2.5]" />
+                  </button>
+                </div>
+
+                {/* View Mode Options: Item wise / Dt wise */}
+                <div className="inline-flex items-center p-1 bg-slate-900 border border-slate-700/80 rounded-xl shadow-inner">
+                  <button
+                    type="button"
+                    onClick={() => setStatementViewMode('ITEM')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all flex items-center space-x-1.5 cursor-pointer ${
+                      statementViewMode === 'ITEM'
+                        ? 'bg-indigo-600 text-white shadow-md'
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                    }`}
+                    title="আইটেম ভিত্তিক বিবরণী"
+                  >
+                    <Layers className="w-3.5 h-3.5" />
+                    <span>Item wise</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStatementViewMode('DATE')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all flex items-center space-x-1.5 cursor-pointer ${
+                      statementViewMode === 'DATE'
+                        ? 'bg-indigo-600 text-white shadow-md'
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                    }`}
+                    title="তারিখ ভিত্তিক বিবরণী"
+                  >
+                    <Calendar className="w-3.5 h-3.5" />
+                    <span>Dt wise</span>
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -5492,7 +5896,7 @@ export const MemberDB: React.FC = () => {
                     <span>🍽️</span>
                   </div>
                   <p className="text-sm sm:text-base font-bold text-slate-700 mt-1">
-                    মাসিক বিল বিবরণী
+                    {statementViewMode === 'DATE' ? 'মাসিক বিল বিবরণী (তারিখ ভিত্তিক)' : 'মাসিক বিল বিবরণী'}
                   </p>
                   <div className="w-full h-1 bg-black mt-4"></div>
                 </div>
@@ -5502,57 +5906,123 @@ export const MemberDB: React.FC = () => {
                   <tbody>
                     <tr className="bg-white">
                       <td className="border border-black p-3 text-left w-1/3 bg-white font-black">মাসের নাম</td>
-                      <td className="border border-black p-3 text-left font-black bg-white" colSpan={3}>
+                      <td className="border border-black p-3 text-left font-black bg-white" colSpan={statementViewMode === 'DATE' ? 4 : 3}>
                         {formatBengaliMonthYear(statementMonth)}
                       </td>
                     </tr>
                     <tr className="bg-white">
                       <td className="border border-black p-3 text-left bg-white font-black">পদবী ও নাম</td>
-                      <td className="border border-black p-3 text-left font-black bg-white" colSpan={3}>
+                      <td className="border border-black p-3 text-left font-black bg-white" colSpan={statementViewMode === 'DATE' ? 4 : 3}>
                         {getMemberBanglaRank(statementMember) || formatRankBn(statementMember['Rank'] || statementMember.rank || '')} {getMemberBanglaName(statementMember) || formatMemberNameBn(statementMember['Surname'] || '')}
                       </td>
                     </tr>
                     
-                    {/* Heading Row: দ্রব্যের নাম , পরিমাণ , দর, মোট (Bold & Center Align) */}
+                    {/* Heading Row:
+                        Item wise: দ্রব্যের নাম , পরিমাণ , দর, মোট
+                        Dt wise: তারিখ (৭ সেপ্ট), বিবরণ, পরিমাণ, দর, মোট (তারিখের কলাম ছোট)
+                    */}
                     <tr className="bg-white text-center font-black">
-                      <th className="border border-black p-3 text-center font-black w-2/5 bg-white">দ্রব্যের নাম</th>
-                      <th className="border border-black p-3 text-center font-black w-1/5 bg-white">পরিমাণ</th>
-                      <th className="border border-black p-3 text-center font-black w-1/5 bg-white">দর</th>
-                      <th className="border border-black p-3 text-center font-black w-1/5 bg-white">মোট</th>
+                      {statementViewMode === 'ITEM' ? (
+                        <>
+                          <th className="border border-black p-3 text-center font-black w-2/5 bg-white">দ্রব্যের নাম</th>
+                          <th className="border border-black p-3 text-center font-black w-1/5 bg-white">পরিমাণ</th>
+                          <th className="border border-black p-3 text-center font-black w-1/5 bg-white">দর</th>
+                          <th className="border border-black p-3 text-center font-black w-1/5 bg-white">মোট</th>
+                        </>
+                      ) : (
+                        <>
+                          <th className="border border-black py-3 px-2 text-center font-black w-[18%] bg-white text-xs sm:text-sm">তারিখ</th>
+                          <th className="border border-black p-3 text-center font-black w-[42%] bg-white">বিবরণ</th>
+                          <th className="border border-black py-3 px-1 text-center font-black w-[12%] bg-white text-xs sm:text-sm">পরিমাণ</th>
+                          <th className="border border-black py-3 px-1 text-center font-black w-[13%] bg-white text-xs sm:text-sm">দর</th>
+                          <th className="border border-black py-3 px-2 text-center font-black w-[15%] bg-white text-xs sm:text-sm">মোট</th>
+                        </>
+                      )}
                     </tr>
 
-                    {/* Items Rows - All 4 columns visible: দ্রব্যের নাম, পরিমাণ, দর, মোট */}
-                    {statementAggregatedItems.length > 0 ? (
-                      statementAggregatedItems.map((item, idx) => {
-                        const isGeneric = isGenericCanteenBill(item.itemName);
-                        const displayName = isGeneric ? `ক্যান্টিন বিল (${formatBengaliMonthYear(statementMonth)})` : formatItemNameBn(item.itemName);
-                        const qty = item.qty > 0 ? item.qty : 1;
-                        const rate = item.rate > 0 ? item.rate : Math.round(item.total / qty);
-                        return (
-                          <tr key={idx} className="bg-white">
-                            <td className="border border-black p-3 text-left font-bold bg-white">{displayName}</td>
-                            <td className="border border-black p-3 text-center font-bold bg-white">{toBengaliNum(qty)}</td>
-                            <td className="border border-black p-3 text-center font-bold bg-white">
-                              ৳{toBengaliNum(rate)}
-                            </td>
-                            <td className="border border-black p-3 text-center font-bold bg-white">
-                              ৳{toBengaliNum(item.total)}
-                            </td>
-                          </tr>
-                        );
-                      })
+                    {/* Items Rows */}
+                    {statementViewMode === 'ITEM' ? (
+                      statementAggregatedItems.length > 0 ? (
+                        statementAggregatedItems.map((item, idx) => {
+                          const isGeneric = isGenericCanteenBill(item.itemName);
+                          const displayName = isGeneric ? `ক্যান্টিন বিল (${formatBengaliMonthYear(statementMonth)})` : formatItemNameBn(item.itemName);
+                          const qty = item.qty > 0 ? item.qty : 1;
+                          const rate = item.rate > 0 ? item.rate : Math.round(item.total / qty);
+                          return (
+                            <tr key={idx} className="bg-white">
+                              <td className="border border-black p-3 text-left font-bold bg-white">{displayName}</td>
+                              <td className="border border-black p-3 text-center font-bold bg-white">{toBengaliNum(qty)}</td>
+                              <td className="border border-black p-3 text-center font-bold bg-white">
+                                ৳{toBengaliNum(rate)}
+                              </td>
+                              <td className="border border-black p-3 text-center font-bold bg-white">
+                                ৳{toBengaliNum(item.total)}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      ) : (
+                        <tr className="bg-white">
+                          <td colSpan={4} className="border border-black p-3.5 text-center font-bold text-slate-800 bg-white tracking-wide text-sm sm:text-base">
+                            এই মাসে কোনো ক্যান্টিন বিল নেই
+                          </td>
+                        </tr>
+                      )
                     ) : (
-                      <tr className="bg-white">
-                        <td colSpan={4} className="border border-black p-3.5 text-center font-bold text-slate-800 bg-white tracking-wide text-sm sm:text-base">
-                          এই মাসে কোনো ক্যান্টিন বিল নেই
-                        </td>
-                      </tr>
+                      statementDateWiseRows.length > 0 ? (
+                        statementDateWiseRows.map((row, idx) => {
+                          return (
+                            <tr key={idx} className="bg-white">
+                              {/* তারিখের কলাম ছোট (৭ সেপ্ট) */}
+                              <td className="border border-black py-2.5 px-1.5 text-center font-black bg-white whitespace-nowrap text-xs sm:text-sm">
+                                <div>{row.displayDateBn}</div>
+                                {row.displayDateEn && (
+                                  <div className="text-[10px] text-slate-500 font-bold font-sans">{row.displayDateEn}</div>
+                                )}
+                              </td>
+
+                              {/* যদি ক্যান্টিনের আইটেম ব্যাতিত ইউনিট ফান্ড ও অন্যান্য যা বিল আছে -> বিবরণ, পরিমাণ ও দর এর Cell Merge করে লিখবে */}
+                              {row.isMerged ? (
+                                <td colSpan={3} className="border border-black p-3 text-left font-bold bg-white whitespace-pre-line leading-relaxed text-xs sm:text-sm">
+                                  {row.itemsText}
+                                </td>
+                              ) : (
+                                <>
+                                  {/* বিবরণ */}
+                                  <td className="border border-black p-3 text-left font-bold bg-white whitespace-pre-line leading-relaxed text-xs sm:text-sm">
+                                    {row.itemsText}
+                                  </td>
+                                  {/* পরিমাণ */}
+                                  <td className="border border-black py-2.5 px-1 text-center font-bold bg-white text-xs sm:text-sm">
+                                    {toBengaliNum(row.qty)}
+                                  </td>
+                                  {/* দর */}
+                                  <td className="border border-black py-2.5 px-1 text-center font-bold bg-white text-xs sm:text-sm">
+                                    ৳{toBengaliNum(row.rate || Math.round(row.total / (row.qty || 1)))}
+                                  </td>
+                                </>
+                              )}
+
+                              {/* মোট */}
+                              <td className="border border-black py-2.5 px-1.5 text-center font-bold bg-white text-xs sm:text-sm">
+                                ৳{toBengaliNum(row.total)}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      ) : (
+                        <tr className="bg-white">
+                          <td colSpan={5} className="border border-black p-3.5 text-center font-bold text-slate-800 bg-white tracking-wide text-sm sm:text-base">
+                            এই মাসে কোনো তারিখ ভিত্তিক বিল নেই
+                          </td>
+                        </tr>
+                      )
                     )}
 
-                    {/* Summary Rows - Normal white cells, no alternating grey */}
+                    {/* Summary Rows - Normal white cells, colSpan matches view mode */}
                     {totalMonthBill > 0 && (
                       <tr className="bg-white">
-                        <td className="border border-black p-3 text-right font-black bg-white" colSpan={3}>
+                        <td className="border border-black p-3 text-right font-black bg-white" colSpan={statementViewMode === 'DATE' ? 4 : 3}>
                           মোট ক্যান্টিন বিল
                         </td>
                         <td className="border border-black p-3 text-center font-black bg-white">
@@ -5564,7 +6034,7 @@ export const MemberDB: React.FC = () => {
                     {/* ডিসকাউন্ট (যদি > ০ থাকে, মোট ক্যান্টিন বিল এর ঠিক নিচে) */}
                     {totalMonthDiscount > 0 && (
                       <tr className="bg-white">
-                        <td className="border border-black p-3 text-right font-black bg-white text-emerald-700" colSpan={3}>
+                        <td className="border border-black p-3 text-right font-black bg-white text-emerald-700" colSpan={statementViewMode === 'DATE' ? 4 : 3}>
                           ডিসকাউন্ট
                         </td>
                         <td className="border border-black p-3 text-center font-black bg-white text-emerald-700">
@@ -5576,7 +6046,7 @@ export const MemberDB: React.FC = () => {
                     {/* বকেয়া বিল (যদি ০ থাকে তাহলে Hide থাকবে) */}
                     {previousDue > 0 && (
                       <tr className="bg-white">
-                        <td className="border border-black p-3 text-right font-black bg-white" colSpan={3}>
+                        <td className="border border-black p-3 text-right font-black bg-white" colSpan={statementViewMode === 'DATE' ? 4 : 3}>
                           বকেয়া বিল
                         </td>
                         <td className="border border-black p-3 text-center font-black bg-white">
@@ -5588,7 +6058,7 @@ export const MemberDB: React.FC = () => {
                     {/* ইউনিট ফান্ড (যদি ০ থাকে তাহলে Hide থাকবে) */}
                     {unitFundBill > 0 && (
                       <tr className="bg-white">
-                        <td className="border border-black p-3 text-right font-black bg-white" colSpan={3}>
+                        <td className="border border-black p-3 text-right font-black bg-white" colSpan={statementViewMode === 'DATE' ? 4 : 3}>
                           ইউনিট ফান্ড
                         </td>
                         <td className="border border-black p-3 text-center font-black bg-white">
@@ -5600,7 +6070,7 @@ export const MemberDB: React.FC = () => {
                     {/* অন্যান্য (যদি ০ থাকে তাহলে Hide থাকবে) */}
                     {othersFundBill > 0 && (
                       <tr className="bg-white">
-                        <td className="border border-black p-3 text-right font-black bg-white" colSpan={3}>
+                        <td className="border border-black p-3 text-right font-black bg-white" colSpan={statementViewMode === 'DATE' ? 4 : 3}>
                           অন্যান্য
                         </td>
                         <td className="border border-black p-3 text-center font-black bg-white">
@@ -5611,7 +6081,7 @@ export const MemberDB: React.FC = () => {
 
                     {effectivePayments > 0 && (
                       <tr className="bg-white">
-                        <td className="border border-black p-3 text-right font-black bg-white" colSpan={3}>
+                        <td className="border border-black p-3 text-right font-black bg-white" colSpan={statementViewMode === 'DATE' ? 4 : 3}>
                           পরিশোধিত বিল
                         </td>
                         <td className="border border-black p-3 text-center font-black bg-white text-emerald-700">
@@ -5620,7 +6090,7 @@ export const MemberDB: React.FC = () => {
                       </tr>
                     )}
                     <tr className="bg-white">
-                      <td className="border border-black p-3 text-right font-black bg-white" colSpan={3}>
+                      <td className="border border-black p-3 text-right font-black bg-white" colSpan={statementViewMode === 'DATE' ? 4 : 3}>
                         সর্বমোট প্রদেয় বিল
                       </td>
                       <td className="border border-black p-3 text-center font-black text-[#e11d48] bg-white text-base sm:text-lg">
@@ -5655,40 +6125,115 @@ export const MemberDB: React.FC = () => {
                 </button>
               </div>
 
-              {/* Month Selector */}
+              {/* Month Selector with Left/Right Arrows */}
               <div className="mb-4">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1.5 flex items-center justify-between">
-                  <span>BILL MONTH (বিলের মাস)</span>
-                  <span className="text-[10px] text-indigo-400 font-mono font-bold">
-                    {lastDateInfo.labelBn}
-                  </span>
-                </label>
-                <select
-                  value={payBillMonth}
-                  onChange={(e) => {
-                    const newMonth = e.target.value;
-                    setPayBillMonth(newMonth);
-                    if (newMonth === 'ALL') {
-                      setPayAmount(String(totalOverallDue || 0));
-                    } else {
-                      const newDue = getMemberDueUpToMonth(payBillMember, newMonth, payBillCategory || selectedCategory);
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    BILL MONTH (বিলের মাস)
+                  </label>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-[10px] text-indigo-400 font-mono font-bold">
+                      {lastDateInfo.labelBn}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (payBillMonth === 'ALL') {
+                          const running = getRunningMonthKey();
+                          setPayBillMonth(running);
+                          const newDue = getMemberDueUpToMonth(payBillMember, running, payBillCategory || selectedCategory);
+                          setPayAmount(String(Math.max(0, newDue)));
+                        } else {
+                          setPayBillMonth('ALL');
+                          setPayAmount(String(totalOverallDue || 0));
+                        }
+                      }}
+                      className={`text-[9px] px-2 py-0.5 rounded-md font-mono font-bold transition-all cursor-pointer ${
+                        payBillMonth === 'ALL'
+                          ? 'bg-amber-500 text-slate-950 font-black'
+                          : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
+                      }`}
+                    >
+                      {payBillMonth === 'ALL' ? 'SPECIFIC MONTH' : 'ALL DUE'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between bg-slate-950 border border-slate-800 rounded-2xl p-1.5 shadow-inner">
+                  {/* Left Arrow Button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      let target = payBillMonth;
+                      if (!target || target === 'ALL') {
+                        target = getRunningMonthKey();
+                      }
+                      const idx = availableMonths.indexOf(target);
+                      let prevMonth = '';
+                      if (idx !== -1 && idx < availableMonths.length - 1) {
+                        prevMonth = availableMonths[idx + 1];
+                      } else {
+                        const [y, m] = target.split('-').map(Number);
+                        const d = new Date(y, m - 2, 1);
+                        prevMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                      }
+                      setPayBillMonth(prevMonth);
+                      const newDue = getMemberDueUpToMonth(payBillMember, prevMonth, payBillCategory || selectedCategory);
                       setPayAmount(String(Math.max(0, newDue)));
-                    }
-                  }}
-                  className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-3.5 py-2.5 text-xs font-bold font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
-                >
-                  {availableMonths.map((m) => {
-                    const lastD = getLastDateOfMonth(m);
-                    return (
-                      <option key={m} value={m} className="bg-slate-900 text-white">
-                        {formatBengaliMonthYear(m)} ({lastD.formatted} পর্যন্ত বিল)
-                      </option>
-                    );
-                  })}
-                  <option value="ALL" className="bg-slate-900 text-white">
-                    ALL / সর্বমোট বর্তমান বকেয়া (আজ পর্যন্ত)
-                  </option>
-                </select>
+                    }}
+                    className="w-10 h-10 flex items-center justify-center bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-white rounded-xl transition-all cursor-pointer border border-slate-700/60 shadow-md active:scale-95"
+                    title="Previous Month (পূর্ববর্তী মাস)"
+                  >
+                    <ChevronLeft className="w-5 h-5 stroke-[2.5]" />
+                  </button>
+
+                  {/* Month Display (e.g. "OCTOBER") */}
+                  <div className="flex-1 text-center px-2 py-0.5 select-none">
+                    <div className="flex items-center justify-center space-x-1.5">
+                      <Calendar className="w-4 h-4 text-indigo-400 shrink-0" />
+                      <span className="text-sm sm:text-base font-black uppercase font-mono tracking-wider text-white">
+                        {payBillMonth === 'ALL' ? 'ALL MONTHS' : formatMonthOnlyUpper(payBillMonth)}
+                      </span>
+                      {payBillMonth !== 'ALL' && (
+                        <span className="text-xs font-mono font-bold text-slate-400">
+                          {payBillMonth.split('-')[0]}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[10px] text-slate-400 font-medium mt-0.5">
+                      {payBillMonth === 'ALL' 
+                        ? 'সর্বমোট বর্তমান বকেয়া (আজ পর্যন্ত)' 
+                        : `(${lastDateInfo.formatted} পর্যন্ত বিল)`}
+                    </div>
+                  </div>
+
+                  {/* Right Arrow Button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      let target = payBillMonth;
+                      if (!target || target === 'ALL') {
+                        target = getRunningMonthKey();
+                      }
+                      const idx = availableMonths.indexOf(target);
+                      let nextMonth = '';
+                      if (idx > 0) {
+                        nextMonth = availableMonths[idx - 1];
+                      } else {
+                        const [y, m] = target.split('-').map(Number);
+                        const d = new Date(y, m, 1);
+                        nextMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                      }
+                      setPayBillMonth(nextMonth);
+                      const newDue = getMemberDueUpToMonth(payBillMember, nextMonth, payBillCategory || selectedCategory);
+                      setPayAmount(String(Math.max(0, newDue)));
+                    }}
+                    className="w-10 h-10 flex items-center justify-center bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-white rounded-xl transition-all cursor-pointer border border-slate-700/60 shadow-md active:scale-95"
+                    title="Next Month (পরবর্তী মাস)"
+                  >
+                    <ChevronRight className="w-5 h-5 stroke-[2.5]" />
+                  </button>
+                </div>
               </div>
 
               {/* Due Amount Highlight Card */}

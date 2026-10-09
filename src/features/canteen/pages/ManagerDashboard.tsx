@@ -791,51 +791,55 @@ export const ManagerDashboard: React.FC = () => {
           </div>
       )}
       
-      {/* Top Banner (Manager Style) */}
-      <div className="bg-[#0f172a] rounded-[2rem] p-12 flex flex-col items-center justify-center relative overflow-hidden shadow-sm">
-         {/* Faint background decoration */}
-         <div className="absolute left-10 top-1/2 -translate-y-1/2 opacity-5 hidden md:block">
-            <Utensils className="w-64 h-64 text-white" />
-         </div>
-         <div className="absolute right-10 top-1/2 -translate-y-1/2 opacity-5 hidden md:block transform scale-x-[-1]">
-            <Utensils className="w-64 h-64 text-white" />
-         </div>
+      {/* Top Banner (Manager Style) - Visible only when Menu is curated */}
+      {selectedItems && selectedItems.length > 0 && (
+        <div className="bg-[#0f172a] rounded-[2rem] p-12 flex flex-col items-center justify-center relative overflow-hidden shadow-sm">
+           {/* Faint background decoration */}
+           <div className="absolute left-10 top-1/2 -translate-y-1/2 opacity-5 hidden md:block">
+              <Utensils className="w-64 h-64 text-white" />
+           </div>
+           <div className="absolute right-10 top-1/2 -translate-y-1/2 opacity-5 hidden md:block transform scale-x-[-1]">
+              <Utensils className="w-64 h-64 text-white" />
+           </div>
 
-         <div className="z-10 flex flex-col items-center space-y-4">
-            <div className="w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center p-2 border border-slate-700 shadow-inner overflow-hidden">
-               {canteenConfig.logoUrl ? (
-                  <img 
-                    src={resolveImageUrl(canteenConfig.logoUrl)} 
-                    alt="Logo" 
-                    referrerPolicy="no-referrer"
-                    className="w-full h-full object-contain opacity-90" 
-                    onError={(e) => { e.currentTarget.style.display = 'none'; }} 
-                  />
-               ) : (
-                  <Utensils className="w-8 h-8 text-[#4f46e5]" />
-               )}
-            </div>
-            
-            <h2 className="text-2xl sm:text-3xl md:text-4xl font-black text-white tracking-wider sm:tracking-widest flex items-center justify-center whitespace-nowrap text-center px-2">
-               <span>{canteenConfig.name || '🍽️ CAFE UAV 🍽️'}</span>
-            </h2>
-            <p className="text-[10px] sm:text-xs tracking-widest text-slate-400 font-bold uppercase pb-1">Eat Good Food, Serve Good!</p>
-         </div>
-      </div>
+           <div className="z-10 flex flex-col items-center space-y-4">
+              <div className="w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center p-2 border border-slate-700 shadow-inner overflow-hidden">
+                 {canteenConfig.logoUrl ? (
+                    <img 
+                      src={resolveImageUrl(canteenConfig.logoUrl)} 
+                      alt="Logo" 
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-contain opacity-90" 
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }} 
+                    />
+                 ) : (
+                    <Utensils className="w-8 h-8 text-[#4f46e5]" />
+                 )}
+              </div>
+              
+              <h2 className="text-2xl sm:text-3xl md:text-4xl font-black text-white tracking-wider sm:tracking-widest flex items-center justify-center whitespace-nowrap text-center px-2">
+                 <span>{canteenConfig.name || '🍽️ CAFE UAV 🍽️'}</span>
+              </h2>
+              <p className="text-[10px] sm:text-xs tracking-widest text-slate-400 font-bold uppercase pb-1">Eat Good Food, Serve Good!</p>
+           </div>
+        </div>
+      )}
 
       {/* Centered Pre-Order Content & Separate Boxes */}
       <div className="max-w-4xl mx-auto w-full space-y-6">
-         {/* Top Centered Curate Menu Button (Pic 1: Center above Today's Menu box) */}
-         <div className="flex justify-center items-center pt-2">
-            <button 
-               type="button"
-               onClick={() => setShowCurateMenu(true)} 
-               className="px-6 py-3 bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-2xl text-xs font-black tracking-widest uppercase transition-all shadow-xl shadow-indigo-600/30 hover:shadow-indigo-500/40 flex items-center space-x-2.5 active:scale-95 cursor-pointer border border-indigo-400/40 hover:border-indigo-300"
-            >
-               <ChefHat className="w-4 h-4 text-amber-300" />
-               <span>CURATE MENU ({selectedItems.length})</span>
-            </button>
-         </div>
+         {/* Top Centered Curate Menu Button (Visible only when Menu is curated) */}
+         {selectedItems && selectedItems.length > 0 && (
+           <div className="flex justify-center items-center pt-2">
+              <button 
+                 type="button"
+                 onClick={() => setShowCurateMenu(true)} 
+                 className="px-6 py-3 bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-2xl text-xs font-black tracking-widest uppercase transition-all shadow-xl shadow-indigo-600/30 hover:shadow-indigo-500/40 flex items-center space-x-2.5 active:scale-95 cursor-pointer border border-indigo-400/40 hover:border-indigo-300"
+              >
+                 <ChefHat className="w-4 h-4 text-amber-300" />
+                 <span>CURATE MENU ({selectedItems.length})</span>
+              </button>
+           </div>
+         )}
 
          {/* 1. MENU BOX */}
          <div className="bg-slate-900 rounded-[2rem] p-6 sm:p-8 shadow-xl border border-slate-800 flex flex-col">
@@ -885,9 +889,17 @@ export const ManagerDashboard: React.FC = () => {
 
             {/* Curated Menu Items */}
             {(!selectedItems || selectedItems.length === 0) ? (
-               <div className="py-8 px-4 rounded-2xl bg-slate-950/60 border border-slate-800/80 flex flex-col items-center justify-center text-center">
-                  <Utensils className="w-10 h-10 text-slate-600 mb-2" />
+               <div className="py-10 px-4 rounded-2xl bg-slate-950/60 border border-slate-800/80 flex flex-col items-center justify-center text-center space-y-3">
+                  <Utensils className="w-10 h-10 text-slate-600 mb-1" />
                   <p className="text-slate-400 text-xs font-bold uppercase tracking-wider">No menu items curated for today</p>
+                  <button 
+                     type="button"
+                     onClick={() => setShowCurateMenu(true)} 
+                     className="px-5 py-2.5 bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl text-xs font-black tracking-widest uppercase transition-all shadow-md flex items-center space-x-2 cursor-pointer active:scale-95 border border-indigo-400/40"
+                  >
+                     <ChefHat className="w-4 h-4 text-amber-300" />
+                     <span>Curate Today's Menu</span>
+                  </button>
                </div>
             ) : (
                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5 w-full py-2">
@@ -925,6 +937,9 @@ export const ManagerDashboard: React.FC = () => {
             )}
          </div>
 
+         {/* All other Dashboard sections stay hidden if no menu is curated today */}
+         {selectedItems && selectedItems.length > 0 && (
+            <>
          {/* 2. TOTAL PRE-ORDERS BOX */}
          <div className="bg-slate-900 rounded-[2rem] p-6 sm:p-8 shadow-xl border border-slate-800 flex flex-col space-y-5">
             <div className="flex items-center justify-between mb-2">
@@ -1690,6 +1705,8 @@ export const ManagerDashboard: React.FC = () => {
                </div>
             )}
          </div>
+         </>
+         )}
       </div>
 
       {/* Cancel Confirm Modal */}
