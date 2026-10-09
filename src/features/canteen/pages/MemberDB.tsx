@@ -2836,8 +2836,8 @@ export const MemberDB: React.FC = () => {
       const totalDueBefore = getMemberTotalDue(payBillMember, 'ALL');
       const newDue = Math.max(0, totalDueBefore - amount);
       
-      // Update Supabase Canteen table 'Due' column
-      await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', payBillMember.airman_id);
+      // Update Supabase Canteen table 'Due' column non-blockingly in background
+      Promise.resolve(supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', payBillMember.airman_id)).catch(e => console.warn('Supabase member due update warning:', e));
       
       const isCash = String(payMethod).toUpperCase() === 'CASH';
       const gatewayFormatted = isCash ? 'Cash' : 'UCB';
@@ -2886,7 +2886,7 @@ export const MemberDB: React.FC = () => {
       const updatedTxs = [tx, ...txs];
       localStorage.setItem('canteen_txs', JSON.stringify(updatedTxs));
       setAllTxs(updatedTxs);
-      await pushKeyToCloud('canteen_txs', updatedTxs);
+      pushKeyToCloud('canteen_txs', updatedTxs).catch(e => console.warn('Push key error:', e));
       
       window.dispatchEvent(new Event('canteen_state_updated'));
       window.dispatchEvent(new Event('canteen_txs_updated'));

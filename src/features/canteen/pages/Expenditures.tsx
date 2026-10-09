@@ -1516,18 +1516,25 @@ export const Expenditures: React.FC = () => {
                           </span>
                         </div>
                         
-                        <div className="flex items-center space-x-2 mt-1.5">
-                          <label className="flex items-center space-x-2 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={formDeductAdvance}
-                              onChange={(e) => setFormDeductAdvance(e.target.checked)}
-                              className="w-4 h-4 rounded text-indigo-600 bg-slate-900 border-slate-700 focus:ring-indigo-500"
-                            />
-                            <span className="text-[11px] font-bold text-slate-300">
-                              এই খরচ (৳{formTotalAmount.toLocaleString()}) {formPerson} এর অগ্রিম থেকে সমন্বয় করুন
+                        <div className="flex items-center space-x-2 mt-2">
+                          <button
+                            type="button"
+                            onClick={() => setFormDeductAdvance(!formDeductAdvance)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center space-x-2 border cursor-pointer ${
+                              formDeductAdvance
+                                ? 'bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-950/40'
+                                : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white hover:bg-slate-800'
+                            }`}
+                          >
+                            <span className={`w-4 h-4 rounded-md border flex items-center justify-center transition-colors ${
+                              formDeductAdvance ? 'bg-white border-white text-indigo-600' : 'border-slate-500 text-transparent'
+                            }`}>
+                              <Check className="w-3 h-3 stroke-[3]" />
                             </span>
-                          </label>
+                            <span>
+                              Deduct this expense (৳{formTotalAmount.toLocaleString()}) from {formPerson}'s advance
+                            </span>
+                          </button>
                         </div>
                       </div>
                     </div>

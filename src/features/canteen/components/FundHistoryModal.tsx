@@ -84,6 +84,56 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [deletedTxIds, setDeletedTxIds] = useState<Set<string>>(() => new Set(getDeletedTxIds()));
 
+  const [deleteSuccessData, setDeleteSuccessData] = useState<{
+    memberName: string;
+    bdNo: string;
+    amount: number;
+    purpose: string;
+  } | null>(null);
+
+  const playSuccessChime = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      if (ctx.state === 'suspended') ctx.resume();
+      const now = ctx.currentTime;
+      [523.25, 659.25, 783.99, 1046.50].forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+        gain.gain.setValueAtTime(0, now + idx * 0.08);
+        gain.gain.linearRampToValueAtTime(0.18, now + idx * 0.08 + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.45);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + idx * 0.08);
+        osc.stop(now + idx * 0.08 + 0.5);
+      });
+    } catch {}
+  };
+
+  const playPopSound = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(440, now);
+      osc.frequency.exponentialRampToValueAtTime(160, now + 0.2);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.23);
+    } catch {}
+  };
+
   // Sync category filter when initialCategory changes
   useEffect(() => {
     if (initialCategory) {
@@ -347,15 +397,6 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
       })();
       const filtered = existingTxs.filter((t: any) => String(t.id) !== txIdStr);
       localStorage.setItem('canteen_txs', JSON.stringify(filtered));
-      await pushKeyToCloud('canteen_txs', filtered);
-
-      if (onRemoveTx) {
-        try {
-          await onRemoveTx(tx);
-        } catch (e) {
-          console.warn('onRemoveTx error in FundHistoryModal:', e);
-        }
-      }
 
       const targetMember = members.find((m: any) => {
         if (!m) return false;
@@ -374,23 +415,6 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
         const currentDue = Number(targetMember.Due ?? targetMember.due ?? targetMember.baki ?? 0);
         const newDue = Math.max(0, currentDue - amountToReverse);
 
-        try {
-          if (targetMember.airman_id) {
-            await supabase
-              .from('Canteen_Member')
-              .update({ Due: newDue })
-              .eq('airman_id', targetMember.airman_id);
-          }
-          if (targetMember['BD No']) {
-            await supabase
-              .from('Canteen_Member')
-              .update({ Due: newDue })
-              .eq('BD No', String(targetMember['BD No']).trim());
-          }
-        } catch (e) {
-          console.warn('Supabase member due update on delete:', e);
-        }
-
         targetMember.Due = newDue;
         targetMember.due = newDue;
         targetMember.baki = newDue;
@@ -405,16 +429,58 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
         }
       }
 
+      // 0ms instant feedback: play sound and show dynamic success modal view
+      playPopSound();
+      playSuccessChime();
+
+      setDeleteSuccessData({
+        memberName: String(tx.memberName || tx.name || `BD/${tx.bdNo || ''}`).trim(),
+        bdNo: String(tx.bdNo || tx['BD No'] || ''),
+        amount: amountToReverse,
+        purpose: String(tx.items || tx.note || 'বিল রেকর্ড')
+      });
+
+      // Dispatch local event updates immediately
       window.dispatchEvent(new Event('canteen_txs_updated'));
       window.dispatchEvent(new Event('canteen_state_updated'));
       window.dispatchEvent(new Event('canteen_members_updated'));
       window.dispatchEvent(new Event('storage'));
 
-      showToast('Transaction record deleted successfully');
-      setTxToDelete(null);
-      if (onSuccess) onSuccess();
+      // Perform background cloud and Supabase sync non-blockingly
+      (async () => {
+        try {
+          await pushKeyToCloud('canteen_txs', filtered);
+          if (onRemoveTx) {
+            await onRemoveTx(tx).catch(() => {});
+          }
+          if (targetMember) {
+            if (targetMember.airman_id) {
+              await supabase
+                .from('Canteen_Member')
+                .update({ Due: newDue })
+                .eq('airman_id', targetMember.airman_id);
+            }
+            if (targetMember['BD No']) {
+              await supabase
+                .from('Canteen_Member')
+                .update({ Due: newDue })
+                .eq('BD No', String(targetMember['BD No']).trim());
+            }
+          }
+        } catch (e) {
+          console.warn('Background delete sync error in FundHistoryModal:', e);
+        }
+      })();
+
+      // Auto close success popup after 2.5s
+      setTimeout(() => {
+        setDeleteSuccessData(null);
+        setTxToDelete(null);
+        if (onSuccess) onSuccess();
+      }, 2500);
     } catch (err: any) {
       showToast(`Delete failed: ${err.message}`, 'error');
+      setTxToDelete(null);
     } finally {
       setIsDeleting(false);
     }
@@ -796,37 +862,84 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
       {/* Delete Transaction Confirmation Modal */}
       {txToDelete && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-sm w-full shadow-2xl animate-in zoom-in-95 space-y-4">
-            <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
-              <Trash2 className="w-6 h-6" />
-            </div>
-            <div className="text-center space-y-1">
-              <h4 className="text-base font-black text-white">Delete Transaction?</h4>
-              <p className="text-xs text-slate-400">
-                Are you sure you want to delete this bill of <strong className="text-white font-mono">৳{Number(txToDelete.amount || 0).toLocaleString()}</strong> for <strong>{txToDelete.memberName || txToDelete.name || `BD/${txToDelete.bdNo}`}</strong>?
-              </p>
-              <p className="text-[11px] text-amber-400/90 font-medium">
-                Member's due will be automatically reversed.
-              </p>
-            </div>
-            <div className="grid grid-cols-2 gap-2.5 pt-2">
-              <button
-                type="button"
-                onClick={() => setTxToDelete(null)}
-                className="py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={confirmDeleteTx}
-                disabled={isDeleting}
-                className="py-2.5 px-4 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs transition-colors flex items-center justify-center space-x-1.5 shadow-lg shadow-rose-950/50 cursor-pointer disabled:opacity-50"
-              >
-                {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                <span>{isDeleting ? 'Deleting...' : 'Delete'}</span>
-              </button>
-            </div>
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-sm w-full shadow-2xl animate-in zoom-in-95 space-y-4 text-center relative overflow-hidden">
+            {deleteSuccessData ? (
+              /* Dynamic Success Animation View inside popup box */
+              <div className="space-y-4 py-2 animate-in fade-in zoom-in-95 duration-200">
+                <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-500" />
+                <div className="w-16 h-16 bg-emerald-500/20 text-emerald-400 rounded-2xl flex items-center justify-center mx-auto border border-emerald-500/40 shadow-lg shadow-emerald-500/20">
+                  <CheckCircle2 className="w-9 h-9 animate-bounce text-emerald-400" />
+                </div>
+                <div>
+                  <h4 className="text-lg font-black text-white">
+                    রেকর্ড সফলভাবে মুছে ফেলা হয়েছে!
+                  </h4>
+                  <p className="text-xs text-slate-300 mt-1 line-clamp-1">
+                    {deleteSuccessData.memberName} {deleteSuccessData.bdNo ? `(BD: ${deleteSuccessData.bdNo})` : ''}
+                  </p>
+                </div>
+                <div className="p-3.5 bg-slate-950/80 rounded-2xl border border-slate-800 text-xs space-y-1.5 text-left">
+                  <div className="flex justify-between items-center text-slate-300">
+                    <span className="text-slate-400">সমন্বয়কৃত বকেয়া (Reversed):</span>
+                    <span className="font-mono font-bold text-emerald-400 text-sm">
+                      ৳{deleteSuccessData.amount.toLocaleString()}
+                    </span>
+                  </div>
+                  {deleteSuccessData.purpose && (
+                    <div className="flex justify-between items-center text-slate-300">
+                      <span className="text-slate-400">বিবরণ:</span>
+                      <span className="text-slate-200 font-medium truncate max-w-[170px]">
+                        {deleteSuccessData.purpose}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDeleteSuccessData(null);
+                    setTxToDelete(null);
+                    if (onSuccess) onSuccess();
+                  }}
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs shadow-lg transition-colors cursor-pointer"
+                >
+                  সম্পন্ন (Close)
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
+                  <Trash2 className="w-6 h-6" />
+                </div>
+                <div className="text-center space-y-1">
+                  <h4 className="text-base font-black text-white">Delete Transaction?</h4>
+                  <p className="text-xs text-slate-400">
+                    Are you sure you want to delete this bill of <strong className="text-white font-mono">৳{Number(txToDelete.amount || 0).toLocaleString()}</strong> for <strong>{txToDelete.memberName || txToDelete.name || `BD/${txToDelete.bdNo}`}</strong>?
+                  </p>
+                  <p className="text-[11px] text-amber-400/90 font-medium">
+                    Member's due will be automatically reversed.
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setTxToDelete(null)}
+                    className="py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmDeleteTx}
+                    disabled={isDeleting}
+                    className="py-2.5 px-4 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs transition-colors flex items-center justify-center space-x-1.5 shadow-lg shadow-rose-950/50 cursor-pointer disabled:opacity-50"
+                  >
+                    {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                    <span>{isDeleting ? 'Deleting...' : 'Delete'}</span>
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

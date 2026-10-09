@@ -124,11 +124,11 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
   
   // Purpose Presets & Notes State
   const DEFAULT_PURPOSE_PRESETS = [
-    'বাজার',
-    'ফরম-৭৯৩',
-    'অন্য ক্যান্টিন বিল',
     'Mess Dinner Fee',
-    'Picnic & Refreshment'
+    'Picnic & Refreshment',
+    'Special Event Catering',
+    'Bazar / Market',
+    'Form-793'
   ];
 
   const [purposePresets, setPurposePresets] = useState<string[]>(() => {
@@ -138,7 +138,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
     } catch {}
     return DEFAULT_PURPOSE_PRESETS;
   });
-  const [purpose, setPurpose] = useState<string>('বাজার');
+  const [purpose, setPurpose] = useState<string>('Mess Dinner Fee');
   const [notes, setNotes] = useState<string>('');
   const [newPresetInput, setNewPresetInput] = useState<string>('');
   const [isAddingPreset, setIsAddingPreset] = useState<boolean>(false);
@@ -160,6 +160,66 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
   const [txToDelete, setTxToDelete] = useState<any | null>(null);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [deletedTxIds, setDeletedTxIds] = useState<Set<string>>(new Set());
+
+  // Dynamic Success Popup State for Batch Post & Delete
+  const [batchSuccessData, setBatchSuccessData] = useState<{
+    memberCount: number;
+    totalAmount: number;
+    category: string;
+    purpose: string;
+    source: string;
+    targetStaff?: string;
+  } | null>(null);
+
+  const [deleteSuccessData, setDeleteSuccessData] = useState<{
+    memberName: string;
+    bdNo: string;
+    amount: number;
+    purpose: string;
+  } | null>(null);
+
+  const playSuccessChime = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      if (ctx.state === 'suspended') ctx.resume();
+      const now = ctx.currentTime;
+      [523.25, 659.25, 783.99, 1046.50].forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+        gain.gain.setValueAtTime(0, now + idx * 0.08);
+        gain.gain.linearRampToValueAtTime(0.18, now + idx * 0.08 + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.45);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + idx * 0.08);
+        osc.stop(now + idx * 0.08 + 0.5);
+      });
+    } catch {}
+  };
+
+  const playPopSound = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(440, now);
+      osc.frequency.exponentialRampToValueAtTime(160, now + 0.2);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.23);
+    } catch {}
+  };
 
   const canteenConfig = useMemo(() => getCanteenConfig(), []);
   const managerName = canteenConfig?.managerName || 'LAC Nishad';
@@ -623,9 +683,6 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       const updatedTxs = [...newBatchTxs, ...existingTxs];
       localStorage.setItem('canteen_txs', JSON.stringify(updatedTxs));
 
-      // Push member txs to cloud in background
-      await pushKeyToCloud('canteen_txs', updatedTxs);
-
       // Automatically deduct total billed amount from Fund Cash or UCB as an expense so Capital All Logs receives entry
       const totalBatchDeduction = totalBatchAmount;
       const existingExpenses = (() => {
@@ -654,10 +711,10 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
 
       const updatedExpenses = [fundExpenseRecord, ...existingExpenses];
       localStorage.setItem('canteen_expenses', JSON.stringify(updatedExpenses));
-      await pushKeyToCloud('canteen_expenses', updatedExpenses);
       window.dispatchEvent(new Event('canteen_expenses_updated'));
 
       // If Cash and Staff is selected: deduct from the staff member's account!
+      let updatedAdvances: any[] = [];
       if (othersFundSource === 'Cash' && cashDeductTarget === 'STAFF' && selectedStaffName) {
         const advancesRaw = localStorage.getItem('canteen_bazar_advances');
         const advances: any[] = advancesRaw ? JSON.parse(advancesRaw) : [];
@@ -671,7 +728,6 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                  !isSettled;
         });
 
-        let updatedAdvances = advances;
         if (personActive.length === 0) {
           // If person had no active advance, create one so their spent balance is updated
           const newNegativeAdv = {
@@ -704,9 +760,15 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
         }
 
         localStorage.setItem('canteen_bazar_advances', JSON.stringify(updatedAdvances));
-        await pushKeyToCloud('canteen_bazar_advances', updatedAdvances);
         window.dispatchEvent(new Event('canteen_bazar_advances_updated'));
       }
+
+      // Fast background push to Supabase cloud without freezing user UI
+      Promise.all([
+        pushKeyToCloud('canteen_txs', updatedTxs),
+        pushKeyToCloud('canteen_expenses', updatedExpenses),
+        ...(othersFundSource === 'Cash' && cashDeductTarget === 'STAFF' && selectedStaffName ? [pushKeyToCloud('canteen_bazar_advances', updatedAdvances)] : [])
+      ]).catch((err) => console.warn('Background batch sync warning:', err));
 
       // Trigger sync events across the entire app
       window.dispatchEvent(new Event('canteen_txs_updated'));
@@ -714,24 +776,25 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       window.dispatchEvent(new Event('canteen_members_updated'));
       window.dispatchEvent(new Event('storage'));
 
-      if (isUnitFund) {
-        showToast(
-          `Successfully posted Unit Fund bill for ${selectedMemberList.length} members (Total: ৳${totalBatchDeduction.toLocaleString()}) and recorded in Capital Logs!`
-        );
-      } else {
-        showToast(
-          `Successfully posted Others Bill for ${selectedMemberList.length} members and deducted ৳${totalBatchDeduction.toLocaleString()} from ${othersFundSource} Fund!`
-        );
-      }
+      // Play audio chime and trigger dynamic success modal popup immediately
+      playSuccessChime();
 
-      // Reset form
+      setBatchSuccessData({
+        memberCount: selectedMemberList.length,
+        totalAmount: totalBatchDeduction,
+        category: isUnitFund ? 'Unit Fund' : 'Others Bill',
+        purpose: finalPurpose,
+        source: othersFundSource,
+        targetStaff: othersFundSource === 'Cash' && cashDeductTarget === 'STAFF' ? selectedStaffName : undefined
+      });
+
+      // Reset form fields
       setAmount('');
       setMemberCustomAmounts({});
       setAmountMode('SAME');
       setFillAllInput('');
       setNotes('');
       setSelectedAirmanIds(new Set());
-      onSuccess();
     } catch (err: any) {
       console.error('Batch add error:', err);
       showToast(`Failed to post batch bills: ${err?.message || 'Unknown error'}`, 'error');
@@ -862,7 +925,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       recordDeletedTxId(txIdStr);
       setDeletedTxIds((prev) => new Set(prev).add(txIdStr));
 
-      // 2. Remove from canteen_txs in localStorage and cloud immediately
+      // 2. Remove from canteen_txs in localStorage immediately
       const existingTxs = (() => {
         try {
           return JSON.parse(localStorage.getItem('canteen_txs') || '[]');
@@ -872,18 +935,8 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       })();
       const filtered = existingTxs.filter((t: any) => String(t.id) !== txIdStr);
       localStorage.setItem('canteen_txs', JSON.stringify(filtered));
-      await pushKeyToCloud('canteen_txs', filtered);
 
-      // 3. Delegate to onRemoveTx if provided from parent (MemberDB)
-      if (onRemoveTx) {
-        try {
-          await onRemoveTx(tx);
-        } catch (e) {
-          console.warn('onRemoveTx call error in FundBatchBillPage:', e);
-        }
-      }
-
-      // 4. Find target member to reverse their Due locally and in Supabase
+      // 3. Find target member to reverse their Due locally and in memory
       const targetMember = members.find((m: any) => {
         if (!m) return false;
         if (tx.airman_id && m.airman_id === tx.airman_id) return true;
@@ -899,28 +952,11 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
         return false;
       });
 
+      const amountToReverse = Number(tx.amount || 0);
+      let newDue = 0;
       if (targetMember) {
-        const amountToReverse = Number(tx.amount || 0);
         const currentDue = Number(targetMember.Due ?? targetMember.due ?? targetMember.baki ?? 0);
-        const newDue = Math.max(0, currentDue - amountToReverse);
-
-        try {
-          if (targetMember.airman_id) {
-            await supabase
-              .from('Canteen_Member')
-              .update({ Due: newDue })
-              .eq('airman_id', targetMember.airman_id);
-          }
-          if (targetMember['BD No']) {
-            await supabase
-              .from('Canteen_Member')
-              .update({ Due: newDue })
-              .eq('BD No', String(targetMember['BD No']).trim());
-          }
-        } catch (e) {
-          console.warn('Supabase member due update on delete:', e);
-        }
-
+        newDue = Math.max(0, currentDue - amountToReverse);
         targetMember.Due = newDue;
         targetMember.due = newDue;
         targetMember.baki = newDue;
@@ -935,16 +971,58 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
         }
       }
 
+      // 0ms instant feedback: play sound and show dynamic success modal view
+      playPopSound();
+      playSuccessChime();
+
+      setDeleteSuccessData({
+        memberName: String(tx.memberName || tx.name || `BD/${tx.bdNo || ''}`).trim(),
+        bdNo: String(tx.bdNo || tx['BD No'] || ''),
+        amount: amountToReverse,
+        purpose: String(tx.items || tx.note || 'বিল রেকর্ড')
+      });
+
+      // Dispatch local event updates immediately
       window.dispatchEvent(new Event('canteen_txs_updated'));
       window.dispatchEvent(new Event('canteen_state_updated'));
       window.dispatchEvent(new Event('canteen_members_updated'));
       window.dispatchEvent(new Event('storage'));
 
-      showToast('Transaction record deleted successfully');
-      setTxToDelete(null);
-      if (onSuccess) onSuccess();
+      // Perform background cloud and Supabase sync non-blockingly
+      (async () => {
+        try {
+          await pushKeyToCloud('canteen_txs', filtered);
+          if (onRemoveTx) {
+            await onRemoveTx(tx).catch(() => {});
+          }
+          if (targetMember) {
+            if (targetMember.airman_id) {
+              await supabase
+                .from('Canteen_Member')
+                .update({ Due: newDue })
+                .eq('airman_id', targetMember.airman_id);
+            }
+            if (targetMember['BD No']) {
+              await supabase
+                .from('Canteen_Member')
+                .update({ Due: newDue })
+                .eq('BD No', String(targetMember['BD No']).trim());
+            }
+          }
+        } catch (e) {
+          console.warn('Background delete sync error:', e);
+        }
+      })();
+
+      // Auto close success popup after 2.5s
+      setTimeout(() => {
+        setDeleteSuccessData(null);
+        setTxToDelete(null);
+        if (onSuccess) onSuccess();
+      }, 2500);
     } catch (err: any) {
       showToast(`Delete failed: ${err.message}`, 'error');
+      setTxToDelete(null);
     } finally {
       setIsDeleting(false);
     }
@@ -1145,11 +1223,11 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
           <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
             <div className="flex items-center space-x-2.5">
               <span className="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-400 font-mono font-black text-xs flex items-center justify-center">
-                ১
+                1
               </span>
               <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center space-x-2">
                 <Calendar className="w-4 h-4 text-indigo-400" />
-                <span>তারিখ (Billing Date)</span>
+                <span>Billing Date</span>
               </h3>
             </div>
             <span className="text-[11px] font-mono font-bold px-2.5 py-1 rounded-xl bg-slate-950 text-indigo-300 border border-slate-800">
@@ -1171,11 +1249,11 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
             <div className="flex items-center space-x-2.5">
               <span className="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-400 font-mono font-black text-xs flex items-center justify-center">
-                ২
+                2
               </span>
               <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center space-x-2">
                 <Users className="w-4 h-4 text-indigo-400" />
-                <span>সদস্য নির্বাচন (Member Selection)</span>
+                <span>Member Selection</span>
               </h3>
             </div>
             <div className="flex items-center space-x-2 text-xs font-bold text-slate-400 self-end sm:self-auto">
@@ -1420,14 +1498,14 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
           <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
             <div className="flex items-center space-x-2.5">
               <span className="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-400 font-mono font-black text-xs flex items-center justify-center">
-                ৩
+                3
               </span>
               <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center space-x-2">
                 <Tag className="w-4 h-4 text-indigo-400" />
-                <span>ক্যাটাগরি / প্রিসেট নির্বাচন (Select Cat) {!isUnitFund && <span className="text-rose-400">*</span>}</span>
+                <span>Select Category / Purpose {!isUnitFund && <span className="text-rose-400">*</span>}</span>
               </h3>
             </div>
-            {/* Settings Gear Icon to toggle edit mode, like Add Disposal */}
+            {/* Settings Gear Icon to toggle edit mode */}
             <button
               type="button"
               onClick={() => setIsEditingPresets(!isEditingPresets)}
@@ -1482,13 +1560,13 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
               );
             })}
 
-            {/* Inline Add Preset: NO popup overflowing on mobile, NO suggested categories */}
+            {/* Inline Add Preset */}
             {!isEditingPresets && (
               isAddingPreset ? (
                 <div className="flex items-center gap-1.5 bg-slate-950 border border-indigo-500/60 rounded-xl p-1 max-w-full">
                   <input
                     type="text"
-                    placeholder="নতুন প্রিসেট..."
+                    placeholder="New preset..."
                     value={newPresetInput}
                     onChange={(e) => setNewPresetInput(e.target.value)}
                     onKeyDown={(e) => {
@@ -1532,14 +1610,14 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
             )}
           </div>
 
-          {/* Specify Custom Name / বিবরণ Input */}
+          {/* Specify Custom Purpose Name */}
           <div className="p-3 bg-slate-950/70 border border-slate-800 rounded-2xl space-y-1">
             <label className="text-[11px] font-bold text-slate-300 block">
-              Specify Purpose Name / বিবরণ {!isUnitFund && <span className="text-rose-400">*</span>}
+              Purpose / Description {!isUnitFund && <span className="text-rose-400">*</span>}
             </label>
             <input
               type="text"
-              placeholder="e.g. বাজার, ফরম-৭৯৩, ইত্যাদি..."
+              placeholder="e.g. Mess Dinner Fee, Refreshment, etc."
               value={purpose}
               onChange={(e) => setPurpose(e.target.value)}
               className="w-full px-3 py-2 text-xs font-bold rounded-xl border border-slate-700 bg-slate-900 text-white outline-none focus:border-indigo-500 shadow-inner"
@@ -1547,42 +1625,33 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
             />
           </div>
 
-          {/* Notes (ঐচ্ছিক) */}
+          {/* Notes (Optional) */}
           <div>
             <label className="block text-xs font-black uppercase text-slate-300 mb-1.5 flex items-center space-x-1.5">
               <FileText className="w-3.5 h-3.5 text-slate-400" />
-              <span>Notes / বিশেষ বিবরণ (ঐচ্ছিক)</span>
+              <span>Notes (Optional)</span>
             </label>
             <textarea
               rows={2}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="প্রয়োজনীয় কোনো বাড়তি নোট বা বিবরণ লিখুন..."
+              placeholder="Any additional notes or remarks..."
               className="w-full bg-slate-950 border border-slate-700 rounded-2xl p-3 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 shadow-inner resize-none"
             />
           </div>
         </div>
 
         {/* STEP 4: AMOUNT */}
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm space-y-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3.5">
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
             <div className="flex items-center space-x-2.5">
               <span className="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-400 font-mono font-black text-xs flex items-center justify-center">
-                ৪
+                4
               </span>
-              <div>
-                <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center space-x-2">
-                  <Coins className="w-4 h-4 text-indigo-400" />
-                  <span>বিলের পরিমাণ (Amount) <span className="text-rose-400">*</span></span>
-                </h3>
-                <p className="text-[11px] text-slate-400 font-medium">
-                  {selectedCount === 0 
-                    ? 'প্রথমে উপরে সদস্য নির্বাচন করুন'
-                    : selectedCount === 1 
-                      ? 'নির্বাচিত ১ জন সদস্যের জন্য বিল'
-                      : `নির্বাচিত ${selectedCount} জন সদস্যের জন্য বিলের পরিমাণ নির্ধারণ করুন`}
-                </p>
-              </div>
+              <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center space-x-2">
+                <Coins className="w-4 h-4 text-indigo-400" />
+                <span>Amount <span className="text-rose-400">*</span></span>
+              </h3>
             </div>
 
             {selectedCount > 0 && (
@@ -1595,21 +1664,21 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
           {selectedCount === 0 ? (
             <div className="p-6 text-center text-slate-400 text-xs font-bold bg-slate-950/60 rounded-2xl border border-dashed border-slate-800">
               <Users className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-50" />
-              বিলের পরিমাণ নির্ধারণ করতে অনুগ্রহ করে উপরে <span className="text-indigo-400">২য় ধাপ (সদস্য নির্বাচন)</span> থেকে এক বা একাধিক সদস্য সিলেক্ট করুন।
+              Please select one or more members in Member Selection above.
             </div>
           ) : (
             <div className="space-y-3.5">
-              {/* Quick Toolbar: Fill All / সবগুলোতে দিন */}
+              {/* Quick Toolbar: Fill All */}
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 p-3.5 bg-slate-950/80 rounded-2xl border border-slate-800">
                 <div className="text-xs font-bold text-slate-300">
-                  নিচে প্রতিটি নির্বাচিত সদস্যের নামের পাশে কাঙ্ক্ষিত পরিমাণ লিখুন:
+                  Set amount for each selected member:
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="relative w-32 sm:w-36">
                     <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-mono font-bold text-slate-400 text-xs">৳</span>
                     <input
                       type="number"
-                      placeholder="একসাথে বসান"
+                      placeholder="Fill All"
                       value={fillAllInput}
                       onChange={(e) => setFillAllInput(e.target.value)}
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-6 pr-2 py-1.5 text-xs font-mono text-white outline-none focus:border-indigo-500"
@@ -1624,11 +1693,11 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                         next[id] = fillAllInput;
                       });
                       setMemberCustomAmounts(next);
-                      showToast(`সকল সদস্যের জন্য ৳${fillAllInput} বসানো হয়েছে`);
+                      showToast(`Applied ৳${fillAllInput} to all members`);
                     }}
                     className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shadow-sm"
                   >
-                    সবগুলোতে দিন
+                    Apply to All
                   </button>
                 </div>
               </div>
@@ -1695,7 +1764,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                           type="number"
                           min="1"
                           step="1"
-                          placeholder="টাকার পরিমাণ"
+                          placeholder="Amount"
                           value={memberVal}
                           onChange={(e) => {
                             const val = e.target.value;
@@ -1720,15 +1789,15 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
               <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-indigo-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
                 <div className="flex items-center space-x-2">
                   <span className="text-slate-300 font-bold">
-                    নির্বাচিত {selectedCount} জন সদস্যের মোট বিল:
+                    Total ({selectedCount} Members):
                   </span>
                   {invalidCustomAmountsCount > 0 ? (
                     <span className="text-[11px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/20">
-                      ⚠️ {invalidCustomAmountsCount} জনের পরিমাণ বাকি
+                      ⚠️ {invalidCustomAmountsCount} Pending
                     </span>
                   ) : (
                     <span className="text-[11px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-lg border border-emerald-500/20">
-                      ✓ সবার পরিমাণ নির্ধারিত
+                      ✓ All Configured
                     </span>
                   )}
                 </div>
@@ -1741,15 +1810,15 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
         </div>
 
         {/* STEP 5: PAYMENT METHOD */}
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-sm space-y-3.5">
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
           <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
             <div className="flex items-center space-x-2.5">
               <span className="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-400 font-mono font-black text-xs flex items-center justify-center">
-                ৫
+                5
               </span>
               <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center space-x-2">
                 <Wallet className="w-4 h-4 text-cyan-400" />
-                <span>পেমেন্ট মাধ্যম (Payment Method) <span className="text-rose-400">*</span></span>
+                <span>Payment Method <span className="text-rose-400">*</span></span>
               </h3>
             </div>
             <span className="text-[10px] text-slate-400 font-mono">Capital Fund</span>
@@ -1782,82 +1851,104 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
             </button>
           </div>
 
-          {/* When Cash is selected: Staff option toggle & selection */}
+          {/* When Cash is selected: Source Selection (Manager Cash vs Staff Account) without checkbox */}
           {othersFundSource === 'Cash' && (
-            <div className="bg-slate-950/90 rounded-2xl p-3.5 border border-slate-800 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <label className="flex items-center space-x-2 cursor-pointer select-none">
-                  <input 
-                    type="checkbox"
-                    checked={cashDeductTarget === 'STAFF'}
-                    onChange={(e) => setCashDeductTarget(e.target.checked ? 'STAFF' : 'MANAGER')}
-                    className="w-4 h-4 rounded text-emerald-600 bg-slate-900 border-slate-700 focus:ring-0 focus:ring-offset-0 cursor-pointer"
-                  />
-                  <span className="text-xs font-bold text-slate-200">
-                    Staff অপশন নির্বাচন (Staff Account)
-                  </span>
-                </label>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-900 text-slate-400 border border-slate-800">
-                  {cashDeductTarget === 'STAFF' ? 'Staff Account' : 'Auto Manager Cash'}
-                </span>
+            <div className="bg-slate-950/90 rounded-2xl p-3.5 border border-slate-800 space-y-3">
+              <div className="text-xs font-bold text-slate-300">
+                Cash Channel / Source:
               </div>
 
+              {/* Segmented Switch Buttons instead of Checkbox */}
+              <div className="grid grid-cols-2 gap-2 p-1 bg-slate-900 rounded-xl border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setCashDeductTarget('MANAGER')}
+                  className={`py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1.5 ${
+                    cashDeductTarget === 'MANAGER'
+                      ? 'bg-slate-800 text-white shadow-xs border border-slate-700'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Manager Cash</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCashDeductTarget('STAFF')}
+                  className={`py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1.5 ${
+                    cashDeductTarget === 'STAFF'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5 text-emerald-200" />
+                  <span>Staff Account</span>
+                </button>
+              </div>
+
+              {/* Modern Staff Selection without Checkbox */}
               {cashDeductTarget === 'STAFF' ? (
-                <div className="space-y-1.5 pt-1.5 border-t border-slate-800">
-                  <label className="block text-[10px] font-black uppercase text-slate-400">
-                    Select Staff Member *
-                  </label>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                    {civilianStaffList.map((st) => (
-                      <button
-                        key={st.id || st.name}
-                        type="button"
-                        onClick={() => setSelectedStaffName(st.name)}
-                        className={`px-2 py-1.5 rounded-lg text-[10px] font-black text-center truncate transition-all cursor-pointer ${
-                          selectedStaffName === st.name
-                            ? 'bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-300'
-                            : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
-                        }`}
-                        title={st.name}
-                      >
-                        {st.name}
-                      </button>
-                    ))}
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[11px] font-black uppercase tracking-wider text-slate-300">
+                      Civilian Staff Member <span className="text-rose-400">*</span>
+                    </label>
+                    <span className="text-[10px] text-emerald-400 font-mono font-bold">
+                      Selected: {selectedStaffName}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {civilianStaffList.map((st) => {
+                      const isSelected = selectedStaffName === st.name;
+                      return (
+                        <button
+                          key={st.id || st.name}
+                          type="button"
+                          onClick={() => setSelectedStaffName(st.name)}
+                          className={`p-2.5 rounded-xl text-left transition-all cursor-pointer border flex items-center space-x-2.5 ${
+                            isSelected
+                              ? 'bg-emerald-950/80 border-emerald-500 text-white shadow-sm ring-1 ring-emerald-500/50'
+                              : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700 hover:text-white'
+                          }`}
+                        >
+                          <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-black shrink-0 ${
+                            isSelected ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'
+                          }`}>
+                            {st.name.replace(/^(Civ\s*|Civilian\s*)/i, '').charAt(0) || 'S'}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-black truncate">{st.name}</p>
+                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tight block">
+                              Staff
+                            </span>
+                          </div>
+                          {isSelected && (
+                            <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               ) : (
-                <div className="p-2.5 rounded-xl bg-indigo-950/30 border border-indigo-900/40 text-[11px] text-indigo-300 font-bold flex items-center space-x-2">
+                <div className="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-300 font-bold flex items-center space-x-2">
                   <ShieldCheck className="w-4 h-4 text-indigo-400 shrink-0" />
-                  <span>Staff নির্বাচন না করায় স্বয়ংক্রিয়ভাবে Manager ({managerName}) এর Cash থেকে টাকা কর্তন ও লগ করা হবে।</span>
+                  <span>Deduction logged under Manager Cash ({managerName}).</span>
                 </div>
               )}
             </div>
           )}
-
-          <p className="text-[10px] text-slate-400 font-bold leading-relaxed">
-            💡 মোট বিল {totalBatchAmount > 0 && selectedCount > 0 ? `৳${totalBatchAmount.toLocaleString()}` : ''} ক্যাপিটাল ফান্ডের{' '}
-            {othersFundSource === 'Cash' ? (
-              cashDeductTarget === 'STAFF' ? (
-                <strong className="text-emerald-400">{selectedStaffName} এর Advance</strong>
-              ) : (
-                <strong className="text-indigo-300">Manager ({managerName}) Cash</strong>
-              )
-            ) : (
-              <strong className="text-cyan-300">UCB Fund</strong>
-            )}{' '}
-            থেকে কর্তন হয়ে Capital এর All Logs-এ এন্ট্রি যোগ হবে।
-          </p>
         </div>
 
         {/* STEP 6: CONFIRM */}
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
           <div className="flex items-center space-x-2.5 border-b border-slate-800 pb-2.5">
             <span className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 font-mono font-black text-xs flex items-center justify-center">
-              ৬
+              6
             </span>
             <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center space-x-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span>বিল নিশ্চিতকরণ ও পোস্ট (Confirm)</span>
+              <span>Confirm</span>
             </h3>
           </div>
 
@@ -1878,9 +1969,9 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
             <div className="flex items-center justify-between text-xs font-bold text-slate-400">
               <span>Amount Per Member:</span>
               <span className="font-mono text-emerald-400 font-black">
-                {amountMode === 'SAME'
-                  ? (numAmount > 0 ? `৳${numAmount.toLocaleString()}` : 'Nil')
-                  : `Individual Rates (ভিন্ন ভিন্ন পরিমাণ)`}
+                {allSameMembers && firstMemberAmt > 0
+                  ? `৳${firstMemberAmt.toLocaleString()}`
+                  : `Individual Rates`}
               </span>
             </div>
             <div className="flex items-center justify-between text-xs font-bold text-slate-400">
@@ -1913,11 +2004,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
             ) : (
               <Check className="w-4 h-4" />
             )}
-            <span>
-              {isSubmitting 
-                ? 'Posting Bills...' 
-                : `Confirm & Post Batch Bill (${selectedCount} Members • ${totalBatchAmount > 0 && selectedCount > 0 ? `৳${totalBatchAmount.toLocaleString()}` : 'Nil'})`}
-            </span>
+            <span>Confirm</span>
           </button>
         </div>
       </div>
@@ -1937,37 +2024,174 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       {/* Delete Transaction Confirmation Modal */}
       {txToDelete && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[999] flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-sm w-full shadow-2xl animate-in zoom-in-95 space-y-4">
-            <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
-              <Trash2 className="w-6 h-6" />
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-sm w-full shadow-2xl animate-in zoom-in-95 space-y-4 text-center relative overflow-hidden">
+            {deleteSuccessData ? (
+              /* Dynamic Success Animation View inside popup box */
+              <div className="space-y-4 py-2 animate-in fade-in zoom-in-95 duration-200">
+                <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-500" />
+                <div className="w-16 h-16 bg-emerald-500/20 text-emerald-400 rounded-2xl flex items-center justify-center mx-auto border border-emerald-500/40 shadow-lg shadow-emerald-500/20">
+                  <CheckCircle2 className="w-9 h-9 animate-bounce text-emerald-400" />
+                </div>
+                <div>
+                  <h4 className="text-lg font-black text-white">
+                    রেকর্ড সফলভাবে মুছে ফেলা হয়েছে!
+                  </h4>
+                  <p className="text-xs text-slate-300 mt-1 line-clamp-1">
+                    {deleteSuccessData.memberName} {deleteSuccessData.bdNo ? `(BD: ${deleteSuccessData.bdNo})` : ''}
+                  </p>
+                </div>
+                <div className="p-3.5 bg-slate-950/80 rounded-2xl border border-slate-800 text-xs space-y-1.5 text-left">
+                  <div className="flex justify-between items-center text-slate-300">
+                    <span className="text-slate-400">সমন্বয়কৃত বকেয়া (Reversed):</span>
+                    <span className="font-mono font-bold text-emerald-400 text-sm">
+                      ৳{deleteSuccessData.amount.toLocaleString()}
+                    </span>
+                  </div>
+                  {deleteSuccessData.purpose && (
+                    <div className="flex justify-between items-center text-slate-300">
+                      <span className="text-slate-400">বিবরণ:</span>
+                      <span className="text-slate-200 font-medium truncate max-w-[170px]">
+                        {deleteSuccessData.purpose}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDeleteSuccessData(null);
+                    setTxToDelete(null);
+                    if (onSuccess) onSuccess();
+                  }}
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs shadow-lg transition-colors cursor-pointer"
+                >
+                  সম্পন্ন (Close)
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center mx-auto">
+                  <Trash2 className="w-6 h-6" />
+                </div>
+                <div className="text-center space-y-1">
+                  <h4 className="text-base font-black text-white">Delete Transaction?</h4>
+                  <p className="text-xs text-slate-400">
+                    Are you sure you want to delete this bill of <strong className="text-white font-mono">৳{Number(txToDelete.amount || 0).toLocaleString()}</strong> for <strong>{txToDelete.memberName || txToDelete.name || `BD/${txToDelete.bdNo}`}</strong>?
+                  </p>
+                  <p className="text-[11px] text-amber-400/90 font-medium">
+                    Member's due will be automatically reversed.
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setTxToDelete(null)}
+                    className="py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmDeleteTx}
+                    disabled={isDeleting}
+                    className="py-2.5 px-4 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs transition-colors flex items-center justify-center space-x-1.5 shadow-lg shadow-rose-950/50 cursor-pointer disabled:opacity-50"
+                  >
+                    {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                    <span>{isDeleting ? 'Deleting...' : 'Delete'}</span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Batch Bill Success Confirmation Modal with Celebration Animation */}
+      {batchSuccessData && (
+        <div 
+          className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[1000] flex items-center justify-center p-4 animate-in fade-in duration-200"
+          onClick={() => {
+            setBatchSuccessData(null);
+            if (onSuccess) onSuccess();
+          }}
+        >
+          <div 
+            className="bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 border border-emerald-500/50 rounded-[2.5rem] p-6 sm:p-8 w-full max-w-md shadow-[0_0_60px_-10px_rgba(16,185,129,0.45),0_25px_50px_-12px_rgba(0,0,0,0.85)] animate-in zoom-in-95 relative overflow-hidden text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Top decorative gradient bar */}
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-500" />
+            
+            {/* Glowing Backdrop Aura */}
+            <div className="absolute -top-24 left-1/2 -translate-x-1/2 w-64 h-64 bg-emerald-500/25 rounded-full blur-3xl pointer-events-none"></div>
+
+            {/* CheckCircle / Celebration Icon */}
+            <div className="relative mx-auto w-20 h-20 mb-4">
+              <div className="absolute inset-0 rounded-full bg-emerald-500/20 animate-ping opacity-75"></div>
+              <div className="relative w-20 h-20 rounded-3xl bg-gradient-to-br from-emerald-400 to-teal-600 p-0.5 shadow-xl shadow-emerald-500/30 flex items-center justify-center">
+                <div className="w-full h-full bg-slate-950 rounded-[22px] flex items-center justify-center">
+                  <CheckCircle2 className="w-10 h-10 text-emerald-400 animate-bounce" />
+                </div>
+              </div>
             </div>
-            <div className="text-center space-y-1">
-              <h4 className="text-base font-black text-white">Delete Transaction?</h4>
-              <p className="text-xs text-slate-400">
-                Are you sure you want to delete this bill of <strong className="text-white font-mono">৳{Number(txToDelete.amount || 0).toLocaleString()}</strong> for <strong>{txToDelete.memberName || txToDelete.name || `BD/${txToDelete.bdNo}`}</strong>?
+
+            <div className="space-y-1 mb-5">
+              <h3 className="text-xl font-black text-white tracking-tight">
+                বিল সফলভাবে যুক্ত হয়েছে!
+              </h3>
+              <p className="text-xs text-emerald-400 font-semibold">
+                Batch Bill Successfully Posted
               </p>
-              <p className="text-[11px] text-amber-400/90 font-medium">
-                Member's due will be automatically reversed.
-              </p>
             </div>
-            <div className="grid grid-cols-2 gap-2.5 pt-2">
-              <button
-                type="button"
-                onClick={() => setTxToDelete(null)}
-                className="py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={confirmDeleteTx}
-                disabled={isDeleting}
-                className="py-2.5 px-4 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs transition-colors flex items-center justify-center space-x-1.5 shadow-lg shadow-rose-950/50 cursor-pointer disabled:opacity-50"
-              >
-                {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                <span>{isDeleting ? 'Deleting...' : 'Delete'}</span>
-              </button>
+
+            {/* Info Summary Card */}
+            <div className="bg-slate-950/80 border border-slate-800/80 rounded-2xl p-4 text-xs space-y-2.5 text-left mb-5">
+              <div className="flex justify-between items-center text-slate-300">
+                <span className="text-slate-400 flex items-center gap-1.5">
+                  <Users className="w-3.5 h-3.5 text-emerald-400" /> মোট সদস্য:
+                </span>
+                <span className="font-bold text-white bg-emerald-500/10 px-2 py-0.5 rounded-lg border border-emerald-500/20">
+                  {batchSuccessData.memberCount} জন
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-slate-300">
+                <span className="text-slate-400 flex items-center gap-1.5">
+                  <Banknote className="w-3.5 h-3.5 text-emerald-400" /> মোট টাকার পরিমাণ:
+                </span>
+                <span className="font-mono font-black text-emerald-400 text-base">
+                  ৳{batchSuccessData.totalAmount.toLocaleString()}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-slate-300">
+                <span className="text-slate-400 flex items-center gap-1.5">
+                  <Tag className="w-3.5 h-3.5 text-slate-400" /> উদ্দেশ্য / ফান্ড:
+                </span>
+                <span className="font-bold text-slate-200 line-clamp-1 max-w-[180px] text-right">
+                  {batchSuccessData.purpose}
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-slate-300">
+                <span className="text-slate-400 flex items-center gap-1.5">
+                  <Wallet className="w-3.5 h-3.5 text-slate-400" /> ফান্ড সোর্স:
+                </span>
+                <span className="font-semibold text-slate-300">
+                  {batchSuccessData.source} {batchSuccessData.targetStaff ? `(${batchSuccessData.targetStaff})` : ''}
+                </span>
+              </div>
             </div>
+
+            {/* Done Button */}
+            <button
+              type="button"
+              onClick={() => {
+                setBatchSuccessData(null);
+                if (onSuccess) onSuccess();
+              }}
+              className="w-full py-3.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm rounded-2xl shadow-xl shadow-emerald-950/50 transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-2"
+            >
+              <Check className="w-4 h-4 stroke-[3]" />
+              <span>ঠিক আছে / সম্পন্ন (OK)</span>
+            </button>
           </div>
         </div>
       )}
@@ -2062,11 +2286,11 @@ export const EditFundTxModal: React.FC<EditFundTxModalProps> = ({
     e.preventDefault();
     const num = parseFloat(editAmount);
     if (isNaN(num) || num <= 0) {
-      setErrorMsg('সঠিক টাকার পরিমাণ দিন (০ এর বেশি)');
+      setErrorMsg('Please enter a valid amount greater than 0');
       return;
     }
     if (!editItems.trim()) {
-      setErrorMsg('উদ্দেশ্য বা বিবরণ খালি রাখা যাবে না');
+      setErrorMsg('Purpose or description cannot be empty');
       return;
     }
 
@@ -2088,7 +2312,7 @@ export const EditFundTxModal: React.FC<EditFundTxModalProps> = ({
         monthKey: derivedMonthKey
       });
     } catch (err: any) {
-      setErrorMsg(err?.message || 'সংরক্ষণ ব্যর্থ হয়েছে');
+      setErrorMsg(err?.message || 'Failed to save changes');
     }
   };
 
@@ -2126,7 +2350,7 @@ export const EditFundTxModal: React.FC<EditFundTxModalProps> = ({
           {/* Amount */}
           <div>
             <label className="block text-xs font-black uppercase text-slate-300 mb-1">
-              Amount (টাকা) <span className="text-rose-400">*</span>
+              Amount <span className="text-rose-400">*</span>
             </label>
             <div className="relative">
               <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-mono font-black text-slate-400 text-sm">
@@ -2198,7 +2422,7 @@ export const EditFundTxModal: React.FC<EditFundTxModalProps> = ({
               type="text"
               value={editItems}
               onChange={(e) => setEditItems(e.target.value)}
-              placeholder="উদ্দেশ্য বা বিবরণ লিখুন..."
+              placeholder="Enter purpose or description..."
               className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-indigo-500"
               required
             />
@@ -2207,13 +2431,13 @@ export const EditFundTxModal: React.FC<EditFundTxModalProps> = ({
           {/* Note */}
           <div>
             <label className="block text-xs font-black uppercase text-slate-300 mb-1">
-              Notes / বিশেষ মন্তব্য (ঐচ্ছিক)
+              Notes (Optional)
             </label>
             <input
               type="text"
               value={editNote}
               onChange={(e) => setEditNote(e.target.value)}
-              placeholder="অতিরিক্ত মন্তব্য..."
+              placeholder="Additional notes or remarks..."
               className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-indigo-500"
             />
           </div>

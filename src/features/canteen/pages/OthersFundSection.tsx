@@ -20,12 +20,12 @@ const OTHERS_EXPENSES_KEY = 'baf_others_fund_expenses';
 const OTHERS_TRANSFERS_KEY = 'baf_others_fund_transfers';
 
 const DEFAULT_CATEGORIES: OthersFundCategory[] = [
-  { id: 'cat-welfare', name: 'কল্যাণ তহবিল (Welfare Fund)', description: 'সদস্যদের বিশেষ কল্যাণ ও সহায়তা', color: 'from-amber-600 to-orange-600', createdAt: new Date().toISOString() },
-  { id: 'cat-mess', name: 'মেস তহবিল (Mess Fund)', description: 'ইউনিট মেস ও ডাইনিং সংস্থান', color: 'from-blue-600 to-indigo-600', createdAt: new Date().toISOString() },
-  { id: 'cat-sports', name: 'ক্রীড়া ও বিনোদন (Sports & Recreation)', description: 'খেলাধুলা সামগ্রী ও টুর্নামেন্ট', color: 'from-emerald-600 to-teal-600', createdAt: new Date().toISOString() },
-  { id: 'cat-mosque', name: 'মসজিদ তহবিল (Mosque Fund)', description: 'মসজিদ রক্ষণাবেক্ষণ ও ধর্মীয় অনুষ্ঠান', color: 'from-green-600 to-emerald-600', createdAt: new Date().toISOString() },
-  { id: 'cat-event', name: 'অনুষ্ঠান ও বিশেষ প্রকল্প (Event & Project)', description: 'বার্ষিক পিকনিক, ইফতার ও জাতীয় দিবস', color: 'from-purple-600 to-pink-600', createdAt: new Date().toISOString() },
-  { id: 'cat-emergency', name: 'জরুরি তহবিল (Emergency Fund)', description: 'অনাকাঙ্ক্ষিত আপৎকালীন প্রয়োজন', color: 'from-rose-600 to-red-600', createdAt: new Date().toISOString() }
+  { id: 'cat-welfare', name: 'Welfare Fund', color: 'from-amber-600 to-orange-600', createdAt: new Date().toISOString() },
+  { id: 'cat-mess', name: 'Mess Fund', color: 'from-blue-600 to-indigo-600', createdAt: new Date().toISOString() },
+  { id: 'cat-sports', name: 'Sports & Recreation', color: 'from-emerald-600 to-teal-600', createdAt: new Date().toISOString() },
+  { id: 'cat-mosque', name: 'Mosque Fund', color: 'from-green-600 to-emerald-600', createdAt: new Date().toISOString() },
+  { id: 'cat-event', name: 'Event & Project', color: 'from-purple-600 to-pink-600', createdAt: new Date().toISOString() },
+  { id: 'cat-emergency', name: 'Emergency Fund', color: 'from-rose-600 to-red-600', createdAt: new Date().toISOString() }
 ];
 
 export const OthersFundSection: React.FC = () => {
@@ -50,7 +50,7 @@ export const OthersFundSection: React.FC = () => {
   const [inflowFundId, setInflowFundId] = useState('');
   const [inflowDate, setInflowDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [inflowAmount, setInflowAmount] = useState('');
-  const [inflowSource, setInflowSource] = useState('অনুদান / চাঁদা');
+  const [inflowSource, setInflowSource] = useState('Contribution / Grant');
   const [inflowMethod, setInflowMethod] = useState<'CASH' | 'BANK'>('CASH');
   const [inflowVoucher, setInflowVoucher] = useState('');
   const [inflowReceivedFrom, setInflowReceivedFrom] = useState('');
@@ -61,7 +61,7 @@ export const OthersFundSection: React.FC = () => {
   const [expenseFundId, setExpenseFundId] = useState('');
   const [expenseDate, setExpenseDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [expenseAmount, setExpenseAmount] = useState('');
-  const [expenseCategory, setExpenseCategory] = useState('সাধারণ ব্যয়');
+  const [expenseCategory, setExpenseCategory] = useState('General Expense');
   const [expenseMethod, setExpenseMethod] = useState<'CASH' | 'BANK'>('CASH');
   const [expenseVoucher, setExpenseVoucher] = useState('');
   const [expensePaidTo, setExpensePaidTo] = useState('');
@@ -80,14 +80,36 @@ export const OthersFundSection: React.FC = () => {
 
   // New Category Form State
   const [newCatName, setNewCatName] = useState('');
-  const [newCatDesc, setNewCatDesc] = useState('');
   const [newCatError, setNewCatError] = useState('');
+
+  const sanitizeCategory = (c: OthersFundCategory): OthersFundCategory => {
+    let name = c.name || '';
+    if (name.includes('Welfare') || name.includes('কল্যাণ')) name = 'Welfare Fund';
+    else if (name.includes('Mess') || name.includes('মেস')) name = 'Mess Fund';
+    else if (name.includes('Sports') || name.includes('ক্রীড়া')) name = 'Sports & Recreation';
+    else if (name.includes('Mosque') || name.includes('মসজিদ')) name = 'Mosque Fund';
+    else if (name.includes('Event') || name.includes('অনুষ্ঠান')) name = 'Event & Project';
+    else if (name.includes('Emergency') || name.includes('জরুরি')) name = 'Emergency Fund';
+    else {
+      const match = name.match(/\(([^)]+)\)/);
+      if (match && match[1]) name = match[1].trim();
+      else name = name.replace(/[\u0980-\u09FF]+/g, '').trim() || name;
+    }
+    return {
+      ...c,
+      name,
+      description: undefined
+    };
+  };
 
   const loadData = () => {
     try {
       const rawCats = localStorage.getItem(OTHERS_CATEGORIES_KEY);
       if (rawCats) {
-        setCategories(JSON.parse(rawCats));
+        const parsed = JSON.parse(rawCats);
+        const cleaned = Array.isArray(parsed) ? parsed.map(sanitizeCategory) : DEFAULT_CATEGORIES;
+        setCategories(cleaned);
+        localStorage.setItem(OTHERS_CATEGORIES_KEY, JSON.stringify(cleaned));
       } else {
         setCategories(DEFAULT_CATEGORIES);
         localStorage.setItem(OTHERS_CATEGORIES_KEY, JSON.stringify(DEFAULT_CATEGORIES));
@@ -218,14 +240,13 @@ export const OthersFundSection: React.FC = () => {
     e.preventDefault();
     setNewCatError('');
     if (!newCatName.trim()) {
-      setNewCatError('ফান্ডের নাম লিখুন');
+      setNewCatError('Please enter a fund name');
       return;
     }
 
     const newCategory: OthersFundCategory = {
       id: 'cat-custom-' + Date.now(),
       name: newCatName.trim(),
-      description: newCatDesc.trim() || undefined,
       color: 'from-indigo-600 to-purple-600',
       createdAt: new Date().toISOString()
     };
@@ -236,8 +257,7 @@ export const OthersFundSection: React.FC = () => {
     triggerUpdate();
     setShowNewCategoryModal(false);
     setNewCatName('');
-    setNewCatDesc('');
-    showToast(`"${newCategory.name}" নতুন তহবিল সফলভাবে যুক্ত হয়েছে!`);
+    showToast(`"${newCategory.name}" fund created successfully!`);
   };
 
   // Add Inflow
@@ -246,13 +266,13 @@ export const OthersFundSection: React.FC = () => {
     setInflowError('');
     const amt = parseFloat(inflowAmount);
     if (isNaN(amt) || amt <= 0) {
-      setInflowError('অনুগ্রহ করে সঠিক টাকার পরিমাণ লিখুন');
+      setInflowError('Please enter a valid amount');
       return;
     }
 
     const targetCategory = categories.find(c => c.id === inflowFundId);
     if (!targetCategory) {
-      setInflowError('অনুগ্রহ করে একটি তহবিল নির্বাচন করুন');
+      setInflowError('Please select a fund');
       return;
     }
 
@@ -262,7 +282,7 @@ export const OthersFundSection: React.FC = () => {
       fundName: targetCategory.name,
       date: inflowDate || new Date().toISOString().split('T')[0],
       amount: amt,
-      source: inflowSource.trim() || 'জমা',
+      source: inflowSource.trim() || 'Contribution / Deposit',
       paymentMethod: inflowMethod,
       voucherNo: inflowVoucher.trim() || undefined,
       receivedFrom: inflowReceivedFrom.trim() || undefined,
@@ -279,7 +299,7 @@ export const OthersFundSection: React.FC = () => {
     setInflowVoucher('');
     setInflowReceivedFrom('');
     setInflowDesc('');
-    showToast(`৳${amt.toLocaleString('en-US')} "${targetCategory.name}" তহবিলে জমা হয়েছে!`);
+    showToast(`৳${amt.toLocaleString('en-US')} deposited into "${targetCategory.name}"!`);
   };
 
   // Add Expense
@@ -288,20 +308,20 @@ export const OthersFundSection: React.FC = () => {
     setExpenseError('');
     const amt = parseFloat(expenseAmount);
     if (isNaN(amt) || amt <= 0) {
-      setExpenseError('অনুগ্রহ করে সঠিক খরচের পরিমাণ লিখুন');
+      setExpenseError('Please enter a valid expense amount');
       return;
     }
 
     const targetCategory = categories.find(c => c.id === expenseFundId);
     if (!targetCategory) {
-      setExpenseError('অনুগ্রহ করে একটি তহবিল নির্বাচন করুন');
+      setExpenseError('Please select a fund');
       return;
     }
 
     const fundBal = getFundBalance(targetCategory.id);
     const available = expenseMethod === 'CASH' ? fundBal.cash : fundBal.bank;
     if (amt > available) {
-      setExpenseError(`পর্যাপ্ত ব্যালেন্স নেই! "${targetCategory.name}" এর ${expenseMethod} তহবিলে রয়েছে ৳${available.toLocaleString('en-US')}`);
+      setExpenseError(`Insufficient balance! "${targetCategory.name}" has ৳${available.toLocaleString('en-US')} in ${expenseMethod}.`);
       return;
     }
 
@@ -311,7 +331,7 @@ export const OthersFundSection: React.FC = () => {
       fundName: targetCategory.name,
       date: expenseDate || new Date().toISOString().split('T')[0],
       amount: amt,
-      category: expenseCategory.trim() || 'খরচ',
+      category: expenseCategory.trim() || 'General Expense',
       paymentMethod: expenseMethod,
       voucherNo: expenseVoucher.trim() || undefined,
       paidTo: expensePaidTo.trim() || undefined,
@@ -328,7 +348,7 @@ export const OthersFundSection: React.FC = () => {
     setExpenseVoucher('');
     setExpensePaidTo('');
     setExpenseDesc('');
-    showToast(`৳${amt.toLocaleString('en-US')} "${targetCategory.name}" তহবিল থেকে খরচ লিপিবদ্ধ হয়েছে!`);
+    showToast(`৳${amt.toLocaleString('en-US')} expense recorded from "${targetCategory.name}"!`);
   };
 
   // Add Transfer
@@ -337,7 +357,7 @@ export const OthersFundSection: React.FC = () => {
     setTransferError('');
     const amt = parseFloat(transferAmount);
     if (isNaN(amt) || amt <= 0) {
-      setTransferError('অনুগ্রহ করে সঠিক টাকার পরিমাণ লিখুন');
+      setTransferError('Please enter a valid transfer amount');
       return;
     }
 
@@ -345,19 +365,19 @@ export const OthersFundSection: React.FC = () => {
     const toCat = categories.find(c => c.id === transferToFundId);
 
     if (!fromCat || !toCat) {
-      setTransferError('উৎস এবং গন্তব্য তহবিল নির্বাচন করুন');
+      setTransferError('Please select source and destination funds');
       return;
     }
 
     if (fromCat.id === toCat.id && transferFromMethod === transferToMethod) {
-      setTransferError('একই তহবিলের একই মেথডে ট্রান্সফার সম্ভব নয়');
+      setTransferError('Cannot transfer within the same fund and payment method');
       return;
     }
 
     const fromBal = getFundBalance(fromCat.id);
     const available = transferFromMethod === 'CASH' ? fromBal.cash : fromBal.bank;
     if (amt > available) {
-      setTransferError(`পর্যাপ্ত ব্যালেন্স নেই! "${fromCat.name}" এর ${transferFromMethod} এ বর্তমান স্থিতি ৳${available.toLocaleString('en-US')}`);
+      setTransferError(`Insufficient balance! "${fromCat.name}" has ৳${available.toLocaleString('en-US')} in ${transferFromMethod}.`);
       return;
     }
 
@@ -382,7 +402,7 @@ export const OthersFundSection: React.FC = () => {
     setShowTransferModal(false);
     setTransferAmount('');
     setTransferNote('');
-    showToast(`৳${amt.toLocaleString('en-US')} সফলভাবে স্থানান্তর করা হয়েছে!`);
+    showToast(`৳${amt.toLocaleString('en-US')} transferred successfully!`);
   };
 
   // Delete Confirmation Modal State
@@ -507,7 +527,7 @@ export const OthersFundSection: React.FC = () => {
         <div>
           <h2 className="text-2xl font-black text-white uppercase tracking-tighter flex items-center gap-2">
             <Briefcase className="w-6 h-6 text-amber-400" />
-            <span>OTHERS FUND (অন্যান্য তহবিলসমূহ)</span>
+            <span>OTHERS FUND</span>
           </h2>
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
             WELFARE, MESS, SPORTS, MOSQUE, PROJECT & CUSTOM WELFARE SUB-FUNDS
@@ -524,7 +544,7 @@ export const OthersFundSection: React.FC = () => {
             className="px-4 py-2.5 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all flex items-center space-x-1.5 shadow-lg shadow-amber-500/25 active:translate-y-0.5 cursor-pointer"
           >
             <PlusCircle className="w-4 h-4" />
-            <span>তহবিলে জমা (+ DEPOSIT)</span>
+            <span>+ Deposit</span>
           </button>
 
           <button
@@ -536,7 +556,7 @@ export const OthersFundSection: React.FC = () => {
             className="px-4 py-2.5 bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all flex items-center space-x-1.5 shadow-lg shadow-rose-500/25 active:translate-y-0.5 cursor-pointer"
           >
             <MinusCircle className="w-4 h-4" />
-            <span>ব্যয় (- EXPENSE)</span>
+            <span>- Expense</span>
           </button>
 
           <button
@@ -548,7 +568,7 @@ export const OthersFundSection: React.FC = () => {
             className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-indigo-500/30 rounded-xl text-xs font-black tracking-wider uppercase transition-colors flex items-center space-x-1.5 cursor-pointer"
           >
             <ArrowRightLeft className="w-4 h-4 text-indigo-400" />
-            <span>স্থানান্তর (TRANSFER)</span>
+            <span>Transfer</span>
           </button>
 
           <button
@@ -561,7 +581,7 @@ export const OthersFundSection: React.FC = () => {
             title="Create Custom Fund"
           >
             <FolderPlus className="w-4 h-4" />
-            <span className="hidden sm:inline">নতুন তহবিল (+ FUND)</span>
+            <span className="hidden sm:inline">+ New Fund</span>
           </button>
 
           <button
@@ -587,7 +607,7 @@ export const OthersFundSection: React.FC = () => {
           }`}
         >
           <Layers className="w-4 h-4" />
-          <span>সকল অন্যান্য তহবিল (ALL FUNDS)</span>
+          <span>ALL FUNDS</span>
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-900/60 font-mono">
             ৳{getFundBalance().total.toLocaleString('en-US')}
           </span>
@@ -635,8 +655,8 @@ export const OthersFundSection: React.FC = () => {
             ৳{currentViewBalances.total.toLocaleString('en-US')}
           </h3>
           <div className="text-[10px] text-slate-400 font-medium mt-2 flex flex-col space-y-0.5">
-            <span className="text-emerald-400 font-bold">+ মোট জমা / অনুদান: ৳{currentViewBalances.inflow.toLocaleString('en-US')}</span>
-            <span className="text-rose-400 font-bold">- মোট খরচ / বিতরণ: ৳{currentViewBalances.expense.toLocaleString('en-US')}</span>
+            <span className="text-emerald-400 font-bold">+ Total Deposits: ৳{currentViewBalances.inflow.toLocaleString('en-US')}</span>
+            <span className="text-rose-400 font-bold">- Total Expenses: ৳{currentViewBalances.expense.toLocaleString('en-US')}</span>
           </div>
         </div>
 
@@ -655,7 +675,7 @@ export const OthersFundSection: React.FC = () => {
             ৳{currentViewBalances.cash.toLocaleString('en-US')}
           </h3>
           <p className="text-[10px] text-slate-400 font-medium mt-2">
-            নগদ হাতে সংরক্ষিত স্থিতি
+            Available in cash in hand
           </p>
         </div>
 
@@ -674,7 +694,7 @@ export const OthersFundSection: React.FC = () => {
             ৳{currentViewBalances.bank.toLocaleString('en-US')}
           </h3>
           <p className="text-[10px] text-slate-400 font-medium mt-2">
-            ব্যাংক একাউন্টে সংরক্ষিত স্থিতি
+            Available in bank balance
           </p>
         </div>
       </div>
@@ -695,7 +715,7 @@ export const OthersFundSection: React.FC = () => {
                 type="text"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                placeholder="খুঁজুন (তহবিল / খাত / বিবরণ)..."
+                placeholder="Search (Fund / category / remarks)..."
                 className="pl-8 pr-3 py-1.5 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 w-44 sm:w-60"
               />
             </div>
@@ -749,7 +769,7 @@ export const OthersFundSection: React.FC = () => {
               {filteredTransactions.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="p-8 text-center text-slate-400 font-bold">
-                    কোনো লেনদেনের তথ্য পাওয়া যায়নি
+                    No transactions found
                   </td>
                 </tr>
               ) : (
@@ -764,17 +784,17 @@ export const OthersFundSection: React.FC = () => {
                     <td className="p-4">
                       {tx.type === 'INFLOW' && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-emerald-950/80 text-emerald-400 border border-emerald-800/50">
-                          <ArrowDownRight className="w-3 h-3" /> জমা
+                          <ArrowDownRight className="w-3 h-3" /> Deposit
                         </span>
                       )}
                       {tx.type === 'EXPENSE' && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-rose-950/80 text-rose-400 border border-rose-800/50">
-                          <ArrowUpRight className="w-3 h-3" /> খরচ
+                          <ArrowUpRight className="w-3 h-3" /> Expense
                         </span>
                       )}
                       {tx.type === 'TRANSFER' && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-indigo-950/80 text-indigo-400 border border-indigo-800/50">
-                          <ArrowRightLeft className="w-3 h-3" /> স্থানান্তর
+                          <ArrowRightLeft className="w-3 h-3" /> Transfer
                         </span>
                       )}
                     </td>
@@ -808,7 +828,7 @@ export const OthersFundSection: React.FC = () => {
                           setDeleteConfirmTx({
                             id: tx.id,
                             type: tx.type,
-                            desc: tx.description || tx.category || 'রেকর্ড',
+                            desc: tx.description || tx.category || 'Record',
                             amount: tx.amount
                           });
                         }}
@@ -833,7 +853,7 @@ export const OthersFundSection: React.FC = () => {
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-lg font-black text-white flex items-center gap-2">
                 <PlusCircle className="w-5 h-5 text-amber-400" />
-                <span>তহবিলে অর্থ জমা (Deposit to Fund)</span>
+                <span>Deposit to Fund</span>
               </h3>
               <button
                 type="button"
@@ -853,7 +873,7 @@ export const OthersFundSection: React.FC = () => {
 
             <form onSubmit={handleSaveInflow} className="space-y-3.5 text-xs">
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">কোন তহবিলে জমা হবে? (Select Fund) *</label>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Select Target Fund *</label>
                 <select
                   value={inflowFundId}
                   onChange={e => setInflowFundId(e.target.value)}
@@ -867,7 +887,7 @@ export const OthersFundSection: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">তারিখ (Date)</label>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Date</label>
                   <input
                     type="date"
                     required
@@ -877,7 +897,7 @@ export const OthersFundSection: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">টাকার পরিমাণ (৳ Amount) *</label>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Amount (৳) *</label>
                   <input
                     type="number"
                     required
@@ -892,30 +912,30 @@ export const OthersFundSection: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">পেমেন্ট মেথড (Payment Method) *</label>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Payment Method *</label>
                   <div className="flex bg-slate-800 rounded-xl p-1 border border-slate-700">
                     <button
                       type="button"
                       onClick={() => setInflowMethod('CASH')}
                       className={`flex-1 py-1.5 rounded-lg font-bold text-[11px] transition-colors cursor-pointer ${inflowMethod === 'CASH' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}
                     >
-                      ক্যাশ (CASH)
+                      CASH
                     </button>
                     <button
                       type="button"
                       onClick={() => setInflowMethod('BANK')}
                       className={`flex-1 py-1.5 rounded-lg font-bold text-[11px] transition-colors cursor-pointer ${inflowMethod === 'BANK' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
                     >
-                      ব্যাংক (BANK)
+                      BANK
                     </button>
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">জমার খাত / উৎস (Source)</label>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Source / Purpose</label>
                   <input
                     type="text"
-                    placeholder="e.g. চাঁদা / অনুদান / স্পনসর"
+                    placeholder="e.g. Contribution / Grant / Sponsor"
                     value={inflowSource}
                     onChange={e => setInflowSource(e.target.value)}
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white outline-none focus:border-amber-500"
@@ -925,7 +945,7 @@ export const OthersFundSection: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">ভাউচার / রসিদ নং (Voucher No)</label>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Voucher No</label>
                   <input
                     type="text"
                     placeholder="e.g. VR-990"
@@ -935,10 +955,10 @@ export const OthersFundSection: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">যার নিকট থেকে প্রাপ্ত (Received From)</label>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Received From</label>
                   <input
                     type="text"
-                    placeholder="e.g. সদস্যের নাম / কর্মকর্তা"
+                    placeholder="e.g. Member name / Officer"
                     value={inflowReceivedFrom}
                     onChange={e => setInflowReceivedFrom(e.target.value)}
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white outline-none focus:border-amber-500"
@@ -947,10 +967,10 @@ export const OthersFundSection: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">বিবরণ / নোট (Description)</label>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Description / Notes</label>
                 <textarea
                   rows={2}
-                  placeholder="বিস্তারিত নোট..."
+                  placeholder="Detailed remarks..."
                   value={inflowDesc}
                   onChange={e => setInflowDesc(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white outline-none focus:border-amber-500 resize-none"
@@ -963,13 +983,13 @@ export const OthersFundSection: React.FC = () => {
                   onClick={() => setShowInflowModal(false)}
                   className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold transition-colors cursor-pointer"
                 >
-                  বাতিল
+                  Cancel
                 </button>
                 <button
                   type="submit"
                   className="px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-black shadow-lg shadow-amber-600/30 transition-all cursor-pointer"
                 >
-                  জমা নিশ্চিত করুন
+                  Confirm Deposit
                 </button>
               </div>
             </form>
@@ -984,7 +1004,7 @@ export const OthersFundSection: React.FC = () => {
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-lg font-black text-white flex items-center gap-2">
                 <MinusCircle className="w-5 h-5 text-rose-400" />
-                <span>তহবিল থেকে ব্যয় লিপিবদ্ধ (Add Expense)</span>
+                <span>Record Expense</span>
               </h3>
               <button
                 type="button"
@@ -1004,7 +1024,7 @@ export const OthersFundSection: React.FC = () => {
 
             <form onSubmit={handleSaveExpense} className="space-y-3.5 text-xs">
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">কোন তহবিল থেকে ব্যয় হবে? (Select Fund) *</label>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Select Source Fund *</label>
                 <select
                   value={expenseFundId}
                   onChange={e => setExpenseFundId(e.target.value)}
@@ -1014,7 +1034,7 @@ export const OthersFundSection: React.FC = () => {
                     const b = getFundBalance(c.id);
                     return (
                       <option key={c.id} value={c.id}>
-                        {c.name} (স্থিতি: ৳{b.total.toLocaleString('en-US')})
+                        {c.name} (Balance: ৳{b.total.toLocaleString('en-US')})
                       </option>
                     );
                   })}
@@ -1023,7 +1043,7 @@ export const OthersFundSection: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">তারিখ (Date)</label>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Date</label>
                   <input
                     type="date"
                     required
@@ -1033,7 +1053,7 @@ export const OthersFundSection: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">খরচের পরিমাণ (৳ Amount) *</label>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Expense Amount (৳) *</label>
                   <input
                     type="number"
                     required
@@ -1048,30 +1068,30 @@ export const OthersFundSection: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">পেমেন্ট মেথড (Payment Method) *</label>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Payment Method *</label>
                   <div className="flex bg-slate-800 rounded-xl p-1 border border-slate-700">
                     <button
                       type="button"
                       onClick={() => setExpenseMethod('CASH')}
                       className={`flex-1 py-1.5 rounded-lg font-bold text-[11px] transition-colors cursor-pointer ${expenseMethod === 'CASH' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}
                     >
-                      ক্যাশ (CASH)
+                      CASH
                     </button>
                     <button
                       type="button"
                       onClick={() => setExpenseMethod('BANK')}
                       className={`flex-1 py-1.5 rounded-lg font-bold text-[11px] transition-colors cursor-pointer ${expenseMethod === 'BANK' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
                     >
-                      ব্যাংক (BANK)
+                      BANK
                     </button>
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">খরচের খাত (Expense Category)</label>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Expense Category</label>
                   <input
                     type="text"
-                    placeholder="e.g. সরঞ্জাম ক্রয় / আপ্যায়ন / পুরস্কার"
+                    placeholder="e.g. Equipment / Refreshment / Maintenance"
                     value={expenseCategory}
                     onChange={e => setExpenseCategory(e.target.value)}
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white outline-none focus:border-rose-500"
@@ -1081,7 +1101,7 @@ export const OthersFundSection: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">বিল / ভাউচার নং (Bill No)</label>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Bill / Voucher No</label>
                   <input
                     type="text"
                     placeholder="e.g. BILL-102"
@@ -1091,10 +1111,10 @@ export const OthersFundSection: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">যাকে পরিশোধ করা হলো (Paid To)</label>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Paid To</label>
                   <input
                     type="text"
-                    placeholder="e.g. ভেন্ডর / প্রাপক"
+                    placeholder="e.g. Vendor / Recipient"
                     value={expensePaidTo}
                     onChange={e => setExpensePaidTo(e.target.value)}
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white outline-none focus:border-rose-500"
@@ -1103,10 +1123,10 @@ export const OthersFundSection: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">উদ্দেশ্য / বিবরণ (Remarks)</label>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Description / Remarks</label>
                 <textarea
                   rows={2}
-                  placeholder="খরচের উদ্দেশ্য..."
+                  placeholder="Purpose of expense..."
                   value={expenseDesc}
                   onChange={e => setExpenseDesc(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white outline-none focus:border-rose-500 resize-none"
@@ -1119,13 +1139,13 @@ export const OthersFundSection: React.FC = () => {
                   onClick={() => setShowExpenseModal(false)}
                   className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold transition-colors cursor-pointer"
                 >
-                  বাতিল
+                  Cancel
                 </button>
                 <button
                   type="submit"
                   className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-black shadow-lg shadow-rose-600/30 transition-all cursor-pointer"
                 >
-                  খরচ নিশ্চিত করুন
+                  Confirm Expense
                 </button>
               </div>
             </form>
@@ -1140,7 +1160,7 @@ export const OthersFundSection: React.FC = () => {
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-lg font-black text-white flex items-center gap-2">
                 <ArrowRightLeft className="w-5 h-5 text-indigo-400" />
-                <span>তহবিল স্থানান্তর (Fund Transfer)</span>
+                <span>Fund Transfer</span>
               </h3>
               <button
                 type="button"
@@ -1161,7 +1181,7 @@ export const OthersFundSection: React.FC = () => {
             <form onSubmit={handleSaveTransfer} className="space-y-3.5 text-xs">
               <div className="grid grid-cols-2 gap-3 p-3 bg-slate-800/60 rounded-2xl border border-slate-700">
                 <div>
-                  <span className="text-[10px] text-slate-400 uppercase font-bold block mb-1">উৎস তহবিল (From Fund):</span>
+                  <span className="text-[10px] text-slate-400 uppercase font-bold block mb-1">From Fund:</span>
                   <select
                     value={transferFromFundId}
                     onChange={e => setTransferFromFundId(e.target.value)}
@@ -1177,20 +1197,20 @@ export const OthersFundSection: React.FC = () => {
                       onClick={() => setTransferFromMethod('CASH')}
                       className={`flex-1 py-1 rounded text-[10px] font-bold ${transferFromMethod === 'CASH' ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'}`}
                     >
-                      ক্যাশ
+                      CASH
                     </button>
                     <button
                       type="button"
                       onClick={() => setTransferFromMethod('BANK')}
                       className={`flex-1 py-1 rounded text-[10px] font-bold ${transferFromMethod === 'BANK' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'}`}
                     >
-                      ব্যাংক
+                      BANK
                     </button>
                   </div>
                 </div>
 
                 <div>
-                  <span className="text-[10px] text-slate-400 uppercase font-bold block mb-1">গন্তব্য তহবিল (To Fund):</span>
+                  <span className="text-[10px] text-slate-400 uppercase font-bold block mb-1">To Fund:</span>
                   <select
                     value={transferToFundId}
                     onChange={e => setTransferToFundId(e.target.value)}
@@ -1206,14 +1226,14 @@ export const OthersFundSection: React.FC = () => {
                       onClick={() => setTransferToMethod('CASH')}
                       className={`flex-1 py-1 rounded text-[10px] font-bold ${transferToMethod === 'CASH' ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'}`}
                     >
-                      ক্যাশ
+                      CASH
                     </button>
                     <button
                       type="button"
                       onClick={() => setTransferToMethod('BANK')}
                       className={`flex-1 py-1 rounded text-[10px] font-bold ${transferToMethod === 'BANK' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'}`}
                     >
-                      ব্যাংক
+                      BANK
                     </button>
                   </div>
                 </div>
@@ -1221,7 +1241,7 @@ export const OthersFundSection: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">স্থানান্তরের পরিমাণ (৳ Amount) *</label>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Transfer Amount (৳) *</label>
                   <input
                     type="number"
                     required
@@ -1233,7 +1253,7 @@ export const OthersFundSection: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">তারিখ (Date)</label>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Date</label>
                   <input
                     type="date"
                     required
@@ -1245,10 +1265,10 @@ export const OthersFundSection: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">নোট / কারণ (Reason)</label>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Note / Reason</label>
                 <input
                   type="text"
-                  placeholder="e.g. ফান্ড সমন্বয় / ক্যাশ স্থানান্তর..."
+                  placeholder="e.g. Fund rebalance / Cash replenishment..."
                   value={transferNote}
                   onChange={e => setTransferNote(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white outline-none focus:border-indigo-500"
@@ -1261,13 +1281,13 @@ export const OthersFundSection: React.FC = () => {
                   onClick={() => setShowTransferModal(false)}
                   className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold transition-colors cursor-pointer"
                 >
-                  বাতিল
+                  Cancel
                 </button>
                 <button
                   type="submit"
                   className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black shadow-lg shadow-indigo-600/30 transition-all cursor-pointer"
                 >
-                  স্থানান্তর সম্পন্ন করুন
+                  Complete Transfer
                 </button>
               </div>
             </form>
@@ -1282,7 +1302,7 @@ export const OthersFundSection: React.FC = () => {
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-lg font-black text-white flex items-center gap-2">
                 <FolderPlus className="w-5 h-5 text-amber-400" />
-                <span>নতুন তহবিল তৈরি করুন (Create Custom Fund)</span>
+                <span>Create Custom Fund</span>
               </h3>
               <button
                 type="button"
@@ -1302,25 +1322,14 @@ export const OthersFundSection: React.FC = () => {
 
             <form onSubmit={handleCreateCategory} className="space-y-3.5 text-xs">
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">তহবিলের নাম (Fund Name) *</label>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Fund Name *</label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. বার্ষিক পিকনিক তহবিল / ইফতার ফান্ড"
+                  placeholder="e.g. Special Welfare Project Fund"
                   value={newCatName}
                   onChange={e => setNewCatName(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold outline-none focus:border-amber-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">সংক্ষিপ্ত বিবরণ (Description / Purpose)</label>
-                <textarea
-                  rows={2}
-                  placeholder="এই তহবিলের লক্ষ্য বা উদ্দেশ্য..."
-                  value={newCatDesc}
-                  onChange={e => setNewCatDesc(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white outline-none focus:border-amber-500 resize-none"
                 />
               </div>
 
@@ -1330,13 +1339,13 @@ export const OthersFundSection: React.FC = () => {
                   onClick={() => setShowNewCategoryModal(false)}
                   className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold transition-colors cursor-pointer"
                 >
-                  বাতিল
+                  Cancel
                 </button>
                 <button
                   type="submit"
                   className="px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-black shadow-lg shadow-amber-600/30 transition-all cursor-pointer"
                 >
-                  তহবিল তৈরি করুন
+                  Create Fund
                 </button>
               </div>
             </form>
@@ -1355,11 +1364,11 @@ export const OthersFundSection: React.FC = () => {
                   <CheckCircle2 className="w-8 h-8 animate-bounce" />
                 </div>
                 <div>
-                  <h4 className="text-base font-black text-white">রেকর্ড সফলভাবে মুছে ফেলা হয়েছে!</h4>
+                  <h4 className="text-base font-black text-white">Record deleted successfully!</h4>
                   <p className="text-xs text-slate-300 mt-1 line-clamp-2">{deleteSuccessData.desc}</p>
                 </div>
                 <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800 text-xs flex justify-between items-center text-slate-300">
-                  <span>মুছে ফেলা পরিমাণ:</span>
+                  <span>Amount Removed:</span>
                   <span className="font-mono font-bold text-emerald-400">৳{deleteSuccessData.amount.toLocaleString()}</span>
                 </div>
                 <button
@@ -1370,7 +1379,7 @@ export const OthersFundSection: React.FC = () => {
                   }}
                   className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition-colors cursor-pointer"
                 >
-                  ঠিক আছে (DONE)
+                  Done
                 </button>
               </div>
             ) : (
@@ -1380,10 +1389,10 @@ export const OthersFundSection: React.FC = () => {
                   <Trash2 className="w-6 h-6 animate-pulse" />
                 </div>
                 <div className="text-center space-y-1">
-                  <h4 className="text-base font-black text-white">রেকর্ড মুছে ফেলতে চান?</h4>
+                  <h4 className="text-base font-black text-white">Delete Record?</h4>
                   <p className="text-xs text-slate-400">
-                    আপনি কি নিশ্চিত যে <strong className="text-white">"{deleteConfirmTx.desc}"</strong>-এর{' '}
-                    <strong className="text-rose-400 font-mono">৳{deleteConfirmTx.amount.toLocaleString()}</strong> রেকর্ডটি মুছে ফেলতে চান?
+                    Are you sure you want to delete the record <strong className="text-white">"{deleteConfirmTx.desc}"</strong> of{' '}
+                    <strong className="text-rose-400 font-mono">৳{deleteConfirmTx.amount.toLocaleString()}</strong>?
                   </p>
                 </div>
                 <div className="grid grid-cols-2 gap-2.5 pt-2">
@@ -1392,7 +1401,7 @@ export const OthersFundSection: React.FC = () => {
                     onClick={() => setDeleteConfirmTx(null)}
                     className="py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-colors cursor-pointer"
                   >
-                    বাতিল
+                    Cancel
                   </button>
                   <button
                     type="button"
@@ -1400,7 +1409,7 @@ export const OthersFundSection: React.FC = () => {
                     className="py-2.5 px-4 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs transition-colors flex items-center justify-center space-x-1.5 shadow-lg shadow-rose-950/50 cursor-pointer active:scale-95"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>মুছে ফেলুন</span>
+                    <span>Delete</span>
                   </button>
                 </div>
               </>
