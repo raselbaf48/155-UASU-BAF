@@ -2,11 +2,12 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Search, Plus, ShoppingCart, Minus, Trash2, CheckCircle2, X, History, Calendar, 
-  Package as PackageIcon, Users, Utensils, CheckSquare, Check, Banknote
+  Package as PackageIcon, Users, Utensils, CheckSquare, Check, Banknote, Edit2, Edit3
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, getItemDisplayName, getCanteenConfig, CanteenConfig } from '../utils/canteenSettings';
 import { formatCanteenDate } from '../utils/dateUtils';
+import { getMenuItemBanglaName } from '../utils/menuBanglaNames';
 import { DateNavigator, getTodayYMD } from '../components/DateNavigator';
 import { deductRawStockForSales, getRawInventoryItems, calculateMenuItemStockInfo, getMenuRecipes } from '../utils/recipeManager';
 import { pushKeyToCloud } from '../utils/canteenCloudSync';
@@ -147,6 +148,13 @@ export const PosSales: React.FC = () => {
   const [salesHistory, setSalesHistory] = useState<any[]>([]);
   const [txDeleteConfirmId, setTxDeleteConfirmId] = useState<string | null>(null);
   const [deleteSuccessData, setDeleteSuccessData] = useState<{ desc: string; amount: number } | null>(null);
+  
+  // History Record Detail/Edit State
+  const [editingTx, setEditingTx] = useState<any | null>(null);
+  const [editAmount, setEditAmount] = useState<string>('');
+  const [editPaymentStatus, setEditPaymentStatus] = useState<'DUE' | 'PAID'>('DUE');
+  const [editDate, setEditDate] = useState<string>('');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   useEffect(() => {
     const handleSyncStock = () => {
@@ -320,6 +328,110 @@ export const PosSales: React.FC = () => {
 
     setToastMessage(isPaid ? '✅ Cash sale record removed from history!' : '✅ Sale record removed and member due adjusted!');
     setTimeout(() => setToastMessage(''), 4000);
+  };
+
+  const openEditTxModal = (tx: any) => {
+    setEditingTx(tx);
+    setEditAmount(String(tx.amount || 0));
+    const isPaid = tx.status === 'PAID' || tx.paymentStatus === 'PAID' || String(tx.gateway || tx.paymentMethod || '').toUpperCase() === 'CASH';
+    setEditPaymentStatus(isPaid ? 'PAID' : 'DUE');
+    setEditDate(String(tx.date || tx.paymentDate || getTodayYMD()));
+  };
+
+  const saveEditedHistoryItem = async () => {
+    if (!editingTx) return;
+    const newAmt = parseFloat(editAmount);
+    if (isNaN(newAmt) || newAmt < 0) {
+      alert('অনুগ্রহ করে সঠিক টাকার পরিমাণ লিখুন');
+      return;
+    }
+
+    setIsSavingEdit(true);
+    try {
+      const oldAmount = Number(editingTx.amount || 0);
+      const oldIsPaid = editingTx.status === 'PAID' || editingTx.paymentStatus === 'PAID' || String(editingTx.gateway || editingTx.paymentMethod || '').toUpperCase() === 'CASH';
+      const newIsPaid = editPaymentStatus === 'PAID';
+
+      // Update Member Due if member exists
+      if (editingTx.airman_id) {
+        const m = members.find(mem => mem.airman_id === editingTx.airman_id);
+        if (m) {
+          const currentDue = Number(m.Due ?? m.due ?? m.baki ?? 0);
+          let newDue = currentDue;
+
+          if (!oldIsPaid && newIsPaid) {
+            // Was Due, now Paid -> reduce due by old amount
+            newDue = Math.max(0, currentDue - oldAmount);
+          } else if (oldIsPaid && !newIsPaid) {
+            // Was Paid, now Due -> add new amount to due
+            newDue = currentDue + newAmt;
+          } else if (!oldIsPaid && !newIsPaid) {
+            // Was Due, still Due -> adjust difference
+            const diff = newAmt - oldAmount;
+            newDue = Math.max(0, currentDue + diff);
+          }
+
+          if (newDue !== currentDue) {
+            await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', editingTx.airman_id);
+            setMembers(prev => prev.map(mem => mem.airman_id === editingTx.airman_id ? { ...mem, Due: newDue, baki: newDue } : mem));
+          }
+        }
+      }
+
+      // Update transaction in storage
+      const currentHistory = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+      const updatedHistory = currentHistory.map((tx: any) => {
+        if (String(tx.id) === String(editingTx.id)) {
+          return {
+            ...tx,
+            amount: newAmt,
+            date: editDate || tx.date,
+            status: editPaymentStatus,
+            paymentStatus: editPaymentStatus,
+            gateway: editPaymentStatus === 'PAID' ? 'CASH' : 'DUE',
+            paymentMethod: editPaymentStatus === 'PAID' ? 'CASH' : 'DUE',
+          };
+        }
+        return tx;
+      });
+
+      setSalesHistory(prev => prev.map(tx => {
+        if (String(tx.id) === String(editingTx.id)) {
+          return {
+            ...tx,
+            amount: newAmt,
+            date: editDate || tx.date,
+            status: editPaymentStatus,
+            paymentStatus: editPaymentStatus,
+            gateway: editPaymentStatus === 'PAID' ? 'CASH' : 'DUE',
+            paymentMethod: editPaymentStatus === 'PAID' ? 'CASH' : 'DUE',
+          };
+        }
+        return tx;
+      }));
+
+      localStorage.setItem('canteen_txs', JSON.stringify(updatedHistory));
+      try {
+        await pushKeyToCloud('canteen_txs', updatedHistory);
+      } catch (e) {
+        console.warn('Cloud sync error for canteen_txs:', e);
+      }
+
+      window.dispatchEvent(new Event('canteen_txs_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('canteen_fund_updated'));
+      window.dispatchEvent(new Event('storage'));
+
+      playSuccessChime();
+      setToastMessage('✅ বিক্রয় রেকর্ড সফলভাবে আপডেট করা হয়েছে!');
+      setTimeout(() => setToastMessage(''), 4000);
+      setEditingTx(null);
+    } catch (err) {
+      console.error('Error saving edited history item:', err);
+      alert('রেকর্ড আপডেট করতে সমস্যা হয়েছে');
+    } finally {
+      setIsSavingEdit(false);
+    }
   };
 
   const addToBasket = (item: any) => {
@@ -1521,6 +1633,186 @@ export const PosSales: React.FC = () => {
         )}
       </AnimatePresence>
 
+      {/* Edit / Remove Sale Record Modal */}
+      <AnimatePresence>
+        {editingTx && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[70] flex items-center justify-center p-3 sm:p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.92, y: 15, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.92, y: 15, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 450, damping: 28 }}
+              className="bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6 w-full max-w-md shadow-2xl relative overflow-hidden"
+            >
+              <div className="flex items-center justify-between pb-3.5 border-b border-slate-800">
+                <div className="flex items-center space-x-2.5">
+                  <div className="p-2 bg-indigo-500/20 text-indigo-400 rounded-xl">
+                    <Edit3 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-white">বিক্রয় রেকর্ড সম্পাদনা / মুছুন</h3>
+                    <p className="text-[11px] text-slate-400">Edit transaction or delete record</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditingTx(null)}
+                  className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="py-4 space-y-4">
+                {/* Member / Customer info */}
+                <div className="p-3 bg-slate-950/70 rounded-2xl border border-slate-800/80 flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Customer</span>
+                    <span className="text-xs font-black text-white">
+                      {editingTx.rank ? `${editingTx.rank} ` : ''}{editingTx.memberName || editingTx.airman_id}
+                    </span>
+                  </div>
+                  {editingTx.bdNo && (
+                    <span className="px-2 py-0.5 rounded-lg bg-indigo-500/15 text-indigo-300 font-mono text-[10px] font-bold border border-indigo-500/30">
+                      BD: {editingTx.bdNo}
+                    </span>
+                  )}
+                </div>
+
+                {/* Items info */}
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+                    মেনু আইটেম (Items)
+                  </span>
+                  <div className="p-3 bg-slate-950/70 rounded-2xl border border-slate-800/80 flex flex-wrap gap-1.5">
+                    {(() => {
+                      let itemsList: Array<{ name: string; qty: number }> = [];
+                      if (editingTx.soldItems && Array.isArray(editingTx.soldItems) && editingTx.soldItems.length > 0) {
+                        itemsList = editingTx.soldItems.map((si: any) => ({
+                          name: getMenuItemBanglaName(si.menuItemName || si.name || '') || si.menuItemName || si.name || 'আইটেম',
+                          qty: Number(si.qty || si.quantity || 1)
+                        }));
+                      } else if (editingTx.items) {
+                        const parts = String(editingTx.items).split(/[,+;|\n]+/).map(s => s.trim()).filter(Boolean);
+                        itemsList = parts.map(part => {
+                          const clean = part.replace(/\s*\(\s*\d+\s*\)$/, '').replace(/\s*[xX]\s*\d+$/, '').trim();
+                          const bn = getMenuItemBanglaName(clean) || clean;
+                          return { name: bn, qty: 1 };
+                        });
+                      }
+                      return itemsList.map((it, idx) => (
+                        <span key={idx} className="px-2.5 py-1 rounded-xl bg-slate-900 border border-slate-700/80 text-emerald-300 font-bold text-xs">
+                          {it.name}
+                        </span>
+                      ));
+                    })()}
+                  </div>
+                </div>
+
+                {/* Date Input */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                    তারিখ (Date)
+                  </label>
+                  <input
+                    type="date"
+                    value={editDate}
+                    onChange={(e) => setEditDate(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl text-xs font-mono font-bold text-white outline-none"
+                  />
+                </div>
+
+                {/* Total Amount Input */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                    মোট টাকা (Total Amount - ৳)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={editAmount}
+                    onChange={(e) => setEditAmount(e.target.value)}
+                    placeholder="Total amount"
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl text-sm font-mono font-black text-emerald-400 outline-none"
+                  />
+                </div>
+
+                {/* Status DUE / PAID Toggle */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-300 block mb-1.5">
+                    পেমেন্ট স্ট্যাটাস (Payment Status)
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditPaymentStatus('DUE')}
+                      className={`py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all border cursor-pointer ${
+                        editPaymentStatus === 'DUE'
+                          ? 'bg-amber-500/20 text-amber-400 border-amber-500/50 shadow-md shadow-amber-950/30'
+                          : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
+                      }`}
+                    >
+                      DUE (বকেয়া)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditPaymentStatus('PAID')}
+                      className={`py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all border cursor-pointer ${
+                        editPaymentStatus === 'PAID'
+                          ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50 shadow-md shadow-emerald-950/30'
+                          : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
+                      }`}
+                    >
+                      PAID (পরিশোধিত)
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons: Save & Remove */}
+              <div className="pt-3 border-t border-slate-800 flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const idToDelete = editingTx.id;
+                    setEditingTx(null);
+                    setTxDeleteConfirmId(idToDelete);
+                  }}
+                  className="px-4 py-2.5 bg-rose-500/15 hover:bg-rose-500/25 text-rose-400 hover:text-rose-300 border border-rose-500/30 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                  title="Delete this record"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>Remove</span>
+                </button>
+                <div className="flex-1 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingTx(null)}
+                    className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSavingEdit}
+                    onClick={saveEditedHistoryItem}
+                    className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-black tracking-wide transition-all shadow-md shadow-indigo-900/40 cursor-pointer disabled:opacity-50"
+                  >
+                    {isSavingEdit ? 'সংরক্ষণ হচ্ছে...' : 'Save Changes'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* History Modal - Table Format (Ser No, Customer Name, Item Name, Qty, Total, Status) */}
       {showHistoryModal && (
         <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-2 sm:p-4">
@@ -1609,7 +1901,6 @@ export const PosSales: React.FC = () => {
                         <th className="py-3 px-3 font-black text-center w-16">Qty</th>
                         <th className="py-3 px-3 font-black text-right w-24">Total</th>
                         <th className="py-3 px-3 font-black text-center w-28">Status (DUE/Paid)</th>
-                        <th className="py-3 px-2 font-black text-center w-14">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/70">
@@ -1622,10 +1913,14 @@ export const PosSales: React.FC = () => {
                         let parsedItemsList: Array<{ name: string; qty: number }> = [];
                         let totalQty = 0;
                         if (tx.soldItems && Array.isArray(tx.soldItems) && tx.soldItems.length > 0) {
-                          parsedItemsList = tx.soldItems.map((si: any) => ({
-                            name: si.menuItemName || si.name || 'Item',
-                            qty: Number(si.qty || si.quantity || 1)
-                          }));
+                          parsedItemsList = tx.soldItems.map((si: any) => {
+                            const raw = si.menuItemName || si.name || 'Item';
+                            const bn = getMenuItemBanglaName(raw) || raw;
+                            return {
+                              name: bn,
+                              qty: Number(si.qty || si.quantity || 1)
+                            };
+                          });
                           totalQty = parsedItemsList.reduce((sum, it) => sum + it.qty, 0);
                         } else if (tx.items) {
                           const parts = String(tx.items).split(/[,+;|\n]+/).map(s => s.trim()).filter(Boolean);
@@ -1634,16 +1929,21 @@ export const PosSales: React.FC = () => {
                             if (parenMatch) {
                               const q = parseInt(parenMatch[2], 10);
                               totalQty += q;
-                              return { name: parenMatch[1].trim(), qty: q };
+                              const raw = parenMatch[1].trim();
+                              const bn = getMenuItemBanglaName(raw) || raw;
+                              return { name: bn, qty: q };
                             }
                             const xMatch = part.match(/^(.+?)\s*[xX]\s*(\d+)$/);
                             if (xMatch) {
                               const q = parseInt(xMatch[2], 10);
                               totalQty += q;
-                              return { name: xMatch[1].trim(), qty: q };
+                              const raw = xMatch[1].trim();
+                              const bn = getMenuItemBanglaName(raw) || raw;
+                              return { name: bn, qty: q };
                             }
                             totalQty += 1;
-                            return { name: part, qty: 1 };
+                            const bn = getMenuItemBanglaName(part) || part;
+                            return { name: bn, qty: 1 };
                           });
                         }
                         if (totalQty === 0) totalQty = 1;
@@ -1651,9 +1951,14 @@ export const PosSales: React.FC = () => {
                         const isPaid = tx.status === 'PAID' || tx.paymentStatus === 'PAID' || String(tx.gateway || tx.paymentMethod || '').toUpperCase() === 'CASH';
 
                         return (
-                          <tr key={tx.id} className="hover:bg-slate-800/40 transition-colors">
+                          <tr 
+                            key={tx.id} 
+                            onClick={() => openEditTxModal(tx)}
+                            title="Click row to Edit or Remove record"
+                            className="hover:bg-indigo-950/30 hover:border-indigo-500/30 transition-colors cursor-pointer group"
+                          >
                             {/* Ser No */}
-                            <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-400">
+                            <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-400 group-hover:text-indigo-300">
                               {idx + 1}
                             </td>
 
@@ -1664,7 +1969,7 @@ export const PosSales: React.FC = () => {
 
                             {/* Customer Name */}
                             <td className="py-2.5 px-3">
-                              <div className="font-black text-white text-xs">
+                              <div className="font-black text-white text-xs group-hover:text-indigo-200">
                                 {memberRank ? `${memberRank} ` : ''}{memberSurname}
                               </div>
                               {memberBdNo && (
@@ -1681,14 +1986,18 @@ export const PosSales: React.FC = () => {
                                   parsedItemsList.map((item, i) => (
                                     <span 
                                       key={i} 
-                                      className="inline-flex items-center px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-700/80 text-slate-200 text-[11px]"
+                                      className="inline-flex items-center px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-700/80 text-emerald-300 text-[11px] font-medium"
                                     >
-                                      <span className="truncate max-w-[140px]">{item.name}</span>
-                                      <span className="ml-1 text-indigo-400 font-mono font-bold text-[10px]">x{item.qty}</span>
+                                      <span className="truncate max-w-[150px]">{item.name}</span>
+                                      {item.qty > 1 && (
+                                        <span className="ml-1 text-indigo-400 font-mono font-bold text-[10px]">x{item.qty}</span>
+                                      )}
                                     </span>
                                   ))
                                 ) : (
-                                  <span className="text-slate-400 text-xs">{tx.items || 'Menu Item'}</span>
+                                  <span className="text-slate-400 text-xs">
+                                    {getMenuItemBanglaName(tx.items) || tx.items || 'মেনু আইটেম'}
+                                  </span>
                                 )}
                               </div>
                             </td>
@@ -1712,18 +2021,6 @@ export const PosSales: React.FC = () => {
                               }`}>
                                 {isPaid ? 'PAID' : 'DUE'}
                               </span>
-                            </td>
-
-                            {/* Action */}
-                            <td className="py-2.5 px-2 text-center">
-                              <button
-                                type="button"
-                                onClick={() => setTxDeleteConfirmId(tx.id)}
-                                className="p-1 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded transition-colors cursor-pointer"
-                                title="Delete sale record"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
                             </td>
                           </tr>
                         );
