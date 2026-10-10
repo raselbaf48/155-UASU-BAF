@@ -5333,56 +5333,9 @@ export const MemberDB: React.FC<MemberDBProps> = ({
                         </>
                       )}
                       <span>{profileMember['Surname']}</span>
-                      {!isEditingBanglaName ? (
-                        <div className="inline-flex items-center gap-1">
-                          <span className="text-emerald-400 font-sans text-sm font-bold">
-                            ({getMemberBanglaName(profileMember) || formatMemberNameBn(profileMember['Surname'])})
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setIsEditingBanglaName(true);
-                              setEditingBanglaNameVal(getMemberBanglaName(profileMember) || formatMemberNameBn(profileMember['Surname']) || '');
-                            }}
-                            className="p-1 text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                            title="বাংলা নাম পরিবর্তন করুন (Edit Bangla Name)"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="inline-flex items-center gap-1 bg-slate-800 p-1 rounded-xl border border-emerald-500/40">
-                          <input
-                            type="text"
-                            value={editingBanglaNameVal}
-                            onChange={(e) => setEditingBanglaNameVal(e.target.value)}
-                            placeholder="বাংলা নাম লিখুন"
-                            className="px-2 py-0.5 bg-slate-900 border border-slate-700 rounded-lg text-xs font-bold text-emerald-300 focus:outline-none focus:border-emerald-400 font-sans w-32"
-                            autoFocus
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleSaveProfileBanglaName();
-                              if (e.key === 'Escape') setIsEditingBanglaName(false);
-                            }}
-                          />
-                          <button
-                            type="button"
-                            onClick={handleSaveProfileBanglaName}
-                            disabled={isSavingBanglaName}
-                            className="p-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors cursor-pointer"
-                            title="সংরক্ষণ করুন"
-                          >
-                            <Check className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setIsEditingBanglaName(false)}
-                            className="p-1 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
-                            title="বাতিল"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      )}
+                      <span className="text-emerald-400 font-sans text-sm font-bold">
+                        ({getMemberBanglaName(profileMember) || formatMemberNameBn(profileMember['Surname'])})
+                      </span>
                     </h2>
                   </div>
                   <p className="text-xs font-bold text-indigo-400 font-mono">BD No: {profileMember['BD No']}</p>
@@ -5391,22 +5344,6 @@ export const MemberDB: React.FC<MemberDBProps> = ({
 
               {/* Header Right Actions */}
               <div className="flex items-center space-x-2">
-                {String(profileMember['BD No']).trim() === String(canteenConfig?.managerBdNo).trim() ? (
-                  <span className="px-2.5 py-1.5 rounded-xl bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
-                    <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
-                    <span>Active Manager</span>
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => handleAssignManager(profileMember)}
-                    className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white border border-slate-700 text-[10px] font-black uppercase tracking-wider flex items-center gap-1 transition-all cursor-pointer shadow-xs active:scale-95"
-                    title="এই সদস্যকে ক্যান্টিন ম্যানেজার নির্ধারণ করুন"
-                  >
-                    <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
-                    <span>Make Manager</span>
-                  </button>
-                )}
                 <button 
                   onClick={() => setProfileMember(null)} 
                   className="p-2.5 text-slate-400 hover:bg-slate-800 rounded-xl transition-colors ml-1 cursor-pointer" 
@@ -5421,18 +5358,8 @@ export const MemberDB: React.FC<MemberDBProps> = ({
             <div className="p-6 overflow-y-auto bg-slate-900/50 flex-1 space-y-6">
               {/* VIEW MODE: Read-only Member Profile & History */}
               <div className="space-y-6">
-                  {/* Basic Member Info & Summary Cards */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                    <div className="bg-slate-800/80 p-3 rounded-2xl border border-slate-700">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Role / পদবি</p>
-                      <p className="text-xs font-black text-indigo-300 uppercase tracking-wide truncate">
-                        {profileMember['Role'] || profileMember.role || 'Member'}
-                      </p>
-                      <p className="text-[10px] font-bold text-slate-400 font-mono mt-0.5 truncate">
-                        {profileMember['Contact'] || 'No Contact'}
-                      </p>
-                    </div>
-
+                  {/* Basic Member Info & Summary Cards - Role box removed as requested */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                     <div className="bg-slate-800/80 p-3 rounded-2xl border border-slate-700">
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">মোট বিল (Billed)</p>
                       <p className="text-base font-black font-mono text-amber-400">
@@ -5463,41 +5390,6 @@ export const MemberDB: React.FC<MemberDBProps> = ({
                         <p className="text-[10px] text-slate-400 font-bold">বর্তমান বকেয়া</p>
                       </div>
                     </div>
-                  </div>
-
-                  {/* Seniority Order Setting Card (Synced with Cloud & Office Biodata Register) */}
-                  <div className="p-4 bg-emerald-950/30 border border-emerald-500/30 rounded-2xl flex items-center justify-between flex-wrap gap-3 shadow-inner">
-                    <div className="flex items-center space-x-3.5">
-                      <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0 shadow-sm">
-                        <Award className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <div className="flex items-center space-x-2 flex-wrap">
-                          <p className="text-xs font-black text-white uppercase tracking-wider">
-                            Seniority / জ্যেষ্ঠতা নম্বর:
-                          </p>
-                          <span className="font-mono text-emerald-400 font-black text-sm px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-400/30">
-                            #{profileMember.seniority || profileMember.Seniority || '-'}
-                          </span>
-                          <span className="text-[10px] font-mono font-bold bg-indigo-950/80 text-indigo-300 px-2 py-0.5 rounded border border-indigo-500/30">
-                            {profileMember['Rank'] || 'Rank'}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-emerald-300/80 font-medium mt-0.5">
-                          অফিস Biodata Register ও ক্যান্টিন ডাটাবেজে সামরিক পদমর্যাদার ক্রম অনুযায়ী সুবিন্যস্ত।
-                        </p>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => setSeniorityEditMember(profileMember)}
-                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black transition-all cursor-pointer shadow-md active:scale-95"
-                      title="জ্যেষ্ঠতা নম্বর পরিবর্তন করুন"
-                    >
-                      <Award className="w-4 h-4 text-emerald-200 shrink-0" />
-                      <span>জ্যেষ্ঠতা পরিবর্তন</span>
-                    </button>
                   </div>
 
                   {/* Transaction History Section */}

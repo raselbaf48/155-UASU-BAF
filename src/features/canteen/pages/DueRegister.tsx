@@ -1845,6 +1845,7 @@ export const DueRegister: React.FC = () => {
           isOpen={!!payBillShop}
           onClose={() => setPayBillShop(null)}
           shopName={payBillShop}
+          initialMonth={selectedMonth}
           totalDue={
             payBillShop === 'Grocessary Shop'
               ? grocessaryTotal
