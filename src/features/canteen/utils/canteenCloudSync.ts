@@ -8,6 +8,8 @@ import {
   fetchCanteenMembersOnce, 
   getCanteenMenuCache, 
   fetchCanteenMenuOnce,
+  updateSingleMenuItemInCache,
+  setCanteenMenuCache,
   DEFAULT_CANTEEN_MENU_ITEMS,
   CanteenMenuItem
 } from './canteenMenuData';
@@ -35,10 +37,13 @@ export const CANTEEN_CLOUD_KEYS = [
   'canteen_expenses',
   'canteen_deleted_expense_ids',
   'canteen_bazar_advances',
+  'canteen_deleted_advance_ids',
   'canteen_member_bangla_names',
   'canteen_fund_transfers',
   'canteen_daily_menu',
   'canteen_daily_menu_updated_at',
+  'canteen_menu_recipes_v3',
+  'canteen_menu_recipes_20pax_v1',
   'canteen_menu_recipes_v2',
   'canteen_raw_stock_logs_v2',
   'canteen_expense_last_unit_prices',
@@ -401,6 +406,30 @@ export function recordDeletedExpenseId(expId: string | number) {
 }
 
 /**
+ * Deleted Advance Tombstones to prevent deleted advances from resurrecting on cloud sync
+ */
+export function getDeletedAdvanceIds(): Set<string> {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = localStorage.getItem('canteen_deleted_advance_ids');
+    if (raw) return new Set(JSON.parse(raw).map(String));
+  } catch {}
+  return new Set();
+}
+
+export function recordDeletedAdvanceId(advId: string | number) {
+  if (typeof window === 'undefined' || !advId) return;
+  try {
+    const set = getDeletedAdvanceIds();
+    set.add(String(advId));
+    const arr = Array.from(set);
+    localStorage.setItem('canteen_deleted_advance_ids', JSON.stringify(arr));
+    // Persist tombstones to cloud immediately so deleted advances NEVER return on any device/refresh
+    pushKeyToCloud('canteen_deleted_advance_ids', arr).catch(() => {});
+  } catch {}
+}
+
+/**
  * Automatically reconciles and updates/deletes corresponding expense from canteen_expenses (Capital Log)
  * when an OTHERS or UNIT_FUND transaction is deleted.
  */
@@ -559,6 +588,25 @@ function mergeArrayData(localArr: any[], cloudArr: any[], keyField = 'id', keyNa
     const deletedExpIds = getDeletedExpenseIds();
     localArr = localArr.filter(e => e && !deletedExpIds.has(String(e.id)));
     cloudArr = cloudArr.filter(e => e && !deletedExpIds.has(String(e.id)));
+
+    // Self-heal: ensure shop due records never attach a civilian staff member
+    const cleanShopDue = (e: any) => {
+      if (e && (e.dueShop || String(e.paymentMethod || '').toLowerCase() === 'due' || String(e.id || '').startsWith('shop-init-')) && e.detailedPerson) {
+        const copy = { ...e };
+        delete copy.detailedPerson;
+        return copy;
+      }
+      return e;
+    };
+    localArr = localArr.map(cleanShopDue);
+    cloudArr = cloudArr.map(cleanShopDue);
+  }
+
+  // Filter out any explicitly deleted advances so they NEVER resurrect from cloud
+  if (keyName === 'canteen_bazar_advances') {
+    const deletedAdvIds = getDeletedAdvanceIds();
+    localArr = localArr.filter(a => a && !deletedAdvIds.has(String(a.id)));
+    cloudArr = cloudArr.filter(a => a && !deletedAdvIds.has(String(a.id)));
   }
 
   const map = new Map<string, any>();
@@ -708,8 +756,12 @@ function dispatchKeyUpdateEvent(key: string) {
       case 'canteen_fund_transfers':
         window.dispatchEvent(new Event('canteen_transfers_updated'));
         break;
+      case 'canteen_menu_recipes_v3':
       case 'canteen_menu_recipes_v2':
         window.dispatchEvent(new Event('canteen_menu_recipes_updated'));
+        break;
+      case 'canteen_menu_recipes_20pax_v1':
+        window.dispatchEvent(new Event('canteen_recipes_20pax_updated'));
         break;
       case 'canteen_raw_stock_logs_v2':
         window.dispatchEvent(new Event('canteen_raw_stock_logs_updated'));
@@ -787,6 +839,16 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
       }
     }
 
+    // Merge deleted advance IDs so any deleted advances never resurrect
+    const cloudDeletedAdv = cloudKeyMap.get('canteen_deleted_advance_ids');
+    if (Array.isArray(cloudDeletedAdv) && cloudDeletedAdv.length > 0) {
+      const localDeletedAdv = getDeletedAdvanceIds();
+      cloudDeletedAdv.forEach(id => localDeletedAdv.add(String(id)));
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('canteen_deleted_advance_ids', JSON.stringify(Array.from(localDeletedAdv)));
+      }
+    }
+
     // Iterate over all canteen cloud keys
     for (const key of CANTEEN_CLOUD_KEYS) {
       const cloudVal = cloudKeyMap.get(key);
@@ -842,6 +904,10 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
               const deletedExpIds = getDeletedExpenseIds();
               finalVal = finalVal.filter((e: any) => !deletedExpIds.has(String(e?.id)));
             }
+            if (key === 'canteen_bazar_advances') {
+              const deletedAdvIds = getDeletedAdvanceIds();
+              finalVal = finalVal.filter((a: any) => !deletedAdvIds.has(String(a?.id)));
+            }
           }
         } else if (key === 'canteen_daily_menu' && Array.isArray(localVal) && localVal.length > 0 && (!Array.isArray(cloudVal) || cloudVal.length === 0)) {
           const localUpdated = typeof window !== 'undefined' ? localStorage.getItem('canteen_daily_menu_updated_at') : null;
@@ -852,6 +918,21 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
           }
         } else if (typeof cloudVal === 'object' && cloudVal !== null && typeof localVal === 'object' && localVal !== null) {
           finalVal = { ...cloudVal, ...localVal };
+        }
+
+        if (Array.isArray(finalVal)) {
+          if (key === 'canteen_txs') {
+            const deletedIds = getDeletedTxIds();
+            finalVal = finalVal.filter((t: any) => !deletedIds.has(String(t?.id)));
+          }
+          if (key === 'canteen_expenses') {
+            const deletedExpIds = getDeletedExpenseIds();
+            finalVal = finalVal.filter((e: any) => !deletedExpIds.has(String(e?.id)));
+          }
+          if (key === 'canteen_bazar_advances') {
+            const deletedAdvIds = getDeletedAdvanceIds();
+            finalVal = finalVal.filter((a: any) => !deletedAdvIds.has(String(a?.id)));
+          }
         }
 
         if (typeof window !== 'undefined') {
@@ -1282,16 +1363,23 @@ export function initCanteenCloudSync(): () => void {
               } else {
                 const keyField = key === 'canteen_expense_last_unit_prices' ? 'key' : 'id';
                 mergedVal = mergeArrayData(currentLocal, parsed, keyField, key);
-                if (key === 'canteen_txs') {
-                  const deletedIds = getDeletedTxIds();
-                  mergedVal = mergedVal.filter((t: any) => !deletedIds.has(String(t?.id)));
-                }
-                if (key === 'canteen_expenses') {
-                  const deletedExpIds = getDeletedExpenseIds();
-                  mergedVal = mergedVal.filter((e: any) => !deletedExpIds.has(String(e?.id)));
-                }
               }
             }
+
+            if (Array.isArray(mergedVal)) {
+            if (key === 'canteen_txs') {
+              const deletedIds = getDeletedTxIds();
+              mergedVal = mergedVal.filter((t: any) => !deletedIds.has(String(t?.id)));
+            }
+            if (key === 'canteen_expenses') {
+              const deletedExpIds = getDeletedExpenseIds();
+              mergedVal = mergedVal.filter((e: any) => !deletedExpIds.has(String(e?.id)));
+            }
+            if (key === 'canteen_bazar_advances') {
+              const deletedAdvIds = getDeletedAdvanceIds();
+              mergedVal = mergedVal.filter((a: any) => !deletedAdvIds.has(String(a?.id)));
+            }
+          }
 
             if (key === 'canteen_daily_menu_updated_at') {
               const localUpdated = typeof window !== 'undefined' ? localStorage.getItem('canteen_daily_menu_updated_at') : null;
@@ -1380,14 +1468,39 @@ export function initCanteenCloudSync(): () => void {
     )
     .subscribe();
 
-  // 4. Listen to local DOM events to mark dirty and auto-backup to cloud after 10s
+  // 4. Setup Realtime subscription on Canteen_Menu for instant menu updates across devices/tabs
+  const menuChannel = supabase
+    .channel('canteen_menu_realtime_sync_channel')
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'Canteen_Menu'
+      },
+      (payload: any) => {
+        if ((payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') && payload.new) {
+          updateSingleMenuItemInCache(payload.new);
+        } else if (payload.eventType === 'DELETE' && payload.old) {
+          const current = getCanteenMenuCache();
+          setCanteenMenuCache(current.filter((c) => c.id !== payload.old.id));
+        }
+      }
+    )
+    .subscribe();
+
+  // 5. Listen to local DOM events to mark dirty and auto-backup to cloud after 10s
   const handleLocalTxs = () => queuePushKeyToCloud('canteen_txs');
   const handleLocalOrders = () => queuePushKeyToCloud('canteen_pre_orders');
   const handleLocalExpenses = () => queuePushKeyToCloud('canteen_expenses');
   const handleLocalAdvances = () => queuePushKeyToCloud('canteen_bazar_advances');
   const handleLocalBanglaNames = () => queuePushKeyToCloud('canteen_member_bangla_names');
   const handleLocalTransfers = () => queuePushKeyToCloud('canteen_fund_transfers');
-  const handleLocalRecipes = () => queuePushKeyToCloud('canteen_menu_recipes_v2');
+  const handleLocalRecipes = () => {
+    queuePushKeyToCloud('canteen_menu_recipes_v3');
+    queuePushKeyToCloud('canteen_menu_recipes_20pax_v1');
+    queuePushKeyToCloud('canteen_menu_recipes_v2');
+  };
   const handleLocalStockLogs = () => queuePushKeyToCloud('canteen_raw_stock_logs_v2');
   const handleLocalRawInventory = () => queuePushKeyToCloud('canteen_raw_inventory_items_v2');
   const handleLocalBillHistory = () => queuePushKeyToCloud('canteen_bill_import_history');
@@ -1415,6 +1528,7 @@ export function initCanteenCloudSync(): () => void {
   window.addEventListener('canteen_member_bangla_names_updated', handleLocalBanglaNames);
   window.addEventListener('canteen_transfers_updated', handleLocalTransfers);
   window.addEventListener('canteen_menu_recipes_updated', handleLocalRecipes);
+  window.addEventListener('canteen_recipes_20pax_updated', handleLocalRecipes);
   window.addEventListener('canteen_raw_stock_logs_updated', handleLocalStockLogs);
   window.addEventListener('canteen_raw_inventory_updated', handleLocalRawInventory);
   window.addEventListener('canteen_daily_menu_updated', handleLocalDailyMenu);
@@ -1445,6 +1559,7 @@ export function initCanteenCloudSync(): () => void {
   return () => {
     supabase.removeChannel(channel);
     supabase.removeChannel(memberChannel);
+    supabase.removeChannel(menuChannel);
     window.removeEventListener('canteen_txs_updated', handleLocalTxs);
     window.removeEventListener('canteen_pre_orders_updated', handleLocalOrders);
     window.removeEventListener('canteen_expenses_updated', handleLocalExpenses);
@@ -1452,6 +1567,7 @@ export function initCanteenCloudSync(): () => void {
     window.removeEventListener('canteen_member_bangla_names_updated', handleLocalBanglaNames);
     window.removeEventListener('canteen_transfers_updated', handleLocalTransfers);
     window.removeEventListener('canteen_menu_recipes_updated', handleLocalRecipes);
+    window.removeEventListener('canteen_recipes_20pax_updated', handleLocalRecipes);
     window.removeEventListener('canteen_raw_stock_logs_updated', handleLocalStockLogs);
     window.removeEventListener('canteen_raw_inventory_updated', handleLocalRawInventory);
     window.removeEventListener('canteen_bill_import_history_updated', handleLocalBillHistory);

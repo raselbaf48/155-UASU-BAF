@@ -9,7 +9,14 @@ import { UnitFundSection } from './UnitFundSection';
 import { OthersFundSection } from './OthersFundSection';
 import { AllFundsOverviewSection } from './AllFundsOverviewSection';
 import { getTxCategory } from './MemberDB';
-import { pushKeyToCloud, recordDeletedExpenseId, recordDeletedTxId } from '../utils/canteenCloudSync';
+import { 
+  pushKeyToCloud, 
+  recordDeletedExpenseId, 
+  recordDeletedTxId,
+  getDeletedTxIds,
+  getDeletedExpenseIds,
+  getDeletedAdvanceIds
+} from '../utils/canteenCloudSync';
 import { playSuccessChime } from '../utils/audioFeedback';
 
 export interface FundTransfer {
@@ -54,11 +61,15 @@ export const CanteenFund: React.FC = () => {
   const loadData = () => {
     try {
       const rawTxs = localStorage.getItem(TXS_KEY);
-      const txs: any[] = rawTxs ? JSON.parse(rawTxs) : [];
-      setReports(Array.isArray(txs) ? txs : []);
+      const parsedTxs: any[] = rawTxs ? JSON.parse(rawTxs) : [];
+      const delTxIds = getDeletedTxIds();
+      const txs = Array.isArray(parsedTxs) ? parsedTxs.filter(t => t && !delTxIds.has(String(t.id))) : [];
+      setReports(txs);
 
       const rawExps = localStorage.getItem(EXPENSES_KEY);
-      let exps: any[] = rawExps ? JSON.parse(rawExps) : [];
+      let rawParsedExps: any[] = rawExps ? JSON.parse(rawExps) : [];
+      const delExpIds = getDeletedExpenseIds();
+      let exps = Array.isArray(rawParsedExps) ? rawParsedExps.filter(e => e && !delExpIds.has(String(e.id))) : [];
 
       // Automatically clean up any orphaned Others/Unit Fund batch bill expenses
       // whose underlying transactions were deleted from Others/Unit Fund history
@@ -246,8 +257,10 @@ export const CanteenFund: React.FC = () => {
 
     try {
       const rawAdvs = localStorage.getItem(ADVANCES_KEY);
-      const advs = rawAdvs ? JSON.parse(rawAdvs) : [];
-      setAdvances(Array.isArray(advs) ? advs : []);
+      const parsedAdvs = rawAdvs ? JSON.parse(rawAdvs) : [];
+      const delAdvIds = getDeletedAdvanceIds();
+      const advs = Array.isArray(parsedAdvs) ? parsedAdvs.filter((a: any) => a && !delAdvIds.has(String(a.id))) : [];
+      setAdvances(advs);
     } catch (_err) {
       setAdvances([]);
     }
@@ -491,18 +504,11 @@ export const CanteenFund: React.FC = () => {
 
       if (isRefund) {
         logType = 'CASH_REFUND';
-        // As requested: "Refund korle / type hbe Refund / Description - Civ Tanvir"
-        title = r.memberName || 'Civ Tanvir';
+        title = r.memberName || r.customerName || 'Cash Refund';
         subtitle = undefined;
       } else if (isBillPayment) {
         logType = 'PAYMENT';
-        // As requested:
-        // "BIL payment  korle
-        // type hbe Payment 
-        // Description - 
-        // Civ Tanvir  enter diye niche
-        // (upto Sep 26)"
-        const person = r.memberName || r.customerName || (r.bdNo ? `BD-${r.bdNo}` : 'Civ Tanvir');
+        const person = r.memberName || r.customerName || (r.bdNo ? `BD-${r.bdNo}` : 'Member');
         const uptoStr = getBillPaymentUptoText(r);
         title = `${person}\n(${uptoStr})`;
         subtitle = undefined;
@@ -547,13 +553,9 @@ export const CanteenFund: React.FC = () => {
       let subtitle: string | undefined = undefined;
 
       if (isAdvanceDesc) {
-        // As requested: "Cash Advance nile / type hbe Advance / Description - Civ Tanvir"
-        title = e.detailedPerson || 'Civ Tanvir';
+        title = e.detailedPerson || 'Staff Advance';
         subtitle = undefined;
       } else if (isOthersOrUnit) {
-        // As requested:
-        // "বাজার ও সিংগারা এর নিচে Enter diye
-        // (Sqn Ldr Tareq)"
         let cleanPurpose = String(e.desc || '')
           .replace(/^OTHERS\s*BILL\s*:\s*/i, '')
           .replace(/^OTHER\s*BILL\s*:\s*/i, '')
@@ -566,7 +568,7 @@ export const CanteenFund: React.FC = () => {
           memberNamesList = e.memberBreakdown
             .map((m: any) => String(m.name || '').trim())
             .filter(Boolean);
-        } else if (e.detailedPerson && !e.detailedPerson.startsWith('Staff:') && !e.detailedPerson.startsWith('Manager:') && e.detailedPerson !== 'Civ Tanvir') {
+        } else if (e.detailedPerson && !e.detailedPerson.startsWith('Staff:') && !e.detailedPerson.startsWith('Manager:')) {
           const cleanP = e.detailedPerson.split(':')[0].replace(/\(BD-[^)]+\)/i, '').trim();
           if (cleanP) memberNamesList.push(cleanP);
         }
@@ -614,10 +616,8 @@ export const CanteenFund: React.FC = () => {
     });
 
     // 4. Staff Advances & Settle Return History
-    // "Cash advance er log expence hbe na oita Cash Advance hbe, back asle oita Cash Refund hbe"
     advances.forEach((a, idx) => {
       // 4a. Advance Add / Issue
-      // As requested: "Cash Advance nile / type hbe Advance / Description - Civ Tanvir"
       if (Number(a.amount) > 0 && !a.id.includes('settle-topup')) {
         const dStr = a.date || '';
         const dVal = new Date(dStr).getTime() || 0;
@@ -625,7 +625,7 @@ export const CanteenFund: React.FC = () => {
           id: `adv-add-${a.id || idx}`,
           date: dStr,
           logType: 'CASH_ADVANCE',
-          title: a.personName || 'Civ Tanvir',
+          title: a.personName || 'Staff Advance',
           subtitle: undefined,
           channel: 'CASH',
           amount: Number(a.amount) || 0,
@@ -634,7 +634,6 @@ export const CanteenFund: React.FC = () => {
       }
 
       // 4b. Settle Return to Cash (if not already recorded in reports)
-      // As requested: "Refund korle / type hbe Refund / Description - Civ Tanvir"
       if (Number(a.returnAmount) > 0) {
         const alreadyInReports = reports.some(r => 
           (r.type === 'ADVANCE_RETURN' || r.type === 'BAZAR_RETURN') && 
@@ -648,7 +647,7 @@ export const CanteenFund: React.FC = () => {
             id: `adv-return-${a.id || idx}`,
             date: dStr,
             logType: 'CASH_REFUND',
-            title: a.personName || 'Civ Tanvir',
+            title: a.personName || 'Staff Refund',
             subtitle: undefined,
             channel: 'CASH',
             amount: Number(a.returnAmount) || 0,
@@ -665,7 +664,7 @@ export const CanteenFund: React.FC = () => {
           id: `adv-topup-${a.id || idx}`,
           date: dStr,
           logType: 'CASH_ADVANCE',
-          title: a.personName || 'Civ Tanvir',
+          title: a.personName || 'Staff Advance',
           subtitle: undefined,
           channel: 'CASH',
           amount: Number(a.amount) || 0,
@@ -1235,7 +1234,7 @@ export const CanteenFund: React.FC = () => {
                         <td className="p-4 text-slate-300 font-medium">
                           {exp.memberBreakdown && Array.isArray(exp.memberBreakdown) && exp.memberBreakdown.length > 0
                             ? exp.memberBreakdown.map((m: any) => `${m.name}${m.bdNo ? ` (BD-${m.bdNo})` : ''}`).join(', ')
-                            : (exp.detailedPerson || 'Civ Tanvir')}
+                            : (exp.detailedPerson || 'Staff / Manager')}
                         </td>
                         <td className="p-4">
                           <span className={`px-2 py-1 rounded text-[9px] font-black tracking-wider uppercase border ${isUcbMethod(exp.paymentMethod) ? 'bg-blue-900/30 text-blue-400 border-blue-800/40' : 'bg-emerald-900/30 text-emerald-400 border-emerald-800/40'}`}>

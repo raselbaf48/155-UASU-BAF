@@ -26,7 +26,7 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
-import { getCanteenMenuCache, fetchCanteenMenuOnce, CanteenMenuItem } from '../utils/canteenMenuData';
+import { getCanteenMenuCache, fetchCanteenMenuOnce, updateSingleMenuItemInCache, CanteenMenuItem } from '../utils/canteenMenuData';
 import {
   getRawInventoryItems,
   RawInventoryItem,
@@ -37,10 +37,13 @@ import {
   RecipeIngredient,
   getRawItemSubUnitInfo,
   getIngredientToInventoryRatio,
-  getEffectiveRawUnitCost
+  getEffectiveRawUnitCost,
+  formatRecipeRawItemsString
 } from '../utils/recipeManager';
 import { resolveImageUrl } from '../utils/canteenSettings';
 import { playCelebrationSound } from '../utils/audioFeedback';
+import { pushKeyToCloud, pullKeyFromCloud } from '../utils/canteenCloudSync';
+import { saveMenuItemBanglaName, getMenuItemBanglaName } from '../utils/menuBanglaNames';
 
 export interface Recipe20PaxIngredient {
   rawItemId: string;
@@ -181,15 +184,14 @@ export const save20PaxRecipes = async (recipes: Recipe20PaxMap): Promise<void> =
   try {
     localStorage.setItem(RECIPES_20PAX_STORAGE_KEY, JSON.stringify(recipes));
     window.dispatchEvent(new CustomEvent('canteen_recipes_20pax_updated', { detail: recipes }));
+    window.dispatchEvent(new Event('storage'));
 
-    // Non-blocking background sync to Supabase app_settings
-    Promise.resolve(
-      supabase
-        .from('app_settings')
-        .upsert({ key: RECIPES_20PAX_STORAGE_KEY, value: recipes }, { onConflict: 'key' })
-    ).catch((err) => console.warn('Supabase app_settings save note for 20-pax recipes:', err));
+    // Instant cloud persistence to Supabase app_settings (0ms delay)
+    pushKeyToCloud(RECIPES_20PAX_STORAGE_KEY, recipes).catch((err) =>
+      console.warn('Supabase app_settings save note for 20-pax recipes:', err)
+    );
 
-    // Also auto-sync 1-person recipes into canteen_menu_recipes_v3 for POS deduction
+    // Also auto-sync 1-person recipes into canteen_menu_recipes_v3 for POS deduction & other views
     try {
       const current1Pax = getMenuRecipes();
       const updated1Pax: MenuRecipeMap = { ...current1Pax };
@@ -212,6 +214,8 @@ export const save20PaxRecipes = async (recipes: Recipe20PaxMap): Promise<void> =
         }
       });
       saveMenuRecipes(updated1Pax);
+      pushKeyToCloud('canteen_menu_recipes_v3', updated1Pax).catch(() => {});
+      window.dispatchEvent(new Event('canteen_menu_recipes_updated'));
     } catch (e) {
       console.warn('Auto sync 1-pax recipe error:', e);
     }
@@ -233,6 +237,8 @@ export const RawDistributionPage: React.FC = () => {
 
   // Recipe Editor Modal State
   const [activeEditingMenu, setActiveEditingMenu] = useState<CanteenMenuItem | null>(null);
+  const [editingDishName, setEditingDishName] = useState<string>('');
+  const [editingDishNameBn, setEditingDishNameBn] = useState<string>('');
   const [editingIngredients, setEditingIngredients] = useState<Recipe20PaxIngredient[]>([]);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
 
@@ -254,23 +260,34 @@ export const RawDistributionPage: React.FC = () => {
   const [copiedMarketList, setCopiedMarketList] = useState(false);
   const [syncToast, setSyncToast] = useState<string | null>(null);
 
+  // Dynamic Total Meal formulation scale state
+  const [totalMeals, setTotalMeals] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('canteen_recipe_formulation_meal_count');
+      return saved ? Math.max(1, parseInt(saved, 10) || 20) : 20;
+    } catch {
+      return 20;
+    }
+  });
+
+  const handleUpdateTotalMeals = (count: number) => {
+    const valid = Math.max(1, isNaN(count) ? 20 : count);
+    setTotalMeals(valid);
+    try {
+      localStorage.setItem('canteen_recipe_formulation_meal_count', String(valid));
+    } catch {}
+  };
+
   useEffect(() => {
     fetchCanteenMenuOnce().then((items) => {
       if (items && items.length > 0) setMenuItems(items);
     });
 
-    // Cloud pull for 20-pax recipes
-    Promise.resolve(
-      supabase
-        .from('app_settings')
-        .select('value')
-        .eq('key', RECIPES_20PAX_STORAGE_KEY)
-        .single()
-    )
-      .then((res: any) => {
-        const data = res?.data;
-        if (data && data.value && typeof data.value === 'object') {
-          const merged = { ...buildAll20PaxFrom1Pax(), ...data.value };
+    // Cloud pull for 20-pax recipes using proper setting_key
+    pullKeyFromCloud(RECIPES_20PAX_STORAGE_KEY)
+      .then((cloudData) => {
+        if (cloudData && typeof cloudData === 'object') {
+          const merged = { ...buildAll20PaxFrom1Pax(), ...cloudData };
           setRecipes20Pax(merged);
           localStorage.setItem(RECIPES_20PAX_STORAGE_KEY, JSON.stringify(merged));
         }
@@ -278,20 +295,31 @@ export const RawDistributionPage: React.FC = () => {
       .catch(() => {});
 
     const handleMenuUpdate = (e: any) => {
-      if (e.detail) setMenuItems(e.detail);
+      if (e?.detail) setMenuItems(e.detail);
       else setMenuItems(getCanteenMenuCache());
     };
     const handleRawUpdate = () => {
       setRawItems(getRawInventoryItems());
     };
+    const handleRecipes20Update = (e?: any) => {
+      if (e?.detail && typeof e.detail === 'object') {
+        setRecipes20Pax(e.detail);
+      } else {
+        setRecipes20Pax(get20PaxRecipes());
+      }
+    };
 
     window.addEventListener('canteen_menu_updated', handleMenuUpdate);
     window.addEventListener('canteen_raw_inventory_updated', handleRawUpdate);
+    window.addEventListener('canteen_recipes_20pax_updated', handleRecipes20Update);
+    window.addEventListener('canteen_menu_recipes_updated', handleRecipes20Update);
     window.addEventListener('storage', handleRawUpdate);
 
     return () => {
       window.removeEventListener('canteen_menu_updated', handleMenuUpdate);
       window.removeEventListener('canteen_raw_inventory_updated', handleRawUpdate);
+      window.removeEventListener('canteen_recipes_20pax_updated', handleRecipes20Update);
+      window.removeEventListener('canteen_menu_recipes_updated', handleRecipes20Update);
       window.removeEventListener('storage', handleRawUpdate);
     };
   }, []);
@@ -459,6 +487,8 @@ export const RawDistributionPage: React.FC = () => {
   // Open Recipe Editor Modal
   const handleOpenEditor = (menu: CanteenMenuItem) => {
     setActiveEditingMenu(menu);
+    setEditingDishName(menu.name || '');
+    setEditingDishNameBn(menu.name_bn || menu.nameBn || getMenuItemBanglaName(menu) || '');
     const existing = getIngredientsForMenu(menu);
     if (existing.length > 0) {
       setEditingIngredients([...existing]);
@@ -517,24 +547,96 @@ export const RawDistributionPage: React.FC = () => {
     setEditingIngredients((prev) => prev.filter((_, i) => i !== index));
   };
 
-  // Save Recipe Formula
+  // Save Recipe Formula & Dish Specifications
   const handleSaveRecipe = async () => {
     if (!activeEditingMenu) return;
-    const key = getRecipeKey(activeEditingMenu);
-    const updatedMap: Recipe20PaxMap = {
-      ...recipes20Pax,
-      [key]: editingIngredients,
-      [activeEditingMenu.id]: editingIngredients
-    };
+
+    const oldName = (activeEditingMenu.name || '').trim().toUpperCase();
+    const cleanNewName = (editingDishName || '').trim();
+    const newNameUpper = cleanNewName.toUpperCase();
+    const cleanNewNameBn = (editingDishNameBn || '').trim();
+
+    // 1. Calculate updated recipe cost and formatted raw items string for the menu item
+    const rawList = rawItems.length > 0 ? rawItems : getRawInventoryItems();
+    const costFor20 = calculateCostFor20(editingIngredients);
+    const portionCost = Math.round((costFor20 / 20) * 100) / 100;
+    const onePaxIngs = editingIngredients.map((ing) => {
+      let q1 = ing.quantityFor20 / 20;
+      let u1 = ing.unit;
+      if (u1.toLowerCase() === 'kg' && q1 < 0.2) {
+        q1 = Math.round(q1 * 1000);
+        u1 = 'gm';
+      }
+      return {
+        rawItemId: ing.rawItemId,
+        rawItemName: ing.rawItemName,
+        quantity: Math.round(q1 * 1000) / 1000,
+        unit: u1
+      };
+    });
+    const rawItemValue = formatRecipeRawItemsString(onePaxIngs, rawList);
+
+    // 2. Build updated 20-pax recipe map, migrating keys if name changed
+    const updatedMap: Recipe20PaxMap = { ...recipes20Pax };
+    if (oldName && newNameUpper && oldName !== newNameUpper) {
+      delete updatedMap[oldName];
+    }
+    const finalKey = newNameUpper || getRecipeKey(activeEditingMenu);
+    updatedMap[finalKey] = editingIngredients;
+    updatedMap[activeEditingMenu.id] = editingIngredients;
 
     setRecipes20Pax(updatedMap);
     await save20PaxRecipes(updatedMap);
-    playCelebrationSound();
 
+    // 3. If dish name or Bengali name changed, update Bengali dictionary & 1-pax recipe
+    if (cleanNewNameBn) {
+      saveMenuItemBanglaName(
+        { id: activeEditingMenu.id, name: cleanNewName || activeEditingMenu.name },
+        cleanNewNameBn
+      );
+    }
+
+    // 4. Update menu item in local state and cache immediately (0ms delay!)
+    const finalDishName = cleanNewName || activeEditingMenu.name;
+    const updatedMenuItem: CanteenMenuItem = {
+      ...activeEditingMenu,
+      name: finalDishName,
+      name_en: finalDishName,
+      name_bn: cleanNewNameBn || activeEditingMenu.name_bn,
+      nameBn: cleanNewNameBn || activeEditingMenu.nameBn,
+      Cost: portionCost,
+      cost: portionCost,
+      rawItem: rawItemValue,
+      'Raw Item': rawItemValue,
+      updated_at: new Date().toISOString()
+    };
+
+    setMenuItems((prev) => prev.map((m) => (m.id === activeEditingMenu.id ? updatedMenuItem : m)));
+    updateSingleMenuItemInCache(updatedMenuItem);
+
+    // 5. Update Supabase Canteen_Menu table immediately
+    const updatePayload: any = {
+      Cost: portionCost,
+      'Raw Item': rawItemValue,
+      updated_at: new Date().toISOString()
+    };
+    if (cleanNewName) updatePayload.name = cleanNewName;
+    if (cleanNewNameBn) updatePayload.name_bn = cleanNewNameBn;
+
+    Promise.resolve(
+      supabase
+        .from('Canteen_Menu')
+        .update(updatePayload)
+        .eq('id', activeEditingMenu.id)
+    ).then(({ error }: any) => {
+      if (error) console.warn('Supabase menu update warning:', error);
+    }).catch((err) => console.warn('Supabase menu update warning:', err));
+
+    playCelebrationSound();
     setSaveSuccessMsg('Recipe formulation saved successfully.');
     setTimeout(() => {
       setActiveEditingMenu(null);
-    }, 700);
+    }, 400);
   };
 
   // Filtered raw items for the Multi-Select Picker Modal
@@ -707,7 +809,7 @@ export const RawDistributionPage: React.FC = () => {
       ),
       `----------------------------------------`,
       `💰 *Estimated Ready Cost:* ৳${totalScaledCost.toLocaleString()}`,
-      `👤 *Ready Cost per Portion:* ৳${Math.round(totalScaledCost / (scalerPaxCount || 1))}`,
+      `👤 *Ready Cost per Meal:* ৳${Math.round(totalScaledCost / (scalerPaxCount || 1))}`,
       `\n_Prepared by: Canteen Management_`
     ];
     navigator.clipboard.writeText(lines.join('\n'));
@@ -738,50 +840,89 @@ export const RawDistributionPage: React.FC = () => {
           <div className="space-y-1.5">
             <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-400/20 text-indigo-400 text-[11px] font-bold uppercase tracking-wider">
               <ChefHat className="w-3.5 h-3.5" />
-              <span>Production Matrix • Standard Batch Size: 20 Persons</span>
+              <span>Production Matrix • Standard Batch Size: {totalMeals} Meals</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight flex items-center space-x-3">
               <span>Recipe Formulation</span>
               <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                20 Pax Standard
+                {totalMeals} Meals Standard
               </span>
             </h1>
             <p className="text-xs sm:text-sm text-slate-400 max-w-2xl leading-relaxed">
-              Standardized raw material requirements to cook 20 portions per dish. Automatically calculates true kitchen production ready costs.
+              Standardized raw material requirements to cook {totalMeals} meals per dish. Automatically calculates true kitchen production ready costs.
             </p>
           </div>
 
-          <div className="flex items-center space-x-2 self-stretch sm:self-auto flex-wrap gap-y-2">
-            <button
-              onClick={handleAutoSyncAllFrom1Pax}
-              className="px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-wider flex items-center space-x-2 transition-all cursor-pointer shadow-lg shadow-indigo-600/30 active:scale-95"
-              title="Apply 20x multiplier to all dishes with 1-person recipes"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Sync 20x from Menu</span>
-            </button>
+          {/* Dynamic Total Meal Scaler Controller */}
+          <div className="bg-slate-950/90 border border-indigo-500/30 rounded-2xl p-2 sm:p-2.5 flex items-center gap-3 shadow-lg shadow-indigo-950/40 self-stretch sm:self-auto">
+            <div className="flex items-center space-x-2 pl-1.5">
+              <div className="w-8 h-8 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-black shrink-0">
+                <UtensilsCrossed className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block leading-tight">
+                  Total Meal
+                </span>
+                <span className="text-[10px] font-mono font-bold text-indigo-300">
+                  মোট মিল সংখ্যা
+                </span>
+              </div>
+            </div>
 
-            <button
-              onClick={handleOpenMenuPicker}
-              className="px-4 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold uppercase tracking-wider flex items-center space-x-2 transition-all cursor-pointer border border-slate-700 active:scale-95"
-              title="Select dishes from menu list"
-            >
-              <Plus className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Select Dishes</span>
-            </button>
+            <div className="flex items-center space-x-1.5 bg-slate-900 border border-slate-800 rounded-xl p-1">
+              <button
+                type="button"
+                onClick={() => handleUpdateTotalMeals(totalMeals - (totalMeals > 20 ? 10 : 5))}
+                className="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center text-xs font-black transition-colors cursor-pointer select-none active:scale-95"
+                title="Decrease Meal Count"
+              >
+                -
+              </button>
 
-            <button
-              onClick={() => {
-                setRecipes20Pax(get20PaxRecipes());
-                setRawItems(getRawInventoryItems());
-                fetchCanteenMenuOnce().then((items) => items && setMenuItems(items));
-              }}
-              className="px-3.5 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold uppercase tracking-wider flex items-center space-x-1.5 transition-all cursor-pointer border border-slate-700"
-              title="Refresh Data"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Refresh</span>
-            </button>
+              <div className="relative flex items-center">
+                <input
+                  type="number"
+                  min={1}
+                  max={2000}
+                  value={totalMeals}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value, 10);
+                    handleUpdateTotalMeals(val);
+                  }}
+                  className="w-16 sm:w-20 bg-slate-950 border border-slate-700 text-white font-mono font-black text-center text-sm sm:text-base py-1 px-1 rounded-lg focus:outline-none focus:border-indigo-500"
+                />
+                <span className="text-[11px] font-bold text-slate-400 ml-1.5 mr-1 hidden sm:inline">
+                  Meals
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleUpdateTotalMeals(totalMeals + (totalMeals >= 20 ? 10 : 5))}
+                className="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center text-xs font-black transition-colors cursor-pointer select-none active:scale-95"
+                title="Increase Meal Count"
+              >
+                +
+              </button>
+            </div>
+
+            {/* Quick preset buttons */}
+            <div className="hidden md:flex items-center space-x-1">
+              {[10, 20, 50, 100].map((cnt) => (
+                <button
+                  key={cnt}
+                  type="button"
+                  onClick={() => handleUpdateTotalMeals(cnt)}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold transition-all cursor-pointer ${
+                    totalMeals === cnt
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                  }`}
+                >
+                  {cnt}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -823,7 +964,7 @@ export const RawDistributionPage: React.FC = () => {
             </div>
             <div>
               <p className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Batch Standard</p>
-              <p className="text-lg font-black font-mono text-purple-300">20 Portions</p>
+              <p className="text-lg font-black font-mono text-purple-300">{totalMeals} Meals</p>
             </div>
           </div>
         </div>
@@ -950,9 +1091,9 @@ export const RawDistributionPage: React.FC = () => {
                   <th className="px-4 py-3.5 text-center w-16">Ser No</th>
                   <th className="px-4 py-3.5">Menu Dish</th>
                   <th className="px-3 py-3.5">Category</th>
-                  <th className="px-3 py-3.5 text-center">Ingredients (20 Pax)</th>
-                  <th className="px-4 py-3.5 text-right">Ready Cost (20 Pax)</th>
-                  <th className="px-4 py-3.5 text-right">Cost / Portion</th>
+                  <th className="px-3 py-3.5 text-center">Ingredients ({totalMeals} Meals)</th>
+                  <th className="px-4 py-3.5 text-right">Ready Cost ({totalMeals} Meals)</th>
+                  <th className="px-4 py-3.5 text-right">Cost / Meal</th>
                   <th className="px-4 py-3.5 text-center">Actions</th>
                 </tr>
               </thead>
@@ -962,6 +1103,7 @@ export const RawDistributionPage: React.FC = () => {
                   const isConfigured = ingredients.length > 0;
                   const costFor20 = calculateCostFor20(ingredients);
                   const portionCost = Math.round((costFor20 / 20) * 100) / 100;
+                  const scaledCost = Math.round(((costFor20 / 20) * totalMeals) * 100) / 100;
                   const menuImg = resolveImageUrl(menu.DP || menu.img || menu.image);
 
                   return (
@@ -1017,12 +1159,12 @@ export const RawDistributionPage: React.FC = () => {
                         )}
                       </td>
 
-                      {/* Column 5: Ready Cost (20 Pax) - STRICTLY READY COST ONLY */}
+                      {/* Column 5: Ready Cost for Total Meals */}
                       <td className="px-4 py-3 text-right font-mono font-black text-sm text-emerald-400">
-                        {isConfigured ? `৳ ${costFor20.toLocaleString()}` : '—'}
+                        {isConfigured ? `৳ ${scaledCost.toLocaleString()}` : '—'}
                       </td>
 
-                      {/* Column 6: Ready Cost Per Portion */}
+                      {/* Column 6: Ready Cost Per Meal */}
                       <td className="px-4 py-3 text-right font-mono font-bold text-xs text-slate-300">
                         {isConfigured ? `৳ ${portionCost.toFixed(2)}` : '—'}
                       </td>
@@ -1065,6 +1207,7 @@ export const RawDistributionPage: React.FC = () => {
             const isConfigured = ingredients.length > 0;
             const costFor20 = calculateCostFor20(ingredients);
             const portionCost = Math.round((costFor20 / 20) * 100) / 100;
+            const scaledCost = Math.round(((costFor20 / 20) * totalMeals) * 100) / 100;
             const menuImg = resolveImageUrl(menu.DP || menu.img || menu.image);
 
             return (
@@ -1118,20 +1261,20 @@ export const RawDistributionPage: React.FC = () => {
                     </span>
                   </div>
 
-                  {/* Ready Cost Box (Strictly Ready Cost Only - NO Sales Price / NO Margin) */}
+                  {/* Ready Cost Box */}
                   <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800 flex items-center justify-between">
                     <div>
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                        Ready Cost (20 Pax)
+                        Ready Cost ({totalMeals} Meals)
                       </p>
                       <p className="text-lg font-black font-mono text-emerald-400">
-                        {isConfigured ? `৳ ${costFor20.toLocaleString()}` : '—'}
+                        {isConfigured ? `৳ ${scaledCost.toLocaleString()}` : '—'}
                       </p>
                     </div>
 
                     <div className="text-right">
                       <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                        Per Portion
+                        Per Meal
                       </p>
                       <p className="text-xs font-mono font-bold text-slate-300">
                         {isConfigured ? `৳ ${portionCost.toFixed(2)}` : '—'}
@@ -1142,24 +1285,27 @@ export const RawDistributionPage: React.FC = () => {
                   {/* Raw Ingredients Preview */}
                   <div className="space-y-1.5 pt-1">
                     <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                      Formula Specifications (20 Portions):
+                      Formula Specifications ({totalMeals} Meals):
                     </p>
 
                     {isConfigured ? (
                       <div className="bg-slate-950/80 border border-slate-800/80 rounded-2xl p-2.5 max-h-32 overflow-y-auto space-y-1 text-xs">
-                        {ingredients.slice(0, 4).map((ing, idx) => (
-                          <div
-                            key={idx}
-                            className="flex items-center justify-between text-slate-300 py-0.5"
-                          >
-                            <span className="truncate pr-2 font-medium">
-                              • {ing.rawItemName}
-                            </span>
-                            <span className="font-mono font-bold text-emerald-400 shrink-0">
-                              {ing.quantityFor20} {ing.unit}
-                            </span>
-                          </div>
-                        ))}
+                        {ingredients.slice(0, 4).map((ing, idx) => {
+                          const scaledQty = Math.round(((ing.quantityFor20 / 20) * totalMeals) * 1000) / 1000;
+                          return (
+                            <div
+                              key={idx}
+                              className="flex items-center justify-between text-slate-300 py-0.5"
+                            >
+                              <span className="truncate pr-2 font-medium">
+                                • {ing.rawItemName}
+                              </span>
+                              <span className="font-mono font-bold text-emerald-400 shrink-0">
+                                {scaledQty} {ing.unit}
+                              </span>
+                            </div>
+                          );
+                        })}
                         {ingredients.length > 4 && (
                           <p className="text-[10px] font-bold text-indigo-400 text-center pt-1">
                             + {ingredients.length - 4} more raw materials
@@ -1226,9 +1372,25 @@ export const RawDistributionPage: React.FC = () => {
                     <h2 className="text-base sm:text-lg font-black text-white">
                       Recipe Specification (20 Pax)
                     </h2>
-                    <p className="text-xs text-indigo-300 font-medium">
-                      Dish: <span className="font-bold text-white">{activeEditingMenu.name}</span>
-                    </p>
+                    <div className="flex flex-wrap items-center gap-2 mt-1">
+                      <span className="text-xs text-indigo-300 font-bold">Dish:</span>
+                      <input
+                        type="text"
+                        value={editingDishName}
+                        onChange={(e) => setEditingDishName(e.target.value)}
+                        placeholder="Item Name (English)"
+                        className="bg-slate-950 border border-slate-700/80 rounded-lg px-2.5 py-1 text-xs text-white font-bold focus:outline-none focus:border-indigo-500 w-36 sm:w-48"
+                        title="Edit Dish Name in English"
+                      />
+                      <input
+                        type="text"
+                        value={editingDishNameBn}
+                        onChange={(e) => setEditingDishNameBn(e.target.value)}
+                        placeholder="বাংলা নাম"
+                        className="bg-slate-950 border border-slate-700/80 rounded-lg px-2.5 py-1 text-xs text-emerald-400 font-bold focus:outline-none focus:border-indigo-500 w-32 sm:w-40"
+                        title="Edit Dish Name in Bangla"
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -1255,7 +1417,7 @@ export const RawDistributionPage: React.FC = () => {
                   <div className="flex items-center space-x-2.5">
                     <Info className="w-4 h-4 text-indigo-400 shrink-0" />
                     <span>
-                      Standardized production formula for <strong>20 portions</strong>. Ready cost calculates dynamically from current inventory unit prices.
+                      Standardized production formula for <strong>20 meals</strong>. Ready cost calculates dynamically from current inventory unit prices.
                     </span>
                   </div>
 
@@ -1418,7 +1580,7 @@ export const RawDistributionPage: React.FC = () => {
 
                     <div>
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                        Ready Cost Per Portion
+                        Ready Cost Per Meal
                       </p>
                       <p className="text-xl font-black font-mono text-indigo-300">
                         ৳ {(Math.round((calculateCostFor20(editingIngredients) / 20) * 100) / 100).toFixed(2)}
@@ -1867,7 +2029,7 @@ export const RawDistributionPage: React.FC = () => {
                 <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-bold uppercase text-slate-300 tracking-wider">
-                      Target Batch Size (Portions)
+                      Target Batch Size (Meals)
                     </label>
                     <div className="flex items-center space-x-1.5">
                       <span className="text-2xl font-black font-mono text-emerald-400">

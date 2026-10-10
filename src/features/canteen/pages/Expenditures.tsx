@@ -15,7 +15,15 @@ import {
   RawInventoryItem 
 } from '../utils/recipeManager';
 import { supabase } from '../../../supabase';
-import { pushKeyToCloud, pullKeyFromCloud, recordDeletedExpenseId, getDeletedExpenseIds } from '../utils/canteenCloudSync';
+import { 
+  pushKeyToCloud, 
+  pullKeyFromCloud, 
+  recordDeletedExpenseId, 
+  getDeletedExpenseIds,
+  recordDeletedAdvanceId,
+  getDeletedAdvanceIds,
+  recordDeletedTxId
+} from '../utils/canteenCloudSync';
 import { resolveImageUrl } from '../utils/canteenSettings';
 
 export interface CivilianPerson {
@@ -213,7 +221,10 @@ export const Expenditures: React.FC = () => {
   const [advances, setAdvances] = useState<BazarAdvance[]>(() => {
     try {
       const raw = localStorage.getItem(ADVANCES_KEY);
-      return raw ? JSON.parse(raw) : [];
+      if (!raw) return [];
+      const parsed: any[] = JSON.parse(raw);
+      const delIds = getDeletedAdvanceIds();
+      return Array.isArray(parsed) ? parsed.filter(a => a && a.id && !delIds.has(String(a.id))) : [];
     } catch {
       return [];
     }
@@ -399,10 +410,26 @@ export const Expenditures: React.FC = () => {
 
         const cloudAdv = await pullKeyFromCloud(ADVANCES_KEY);
         if (Array.isArray(cloudAdv)) {
-          const localAdv: BazarAdvance[] = JSON.parse(localStorage.getItem(ADVANCES_KEY) || '[]');
+          const deletedAdvIds = getDeletedAdvanceIds();
+          const localAdv: any[] = JSON.parse(localStorage.getItem(ADVANCES_KEY) || '[]');
           const advMap = new Map<string, BazarAdvance>();
-          [...cloudAdv, ...localAdv].forEach(a => {
-            if (a && a.id) advMap.set(String(a.id), a);
+          [...cloudAdv, ...localAdv].forEach((raw: any) => {
+            if (raw && raw.id && !deletedAdvIds.has(String(raw.id))) {
+              const norm: BazarAdvance = {
+                id: String(raw.id),
+                date: raw.date || formatCanteenDate(new Date()),
+                personName: raw.personName || raw.person || '',
+                amount: Number(raw.amount !== undefined ? raw.amount : (raw.advanceAmount || 0)),
+                spentAmount: Number(raw.spentAmount !== undefined ? raw.spentAmount : (raw.bazarTotalAmount || 0)),
+                returnAmount: Number(raw.returnAmount || 0),
+                channel: 'CASH',
+                purpose: raw.purpose || 'Daily Bazar Advance',
+                status: (raw.status === 'PENDING_BAZAR' ? 'ACTIVE' : (raw.status || 'ACTIVE')),
+                settledDate: raw.settledDate,
+                notes: raw.notes
+              };
+              advMap.set(String(norm.id), norm);
+            }
           });
           const mergedAdv = Array.from(advMap.values());
           localStorage.setItem(ADVANCES_KEY, JSON.stringify(mergedAdv));
@@ -1337,10 +1364,41 @@ export const Expenditures: React.FC = () => {
     try {
       playSuccessSound();
       setDeleteTargetAdvance(null);
+
+      // 1. Record tombstone in local & cloud so it NEVER resurrects
+      recordDeletedAdvanceId(targetAdv.id);
+
       const updated = advances.filter(a => a.id !== targetAdv.id);
       setAdvances(updated);
       localStorage.setItem(ADVANCES_KEY, JSON.stringify(updated));
-      showToast(`✅ Advance ৳${Number(targetAdv.amount).toLocaleString()} deleted successfully!`);
+
+      // 2. Also clean up any orphaned return transaction in canteen_txs for this advance / person
+      try {
+        const rawTxs = localStorage.getItem('canteen_txs');
+        if (rawTxs) {
+          const currentTxs = JSON.parse(rawTxs);
+          const cleanedTxs = currentTxs.filter((t: any) => {
+            if (!t) return false;
+            const isMatchingReturn = 
+              (t.type === 'ADVANCE_RETURN' || t.type === 'BAZAR_RETURN') &&
+              (String(t.id).includes(targetAdv.id) || 
+               (t.memberName && matchesCivilian(t.memberName, targetAdv.personName)) ||
+               (t.items && matchesCivilian(t.items, targetAdv.personName)));
+            if (isMatchingReturn) {
+              recordDeletedTxId(t.id);
+              return false;
+            }
+            return true;
+          });
+          if (cleanedTxs.length !== currentTxs.length) {
+            localStorage.setItem('canteen_txs', JSON.stringify(cleanedTxs));
+            pushKeyToCloud('canteen_txs', cleanedTxs).catch(() => {});
+            window.dispatchEvent(new Event('canteen_txs_updated'));
+          }
+        }
+      } catch {}
+
+      showToast(`✅ Advance ৳${Number(targetAdv.amount).toLocaleString()} deleted successfully! (অগ্রিমের রেকর্ড স্থায়ীভাবে মুছে ফেলা হয়েছে)`);
       window.dispatchEvent(new Event('canteen_bazar_advances_updated'));
       window.dispatchEvent(new Event('canteen_state_updated'));
       window.dispatchEvent(new Event('storage'));
@@ -1349,6 +1407,96 @@ export const Expenditures: React.FC = () => {
       });
     } catch (err: any) {
       showToast(`⚠️ Delete failed: ${err?.message || 'Error'}`);
+    }
+  };
+
+  // Delete a synthetic or linked refund from civilian history
+  const handleDeleteRefundFromHistory = async (advId?: string, rawExpId?: string | number) => {
+    try {
+      playSuccessSound();
+      if (rawExpId) {
+        recordDeletedExpenseId(String(rawExpId));
+        const updatedExps = expenses.filter(e => String(e.id) !== String(rawExpId));
+        setExpenses(updatedExps);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedExps));
+        pushKeyToCloud(STORAGE_KEY, updatedExps).catch(() => {});
+        window.dispatchEvent(new CustomEvent('canteen_expenses_updated', { detail: updatedExps }));
+      }
+      if (advId) {
+        const updatedAdvs = advances.map(a => a.id === advId ? { ...a, returnAmount: 0 } : a);
+        setAdvances(updatedAdvs);
+        localStorage.setItem(ADVANCES_KEY, JSON.stringify(updatedAdvs));
+        pushKeyToCloud(ADVANCES_KEY, updatedAdvs).catch(() => {});
+        window.dispatchEvent(new Event('canteen_bazar_advances_updated'));
+      }
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
+      showToast('✅ রিফান্ড হিস্ট্রি সফলভাবে মুছে ফেলা হয়েছে!');
+    } catch (err: any) {
+      showToast(`⚠️ Delete failed: ${err?.message || 'Error'}`);
+    }
+  };
+
+  // Clear all history records for a civilian person
+  const handleClearAllCivHistory = async (civ: CivilianPerson) => {
+    if (!confirm(`আপনি কি নিশ্চিত যে ${civ.name} এর সকল অগ্রিম ও খরচের হিস্ট্রি রেকর্ড স্থায়ীভাবে মুছে ফেলতে চান?`)) return;
+    try {
+      playSuccessSound();
+
+      // 1. Delete all advances for this civ and tombstone them
+      const civAdvs = advances.filter(a => matchesCivilian(a.personName, civ));
+      civAdvs.forEach(a => recordDeletedAdvanceId(a.id));
+      const remainingAdvs = advances.filter(a => !matchesCivilian(a.personName, civ));
+      setAdvances(remainingAdvs);
+      localStorage.setItem(ADVANCES_KEY, JSON.stringify(remainingAdvs));
+      pushKeyToCloud(ADVANCES_KEY, remainingAdvs).catch(() => {});
+
+      // 2. Delete all non-due expenses for this civ and tombstone them
+      const civExps = expenses.filter(e => 
+        matchesCivilian(e.detailedPerson, civ) && 
+        String(e.paymentMethod || '').toLowerCase() !== 'due' && 
+        !e.dueShop
+      );
+      civExps.forEach(e => recordDeletedExpenseId(String(e.id)));
+      const remainingExps = expenses.filter(e => 
+        !(matchesCivilian(e.detailedPerson, civ) && String(e.paymentMethod || '').toLowerCase() !== 'due' && !e.dueShop)
+      );
+      setExpenses(remainingExps);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(remainingExps));
+      pushKeyToCloud(STORAGE_KEY, remainingExps).catch(() => {});
+
+      // 3. Clean any orphaned return transactions in canteen_txs
+      try {
+        const rawTxs = localStorage.getItem('canteen_txs');
+        if (rawTxs) {
+          const currentTxs = JSON.parse(rawTxs);
+          const cleanedTxs = currentTxs.filter((t: any) => {
+            if (!t) return false;
+            const isMatchingReturn = 
+              (t.type === 'ADVANCE_RETURN' || t.type === 'BAZAR_RETURN') &&
+              ((t.memberName && matchesCivilian(t.memberName, civ)) ||
+               (t.items && matchesCivilian(t.items, civ)));
+            if (isMatchingReturn) {
+              recordDeletedTxId(t.id);
+              return false;
+            }
+            return true;
+          });
+          if (cleanedTxs.length !== currentTxs.length) {
+            localStorage.setItem('canteen_txs', JSON.stringify(cleanedTxs));
+            pushKeyToCloud('canteen_txs', cleanedTxs).catch(() => {});
+            window.dispatchEvent(new Event('canteen_txs_updated'));
+          }
+        }
+      } catch {}
+
+      showToast(`✅ ${civ.name} এর সকল হিস্ট্রি রেকর্ড স্থায়ীভাবে মুছে ফেলা হয়েছে!`);
+      window.dispatchEvent(new Event('canteen_bazar_advances_updated'));
+      window.dispatchEvent(new CustomEvent('canteen_expenses_updated', { detail: remainingExps }));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
+    } catch (err: any) {
+      showToast(`⚠️ Failed to clear history: ${err?.message || 'Error'}`);
     }
   };
 
@@ -3210,13 +3358,24 @@ export const Expenditures: React.FC = () => {
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => setViewingHistoryCiv(null)}
-                  className="p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800 hover:bg-slate-700 transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => handleClearAllCivHistory(viewingHistoryCiv)}
+                    className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider text-rose-400 hover:text-white bg-rose-500/10 hover:bg-rose-600 border border-rose-500/20 transition-all flex items-center space-x-1 cursor-pointer active:scale-95"
+                    title="Clear all history for this person"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Clear All</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewingHistoryCiv(null)}
+                    className="p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800 hover:bg-slate-700 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
 
               {/* Content */}
@@ -3234,6 +3393,7 @@ export const Expenditures: React.FC = () => {
                   const civExps = expenses.filter(e => 
                     matchesCivilian(e.detailedPerson, viewingHistoryCiv) &&
                     String(e.paymentMethod || '').toLowerCase() !== 'due' &&
+                    !e.dueShop &&
                     e.category !== 'Refund' &&
                     e.paymentMethod !== 'Refund' &&
                     !String(e.desc || '').toLowerCase().includes('cash refund') &&
@@ -3272,7 +3432,12 @@ export const Expenditures: React.FC = () => {
 
                 {/* Tabs: Advance History & Expense History side-by-side */}
                 {(() => {
-                  const expenseList = expenses.filter(e => matchesCivilian(e.detailedPerson, viewingHistoryCiv));
+                  // Only include non-due expenses for this civilian (shop dues are not civilian personal/bazar expenses)
+                  const expenseList = expenses.filter(e => 
+                    matchesCivilian(e.detailedPerson, viewingHistoryCiv) &&
+                    String(e.paymentMethod || '').toLowerCase() !== 'due' &&
+                    !e.dueShop
+                  );
                   
                   // Also include any settled advance returns if not already present in expenseList
                   // "Cash Advance er balance sattle kore dile jodi balace add hoy tahole oiya Advance History te asbe , jodi refund hoye tahole Expense History te jbe"
@@ -3294,7 +3459,8 @@ export const Expenditures: React.FC = () => {
                       isDueExp: false,
                       isRefund: true,
                       dueShop: undefined,
-                      rawExpenseId: undefined
+                      rawExpenseId: undefined,
+                      linkedAdvId: a.id
                     }));
 
                   const allCivExpenseItems = [
@@ -3307,7 +3473,8 @@ export const Expenditures: React.FC = () => {
                       isDueExp: String(e.paymentMethod || '').toLowerCase() === 'due',
                       isRefund: e.category === 'Refund' || e.paymentMethod === 'Refund' || String(e.desc || '').toLowerCase().includes('cash refund') || String(e.desc || '').toLowerCase().includes('উদ্বৃত্ত ফেরত'),
                       dueShop: e.dueShop,
-                      rawExpenseId: e.id
+                      rawExpenseId: e.id,
+                      linkedAdvId: undefined
                     })),
                     ...returnItemsFromAdvs
                   ].sort((a, b) => parseExpenseDate(b.date) - parseExpenseDate(a.date));
@@ -3432,7 +3599,7 @@ export const Expenditures: React.FC = () => {
                                       <span className={`font-mono font-black ${isRefund ? 'text-cyan-400' : isDueExp ? 'text-amber-400' : 'text-emerald-400'}`}>
                                         {isRefund ? `+ ৳${item.amount.toLocaleString()} (ফেরত)` : `৳${item.amount.toLocaleString()}`}
                                       </span>
-                                      {item.rawExpenseId && (
+                                      {item.rawExpenseId ? (
                                         <button
                                           type="button"
                                           onClick={() => setDeleteTargetId(item.rawExpenseId!)}
@@ -3441,7 +3608,16 @@ export const Expenditures: React.FC = () => {
                                         >
                                           <Trash2 className="w-3.5 h-3.5" />
                                         </button>
-                                      )}
+                                      ) : item.linkedAdvId ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteRefundFromHistory(item.linkedAdvId)}
+                                          className="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                                          title="Delete refund record from history"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      ) : null}
                                     </div>
                                   </div>
                                 );

@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, fetchDirectImageUrl, getCanteenConfig, getItemDisplayName, CanteenConfig } from '../utils/canteenSettings';
-import { getCanteenMenuCache, fetchCanteenMenuOnce } from '../utils/canteenMenuData';
+import { getCanteenMenuCache, setCanteenMenuCache, updateSingleMenuItemInCache, fetchCanteenMenuOnce } from '../utils/canteenMenuData';
 import { processGalleryImage } from '../utils/imageUpload';
 import { SaveButton } from '../components/SaveButton';
 import { formatCanteenDate } from '../utils/dateUtils';
@@ -31,13 +31,17 @@ import {
   RAW_ITEMS_STORAGE_KEY,
   deduplicateRawItems,
   calculateMenuItemStockInfo,
-  isReadymadeItem
+  isReadymadeItem,
+  saveMenuRecipes
 } from '../utils/recipeManager';
 import {
   get20PaxRecipes,
+  save20PaxRecipes,
   calculateMenuPortionCostFrom20Pax,
-  Recipe20PaxMap
+  Recipe20PaxMap,
+  RECIPES_20PAX_STORAGE_KEY
 } from './RawDistributionPage';
+import { pushKeyToCloud } from '../utils/canteenCloudSync';
 import {
   getMenuItemBanglaName,
   saveMenuItemBanglaName,
@@ -432,16 +436,46 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       DP: finalDp || null
     };
 
-    if (modalFormData.nameBn && modalFormData.nameBn.trim()) {
-      payload.name_bn = modalFormData.nameBn.trim();
+    if (modalFormData.nameBn !== undefined) {
+      payload.name_bn = modalFormData.nameBn.trim() || null;
     }
+    payload.updated_at = new Date().toISOString();
 
-    setIsSavingModal(true);
+    const oldName = (selectedItemForModal.name || '').trim().toUpperCase();
+    const newName = modalFormData.name.trim().toUpperCase();
 
-    try {
-      await supabase.from('Canteen_Menu').update(payload).eq('id', selectedItemForModal.id);
-    } catch (e) {
-      console.warn('Supabase update warning:', e);
+    // If name changed, migrate recipe keys so Recipe Formulation and live stock don't get lost!
+    if (oldName && newName && oldName !== newName) {
+      try {
+        const r20 = get20PaxRecipes();
+        const existingRecipe = r20[oldName] || r20[selectedItemForModal.id];
+        if (existingRecipe) {
+          const updated20 = {
+            ...r20,
+            [newName]: existingRecipe,
+            [selectedItemForModal.id]: existingRecipe
+          };
+          delete updated20[oldName];
+          save20PaxRecipes(updated20);
+        }
+
+        // Also migrate 1-Pax recipe
+        const r1 = getMenuRecipes();
+        const existing1 = r1[oldName] || r1[selectedItemForModal.id];
+        if (existing1) {
+          const updated1 = {
+            ...r1,
+            [newName]: existing1,
+            [selectedItemForModal.id]: existing1
+          };
+          delete updated1[oldName];
+          saveMenuRecipes(updated1);
+          pushKeyToCloud('canteen_menu_recipes_v3', updated1).catch(() => {});
+          window.dispatchEvent(new Event('canteen_menu_recipes_updated'));
+        }
+      } catch (e) {
+        console.warn('Recipe key migration note:', e);
+      }
     }
 
     // Save Bengali name to dictionary, cloud sync & localStorage
@@ -452,20 +486,36 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       );
     }
 
-    setItems(prev => prev.map(i => i.id === selectedItemForModal.id ? { 
-      ...i, 
+    const updatedItem = { 
+      ...selectedItemForModal, 
       ...payload,
+      name: modalFormData.name.trim(),
+      name_en: modalFormData.name.trim(),
       nameBn: modalFormData.nameBn?.trim(),
       name_bn: modalFormData.nameBn?.trim(),
-      cost: parsedCost
-    } : i));
+      cost: parsedCost,
+      Cost: parsedCost,
+      price: parsedPrice,
+      updated_at: new Date().toISOString()
+    };
+
+    // 0ms INSTANT local update & global cache synchronization across all components!
+    setItems(prev => prev.map(i => i.id === selectedItemForModal.id ? updatedItem : i));
+    updateSingleMenuItemInCache(updatedItem);
+
+    // Immediate background sync to Supabase (never block the UI!)
+    Promise.resolve(
+      supabase.from('Canteen_Menu').update(payload).eq('id', selectedItemForModal.id)
+    ).then(({ error }: any) => {
+      if (error) console.warn('Supabase update warning:', error);
+    }).catch((e) => console.warn('Supabase update warning:', e));
 
     setIsSavedModal(true);
     setTimeout(() => {
       setIsSavedModal(false);
       setIsSavingModal(false);
       setSelectedItemForModal(null);
-    }, 1050);
+    }, 180);
   };
 
 
@@ -480,11 +530,20 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
         setRecipes20Pax(get20PaxRecipes());
       }
     };
+    const handleMenuSync = (e?: any) => {
+      if (e?.detail && Array.isArray(e.detail)) {
+        setItems(e.detail);
+      } else {
+        setItems(getCanteenMenuCache());
+      }
+    };
+    window.addEventListener('canteen_menu_updated', handleMenuSync);
     window.addEventListener('canteen_recipes_20pax_updated', handleSync);
     window.addEventListener('canteen_menu_recipes_updated', handleSync);
     window.addEventListener('canteen_raw_inventory_updated', handleSync);
     window.addEventListener('storage', handleSync);
     return () => {
+      window.removeEventListener('canteen_menu_updated', handleMenuSync);
       window.removeEventListener('canteen_recipes_20pax_updated', handleSync);
       window.removeEventListener('canteen_menu_recipes_updated', handleSync);
       window.removeEventListener('canteen_raw_inventory_updated', handleSync);
@@ -764,25 +823,64 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     const prodCost = costRes.totalCost;
     const rawItemValue = formatRecipeRawItemsString(quickRecipeIngredients, rawList);
 
+    // 1. Save 1-person recipe immediately & push to cloud (0ms delay)
     saveRecipeForMenuItem(quickRecipeItem.id, quickRecipeIngredients, quickRecipeItem.name);
-    setRecipes(getMenuRecipes());
+    const updatedRecipes = getMenuRecipes();
+    setRecipes(updatedRecipes);
+    pushKeyToCloud('canteen_menu_recipes_v3', updatedRecipes).catch(() => {});
 
+    // 2. Also auto-sync 20-pax recipe so Recipe Formulation updates immediately & push to cloud
     try {
-      await supabase.from('Canteen_Menu').update({
-        Cost: prodCost,
-        'Raw Item': rawItemValue
-      }).eq('id', quickRecipeItem.id);
+      const current20 = get20PaxRecipes();
+      const new20PaxIngs = quickRecipeIngredients.map(ing => ({
+        rawItemId: ing.rawItemId,
+        rawItemName: ing.rawItemName,
+        quantityFor20: Math.round(ing.quantity * 20 * 1000) / 1000,
+        unit: ing.unit
+      }));
+      const key = (quickRecipeItem.name || '').trim().toUpperCase();
+      const updated20 = {
+        ...current20,
+        [key]: new20PaxIngs,
+        [quickRecipeItem.id]: new20PaxIngs
+      };
+      save20PaxRecipes(updated20);
+      setRecipes20Pax(updated20);
     } catch (e) {
-      console.warn('Failed to sync quick recipe cost to DB:', e);
+      console.warn('Sync quick recipe to 20pax note:', e);
     }
 
-    setItems(prev => prev.map(i => i.id === quickRecipeItem.id ? {
-      ...i,
+    // 3. Instant local state & cache update in 0ms!
+    const updatedMenu = {
+      ...quickRecipeItem,
       cost: prodCost,
       Cost: prodCost,
       rawItem: rawItemValue,
-      'Raw Item': rawItemValue
-    } : i));
+      'Raw Item': rawItemValue,
+      updated_at: new Date().toISOString()
+    };
+    setItems(prev => prev.map(i => i.id === quickRecipeItem.id ? updatedMenu : i));
+    updateSingleMenuItemInCache(updatedMenu);
+
+    if (selectedItemForModal && selectedItemForModal.id === quickRecipeItem.id) {
+      setSelectedItemForModal(updatedMenu);
+      setModalFormData(prev => ({
+        ...prev,
+        cost: prodCost,
+        rawItem: rawItemValue
+      }));
+    }
+
+    // 4. Background sync to Supabase Canteen_Menu table
+    Promise.resolve(
+      supabase.from('Canteen_Menu').update({
+        Cost: prodCost,
+        'Raw Item': rawItemValue,
+        updated_at: new Date().toISOString()
+      }).eq('id', quickRecipeItem.id)
+    ).then(({ error }: any) => {
+      if (error) console.warn('Failed to sync quick recipe cost to DB:', error);
+    }).catch((e) => console.warn('Failed to sync quick recipe cost to DB:', e));
 
     setIsSavedQuick(true);
     setTimeout(() => {
@@ -790,7 +888,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       setIsSavingQuick(false);
       setQuickRecipeItem(null);
       setRecipeNotice('');
-    }, 1050);
+    }, 180);
   };
 
   // Extract all categories dynamically
@@ -1290,6 +1388,16 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                                  </div>
                               );
                            })()}
+
+                           {/* Recipe Formulation Button */}
+                           <button
+                              type="button"
+                              onClick={() => handleOpenQuickRecipe({ ...selectedItemForModal, ...modalFormData })}
+                              className="w-full py-2.5 px-4 rounded-2xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 hover:border-indigo-400 text-xs font-bold transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-md active:scale-98"
+                           >
+                              <ChefHat className="w-4 h-4 text-indigo-400" />
+                              <span>Recipe Formulation (কাঁচামাল ও রেসিপি সম্পাদনা)</span>
+                           </button>
                         </div>
                      </div>
                   ) : (

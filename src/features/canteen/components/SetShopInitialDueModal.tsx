@@ -208,7 +208,7 @@ export const SetShopInitialDueModal: React.FC<SetShopInitialDueModalProps> = ({
             dueShop: shopName,
             amount: numAmount,
             isCustom: true,
-            detailedPerson: 'Civ Tanvir',
+            detailedPerson: undefined,
             rawItemId: `init-due-${shopSlug}-${billMonth}`
           };
           updated = [newRecord, ...preserved];
@@ -229,7 +229,7 @@ export const SetShopInitialDueModal: React.FC<SetShopInitialDueModalProps> = ({
             dueShop: shopName,
             amount: numAmount,
             isCustom: true,
-            detailedPerson: 'Civ Tanvir',
+            detailedPerson: undefined,
             rawItemId: `init-due-add-${shopSlug}-${billMonth}`
           };
           updated = [newRecord, ...all];

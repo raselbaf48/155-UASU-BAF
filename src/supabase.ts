@@ -84,11 +84,15 @@ if (!isSupabaseConfigured) {
   console.warn('Supabase URL or Anon Key is missing. Using default fallback values.');
 }
 
+// Remember if direct fetch is blocked by browser/network/adblocker in this session
+// so we don't repeat failed network attempts and spam console warnings
+let isDirectFetchBlocked = false;
+
 /**
  * Smart fetch for Supabase:
- * Attempts direct fetch first for maximum speed, native streaming, and zero proxy bottlenecks.
+ * Attempts direct fetch first for maximum speed.
  * If direct fetch is blocked by an ad-blocker or iframe restriction (Failed to fetch),
- * it automatically falls back to the same-origin /api/supabase proxy.
+ * it seamlessly and quietly falls back to the same-origin /api/supabase proxy.
  */
 const smartFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
@@ -109,6 +113,25 @@ const smartFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
   const isSupabaseCall = urlStr.includes(DIRECT_SUPABASE_URL) || urlStr.includes('supabase.co');
 
   if (isSupabaseCall) {
+    let proxyBase = '/api/supabase';
+    if (typeof window !== 'undefined') {
+      proxyBase = `${window.location.origin}/api/supabase`;
+    }
+    const proxyUrl = urlStr.replace(/^https?:\/\/[^\/]+/, proxyBase);
+
+    // If direct fetch is already known to be blocked, go straight to proxy without throwing console errors
+    if (isDirectFetchBlocked) {
+      try {
+        const proxyRes = await fetch(proxyUrl, modifiedInit);
+        if (proxyRes.ok || (proxyRes.status >= 200 && proxyRes.status < 500)) {
+          return proxyRes;
+        }
+      } catch {
+        // Fallback to direct fetch
+        return fetch(input, modifiedInit);
+      }
+    }
+
     // 1. Try direct fetch first (standard CORS, fast, native)
     try {
       const directRes = await fetch(input, modifiedInit);
@@ -116,24 +139,20 @@ const smartFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
       if (directRes.ok || (directRes.status >= 200 && directRes.status < 500)) {
         return directRes;
       }
-    } catch (directErr) {
-      // Network failure, browser block, or Adblocker blocked supabase.co - try local proxy fallback
-      console.warn('Direct Supabase fetch failed (network or adblocker), attempting proxy fallback:', directErr);
+    } catch {
+      // Network failure, browser block, or Adblocker blocked supabase.co
+      // Remember so all subsequent requests use the proxy cleanly without noisy errors
+      isDirectFetchBlocked = true;
     }
 
-    // 2. Fallback to same-origin proxy
-    let proxyBase = '/api/supabase';
-    if (typeof window !== 'undefined') {
-      proxyBase = `${window.location.origin}/api/supabase`;
-    }
-    const proxyUrl = urlStr.replace(/^https?:\/\/[^\/]+/, proxyBase);
+    // 2. Fallback to same-origin proxy cleanly
     try {
       const proxyRes = await fetch(proxyUrl, modifiedInit);
       if (proxyRes.ok || (proxyRes.status >= 200 && proxyRes.status < 500)) {
         return proxyRes;
       }
-    } catch (proxyErr) {
-      console.warn('Proxy fallback also failed:', proxyErr);
+    } catch {
+      // Quiet fallback
     }
   }
 

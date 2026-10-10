@@ -17,6 +17,7 @@ export interface CanteenMenuItem {
   img?: string;
   image?: string;
   created_at?: string;
+  updated_at?: string;
 }
 
 import defaultMenuItemsData from '../data/defaultMenuItems.json';
@@ -91,6 +92,42 @@ export function getCanteenMenuCache(): CanteenMenuItem[] {
 }
 
 /**
+ * Synchronously updates the menu cache in memory and localStorage (0ms delay),
+ * and dispatches 'canteen_menu_updated' and 'canteen_state_updated' so ALL components
+ * (CanteenInventory, MenuManagement, POS, RawDistribution, PersonalPortal) update in real-time.
+ */
+export function setCanteenMenuCache(items: CanteenMenuItem[]): void {
+  inMemoryMenuCache = items;
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('canteen_menu_cache', JSON.stringify(items));
+      localStorage.setItem('canteen_menu_items_list', JSON.stringify(items));
+    } catch (e) {
+      console.warn('Error persisting canteen_menu_cache:', e);
+    }
+    // Instant event dispatch (0ms)
+    window.dispatchEvent(new CustomEvent('canteen_menu_updated', { detail: items }));
+    window.dispatchEvent(new Event('canteen_state_updated'));
+    window.dispatchEvent(new Event('storage'));
+  }
+}
+
+/**
+ * Updates a single menu item in the cache immediately in 0ms and notifies listeners.
+ */
+export function updateSingleMenuItemInCache(updatedItem: Partial<CanteenMenuItem> & { id: string }): CanteenMenuItem[] {
+  const current = getCanteenMenuCache();
+  const next = current.map((it) => {
+    if (it.id === updatedItem.id) {
+      return { ...it, ...updatedItem, updated_at: updatedItem.updated_at || new Date().toISOString() };
+    }
+    return it;
+  });
+  setCanteenMenuCache(next);
+  return next;
+}
+
+/**
  * Fetches latest menu catalog from Supabase, updates memory & localStorage caches,
  * and deduplicates simultaneous requests (single-flight).
  * Uses Stale-While-Revalidate pattern: instantly returns existing cached menu (with DPs) in 0ms,
@@ -106,8 +143,21 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
         try {
           const { data, error } = await supabase.from('Canteen_Menu').select('*');
           if (!error && data && data.length > 0) {
+            const currentCache = getCanteenMenuCache();
+            const currentMap = new Map(currentCache.map((i) => [i.id, i]));
+            const now = Date.now();
+
             const hydrated = data.map((it: any) => {
-              const bn = it.name_bn || it.nameBn || it['Name (BN)'] || getMenuItemBanglaName(it) || '';
+              const local = currentMap.get(it.id);
+              if (local) {
+                const localTime = local.updated_at ? new Date(local.updated_at).getTime() : 0;
+                const serverTime = it.updated_at ? new Date(it.updated_at).getTime() : 0;
+                // Preserve local changes if updated in last 30s and server hasn't caught up
+                if (localTime > serverTime && now - localTime < 30000) {
+                  return local;
+                }
+              }
+              const bn = it.name_bn || it.nameBn || it['Name (BN)'] || getMenuItemBanglaName(it) || local?.name_bn || '';
               return {
                 ...it,
                 name_bn: bn,
@@ -148,8 +198,20 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
     try {
       const { data, error } = await supabase.from('Canteen_Menu').select('*');
       if (!error && data && data.length > 0) {
+        const currentCache = getCanteenMenuCache();
+        const currentMap = new Map(currentCache.map((i) => [i.id, i]));
+        const now = Date.now();
+
         const hydrated = data.map((it: any) => {
-          const bn = it.name_bn || it.nameBn || it['Name (BN)'] || getMenuItemBanglaName(it) || '';
+          const local = currentMap.get(it.id);
+          if (local) {
+            const localTime = local.updated_at ? new Date(local.updated_at).getTime() : 0;
+            const serverTime = it.updated_at ? new Date(it.updated_at).getTime() : 0;
+            if (localTime > serverTime && now - localTime < 30000) {
+              return local;
+            }
+          }
+          const bn = it.name_bn || it.nameBn || it['Name (BN)'] || getMenuItemBanglaName(it) || local?.name_bn || '';
           return {
             ...it,
             name_bn: bn,
