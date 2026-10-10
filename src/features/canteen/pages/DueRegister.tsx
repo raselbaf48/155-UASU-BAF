@@ -3,13 +3,22 @@ import {
   Search, Banknote, UserCheck, RefreshCw, Calendar, Filter, 
   AlertCircle, FileText, CheckCircle2, Store, ShoppingCart, 
   Utensils, Layers, Check, X, ArrowRight, DollarSign, Wallet,
-  Upload, Download, FileSpreadsheet, Plus, Trash2, HelpCircle
+  Upload, Download, FileSpreadsheet, Plus, Trash2, HelpCircle,
+  Coins, ChevronRight, ChevronLeft, Edit2, History, Edit3
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { ExpenseRecord, DUE_SHOPS, DueShopName } from './Expenditures';
+export type { ExpenseRecord, DueShopName };
+export { DUE_SHOPS };
 import { pushKeyToCloud } from '../utils/canteenCloudSync';
+import { getRunningMonthKey, formatMonthOnlyUpper } from './MemberDB';
+import { formatBengaliMonthYear } from '../utils/exportCanteenBillExcel';
+import { SetShopInitialDueModal, getExpenseMonthKey } from '../components/SetShopInitialDueModal';
+import { ShopPayBillModal } from '../components/ShopPayBillModal';
+import { ShopStatementModal } from '../components/ShopStatementModal';
+import { ShopPaymentHistoryModal } from '../components/ShopPaymentHistoryModal';
 
 const EXPENSES_STORAGE_KEY = 'canteen_expenses';
 
@@ -83,6 +92,13 @@ export const DueRegister: React.FC = () => {
   const [isImporting, setIsImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Shop Modals state (Initial Due, Pay Bill, Statement, Payment History)
+  const [initialDueShop, setInitialDueShop] = useState<DueShopName | null>(null);
+  const [payBillShop, setPayBillShop] = useState<DueShopName | null>(null);
+  const [statementShop, setStatementShop] = useState<DueShopName | 'ALL' | null>(null);
+  const [isPaymentHistoryOpen, setIsPaymentHistoryOpen] = useState(false);
+  const [allShopPayments, setAllShopPayments] = useState<ExpenseRecord[]>([]);
+
   const loadDueExpenses = () => {
     try {
       const raw = localStorage.getItem(EXPENSES_STORAGE_KEY);
@@ -90,8 +106,26 @@ export const DueRegister: React.FC = () => {
       // Only keep records with paymentMethod === 'Due'
       const dueRecords = all.filter(e => String(e.paymentMethod || '').trim().toLowerCase() === 'due');
       setExpenses(dueRecords);
+
+      // Paid / settled shop records
+      const paidRecords = all.filter(e => {
+        const isDue = String(e.paymentMethod || '').trim().toLowerCase() === 'due';
+        if (isDue) return false;
+        if (e.settledDate) return true;
+        if (e.dueShop) return true;
+        if (String(e.id).startsWith('shop-pay-')) return true;
+        const descLower = String(e.desc || '').toLowerCase();
+        return (
+          descLower.includes('grocessary') || 
+          descLower.includes('poultry') || 
+          descLower.includes('bake & bite') || 
+          descLower.includes('bake and bite')
+        );
+      });
+      setAllShopPayments(paidRecords);
     } catch {
       setExpenses([]);
+      setAllShopPayments([]);
     }
   };
 
@@ -120,6 +154,69 @@ export const DueRegister: React.FC = () => {
   const bakeAndBiteTotal = useMemo(() => bakeAndBiteExpenses.reduce((s, e) => s + (Number(e.amount) || 0), 0), [bakeAndBiteExpenses]);
   const grandTotalDue = grocessaryTotal + poultryTotal + bakeAndBiteTotal;
 
+  // Month state & navigation (Identical to MemberDB / Bill)
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => getRunningMonthKey());
+  const [monthFilterMode, setMonthFilterMode] = useState<'ALL' | 'MONTH'>('ALL');
+
+  const availableMonths = useMemo(() => {
+    const set = new Set<string>();
+    const cur = getRunningMonthKey();
+    set.add(cur);
+    expenses.forEach((e) => {
+      const mk = e.monthKey || getExpenseMonthKey(e.date);
+      if (mk) set.add(mk);
+    });
+    return Array.from(set).sort().reverse();
+  }, [expenses]);
+
+  const handlePrevMonth = () => {
+    setMonthFilterMode('MONTH');
+    const idx = availableMonths.indexOf(selectedMonth);
+    if (idx !== -1 && idx < availableMonths.length - 1) {
+      setSelectedMonth(availableMonths[idx + 1]);
+    } else {
+      const [y, m] = selectedMonth.split('-').map(Number);
+      const d = new Date(y, m - 2, 1);
+      const prevKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      setSelectedMonth(prevKey);
+    }
+  };
+
+  const handleNextMonth = () => {
+    setMonthFilterMode('MONTH');
+    const idx = availableMonths.indexOf(selectedMonth);
+    if (idx > 0) {
+      setSelectedMonth(availableMonths[idx - 1]);
+    } else {
+      const [y, m] = selectedMonth.split('-').map(Number);
+      const d = new Date(y, m, 1);
+      const nextKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      setSelectedMonth(nextKey);
+    }
+  };
+
+  const selectedMonthLabel = useMemo(() => {
+    return formatMonthOnlyUpper(selectedMonth);
+  }, [selectedMonth]);
+
+  const grocessaryMonthDue = useMemo(() => {
+    return grocessaryExpenses
+      .filter(e => (e.monthKey || getExpenseMonthKey(e.date)) === selectedMonth)
+      .reduce((s, e) => s + (Number(e.amount) || 0), 0);
+  }, [grocessaryExpenses, selectedMonth]);
+
+  const poultryMonthDue = useMemo(() => {
+    return poultryExpenses
+      .filter(e => (e.monthKey || getExpenseMonthKey(e.date)) === selectedMonth)
+      .reduce((s, e) => s + (Number(e.amount) || 0), 0);
+  }, [poultryExpenses, selectedMonth]);
+
+  const bakeAndBiteMonthDue = useMemo(() => {
+    return bakeAndBiteExpenses
+      .filter(e => (e.monthKey || getExpenseMonthKey(e.date)) === selectedMonth)
+      .reduce((s, e) => s + (Number(e.amount) || 0), 0);
+  }, [bakeAndBiteExpenses, selectedMonth]);
+
   // Filter list
   const filtered = expenses.filter((expense) => {
     const expenseShop = resolveExpenseDueShop(expense);
@@ -136,7 +233,10 @@ export const DueRegister: React.FC = () => {
     const matchesShop = 
       selectedShop === 'ALL' || expenseShop === selectedShop;
 
-    return matchesSearch && matchesPerson && matchesShop;
+    const matchesMonth = 
+      monthFilterMode === 'ALL' || (expense.monthKey || getExpenseMonthKey(expense.date)) === selectedMonth;
+
+    return matchesSearch && matchesPerson && matchesShop && matchesMonth;
   });
 
   const totalFilteredAmount = filtered.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
@@ -571,7 +671,21 @@ export const DueRegister: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center space-x-3 w-full sm:w-auto">
+        <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+          {/* PAYMENT HISTORY BUTTON (exactly like Bill) */}
+          <button
+            type="button"
+            onClick={() => setIsPaymentHistoryOpen(true)}
+            className="w-full sm:w-auto flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-indigo-900/40 transition-all cursor-pointer active:scale-95 border border-indigo-400/30 group"
+            title="দোকানের পরিশোধিত বিল ও ভাউচার হিস্ট্রি দেখুন, সম্পাদনা বা বাতিল করুন"
+          >
+            <History className="w-4 h-4 text-indigo-200 group-hover:rotate-[-45deg] transition-transform" />
+            <span>PAYMENT HISTORY</span>
+            <span className="px-1.5 py-0.5 rounded-full bg-black/30 text-[10px] font-mono font-black text-indigo-200 border border-indigo-400/20">
+              {allShopPayments.length}
+            </span>
+          </button>
+
           {/* IMPORT DUE DATA BUTTON */}
           <button
             type="button"
@@ -580,7 +694,7 @@ export const DueRegister: React.FC = () => {
               setParsedRows([]);
               setPastedText('');
             }}
-            className="px-4 py-2.5 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all flex items-center space-x-2 shadow-md shadow-amber-600/30 cursor-pointer active:scale-95 border border-amber-400/40"
+            className="w-full sm:w-auto px-4 py-2.5 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all flex items-center justify-center space-x-2 shadow-md shadow-amber-600/30 cursor-pointer active:scale-95 border border-amber-400/40"
             title="Import multiple dates due records at once from Excel or text"
           >
             <Upload className="w-4 h-4" />
@@ -589,121 +703,476 @@ export const DueRegister: React.FC = () => {
         </div>
       </div>
 
-      {/* 3 SHOPS + TOTAL SUMMARY CARDS */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* 3 SHOPS CARDS (Modeled exactly like Member Box in Bill - Click to open Statement / History) */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         
         {/* Card 1: Grocessary Shop */}
         <div 
-          onClick={() => setSelectedShop(selectedShop === 'Grocessary Shop' ? 'ALL' : 'Grocessary Shop')}
-          className={`rounded-3xl p-5 border transition-all cursor-pointer relative overflow-hidden group select-none ${
+          onClick={() => setStatementShop('Grocessary Shop')}
+          className={`rounded-3xl p-5 border transition-all relative overflow-hidden group select-none shadow-lg flex flex-col justify-between cursor-pointer ${
             selectedShop === 'Grocessary Shop'
-              ? 'bg-gradient-to-br from-emerald-950/70 via-slate-900 to-slate-950 border-emerald-500 shadow-lg shadow-emerald-950/50 ring-2 ring-emerald-500/30'
+              ? 'bg-gradient-to-br from-emerald-950/70 via-slate-900 to-slate-950 border-emerald-500 shadow-emerald-950/50 ring-2 ring-emerald-500/30'
               : 'bg-slate-900/90 border-slate-800 hover:border-emerald-500/50 hover:bg-slate-900'
           }`}
+          title="Click to view Statement / History"
         >
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-black tracking-widest uppercase text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
-              GROCESSARY SHOP
-            </span>
-            <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-              <ShoppingCart className="w-4 h-4" />
+          <div>
+            {/* Top Section: Shop Info (Left) + Total Due (Right) */}
+            <div className="flex items-start justify-between gap-2">
+              <div 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedShop(selectedShop === 'Grocessary Shop' ? 'ALL' : 'Grocessary Shop');
+                }}
+                className="flex items-center space-x-3 min-w-0 cursor-pointer group/title"
+                title="Click to filter table by Grocessary Shop"
+              >
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/30 shadow-inner group-hover/title:scale-105 transition-transform">
+                  <ShoppingCart className="w-6 h-6" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center space-x-1.5 flex-wrap">
+                    <h3 className="text-sm sm:text-base font-black text-white tracking-tight uppercase truncate">
+                      GROCESSARY SHOP
+                    </h3>
+                    {selectedShop === 'Grocessary Shop' && (
+                      <span className="px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 font-mono text-[9px] font-black border border-emerald-500/30">
+                        Active ✓
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] font-bold text-slate-400 truncate">
+                    মুদি দোকান • চাল, তেল, মশলা
+                  </p>
+                </div>
+              </div>
+
+              {/* Top-Right: TOTAL DUE (Click to set/change/replace/add Initial Due) */}
+              <div 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setInitialDueShop('Grocessary Shop');
+                }}
+                className="text-right shrink-0 pl-2 cursor-pointer group/due hover:scale-105 transition-transform"
+                title="সর্বমোট বকেয়া (Click to set/edit Initial Due - আগের বকেয়া পরিবর্তন বা নতুন বকেয়া যোগ করুন)"
+              >
+                <div className="flex items-center justify-end space-x-1 mb-0.5">
+                  <Coins className="w-3 h-3 text-amber-400 group-hover/due:rotate-12 transition-transform" />
+                  <p className="text-[10px] font-black text-slate-400 tracking-widest uppercase">
+                    TOTAL DUE
+                  </p>
+                </div>
+                <p className={`text-xl sm:text-2xl font-black font-mono tracking-tight leading-none ${
+                  grocessaryTotal > 0 ? 'text-rose-400 group-hover/due:text-rose-300 underline decoration-dotted decoration-rose-400/50 underline-offset-2' : 'text-emerald-400 group-hover/due:text-emerald-300'
+                }`}>
+                  ৳{grocessaryTotal.toLocaleString('en-US')}
+                </p>
+                <span className="text-[9px] font-bold text-amber-400/80 group-hover/due:text-amber-300 flex items-center justify-end space-x-0.5 mt-0.5">
+                  <span>Edit / Add Due</span>
+                  <ChevronRight className="w-2.5 h-2.5" />
+                </span>
+              </div>
+            </div>
+
+            {/* Middle Row: Due Items Count & Month Bill Badge */}
+            <div className="mt-3.5 pt-2.5 border-t border-slate-800/80 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedShop(selectedShop === 'Grocessary Shop' ? 'ALL' : 'Grocessary Shop')}
+                className={`px-2.5 py-1 rounded-xl border text-[11px] font-bold font-mono transition-all cursor-pointer ${
+                  selectedShop === 'Grocessary Shop'
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                    : 'bg-slate-950/80 hover:bg-slate-800 text-slate-400 border-slate-800'
+                }`}
+                title="Filter table by Grocessary Shop"
+              >
+                {grocessaryExpenses.length} Due Items {selectedShop === 'Grocessary Shop' ? '• Filtered' : ''}
+              </button>
+
+              <div className="px-2.5 py-1 rounded-xl bg-slate-950/80 border border-slate-800 text-slate-300 flex items-center space-x-1.5 text-[10px] font-bold font-mono">
+                <Calendar className="w-3 h-3 text-amber-400" />
+                <span className="text-slate-400 uppercase">{selectedMonthLabel} DUE:</span>
+                <span className="text-amber-300 font-black">৳{grocessaryMonthDue.toLocaleString()}</span>
+              </div>
             </div>
           </div>
-          <h3 className="text-2xl font-black text-white tracking-tight font-mono">
-            ৳{grocessaryTotal.toLocaleString('en-US')}
-          </h3>
-          <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-800/80 text-[10px]">
-            <span className="text-slate-400 font-bold">{grocessaryExpenses.length} Due Items</span>
-            <span className="text-emerald-400 font-black">
-              {selectedShop === 'Grocessary Shop' ? 'Active Filter ✓' : 'Click to View →'}
-            </span>
+
+          {/* Bottom Action Bar: Left side = Statement, Right side = Pay Bill */}
+          <div className="mt-3 pt-3 border-t border-slate-800/80 flex items-center space-x-2.5">
+            {/* Statement */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setStatementShop('Grocessary Shop');
+              }}
+              className="flex-1 py-2 px-3 bg-slate-800/90 hover:bg-slate-700/90 text-indigo-300 hover:text-white rounded-xl text-xs font-black tracking-wider uppercase flex items-center justify-center space-x-1.5 border border-slate-700/70 transition-all shadow-sm active:translate-y-0.5 group/btn cursor-pointer"
+              title="View Statement & Items breakdown"
+            >
+              <FileText className="w-3.5 h-3.5 text-indigo-400 group-hover/btn:scale-110 transition-transform" />
+              <span>STATEMENT</span>
+            </button>
+
+            {/* Pay Bill */}
+            <button
+              type="button"
+              disabled={grocessaryTotal <= 0}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (grocessaryTotal <= 0) return;
+                setPayBillShop('Grocessary Shop');
+              }}
+              className={`flex-1 py-2 px-3 rounded-xl text-xs font-black tracking-wider uppercase flex items-center justify-center space-x-1.5 transition-all group/btn ${
+                grocessaryTotal > 0
+                  ? 'bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-[0_4px_12px_rgba(16,185,129,0.3)] border-t border-emerald-300/40 active:translate-y-0.5 cursor-pointer'
+                  : 'bg-slate-800/50 text-slate-500 border border-slate-800/80 cursor-not-allowed opacity-50 shadow-none pointer-events-none'
+              }`}
+              title={grocessaryTotal > 0 ? "Direct Pay Bill to Shop" : "কোনো বকেয়া নেই"}
+            >
+              <Banknote className={`w-3.5 h-3.5 ${grocessaryTotal > 0 ? 'group-hover/btn:scale-110 text-white' : 'text-slate-500'} transition-transform`} />
+              <span className="truncate">PAY BILL</span>
+            </button>
           </div>
         </div>
 
         {/* Card 2: Poultry Shop */}
         <div 
-          onClick={() => setSelectedShop(selectedShop === 'Poultry Shop' ? 'ALL' : 'Poultry Shop')}
-          className={`rounded-3xl p-5 border transition-all cursor-pointer relative overflow-hidden group select-none ${
+          onClick={() => setStatementShop('Poultry Shop')}
+          className={`rounded-3xl p-5 border transition-all relative overflow-hidden group select-none shadow-lg flex flex-col justify-between cursor-pointer ${
             selectedShop === 'Poultry Shop'
-              ? 'bg-gradient-to-br from-amber-950/70 via-slate-900 to-slate-950 border-amber-500 shadow-lg shadow-amber-950/50 ring-2 ring-amber-500/30'
+              ? 'bg-gradient-to-br from-amber-950/70 via-slate-900 to-slate-950 border-amber-500 shadow-amber-950/50 ring-2 ring-amber-500/30'
               : 'bg-slate-900/90 border-slate-800 hover:border-amber-500/50 hover:bg-slate-900'
           }`}
+          title="Click to view Statement / History"
         >
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-black tracking-widest uppercase text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
-              POULTRY SHOP
-            </span>
-            <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center">
-              <Layers className="w-4 h-4" />
+          <div>
+            {/* Top Section: Shop Info (Left) + Total Due (Right) */}
+            <div className="flex items-start justify-between gap-2">
+              <div 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedShop(selectedShop === 'Poultry Shop' ? 'ALL' : 'Poultry Shop');
+                }}
+                className="flex items-center space-x-3 min-w-0 cursor-pointer group/title"
+                title="Click to filter table by Poultry Shop"
+              >
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/30 shadow-inner group-hover/title:scale-105 transition-transform">
+                  <Layers className="w-6 h-6" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center space-x-1.5 flex-wrap">
+                    <h3 className="text-sm sm:text-base font-black text-white tracking-tight uppercase truncate">
+                      POULTRY SHOP
+                    </h3>
+                    {selectedShop === 'Poultry Shop' && (
+                      <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 font-mono text-[9px] font-black border border-amber-500/30">
+                        Active ✓
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] font-bold text-slate-400 truncate">
+                    পোল্ট্রি শপ • মুরগি ও ডিম
+                  </p>
+                </div>
+              </div>
+
+              {/* Top-Right: TOTAL DUE (Click to set/change/replace/add Initial Due) */}
+              <div 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setInitialDueShop('Poultry Shop');
+                }}
+                className="text-right shrink-0 pl-2 cursor-pointer group/due hover:scale-105 transition-transform"
+                title="সর্বমোট বকেয়া (Click to set/edit Initial Due - আগের বকেয়া পরিবর্তন বা নতুন বকেয়া যোগ করুন)"
+              >
+                <div className="flex items-center justify-end space-x-1 mb-0.5">
+                  <Coins className="w-3 h-3 text-amber-400 group-hover/due:rotate-12 transition-transform" />
+                  <p className="text-[10px] font-black text-slate-400 tracking-widest uppercase">
+                    TOTAL DUE
+                  </p>
+                </div>
+                <p className={`text-xl sm:text-2xl font-black font-mono tracking-tight leading-none ${
+                  poultryTotal > 0 ? 'text-rose-400 group-hover/due:text-rose-300 underline decoration-dotted decoration-rose-400/50 underline-offset-2' : 'text-emerald-400 group-hover/due:text-emerald-300'
+                }`}>
+                  ৳{poultryTotal.toLocaleString('en-US')}
+                </p>
+                <span className="text-[9px] font-bold text-amber-400/80 group-hover/due:text-amber-300 flex items-center justify-end space-x-0.5 mt-0.5">
+                  <span>Edit / Add Due</span>
+                  <ChevronRight className="w-2.5 h-2.5" />
+                </span>
+              </div>
+            </div>
+
+            {/* Middle Row: Due Items Count & Month Bill Badge */}
+            <div className="mt-3.5 pt-2.5 border-t border-slate-800/80 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedShop(selectedShop === 'Poultry Shop' ? 'ALL' : 'Poultry Shop');
+                }}
+                className={`px-2.5 py-1 rounded-xl border text-[11px] font-bold font-mono transition-all cursor-pointer ${
+                  selectedShop === 'Poultry Shop'
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                    : 'bg-slate-950/80 hover:bg-slate-800 text-slate-400 border-slate-800'
+                }`}
+                title="Filter table by Poultry Shop"
+              >
+                {poultryExpenses.length} Due Items {selectedShop === 'Poultry Shop' ? '• Filtered' : ''}
+              </button>
+
+              <div className="px-2.5 py-1 rounded-xl bg-slate-950/80 border border-slate-800 text-slate-300 flex items-center space-x-1.5 text-[10px] font-bold font-mono">
+                <Calendar className="w-3 h-3 text-amber-400" />
+                <span className="text-slate-400 uppercase">{selectedMonthLabel} DUE:</span>
+                <span className="text-amber-300 font-black">৳{poultryMonthDue.toLocaleString()}</span>
+              </div>
             </div>
           </div>
-          <h3 className="text-2xl font-black text-white tracking-tight font-mono">
-            ৳{poultryTotal.toLocaleString('en-US')}
-          </h3>
-          <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-800/80 text-[10px]">
-            <span className="text-slate-400 font-bold">{poultryExpenses.length} Due Items</span>
-            <span className="text-amber-400 font-black">
-              {selectedShop === 'Poultry Shop' ? 'Active Filter ✓' : 'Click to View →'}
-            </span>
+
+          {/* Bottom Action Bar: Left side = Statement, Right side = Pay Bill */}
+          <div className="mt-3 pt-3 border-t border-slate-800/80 flex items-center space-x-2.5">
+            {/* Statement */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setStatementShop('Poultry Shop');
+              }}
+              className="flex-1 py-2 px-3 bg-slate-800/90 hover:bg-slate-700/90 text-indigo-300 hover:text-white rounded-xl text-xs font-black tracking-wider uppercase flex items-center justify-center space-x-1.5 border border-slate-700/70 transition-all shadow-sm active:translate-y-0.5 group/btn cursor-pointer"
+              title="View Statement & Items breakdown"
+            >
+              <FileText className="w-3.5 h-3.5 text-indigo-400 group-hover/btn:scale-110 transition-transform" />
+              <span>STATEMENT</span>
+            </button>
+
+            {/* Pay Bill */}
+            <button
+              type="button"
+              disabled={poultryTotal <= 0}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (poultryTotal <= 0) return;
+                setPayBillShop('Poultry Shop');
+              }}
+              className={`flex-1 py-2 px-3 rounded-xl text-xs font-black tracking-wider uppercase flex items-center justify-center space-x-1.5 transition-all group/btn ${
+                poultryTotal > 0
+                  ? 'bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-[0_4px_12px_rgba(16,185,129,0.3)] border-t border-emerald-300/40 active:translate-y-0.5 cursor-pointer'
+                  : 'bg-slate-800/50 text-slate-500 border border-slate-800/80 cursor-not-allowed opacity-50 shadow-none pointer-events-none'
+              }`}
+              title={poultryTotal > 0 ? "Direct Pay Bill to Shop" : "কোনো বকেয়া নেই"}
+            >
+              <Banknote className={`w-3.5 h-3.5 ${poultryTotal > 0 ? 'group-hover/btn:scale-110 text-white' : 'text-slate-500'} transition-transform`} />
+              <span className="truncate">PAY BILL</span>
+            </button>
           </div>
         </div>
 
         {/* Card 3: Bake & Bite */}
         <div 
-          onClick={() => setSelectedShop(selectedShop === 'Bake & Bite' ? 'ALL' : 'Bake & Bite')}
-          className={`rounded-3xl p-5 border transition-all cursor-pointer relative overflow-hidden group select-none ${
+          onClick={() => setStatementShop('Bake & Bite')}
+          className={`rounded-3xl p-5 border transition-all relative overflow-hidden group select-none shadow-lg flex flex-col justify-between cursor-pointer ${
             selectedShop === 'Bake & Bite'
-              ? 'bg-gradient-to-br from-purple-950/70 via-slate-900 to-slate-950 border-purple-500 shadow-lg shadow-purple-950/50 ring-2 ring-purple-500/30'
+              ? 'bg-gradient-to-br from-purple-950/70 via-slate-900 to-slate-950 border-purple-500 shadow-purple-950/50 ring-2 ring-purple-500/30'
               : 'bg-slate-900/90 border-slate-800 hover:border-purple-500/50 hover:bg-slate-900'
           }`}
+          title="Click to view Statement / History"
         >
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-black tracking-widest uppercase text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded-md border border-purple-500/20">
-              BAKE & BITE
-            </span>
-            <div className="w-9 h-9 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center">
-              <Utensils className="w-4 h-4" />
+          <div>
+            {/* Top Section: Shop Info (Left) + Total Due (Right) */}
+            <div className="flex items-start justify-between gap-2">
+              <div 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedShop(selectedShop === 'Bake & Bite' ? 'ALL' : 'Bake & Bite');
+                }}
+                className="flex items-center space-x-3 min-w-0 cursor-pointer group/title"
+                title="Click to filter table by Bake & Bite"
+              >
+                <div className="w-12 h-12 rounded-2xl bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0 border border-purple-500/30 shadow-inner group-hover/title:scale-105 transition-transform">
+                  <Utensils className="w-6 h-6" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center space-x-1.5 flex-wrap">
+                    <h3 className="text-sm sm:text-base font-black text-white tracking-tight uppercase truncate">
+                      BAKE & BITE
+                    </h3>
+                    {selectedShop === 'Bake & Bite' && (
+                      <span className="px-1.5 py-0.2 rounded-full bg-purple-500/20 text-purple-300 font-mono text-[9px] font-black border border-purple-500/30">
+                        Active ✓
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] font-bold text-slate-400 truncate">
+                    বেক অ্যান্ড বাইট • রুটি, টোস্ট ও পেটিস
+                  </p>
+                </div>
+              </div>
+
+              {/* Top-Right: TOTAL DUE (Click to set/change/replace/add Initial Due) */}
+              <div 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setInitialDueShop('Bake & Bite');
+                }}
+                className="text-right shrink-0 pl-2 cursor-pointer group/due hover:scale-105 transition-transform"
+                title="সর্বমোট বকেয়া (Click to set/edit Initial Due - আগের বকেয়া পরিবর্তন বা নতুন বকেয়া যোগ করুন)"
+              >
+                <div className="flex items-center justify-end space-x-1 mb-0.5">
+                  <Coins className="w-3 h-3 text-amber-400 group-hover/due:rotate-12 transition-transform" />
+                  <p className="text-[10px] font-black text-slate-400 tracking-widest uppercase">
+                    TOTAL DUE
+                  </p>
+                </div>
+                <p className={`text-xl sm:text-2xl font-black font-mono tracking-tight leading-none ${
+                  bakeAndBiteTotal > 0 ? 'text-rose-400 group-hover/due:text-rose-300 underline decoration-dotted decoration-rose-400/50 underline-offset-2' : 'text-emerald-400 group-hover/due:text-emerald-300'
+                }`}>
+                  ৳{bakeAndBiteTotal.toLocaleString('en-US')}
+                </p>
+                <span className="text-[9px] font-bold text-amber-400/80 group-hover/due:text-amber-300 flex items-center justify-end space-x-0.5 mt-0.5">
+                  <span>Edit / Add Due</span>
+                  <ChevronRight className="w-2.5 h-2.5" />
+                </span>
+              </div>
+            </div>
+
+            {/* Middle Row: Due Items Count & Month Bill Badge */}
+            <div className="mt-3.5 pt-2.5 border-t border-slate-800/80 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedShop(selectedShop === 'Bake & Bite' ? 'ALL' : 'Bake & Bite');
+                }}
+                className={`px-2.5 py-1 rounded-xl border text-[11px] font-bold font-mono transition-all cursor-pointer ${
+                  selectedShop === 'Bake & Bite'
+                    ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
+                    : 'bg-slate-950/80 hover:bg-slate-800 text-slate-400 border-slate-800'
+                }`}
+                title="Filter table by Bake & Bite"
+              >
+                {bakeAndBiteExpenses.length} Due Items {selectedShop === 'Bake & Bite' ? '• Filtered' : ''}
+              </button>
+
+              <div className="px-2.5 py-1 rounded-xl bg-slate-950/80 border border-slate-800 text-slate-300 flex items-center space-x-1.5 text-[10px] font-bold font-mono">
+                <Calendar className="w-3 h-3 text-amber-400" />
+                <span className="text-slate-400 uppercase">{selectedMonthLabel} DUE:</span>
+                <span className="text-amber-300 font-black">৳{bakeAndBiteMonthDue.toLocaleString()}</span>
+              </div>
             </div>
           </div>
-          <h3 className="text-2xl font-black text-white tracking-tight font-mono">
-            ৳{bakeAndBiteTotal.toLocaleString('en-US')}
-          </h3>
-          <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-800/80 text-[10px]">
-            <span className="text-slate-400 font-bold">{bakeAndBiteExpenses.length} Due Items</span>
-            <span className="text-purple-400 font-black">
-              {selectedShop === 'Bake & Bite' ? 'Active Filter ✓' : 'Click to View →'}
-            </span>
+
+          {/* Bottom Action Bar: Left side = Statement, Right side = Pay Bill */}
+          <div className="mt-3 pt-3 border-t border-slate-800/80 flex items-center space-x-2.5">
+            {/* Statement */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setStatementShop('Bake & Bite');
+              }}
+              className="flex-1 py-2 px-3 bg-slate-800/90 hover:bg-slate-700/90 text-indigo-300 hover:text-white rounded-xl text-xs font-black tracking-wider uppercase flex items-center justify-center space-x-1.5 border border-slate-700/70 transition-all shadow-sm active:translate-y-0.5 group/btn cursor-pointer"
+              title="View Statement & Items breakdown"
+            >
+              <FileText className="w-3.5 h-3.5 text-indigo-400 group-hover/btn:scale-110 transition-transform" />
+              <span>STATEMENT</span>
+            </button>
+
+            {/* Pay Bill */}
+            <button
+              type="button"
+              disabled={bakeAndBiteTotal <= 0}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (bakeAndBiteTotal <= 0) return;
+                setPayBillShop('Bake & Bite');
+              }}
+              className={`flex-1 py-2 px-3 rounded-xl text-xs font-black tracking-wider uppercase flex items-center justify-center space-x-1.5 transition-all group/btn ${
+                bakeAndBiteTotal > 0
+                  ? 'bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-[0_4px_12px_rgba(16,185,129,0.3)] border-t border-emerald-300/40 active:translate-y-0.5 cursor-pointer'
+                  : 'bg-slate-800/50 text-slate-500 border border-slate-800/80 cursor-not-allowed opacity-50 shadow-none pointer-events-none'
+              }`}
+              title={bakeAndBiteTotal > 0 ? "Direct Pay Bill to Shop" : "কোনো বকেয়া নেই"}
+            >
+              <Banknote className={`w-3.5 h-3.5 ${bakeAndBiteTotal > 0 ? 'group-hover/btn:scale-110 text-white' : 'text-slate-500'} transition-transform`} />
+              <span className="truncate">PAY BILL</span>
+            </button>
           </div>
         </div>
 
-        {/* Card 4: Total Due Summary */}
-        <div 
-          onClick={() => setSelectedShop('ALL')}
-          className={`rounded-3xl p-5 border transition-all cursor-pointer relative overflow-hidden select-none ${
-            selectedShop === 'ALL'
-              ? 'bg-gradient-to-br from-indigo-950/70 via-slate-900 to-slate-950 border-indigo-500 shadow-lg shadow-indigo-950/50 ring-2 ring-indigo-500/30'
-              : 'bg-slate-900/90 border-slate-800 hover:border-indigo-500/50 hover:bg-slate-900'
-          }`}
-        >
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-black tracking-widest uppercase text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-md border border-indigo-500/20">
-              TOTAL DUE BALANCE
+      </div>
+
+      {/* Month Selector & Filter Info Strip (Identical to Bill / MemberDB) */}
+      <div className="bg-slate-900/85 border border-slate-800 rounded-2xl p-2.5 sm:p-3.5 shadow-md">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between text-[11px] font-bold text-slate-400 gap-2.5">
+          <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+            <span>
+              Showing: <strong className="text-white">{monthFilterMode === 'ALL' ? 'All Due Entries' : 'Monthly Due Entries'}</strong>
+              {' • '}
+              <strong className="text-amber-300 font-mono">{formatMonthOnlyUpper(selectedMonth)}</strong>
             </span>
-            <div className="w-9 h-9 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
-              <Store className="w-4 h-4" />
+            <span className="text-slate-500 hidden sm:inline">|</span>
+            <span className="text-amber-400 font-mono font-black">
+              Total Due: ৳{totalFilteredAmount.toLocaleString('en-US')}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-end space-x-2.5 shrink-0 flex-wrap gap-2">
+            {/* Month Selector Box on the LEFT side of All/Month Toggle - Format: "OCTOBER" */}
+            <div className="inline-flex items-center bg-slate-950 rounded-xl p-0.5 border border-slate-800 shadow-xs">
+              <button
+                type="button"
+                onClick={handlePrevMonth}
+                className="w-7 h-7 flex items-center justify-center bg-gradient-to-b from-slate-700 via-slate-800 to-slate-900 hover:from-slate-600 hover:to-slate-750 text-amber-300 hover:text-white rounded-lg transition-all cursor-pointer border-t border-slate-600/80 border-x border-slate-700/80 border-b-[2.5px] border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.6)]"
+                title="পূর্ববর্তী মাস"
+              >
+                <ChevronLeft className="w-3.5 h-3.5 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]" />
+              </button>
+
+              <div className="px-2.5 py-0.5 text-center select-none flex items-center space-x-1.5">
+                <Calendar className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span className="text-xs sm:text-sm font-black uppercase font-mono tracking-wider text-white">
+                  {formatMonthOnlyUpper(selectedMonth)}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleNextMonth}
+                className="w-7 h-7 flex items-center justify-center bg-gradient-to-b from-slate-700 via-slate-800 to-slate-900 hover:from-slate-600 hover:to-slate-750 text-amber-300 hover:text-white rounded-lg transition-all cursor-pointer border-t border-slate-600/80 border-x border-slate-700/80 border-b-[2.5px] border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.6)]"
+                title="পরবর্তী মাস"
+              >
+                <ChevronRight className="w-3.5 h-3.5 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]" />
+              </button>
+            </div>
+
+            {/* Quick Toggle: All vs Filtered Month */}
+            <div className="flex items-center bg-slate-950 rounded-xl p-0.5 border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setMonthFilterMode('ALL')}
+                className={`px-3 py-1.5 rounded-lg text-[10px] sm:text-[11px] font-black uppercase transition-all cursor-pointer ${
+                  monthFilterMode === 'ALL'
+                    ? 'bg-slate-800 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                All
+              </button>
+              <button
+                type="button"
+                onClick={() => setMonthFilterMode('MONTH')}
+                className={`px-3 py-1.5 rounded-lg text-[10px] sm:text-[11px] font-black uppercase transition-all cursor-pointer ${
+                  monthFilterMode === 'MONTH'
+                    ? 'bg-amber-600 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Month ({formatMonthOnlyUpper(selectedMonth)})
+              </button>
             </div>
           </div>
-          <h3 className="text-2xl font-black text-amber-400 tracking-tight font-mono">
-            ৳{grandTotalDue.toLocaleString('en-US')}
-          </h3>
-          <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-800/80 text-[10px]">
-            <span className="text-slate-400 font-bold">{expenses.length} Records Total</span>
-            <span className="text-indigo-400 font-black">
-              {selectedShop === 'ALL' ? 'Showing All ✓' : 'Show All →'}
-            </span>
-          </div>
         </div>
-
       </div>
 
       {/* Shop Filter Tabs */}
@@ -1348,6 +1817,72 @@ export const DueRegister: React.FC = () => {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Set Shop Initial Due Modal */}
+      {initialDueShop && (
+        <SetShopInitialDueModal
+          isOpen={!!initialDueShop}
+          onClose={() => setInitialDueShop(null)}
+          shopName={initialDueShop}
+          currentTotalDue={
+            initialDueShop === 'Grocessary Shop'
+              ? grocessaryTotal
+              : initialDueShop === 'Poultry Shop'
+              ? poultryTotal
+              : bakeAndBiteTotal
+          }
+          onSuccess={(_updatedDue) => {
+            loadDueExpenses();
+            setToastMessage(`✅ ${initialDueShop} এর প্রারম্ভিক বকেয়া সফলভাবে আপডেট করা হয়েছে!`);
+            setTimeout(() => setToastMessage(''), 4500);
+          }}
+        />
+      )}
+
+      {/* Shop Pay Bill Modal */}
+      {payBillShop && (
+        <ShopPayBillModal
+          isOpen={!!payBillShop}
+          onClose={() => setPayBillShop(null)}
+          shopName={payBillShop}
+          totalDue={
+            payBillShop === 'Grocessary Shop'
+              ? grocessaryTotal
+              : payBillShop === 'Poultry Shop'
+              ? poultryTotal
+              : bakeAndBiteTotal
+          }
+          onSuccess={(amt, method) => {
+            loadDueExpenses();
+            setToastMessage(`✅ ${payBillShop} এর ৳${amt.toLocaleString()} বিল পরিশোধ সফল হয়েছে (${method})!`);
+            setTimeout(() => setToastMessage(''), 5000);
+          }}
+        />
+      )}
+
+      {/* Shop Statement Modal */}
+      {statementShop && (
+        <ShopStatementModal
+          isOpen={!!statementShop}
+          onClose={() => setStatementShop(null)}
+          shopName={statementShop}
+          onSettleIndividualExpense={(exp) => {
+            setStatementShop(null);
+            setSettleExpense(exp);
+          }}
+          onOpenPayBill={(s) => {
+            setStatementShop(null);
+            setPayBillShop(s);
+          }}
+        />
+      )}
+
+      {/* Shop Payment History Modal */}
+      <ShopPaymentHistoryModal
+        isOpen={isPaymentHistoryOpen}
+        onClose={() => setIsPaymentHistoryOpen(false)}
+        onPaymentUpdated={() => loadDueExpenses()}
+      />
 
     </div>
   );

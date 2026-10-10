@@ -33,7 +33,7 @@ import { DueRegister } from '../pages/DueRegister';
 import { RawDistributionPage } from '../pages/RawDistributionPage';
 import { AirmanProfileModal } from '../../../components/AirmanProfileModal';
 
-import { Wallet, LayoutDashboard, Coffee, Search, List, CreditCard, ArrowLeft, Utensils, Wifi, HelpCircle, LogIn, Grid, Package as Pkg, ShoppingCart, Users, Banknote, BarChart2, Settings as SettingsIcon, PieChart, Package, UserCircle, X, Menu, User, Eye, EyeOff, Lock, Phone, UtensilsCrossed, Boxes, ClipboardList, Cloud, RefreshCw, Receipt, KeyRound, ChefHat } from 'lucide-react';
+import { Wallet, LayoutDashboard, Coffee, Search, List, CreditCard, ArrowLeft, Utensils, Wifi, HelpCircle, LogIn, Grid, Package as Pkg, ShoppingCart, Users, Banknote, BarChart2, Settings as SettingsIcon, PieChart, Package, UserCircle, X, Menu, User, Eye, EyeOff, Lock, Phone, UtensilsCrossed, Boxes, ClipboardList, Cloud, RefreshCw, Receipt, KeyRound, ChefHat, Landmark, Layers } from 'lucide-react';
 
 interface CanteenLayoutProps {
   initialMember?: { name: string, bdNo: string, role?: 'employee'|'manager', photoUrl?: string, due?: number };
@@ -572,6 +572,8 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
   const navItems = currentUser.role === 'manager' ? [
     { id: 'manager_dashboard', name: 'Dashboard', icon: Grid },
     { id: 'pos_sales', name: 'POS Sales', icon: ShoppingCart },
+    { id: 'unit_fund', name: 'Unit Fund', icon: Landmark },
+    { id: 'others', name: 'Others', icon: Layers },
     { id: 'member_db', name: 'Bill', icon: Receipt },
     { id: 'due_register', name: 'Due Register', icon: ClipboardList },
     { id: 'menu', name: 'Menu', icon: UtensilsCrossed },
@@ -591,7 +593,9 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
     switch (tabId) {
       case 'manager_dashboard': return <ManagerDashboard />;
       case 'pos_sales': return <PosSales />;
-      case 'member_db': return <MemberDB />;
+      case 'unit_fund': return <MemberDB forcedCategory="UNIT_FUND" onNavigateToTab={(tab) => setActiveTab(tab)} />;
+      case 'others': return <MemberDB forcedCategory="OTHERS" onNavigateToTab={(tab) => setActiveTab(tab)} />;
+      case 'member_db': return <MemberDB initialCategory="ALL" hideFundTabs={true} onNavigateToTab={(tab) => setActiveTab(tab)} />;
       case 'due_register': return <DueRegister />;
       case 'menu': return <CanteenInventory readOnly={currentUser.role !== 'manager'} />;
       case 'inventory': return <RawInventoryManagement readOnly={currentUser.role !== 'manager'} />;
@@ -606,7 +610,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
 
   const renderContent = () => {
     // If not a manager, prevent access to any manager tabs
-    const managerTabs = ['manager_dashboard', 'pos_sales', 'member_db', 'due_register', 'expenditures', 'reports', 'fund', 'raw_distribution', 'settings'];
+    const managerTabs = ['manager_dashboard', 'pos_sales', 'unit_fund', 'others', 'member_db', 'due_register', 'expenditures', 'reports', 'fund', 'raw_distribution', 'settings'];
     if (currentUser.role !== 'manager' && managerTabs.includes(activeTab)) {
       return (
         <PersonalPortal 

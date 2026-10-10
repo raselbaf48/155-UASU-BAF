@@ -303,17 +303,33 @@ export const getPaymentCycleMonthKey = (dateVal: any): string => {
           year = yr;
         } else {
           // 4. Bengali month names e.g. "০২ অক্টোবর ২০২৬" or "25 সেপ্টেম্বর 26"
-          const BN_MONTH_MAP: Record<string, number> = {
-            'জানু': 1, 'ফেব্রু': 2, 'মার্চ': 3, 'এপ্রি': 4, 'মে': 5, 'জুন': 6,
-            'জুলাই': 7, 'আগস্ট': 8, 'সেপ্টে': 9, 'অক্টো': 10, 'নভে': 11, 'ডিসে': 12
-          };
+          const BN_MONTH_LIST: Array<{ prefix: string; m: number; isMay?: boolean }> = [
+            { prefix: 'অক্টো', m: 10 },
+            { prefix: 'সেপ্টে', m: 9 },
+            { prefix: 'নভে', m: 11 },
+            { prefix: 'ডিসে', m: 12 },
+            { prefix: 'জানু', m: 1 },
+            { prefix: 'ফেব্রু', m: 2 },
+            { prefix: 'মার্চ', m: 3 },
+            { prefix: 'এপ্রি', m: 4 },
+            { prefix: 'আগস্ট', m: 8 },
+            { prefix: 'জুলাই', m: 7 },
+            { prefix: 'জুন', m: 6 },
+            { prefix: 'মে', m: 5, isMay: true }
+          ];
           const bnMatch = str.match(/^(\d{1,2})[\s\-\/\.]+([^\d\s\-\/\.]+)/);
           if (bnMatch) {
             day = parseInt(bnMatch[1], 10);
             const rawMon = bnMatch[2].trim();
-            for (const [k, v] of Object.entries(BN_MONTH_MAP)) {
-              if (rawMon.includes(k)) {
-                month = v;
+            for (const item of BN_MONTH_LIST) {
+              let matched = false;
+              if (item.isMay) {
+                matched = /(?:^|[^\u0980-\u09FF])মে(?:[^\u0980-\u09FF]|$)/.test(rawMon) && !rawMon.includes('মেম্বার') && !rawMon.includes('মেসার্স');
+              } else {
+                matched = rawMon.includes(item.prefix);
+              }
+              if (matched) {
+                month = item.m;
                 break;
               }
             }

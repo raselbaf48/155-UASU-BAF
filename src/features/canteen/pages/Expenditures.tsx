@@ -59,6 +59,7 @@ export type DueShopName = typeof DUE_SHOPS[number];
 export interface ExpenseRecord {
   id: string | number;
   date: string;
+  monthKey?: string;
   desc: string;
   subdesc?: string;
   category?: string;
@@ -72,6 +73,8 @@ export interface ExpenseRecord {
   isCustom?: boolean;
   rawItemId?: string;
   advanceId?: string;
+  settledDate?: string;
+  settledMethod?: string;
 }
 
 export interface BazarAdvance {

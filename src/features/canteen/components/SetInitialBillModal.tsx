@@ -8,7 +8,9 @@ import {
   Layers, 
   RefreshCw,
   Calendar,
-  ChevronDown
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { pushKeyToCloud } from '../utils/canteenCloudSync';
@@ -16,7 +18,7 @@ import { formatCanteenDate } from '../utils/dateUtils';
 import { resolveImageUrl } from '../utils/canteenSettings';
 import { getFormattedDateForMonth } from '../utils/importHistoryTxs';
 import { formatBengaliMonthYear } from '../utils/exportCanteenBillExcel';
-import { getTxMonthKey, getRunningMonthKey } from '../pages/MemberDB';
+import { getTxMonthKey, getRunningMonthKey, formatMonthOnlyUpper } from '../pages/MemberDB';
 
 interface SetInitialBillModalProps {
   isOpen: boolean;
@@ -426,26 +428,60 @@ export const SetInitialBillModal: React.FC<SetInitialBillModalProps> = ({
             </p>
           </div>
 
-          {/* Month Selector: Clean Dropdown List */}
+          {/* Month Selector: Bill er month option er moto navigation */}
           <div>
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
-              টার্গেট মাস (Target Month)
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1 flex items-center justify-between">
+              <span>টার্গেট মাস (Target Month)</span>
+              <span className="text-[10px] text-slate-500 font-mono normal-case">
+                {formatBengaliMonthYear(billMonth)}
+              </span>
             </label>
-            <div className="relative">
-              <select
-                value={billMonth}
-                onChange={(e) => handleMonthChange(e.target.value)}
-                className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 text-xs font-bold font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 appearance-none cursor-pointer pr-10"
+            <div className="flex items-center justify-between bg-slate-950 rounded-2xl p-1.5 border border-slate-800 shadow-inner">
+              <button
+                type="button"
+                onClick={() => {
+                  const idx = monthOptions.findIndex(o => o.key === billMonth);
+                  if (idx !== -1 && idx < monthOptions.length - 1) {
+                    handleMonthChange(monthOptions[idx + 1].key);
+                  } else {
+                    const [y, m] = billMonth.split('-').map(Number);
+                    const d = new Date(y, m - 2, 1);
+                    handleMonthChange(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+                  }
+                }}
+                className="w-9 h-9 flex items-center justify-center bg-gradient-to-b from-slate-700 via-slate-800 to-slate-900 hover:from-slate-600 hover:to-slate-750 text-indigo-300 hover:text-white rounded-xl transition-all cursor-pointer border-t border-slate-600/80 border-x border-slate-700/80 border-b-[2.5px] border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.6)]"
+                title="পূর্ববর্তী মাস"
               >
-                {monthOptions.map((opt) => (
-                  <option key={opt.key} value={opt.key} className="bg-slate-900 text-white py-1.5">
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-indigo-400">
-                <ChevronDown className="w-4 h-4" />
+                <ChevronLeft className="w-4 h-4 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]" />
+              </button>
+
+              <div className="flex-1 px-3 py-1 text-center select-none flex items-center justify-center space-x-2">
+                <Calendar className="w-4 h-4 text-indigo-400 shrink-0" />
+                <span className="text-sm font-black uppercase font-mono tracking-wider text-white">
+                  {formatMonthOnlyUpper(billMonth)}
+                </span>
+                <span className="text-xs font-mono font-bold text-slate-400">
+                  {billMonth.split('-')[0]}
+                </span>
               </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const idx = monthOptions.findIndex(o => o.key === billMonth);
+                  if (idx > 0) {
+                    handleMonthChange(monthOptions[idx - 1].key);
+                  } else {
+                    const [y, m] = billMonth.split('-').map(Number);
+                    const d = new Date(y, m, 1);
+                    handleMonthChange(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+                  }
+                }}
+                className="w-9 h-9 flex items-center justify-center bg-gradient-to-b from-slate-700 via-slate-800 to-slate-900 hover:from-slate-600 hover:to-slate-750 text-indigo-300 hover:text-white rounded-xl transition-all cursor-pointer border-t border-slate-600/80 border-x border-slate-700/80 border-b-[2.5px] border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.6)]"
+                title="পরবর্তী মাস"
+              >
+                <ChevronRight className="w-4 h-4 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]" />
+              </button>
             </div>
             {previousAmount > 0 && (
               <p className="text-[11px] text-amber-300 mt-1.5 font-bold flex items-center gap-1.5">

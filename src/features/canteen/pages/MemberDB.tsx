@@ -268,17 +268,34 @@ export const getTxMonthKey = (dateStr: any): string => {
     }
   }
 
-  // 2b. Bengali month string (e.g. "আগস্ট ২০২৬", "সেপ্টেম্বর ২০২৬", "২৮ আগস্ট ২৬")
-  const BN_MONTH_MAP: Record<string, string> = {
-    'জানু': '01', 'ফেব্রু': '02', 'মার্চ': '03', 'এপ্রি': '04', 'মে': '05', 'জুন': '06',
-    'জুলা': '07', 'আগস্ট': '08', 'সেপ্টে': '09', 'অক্টো': '10', 'নভে': '11', 'ডিসে': '12'
-  };
-  for (const [bnPrefix, mNum] of Object.entries(BN_MONTH_MAP)) {
-    if (str.includes(bnPrefix)) {
+  // 2b. Bengali month string (e.g. "আগস্ট ২০২৬", "সেপ্টেম্বর ২০২৬", "২৮ আগস্ট ২৬", "০১ অক্টোবর ২০২৬")
+  const BN_MONTH_MAP: Array<{ prefix: string; mNum: string; isMay?: boolean }> = [
+    { prefix: 'অক্টো', mNum: '10' },
+    { prefix: 'সেপ্টে', mNum: '09' },
+    { prefix: 'নভে', mNum: '11' },
+    { prefix: 'ডিসে', mNum: '12' },
+    { prefix: 'জানু', mNum: '01' },
+    { prefix: 'ফেব্রু', mNum: '02' },
+    { prefix: 'মার্চ', mNum: '03' },
+    { prefix: 'এপ্রি', mNum: '04' },
+    { prefix: 'আগস্ট', mNum: '08' },
+    { prefix: 'জুলা', mNum: '07' },
+    { prefix: 'জুন', mNum: '06' },
+    { prefix: 'মে', mNum: '05', isMay: true }
+  ];
+  for (const item of BN_MONTH_MAP) {
+    let matched = false;
+    if (item.isMay) {
+      // Must be the standalone month word 'মে', NEVER part of 'মেম্বার' (Member), 'মেসার্স', etc.
+      matched = /(?:^|[^\u0980-\u09FF])মে(?:[^\u0980-\u09FF]|$)/.test(str) && !str.includes('মেম্বার') && !str.includes('মেসার্স');
+    } else {
+      matched = str.includes(item.prefix);
+    }
+    if (matched) {
       const yrMatch = str.match(/(\d{4}|\d{2})/);
       let yr = yrMatch ? parseInt(yrMatch[1], 10) : new Date().getFullYear();
       if (yr < 100) yr += 2000;
-      return `${yr}-${mNum}`;
+      return `${yr}-${item.mNum}`;
     }
   }
 
@@ -320,8 +337,21 @@ export const getTxEffectiveMonth = (tx: any): string => {
   if (isPay) {
     return resolvePaymentBillMonth(tx);
   }
+
+  // 1. If explicit valid monthKey is stored, strictly honor it as the primary authority
+  if (tx.monthKey && /^\d{4}-\d{2}$/.test(String(tx.monthKey).trim())) {
+    return String(tx.monthKey).trim();
+  }
+
+  // 2. Check items description with priority for October, September, August, etc.
   const itemsStr = String(tx.items || '');
   if (itemsStr) {
+    if (itemsStr.includes('অক্টোবর') || itemsStr.toLowerCase().includes('oct')) {
+      const yrMatch = itemsStr.match(/202\d/) || itemsStr.match(/২০২[০-৯]/);
+      let yr = '2026';
+      if (yrMatch) yr = yrMatch[0].replace(/[০-৯]/g, d => String('০১২৩৪৫৬৭৮৯'.indexOf(d)));
+      return `${yr}-10`;
+    }
     if (itemsStr.includes('সেপ্টেম্বর') || itemsStr.toLowerCase().includes('sep')) {
       const yrMatch = itemsStr.match(/202\d/) || itemsStr.match(/২০২[০-৯]/);
       let yr = '2026';
@@ -334,20 +364,16 @@ export const getTxEffectiveMonth = (tx: any): string => {
       if (yrMatch) yr = yrMatch[0].replace(/[০-৯]/g, d => String('০১২৩৪৫৬৭৮৯'.indexOf(d)));
       return `${yr}-08`;
     }
-    if (itemsStr.includes('অক্টোবর') || itemsStr.toLowerCase().includes('oct')) {
-      const yrMatch = itemsStr.match(/202\d/) || itemsStr.match(/২০২[০-৯]/);
-      let yr = '2026';
-      if (yrMatch) yr = yrMatch[0].replace(/[০-৯]/g, d => String('০১২৩৪৫৬৭৮৯'.indexOf(d)));
-      return `${yr}-10`;
-    }
     if (itemsStr.includes('নভেম্বর') || itemsStr.toLowerCase().includes('nov')) return '2026-11';
     if (itemsStr.includes('ডিসেম্বর') || itemsStr.toLowerCase().includes('dec')) return '2026-12';
     if (itemsStr.includes('জুলাই') || itemsStr.toLowerCase().includes('jul')) return '2026-07';
-  }
-
-  // If explicit valid monthKey is stored, strictly honor it
-  if (tx.monthKey && /^\d{4}-\d{2}$/.test(String(tx.monthKey).trim())) {
-    return String(tx.monthKey).trim();
+    if (itemsStr.includes('জুন') || itemsStr.toLowerCase().includes('jun')) return '2026-06';
+    if (
+      (/(?:^|[^\u0980-\u09FF])মে(?:[^\u0980-\u09FF]|$)/.test(itemsStr) && !itemsStr.includes('মেম্বার') && !itemsStr.includes('মেসার্স')) ||
+      itemsStr.toLowerCase().includes('may')
+    ) {
+      return '2026-05';
+    }
   }
 
   return getTxMonthKey(tx?.date || tx?.timestamp || tx?.created_at || tx?.createdAt);
@@ -701,9 +727,27 @@ export interface StatementItemRow {
 let globalMembersCache: any[] | null = null;
 let lastMembersSyncTimestamp = 0;
 
-export const MemberDB: React.FC = () => {
+export interface MemberDBProps {
+  initialCategory?: BillCategory;
+  forcedCategory?: BillCategory;
+  hideFundTabs?: boolean;
+  onNavigateToTab?: (tab: string) => void;
+}
+
+export const MemberDB: React.FC<MemberDBProps> = ({
+  initialCategory = 'ALL',
+  forcedCategory,
+  hideFundTabs = false,
+  onNavigateToTab
+}) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<BillCategory>('ALL');
+  const [selectedCategory, setSelectedCategory] = useState<BillCategory>(() => forcedCategory || initialCategory);
+
+  useEffect(() => {
+    if (forcedCategory) {
+      setSelectedCategory(forcedCategory);
+    }
+  }, [forcedCategory]);
   const [selectedMonth, setSelectedMonth] = useState<string>(() => getRunningMonthKey());
   const [filterMode, setFilterMode] = useState<'AUTO' | 'ALL' | 'DUE'>('AUTO');
   const [rankTypeFilter, setRankTypeFilter] = useState<'OVERALL' | 'OFFICER' | 'AIRMEN' | 'CIVILIAN'>('OVERALL');
@@ -857,12 +901,44 @@ export const MemberDB: React.FC = () => {
               return { ...tx, billMonth: resolved, monthKey: resolved };
             }
           }
+          // Self-heal: If an October transaction was previously misclassified as '2026-05' (May) due to 'মে' substring match
+          const itemsStr = String(tx.items || tx.desc || tx.description || '');
+          const isOct = itemsStr.includes('অক্টোবর') || itemsStr.toLowerCase().includes('oct') || String(tx.id || '').includes('2026-10') || String(tx.date || '').toLowerCase().includes('oct');
+          if (isOct && tx.monthKey === '2026-05') {
+            modified = true;
+            return { ...tx, monthKey: '2026-10' };
+          }
           return tx;
         });
         if (modified) {
           localStorage.setItem('canteen_txs', JSON.stringify(cleaned));
           pushKeyToCloud('canteen_txs', cleaned).catch(() => {});
           window.dispatchEvent(new Event('canteen_txs_updated'));
+        }
+      }
+
+      // Self-heal shop expenses in canteen_expenses
+      const rawExp = localStorage.getItem('canteen_expenses');
+      if (rawExp) {
+        const exps = JSON.parse(rawExp);
+        let expMod = false;
+        const cleanedExp = exps.map((e: any) => {
+          if (!e.monthKey) {
+            const mk = getTxMonthKey(e.date) || (String(e.id || '').includes('2026-10') ? '2026-10' : '');
+            if (mk) {
+              expMod = true;
+              return { ...e, monthKey: mk };
+            }
+          } else if (e.monthKey === '2026-05' && (String(e.id || '').includes('2026-10') || String(e.desc || '').includes('অক্টোবর') || String(e.date || '').toLowerCase().includes('oct'))) {
+            expMod = true;
+            return { ...e, monthKey: '2026-10' };
+          }
+          return e;
+        });
+        if (expMod) {
+          localStorage.setItem('canteen_expenses', JSON.stringify(cleanedExp));
+          pushKeyToCloud('canteen_expenses', cleanedExp).catch(() => {});
+          window.dispatchEvent(new CustomEvent('canteen_expenses_updated', { detail: cleanedExp }));
         }
       }
     } catch {}
@@ -916,20 +992,36 @@ export const MemberDB: React.FC = () => {
         }
       }
 
-      // B. Bengali month names (e.g. "২৮ আগস্ট ২৬", "২৮ সেপ্টেম্বর ২০২৬", "আগস্ট ২০২৬")
+      // B. Bengali month names (e.g. "২৮ আগস্ট ২৬", "২৮ সেপ্টেম্বর ২০২৬", "আগস্ট ২০২৬", "০১ অক্টোবর ২০২৬")
       if (!calendarTime) {
-        const BN_MONTHS: Record<string, number> = {
-          'জানু': 0, 'ফেব্রু': 1, 'মার্চ': 2, 'এপ্রি': 3, 'মে': 4, 'জুন': 5,
-          'জুলা': 6, 'আগস্ট': 7, 'সেপ্টে': 8, 'অক্টো': 9, 'নভে': 10, 'ডিসে': 11
-        };
-        for (const [bnPrefix, mIdx] of Object.entries(BN_MONTHS)) {
-          if (str.includes(bnPrefix)) {
+        const BN_MONTHS: Array<{ prefix: string; mIdx: number; isMay?: boolean }> = [
+          { prefix: 'অক্টো', mIdx: 9 },
+          { prefix: 'সেপ্টে', mIdx: 8 },
+          { prefix: 'নভে', mIdx: 10 },
+          { prefix: 'ডিসে', mIdx: 11 },
+          { prefix: 'জানু', mIdx: 0 },
+          { prefix: 'ফেব্রু', mIdx: 1 },
+          { prefix: 'মার্চ', mIdx: 2 },
+          { prefix: 'এপ্রি', mIdx: 3 },
+          { prefix: 'আগস্ট', mIdx: 7 },
+          { prefix: 'জুলা', mIdx: 6 },
+          { prefix: 'জুন', mIdx: 5 },
+          { prefix: 'মে', mIdx: 4, isMay: true }
+        ];
+        for (const item of BN_MONTHS) {
+          let matched = false;
+          if (item.isMay) {
+            matched = /(?:^|[^\u0980-\u09FF])মে(?:[^\u0980-\u09FF]|$)/.test(str) && !str.includes('মেম্বার') && !str.includes('মেসার্স');
+          } else {
+            matched = str.includes(item.prefix);
+          }
+          if (matched) {
             const dayMatch = str.match(/^(\d{1,2})/);
             const yrMatch = str.match(/(\d{4}|\d{2})$/) || str.match(/\s(\d{2,4})/);
             const day = dayMatch ? parseInt(dayMatch[1], 10) : 28;
             let yr = yrMatch ? parseInt(yrMatch[1], 10) : 2026;
             if (yr < 100) yr += 2000;
-            calendarTime = new Date(yr, mIdx, day, 12, 0, 0).getTime();
+            calendarTime = new Date(yr, item.mIdx, day, 12, 0, 0).getTime();
             break;
           }
         }
@@ -2635,7 +2727,9 @@ export const MemberDB: React.FC = () => {
     unitFundBill: number = 0,
     othersFundBill: number = 0,
     monthKey: string = 'ALL',
-    totalDiscount: number = 0
+    totalDiscount: number = 0,
+    previousAdvance: number = 0,
+    remainingAdvance: number = 0
   ) => {
     const rank = getMemberBanglaRank(member) || formatRankBn(member.Rank || member.rank || '');
     const surname = getMemberBanglaName(member) || formatMemberNameBn(member.Surname || member.surname || '');
@@ -2652,6 +2746,8 @@ export const MemberDB: React.FC = () => {
           items,
           totalMonthBill,
           previousDue,
+          previousAdvance,
+          remainingAdvance,
           unitFundBill,
           othersFundBill,
           effectivePayments,
@@ -2666,7 +2762,9 @@ export const MemberDB: React.FC = () => {
             qty: r.qty,
             rate: r.rate,
             total: r.total,
-            isMerged: r.isMerged
+            isMerged: r.isMerged,
+            isFirstOfDate: r.isFirstOfDate,
+            dateRowSpan: r.dateRowSpan
           }))
         });
         if (blob) {
@@ -2739,7 +2837,9 @@ export const MemberDB: React.FC = () => {
     unitFundBill: number = 0,
     othersFundBill: number = 0,
     monthKey: string = 'ALL',
-    totalDiscount: number = 0
+    totalDiscount: number = 0,
+    previousAdvance: number = 0,
+    remainingAdvance: number = 0
   ) => {
     const rank = getMemberBanglaRank(member) || formatRankBn(member.Rank || member.rank || '');
     const surname = getMemberBanglaName(member) || formatMemberNameBn(member.Surname || member.surname || '');
@@ -2767,6 +2867,8 @@ export const MemberDB: React.FC = () => {
           items,
           totalMonthBill,
           previousDue,
+          previousAdvance,
+          remainingAdvance,
           unitFundBill,
           othersFundBill,
           effectivePayments,
@@ -2781,7 +2883,9 @@ export const MemberDB: React.FC = () => {
             qty: r.qty,
             rate: r.rate,
             total: r.total,
-            isMerged: r.isMerged
+            isMerged: r.isMerged,
+            isFirstOfDate: r.isFirstOfDate,
+            dateRowSpan: r.dateRowSpan
           }))
         });
         if (blob) {
@@ -4035,29 +4139,35 @@ export const MemberDB: React.FC = () => {
       rate: number;
       total: number;
       isMerged: boolean;
+      isFirstOfDate: boolean;
+      dateRowSpan: number;
     }[] = [];
 
     sortedDates.forEach((isoKey) => {
       const entry = dateMap.get(isoKey)!;
-      let dateHasPrinted = false;
+      const itemsList = Array.from(entry.itemsMap.entries());
+      const dateRowSpan = itemsList.length;
 
-      entry.itemsMap.forEach((val, name) => {
+      itemsList.forEach(([name, val], index) => {
         const isGeneric = isGenericCanteenBill(name);
         const displayName = isGeneric ? `ক্যান্টিন বিল (${formatBengaliMonthYear(statementMonth)})` : formatItemNameBn(name);
-        const merged = isNonCanteenBill(name);
+        const isNonCanteen = isNonCanteenBill(name);
+        // Generic imported bills (ক্যান্টিন বিল/খরচ without quantity & rate) and Non-canteen bills have merged Qty & Rate cells
+        const merged = isNonCanteen || isGeneric;
         const rate = val.rates.length > 0 ? val.rates[0] : (val.qty > 0 ? Math.round((val.total / val.qty) * 100) / 100 : val.total);
 
         rows.push({
           dateKey: isoKey,
-          displayDateBn: !dateHasPrinted ? entry.dateBn : '',
-          displayDateEn: !dateHasPrinted ? entry.dateEn : '',
+          displayDateBn: index === 0 ? entry.dateBn : '',
+          displayDateEn: index === 0 ? entry.dateEn : '',
           itemsText: displayName,
           qty: val.qty,
           rate,
           total: val.total,
-          isMerged: merged
+          isMerged: merged,
+          isFirstOfDate: index === 0,
+          dateRowSpan: index === 0 ? dateRowSpan : 0
         });
-        dateHasPrinted = true;
       });
     });
 
@@ -4090,17 +4200,7 @@ export const MemberDB: React.FC = () => {
 
   // Net Canteen bill for month after discount
   const netMonthCanteenBill = Math.max(0, totalMonthBill - totalMonthDiscount);
-
-  // বকেয়া বিল হিসাব:
-  let previousDue = 0;
   const currentMonthCharges = netMonthCanteenBill + unitFundBill + othersFundBill;
-  if (memberTotalDue > currentMonthCharges) {
-    previousDue = Math.max(0, Math.round((memberTotalDue - currentMonthCharges) * 100) / 100);
-  } else if (memberTotalDue > 0 && currentMonthCharges === 0) {
-    previousDue = memberTotalDue;
-  } else {
-    previousDue = 0;
-  }
 
   // Payments in this month (both Bill Payments and POS cash paid sales)
   const currentMonthPayments = filteredStatementTxs
@@ -4115,9 +4215,61 @@ export const MemberDB: React.FC = () => {
 
   const effectivePayments = currentMonthPayments;
 
-  const netPayable = memberTotalDue === 0
-    ? 0
-    : Math.max(0, netMonthCanteenBill + previousDue + unitFundBill + othersFundBill - effectivePayments);
+  // বকেয়া বিল ও পূর্বের অগ্রিম হিসাব (Prior period net balance):
+  let previousDue = 0;
+  let previousAdvance = 0;
+
+  if (statementMonth !== 'ALL') {
+    const priorTxs = (statementTx || []).filter((tx) => {
+      const m = getTxEffectiveMonth(tx);
+      return m && m < statementMonth;
+    });
+
+    const priorCharges = calculateEffectiveCharges(priorTxs);
+    const priorPayments = priorTxs
+      .filter((tx) => isPaymentTx(tx) && !tx.isReverted && tx.status !== 'REVERTED')
+      .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+
+    const priorNet = Math.round((priorCharges - priorPayments) * 100) / 100;
+    if (priorNet > 0) {
+      previousDue = priorNet;
+      previousAdvance = 0;
+    } else if (priorNet < 0) {
+      previousDue = 0;
+      previousAdvance = Math.abs(priorNet);
+    } else {
+      previousDue = 0;
+      previousAdvance = 0;
+    }
+  }
+
+  // Fallback ONLY when member has zero transaction history in the entire ledger,
+  // but has an initial profile balance in the current running month
+  if ((!statementTx || statementTx.length === 0) && statementMonth !== 'ALL') {
+    if (memberTotalDue > 0 && (statementMonth === getRunningMonthKey() || statementMonth === '2026-10')) {
+      previousDue = memberTotalDue;
+    }
+  }
+
+  // Gross charges including previous due
+  const grossCharges = currentMonthCharges + previousDue;
+
+  // Advance deducted from gross charges
+  const appliedAdvance = Math.min(grossCharges, previousAdvance);
+  const unusedPreviousAdvance = Math.max(0, previousAdvance - grossCharges);
+
+  const netAfterAdvance = Math.max(0, grossCharges - appliedAdvance);
+
+  let netPayable = 0;
+  let remainingAdvance = 0;
+
+  if (effectivePayments >= netAfterAdvance) {
+    netPayable = 0;
+    remainingAdvance = unusedPreviousAdvance + (effectivePayments - netAfterAdvance);
+  } else {
+    netPayable = netAfterAdvance - effectivePayments;
+    remainingAdvance = unusedPreviousAdvance;
+  }
 
   // Pre-render the statement slip into an image file so WhatsApp click has fresh user activation and instant image file ready
   useEffect(() => {
@@ -4139,6 +4291,8 @@ export const MemberDB: React.FC = () => {
       items: statementAggregatedItems,
       totalMonthBill,
       previousDue,
+      previousAdvance,
+      remainingAdvance,
       unitFundBill,
       othersFundBill,
       effectivePayments,
@@ -4153,7 +4307,9 @@ export const MemberDB: React.FC = () => {
         qty: r.qty,
         rate: r.rate,
         total: r.total,
-        isMerged: r.isMerged
+        isMerged: r.isMerged,
+        isFirstOfDate: r.isFirstOfDate,
+        dateRowSpan: r.dateRowSpan
       }))
     }).then((blob) => {
       if (isCancelled || !blob) return;
@@ -4176,6 +4332,8 @@ export const MemberDB: React.FC = () => {
     totalMonthBill, 
     totalMonthDiscount,
     previousDue, 
+    previousAdvance,
+    remainingAdvance,
     unitFundBill,
     othersFundBill,
     effectivePayments,
@@ -4198,6 +4356,8 @@ export const MemberDB: React.FC = () => {
           items: statementAggregatedItems,
           totalMonthBill,
           previousDue,
+          previousAdvance,
+          remainingAdvance,
           unitFundBill,
           othersFundBill,
           effectivePayments,
@@ -4212,7 +4372,9 @@ export const MemberDB: React.FC = () => {
             qty: r.qty,
             rate: r.rate,
             total: r.total,
-            isMerged: r.isMerged
+            isMerged: r.isMerged,
+            isFirstOfDate: r.isFirstOfDate,
+            dateRowSpan: r.dateRowSpan
           }))
         });
         if (blob) {
@@ -4301,8 +4463,16 @@ export const MemberDB: React.FC = () => {
           members={members}
           allTxs={allTxs}
           selectedMonth={selectedMonth}
-          onBack={() => setSelectedCategory('CANTEEN')}
-          onCategoryChange={(cat) => setSelectedCategory(cat)}
+          onBack={() => onNavigateToTab ? onNavigateToTab('member_db') : setSelectedCategory('CANTEEN')}
+          onCategoryChange={(cat) => {
+            if (onNavigateToTab) {
+              if (cat === 'UNIT_FUND') onNavigateToTab('unit_fund');
+              else if (cat === 'OTHERS') onNavigateToTab('others');
+              else onNavigateToTab('member_db');
+            } else {
+              setSelectedCategory(cat);
+            }
+          }}
           onSuccess={() => fetchMembers(true)}
           openStatement={openStatement}
           openPayBill={openPayBill}
@@ -4327,7 +4497,7 @@ export const MemberDB: React.FC = () => {
                 <span>BILL MANAGEMENT</span>
               </h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                Canteen Bill, Unit Fund Bill & Others Bill Administration
+                {hideFundTabs ? 'Canteen Bill Administration' : 'Canteen Bill, Unit Fund Bill & Others Bill Administration'}
               </p>
             </div>
 
@@ -4362,21 +4532,23 @@ export const MemberDB: React.FC = () => {
                 </span>
               </button>
 
-              <button
-                type="button"
-                onClick={() => setIsFundHistoryModalOpen(true)}
-                className="w-full sm:w-auto flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-black text-xs uppercase tracking-wider shadow-md transition-all cursor-pointer active:scale-95 border border-slate-700 group"
-                title="Unit Fund & Other History আলাদা পেজে দেখুন"
-              >
-                <Clock className="w-4 h-4 text-cyan-400 group-hover:rotate-[-45deg] transition-transform" />
-                <span>Unit Fund & Other History</span>
-                <span className="px-1.5 py-0.5 rounded-full bg-black/30 text-[10px] font-mono font-black text-cyan-300 border border-cyan-400/20">
-                  {(allTxs || []).filter((tx: any) => {
-                    const c = getTxCategory(tx);
-                    return c === 'UNIT_FUND' || c === 'OTHERS';
-                  }).length}
-                </span>
-              </button>
+              {!hideFundTabs && (
+                <button
+                  type="button"
+                  onClick={() => setIsFundHistoryModalOpen(true)}
+                  className="w-full sm:w-auto flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-black text-xs uppercase tracking-wider shadow-md transition-all cursor-pointer active:scale-95 border border-slate-700 group"
+                  title="Unit Fund & Other History আলাদা পেজে দেখুন"
+                >
+                  <Clock className="w-4 h-4 text-cyan-400 group-hover:rotate-[-45deg] transition-transform" />
+                  <span>Unit Fund & Other History</span>
+                  <span className="px-1.5 py-0.5 rounded-full bg-black/30 text-[10px] font-mono font-black text-cyan-300 border border-cyan-400/20">
+                    {(allTxs || []).filter((tx: any) => {
+                      const c = getTxCategory(tx);
+                      return c === 'UNIT_FUND' || c === 'OTHERS';
+                    }).length}
+                  </span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -4453,69 +4625,14 @@ export const MemberDB: React.FC = () => {
         </div>
       </div>
 
-      {/* Bill Category Tabs & Compact Month Selector */}
-      <div className="bg-slate-900/85 border border-slate-800 rounded-2xl p-2.5 sm:p-3.5 space-y-3 shadow-md">
-        {/* Bill Category Filter Pills: Full-width responsive box that adjusts across screen sizes */}
-        <div className="w-full grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2.5 p-1.5 bg-slate-950/90 rounded-2xl border border-slate-800 shadow-inner">
-          <button
-            type="button"
-            onClick={() => setSelectedCategory('ALL')}
-            className={`w-full py-2.5 sm:py-3 px-3 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-2 ${
-              selectedCategory === 'ALL'
-                ? 'bg-slate-700 text-white shadow-md ring-1 ring-slate-400/50 scale-[1.01]'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-            }`}
-          >
-            <Receipt className="w-4 h-4 text-slate-300 shrink-0" />
-            <span>ALL</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setSelectedCategory('CANTEEN')}
-            className={`w-full py-2.5 sm:py-3 px-3 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-2 ${
-              selectedCategory === 'CANTEEN'
-                ? 'bg-amber-600 text-white shadow-md ring-1 ring-amber-400/50 scale-[1.01]'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-            }`}
-          >
-            <Coffee className="w-4 h-4 text-amber-400 shrink-0" />
-            <span>CANTEEN</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setSelectedCategory('UNIT_FUND')}
-            className={`w-full py-2.5 sm:py-3 px-3 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-2 ${
-              selectedCategory === 'UNIT_FUND'
-                ? 'bg-indigo-600 text-white shadow-md ring-1 ring-indigo-400/50 scale-[1.01]'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-            }`}
-          >
-            <Landmark className="w-4 h-4 text-indigo-400 shrink-0" />
-            <span className="truncate">UNIT FUND</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setSelectedCategory('OTHERS')}
-            className={`w-full py-2.5 sm:py-3 px-3 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center space-x-2 ${
-              selectedCategory === 'OTHERS'
-                ? 'bg-cyan-600 text-white shadow-md ring-1 ring-cyan-400/50 scale-[1.01]'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-            }`}
-          >
-            <Layers className="w-4 h-4 text-cyan-400 shrink-0" />
-            <span>OTHERS</span>
-          </button>
-        </div>
-
+      {/* Month Selector & Filter Info Strip */}
+      <div className="bg-slate-900/85 border border-slate-800 rounded-2xl p-2.5 sm:p-3.5 shadow-md">
         {/* Filter Info Strip with Total Billed & Month Selector placed directly to the LEFT of All/Due */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between text-[11px] font-bold text-slate-400 pt-2.5 border-t border-slate-800/60 gap-2.5">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between text-[11px] font-bold text-slate-400 gap-2.5">
           <div className="flex items-center space-x-2 flex-wrap gap-y-1">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <span>
-              Showing: <strong className="text-white">{selectedCategory === 'CANTEEN' ? 'Canteen' : selectedCategory === 'UNIT_FUND' ? 'Unit Fund' : selectedCategory === 'OTHERS' ? 'Others' : 'All Bills'}</strong>
+              Showing: <strong className="text-white">All Bills</strong>
               {' • '}
               <strong className="text-indigo-300 font-mono">{formatMonthOnlyUpper(selectedMonth)}</strong>
             </span>
@@ -5697,7 +5814,7 @@ export const MemberDB: React.FC = () => {
                 {/* 1. WHATSAPP Direct Chat with Member (Full breakdown & copied/saved statement picture) */}
                 <button 
                   type="button"
-                  onClick={() => handleDirectWhatsAppChat(statementMember, statementAggregatedItems, netPayable, totalMonthBill, previousDue, unitFundBill, othersFundBill, statementMonth, totalMonthDiscount)}
+                  onClick={() => handleDirectWhatsAppChat(statementMember, statementAggregatedItems, netPayable, totalMonthBill, previousDue, unitFundBill, othersFundBill, statementMonth, totalMonthDiscount, previousAdvance, remainingAdvance)}
                   disabled={isCapturingPic}
                   className="flex items-center space-x-1.5 px-3.5 py-2 bg-[#25D366] hover:bg-[#20ba59] text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md shadow-[#25D366]/25 active:translate-y-0.5 whitespace-nowrap cursor-pointer disabled:opacity-60"
                   title="সরাসরি সদস্যের হোয়াটসঅ্যাপ চ্যাটে স্টেটমেন্ট ও ছবি পাঠান"
@@ -5709,7 +5826,7 @@ export const MemberDB: React.FC = () => {
                 {/* 2. Share Image via System Share (Attaches picture directly in WhatsApp) */}
                 <button 
                   type="button"
-                  onClick={() => handleShareWhatsAppImage(statementMember, statementAggregatedItems, netPayable, totalMonthBill, previousDue, unitFundBill, othersFundBill, statementMonth, totalMonthDiscount)}
+                  onClick={() => handleShareWhatsAppImage(statementMember, statementAggregatedItems, netPayable, totalMonthBill, previousDue, unitFundBill, othersFundBill, statementMonth, totalMonthDiscount, previousAdvance, remainingAdvance)}
                   disabled={isCapturingPic}
                   className="flex items-center space-x-1.5 px-3 py-2 bg-emerald-800 hover:bg-emerald-700 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md shadow-emerald-800/25 active:translate-y-0.5 whitespace-nowrap cursor-pointer disabled:opacity-60"
                   title="ছবি সরাসরি হোয়াটসঅ্যাপে শেয়ার করুন"
@@ -5901,22 +6018,32 @@ export const MemberDB: React.FC = () => {
                   <div className="w-full h-1 bg-black mt-4"></div>
                 </div>
 
-                {/* Statement Paper Table matching Pic 2 - Normal white cells */}
-                <table className="w-full border-collapse border-2 border-black text-sm sm:text-base font-bold text-black bg-white">
+                {/* Statement Paper Table - Normal white cells */}
+                {/* 1. Header Information Table: মাসের নাম ও পদবী ও নাম (সুনির্দিষ্ট ও সুন্দর সাইজ/প্রস্থ, নাম কখনোই নিচে যাবে না) */}
+                <table className="w-full border-collapse border-2 border-black text-sm sm:text-base font-bold text-black bg-white m-0">
                   <tbody>
                     <tr className="bg-white">
-                      <td className="border border-black p-3 text-left w-1/3 bg-white font-black">মাসের নাম</td>
-                      <td className="border border-black p-3 text-left font-black bg-white" colSpan={statementViewMode === 'DATE' ? 4 : 3}>
+                      <td className="border border-black p-3 text-left w-[32%] sm:w-[28%] bg-white font-black whitespace-nowrap">
+                        মাসের নাম
+                      </td>
+                      <td className="border border-black p-3 text-left font-black bg-white">
                         {formatBengaliMonthYear(statementMonth)}
                       </td>
                     </tr>
                     <tr className="bg-white">
-                      <td className="border border-black p-3 text-left bg-white font-black">পদবী ও নাম</td>
-                      <td className="border border-black p-3 text-left font-black bg-white" colSpan={statementViewMode === 'DATE' ? 4 : 3}>
+                      <td className="border border-black p-3 text-left w-[32%] sm:w-[28%] bg-white font-black whitespace-nowrap">
+                        পদবী ও নাম
+                      </td>
+                      <td className="border border-black p-3 text-left font-black bg-white">
                         {getMemberBanglaRank(statementMember) || formatRankBn(statementMember['Rank'] || statementMember.rank || '')} {getMemberBanglaName(statementMember) || formatMemberNameBn(statementMember['Surname'] || '')}
                       </td>
                     </tr>
-                    
+                  </tbody>
+                </table>
+
+                {/* 2. Statement Items Table - Seamlessly attached below without double border */}
+                <table className="w-full border-collapse border-2 border-t-0 border-black text-sm sm:text-base font-bold text-black bg-white m-0">
+                  <tbody>
                     {/* Heading Row:
                         Item wise: দ্রব্যের নাম , পরিমাণ , দর, মোট
                         Dt wise: তারিখ (৭ সেপ্ট), বিবরণ, পরিমাণ, দর, মোট (তারিখের কলাম ছোট)
@@ -5950,11 +6077,19 @@ export const MemberDB: React.FC = () => {
                           const rate = item.rate > 0 ? item.rate : Math.round(item.total / qty);
                           return (
                             <tr key={idx} className="bg-white">
-                              <td className="border border-black p-3 text-left font-bold bg-white">{displayName}</td>
-                              <td className="border border-black p-3 text-center font-bold bg-white">{toBengaliNum(qty)}</td>
-                              <td className="border border-black p-3 text-center font-bold bg-white">
-                                ৳{toBengaliNum(rate)}
-                              </td>
+                              {isGeneric ? (
+                                <td colSpan={3} className="border border-black p-3 text-left font-bold bg-white">
+                                  {displayName}
+                                </td>
+                              ) : (
+                                <>
+                                  <td className="border border-black p-3 text-left font-bold bg-white">{displayName}</td>
+                                  <td className="border border-black p-3 text-center font-bold bg-white">{toBengaliNum(qty)}</td>
+                                  <td className="border border-black p-3 text-center font-bold bg-white">
+                                    ৳{toBengaliNum(rate)}
+                                  </td>
+                                </>
+                              )}
                               <td className="border border-black p-3 text-center font-bold bg-white">
                                 ৳{toBengaliNum(item.total)}
                               </td>
@@ -5973,13 +6108,15 @@ export const MemberDB: React.FC = () => {
                         statementDateWiseRows.map((row, idx) => {
                           return (
                             <tr key={idx} className="bg-white">
-                              {/* তারিখের কলাম ছোট (৭ সেপ্ট) */}
-                              <td className="border border-black py-2.5 px-1.5 text-center font-black bg-white whitespace-nowrap text-xs sm:text-sm">
-                                <div>{row.displayDateBn}</div>
-                                {row.displayDateEn && (
-                                  <div className="text-[10px] text-slate-500 font-bold font-sans">{row.displayDateEn}</div>
-                                )}
-                              </td>
+                              {/* পর পর ২ বা ততোধিক সেলে একই তারিখ হলে cell merge করে একটি তারিখ দেখাবে */}
+                              {row.isFirstOfDate && (
+                                <td
+                                  rowSpan={row.dateRowSpan}
+                                  className="border border-black py-2.5 px-1.5 text-center font-black bg-white whitespace-nowrap text-xs sm:text-sm align-middle"
+                                >
+                                  <div>{row.displayDateBn}</div>
+                                </td>
+                              )}
 
                               {/* যদি ক্যান্টিনের আইটেম ব্যাতিত ইউনিট ফান্ড ও অন্যান্য যা বিল আছে -> বিবরণ, পরিমাণ ও দর এর Cell Merge করে লিখবে */}
                               {row.isMerged ? (
@@ -6055,6 +6192,18 @@ export const MemberDB: React.FC = () => {
                       </tr>
                     )}
 
+                    {/* পূর্বের অগ্রিম (Advance from prior month) - যদি ০ থাকে তাহলে Hide থাকবে */}
+                    {previousAdvance > 0 && (
+                      <tr className="bg-white">
+                        <td className="border border-black p-3 text-right font-black bg-white text-emerald-700" colSpan={statementViewMode === 'DATE' ? 4 : 3}>
+                          পূর্বের অগ্রিম
+                        </td>
+                        <td className="border border-black p-3 text-center font-black bg-white text-emerald-700">
+                          ৳{toBengaliNum(previousAdvance)}
+                        </td>
+                      </tr>
+                    )}
+
                     {/* ইউনিট ফান্ড (যদি ০ থাকে তাহলে Hide থাকবে) */}
                     {unitFundBill > 0 && (
                       <tr className="bg-white">
@@ -6085,7 +6234,7 @@ export const MemberDB: React.FC = () => {
                           পরিশোধিত বিল
                         </td>
                         <td className="border border-black p-3 text-center font-black bg-white text-emerald-700">
-                          -৳{toBengaliNum(effectivePayments)}
+                          ৳{toBengaliNum(effectivePayments)}
                         </td>
                       </tr>
                     )}
@@ -6097,6 +6246,18 @@ export const MemberDB: React.FC = () => {
                         ৳{toBengaliNum(netPayable)}
                       </td>
                     </tr>
+
+                    {/* অবশিষ্ট অগ্রিম (যদি অগ্রিম পুরো বিল সমন্বয় করার পরও অবশিষ্ট থাকে) */}
+                    {remainingAdvance > 0 && (
+                      <tr className="bg-white">
+                        <td className="border border-black p-3 text-right font-black bg-white text-emerald-700" colSpan={statementViewMode === 'DATE' ? 4 : 3}>
+                          অবশিষ্ট অগ্রিম
+                        </td>
+                        <td className="border border-black p-3 text-center font-black bg-white text-emerald-700">
+                          ৳{toBengaliNum(remainingAdvance)}
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>

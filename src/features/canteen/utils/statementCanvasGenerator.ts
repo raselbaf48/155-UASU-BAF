@@ -14,6 +14,8 @@ export interface StatementDateWiseCanvasRow {
   rate?: number;
   total: number;
   isMerged?: boolean;
+  isFirstOfDate?: boolean;
+  dateRowSpan?: number;
 }
 
 export interface StatementCanvasData {
@@ -22,6 +24,8 @@ export interface StatementCanvasData {
   items: { itemName: string; qty: number; rate: number; total: number }[];
   totalMonthBill: number;
   previousDue: number;
+  previousAdvance?: number;
+  remainingAdvance?: number;
   unitFundBill: number;
   othersFundBill: number;
   effectivePayments: number;
@@ -66,6 +70,8 @@ export function generateStatementCanvas(data: StatementCanvasData): HTMLCanvasEl
     items,
     totalMonthBill,
     previousDue,
+    previousAdvance = 0,
+    remainingAdvance = 0,
     unitFundBill,
     othersFundBill,
     effectivePayments,
@@ -97,9 +103,11 @@ export function generateStatementCanvas(data: StatementCanvasData): HTMLCanvasEl
   if (totalMonthBill > 0) summaryRowsCount++;
   if (totalDiscount && totalDiscount > 0) summaryRowsCount++;
   if (previousDue > 0) summaryRowsCount++;
+  if (previousAdvance > 0) summaryRowsCount++;
   if (unitFundBill > 0) summaryRowsCount++;
   if (othersFundBill > 0) summaryRowsCount++;
   if (effectivePayments > 0) summaryRowsCount++;
+  if (remainingAdvance > 0) summaryRowsCount++;
 
   const itemsCount = isDateWise 
     ? (dateWiseRows.length > 0 ? dateWiseRows.length : 1)
@@ -166,6 +174,11 @@ export function generateStatementCanvas(data: StatementCanvasData): HTMLCanvasEl
     ctx.strokeRect(x, y, w, h);
   };
 
+  // Header row widths: মাসের নাম ও পদবী ও নাম (সুনির্দিষ্ট ও সুন্দর সাইজ/প্রস্থ ~৩২%, নাম কখনোই ভাঙবে না)
+  const headerCol1W = Math.round(tableWidth * 0.32);
+  const headerCol2W = tableWidth - headerCol1W;
+  const headerCol2X = col1X + headerCol1W;
+
   // Helper for 2-column wide rows (e.g. Month, Name) - Normal white background as requested
   const drawRow = (
     text1: string,
@@ -176,25 +189,24 @@ export function generateStatementCanvas(data: StatementCanvasData): HTMLCanvasEl
   ) => {
     // Col 1
     ctx.fillStyle = '#ffffff';
-    ctx.fillRect(col1X, currentY, col1W, rowHeight);
-    drawBorder(col1X, currentY, col1W, rowHeight);
+    ctx.fillRect(col1X, currentY, headerCol1W, rowHeight);
+    drawBorder(col1X, currentY, headerCol1W, rowHeight);
 
     ctx.fillStyle = '#000000';
     ctx.font = `bold ${fontSize}px ${BENGALI_SUTONNY_FONT}`;
     ctx.textAlign = align1;
-    const t1X = align1 === 'left' ? col1X + 10 : (align1 === 'right' ? col1X + col1W - 10 : col1X + col1W / 2);
+    const t1X = align1 === 'left' ? col1X + 10 : (align1 === 'right' ? col1X + headerCol1W - 10 : col1X + headerCol1W / 2);
     ctx.fillText(text1, t1X, currentY + rowHeight / 2 + 1);
 
-    // Col 2 spanning remaining columns - Normal white background
-    const restW = tableWidth - col1W;
+    // Col 2 spanning remaining width - Normal white background
     ctx.fillStyle = '#ffffff';
-    ctx.fillRect(col2X, currentY, restW, rowHeight);
-    drawBorder(col2X, currentY, restW, rowHeight);
+    ctx.fillRect(headerCol2X, currentY, headerCol2W, rowHeight);
+    drawBorder(headerCol2X, currentY, headerCol2W, rowHeight);
 
     ctx.fillStyle = '#000000';
     ctx.font = `bold ${fontSize}px ${BENGALI_SUTONNY_FONT}`;
     ctx.textAlign = align2;
-    const t2X = align2 === 'left' ? col2X + 12 : (align2 === 'right' ? col2X + restW - 12 : col2X + restW / 2);
+    const t2X = align2 === 'left' ? headerCol2X + 12 : (align2 === 'right' ? headerCol2X + headerCol2W - 12 : headerCol2X + headerCol2W / 2);
     ctx.fillText(text2, t2X, currentY + rowHeight / 2 + 1);
 
     currentY += rowHeight;
@@ -232,33 +244,46 @@ export function generateStatementCanvas(data: StatementCanvasData): HTMLCanvasEl
   currentY += rowHeight;
 
   // Helper to draw an item row with 4 columns: দ্রব্যের নাম | পরিমাণ | দর | মোট
-  const drawItemRow = (name: string, qty: number | string, rate: number | string, total: number | string) => {
-    // Cell 1: দ্রব্যের নাম
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(col1X, currentY, col1W, rowHeight);
-    drawBorder(col1X, currentY, col1W, rowHeight);
-    ctx.fillStyle = '#000000';
-    ctx.font = `bold 13px ${BENGALI_SUTONNY_FONT}`;
-    ctx.textAlign = 'left';
-    ctx.fillText(name, col1X + 10, currentY + rowHeight / 2 + 1);
+  // For generic lump sum bills without itemized rates/quantities, merges দ্রব্যের নাম, পরিমাণ & দর
+  const drawItemRow = (name: string, qty: number | string, rate: number | string, total: number | string, isMerged = false) => {
+    if (isMerged) {
+      // Cell 1+2+3 merged (col1W + col2W + col3W)
+      const mergedW = col1W + col2W + col3W;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(col1X, currentY, mergedW, rowHeight);
+      drawBorder(col1X, currentY, mergedW, rowHeight);
+      ctx.fillStyle = '#000000';
+      ctx.font = `bold 13px ${BENGALI_SUTONNY_FONT}`;
+      ctx.textAlign = 'left';
+      ctx.fillText(name, col1X + 10, currentY + rowHeight / 2 + 1);
+    } else {
+      // Cell 1: দ্রব্যের নাম
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(col1X, currentY, col1W, rowHeight);
+      drawBorder(col1X, currentY, col1W, rowHeight);
+      ctx.fillStyle = '#000000';
+      ctx.font = `bold 13px ${BENGALI_SUTONNY_FONT}`;
+      ctx.textAlign = 'left';
+      ctx.fillText(name, col1X + 10, currentY + rowHeight / 2 + 1);
 
-    // Cell 2: পরিমাণ
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(col2X, currentY, col2W, rowHeight);
-    drawBorder(col2X, currentY, col2W, rowHeight);
-    ctx.fillStyle = '#000000';
-    ctx.font = `bold 13px ${BENGALI_SUTONNY_FONT}`;
-    ctx.textAlign = 'center';
-    ctx.fillText(toBengaliNum(qty), col2X + col2W / 2, currentY + rowHeight / 2 + 1);
+      // Cell 2: পরিমাণ
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(col2X, currentY, col2W, rowHeight);
+      drawBorder(col2X, currentY, col2W, rowHeight);
+      ctx.fillStyle = '#000000';
+      ctx.font = `bold 13px ${BENGALI_SUTONNY_FONT}`;
+      ctx.textAlign = 'center';
+      ctx.fillText(toBengaliNum(qty), col2X + col2W / 2, currentY + rowHeight / 2 + 1);
 
-    // Cell 3: দর
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(col3X, currentY, col3W, rowHeight);
-    drawBorder(col3X, currentY, col3W, rowHeight);
-    ctx.fillStyle = '#000000';
-    ctx.font = `bold 13px ${BENGALI_SUTONNY_FONT}`;
-    ctx.textAlign = 'center';
-    ctx.fillText(`৳${toBengaliNum(rate)}`, col3X + col3W / 2, currentY + rowHeight / 2 + 1);
+      // Cell 3: দর
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(col3X, currentY, col3W, rowHeight);
+      drawBorder(col3X, currentY, col3W, rowHeight);
+      ctx.fillStyle = '#000000';
+      ctx.font = `bold 13px ${BENGALI_SUTONNY_FONT}`;
+      ctx.textAlign = 'center';
+      ctx.fillText(`৳${toBengaliNum(rate)}`, col3X + col3W / 2, currentY + rowHeight / 2 + 1);
+    }
 
     // Cell 4: মোট
     ctx.fillStyle = '#ffffff';
@@ -274,15 +299,29 @@ export function generateStatementCanvas(data: StatementCanvasData): HTMLCanvasEl
 
   // Helper to draw a Dt-wise row: তারিখ (৭ সেপ্ট) | বিবরণ | পরিমাণ | দর | মোট
   // For non-canteen bills (Unit Fund & Others), merges বিবরণ, পরিমাণ & দর cells
-  const drawDateWiseRow = (dateStr: string, itemsText: string, qty: number | string, rate: number | string, total: number | string, isMerged = false) => {
-    // Cell 1: তারিখ
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(col1X, currentY, col1W, rowHeight);
-    drawBorder(col1X, currentY, col1W, rowHeight);
-    ctx.fillStyle = '#000000';
-    ctx.font = `bold 12px ${BENGALI_SUTONNY_FONT}`;
-    ctx.textAlign = 'center';
-    ctx.fillText(dateStr, col1X + col1W / 2, currentY + rowHeight / 2 + 1);
+  // If consecutive rows have the same date, Cell 1 is merged (drawn once spanning all rows of that date)
+  const drawDateWiseRow = (
+    dateStr: string,
+    itemsText: string,
+    qty: number | string,
+    rate: number | string,
+    total: number | string,
+    isMerged = false,
+    isFirstOfDate = true,
+    dateRowSpan = 1
+  ) => {
+    // Cell 1: তারিখ (draws merged box only on the first row of that date)
+    if (isFirstOfDate) {
+      const span = Math.max(1, dateRowSpan || 1);
+      const mergedDateH = rowHeight * span;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(col1X, currentY, col1W, mergedDateH);
+      drawBorder(col1X, currentY, col1W, mergedDateH);
+      ctx.fillStyle = '#000000';
+      ctx.font = `bold 12px ${BENGALI_SUTONNY_FONT}`;
+      ctx.textAlign = 'center';
+      ctx.fillText(dateStr, col1X + col1W / 2, currentY + mergedDateH / 2 + 1);
+    }
 
     if (isMerged) {
       // Merged Cell spanning বিবরণ, পরিমাণ & দর (col2W + col3W + col4W)
@@ -340,7 +379,16 @@ export function generateStatementCanvas(data: StatementCanvasData): HTMLCanvasEl
     if (dateWiseRows && dateWiseRows.length > 0) {
       dateWiseRows.forEach((r) => {
         const rowRate = r.rate !== undefined && r.rate > 0 ? r.rate : (r.qty > 0 ? Math.round(r.total / r.qty) : r.total);
-        drawDateWiseRow(r.date, r.itemsText, r.qty, rowRate, r.total, r.isMerged);
+        drawDateWiseRow(
+          r.date,
+          r.itemsText,
+          r.qty,
+          rowRate,
+          r.total,
+          r.isMerged,
+          r.isFirstOfDate ?? (r.date !== ''),
+          r.dateRowSpan ?? 1
+        );
       });
     } else {
       // Merge all columns: এই মাসে কোনো তারিখ ভিত্তিক বিল নেই
@@ -361,10 +409,10 @@ export function generateStatementCanvas(data: StatementCanvasData): HTMLCanvasEl
         const displayName = isGeneric ? `ক্যান্টিন বিল (${monthText})` : formatItemNameBn(item.itemName);
         const qty = item.qty > 0 ? item.qty : 1;
         const rate = item.rate > 0 ? item.rate : Math.round(item.total / qty);
-        drawItemRow(displayName, qty, rate, item.total);
+        drawItemRow(displayName, qty, rate, item.total, isGeneric);
       });
     } else if (totalMonthBill > 0) {
-      drawItemRow(`ক্যান্টিন বিল (${monthText})`, 1, totalMonthBill, totalMonthBill);
+      drawItemRow(`ক্যান্টিন বিল (${monthText})`, 1, totalMonthBill, totalMonthBill, true);
     } else {
       // Merge all 4 columns: এই মাসে কোনো ক্যান্টিন বিল নেই
       ctx.fillStyle = '#ffffff';
@@ -425,6 +473,11 @@ export function generateStatementCanvas(data: StatementCanvasData): HTMLCanvasEl
     drawSummaryRow('বকেয়া বিল', `৳${toBengaliNum(previousDue)}`, '#000000');
   }
 
+  // 2.1 পূর্বের অগ্রিম (if > 0, displayed in green amount)
+  if (previousAdvance > 0) {
+    drawSummaryRow('পূর্বের অগ্রিম', `৳${toBengaliNum(previousAdvance)}`, '#059669');
+  }
+
   // 3. ইউনিট ফান্ড (if > 0)
   if (unitFundBill > 0) {
     drawSummaryRow('ইউনিট ফান্ড', `৳${toBengaliNum(unitFundBill)}`, '#000000');
@@ -437,11 +490,16 @@ export function generateStatementCanvas(data: StatementCanvasData): HTMLCanvasEl
 
   // 5. পরিশোধিত বিল (if > 0)
   if (effectivePayments > 0) {
-    drawSummaryRow('পরিশোধিত বিল', `-৳${toBengaliNum(effectivePayments)}`, '#059669');
+    drawSummaryRow('পরিশোধিত বিল', `৳${toBengaliNum(effectivePayments)}`, '#059669');
   }
 
   // 6. সর্বমোট প্রদেয় বিল (Bold Red Text on normal white background)
   drawSummaryRow('সর্বমোট প্রদেয় বিল', `৳${toBengaliNum(netPayable)}`, '#e11d48', 16);
+
+  // 7. অবশিষ্ট অগ্রিম (if > 0, displayed in green)
+  if (remainingAdvance > 0) {
+    drawSummaryRow('অবশিষ্ট অগ্রিম', `৳${toBengaliNum(remainingAdvance)}`, '#059669');
+  }
 
   // Outer border around whole table for clean crisp outline
   ctx.strokeStyle = '#000000';
