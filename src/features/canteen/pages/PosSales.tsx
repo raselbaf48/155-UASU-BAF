@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, getItemDisplayName, getCanteenConfig, CanteenConfig } from '../utils/canteenSettings';
-import { formatCanteenDate } from '../utils/dateUtils';
+import { formatCanteenDate, toYMDDate } from '../utils/dateUtils';
 import { getMenuItemBanglaName } from '../utils/menuBanglaNames';
 import { DateNavigator, getTodayYMD } from '../components/DateNavigator';
 import { deductRawStockForSales, getRawInventoryItems, calculateMenuItemStockInfo, getMenuRecipes } from '../utils/recipeManager';
@@ -152,6 +152,8 @@ export const PosSales: React.FC = () => {
   // History Record Detail/Edit State
   const [editingTx, setEditingTx] = useState<any | null>(null);
   const [editAmount, setEditAmount] = useState<string>('');
+  const [editDiscount, setEditDiscount] = useState<string>('0');
+  const [editBaseAmount, setEditBaseAmount] = useState<number>(0);
   const [editPaymentStatus, setEditPaymentStatus] = useState<'DUE' | 'PAID'>('DUE');
   const [editDate, setEditDate] = useState<string>('');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
@@ -247,7 +249,7 @@ export const PosSales: React.FC = () => {
     const history = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
     const onlySales = history.filter((tx: any) => isSaleTransaction(tx));
     setSalesHistory(onlySales);
-    setHistoryDateFilter(getTodayYMD());
+    setHistoryDateFilter(saleDate || getTodayYMD());
     setShowHistoryModal(true);
   };
 
@@ -255,15 +257,9 @@ export const PosSales: React.FC = () => {
     let list = salesHistory.filter((tx: any) => isSaleTransaction(tx));
     if (historyDateFilter) {
       list = list.filter(tx => {
-        const txDateStr = String(tx.date || tx.timestamp || '');
-        if (txDateStr.includes(historyDateFilter)) return true;
-        const d = new Date(txDateStr);
-        if (!isNaN(d.getTime())) {
-          const iso = d.toISOString().split('T')[0];
-          const local = d.toLocaleDateString('en-CA');
-          return iso === historyDateFilter || local === historyDateFilter;
-        }
-        return false;
+        const rawDate = tx.date || tx.paymentDate || tx.timestamp || tx.created_at || (typeof tx.id === 'number' ? tx.id : undefined);
+        const ymd = toYMDDate(rawDate);
+        return ymd === historyDateFilter;
       });
     }
     if (!historySearchTerm.trim()) return list;
@@ -332,19 +328,37 @@ export const PosSales: React.FC = () => {
 
   const openEditTxModal = (tx: any) => {
     setEditingTx(tx);
-    setEditAmount(String(tx.amount || 0));
+    const existingAmount = Number(tx.amount || 0);
+    const existingDiscount = Number(tx.discount || 0);
+    const base = Number(tx.originalAmount || (existingAmount + existingDiscount));
+    setEditBaseAmount(base);
+    setEditDiscount(String(existingDiscount));
+    setEditAmount(String(existingAmount));
+
     const isPaid = tx.status === 'PAID' || tx.paymentStatus === 'PAID' || String(tx.gateway || tx.paymentMethod || '').toUpperCase() === 'CASH';
     setEditPaymentStatus(isPaid ? 'PAID' : 'DUE');
-    setEditDate(String(tx.date || tx.paymentDate || getTodayYMD()));
+
+    // Date formatting: ensure YYYY-MM-DD so HTML5 input[type="date"] displays it!
+    const rawDate = tx.date || tx.paymentDate || tx.timestamp || tx.created_at || (typeof tx.id === 'number' ? tx.id : undefined);
+    setEditDate(toYMDDate(rawDate) || getTodayYMD());
+  };
+
+  const handleEditDiscountChange = (val: string) => {
+    setEditDiscount(val);
+    const disc = Math.max(0, parseFloat(val) || 0);
+    const computedAmt = Math.max(0, editBaseAmount - disc);
+    setEditAmount(String(computedAmt));
   };
 
   const saveEditedHistoryItem = async () => {
     if (!editingTx) return;
     const newAmt = parseFloat(editAmount);
     if (isNaN(newAmt) || newAmt < 0) {
-      alert('অনুগ্রহ করে সঠিক টাকার পরিমাণ লিখুন');
+      alert('অনুগ্রহ করে সঠিক টাকার পরিমাণ নিশ্চিত করুন');
       return;
     }
+    const newDiscount = Math.max(0, parseFloat(editDiscount) || 0);
+    const savedDateFormatted = formatCanteenDate(editDate) || editDate;
 
     setIsSavingEdit(true);
     try {
@@ -384,8 +398,10 @@ export const PosSales: React.FC = () => {
         if (String(tx.id) === String(editingTx.id)) {
           return {
             ...tx,
+            originalAmount: editBaseAmount,
+            discount: newDiscount,
             amount: newAmt,
-            date: editDate || tx.date,
+            date: savedDateFormatted,
             status: editPaymentStatus,
             paymentStatus: editPaymentStatus,
             gateway: editPaymentStatus === 'PAID' ? 'CASH' : 'DUE',
@@ -399,8 +415,10 @@ export const PosSales: React.FC = () => {
         if (String(tx.id) === String(editingTx.id)) {
           return {
             ...tx,
+            originalAmount: editBaseAmount,
+            discount: newDiscount,
             amount: newAmt,
-            date: editDate || tx.date,
+            date: savedDateFormatted,
             status: editPaymentStatus,
             paymentStatus: editPaymentStatus,
             gateway: editPaymentStatus === 'PAID' ? 'CASH' : 'DUE',
@@ -1669,12 +1687,13 @@ export const PosSales: React.FC = () => {
               </div>
 
               <div className="py-4 space-y-4">
-                {/* Member / Customer info */}
+                {/* Member / Customer info (Fixed / Read-only) */}
                 <div className="p-3 bg-slate-950/70 rounded-2xl border border-slate-800/80 flex items-center justify-between">
                   <div>
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Customer</span>
                     <span className="text-xs font-black text-white">
-                      {editingTx.rank ? `${editingTx.rank} ` : ''}{editingTx.memberName || editingTx.airman_id}
+                      {editingTx.rank && !String(editingTx.memberName || '').startsWith(editingTx.rank) ? `${editingTx.rank} ` : ''}
+                      {editingTx.memberName || editingTx.airman_id}
                     </span>
                   </div>
                   {editingTx.bdNo && (
@@ -1684,7 +1703,7 @@ export const PosSales: React.FC = () => {
                   )}
                 </div>
 
-                {/* Items info */}
+                {/* Items info (Fixed / Read-only) */}
                 <div>
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
                     মেনু আইটেম (Items)
@@ -1706,15 +1725,18 @@ export const PosSales: React.FC = () => {
                         });
                       }
                       return itemsList.map((it, idx) => (
-                        <span key={idx} className="px-2.5 py-1 rounded-xl bg-slate-900 border border-slate-700/80 text-emerald-300 font-bold text-xs">
-                          {it.name}
+                        <span key={idx} className="px-2.5 py-1 rounded-xl bg-slate-900 border border-slate-700/80 text-emerald-300 font-bold text-xs flex items-center gap-1.5">
+                          <span>{it.name}</span>
+                          {it.qty > 1 && (
+                            <span className="text-indigo-400 font-mono text-[10px] font-black">x{it.qty}</span>
+                          )}
                         </span>
                       ));
                     })()}
                   </div>
                 </div>
 
-                {/* Date Input */}
+                {/* Date Input - Editable */}
                 <div>
                   <label className="text-[11px] font-bold text-slate-300 block mb-1">
                     তারিখ (Date)
@@ -1723,27 +1745,58 @@ export const PosSales: React.FC = () => {
                     type="date"
                     value={editDate}
                     onChange={(e) => setEditDate(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl text-xs font-mono font-bold text-white outline-none"
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl text-xs font-mono font-bold text-white outline-none cursor-pointer"
                   />
                 </div>
 
-                {/* Total Amount Input */}
+                {/* Discount Input - Editable (Placed right below Date) */}
                 <div>
-                  <label className="text-[11px] font-bold text-slate-300 block mb-1">
-                    মোট টাকা (Total Amount - ৳)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={editAmount}
-                    onChange={(e) => setEditAmount(e.target.value)}
-                    placeholder="Total amount"
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl text-sm font-mono font-black text-emerald-400 outline-none"
-                  />
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-bold text-slate-300">
+                      ডিসকাউন্ট (Discount - ৳)
+                    </label>
+                    <span className="text-[10px] text-amber-400/90 font-mono font-bold">
+                      মূল বিল: ৳{editBaseAmount}
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      min="0"
+                      max={editBaseAmount}
+                      step="1"
+                      value={editDiscount}
+                      onChange={(e) => handleEditDiscountChange(e.target.value)}
+                      placeholder="0"
+                      className="w-full pl-3.5 pr-8 py-2.5 bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl text-sm font-mono font-bold text-amber-400 outline-none"
+                    />
+                    <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-mono font-bold text-slate-500">
+                      ৳
+                    </span>
+                  </div>
                 </div>
 
-                {/* Status DUE / PAID Toggle */}
+                {/* Total Amount Display - Auto calculated from Base Amount - Discount (Fixed/Protected) */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-bold text-slate-300">
+                      মোট টাকা (Total Amount - ৳)
+                    </label>
+                    <span className="text-[10px] font-mono text-slate-400">
+                      {Number(editDiscount) > 0 ? `৳${editBaseAmount} - ৳${Number(editDiscount)} = ৳${Number(editAmount || 0)}` : `বিল: ৳${editBaseAmount}`}
+                    </span>
+                  </div>
+                  <div className="w-full px-3.5 py-2.5 bg-slate-950/80 border border-slate-800/80 rounded-xl flex items-center justify-between">
+                    <span className="text-base font-mono font-black text-emerald-400">
+                      ৳{Number(editAmount || 0).toLocaleString()}
+                    </span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                      Auto Calculated
+                    </span>
+                  </div>
+                </div>
+
+                {/* Status DUE / PAID Toggle - Editable */}
                 <div>
                   <label className="text-[11px] font-bold text-slate-300 block mb-1.5">
                     পেমেন্ট স্ট্যাটাস (Payment Status)
@@ -1970,7 +2023,7 @@ export const PosSales: React.FC = () => {
                             {/* Customer Name */}
                             <td className="py-2.5 px-3">
                               <div className="font-black text-white text-xs group-hover:text-indigo-200">
-                                {memberRank ? `${memberRank} ` : ''}{memberSurname}
+                                {memberRank && !String(memberSurname).startsWith(memberRank) ? `${memberRank} ` : ''}{memberSurname}
                               </div>
                               {memberBdNo && (
                                 <div className="text-[10px] font-mono text-slate-400 mt-0.5">
@@ -1979,32 +2032,46 @@ export const PosSales: React.FC = () => {
                               )}
                             </td>
 
-                            {/* Item Name */}
+                            {/* Item Name (Each item on its own row) */}
                             <td className="py-2.5 px-3">
-                              <div className="flex flex-wrap gap-1">
+                              <div className="flex flex-col gap-1.5 py-0.5">
                                 {parsedItemsList.length > 0 ? (
                                   parsedItemsList.map((item, i) => (
-                                    <span 
-                                      key={i} 
-                                      className="inline-flex items-center px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-700/80 text-emerald-300 text-[11px] font-medium"
-                                    >
-                                      <span className="truncate max-w-[150px]">{item.name}</span>
-                                      {item.qty > 1 && (
-                                        <span className="ml-1 text-indigo-400 font-mono font-bold text-[10px]">x{item.qty}</span>
-                                      )}
-                                    </span>
+                                    <div key={i} className="min-h-[24px] flex items-center">
+                                      <span 
+                                        className="inline-flex items-center px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-700/80 text-emerald-300 text-[11px] font-medium"
+                                      >
+                                        <span className="truncate max-w-[170px]">{item.name}</span>
+                                      </span>
+                                    </div>
                                   ))
                                 ) : (
-                                  <span className="text-slate-400 text-xs">
-                                    {getMenuItemBanglaName(tx.items) || tx.items || 'মেনু আইটেম'}
-                                  </span>
+                                  <div className="min-h-[24px] flex items-center">
+                                    <span className="text-slate-400 text-xs">
+                                      {getMenuItemBanglaName(tx.items) || tx.items || 'মেনু আইটেম'}
+                                    </span>
+                                  </div>
                                 )}
                               </div>
                             </td>
 
-                            {/* Qty */}
-                            <td className="py-2.5 px-3 text-center font-mono font-bold text-indigo-300">
-                              {totalQty}
+                            {/* Qty (Vertically aligned row-by-row with each item) */}
+                            <td className="py-2.5 px-3 text-center">
+                              <div className="flex flex-col gap-1.5 py-0.5 items-center justify-center">
+                                {parsedItemsList.length > 0 ? (
+                                  parsedItemsList.map((item, i) => (
+                                    <div key={i} className="min-h-[24px] flex items-center justify-center">
+                                      <span className="inline-flex items-center justify-center min-w-[24px] px-1.5 py-0.5 rounded-md bg-indigo-950/60 border border-indigo-500/30 text-indigo-300 font-mono font-black text-xs">
+                                        {item.qty}
+                                      </span>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <div className="min-h-[24px] flex items-center justify-center">
+                                    <span className="font-mono font-bold text-indigo-300 text-xs">1</span>
+                                  </div>
+                                )}
+                              </div>
                             </td>
 
                             {/* Total */}

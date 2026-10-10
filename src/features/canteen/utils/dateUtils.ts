@@ -95,3 +95,73 @@ export const formatCanteenDate = (val: any): string => {
 export const getCanteenCurrentDate = (): string => {
   return formatCanteenDate(new Date());
 };
+
+export const toYMDDate = (val: any): string => {
+  if (!val) return '';
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return '';
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, '0');
+    const d = String(val.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  let str = String(val).trim();
+  if (!str || str === '-') return '';
+
+  const bnDigits: Record<string, string> = {
+    '০': '0', '১': '1', '২': '2', '৩': '3', '৪': '4',
+    '৫': '5', '৬': '6', '৭': '7', '৮': '8', '৯': '9'
+  };
+  str = str.replace(/[০-৯]/g, (ch) => bnDigits[ch] || ch);
+
+  if (/^\d{10,13}$/.test(str)) {
+    const d = new Date(Number(str));
+    if (!isNaN(d.getTime())) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    }
+  }
+
+  // YYYY-MM-DD or YYYY/MM/DD (also handles ISO strings like 2026-10-06T18:00:00.000Z)
+  const ymdMatch = str.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+  if (ymdMatch) {
+    const y = ymdMatch[1];
+    const m = ymdMatch[2].padStart(2, '0');
+    const d = ymdMatch[3].padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  // DD Mon YY or DD Mon YYYY (e.g. 06 Oct 26 or 06 Oct 2026)
+  const monMatch = str.match(/^(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{2,4})/);
+  if (monMatch) {
+    const day = monMatch[1].padStart(2, '0');
+    const monStr = monMatch[2].slice(0, 3).toLowerCase();
+    const mIdx = MONTH_ABBRS.findIndex((m) => m.toLowerCase() === monStr);
+    const mon = String(mIdx >= 0 ? mIdx + 1 : 1).padStart(2, '0');
+    let yr = monMatch[3];
+    if (yr.length === 2) yr = '20' + yr;
+    return `${yr}-${mon}-${day}`;
+  }
+
+  // DD/MM/YYYY or DD-MM-YYYY
+  const dmyMatch = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
+  if (dmyMatch) {
+    const day = dmyMatch[1].padStart(2, '0');
+    const mon = dmyMatch[2].padStart(2, '0');
+    let yr = dmyMatch[3];
+    if (yr.length === 2) yr = '20' + yr;
+    return `${yr}-${mon}-${day}`;
+  }
+
+  const parsed = new Date(str);
+  if (!isNaN(parsed.getTime())) {
+    const y = parsed.getFullYear();
+    const m = String(parsed.getMonth() + 1).padStart(2, '0');
+    const d = String(parsed.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  return '';
+};
