@@ -1108,6 +1108,27 @@ export const MemberDB: React.FC<MemberDBProps> = ({
     return 0;
   };
 
+  // Helper to determine if a transaction originated from Excel / Copy-Paste Bulk Import
+  const isTxFromBulkImport = (tx: any): boolean => {
+    if (!tx) return false;
+    if (tx.isImported === true || tx.imported === true || tx.source === 'IMPORT') return true;
+    const id = String(tx.id || tx.txId || '');
+    if (id.startsWith('tx-import-') || id.includes('-import-') || id.startsWith('import-')) return true;
+    try {
+      const rawBatches = localStorage.getItem('canteen_import_history_batches');
+      if (rawBatches) {
+        const batches = JSON.parse(rawBatches);
+        if (Array.isArray(batches)) {
+          for (const b of batches) {
+            if (Array.isArray(b.txIds) && b.txIds.includes(id)) return true;
+            if (Array.isArray(b.createdTransactionIds) && b.createdTransactionIds.includes(id)) return true;
+          }
+        }
+      }
+    } catch {}
+    return false;
+  };
+
   // Expanded history rows: Newest transactions at top, preserves previous bills & supports reverted payments
   const displayHistoryRows = useMemo(() => {
     const rows: Array<{
@@ -1120,6 +1141,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
       qty: string | number;
       amount: number;
       type: string;
+      isImported?: boolean;
     }> = [];
 
     let currentSer = 1;
@@ -1152,13 +1174,15 @@ export const MemberDB: React.FC<MemberDBProps> = ({
           description: desc,
           qty: isReverted ? 'বাতিল' : '-',
           amount: tx.amount,
-          type: isReverted ? 'REVERTED' : 'BILL PAYMENT'
+          type: isReverted ? 'REVERTED' : 'BILL PAYMENT',
+          isImported: isTxFromBulkImport(tx)
         });
         return;
       }
 
       if (tx.type === 'INITIAL_BILL' || tx.type === 'AMOUNT_CHANGE' || tx.type === 'ADJUSTED') {
         const isChange = tx.isAmountChange || tx.type === 'AMOUNT_CHANGE' || String(tx.items || '').includes('Changed amount');
+        const isImported = isTxFromBulkImport(tx);
         rows.push({
           rowId: `${tx.id}_init`,
           ser: currentSer++,
@@ -1168,7 +1192,8 @@ export const MemberDB: React.FC<MemberDBProps> = ({
           description: tx.items || (isChange ? `Changed amount from ${tx.previousAmount ?? ''} to ${tx.amount}` : 'বকেয়া বিল'),
           qty: '-',
           amount: tx.amount,
-          type: isChange ? 'AMOUNT_CHANGE' : 'INITIAL_BILL'
+          type: isChange ? 'AMOUNT_CHANGE' : 'INITIAL_BILL',
+          isImported
         });
         return;
       }
@@ -1218,7 +1243,8 @@ export const MemberDB: React.FC<MemberDBProps> = ({
             description: desc,
             qty: qty,
             amount: itemTotal,
-            type: rowType
+            type: rowType,
+            isImported: isTxFromBulkImport(tx)
           });
         });
         return;
@@ -1256,7 +1282,8 @@ export const MemberDB: React.FC<MemberDBProps> = ({
             description: desc,
             qty: qty,
             amount: itemTotal,
-            type: rowType
+            type: rowType,
+            isImported: isTxFromBulkImport(tx)
           });
         });
         return;
@@ -1284,7 +1311,8 @@ export const MemberDB: React.FC<MemberDBProps> = ({
         description: descText,
         qty: qtyText,
         amount: Number(tx.amount || 0),
-        type: rowType
+        type: rowType,
+        isImported: isTxFromBulkImport(tx)
       });
     });
 
@@ -5325,20 +5353,19 @@ export const MemberDB: React.FC<MemberDBProps> = ({
                   <div className="flex items-center space-x-2 flex-wrap">
                     <h2 className="text-xl font-black text-white flex items-center gap-1.5 flex-wrap">
                       {profileMember['Rank'] && profileMember['Rank'] !== '-' && (
-                        <>
-                          <span>{profileMember['Rank']}</span>
-                          <span className="text-indigo-300 font-sans text-sm font-bold">
-                            ({getMemberBanglaRank(profileMember) || formatRankBn(profileMember['Rank'])})
-                          </span>
-                        </>
+                        <span>{profileMember['Rank']}</span>
                       )}
                       <span>{profileMember['Surname']}</span>
-                      <span className="text-emerald-400 font-sans text-sm font-bold">
-                        ({getMemberBanglaName(profileMember) || formatMemberNameBn(profileMember['Surname'])})
-                      </span>
                     </h2>
                   </div>
-                  <p className="text-xs font-bold text-indigo-400 font-mono">BD No: {profileMember['BD No']}</p>
+                  <p className="text-xs font-bold text-indigo-400 font-mono">
+                    {(() => {
+                      const raw = String(profileMember['BD No'] || profileMember.bdNo || '').trim();
+                      if (!raw) return '';
+                      const cleaned = raw.replace(/^BD\s*[\/:\-]?\s*/i, '').trim();
+                      return `BD/${cleaned}`;
+                    })()}
+                  </p>
                 </div>
               </div>
 
@@ -5481,7 +5508,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
                                       ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
                                       : 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
                                   }`}>
-                                    {row.type === 'REVERTED' ? 'REVERTED / বাতিল' : row.type === 'BILL PAYMENT' ? 'পরিশোধ / PAYMENT' : row.type === 'CASH_SALE' ? 'নগদ পরিশোধ / CASH PAID' : row.type === 'AMOUNT_CHANGE' ? 'বিল সংশোধন / CHANGE' : row.type === 'INITIAL_BILL' ? 'ইম্পোর্ট / প্রারম্ভিক বিল' : (row.type || 'খাবার / SALE')}
+                                    {row.type === 'REVERTED' ? 'REVERTED / বাতিল' : row.type === 'BILL PAYMENT' ? 'পরিশোধ / PAYMENT' : row.type === 'CASH_SALE' ? 'নগদ পরিশোধ / CASH PAID' : row.type === 'AMOUNT_CHANGE' ? 'বিল সংশোধন / CHANGE' : row.type === 'INITIAL_BILL' ? (row.isImported ? 'ইম্পোর্ট বিল' : 'বকেয়া বিল') : (row.type || 'খাবার / SALE')}
                                   </span>
                                 </div>
 
@@ -5492,7 +5519,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
                                       নগদ পরিশোধ
                                     </span>
                                   )}
-                                  {row.type === 'INITIAL_BILL' && (
+                                  {row.isImported && (
                                     <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
                                       ইম্পোর্ট বিল
                                     </span>
@@ -5587,7 +5614,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
                                               নগদ পরিশোধ (PAID)
                                             </span>
                                           )}
-                                          {row.type === 'INITIAL_BILL' && (
+                                          {row.isImported && (
                                             <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
                                               ইম্পোর্ট বিল
                                             </span>

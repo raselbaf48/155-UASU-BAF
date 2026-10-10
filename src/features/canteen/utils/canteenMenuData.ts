@@ -308,3 +308,53 @@ export async function fetchCanteenMembersOnce(force = false): Promise<any[]> {
 
   return memberFetchPromise;
 }
+
+export const CANTEEN_DELETED_MEMBERS_ARCHIVE_KEY = 'canteen_deleted_members_archive_v1';
+
+export function getArchivedCanteenMembers(): any[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(CANTEEN_DELETED_MEMBERS_ARCHIVE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function archiveCanteenMember(member: any): void {
+  if (typeof window === 'undefined' || !member) return;
+  try {
+    const archived = getArchivedCanteenMembers();
+    const bdNo = member['BD No'] || member.bdNo;
+    const airmanId = member.airman_id || `airman-${bdNo}`;
+    if (!archived.some(m => m.airman_id === airmanId || (bdNo && (m['BD No'] === bdNo || m.bdNo === bdNo)))) {
+      archived.push({
+        ...member,
+        archivedAt: new Date().toISOString()
+      });
+      localStorage.setItem(CANTEEN_DELETED_MEMBERS_ARCHIVE_KEY, JSON.stringify(archived));
+    }
+  } catch {}
+}
+
+export function findMemberWithArchiveFallback(identifier: string, activeMembers?: any[]): any | null {
+  if (!identifier) return null;
+  const members = activeMembers || getCanteenMembersCache();
+  const cleanId = String(identifier || '').trim().toLowerCase().replace(/^airman-/i, '').replace(/^bd\/?/i, '').replace(/\D/g, '');
+  // First search active members
+  const foundActive = members.find(m => {
+    const mBd = String(m['BD No'] || m.bdNo || '').replace(/\D/g, '');
+    const mAirman = String(m.airman_id || '').toLowerCase();
+    return (cleanId && mBd === cleanId) || mAirman === identifier.toLowerCase() || mAirman === `airman-${cleanId}`;
+  });
+  if (foundActive) return foundActive;
+
+  // Fallback to archived members so old logs and transactions NEVER lose member details
+  const archived = getArchivedCanteenMembers();
+  return archived.find(m => {
+    const mBd = String(m['BD No'] || m.bdNo || '').replace(/\D/g, '');
+    const mAirman = String(m.airman_id || '').toLowerCase();
+    return (cleanId && mBd === cleanId) || mAirman === identifier.toLowerCase() || mAirman === `airman-${cleanId}`;
+  }) || null;
+}
+

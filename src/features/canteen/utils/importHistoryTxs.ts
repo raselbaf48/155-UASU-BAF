@@ -213,7 +213,9 @@ export async function syncImportHistoryToTransactions(): Promise<any[]> {
                 amount: item.dueThisMonth,
                 type: 'INITIAL_BILL',
                 gateway: 'DUE',
-                billType: 'CANTEEN'
+                billType: 'CANTEEN',
+                isImported: true,
+                source: 'IMPORT'
               };
               txMap.set(deterministicId, newTx);
             }
@@ -247,7 +249,9 @@ export async function syncImportHistoryToTransactions(): Promise<any[]> {
                 amount: item.dueLastMonth,
                 type: 'INITIAL_BILL',
                 gateway: 'DUE',
-                billType: 'CANTEEN'
+                billType: 'CANTEEN',
+                isImported: true,
+                source: 'IMPORT'
               };
               txMap.set(deterministicId, newTx);
             }
@@ -278,7 +282,9 @@ export async function syncImportHistoryToTransactions(): Promise<any[]> {
                 amount: item.unitFund,
                 type: 'INITIAL_BILL',
                 gateway: 'DUE',
-                billType: 'UNIT_FUND'
+                billType: 'UNIT_FUND',
+                isImported: true,
+                source: 'IMPORT'
               };
               txMap.set(deterministicId, newTx);
             }
@@ -309,7 +315,9 @@ export async function syncImportHistoryToTransactions(): Promise<any[]> {
                 amount: item.othersFund,
                 type: 'INITIAL_BILL',
                 gateway: 'DUE',
-                billType: 'OTHERS'
+                billType: 'OTHERS',
+                isImported: true,
+                source: 'IMPORT'
               };
               txMap.set(deterministicId, newTx);
             }

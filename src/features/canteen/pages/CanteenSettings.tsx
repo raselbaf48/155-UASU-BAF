@@ -24,8 +24,11 @@ import { getCanteenMembersCache, fetchCanteenMembersOnce } from '../utils/cantee
 import { supabase } from '../../../supabase';
 import { SaveButton } from '../components/SaveButton';
 import { CanteenMemberDB } from './CanteenMemberDB';
+import { DueRegisterSettingsSection } from '../components/DueRegisterSettingsSection';
+import { getDueShops, DueShopConfig } from '../utils/dueShopsConfig';
+import { Store } from 'lucide-react';
 
-export type CanteenSettingSection = 'identity' | 'display_lang' | 'timing' | 'member_db' | 'cloudsync';
+export type CanteenSettingSection = 'identity' | 'display_lang' | 'timing' | 'due_register' | 'member_db' | 'cloudsync';
 
 interface SectionMeta {
   id: CanteenSettingSection;
@@ -88,8 +91,18 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
     expenses: 0
   });
 
-  // Cloud Sync Logs state - connected live to global Canteen Cloud Sync engine
   const [syncLogs, setSyncLogs] = useState<CanteenSyncLog[]>(() => getCanteenSyncLogs());
+  const [dueShopsList, setDueShopsList] = useState<DueShopConfig[]>(() => getDueShops());
+
+  useEffect(() => {
+    const handleShopsUpdated = (e: any) => {
+      setDueShopsList(e?.detail || getDueShops());
+    };
+    window.addEventListener('canteen_due_shops_updated', handleShopsUpdated);
+    return () => {
+      window.removeEventListener('canteen_due_shops_updated', handleShopsUpdated);
+    };
+  }, []);
 
   useEffect(() => {
     const handleSyncLogsUpdated = (e: any) => {
@@ -244,6 +257,14 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
       badge: `Reset: ${settings.dailyResetTime || '15:00'}`
     },
     {
+      id: 'due_register',
+      label: 'Due Register',
+      description: 'ডিউ রেজিস্টার দোকান যোগ, পরিবর্তন (Edit) ও মুছে ফেলা (Remove)',
+      icon: <Store className="w-5 h-5 text-amber-400" />,
+      color: 'text-amber-400 bg-amber-500/10 border-amber-500/30',
+      badge: `${dueShopsList.length} Shops`
+    },
+    {
       id: 'member_db',
       label: 'Member Database',
       description: 'Browse, search, edit member list, view dues, and manage members',
@@ -302,37 +323,30 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
       {activeSection === null ? (
         <div className="space-y-6">
           {/* Header */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/90 backdrop-blur-xl p-6 rounded-3xl border border-slate-800 shadow-xl">
-            <div className="flex items-center space-x-3.5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/90 backdrop-blur-xl p-5 sm:p-6 rounded-3xl border border-slate-800 shadow-xl">
+            <div className="flex items-center space-x-3.5 min-w-0">
+              {onClose && (
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 rounded-2xl text-xs font-black tracking-wider uppercase transition-all flex items-center gap-2 cursor-pointer shrink-0 active:scale-95 shadow-md group"
+                  title="Back"
+                >
+                  <ArrowLeft className="w-4 h-4 text-indigo-400 group-hover:-translate-x-0.5 transition-transform" />
+                  <span>Back</span>
+                </button>
+              )}
               <div className="w-12 h-12 rounded-2xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center shrink-0">
                 <Settings className="w-6 h-6" />
               </div>
-              <div>
-                <h2 className="text-2xl md:text-3xl font-black text-white uppercase tracking-tighter">
+              <div className="min-w-0">
+                <h2 className="text-xl sm:text-2xl md:text-3xl font-black text-white uppercase tracking-tighter truncate">
                   CANTEEN SETTINGS
                 </h2>
                 <p className="text-[10px] md:text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
                   SYSTEM & DATABASE CONFIGURATION
                 </p>
               </div>
-            </div>
-
-            <div className="flex items-center gap-3 self-start sm:self-auto flex-wrap">
-              <div className="flex items-center space-x-2 text-xs text-slate-400 font-mono bg-slate-950/70 border border-slate-800 px-3.5 py-2 rounded-xl">
-                <span>Last Synced:</span>
-                <span className="text-emerald-400 font-bold">{lastSyncedTime}</span>
-              </div>
-
-              {onClose && (
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-black tracking-wider uppercase transition-all flex items-center gap-2 cursor-pointer hover:text-white"
-                >
-                  <ArrowLeft className="w-4 h-4 text-indigo-400" />
-                  <span>Exit to Canteen</span>
-                </button>
-              )}
             </div>
           </div>
 
@@ -373,34 +387,22 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
       ) : (
         /* TOP VIEW 2: WHEN AN OPTION IS CLICKED, ONLY THAT OPTION COMES ON A SEPARATE PAGE ("Je option a click korbo sudhu oita alada page a asbe") */
         <div className="space-y-6">
-          {/* Subpage Top Bar with Back to Settings button */}
+          {/* Subpage Top Bar with Back button */}
           <div className="bg-slate-900/90 backdrop-blur-xl p-4 sm:p-5 rounded-2xl border border-slate-800 shadow-xl space-y-3">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center space-x-3 min-w-0">
                 <button
                   type="button"
                   onClick={handleBackToMenu}
-                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 rounded-xl text-xs font-black tracking-wider uppercase transition-transform active:scale-95 flex items-center gap-2 cursor-pointer shrink-0 touch-manipulation"
+                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 rounded-xl text-xs font-black tracking-wider uppercase transition-transform active:scale-95 flex items-center gap-2 cursor-pointer shrink-0 touch-manipulation group"
                 >
-                  <ArrowLeft className="w-4 h-4 text-indigo-400" />
-                  <span>Back to Settings</span>
+                  <ArrowLeft className="w-4 h-4 text-indigo-400 group-hover:-translate-x-0.5 transition-transform" />
+                  <span>Back</span>
                 </button>
                 <div className="h-6 w-px bg-slate-800 shrink-0 hidden sm:block" />
                 <h3 className="text-base sm:text-lg font-black text-white uppercase tracking-tight truncate">
                   {sections.find(s => s.id === activeSection)?.label}
                 </h3>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {onClose && (
-                  <button
-                    type="button"
-                    onClick={onClose}
-                    className="px-3.5 py-2 bg-slate-800/80 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer hover:text-white"
-                  >
-                    Exit
-                  </button>
-                )}
               </div>
             </div>
 
@@ -1184,6 +1186,11 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
                 />
               </div>
             </div>
+          )}
+
+          {/* DEDICATED PAGE: DUE REGISTER SHOPS MANAGEMENT */}
+          {activeSection === 'due_register' && (
+            <DueRegisterSettingsSection onBack={handleBackToMenu} />
           )}
 
           {/* DEDICATED PAGE 3: MEMBER DATABASE (Full, responsive MemberDB without hanging) */}

@@ -114,9 +114,9 @@ export const toEnglishDate = (val: any): string => {
 };
 
 // Resolve which shop an expense or payment belongs to
-export const resolveShopName = (expense: ExpenseRecord): DueShopName => {
-  if (expense.dueShop && DUE_SHOPS.includes(expense.dueShop as DueShopName)) {
-    return expense.dueShop as DueShopName;
+export const resolveShopName = (expense: ExpenseRecord): string => {
+  if (expense.dueShop) {
+    return expense.dueShop;
   }
   const desc = String(expense.desc || '').toLowerCase();
   if (

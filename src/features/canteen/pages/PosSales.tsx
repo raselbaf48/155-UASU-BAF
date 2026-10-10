@@ -577,13 +577,10 @@ export const PosSales: React.FC = () => {
 
   return (
     <>
-      <div className="max-w-7xl mx-auto space-y-4 animate-in fade-in duration-300 pb-28 md:pb-12 px-2 sm:px-4">
+      <div className="w-full space-y-3.5 animate-in fade-in duration-300 pb-24 lg:pb-6 px-1 sm:px-2">
         
-        {/* Main POS Container Card (Top 'CANTEEN POS' removed as requested; History button moved here) */}
-        <div className="bg-slate-900 rounded-[2rem] border-t-4 border-t-indigo-500 shadow-xl border border-slate-800 p-4 sm:p-6 space-y-4">
-          
-          {/* Header Strip with Date Navigator, History button, and Per-Member Info */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+        {/* Header Strip with Date Navigator, History button, and Per-Member Info */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
             <div className="flex items-center space-x-2.5">
               <div className="p-2.5 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
                 <ShoppingCart className="w-5 h-5" />
@@ -596,91 +593,74 @@ export const PosSales: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex items-center space-x-2 flex-wrap gap-y-2">
+            <div className="flex items-center justify-between sm:justify-end gap-2.5 w-full sm:w-auto">
               {/* Sale Date Picker with Left/Right Arrows, '09 Oct 26' format, Today default */}
               <DateNavigator 
                 value={saleDate} 
                 onChange={setSaleDate} 
-                label="Dt"
+                label="Date"
                 format="dd_mm_yy"
               />
 
-              {/* History Button (renamed to just History) */}
+              {/* History Button pushed to Right Corner */}
               <button 
                 type="button"
                 onClick={loadHistory}
-                className="flex items-center justify-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-slate-200 border border-slate-700 rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-sm cursor-pointer shrink-0"
+                className="flex items-center justify-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-slate-200 border border-slate-700 rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-sm cursor-pointer shrink-0 ml-auto sm:ml-0"
               >
                 <History className="w-3.5 h-3.5 text-indigo-400" />
                 <span>History</span>
               </button>
-
-              <span className="px-3 py-1.5 bg-indigo-600 text-white rounded-xl text-[10px] font-black tracking-widest uppercase shadow-sm">
-                {basket.length} ITEMS
-              </span>
             </div>
           </div>
 
-          {/* Section 1: Menu Item Selection & Cart ("Card Items") */}
-          <div className="bg-slate-950/80 rounded-3xl border border-slate-800/80 p-4 sm:p-5 space-y-3.5 shadow-lg">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center space-x-2.5">
-                <div className="p-2 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
-                  <Utensils className="w-4 h-4" />
-                </div>
-                <div>
-                  <h4 className="text-xs sm:text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
-                    <span>Menu Item Selection</span>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
-                      {filteredCatalog.length} items
-                    </span>
-                  </h4>
-                  <p className="text-[11px] text-slate-400">Add food & beverage items to customer basket</p>
+          {/* Main Layout: 2-Column Grid on Laptop View (lg:grid-cols-2), 1-Column on Mobile */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+            
+            {/* ======================================================== */}
+            {/* LEFT COLUMN: Menu Selection (Laptop Left Half Screen)    */}
+            {/* ======================================================== */}
+            <div className="bg-slate-950/80 rounded-3xl border border-slate-800/80 p-4 sm:p-5 space-y-3.5 shadow-lg flex flex-col">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center space-x-2.5">
+                  <div className="p-2 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                    <Utensils className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs sm:text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                      <span>Menu Selection</span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
+                        {filteredCatalog.length} items
+                      </span>
+                    </h4>
+                    <p className="text-[11px] text-slate-400">Add food & beverage items to customer basket</p>
+                  </div>
                 </div>
               </div>
 
-              {/* Cart Per-Member Total & Clear Button */}
-              <div className="flex items-center space-x-3 self-start sm:self-auto">
-                <div className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs font-mono">
-                  <span className="text-slate-400 mr-1.5">Per Member:</span>
-                  <strong className="text-emerald-400 font-black text-sm">৳{basketTotal}</strong>
-                </div>
-                {basket.length > 0 && (
-                  <button 
-                    type="button"
-                    onClick={() => setBasket([])} 
-                    className="text-[11px] font-bold text-rose-400 hover:text-rose-300 px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-800 hover:bg-rose-950/30 transition-colors cursor-pointer"
-                  >
-                    Clear Cart
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Search & Category Filter Pills */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
-              <div className="relative flex-1">
-                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              {/* Search Bar - Full Width & Bigger */}
+              <div className="relative w-full">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-indigo-400" />
                 <input 
                   type="text" 
                   placeholder="Search menu items..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-9 py-2 text-xs font-bold text-slate-200 focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-slate-900 border border-slate-700/80 focus:border-indigo-500 rounded-2xl pl-11 pr-10 py-2.5 sm:py-3 text-xs sm:text-sm font-bold text-white placeholder:text-slate-500 shadow-inner focus:outline-none focus:ring-2 focus:ring-indigo-500/25 transition-all"
                 />
                 {searchTerm && (
                   <button 
                     type="button"
                     onClick={() => setSearchTerm('')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs font-bold p-1"
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800 text-xs font-bold"
                   >
                     ✕
                   </button>
                 )}
               </div>
 
-              {/* Category Pills */}
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none shrink-0">
+              {/* Category Pills (Underneath Search Bar) */}
+              <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1 scrollbar-none w-full">
                 {availableCategories.map((cat) => {
                   const count = cat === 'ALL' 
                     ? catalog.length 
@@ -691,14 +671,14 @@ export const PosSales: React.FC = () => {
                       key={cat}
                       type="button"
                       onClick={() => setSelectedCategory(cat)}
-                      className={`px-2.5 py-1 rounded-xl text-[10px] font-black tracking-wider uppercase transition-all shrink-0 cursor-pointer flex items-center space-x-1.5 border ${
+                      className={`px-3 py-1.5 rounded-xl text-xs font-black tracking-wider uppercase transition-all shrink-0 cursor-pointer flex items-center space-x-1.5 border ${
                         isSelected
                           ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm shadow-indigo-500/25'
                           : 'bg-slate-900 text-slate-400 hover:text-slate-200 hover:bg-slate-800 border-slate-800'
                       }`}
                     >
                       <span>{cat}</span>
-                      <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-bold ${
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
                         isSelected ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-500'
                       }`}>
                         {count}
@@ -707,437 +687,607 @@ export const PosSales: React.FC = () => {
                   );
                 })}
               </div>
-            </div>
 
-            {/* Items Grid: Multi-column responsive layout based on screen size, approx 3 rows visible */}
-            <div className="max-h-[300px] overflow-y-auto pr-1">
-              {filteredCatalog.length === 0 ? (
-                <div className="py-8 text-center text-slate-500 bg-slate-900/40 rounded-xl border border-slate-800/60">
-                  <PackageIcon className="w-6 h-6 mx-auto opacity-30 mb-1" />
-                  <p className="text-xs font-bold text-slate-400">No menu items found</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5">
-                  {filteredCatalog.map((item, i) => {
-                    const inBasket = basket.find(b => b.id === item.id);
-                    const stockInfo = calculateMenuItemStockInfo(item.id, item.name, rawInventory, recipesMap);
-                    const isOutOfStock = stockInfo.availableStock <= 0;
-                    const isLowStock = stockInfo.availableStock > 0 && stockInfo.availableStock < 5;
+              {/* Items List Container */}
+              <div className="max-h-[460px] lg:max-h-[700px] overflow-y-auto pr-1">
+                {filteredCatalog.length === 0 ? (
+                  <div className="py-8 text-center text-slate-500 bg-slate-900/40 rounded-xl border border-slate-800/60">
+                    <PackageIcon className="w-6 h-6 mx-auto opacity-30 mb-1" />
+                    <p className="text-xs font-bold text-slate-400">No menu items found</p>
+                  </div>
+                ) : (
+                  <>
+                    {/* MOBILE VIEW: Single single niche niche asbe (single-column vertical list) */}
+                    <div className="flex flex-col space-y-2 lg:hidden">
+                      {filteredCatalog.map((item, i) => {
+                        const inBasket = basket.find(b => b.id === item.id);
+                        const stockInfo = calculateMenuItemStockInfo(item.id, item.name, rawInventory, recipesMap);
+                        const isOutOfStock = stockInfo.availableStock <= 0;
+                        const isLowStock = stockInfo.availableStock > 0 && stockInfo.availableStock < 5;
 
-                    const displayNameObj = getItemDisplayName(item, 'menu', canteenConfig);
-                    const primaryName = displayNameObj.primary || item.name;
-                    const secondaryName = displayNameObj.secondary;
+                        const displayNameObj = getItemDisplayName(item, 'menu', canteenConfig);
+                        const primaryName = displayNameObj.primary || item.name;
+                        const secondaryName = displayNameObj.secondary;
 
-                    return (
-                      <div 
-                        key={item.id || i}
-                        onClick={() => {
-                          if (!isOutOfStock && !inBasket) addToBasket(item);
-                        }}
-                        className={`p-2.5 rounded-xl border transition-all flex flex-col justify-between gap-2 select-none ${
-                          isOutOfStock
-                            ? 'border-slate-800/60 bg-slate-950/30 opacity-40 cursor-not-allowed'
-                            : inBasket
-                            ? 'border-indigo-500 bg-indigo-950/40 shadow-sm ring-1 ring-indigo-500/40'
-                            : 'border-slate-800/80 bg-slate-900/80 hover:bg-slate-900 hover:border-slate-700 cursor-pointer'
-                        }`}
-                      >
-                        {/* Top: Thumbnail & Name */}
-                        <div className="flex items-start space-x-2 min-w-0">
-                          <div className={`w-10 h-10 rounded-lg flex items-center justify-center overflow-hidden shrink-0 border ${
-                            isOutOfStock ? 'border-slate-800 bg-slate-950 text-slate-600' : 'border-slate-800 bg-slate-950 text-slate-400'
-                          }`}>
-                            {item.DP ? (
-                              <img 
-                                src={resolveImageUrl(item.DP)} 
-                                alt={primaryName} 
-                                referrerPolicy="no-referrer"
-                                className="w-full h-full object-cover"
-                                onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                              />
-                            ) : (
-                              <PackageIcon className="w-4 h-4" />
-                            )}
-                          </div>
+                        return (
+                          <div 
+                            key={`mob_${item.id || i}`}
+                            onClick={() => {
+                              if (!isOutOfStock) addToBasket(item);
+                            }}
+                            className={`p-2.5 rounded-2xl border transition-all flex items-center justify-between gap-2.5 select-none ${
+                              isOutOfStock
+                                ? 'border-slate-800/60 bg-slate-950/30 opacity-40 cursor-not-allowed'
+                                : inBasket
+                                ? 'border-indigo-500/70 bg-indigo-950/30 hover:bg-indigo-950/40 cursor-pointer shadow-sm'
+                                : 'border-slate-800/80 bg-slate-900/80 hover:bg-slate-900 hover:border-slate-700 cursor-pointer'
+                            }`}
+                          >
+                            {/* Left: Thumbnail & Details */}
+                            <div className="flex items-center space-x-2.5 min-w-0 flex-1">
+                              <div className={`w-11 h-11 rounded-xl flex items-center justify-center overflow-hidden shrink-0 border ${
+                                isOutOfStock ? 'border-slate-800 bg-slate-950 text-slate-600' : 'border-slate-800 bg-slate-950 text-slate-400'
+                              }`}>
+                                {item.DP ? (
+                                  <img 
+                                    src={resolveImageUrl(item.DP)} 
+                                    alt={primaryName} 
+                                    referrerPolicy="no-referrer"
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                  />
+                                ) : (
+                                  <PackageIcon className="w-4 h-4" />
+                                )}
+                              </div>
 
-                          <div className="min-w-0 flex-1">
-                            <h5 className="text-xs font-black text-white truncate leading-tight" title={primaryName}>
-                              {primaryName}
-                            </h5>
-                            {secondaryName && (
-                              <p className="text-[10px] text-slate-400 truncate leading-tight">
-                                {secondaryName}
-                              </p>
-                            )}
-                            <div className="flex items-center space-x-1 mt-0.5">
-                              <span className="text-[9px] font-black uppercase text-indigo-400 truncate">
-                                {item.category || 'MENU'}
-                              </span>
-                              <span className="text-slate-600">•</span>
-                              {isOutOfStock ? (
-                                <span className="text-[8px] font-bold font-mono text-rose-400 uppercase">OUT</span>
-                              ) : (
-                                <span className={`text-[9px] font-mono font-bold ${isLowStock ? 'text-amber-400' : 'text-emerald-400'}`}>
-                                  {stockInfo.availableStock}
-                                </span>
-                              )}
+                              <div className="min-w-0 flex-1">
+                                {/* Category above menu name (e.g. SNACKS) */}
+                                <div className="mb-0.5">
+                                  <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 inline-block tracking-wider">
+                                    {item.category || 'MENU'}
+                                  </span>
+                                </div>
+                                <h5 className="text-xs font-black text-white truncate leading-tight" title={primaryName}>
+                                  {primaryName}
+                                </h5>
+                                {secondaryName && (
+                                  <p className="text-[10px] text-slate-400 truncate leading-tight mt-0.5">
+                                    {secondaryName}
+                                  </p>
+                                )}
+                                {/* Stock Boro hbe */}
+                                <div className="flex items-center space-x-1.5 mt-1 flex-wrap">
+                                  {isOutOfStock ? (
+                                    <span className="text-[10px] font-black font-mono text-rose-400 uppercase bg-rose-950/70 px-1.5 py-0.5 rounded border border-rose-500/40">
+                                      OUT OF STOCK
+                                    </span>
+                                  ) : (
+                                    <span className={`text-xs font-mono font-black ${isLowStock ? 'text-amber-400' : 'text-emerald-400'}`}>
+                                      Stock: {stockInfo.availableStock}
+                                    </span>
+                                  )}
+                                  {inBasket && inBasket.qty > 0 && (
+                                    <span className="text-[10px] font-mono font-bold text-indigo-300 bg-indigo-950/80 border border-indigo-500/40 px-1.5 py-0.5 rounded">
+                                      Cart: {inBasket.qty}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Right: Price & Add Button */}
+                            <div className="flex items-center space-x-2 shrink-0">
+                              <span className="text-xs sm:text-sm font-black font-mono text-white">৳{item.price}</span>
+
+                              <button
+                                type="button"
+                                disabled={isOutOfStock}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (!isOutOfStock) addToBasket(item);
+                                }}
+                                className={`px-2.5 py-1.5 rounded-xl text-[11px] font-black tracking-wider uppercase transition-all flex items-center space-x-1 ${
+                                  isOutOfStock
+                                    ? 'bg-slate-900 text-slate-600 cursor-not-allowed border border-slate-800'
+                                    : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm shadow-indigo-600/30 cursor-pointer active:scale-95'
+                                }`}
+                              >
+                                <Plus className="w-3 h-3 stroke-[2.5]" />
+                                <span>ADD</span>
+                              </button>
                             </div>
                           </div>
-                        </div>
+                        );
+                      })}
+                    </div>
 
-                        {/* Bottom: Price & Stepper / Add */}
-                        <div className="flex items-center justify-between gap-1 pt-1.5 border-t border-slate-800/60 mt-auto">
-                          <span className="text-xs font-black font-mono text-white">৳{item.price}</span>
+                    {/* LAPTOP VIEW: Single-column vertical list (single single niche niche asbe) */}
+                    <div className="hidden lg:flex lg:flex-col lg:space-y-2">
+                      {filteredCatalog.map((item, i) => {
+                        const inBasket = basket.find(b => b.id === item.id);
+                        const stockInfo = calculateMenuItemStockInfo(item.id, item.name, rawInventory, recipesMap);
+                        const isOutOfStock = stockInfo.availableStock <= 0;
+                        const isLowStock = stockInfo.availableStock > 0 && stockInfo.availableStock < 5;
 
-                          {inBasket ? (
-                            <div className="flex items-center space-x-1 bg-slate-950 rounded-lg border border-slate-800 p-0.5" onClick={(e) => e.stopPropagation()}>
-                              <button 
+                        const displayNameObj = getItemDisplayName(item, 'menu', canteenConfig);
+                        const primaryName = displayNameObj.primary || item.name;
+                        const secondaryName = displayNameObj.secondary;
+
+                        return (
+                          <div 
+                            key={`desk_${item.id || i}`}
+                            onClick={() => {
+                              if (!isOutOfStock) addToBasket(item);
+                            }}
+                            className={`p-3 rounded-2xl border transition-all flex items-center justify-between gap-3 select-none ${
+                              isOutOfStock
+                                ? 'border-slate-800/60 bg-slate-950/30 opacity-40 cursor-not-allowed'
+                                : inBasket
+                                ? 'border-indigo-500/70 bg-indigo-950/30 hover:bg-indigo-950/40 cursor-pointer shadow-sm'
+                                : 'border-slate-800/80 bg-slate-900/80 hover:bg-slate-900 hover:border-slate-700 cursor-pointer'
+                            }`}
+                          >
+                            {/* Left: Thumbnail & Details */}
+                            <div className="flex items-center space-x-3 min-w-0 flex-1">
+                              <div className={`w-12 h-12 rounded-xl flex items-center justify-center overflow-hidden shrink-0 border ${
+                                isOutOfStock ? 'border-slate-800 bg-slate-950 text-slate-600' : 'border-slate-800 bg-slate-950 text-slate-400'
+                              }`}>
+                                {item.DP ? (
+                                  <img 
+                                    src={resolveImageUrl(item.DP)} 
+                                    alt={primaryName} 
+                                    referrerPolicy="no-referrer"
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                  />
+                                ) : (
+                                  <PackageIcon className="w-5 h-5" />
+                                )}
+                              </div>
+
+                              <div className="min-w-0 flex-1">
+                                {/* Category above menu name (e.g. SNACKS) */}
+                                <div className="mb-0.5">
+                                  <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 inline-block tracking-wider">
+                                    {item.category || 'MENU'}
+                                  </span>
+                                </div>
+                                <h5 className="text-sm font-black text-white truncate leading-tight" title={primaryName}>
+                                  {primaryName}
+                                </h5>
+                                {secondaryName && (
+                                  <p className="text-[11px] text-slate-400 truncate leading-tight mt-0.5">
+                                    {secondaryName}
+                                  </p>
+                                )}
+                                {/* Stock Boro hbe */}
+                                <div className="flex items-center space-x-2 mt-1">
+                                  {isOutOfStock ? (
+                                    <span className="text-xs font-black font-mono text-rose-400 uppercase bg-rose-950/70 px-2 py-0.5 rounded-lg border border-rose-500/40">
+                                      OUT OF STOCK
+                                    </span>
+                                  ) : (
+                                    <span className={`text-xs sm:text-sm font-mono font-black ${isLowStock ? 'text-amber-400' : 'text-emerald-400'}`}>
+                                      Stock: {stockInfo.availableStock}
+                                    </span>
+                                  )}
+                                  {inBasket && inBasket.qty > 0 && (
+                                    <span className="text-xs font-mono font-bold text-indigo-300 bg-indigo-950/80 border border-indigo-500/40 px-2 py-0.5 rounded-lg">
+                                      Cart: {inBasket.qty}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Right: Price & Add Button (+ icon) - No -1+ stepper; multiple clicks increment Cart */}
+                            <div className="flex items-center space-x-3 shrink-0">
+                              <span className="text-sm sm:text-base font-black font-mono text-white">৳{item.price}</span>
+
+                              <button
                                 type="button"
-                                onClick={() => updateQty(item.id, -1)} 
-                                className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white cursor-pointer"
+                                disabled={isOutOfStock}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (!isOutOfStock) addToBasket(item);
+                                }}
+                                className={`px-3 py-1.5 rounded-xl text-xs font-black tracking-wider uppercase transition-all flex items-center space-x-1.5 ${
+                                  isOutOfStock
+                                    ? 'bg-slate-900 text-slate-600 cursor-not-allowed border border-slate-800'
+                                    : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm shadow-indigo-600/30 cursor-pointer active:scale-95'
+                                }`}
                               >
-                                <Minus className="w-2.5 h-2.5" />
-                              </button>
-                              <span className="text-xs font-mono font-black text-white w-4 text-center">{inBasket.qty}</span>
-                              <button 
-                                type="button"
-                                onClick={() => updateQty(item.id, 1)} 
-                                className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white cursor-pointer"
-                              >
-                                <Plus className="w-2.5 h-2.5" />
+                                <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                                <span>ADD</span>
                               </button>
                             </div>
-                          ) : (
-                            <button
-                              type="button"
-                              disabled={isOutOfStock}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (!isOutOfStock) addToBasket(item);
-                              }}
-                              className={`px-2.5 py-0.5 rounded-lg text-[10px] font-black tracking-wider uppercase transition-all flex items-center space-x-0.5 ${
-                                isOutOfStock
-                                  ? 'bg-slate-900 text-slate-600 cursor-not-allowed border border-slate-800'
-                                  : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-xs cursor-pointer'
-                              }`}
-                            >
-                              <Plus className="w-3 h-3" />
-                              <span>Add</span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
 
-            {/* Active Cart Items Summary Strip */}
-            {basket.length > 0 && (
-              <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2 flex-wrap">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="text-[10px] font-black uppercase text-indigo-400 tracking-wider">Cart:</span>
-                  {basket.map((item) => (
-                    <span 
-                      key={item.id} 
-                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-800 text-[11px] font-bold text-white shadow-xs"
-                    >
-                      <span>{item.name}</span>
-                      <span className="text-indigo-300 font-mono">x{item.qty}</span>
-                      <span className="text-emerald-400 font-mono">৳{item.price * item.qty}</span>
+            {/* ======================================================== */}
+            {/* RIGHT COLUMN: Order Cart & Member Basket                 */}
+            {/* ======================================================== */}
+            <div className="space-y-5 flex flex-col">
+
+              {/* Section: Order Cart & Checkout (Cart option ta Member Basket er opore) */}
+              <div className="bg-slate-950/90 border border-slate-800 rounded-3xl p-4 sm:p-5 shadow-xl space-y-4">
+                
+                {/* Cart Header */}
+                <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
+                  <div className="flex items-center space-x-2">
+                    <div className="p-2 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                      <ShoppingCart className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs sm:text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                        <span>Order Cart</span>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-600 text-white font-bold">
+                          {basket.length} {basket.length === 1 ? 'item' : 'items'}
+                        </span>
+                      </h4>
+                      <p className="text-[11px] text-slate-400">Items selected for this order</p>
+                    </div>
+                  </div>
+
+                  {/* Cart Total & Clear Button */}
+                  <div className="flex items-center space-x-2">
+                    {basket.length > 0 && (
                       <button 
                         type="button"
-                        onClick={() => removeFromBasket(item.id)} 
-                        className="text-slate-500 hover:text-rose-400 p-0.5 cursor-pointer"
+                        onClick={() => setBasket([])} 
+                        className="text-[11px] font-bold text-rose-400 hover:text-rose-300 px-2 py-1 rounded-lg bg-slate-900 border border-slate-800 hover:bg-rose-950/30 transition-colors cursor-pointer"
                       >
-                        <Trash2 className="w-2.5 h-2.5" />
+                        Clear
                       </button>
-                    </span>
-                  ))}
+                    )}
+                  </div>
                 </div>
-                <span className="text-xs font-mono font-bold text-slate-300">
-                  Per Member: <strong className="text-emerald-400 text-sm font-black">৳{basketTotal}</strong>
-                </span>
-              </div>
-            )}
-          </div>
 
-          {/* Section 2: Member Selection (Multi-column responsive grid, approx 3 rows visible) */}
-          <div className="bg-slate-950/90 border border-slate-800 rounded-3xl p-4 sm:p-5 shadow-xl space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h3 className="text-base sm:text-lg font-black text-white flex items-center space-x-2">
-                  <Users className="w-5 h-5 text-indigo-400" />
-                  <span>Select Members</span>
-                </h3>
-                <p className="text-xs text-slate-400 mt-0.5">Select members to record this sale</p>
-              </div>
-
-              {/* Bulk Action Buttons */}
-              <div className="flex items-center space-x-2 self-start sm:self-auto flex-wrap gap-y-1">
-                <button
-                  type="button"
-                  onClick={handleSelectAllFiltered}
-                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-black tracking-wider flex items-center space-x-1.5 border border-slate-700 transition-all cursor-pointer"
-                >
-                  <CheckSquare className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Select All ({filteredMembers.length})</span>
-                </button>
-                {selectedMembers.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={handleClearMembers}
-                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-950/40 text-rose-300 text-xs font-black tracking-wider flex items-center space-x-1.5 border border-slate-700 transition-all cursor-pointer"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                    <span>Clear ({selectedMembers.length})</span>
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Search & Rank Filters */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-              <div className="relative flex-1">
-                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input 
-                  type="text"
-                  value={memberSearchTerm}
-                  onChange={(e) => setMemberSearchTerm(e.target.value)}
-                  placeholder="Search by BD No, Rank, or Surname..."
-                  className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-9 py-2.5 text-xs sm:text-sm font-bold text-white placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
-                />
-                {memberSearchTerm && (
-                  <button 
-                    type="button"
-                    onClick={() => setMemberSearchTerm('')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs font-bold p-1"
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-
-              {/* Rank Filter Pills */}
-              <div className="flex items-center space-x-1 bg-slate-900 p-1 rounded-xl border border-slate-800 overflow-x-auto scrollbar-none shrink-0">
-                {(['ALL', 'OFFICER', 'AIRMEN', 'CIVILIAN'] as const).map((r) => {
-                  const count = r === 'ALL' ? members.length : r === 'OFFICER' ? officerCount : r === 'AIRMEN' ? airmenCount : civilianCount;
-                  const label = r === 'ALL' ? 'ALL' : r === 'OFFICER' ? 'OFFICER' : r === 'AIRMEN' ? 'AIRMEN' : 'CIVILIAN';
-                  const isSel = memberRankFilter === r;
-                  return (
-                    <button
-                      key={r}
-                      type="button"
-                      onClick={() => setMemberRankFilter(r)}
-                      className={`px-2.5 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer ${
-                        isSel ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      {label} ({count})
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* KPI Stats Strip */}
-            <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-2xl flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center space-x-4 flex-wrap gap-y-1 text-xs font-mono">
-                <span className="text-slate-400">
-                  Selected: <strong className="text-indigo-400 text-sm">{selectedMembers.length} Members</strong>
-                </span>
-                <span className="text-slate-500">•</span>
-                <span className="text-slate-400">
-                  Per Member: <strong className="text-white text-sm">৳{Math.round(perMemberFinalAmount)}</strong>
-                  {numDiscount > 0 && (
-                    <span className="text-rose-400 ml-1 font-bold">(-৳{numDiscount} discount)</span>
-                  )}
-                </span>
-                <span className="text-slate-500">•</span>
-                <span className="text-slate-400">
-                  Grand Total: <strong className="text-emerald-400 text-sm sm:text-base font-black">৳{Math.round(grandTotal).toLocaleString()}</strong>
-                </span>
-              </div>
-            </div>
-
-            {/* Members Grid: Multi-column responsive grid based on screen size, approx 3 rows visible */}
-            <div className="h-[195px] min-h-[195px] max-h-[195px] overflow-y-auto pr-1 flex flex-col">
-              {filteredMembers.length === 0 ? (
-                <div className="flex-1 flex flex-col items-center justify-center text-center py-4 text-slate-400 bg-slate-900/40 rounded-2xl border border-slate-800 p-6">
-                  <Users className="w-8 h-8 mx-auto opacity-20 mb-2" />
-                  <p className="text-xs font-bold uppercase tracking-wider text-slate-300">No Members Found</p>
-                  <p className="text-[11px] text-slate-500 mt-1">Check search filters or try another rank category.</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
-                  {filteredMembers.map((m, i) => {
-                    const isSelected = selectedMembers.some((sm) => sm.airman_id === m.airman_id);
-                    return (
-                      <div
-                        key={m.airman_id || `norm_${m['BD No'] || i}_${i}`}
-                        onClick={() => toggleMember(m)}
-                        className={`p-2 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-2 select-none active:scale-[0.99] ${
-                          isSelected
-                            ? 'bg-indigo-950/60 border-indigo-500 shadow-md ring-1 ring-indigo-500/40'
-                            : 'bg-slate-900/60 border-slate-800/80 hover:border-slate-700 hover:bg-slate-900'
-                        }`}
-                      >
-                        <div className="flex items-center space-x-2 min-w-0">
-                          <div className={`w-4 h-4 rounded-md flex items-center justify-center shrink-0 border transition-colors ${
-                            isSelected 
-                              ? 'bg-indigo-600 border-indigo-500 text-white' 
-                              : 'border-slate-700 bg-slate-950 text-transparent'
-                          }`}>
-                            <Check className="w-3 h-3 stroke-[3]" />
-                          </div>
-                          <div className="min-w-0">
-                            <div className="text-xs font-black text-white truncate leading-tight">
-                              {m['Rank']} {m['Surname']}
-                            </div>
-                            <div className="flex items-center space-x-1.5 mt-0.5 text-[10px] font-mono leading-tight">
-                              <span className="text-slate-400">BD: {m['BD No']}</span>
-                              <span className="text-amber-400 font-bold">Due: ৳{m.Due || 0}</span>
-                            </div>
-                          </div>
+                {/* Cart Items List */}
+                <div className="max-h-[190px] overflow-y-auto pr-1 space-y-2">
+                  {basket.length === 0 ? (
+                    <div className="py-6 text-center text-slate-500 bg-slate-900/40 rounded-2xl border border-slate-800">
+                      <ShoppingCart className="w-7 h-7 mx-auto opacity-25 mb-1.5" />
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Cart is empty</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">Select menu items from the left to add</p>
+                    </div>
+                  ) : (
+                    basket.map((item) => (
+                      <div key={item.id} className="p-2.5 bg-slate-900/90 rounded-xl border border-slate-800 flex items-center justify-between gap-2 shadow-xs">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-black text-white truncate">{item.name}</p>
+                          <p className="text-[11px] font-mono text-slate-400">
+                            ৳{item.price} x {item.qty} = <span className="text-emerald-400 font-bold">৳{item.price * item.qty}</span>
+                          </p>
                         </div>
-
-                        {isSelected && basketTotal > 0 && (
-                          <span className="text-[10px] font-mono font-bold text-emerald-400 shrink-0 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-500/30">
-                            +৳{Math.round(perMemberFinalAmount)}
-                          </span>
-                        )}
+                        <div className="flex items-center space-x-2 shrink-0">
+                          <div className="flex items-center space-x-1 bg-slate-950 rounded-lg border border-slate-800 p-0.5">
+                            <button 
+                              type="button"
+                              onClick={() => updateQty(item.id, -1)} 
+                              className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white cursor-pointer"
+                            >
+                              <Minus className="w-3 h-3" />
+                            </button>
+                            <span className="text-xs font-mono font-bold text-white w-5 text-center">{item.qty}</span>
+                            <button 
+                              type="button"
+                              onClick={() => updateQty(item.id, 1)} 
+                              className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white cursor-pointer"
+                            >
+                              <Plus className="w-3 h-3" />
+                            </button>
+                          </div>
+                          <button 
+                            type="button"
+                            onClick={() => removeFromBasket(item.id)} 
+                            className="p-1 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-lg cursor-pointer transition-colors"
+                            title="Remove"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
-                    );
-                  })}
+                    ))
+                  )}
                 </div>
-              )}
-            </div>
-          </div>
 
-          {/* Section 3: Payment Mode, Discount & Summary */}
-          <div className="bg-slate-950/80 border border-slate-800/90 rounded-2xl p-3.5 sm:p-4 space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 items-center">
-              
-              {/* Payment Status (DUE default, PAID adds to Manager Cash) */}
-              <div>
-                <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider block mb-1.5">
-                  Payment Status (Default: DUE)
-                </label>
-                <div className="grid grid-cols-2 gap-2 bg-slate-900 p-1 rounded-xl border border-slate-800">
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMode('DUE')}
-                    className={`py-2 px-3 rounded-lg text-xs font-black tracking-wider uppercase flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
-                      paymentMode === 'DUE'
-                        ? 'bg-amber-600 text-white shadow-sm shadow-amber-600/30'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <span>DUE (বকেয়া)</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMode('PAID')}
-                    className={`py-2 px-3 rounded-lg text-xs font-black tracking-wider uppercase flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
-                      paymentMode === 'PAID'
-                        ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-600/30'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    <Banknote className="w-3.5 h-3.5" />
-                    <span>PAID (নগদ)</span>
-                  </button>
-                </div>
-                <p className="text-[10px] text-slate-500 mt-1 font-medium">
-                  {paymentMode === 'PAID' 
-                    ? '✓ Amount will be added directly to Manager Cash' 
-                    : '✓ Amount will be recorded as due on member account'}
-                </p>
               </div>
 
-              {/* Discount Input */}
-              <div>
-                <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider block mb-1.5">
-                  Discount (৳)
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-mono font-bold text-xs">
-                    ৳
-                  </span>
+              {/* Section: Member Basket (Renamed from Select Members; Placed underneath Cart) */}
+              <div className="bg-slate-950/90 border border-slate-800 rounded-3xl p-4 sm:p-5 shadow-xl space-y-3.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-base sm:text-lg font-black text-white flex items-center space-x-2">
+                      <Users className="w-5 h-5 text-indigo-400" />
+                      <span>Member Basket</span>
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">Select members to record this sale</p>
+                  </div>
+
+                  {/* Bulk Action Buttons & Selected indicator on the left of Select All */}
+                  <div className="flex items-center space-x-2 self-start sm:self-auto flex-wrap gap-y-1">
+                    {/* Selected option on the left side of Select all (hidden if no member selected) */}
+                    {selectedMembers.length > 0 && (
+                      <span className="px-3 py-1.5 rounded-xl bg-indigo-950/70 border border-indigo-500/40 text-xs font-mono font-bold text-indigo-300 flex items-center space-x-1">
+                        <span>Selected:</span>
+                        <strong className="text-white font-black">{selectedMembers.length}</strong>
+                      </span>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={handleSelectAllFiltered}
+                      className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-black tracking-wider flex items-center space-x-1.5 border border-slate-700 transition-all cursor-pointer"
+                    >
+                      <CheckSquare className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Select All ({filteredMembers.length})</span>
+                    </button>
+                    {selectedMembers.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleClearMembers}
+                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-950/40 text-rose-300 text-xs font-black tracking-wider flex items-center space-x-1.5 border border-slate-700 transition-all cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                        <span>Clear ({selectedMembers.length})</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Search Bar - Full Width & Bigger */}
+                <div className="relative w-full">
+                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-indigo-400" />
                   <input 
-                    type="number"
-                    min="0"
-                    value={discountAmount}
-                    onChange={(e) => setDiscountAmount(e.target.value)}
-                    placeholder="0"
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-7 pr-3 py-2 text-xs font-mono font-bold text-white focus:outline-none focus:border-indigo-500"
+                    type="text"
+                    value={memberSearchTerm}
+                    onChange={(e) => setMemberSearchTerm(e.target.value)}
+                    placeholder="Search by BD No, Rank, or Surname..."
+                    className="w-full bg-slate-900 border border-slate-700/80 focus:border-indigo-500 rounded-2xl pl-11 pr-10 py-2.5 sm:py-3 text-xs sm:text-sm font-bold text-white placeholder:text-slate-500 shadow-inner focus:outline-none focus:ring-2 focus:ring-indigo-500/25 transition-all"
                   />
-                  {discountAmount && (
+                  {memberSearchTerm && (
                     <button 
                       type="button"
-                      onClick={() => setDiscountAmount('')}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs"
+                      onClick={() => setMemberSearchTerm('')}
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs font-bold p-1 rounded-full hover:bg-slate-800"
                     >
                       ✕
                     </button>
                   )}
                 </div>
-                <p className="text-[10px] text-slate-500 mt-1 font-medium">
-                  {selectedMembers.length > 1 && numDiscount > 0
-                    ? `✓ ৳${numDiscount} discount applied per member (Total ৳${numDiscount * selectedMembers.length} for ${selectedMembers.length} members)`
-                    : numDiscount > 0
-                    ? `✓ ৳${numDiscount} discount applied per member`
-                    : 'Discount in tk deducted from each member\'s bill'}
-                </p>
+
+                {/* Rank Filter Pills (Underneath Search Bar) */}
+                <div className="flex items-center space-x-1.5 bg-slate-900/90 p-1 rounded-xl border border-slate-800 overflow-x-auto scrollbar-none w-full">
+                  {(['ALL', 'OFFICER', 'AIRMEN', 'CIVILIAN'] as const).map((r) => {
+                    const count = r === 'ALL' ? members.length : r === 'OFFICER' ? officerCount : r === 'AIRMEN' ? airmenCount : civilianCount;
+                    const label = r === 'ALL' ? 'ALL' : r === 'OFFICER' ? 'OFFICER' : r === 'AIRMEN' ? 'AIRMEN' : 'CIVILIAN';
+                    const isSel = memberRankFilter === r;
+                    return (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => setMemberRankFilter(r)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer ${
+                          isSel ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {label} ({count})
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Members List - Single Single Niche Niche (Vertical List) */}
+                <div className="h-[260px] min-h-[200px] max-h-[360px] overflow-y-auto pr-1 flex flex-col">
+                  {filteredMembers.length === 0 ? (
+                    <div className="flex-1 flex flex-col items-center justify-center text-center py-4 text-slate-400 bg-slate-900/40 rounded-2xl border border-slate-800 p-6">
+                      <Users className="w-8 h-8 mx-auto opacity-20 mb-2" />
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-300">No Members Found</p>
+                      <p className="text-[11px] text-slate-500 mt-1">Check search filters or try another rank category.</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col space-y-2">
+                      {filteredMembers.map((m, i) => {
+                        const isSelected = selectedMembers.some((sm) => sm.airman_id === m.airman_id);
+                        return (
+                          <div
+                            key={m.airman_id || `norm_${m['BD No'] || i}_${i}`}
+                            onClick={() => toggleMember(m)}
+                            className={`p-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 select-none active:scale-[0.99] ${
+                              isSelected
+                                ? 'bg-indigo-950/60 border-indigo-500 shadow-md ring-1 ring-indigo-500/40'
+                                : 'bg-slate-900/60 border-slate-800/80 hover:border-slate-700 hover:bg-slate-900'
+                            }`}
+                          >
+                            <div className="flex items-center space-x-3 min-w-0 flex-1">
+                              <div className={`w-4.5 h-4.5 rounded-md flex items-center justify-center shrink-0 border transition-colors ${
+                                isSelected 
+                                  ? 'bg-indigo-600 border-indigo-500 text-white' 
+                                  : 'border-slate-700 bg-slate-950 text-transparent'
+                              }`}>
+                                <Check className="w-3 h-3 stroke-[3]" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="text-xs sm:text-sm font-black text-white truncate leading-tight">
+                                  {m['Rank']} {m['Surname']}
+                                </div>
+                                <div className="flex items-center space-x-2 mt-0.5 text-[11px] font-mono leading-tight">
+                                  <span className="text-slate-400">BD: {m['BD No']}</span>
+                                  <span className="text-slate-600">•</span>
+                                  <span className="text-amber-400 font-bold">Due: ৳{m.Due || 0}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {isSelected && basketTotal > 0 && (
+                              <span className="text-xs font-mono font-bold text-emerald-400 shrink-0 bg-emerald-950/60 px-2 py-0.5 rounded-lg border border-emerald-500/30">
+                                +৳{Math.round(perMemberFinalAmount)}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {/* Amount Summary */}
-              <div className="bg-slate-900/90 rounded-xl p-2.5 border border-slate-800 flex flex-col justify-center space-y-1 sm:col-span-2 lg:col-span-1">
-                <div className="flex justify-between text-[11px] font-mono text-slate-400">
-                  <span>Cart Subtotal:</span>
-                  <span className="text-white font-bold">৳{(basketTotal * (selectedMembers.length || 1)).toLocaleString()}</span>
-                </div>
-                {totalDiscount > 0 && (
-                  <div className="flex justify-between text-[11px] font-mono text-rose-400">
-                    <span>Total Discount:</span>
-                    <span className="font-bold">
-                      -৳{totalDiscount.toLocaleString()} {selectedMembers.length > 1 ? `(৳${numDiscount} x ${selectedMembers.length})` : ''}
-                    </span>
+              {/* Section: Payment & Checkout (Payment Status theke Confirm Checkout porjonto) */}
+              <div className="bg-slate-950/90 border border-slate-800 rounded-3xl p-4 sm:p-5 shadow-xl space-y-4">
+                
+                {/* Payment Status & Discount */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
+                  
+                  {/* Payment Status (Default due label removed) */}
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider block mb-1.5">
+                      Payment Status
+                    </label>
+                    <div className="grid grid-cols-2 gap-2 bg-slate-900 p-1 rounded-xl border border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMode('DUE')}
+                        className={`py-2 px-3 rounded-lg text-xs font-black tracking-wider uppercase flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+                          paymentMode === 'DUE'
+                            ? 'bg-amber-600 text-white shadow-sm shadow-amber-600/30'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        <span>DUE</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPaymentMode('PAID')}
+                        className={`py-2 px-3 rounded-lg text-xs font-black tracking-wider uppercase flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+                          paymentMode === 'PAID'
+                            ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-600/30'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        <Banknote className="w-3.5 h-3.5" />
+                        <span>PAID</span>
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-slate-500 mt-1 font-medium">
+                      {paymentMode === 'PAID' 
+                        ? '✓ Added directly to Manager Cash' 
+                        : '✓ Added as due on member accounts'}
+                    </p>
                   </div>
-                )}
-                <div className="flex justify-between text-xs font-mono font-black pt-1 border-t border-slate-800">
-                  <span className="text-slate-300">Net Payable:</span>
-                  <span className="text-emerald-400 text-sm">৳{Math.round(grandTotal).toLocaleString()}</span>
+
+                  {/* Discount Input with Presets: 10, 15, 20, 25 */}
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider block mb-1.5">
+                      Discount (৳)
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-mono font-bold text-xs">
+                        ৳
+                      </span>
+                      <input 
+                        type="number"
+                        min="0"
+                        value={discountAmount}
+                        onChange={(e) => setDiscountAmount(e.target.value)}
+                        placeholder="0"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-7 pr-3 py-2 text-xs font-mono font-bold text-white focus:outline-none focus:border-indigo-500"
+                      />
+                      {discountAmount && (
+                        <button 
+                          type="button"
+                          onClick={() => setDiscountAmount('')}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Preset Discount Buttons: 10, 15, 20, 25 */}
+                    <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                      {['10', '15', '20', '25'].map((preset) => {
+                        const isActive = discountAmount === preset;
+                        return (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => setDiscountAmount(isActive ? '' : preset)}
+                            className={`px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold transition-all cursor-pointer ${
+                              isActive
+                                ? 'bg-indigo-600 text-white shadow-xs'
+                                : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 hover:text-white'
+                            }`}
+                          >
+                            ৳{preset}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <p className="text-[10px] text-slate-500 mt-1 font-medium">
+                      {selectedMembers.length > 1 && numDiscount > 0
+                        ? `✓ ৳${numDiscount} per member (Total ৳${numDiscount * selectedMembers.length})`
+                        : numDiscount > 0
+                        ? `✓ ৳${numDiscount} discount applied per member`
+                        : 'Discount in tk deducted from bill'}
+                    </p>
+                  </div>
+
                 </div>
+
+                {/* Amount Summary */}
+                <div className="bg-slate-900/90 rounded-xl p-3 border border-slate-800 flex flex-col justify-center space-y-1">
+                  <div className="flex justify-between text-[11px] font-mono text-slate-400">
+                    <span>Cart Subtotal:</span>
+                    <span className="text-white font-bold">৳{(basketTotal * (selectedMembers.length || 1)).toLocaleString()}</span>
+                  </div>
+                  {totalDiscount > 0 && (
+                    <div className="flex justify-between text-[11px] font-mono text-rose-400">
+                      <span>Total Discount:</span>
+                      <span className="font-bold">
+                        -৳{totalDiscount.toLocaleString()} {selectedMembers.length > 1 ? `(৳${numDiscount} x ${selectedMembers.length})` : ''}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-xs font-mono font-black pt-1.5 border-t border-slate-800">
+                    <span className="text-slate-300">Net Payable:</span>
+                    <span className="text-emerald-400 text-sm sm:text-base">৳{Math.round(grandTotal).toLocaleString()}</span>
+                  </div>
+                </div>
+
+                {/* Confirm Checkout Button */}
+                <button 
+                  type="button"
+                  onClick={handleCheckout}
+                  disabled={isCheckingOut || basket.length === 0 || selectedMembers.length === 0}
+                  className={`w-full py-3.5 rounded-2xl text-xs sm:text-sm font-black tracking-wider uppercase flex items-center justify-center space-x-2 transition-all shadow-lg ${
+                    (!isCheckingOut && basket.length > 0 && selectedMembers.length > 0)
+                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30 cursor-pointer active:scale-95' 
+                      : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/50'
+                  }`}
+                >
+                  <CheckCircle2 className="w-5 h-5" />
+                  <span>{isCheckingOut ? 'Confirming Checkout...' : 'Confirm Checkout'}</span>
+                </button>
+
               </div>
 
             </div>
+
           </div>
 
-          {/* Section 4: Bottom Checkout Button ('Confirm Checkout' only, no extra text as requested) */}
-          <div className="pt-1">
-            <button 
-              type="button"
-              onClick={handleCheckout}
-              disabled={isCheckingOut || basket.length === 0 || selectedMembers.length === 0}
-              className={`w-full py-4 rounded-2xl text-xs sm:text-sm font-black tracking-wider uppercase flex items-center justify-center space-x-2 transition-all shadow-lg ${
-                (!isCheckingOut && basket.length > 0 && selectedMembers.length > 0)
-                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30 cursor-pointer active:scale-95' 
-                  : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/50'
-              }`}
-            >
-              <CheckCircle2 className="w-5 h-5" />
-              <span>{isCheckingOut ? 'Confirming Checkout...' : 'Confirm Checkout'}</span>
-            </button>
-          </div>
-
-        </div>
-
         {/* ======================================================== */}
-        {/* MOBILE STICKY FLOATING BOTTOM BAR (md:hidden)            */}
+        {/* MOBILE STICKY FLOATING BOTTOM BAR (lg:hidden)            */}
         {/* ======================================================== */}
-        <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 p-3 shadow-2xl safe-area-bottom">
+        <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 p-3 shadow-2xl safe-area-bottom">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0 flex-1">
               <p className="text-[10px] uppercase font-bold text-slate-400">
@@ -1166,7 +1316,7 @@ export const PosSales: React.FC = () => {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setIsMobileCartOpen(false)}
-              className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-end justify-center md:hidden"
+              className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-end justify-center lg:hidden"
             >
               <motion.div
                 initial={{ y: '100%' }}

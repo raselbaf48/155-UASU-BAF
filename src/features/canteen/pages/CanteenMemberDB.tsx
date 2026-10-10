@@ -28,7 +28,8 @@ import {
   Sparkles,
   KeyRound,
   Eye,
-  EyeOff
+  EyeOff,
+  AlertTriangle
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { supabase } from '../../../supabase';
@@ -47,7 +48,12 @@ import {
   saveMemberBanglaRank,
   BAF_RANKS_WITH_BN 
 } from '../utils/memberBanglaNames';
-import { getCanteenMembersCache, fetchCanteenMembersOnce, setCanteenMembersCache } from '../utils/canteenMenuData';
+import { 
+  getCanteenMembersCache, 
+  fetchCanteenMembersOnce, 
+  setCanteenMembersCache,
+  archiveCanteenMember 
+} from '../utils/canteenMenuData';
 import { playCelebrationSound } from '../utils/audioFeedback';
 import { queuePushKeyToCloud } from '../utils/canteenCloudSync';
 
@@ -1019,14 +1025,64 @@ export const CanteenMemberDB: React.FC = () => {
     }
   };
 
-  // Delete Member from Cloud
+  // Helper to calculate a member's total due (checking member.Due, member.baki, and ledger balance)
+  const getMemberTotalDue = (member: any): number => {
+    if (!member) return 0;
+    const profileDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
+    try {
+      const rawTxs = localStorage.getItem('canteen_transactions');
+      if (!rawTxs) return profileDue;
+      const txs: any[] = JSON.parse(rawTxs);
+      if (!Array.isArray(txs)) return profileDue;
+      const bdClean = String(member['BD No'] || member.bdNo || '').replace(/\D/g, '');
+      const airmanId = member.airman_id || `airman-${bdClean}`;
+      const mSurname = String(member['Surname'] || member.surname || '').toLowerCase().trim();
+
+      const memberTxs = txs.filter((t) => {
+        if (t.isReverted || t.status === 'REVERTED') return false;
+        const tBd = String(t.bdNo || t.airman_id || '').replace(/\D/g, '');
+        if (bdClean && tBd === bdClean) return true;
+        if (t.airman_id && t.airman_id === airmanId) return true;
+        if (mSurname && t.memberName && String(t.memberName).toLowerCase().includes(mSurname)) return true;
+        return false;
+      });
+
+      if (memberTxs.length > 0) {
+        let charges = 0;
+        let payments = 0;
+        memberTxs.forEach((t) => {
+          const amt = Number(t.amount || 0);
+          if (t.type === 'BILL PAYMENT') {
+            payments += amt;
+          } else {
+            charges += amt;
+          }
+        });
+        const netDue = Math.max(0, charges - payments);
+        return Math.max(profileDue, netDue);
+      }
+      return profileDue;
+    } catch {
+      return profileDue;
+    }
+  };
+
+  // Delete Member from Cloud (Blocked if member has any Due)
   const handleConfirmDeleteMember = async () => {
     if (!deleteConfirmMember) return;
+    const memberDue = getMemberTotalDue(deleteConfirmMember);
+    if (memberDue > 0) {
+      alert(`এই সদস্যের এখনো ৳${memberDue.toLocaleString()} বকেয়া (Due) রয়েছে! নিয়ম অনুযায়ী বকেয়া পরিশোধ না করা পর্যন্ত সদস্য মুছে ফেলা সম্পূর্ণ নিষিদ্ধ।`);
+      return;
+    }
     setIsDeleting(true);
 
     try {
       const { error } = await supabase.from('Canteen_Member').delete().eq('airman_id', deleteConfirmMember.airman_id);
       if (error) throw error;
+
+      // Safely archive deleted member so all historical logs/reports keep their name intact
+      archiveCanteenMember(deleteConfirmMember);
 
       showToast(`Member #${deleteConfirmMember['BD No']} removed from Cloud.`);
       const updated = members.filter(m => m.airman_id !== deleteConfirmMember.airman_id);
@@ -2302,52 +2358,101 @@ export const CanteenMemberDB: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* DELETE CONFIRM MODAL */}
+      {/* DELETE CONFIRM / BLOCKED MODAL */}
       <AnimatePresence>
-        {deleteConfirmMember && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4"
-          >
+        {deleteConfirmMember && (() => {
+          const memberDue = getMemberTotalDue(deleteConfirmMember);
+          const isBlocked = memberDue > 0;
+
+          return (
             <motion.div 
-              initial={{ scale: 0.88, y: 20, opacity: 0 }}
-              animate={{ scale: 1, y: 0, opacity: 1 }}
-              exit={{ scale: 0.88, y: 20, opacity: 0 }}
-              transition={{ type: 'spring', stiffness: 450, damping: 28 }}
-              className="bg-slate-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-slate-800 text-center space-y-4 relative overflow-hidden"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4"
             >
-              <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-rose-500 via-red-500 to-rose-500" />
-              <div className="w-14 h-14 rounded-2xl bg-rose-500/20 text-rose-400 mx-auto flex items-center justify-center border border-rose-500/30 shadow-inner">
-                <Trash2 className="w-7 h-7 animate-pulse" />
-              </div>
-              <div>
-                <h3 className="text-base font-black text-white uppercase">Delete Member?</h3>
-                <p className="text-xs text-slate-400 mt-1">
-                  Are you sure you want to delete <strong>{deleteConfirmMember['Rank']} {deleteConfirmMember['Surname']}</strong> (#{deleteConfirmMember['BD No']}) from the Cloud Database?
-                </p>
-              </div>
-              <div className="flex items-center space-x-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setDeleteConfirmMember(null)}
-                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors cursor-pointer active:scale-95"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmDeleteMember}
-                  disabled={isDeleting}
-                  className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black uppercase transition-all cursor-pointer shadow-md shadow-rose-600/30 active:scale-95 disabled:opacity-50"
-                >
-                  {isDeleting ? 'Deleting...' : 'Delete'}
-                </button>
-              </div>
+              <motion.div 
+                initial={{ scale: 0.88, y: 20, opacity: 0 }}
+                animate={{ scale: 1, y: 0, opacity: 1 }}
+                exit={{ scale: 0.88, y: 20, opacity: 0 }}
+                transition={{ type: 'spring', stiffness: 450, damping: 28 }}
+                className="bg-slate-900 rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-slate-800 text-center space-y-4 relative overflow-hidden"
+              >
+                <div className={`absolute top-0 left-0 right-0 h-1.5 ${
+                  isBlocked 
+                    ? 'bg-gradient-to-r from-amber-500 via-rose-500 to-amber-500' 
+                    : 'bg-gradient-to-r from-rose-500 via-red-500 to-rose-500'
+                }`} />
+                <div className={`w-14 h-14 rounded-2xl mx-auto flex items-center justify-center border shadow-inner ${
+                  isBlocked
+                    ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                    : 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                }`}>
+                  {isBlocked ? (
+                    <AlertTriangle className="w-7 h-7 animate-pulse text-amber-400" />
+                  ) : (
+                    <Trash2 className="w-7 h-7 animate-pulse text-rose-400" />
+                  )}
+                </div>
+
+                <div>
+                  <h3 className="text-base font-black text-white uppercase">
+                    {isBlocked ? 'সদস্য মোছা নিষিদ্ধ (Delete Blocked)' : 'Delete Member?'}
+                  </h3>
+                  <p className="text-xs font-bold text-slate-300 mt-1">
+                    {deleteConfirmMember['Rank']} {deleteConfirmMember['Surname']} (#{deleteConfirmMember['BD No']})
+                  </p>
+                </div>
+
+                {isBlocked ? (
+                  <div className="space-y-3 text-left">
+                    <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-2xl text-rose-300 text-xs font-bold space-y-1.5">
+                      <p className="flex items-center gap-1.5 font-black text-rose-400">
+                        <AlertTriangle className="w-4 h-4 shrink-0" />
+                        <span>বকেয়া থাকায় সদস্য রিমুভ করা যাবে না!</span>
+                      </p>
+                      <p className="text-[11px] text-slate-300 leading-relaxed">
+                        এই সদস্যের একাউন্টে বর্তমানে <strong className="text-amber-300 font-mono text-xs">৳{memberDue.toLocaleString()}</strong> বকেয়া (Due) রয়েছে।
+                      </p>
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed text-center">
+                      নিয়ম অনুযায়ী বকেয়া সম্পূর্ণ পরিশোধ না করা পর্যন্ত মেম্বার ডাটাবেজ থেকে সদস্য মুছে ফেলা সম্পূর্ণ নিষিদ্ধ।
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5 text-left">
+                    <p className="text-xs text-slate-300 leading-relaxed text-center">
+                      Are you sure you want to delete this member from the Cloud Database?
+                    </p>
+                    <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-[11px] text-emerald-300 font-semibold leading-relaxed">
+                      ✓ সদস্যকে রিমুভ করলেও পূর্ববর্তী কোনো মিল লগ, ভাউচার বা সেলস হিস্ট্রি থেকে তার নাম মুছে যাবে না (আর্কাইভে সংরক্ষিত থাকবে)।
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center space-x-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setDeleteConfirmMember(null)}
+                    className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors cursor-pointer active:scale-95"
+                  >
+                    {isBlocked ? 'ঠিক আছে (Close)' : 'Cancel'}
+                  </button>
+                  {!isBlocked && (
+                    <button
+                      type="button"
+                      onClick={handleConfirmDeleteMember}
+                      disabled={isDeleting}
+                      className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black uppercase transition-all cursor-pointer shadow-md shadow-rose-600/30 active:scale-95 disabled:opacity-50"
+                    >
+                      {isDeleting ? 'Deleting...' : 'Delete'}
+                    </button>
+                  )}
+                </div>
+              </motion.div>
             </motion.div>
-          </motion.div>
-        )}
+          );
+        })()}
       </AnimatePresence>
 
       {/* Edit Member Seniority Modal (Office App Biodata Register Style) */}

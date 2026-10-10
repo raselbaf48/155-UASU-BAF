@@ -35,17 +35,20 @@ import {
   Globe,
   ExternalLink,
   Save,
-  Palette
-, Activity} from 'lucide-react';
-import {   Logo155UASU } from './Logo155UASU';
-import {   UserManagementTab } from './UserManagementTab';
-import {   UserRole, ThemePreference, DetailedUserLogin, UserLoginStatus, UserLoginRole, Rank, FlightName } from '../types';
+  Palette,
+  Store,
+  Activity
+} from 'lucide-react';
+import { Logo155UASU } from './Logo155UASU';
+import { UserManagementTab } from './UserManagementTab';
+import { UserRole, ThemePreference, DetailedUserLogin, UserLoginStatus, UserLoginRole, Rank, FlightName } from '../types';
 import { getCustomDuties, saveCustomDuties, addCustomDuty, removeCustomDuty, CustomDutyConfig } from '../utils/customDuties';
-import {   subscribeToActiveUsers, subscribeToLoginHistory } from '../services/presenceService';
-import {   getLoginHistory, clearLoginHistory, recordLoginLog, UserLoginLog, getDetailedUsers, toggleUserLoginStatus, saveDetailedUsers, changeUserPassword, changeAdminPassword, changeUserRole, getCurrentUserSession } from '../utils/authSession';
-import {   localDb, getSyncLogs, SyncLog } from '../services/localDatabase';
+import { subscribeToActiveUsers, subscribeToLoginHistory } from '../services/presenceService';
+import { getLoginHistory, clearLoginHistory, recordLoginLog, UserLoginLog, getDetailedUsers, toggleUserLoginStatus, saveDetailedUsers, changeUserPassword, changeAdminPassword, changeUserRole, getCurrentUserSession } from '../utils/authSession';
+import { localDb, getSyncLogs, SyncLog } from '../services/localDatabase';
 
 import { CustomDutiesTab } from './CustomDutiesTab';
+import { DueRegisterSettingsSection } from '../features/canteen/components/DueRegisterSettingsSection';
 import {
   checkForAppUpdate,
   fetchLatestAppVersion,
@@ -80,7 +83,7 @@ interface SettingsModalProps {
   onRosterUpdated?: () => void;
 }
 
-type SettingSection = 'appearance' | 'appUpdate' | 'cloudsync' | 'users' | 'security' | 'database' | 'history' | 'appManagement';
+type SettingSection = 'appearance' | 'appUpdate' | 'cloudsync' | 'users' | 'security' | 'database' | 'history' | 'appManagement' | 'appNotice' | 'maintenanceMode' | 'due_register';
 
 export 
 const Countdown = ({ endTime }: { endTime: string }) => {
@@ -764,6 +767,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     { id: 'security', label: 'Security & Passcode', icon: <Lock className="w-5 h-5" />, color: 'text-amber-500 bg-amber-100 dark:bg-amber-950 dark:text-amber-400' },
     ...((role === 'SUPER_ADMIN' || role === 'OWNER' || role === 'ADMIN') ? [{ id: 'database', label: 'Backup & Restore', icon: <Database className="w-5 h-5" />, color: 'text-emerald-500 bg-emerald-100 dark:bg-emerald-950 dark:text-emerald-400' }] : []),
     ...((role === 'SUPER_ADMIN' || role === 'OWNER' || role === 'ADMIN') ? [{ id: 'history', label: 'Login History', icon: <History className="w-5 h-5" />, color: 'text-sky-500 bg-sky-100 dark:bg-sky-950 dark:text-sky-400' }] : []),
+    { id: 'due_register', label: 'Due Register', icon: <Store className="w-5 h-5" />, color: 'text-amber-500 bg-amber-100 dark:bg-amber-950 dark:text-amber-400' },
   ];
 
   const getSectionTitle = (id: SettingSection) => {
@@ -1810,6 +1814,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </div>
                 </>
               )}
+            </div>
+          )}
+          {activeSection === 'due_register' && (
+            <div className="p-4 sm:p-6 overflow-y-auto h-full">
+              <DueRegisterSettingsSection onBack={() => setActiveSection(null)} />
             </div>
           )}
         </div>

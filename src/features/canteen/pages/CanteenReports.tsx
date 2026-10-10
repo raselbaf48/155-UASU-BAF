@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { formatCanteenDate } from '../utils/dateUtils';
+import { getArchivedCanteenMembers } from '../utils/canteenMenuData';
 
 // Helper to check and filter out any Cash Advance, Advance Return, Bazar Return or Refund
 export const isAdvanceRelated = (tx: any): boolean => {
@@ -133,9 +134,11 @@ export const CanteenReports: React.FC = () => {
 
     try {
       const { data } = await supabase.from('Canteen_Member').select('airman_id, "BD No", Rank, Surname, Due');
-      if (data && data.length > 0) {
+      const archived = getArchivedCanteenMembers();
+      const allMembers = [...(data || []), ...archived];
+      if (allMembers.length > 0) {
         const map: Record<string, any> = {};
-        data.forEach(m => {
+        allMembers.forEach(m => {
           const aid = String(m.airman_id || '').toLowerCase();
           const cleanAid = aid.replace(/^airman-/i, '').replace(/^BD\/?/i, '').trim();
           const bd = String(m['BD No'] || '').toLowerCase();

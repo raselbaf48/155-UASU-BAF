@@ -1450,7 +1450,9 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
               amount: row.dueLastMonth,
               type: 'INITIAL_BILL',
               gateway: 'DUE',
-              billType: 'CANTEEN'
+              billType: 'CANTEEN',
+              isImported: true,
+              source: 'IMPORT'
             });
           }
 
@@ -1472,7 +1474,9 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
               amount: row.advanceLastMonth,
               type: 'BILL PAYMENT',
               gateway: 'ADVANCE',
-              billType: 'CANTEEN'
+              billType: 'CANTEEN',
+              isImported: true,
+              source: 'IMPORT'
             });
           }
 
@@ -1493,7 +1497,9 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
               amount: row.dueThisMonth,
               type: 'INITIAL_BILL',
               gateway: 'DUE',
-              billType: 'CANTEEN'
+              billType: 'CANTEEN',
+              isImported: true,
+              source: 'IMPORT'
             });
           }
 
@@ -1515,7 +1521,9 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
               amount: fallbackAmount,
               type: 'INITIAL_BILL',
               gateway: 'DUE',
-              billType: 'CANTEEN'
+              billType: 'CANTEEN',
+              isImported: true,
+              source: 'IMPORT'
             });
           }
 
@@ -1536,7 +1544,9 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
               amount: row.unitFund,
               type: 'INITIAL_BILL',
               gateway: 'DUE',
-              billType: 'UNIT_FUND'
+              billType: 'UNIT_FUND',
+              isImported: true,
+              source: 'IMPORT'
             });
           }
 
@@ -1557,7 +1567,9 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
               amount: row.othersFund,
               type: 'INITIAL_BILL',
               gateway: 'DUE',
-              billType: 'OTHERS'
+              billType: 'OTHERS',
+              isImported: true,
+              source: 'IMPORT'
             });
           }
         }

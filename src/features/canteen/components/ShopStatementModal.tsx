@@ -1,29 +1,23 @@
 import React, { useState, useMemo } from 'react';
 import { 
   X, 
-  FileText, 
   Calendar, 
-  Search, 
   Download, 
   Printer, 
-  ShoppingCart, 
-  Layers, 
-  Utensils, 
-  Store, 
   Banknote, 
-  Check, 
-  AlertCircle,
-  Filter,
-  CheckCircle2,
-  Clock
+  Receipt,
+  ChevronLeft,
+  ChevronRight,
+  Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
+import html2canvas from 'html2canvas';
 import { DueShopName, ExpenseRecord, resolveExpenseDueShop } from '../pages/DueRegister';
 import { getRunningMonthKey } from '../pages/MemberDB';
 import { formatBengaliMonthYear, toBengaliNum } from '../utils/exportCanteenBillExcel';
-import { formatCanteenDate } from '../utils/dateUtils';
 import { getExpenseMonthKey } from './SetShopInitialDueModal';
+import { getShopDisplayNameBn as getShopDisplayNameBnConfig, getShopEmoji as getShopEmojiConfig } from '../utils/dueShopsConfig';
 
 const EXPENSES_STORAGE_KEY = 'canteen_expenses';
 
@@ -42,10 +36,8 @@ export const ShopStatementModal: React.FC<ShopStatementModalProps> = ({
   onSettleIndividualExpense,
   onOpenPayBill
 }) => {
-  const [selectedMonth, setSelectedMonth] = useState<string>('ALL');
-  const [viewMode, setViewMode] = useState<'DATE' | 'ITEM'>('DATE');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'DUE' | 'PAID'>('ALL');
-  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => getRunningMonthKey());
+  const [isCapturingPic, setIsCapturingPic] = useState<boolean>(false);
 
   // Read all expenses from localStorage
   const allExpenses: ExpenseRecord[] = useMemo(() => {
@@ -57,16 +49,96 @@ export const ShopStatementModal: React.FC<ShopStatementModalProps> = ({
     }
   }, [isOpen]);
 
-  // Filter records by Shop
+  // Helper to identify and EXCLUDE staff cash advance / refund records from shop statements
+  const isExcludedExpense = (e: any): boolean => {
+    if (!e) return true;
+    if (e.isReturn || e.isCashReturn || e.isRefund || e.isCashAdvance) return true;
+    if (e.type === 'CASH_RETURN' || e.type === 'CASH_ADVANCE') return true;
+
+    const cat = String(e.category || '').toLowerCase();
+    const pm = String(e.paymentMethod || '').toLowerCase();
+    if (cat === 'refund' || pm === 'refund') return true;
+    if (cat.includes('advance') || cat.includes('staff')) return true;
+
+    const id = String(e.id || '').toLowerCase();
+    if (id.includes('refund') || id.includes('settle-refund') || id.startsWith('ret-')) return true;
+
+    const desc = String(e.desc || '').toLowerCase();
+    const subdesc = String(e.subdesc || '').toLowerCase();
+    const items = String((e as any).items || '').toLowerCase();
+
+    if (
+      desc.includes('refund') || 
+      desc.includes('cash refund') || 
+      desc.includes('ক্যাশ ফেরত') || 
+      desc.includes('অব্যবহৃত') || 
+      desc.includes('উদ্বৃত্ত') || 
+      desc.includes('ফেরত') || 
+      desc.includes('cash advance') || 
+      desc.includes('ক্যাশ অগ্রিম') || 
+      desc.includes('advance') || 
+      subdesc.includes('refund') || 
+      subdesc.includes('ফেরত') || 
+      subdesc.includes('ক্যাশ ফেরত') || 
+      subdesc.includes('advance') || 
+      subdesc.includes('অগ্রিম') || 
+      items.includes('refund') || 
+      items.includes('ফেরত')
+    ) {
+      if (isInitialDueRecord(e)) return false;
+      return true;
+    }
+
+    // Must be either an initial due, or have paymentMethod === 'due' or settled from due, or have explicit dueShop matching
+    const isDueOrSettled = pm === 'due' || Boolean(e.settledDate) || Boolean(e.dueShop);
+    if (!isDueOrSettled && !isInitialDueRecord(e)) {
+      return true;
+    }
+
+    return false;
+  };
+
+  // Helper to detect if an expense entry is an Initial Due
+  const isInitialDueRecord = (rec: ExpenseRecord): boolean => {
+    if (!rec) return false;
+    const rawId = String(rec.id || '').toLowerCase();
+    const rawItemId = String((rec as any).rawItemId || '').toLowerCase();
+    const desc = String(rec.desc || '').toLowerCase();
+    const subdesc = String((rec as any).subdesc || '').toLowerCase();
+
+    return (
+      rawId.includes('shop-init') ||
+      rawId.includes('init-due') ||
+      rawItemId.startsWith('init-due') ||
+      desc.includes('initial due') ||
+      desc.includes('প্রারম্ভিক বকেয়া') ||
+      desc.includes('প্রারম্ভিক বকেয়া') ||
+      desc.includes('পূর্বের বকেয়া') ||
+      desc.includes('পূর্বের বকেয়া') ||
+      desc.includes('বকেয়া যোগ') ||
+      desc.includes('বকেয়া যোগ') ||
+      desc.includes('বকেয়া') ||
+      desc.includes('বকেয়া') ||
+      desc.includes('initial') ||
+      subdesc.includes('প্রারম্ভিক বকেয়া') ||
+      subdesc.includes('প্রারম্ভিক বকেয়া') ||
+      subdesc.includes('পূর্বের বকেয়া') ||
+      subdesc.includes('পূর্বের বকেয়া') ||
+      Boolean((rec as any).isInitialDue)
+    );
+  };
+
+  // Filter records by Shop (excluding cash returns/advances)
   const shopRecords = useMemo(() => {
     return allExpenses.filter((e) => {
+      if (isExcludedExpense(e)) return false;
       const eShop = resolveExpenseDueShop(e);
       if (shopName !== 'ALL' && eShop !== shopName) return false;
       return true;
     });
   }, [allExpenses, shopName]);
 
-  // Month options list for dropdown
+  // Month options list for dropdown (Single year display, no duplicate 2026)
   const monthOptions = useMemo(() => {
     const list: Array<{ key: string; label: string }> = [
       { key: 'ALL', label: 'সকল মাস (ALL MONTHS)' }
@@ -79,102 +151,262 @@ export const ShopStatementModal: React.FC<ShopStatementModalProps> = ({
       const enMonth = d.toLocaleString('en', { month: 'short' });
       list.push({
         key,
-        label: `${bnLabel} (${enMonth} ${d.getFullYear()})${i === 0 ? ' • চলতি মাস' : ''}`
+        label: `${bnLabel} (${enMonth})${i === 0 ? ' • চলতি মাস' : ''}`
       });
     }
     return list;
   }, []);
 
-  // Filtered by Month, Status, and Search
+  const availableMonthKeys = useMemo(() => {
+    return monthOptions.map(m => m.key).filter(k => k !== 'ALL');
+  }, [monthOptions]);
+
+  // Month arrow navigation handlers
+  const handlePrevMonth = () => {
+    let target = selectedMonth;
+    if (!target || target === 'ALL') target = getRunningMonthKey();
+    const idx = availableMonthKeys.indexOf(target);
+    if (idx !== -1 && idx < availableMonthKeys.length - 1) {
+      setSelectedMonth(availableMonthKeys[idx + 1]);
+    } else {
+      const [y, m] = target.split('-').map(Number);
+      const d = new Date(y, m - 2, 1);
+      setSelectedMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    }
+  };
+
+  const handleNextMonth = () => {
+    let target = selectedMonth;
+    if (!target || target === 'ALL') target = getRunningMonthKey();
+    const idx = availableMonthKeys.indexOf(target);
+    if (idx > 0) {
+      setSelectedMonth(availableMonthKeys[idx - 1]);
+    } else {
+      const [y, m] = target.split('-').map(Number);
+      const d = new Date(y, m, 1);
+      setSelectedMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    }
+  };
+
+  const formatMonthOnlyUpper = (monthKey: string): string => {
+    if (monthKey === 'ALL') return 'ALL MONTHS';
+    const parts = monthKey.split('-');
+    if (parts.length === 2) {
+      const monIdx = parseInt(parts[1], 10) - 1;
+      const months = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'];
+      if (monIdx >= 0 && monIdx < 12) {
+        return `${months[monIdx]} ${parts[0]}`;
+      }
+    }
+    return monthKey;
+  };
+
+  // Helper to parse date into ISO, Bengali display and English display
+  const parseDateComponents = (val: any) => {
+    const bnDigits: Record<string, string> = {
+      '০': '0', '১': '1', '২': '2', '৩': '3', '৪': '4',
+      '৫': '5', '৬': '6', '৭': '7', '৮': '8', '৯': '9'
+    };
+    const monthAbbrs = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const bnMonthShort = [
+      'জানু', 'ফেব্রু', 'মার্চ', 'এপ্রিল', 'মে', 'জুন',
+      'জুলাই', 'আগস্ট', 'সেপ্ট', 'অক্টো', 'নভে', 'ডিসে'
+    ];
+    let str = String(val || '').trim().replace(/[০-৯]/g, (ch) => bnDigits[ch] || ch);
+
+    // Check DD/MM/YYYY or DD-MM-YYYY
+    const dmy = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
+    if (dmy) {
+      const d = dmy[1].padStart(2, '0');
+      const m = dmy[2].padStart(2, '0');
+      let y = dmy[3];
+      if (y.length === 2) y = `20${y}`;
+      const monIdx = parseInt(m, 10) - 1;
+      const monName = monIdx >= 0 && monIdx < 12 ? monthAbbrs[monIdx] : m;
+      const monBn = monIdx >= 0 && monIdx < 12 ? bnMonthShort[monIdx] : toBengaliNum(m);
+      const dayBnNoZero = toBengaliNum(parseInt(d, 10));
+      return {
+        iso: `${y}-${m}-${d}`,
+        displayBn: `${dayBnNoZero} ${monBn}`,
+        displayEn: `${d} ${monName}`
+      };
+    }
+
+    // Check YYYY-MM-DD
+    const ymd = str.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+    if (ymd) {
+      const y = ymd[1];
+      const m = ymd[2].padStart(2, '0');
+      const d = ymd[3].padStart(2, '0');
+      const monIdx = parseInt(m, 10) - 1;
+      const monName = monIdx >= 0 && monIdx < 12 ? monthAbbrs[monIdx] : m;
+      const monBn = monIdx >= 0 && monIdx < 12 ? bnMonthShort[monIdx] : toBengaliNum(m);
+      const dayBnNoZero = toBengaliNum(parseInt(d, 10));
+      return {
+        iso: `${y}-${m}-${d}`,
+        displayBn: `${dayBnNoZero} ${monBn}`,
+        displayEn: `${d} ${monName}`
+      };
+    }
+
+    const dObj = new Date(/^[0-9]{10,13}$/.test(str) ? Number(str) : str);
+    if (!isNaN(dObj.getTime())) {
+      const y = String(dObj.getFullYear());
+      const m = String(dObj.getMonth() + 1).padStart(2, '0');
+      const d = String(dObj.getDate()).padStart(2, '0');
+      const monIdx = dObj.getMonth();
+      const monName = monthAbbrs[monIdx];
+      const monBn = bnMonthShort[monIdx] || toBengaliNum(m);
+      const dayBnNoZero = toBengaliNum(parseInt(d, 10));
+      return {
+        iso: `${y}-${m}-${d}`,
+        displayBn: `${dayBnNoZero} ${monBn}`,
+        displayEn: `${d} ${monName}`
+      };
+    }
+
+    return {
+      iso: '2026-10-01',
+      displayBn: '১ অক্টো',
+      displayEn: '01 Oct'
+    };
+  };
+
+  // Filtered by Month
   const filteredRecords = useMemo(() => {
     return shopRecords.filter((rec) => {
-      // Month filter
       if (selectedMonth !== 'ALL') {
         const mKey = rec.monthKey || getExpenseMonthKey(rec.date);
         if (mKey !== selectedMonth) return false;
       }
-
-      // Status filter
-      const isDue = String(rec.paymentMethod || '').trim().toLowerCase() === 'due';
-      if (statusFilter === 'DUE' && !isDue) return false;
-      if (statusFilter === 'PAID' && isDue) return false;
-
-      // Search term
-      if (searchTerm.trim()) {
-        const term = searchTerm.toLowerCase();
-        const desc = String(rec.desc || '').toLowerCase();
-        const person = String(rec.detailedPerson || '').toLowerCase();
-        const date = String(rec.date || '').toLowerCase();
-        const subdesc = String(rec.subdesc || '').toLowerCase();
-        const sName = resolveExpenseDueShop(rec).toLowerCase();
-        if (!desc.includes(term) && !person.includes(term) && !date.includes(term) && !subdesc.includes(term) && !sName.includes(term)) {
-          return false;
-        }
-      }
-
       return true;
     });
-  }, [shopRecords, selectedMonth, statusFilter, searchTerm]);
+  }, [shopRecords, selectedMonth]);
 
-  // Sort chronological (newest first for date view)
-  const sortedRecords = useMemo(() => {
-    return [...filteredRecords].sort((a, b) => {
-      const parseD = (s: string) => {
-        const parts = String(s).split(/[-/.]/);
-        if (parts.length === 3) {
-          return parts[0].length === 4 
-            ? new Date(`${parts[0]}-${parts[1]}-${parts[2]}`).getTime() 
-            : new Date(`${parts[2]}-${parts[1]}-${parts[0]}`).getTime();
-        }
-        return 0;
-      };
-      return parseD(b.date) - parseD(a.date);
-    });
-  }, [filteredRecords]);
+  // Helper to ensure Bengali description and eliminate English text and redundant month text
+  const cleanItemDescBn = (rawDesc: string, isInit: boolean, _mKey?: string): string => {
+    let text = String(rawDesc || '').trim();
+    if (isInit) {
+      if (text.includes('অতিরিক্ত') || /additional/i.test(text)) {
+        return 'অতিরিক্ত বকেয়া';
+      }
+      return 'প্রারম্ভিক বকেয়া';
+    }
 
-  // Aggregate items for ITEM view
-  const aggregatedItems = useMemo(() => {
-    const map = new Map<string, {
-      itemName: string;
-      unit: string;
-      totalQty: number;
-      totalAmount: number;
-      dueAmount: number;
-      paidAmount: number;
-      entriesCount: number;
+    if (!text) {
+      return 'পণ্য ক্রয়';
+    }
+
+    // Strip out month references if appended inside item description (e.g. "(অক্টোবর ২০২৬)")
+    text = text
+      .replace(/\s*\([^\)]*?(?:জানুয়ারি|ফেব্রুয়ারি|মার্চ|এপ্রিল|মে|জুন|জুলাই|আগস্ট|সেপ্টেম্বর|অক্টোবর|নভেম্বর|ডিসেম্বর|january|february|march|april|may|june|july|august|september|october|november|december|\d{4})[^\)]*?\)/gi, '')
+      .replace(/initial\s*due/gi, 'প্রারম্ভিক বকেয়া')
+      .replace(/additional\s*due/gi, 'অতিরিক্ত বকেয়া')
+      .replace(/previous\s*due/gi, 'পূর্বের বকেয়া')
+      .replace(/shop-init/gi, '')
+      .replace(/init-due/gi, '')
+      .trim();
+
+    return text || 'পণ্য ক্রয়';
+  };
+
+  // Date-wise rows calculation for Dt wise view (with continuous date merge)
+  const statementDateWiseRows = useMemo(() => {
+    const dateMap = new Map<string, {
+      displayDateBn: string;
+      items: Array<{
+        id: string;
+        desc: string;
+        qty: number;
+        unit: string;
+        rate: number;
+        total: number;
+        isDue: boolean;
+        isInitialDue: boolean;
+        detailedPerson?: string;
+        originalRecord: ExpenseRecord;
+      }>;
     }>();
 
-    filteredRecords.forEach((rec) => {
-      const name = String(rec.desc || 'অন্যান্য').trim();
-      const isDue = String(rec.paymentMethod || '').trim().toLowerCase() === 'due';
-      const amt = Number(rec.amount) || 0;
-      const qty = Number(rec.qty) || 0;
-      const unit = rec.unit || 'kg';
-
-      const existing = map.get(name);
-      if (existing) {
-        existing.totalQty += qty;
-        existing.totalAmount += amt;
-        if (isDue) {
-          existing.dueAmount += amt;
-        } else {
-          existing.paidAmount += amt;
-        }
-        existing.entriesCount += 1;
-      } else {
-        map.set(name, {
-          itemName: name,
-          unit,
-          totalQty: qty,
-          totalAmount: amt,
-          dueAmount: isDue ? amt : 0,
-          paidAmount: isDue ? 0 : amt,
-          entriesCount: 1
-        });
-      }
+    // Sort records chronological by date (1st to 31st of the month)
+    const sorted = [...filteredRecords].sort((a, b) => {
+      const timeA = new Date(parseDateComponents(a.date).iso).getTime() || 0;
+      const timeB = new Date(parseDateComponents(b.date).iso).getTime() || 0;
+      return timeA - timeB;
     });
 
-    return Array.from(map.values()).sort((a, b) => b.totalAmount - a.totalAmount);
+    sorted.forEach((rec) => {
+      const dateInfo = parseDateComponents(rec.date);
+      if (!dateMap.has(dateInfo.iso)) {
+        dateMap.set(dateInfo.iso, {
+          displayDateBn: dateInfo.displayBn,
+          items: []
+        });
+      }
+      const entry = dateMap.get(dateInfo.iso)!;
+      const amt = Number(rec.amount) || 0;
+      const isInit = isInitialDueRecord(rec);
+      const q = isInit ? 0 : (Number(rec.qty) || 1);
+      const r = isInit ? 0 : (Number(rec.unitPrice || rec.rate) || (q > 0 ? Math.round(amt / q) : amt));
+      const isDue = String(rec.paymentMethod || '').trim().toLowerCase() === 'due';
+      const cleanedDesc = cleanItemDescBn(rec.desc, isInit, rec.monthKey || selectedMonth);
+
+      entry.items.push({
+        id: rec.id,
+        desc: cleanedDesc,
+        qty: q,
+        unit: isInit ? '' : (rec.unit || ''),
+        rate: r,
+        total: amt,
+        isDue,
+        isInitialDue: isInit,
+        detailedPerson: rec.detailedPerson,
+        originalRecord: rec
+      });
+    });
+
+    const rows: Array<{
+      dateKey: string;
+      displayDateBn: string;
+      itemsText: string;
+      qty: number;
+      unit: string;
+      rate: number;
+      total: number;
+      isDue: boolean;
+      isInitialDue: boolean;
+      detailedPerson?: string;
+      isFirstOfDate: boolean;
+      dateRowSpan: number;
+      originalRecord: ExpenseRecord;
+    }> = [];
+
+    const sortedDates = Array.from(dateMap.keys()).sort();
+
+    sortedDates.forEach((isoKey) => {
+      const entry = dateMap.get(isoKey)!;
+      const count = entry.items.length;
+
+      entry.items.forEach((item, idx) => {
+        rows.push({
+          dateKey: isoKey,
+          displayDateBn: idx === 0 ? entry.displayDateBn : '',
+          itemsText: item.desc,
+          qty: item.qty,
+          unit: item.unit,
+          rate: item.rate,
+          total: item.total,
+          isDue: item.isDue,
+          isInitialDue: item.isInitialDue,
+          detailedPerson: item.detailedPerson,
+          isFirstOfDate: idx === 0,
+          dateRowSpan: idx === 0 ? count : 0,
+          originalRecord: item.originalRecord
+        });
+      });
+    });
+
+    return rows;
   }, [filteredRecords]);
 
   // Summary figures
@@ -193,396 +425,303 @@ export const ShopStatementModal: React.FC<ShopStatementModalProps> = ({
   // Export to Excel
   const handleExportExcel = () => {
     try {
-      const excelRows = sortedRecords.map((r, i) => {
-        const isDue = String(r.paymentMethod || '').trim().toLowerCase() === 'due';
+      const excelRows = statementDateWiseRows.map((r, i) => {
         return {
           'SL': i + 1,
-          'Date': r.date,
-          'Shop': resolveExpenseDueShop(r),
-          'Item Description': r.desc,
-          'Qty': r.qty || '',
-          'Unit': r.unit || '',
-          'Unit Price': r.unitPrice || '',
-          'Amount (৳)': r.amount,
-          'Status': isDue ? 'DUE (বকেয়া)' : `PAID (${r.paymentMethod || 'Cash'})`,
-          'Person': r.detailedPerson || 'Civ Tanvir',
-          'Settled Date': r.settledDate || '',
-          'Note': r.subdesc || ''
+          'Date': r.dateKey,
+          'Item Description': r.itemsText,
+          'Quantity': r.isInitialDue ? '-' : `${r.qty} ${r.unit}`,
+          'Unit Price': r.isInitialDue ? '-' : r.rate,
+          'Total Amount': r.total,
+          'Status': r.isDue ? 'DUE (বকেয়া)' : 'PAID (পরিশোধিত)'
         };
       });
 
       const ws = XLSX.utils.json_to_sheet(excelRows);
       const wb = XLSX.utils.book_new();
-      const sheetName = shopName === 'ALL' ? 'All_Shops_Statement' : shopName.replace(/\s+/g, '_');
-      XLSX.utils.book_append_sheet(wb, ws, sheetName);
-      XLSX.writeFile(wb, `Statement_${sheetName}_${selectedMonth}.xlsx`);
-    } catch (err: any) {
-      alert(`Excel export failed: ${err?.message || 'Error'}`);
+      XLSX.utils.book_append_sheet(wb, ws, 'Shop Statement');
+      XLSX.writeFile(wb, `Shop_Statement_${shopName}_${selectedMonth}.xlsx`);
+    } catch (err) {
+      console.error('Error exporting Excel:', err);
     }
   };
 
-  // Browser Print
-  const handlePrint = () => {
-    window.print();
+  // Capture high-res picture of the paper slip
+  const handleDownloadStatementPic = async () => {
+    const slipEl = document.getElementById('shop-statement-paper-slip');
+    if (!slipEl) return;
+    setIsCapturingPic(true);
+    try {
+      const canvas = await html2canvas(slipEl, {
+        scale: 2,
+        backgroundColor: '#ffffff',
+        useCORS: true,
+        logging: false
+      });
+      const url = canvas.toDataURL('image/png');
+      const link = document.createElement('a');
+      link.download = `Statement_${shopName}_${selectedMonth}.png`;
+      link.href = url;
+      link.click();
+    } catch (err) {
+      console.error('Error generating picture:', err);
+    } finally {
+      setIsCapturingPic(false);
+    }
   };
 
-  const getShopIcon = () => {
-    if (shopName === 'Grocessary Shop') return <ShoppingCart className="w-5 h-5 text-emerald-400" />;
-    if (shopName === 'Poultry Shop') return <Layers className="w-5 h-5 text-amber-400" />;
-    if (shopName === 'Bake & Bite') return <Utensils className="w-5 h-5 text-purple-400" />;
-    return <Store className="w-5 h-5 text-indigo-400" />;
+  const getShopDisplayNameBn = (shop: string): string => {
+    if (!shop || shop === 'ALL') return 'সকল দোকান';
+    return getShopDisplayNameBnConfig(shop);
+  };
+
+  const getShopEmoji = (shop: string): string => {
+    if (!shop || shop === 'ALL') return '🏪';
+    return getShopEmojiConfig(shop);
   };
 
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[120] flex items-center justify-center p-2 sm:p-5 overflow-y-auto">
+        <div 
+          onClick={onClose}
+          className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4"
+        >
           <motion.div
-            initial={{ scale: 0.95, opacity: 0, y: 15 }}
-            animate={{ scale: 1, opacity: 1, y: 0 }}
-            exit={{ scale: 0.95, opacity: 0, y: 15 }}
-            className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-5xl shadow-2xl p-5 sm:p-7 space-y-5 my-auto text-slate-200 max-h-[94vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+            initial={{ opacity: 0, scale: 0.95, y: 15 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 15 }}
+            transition={{ duration: 0.22, ease: 'easeOut' }}
+            className="bg-slate-900 rounded-[2rem] sm:rounded-[2.5rem] w-full max-w-4xl shadow-2xl border border-slate-800 overflow-hidden flex flex-col max-h-[92vh]"
           >
-            {/* Header */}
-            <div className="flex items-center justify-between pb-4 border-b border-slate-800 shrink-0">
-              <div className="flex items-center space-x-3">
-                <div className="w-12 h-12 rounded-2xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center border border-indigo-500/30 shadow-inner">
-                  {getShopIcon()}
-                </div>
-                <div>
-                  <div className="flex items-center space-x-2">
-                    <h3 className="text-lg font-black text-white uppercase tracking-tight">
-                      {shopName === 'ALL' ? 'ALL SHOPS' : shopName} • হিসাব বিবরণী
-                    </h3>
-                    <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 text-[10px] font-black border border-indigo-500/30">
-                      STATEMENT
-                    </span>
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-800 bg-slate-900/90 flex flex-col gap-3">
+              {/* Row 1: Shop Info (Left) + Prominent Close 'X' Button (Right) */}
+              <div className="flex items-center justify-between gap-3 w-full">
+                <div className="flex items-center space-x-3 min-w-0 flex-1">
+                  <div className="w-11 h-11 rounded-2xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-xl shrink-0 shadow-inner">
+                    {getShopEmoji(shopName)}
                   </div>
-                  <p className="text-xs text-slate-400 font-bold mt-0.5">
-                    বকেয়া ও পরিশোধের বিস্তারিত খতিয়ান • {selectedMonth === 'ALL' ? 'সকল লেনদেন' : formatBengaliMonthYear(selectedMonth)}
-                  </p>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center space-x-2">
+                      <h2 className="text-base sm:text-lg font-black text-white truncate leading-tight">
+                        {getShopDisplayNameBn(shopName)}
+                      </h2>
+                      <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 text-[10px] font-black border border-indigo-500/30 shrink-0">
+                        STATEMENT
+                      </span>
+                    </div>
+                    <p className="text-[11px] font-bold text-slate-400 font-mono truncate mt-0.5">
+                      মাসিক হিসাব বিবরণী • {selectedMonth === 'ALL' ? 'সকল লেনদেন' : formatBengaliMonthYear(selectedMonth)}
+                    </p>
+                  </div>
                 </div>
-              </div>
-              <button
-                type="button"
-                onClick={onClose}
-                className="p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800/80 hover:bg-slate-700 transition-colors cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
 
-            {/* Filter & Controls Toolbar */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-slate-950/70 p-3.5 rounded-2xl border border-slate-800 shrink-0">
-              {/* Month Selector */}
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
-                  মাস (MONTH)
-                </label>
-                <div className="relative">
-                  <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <select
-                    value={selectedMonth}
-                    onChange={(e) => setSelectedMonth(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700/80 rounded-xl pl-9 pr-3 py-2 text-xs font-bold text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-                  >
-                    {monthOptions.map((opt) => (
-                      <option key={opt.key} value={opt.key}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Status Filter */}
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
-                  স্ট্যাটাস (STATUS)
-                </label>
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value as any)}
-                  className="w-full bg-slate-900 border border-slate-700/80 rounded-xl px-3 py-2 text-xs font-bold text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                {/* Top-Right Back / Close 'X' Button */}
+                <button 
+                  type="button"
+                  onClick={onClose} 
+                  className="w-10 h-10 rounded-2xl bg-slate-800/90 hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 border border-slate-700/80 hover:border-rose-500/40 flex items-center justify-center transition-all shrink-0 cursor-pointer shadow-md active:scale-90"
+                  title="বন্ধ করুন (Close)"
                 >
-                  <option value="ALL">সব স্ট্যাটাস (ALL)</option>
-                  <option value="DUE">শুধু বকেয়া (ONLY DUE)</option>
-                  <option value="PAID">পরিশোধিত (SETTLED / PAID)</option>
-                </select>
+                  <X className="w-5 h-5" />
+                </button>
               </div>
 
-              {/* Search Box */}
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
-                  অনুসন্ধান (SEARCH)
-                </label>
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    type="text"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="পণ্য বা মেমো খুঁজুন..."
-                    className="w-full bg-slate-900 border border-slate-700/80 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-                  />
-                </div>
-              </div>
-
-              {/* View Mode Switcher */}
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
-                  ভিউ মোড (VIEW MODE)
-                </label>
-                <div className="grid grid-cols-2 gap-1 bg-slate-900 p-1 rounded-xl border border-slate-700/80">
-                  <button
-                    type="button"
-                    onClick={() => setViewMode('DATE')}
-                    className={`py-1.5 px-2 rounded-lg text-[11px] font-black uppercase transition-all ${
-                      viewMode === 'DATE'
-                        ? 'bg-indigo-600 text-white shadow'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    তারিখ ভিত্তিক
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setViewMode('ITEM')}
-                    className={`py-1.5 px-2 rounded-lg text-[11px] font-black uppercase transition-all ${
-                      viewMode === 'ITEM'
-                        ? 'bg-indigo-600 text-white shadow'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    পণ্য ভিত্তিক
-                  </button>
-                </div>
+              {/* Row 2: Action Buttons (Only Print option as requested) */}
+              <div className="flex items-center gap-2 overflow-x-auto w-full pt-0.5 scrollbar-none">
+                {/* Print */}
+                <button 
+                  type="button"
+                  onClick={() => window.print()} 
+                  className="flex items-center space-x-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-md shadow-indigo-500/20 active:translate-y-0.5 whitespace-nowrap cursor-pointer"
+                  title="প্রিন্ট করুন"
+                >
+                  <Printer className="w-4 h-4 shrink-0" />
+                  <span>প্রিন্ট</span>
+                </button>
               </div>
             </div>
 
-            {/* KPI Summary Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 shrink-0">
-              <div className="bg-slate-950/80 border border-slate-800 p-3.5 rounded-2xl">
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-0.5">
-                  মোট ক্রয় / খরচ (TOTAL BILLED)
-                </span>
-                <p className="text-xl font-black font-mono text-white">
-                  ৳{totalBilled.toLocaleString('en-US')}
-                </p>
-                <span className="text-[10px] text-slate-500 font-bold">
-                  {filteredRecords.length} টি রেকর্ড
-                </span>
+            {/* Modal Month Filter Bar (Dt wise only, no Item wise, no duplicate year) */}
+            <div className="px-5 py-3 bg-slate-950/80 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 print:hidden">
+              <div className="flex items-center space-x-2 text-xs font-bold text-slate-300">
+                <Receipt className="w-4 h-4 text-indigo-400" />
+                <span>তারিখ ভিত্তিক হিসাব বিবরণী (Date-wise Statement)</span>
               </div>
 
-              <div className="bg-slate-950/80 border border-slate-800 p-3.5 rounded-2xl">
-                <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest block mb-0.5">
-                  পরিশোধিত বিল (TOTAL PAID)
-                </span>
-                <p className="text-xl font-black font-mono text-emerald-400">
-                  ৳{totalPaid.toLocaleString('en-US')}
-                </p>
-                <span className="text-[10px] text-emerald-500/80 font-bold">
-                  পরিশোধ সম্পন্ন
-                </span>
-              </div>
+              {/* Month Selector with Left/Right Arrows (Single year display) */}
+              <div className="flex items-center bg-slate-900 border border-slate-700/80 rounded-xl p-1 shadow-inner">
+                {/* Left Arrow Button */}
+                <button
+                  type="button"
+                  onClick={handlePrevMonth}
+                  className="w-8 h-8 flex items-center justify-center bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-white rounded-lg transition-all cursor-pointer border border-slate-700/60 shadow-sm active:scale-95"
+                  title="Previous Month (পূর্ববর্তী মাস)"
+                >
+                  <ChevronLeft className="w-4 h-4 stroke-[2.5]" />
+                </button>
 
-              <div className="bg-slate-950/80 border border-rose-900/40 p-3.5 rounded-2xl">
-                <span className="text-[10px] font-black text-rose-400 uppercase tracking-widest block mb-0.5">
-                  অবশিষ্ট বকেয়া (CURRENT NET DUE)
-                </span>
-                <p className="text-xl font-black font-mono text-rose-400">
-                  ৳{totalDue.toLocaleString('en-US')}
-                </p>
-                <span className="text-[10px] text-rose-400/80 font-bold">
-                  পাওনা বকেয়া
-                </span>
+                {/* Month Display (e.g. "OCTOBER 2026") */}
+                <div className="px-3 py-0.5 text-center select-none flex items-center space-x-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                  <span className="text-xs sm:text-sm font-black uppercase font-mono tracking-wider text-white">
+                    {selectedMonth === 'ALL' ? 'ALL MONTHS' : formatMonthOnlyUpper(selectedMonth)}
+                  </span>
+                </div>
+
+                {/* Right Arrow Button */}
+                <button
+                  type="button"
+                  onClick={handleNextMonth}
+                  className="w-8 h-8 flex items-center justify-center bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-white rounded-lg transition-all cursor-pointer border border-slate-700/60 shadow-sm active:scale-95"
+                  title="Next Month (পরবর্তী মাস)"
+                >
+                  <ChevronRight className="w-4 h-4 stroke-[2.5]" />
+                </button>
               </div>
             </div>
 
-            {/* Table Area (Scrollable) */}
-            <div className="flex-1 overflow-y-auto border border-slate-800 rounded-2xl bg-slate-950/50 min-h-[220px]">
-              {viewMode === 'DATE' ? (
-                /* Date-wise Table */
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead className="sticky top-0 bg-slate-950 text-[10px] font-black uppercase tracking-wider text-slate-400 border-b border-slate-800 z-10">
-                    <tr>
-                      <th className="py-3 px-3.5 text-center w-10">#</th>
-                      <th className="py-3 px-3.5">তারিখ (Date)</th>
-                      {shopName === 'ALL' && <th className="py-3 px-3.5">দোকান (Shop)</th>}
-                      <th className="py-3 px-3.5">পণ্যের বিবরণ (Description)</th>
-                      <th className="py-3 px-3.5 text-center">পরিমাণ</th>
-                      <th className="py-3 px-3.5 text-center">দর</th>
-                      <th className="py-3 px-3.5 text-right">মোট টাকা</th>
-                      <th className="py-3 px-3.5 text-center">গ্রহীতা</th>
-                      <th className="py-3 px-3.5 text-center">স্ট্যাটাস</th>
-                      <th className="py-3 px-3.5 text-center">অ্যাকশন</th>
+            {/* Statement Content Area - Authentic paper slip presentation in SutonnyMJ font */}
+            <div className="p-3 sm:p-6 pb-12 overflow-y-auto overflow-x-auto bg-slate-950/70 flex-1 print:p-0 print:bg-white print:overflow-visible">
+              <div 
+                id="shop-statement-paper-slip" 
+                style={{ fontFamily: "'SutonnyMJ', 'SuttonyMJ', 'SutonnyOMJ', 'Sutonny MJ', 'Noto Serif Bengali', 'Tiro Bangla', 'SolaimanLipi', serif" }}
+                className="bg-white rounded-2xl p-6 sm:p-8 pb-8 sm:pb-10 text-black w-full max-w-xl mx-auto shadow-2xl border border-slate-200/90 print:border-none print:shadow-none print:rounded-none my-2 sm:my-4 transition-all sutonny-font font-bangla"
+              >
+                
+                {/* Header Banner: Shop Name and মাসঃ অক্টোবর ২০২৬ */}
+                <div className="text-center mb-5">
+                  <div className="flex items-center justify-center space-x-2 text-2xl sm:text-3xl font-black text-black tracking-tight">
+                    <span>{getShopEmoji(shopName)}</span>
+                    <span>{getShopDisplayNameBn(shopName)}</span>
+                    <span>{getShopEmoji(shopName)}</span>
+                  </div>
+                  <p className="text-base sm:text-lg font-black text-black mt-1">
+                    মাসঃ {selectedMonth === 'ALL' ? 'সকল মাস' : formatBengaliMonthYear(selectedMonth)}
+                  </p>
+                  <div className="w-full h-1 bg-black mt-3"></div>
+                </div>
+
+                {/* Statement Items Table - Directly starts with Heading Row: তারিখ, বিবরণ, পরিমাণ, দর, মোট */}
+                <table className="w-full border-collapse border-2 border-black text-sm sm:text-base font-bold text-black bg-white m-0">
+                  <thead>
+                    <tr className="bg-white text-center font-black">
+                      <th className="border border-black py-3 px-2 text-center font-black w-[18%] bg-white text-xs sm:text-base">তারিখ</th>
+                      <th className="border border-black p-3 text-center font-black w-[42%] bg-white text-xs sm:text-base">বিবরণ</th>
+                      <th className="border border-black py-3 px-1 text-center font-black w-[12%] bg-white text-xs sm:text-base">পরিমাণ</th>
+                      <th className="border border-black py-3 px-1 text-center font-black w-[13%] bg-white text-xs sm:text-base">দর</th>
+                      <th className="border border-black py-3 px-2 text-center font-black w-[15%] bg-white text-xs sm:text-base">মোট</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800/60 font-medium text-slate-300">
-                    {sortedRecords.length === 0 ? (
-                      <tr>
-                        <td colSpan={10} className="py-12 text-center text-slate-500 font-bold">
-                          কোনো হিসাবের তথ্য পাওয়া যায়নি।
-                        </td>
-                      </tr>
-                    ) : (
-                      sortedRecords.map((rec, idx) => {
-                        const isDue = String(rec.paymentMethod || '').trim().toLowerCase() === 'due';
-                        const recShop = resolveExpenseDueShop(rec);
-                        return (
-                          <tr key={rec.id || idx} className="hover:bg-slate-800/40 transition-colors">
-                            <td className="py-2.5 px-3.5 text-center text-slate-500 font-mono text-[11px]">
-                              {idx + 1}
+                  <tbody>
+                    {statementDateWiseRows.length > 0 ? (
+                      statementDateWiseRows.map((row, idx) => (
+                        <tr key={idx} className="bg-white">
+                          {/* পর পর ২ বা ততোধিক সেলে একই তারিখ হলে cell merge করে একটি তারিখ দেখাবে */}
+                          {row.isFirstOfDate && (
+                            <td
+                              rowSpan={row.dateRowSpan}
+                              className="border border-black py-2.5 px-1.5 text-center font-black bg-white whitespace-nowrap text-xs sm:text-sm align-middle"
+                            >
+                              <div>{row.displayDateBn}</div>
                             </td>
-                            <td className="py-2.5 px-3.5 font-mono text-[11px] whitespace-nowrap text-slate-300">
-                              {formatCanteenDate(rec.date)}
+                          )}
+
+                          {/* বিবরণ, পরিমাণ ও দর: Initial Due হলে বিবরণ, পরিমাণ ও দর সেল একসাথে মার্জ হবে (colSpan={3}) */}
+                          {(row.isInitialDue || (!row.qty && !row.rate)) ? (
+                            <td 
+                              colSpan={3} 
+                              className="border border-black p-3 text-left font-bold bg-white whitespace-pre-line leading-relaxed text-xs sm:text-sm"
+                            >
+                              <div>{row.itemsText}</div>
                             </td>
-                            {shopName === 'ALL' && (
-                              <td className="py-2.5 px-3.5 whitespace-nowrap text-[11px] font-bold text-amber-300">
-                                {recShop}
+                          ) : (
+                            <>
+                              {/* বিবরণ */}
+                              <td className="border border-black p-3 text-left font-bold bg-white whitespace-pre-line leading-relaxed text-xs sm:text-sm">
+                                <div>{row.itemsText}</div>
+                                {row.detailedPerson && row.detailedPerson !== 'Civ Tanvir' && (
+                                  <div className="text-[11px] text-slate-600 font-normal">
+                                    ({row.detailedPerson})
+                                  </div>
+                                )}
                               </td>
-                            )}
-                            <td className="py-2.5 px-3.5 font-bold text-white">
-                              <div>{rec.desc}</div>
-                              {rec.subdesc && (
-                                <div className="text-[10px] text-slate-400 font-normal truncate max-w-xs">
-                                  {rec.subdesc}
-                                </div>
-                              )}
-                            </td>
-                            <td className="py-2.5 px-3.5 text-center font-mono">
-                              {rec.qty ? `${rec.qty} ${rec.unit || 'kg'}` : '-'}
-                            </td>
-                            <td className="py-2.5 px-3.5 text-center font-mono text-slate-300">
-                              {rec.unitPrice ? `৳${rec.unitPrice}` : '-'}
-                            </td>
-                            <td className="py-2.5 px-3.5 text-right font-black font-mono text-amber-400 whitespace-nowrap">
-                              ৳{Number(rec.amount).toLocaleString('en-US')}
-                            </td>
-                            <td className="py-2.5 px-3.5 text-center text-[10px] font-bold text-emerald-400 whitespace-nowrap">
-                              {rec.detailedPerson || 'Civ Tanvir'}
-                            </td>
-                            <td className="py-2.5 px-3.5 text-center whitespace-nowrap">
-                              {isDue ? (
-                                <span className="px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20 text-[10px] font-black">
-                                  বকেয়া (Due)
-                                </span>
-                              ) : (
-                                <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 text-[10px] font-black">
-                                  পরিশোধিত ✓
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-2.5 px-3.5 text-center whitespace-nowrap">
-                              {isDue ? (
-                                <button
-                                  type="button"
-                                  onClick={() => onSettleIndividualExpense(rec)}
-                                  className="px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white rounded-lg text-[10px] font-black uppercase transition-all border border-emerald-500/30 cursor-pointer"
-                                  title="Pay / Settle this specific item"
-                                >
-                                  পরিশোধ
-                                </button>
-                              ) : (
-                                <span className="text-[10px] text-slate-500 font-mono">Paid</span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              ) : (
-                /* Item-wise Table */
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead className="sticky top-0 bg-slate-950 text-[10px] font-black uppercase tracking-wider text-slate-400 border-b border-slate-800 z-10">
-                    <tr>
-                      <th className="py-3 px-3.5 text-center w-10">#</th>
-                      <th className="py-3 px-3.5">পণ্যের নাম (Item Name)</th>
-                      <th className="py-3 px-3.5 text-center">এন্ট্রি সংখ্যা</th>
-                      <th className="py-3 px-3.5 text-center">মোট পরিমাণ</th>
-                      <th className="py-3 px-3.5 text-right">মোট ক্রয়মূল্য</th>
-                      <th className="py-3 px-3.5 text-right">পরিশোধিত</th>
-                      <th className="py-3 px-3.5 text-right">অবশিষ্ট বকেয়া</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/60 font-medium text-slate-300">
-                    {aggregatedItems.length === 0 ? (
-                      <tr>
-                        <td colSpan={7} className="py-12 text-center text-slate-500 font-bold">
-                          কোনো পণ্যের বিবরণ পাওয়া যায়নি।
-                        </td>
-                      </tr>
-                    ) : (
-                      aggregatedItems.map((item, idx) => (
-                        <tr key={item.itemName} className="hover:bg-slate-800/40 transition-colors">
-                          <td className="py-2.5 px-3.5 text-center text-slate-500 font-mono text-[11px]">
-                            {idx + 1}
-                          </td>
-                          <td className="py-2.5 px-3.5 font-black text-white">
-                            {item.itemName}
-                          </td>
-                          <td className="py-2.5 px-3.5 text-center font-mono text-slate-400">
-                            {item.entriesCount} বার
-                          </td>
-                          <td className="py-2.5 px-3.5 text-center font-mono font-bold text-slate-200">
-                            {item.totalQty > 0 ? `${item.totalQty} ${item.unit}` : '-'}
-                          </td>
-                          <td className="py-2.5 px-3.5 text-right font-black font-mono text-white">
-                            ৳{item.totalAmount.toLocaleString('en-US')}
-                          </td>
-                          <td className="py-2.5 px-3.5 text-right font-mono text-emerald-400 font-bold">
-                            ৳{item.paidAmount.toLocaleString('en-US')}
-                          </td>
-                          <td className="py-2.5 px-3.5 text-right font-black font-mono text-rose-400">
-                            ৳{item.dueAmount.toLocaleString('en-US')}
+
+                              {/* পরিমাণ */}
+                              <td className="border border-black py-2.5 px-1 text-center font-bold bg-white text-xs sm:text-sm">
+                                {row.qty > 0 ? `${toBengaliNum(row.qty)} ${row.unit || ''}`.trim() : '-'}
+                              </td>
+
+                              {/* দর */}
+                              <td className="border border-black py-2.5 px-1 text-center font-bold bg-white text-xs sm:text-sm">
+                                {row.rate > 0 ? `৳${toBengaliNum(row.rate)}` : '-'}
+                              </td>
+                            </>
+                          )}
+
+                          {/* মোট */}
+                          <td className="border border-black py-2.5 px-1.5 text-center font-bold bg-white text-xs sm:text-sm">
+                            ৳{toBengaliNum(row.total)}
                           </td>
                         </tr>
                       ))
+                    ) : (
+                      <tr className="bg-white">
+                        <td colSpan={5} className="border border-black p-4 text-center font-bold text-slate-800 bg-white tracking-wide text-sm sm:text-base">
+                          এই মাসে কোনো হিসাবের তথ্য নেই
+                        </td>
+                      </tr>
                     )}
+
+                    {/* Summary Rows */}
+                    {totalBilled > 0 && (
+                      <tr className="bg-white">
+                        <td className="border border-black p-3 text-right font-black bg-white" colSpan={4}>
+                          মোট ক্রয় / বিল
+                        </td>
+                        <td className="border border-black p-3 text-center font-black bg-white">
+                          ৳{toBengaliNum(totalBilled)}
+                        </td>
+                      </tr>
+                    )}
+
+                    {totalPaid > 0 && (
+                      <tr className="bg-white">
+                        <td className="border border-black p-3 text-right font-black bg-white text-emerald-700" colSpan={4}>
+                          পরিশোধিত বিল
+                        </td>
+                        <td className="border border-black p-3 text-center font-black bg-white text-emerald-700">
+                          ৳{toBengaliNum(totalPaid)}
+                        </td>
+                      </tr>
+                    )}
+
+                    <tr className="bg-white">
+                      <td className="border border-black p-3 text-right font-black bg-white" colSpan={4}>
+                        সর্বমোট প্রদেয় বকেয়া
+                      </td>
+                      <td className={`border border-black p-3 text-center font-black text-base sm:text-lg ${totalDue > 0 ? 'text-[#e11d48]' : 'text-emerald-600'} bg-white`}>
+                        ৳{toBengaliNum(totalDue)}
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
-              )}
+              </div>
             </div>
 
             {/* Bottom Actions Footer */}
-            <div className="pt-3 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3 shrink-0">
-              <div className="flex items-center space-x-2 flex-wrap gap-y-2">
-                <button
-                  type="button"
-                  onClick={handleExportExcel}
-                  className="px-3.5 py-2 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all border border-emerald-500/30 flex items-center space-x-1.5 cursor-pointer shadow-sm"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Download Excel</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handlePrint}
-                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all border border-slate-700 flex items-center space-x-1.5 cursor-pointer shadow-sm"
-                >
-                  <Printer className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>Print Slip</span>
-                </button>
+            <div className="p-3 sm:p-4 border-t border-slate-800 bg-slate-900/90 flex flex-wrap items-center justify-between gap-3 shrink-0">
+              <div className="flex items-center space-x-2 text-xs text-slate-400 font-bold">
+                <span>মোট এন্ট্রি: {statementDateWiseRows.length} টি</span>
+                <span>•</span>
+                <span className={totalDue > 0 ? 'text-rose-400' : 'text-emerald-400'}>
+                  বকেয়া: ৳{totalDue.toLocaleString()}
+                </span>
               </div>
 
               <div className="flex items-center space-x-2">
-                {shopName !== 'ALL' && totalDue > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onClose();
-                      onOpenPayBill(shopName);
-                    }}
-                    className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black rounded-xl text-xs uppercase tracking-wider transition-all shadow-md shadow-emerald-600/30 cursor-pointer flex items-center space-x-1.5"
-                  >
-                    <Banknote className="w-4 h-4" />
-                    <span>Pay Full Due (৳{totalDue.toLocaleString()})</span>
-                  </button>
-                )}
-
                 <button
                   type="button"
                   onClick={onClose}
