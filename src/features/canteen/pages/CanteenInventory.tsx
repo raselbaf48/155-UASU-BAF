@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, fetchDirectImageUrl, getCanteenConfig, getItemDisplayName, CanteenConfig } from '../utils/canteenSettings';
-import { getCanteenMenuCache, setCanteenMenuCache, updateSingleMenuItemInCache, fetchCanteenMenuOnce } from '../utils/canteenMenuData';
+import { getCanteenMenuCache, setCanteenMenuCache, updateSingleMenuItemInCache, fetchCanteenMenuOnce, normalizeCatalogKey, deduplicateCanteenMenuItems } from '../utils/canteenMenuData';
 import { processGalleryImage } from '../utils/imageUpload';
 import { SaveButton } from '../components/SaveButton';
 import { formatCanteenDate } from '../utils/dateUtils';
@@ -192,7 +192,8 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                 'Raw Item': resolvedRawItem
               };
             });
-            const sorted = formatted.sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
+            const deduped = deduplicateCanteenMenuItems(formatted);
+            const sorted = deduped.sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
             setItems(sorted);
         } else {
             console.error('Failed or empty fetch:', error);
@@ -253,6 +254,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     category: 'SNACKS',
     price: 0,
     cost: 0,
+    stock: 50,
     rawItem: '',
     DP: ''
   });
@@ -305,12 +307,14 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       ? formatRecipeRawItemsString(normalizedRecipe, rawList) 
       : (item['Raw Item'] ?? item.rawItem ?? '');
     const initialBnName = item.nameBn || item.name_bn || item['Name (BN)'] || getMenuItemBanglaName(item) || '';
+    const initialStock = item.stock !== undefined ? Number(item.stock) : (item.max !== undefined ? Number(item.max) : (item.Quantity !== undefined ? Number(item.Quantity) : 50));
     setModalFormData({
       name: item.name || '',
       nameBn: initialBnName,
       category: item.category || 'SNACKS',
       price: Number(item.price) || 0,
       cost: initialCost,
+      stock: initialStock,
       rawItem: initialRawItem,
       DP: item.DP || ''
     });
@@ -428,11 +432,14 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     const parsedCost = formulationCost > 0 
       ? formulationCost 
       : (Number(modalFormData.cost) >= 0 ? Number(modalFormData.cost) : 0);
+    const parsedStock = Number(modalFormData.stock !== undefined ? modalFormData.stock : 50);
     const payload: any = {
       name: modalFormData.name.trim(),
       category: modalFormData.category,
       price: parsedPrice,
       Cost: parsedCost,
+      stock: parsedStock,
+      max: parsedStock,
       DP: finalDp || null
     };
 
@@ -590,6 +597,8 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
           category: newItem.category,
           price: parsedPrice,
           Cost: parsedCost,
+          stock: Number((newItem as any).stock ?? 50),
+          max: Number((newItem as any).stock ?? 50),
           'Raw Item': rawItemValue,
           DP: finalDp || null
       };
@@ -597,46 +606,123 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
         payload.name_bn = newItem.nameBn.trim();
       }
 
+      // Prevent duplicate item addition in Menu / Inventory
+      if (!isEditMode) {
+        const normNewEn = normalizeCatalogKey(newItem.name);
+        const normNewBn = normalizeCatalogKey(newItem.nameBn || '');
+        const duplicateItem = items.find(it => {
+          const normItEn = normalizeCatalogKey(it.name || it.name_en || '');
+          const normItBn = normalizeCatalogKey(it.name_bn || it.nameBn || it['Name (BN)'] || '');
+          return (normNewEn && normItEn && normNewEn === normItEn) ||
+                 (normNewBn && normItBn && normNewBn === normItBn);
+        });
+        if (duplicateItem) {
+          alert(`"${newItem.name}" নামের আইটেমটি মেনুতে ইতিমধ্যে রয়েছে! একই আইটেম ডাবল যোগ করা যাবে না।`);
+          return;
+        }
+      }
+
       setIsSavingAdd(true);
 
       let targetId = editingId;
+      let updatedMenu: any[] = [];
       if (isEditMode && editingId) {
           const { error } = await supabase.from('Canteen_Menu').update(payload).eq('id', editingId);
-          if (!error) {
-              // Realtime update local state
-              setItems(prev => prev.map(i => i.id === editingId ? { 
-                ...i, 
-                ...payload, 
-                nameBn: newItem.nameBn?.trim(), 
-                name_bn: newItem.nameBn?.trim() 
-              } : i));
-          } else {
-              alert("Error updating item: " + error.message);
+          if (error) {
+              console.warn("Supabase update error (persisting locally):", error.message);
           }
+          updatedMenu = deduplicateCanteenMenuItems(items.map(i => i.id === editingId ? { 
+            ...i, 
+            ...payload, 
+            nameBn: newItem.nameBn?.trim(), 
+            name_bn: newItem.nameBn?.trim() 
+          } : i));
+          setItems(updatedMenu);
       } else {
           const { data, error } = await supabase.from('Canteen_Menu').insert([payload]).select();
           
-          if (!error) {
-              if (data && data[0]) {
-                targetId = data[0].id;
-                setItems(prev => [{ 
-                  ...data[0], 
-                  nameBn: newItem.nameBn?.trim(), 
-                  name_bn: newItem.nameBn?.trim() 
-                }, ...prev]);
-              } else {
-                fetchItems();
-              }
+          if (!error && data && data[0]) {
+              targetId = data[0].id;
+              updatedMenu = deduplicateCanteenMenuItems([{ 
+                ...data[0], 
+                nameBn: newItem.nameBn?.trim(), 
+                name_bn: newItem.nameBn?.trim() 
+              }, ...items]);
+              setItems(updatedMenu);
           } else {
-              const generatedId = Math.random().toString();
+              const generatedId = Date.now().toString();
               targetId = generatedId;
-              setItems([{ 
+              updatedMenu = deduplicateCanteenMenuItems([{ 
                 ...payload, 
                 id: generatedId, 
                 nameBn: newItem.nameBn?.trim(), 
                 name_bn: newItem.nameBn?.trim() 
               }, ...items]);
+              setItems(updatedMenu);
           }
+      }
+
+      // Save to local cache & localStorage
+      setCanteenMenuCache(updatedMenu);
+      localStorage.setItem('canteen_menu_items_list', JSON.stringify(updatedMenu));
+      pushKeyToCloud('canteen_daily_menu', updatedMenu).catch(() => {});
+
+      // Recalculate past transactions in canteen_txs so statements & history reflect new menu prices
+      try {
+        const rawTxs = localStorage.getItem('canteen_txs');
+        if (rawTxs) {
+          const txs = JSON.parse(rawTxs);
+          let txsChanged = false;
+          const updatedTxs = txs.map((tx: any) => {
+            let hasItem = false;
+            let newSoldItems = tx.soldItems;
+            if (Array.isArray(tx.soldItems) && tx.soldItems.length > 0) {
+              newSoldItems = tx.soldItems.map((si: any) => {
+                const matchesId = String(si.menuItemId || si.id) === String(targetId);
+                const normSi = normalizeCatalogKey(si.menuItemName || si.name || '');
+                const normEn = normalizeCatalogKey(newItem.name);
+                const normBn = normalizeCatalogKey(newItem.nameBn || getMenuItemBanglaName(newItem.name));
+                const matchesName = (normSi && (normSi === normEn || normSi === normBn || normSi.includes(normEn) || normEn.includes(normSi) || normSi.includes(normBn) || normBn.includes(normSi)));
+                if (matchesId || matchesName) {
+                  hasItem = true;
+                  txsChanged = true;
+                  return {
+                    ...si,
+                    menuItemId: targetId,
+                    menuItemName: newItem.nameBn?.trim() || newItem.name.trim(),
+                    price: parsedPrice
+                  };
+                }
+                return si;
+              });
+
+              if (hasItem) {
+                const totalGross = newSoldItems.reduce(
+                  (sum: number, si: any) => sum + (Number(si.price || 0) * Number(si.qty || si.quantity || 1)),
+                  0
+                );
+                const discount = Number(tx.discount || 0);
+                const newAmount = Math.max(0, totalGross - discount);
+                return {
+                  ...tx,
+                  soldItems: newSoldItems,
+                  items: newSoldItems.map((si: any) => `${si.menuItemName} (${si.qty || 1})`).join(', '),
+                  originalAmount: totalGross,
+                  amount: newAmount
+                };
+              }
+            }
+            return tx;
+          });
+
+          if (txsChanged) {
+            localStorage.setItem('canteen_txs', JSON.stringify(updatedTxs));
+            pushKeyToCloud('canteen_txs', updatedTxs).catch(() => {});
+            window.dispatchEvent(new Event('canteen_txs_updated'));
+          }
+        }
+      } catch (err) {
+        console.warn('Error updating previous transactions on menu change in CanteenInventory:', err);
       }
 
       // Save Bengali name to dictionary, cloud sync & localStorage
@@ -655,6 +741,13 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       }
       setRecipes(getMenuRecipes());
 
+      // Broadcast real-time menu events across the entire application
+      window.dispatchEvent(new CustomEvent('canteen_menu_updated', { detail: updatedMenu }));
+      window.dispatchEvent(new Event('canteen_daily_menu_updated'));
+      window.dispatchEvent(new Event('canteen_inventory_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
+
       setIsSavedAdd(true);
       setTimeout(() => {
         setIsSavedAdd(false);
@@ -669,11 +762,18 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
 
   const confirmDelete = async (id: string) => {
       const { error } = await supabase.from('Canteen_Menu').delete().eq('id', id);
-      if(!error) {
-          fetchItems();
-      } else {
-          setItems(items.filter(i => i.id !== id));
-      }
+      const remaining = items.filter(i => i.id !== id);
+      setItems(remaining);
+      setCanteenMenuCache(remaining);
+      localStorage.setItem('canteen_menu_items_list', JSON.stringify(remaining));
+      pushKeyToCloud('canteen_daily_menu', remaining).catch(() => {});
+
+      window.dispatchEvent(new CustomEvent('canteen_menu_updated', { detail: remaining }));
+      window.dispatchEvent(new Event('canteen_daily_menu_updated'));
+      window.dispatchEvent(new Event('canteen_inventory_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
+
       setDeleteConfirmId(null);
       if (selectedItemForModal?.id === id) {
         setSelectedItemForModal(null);
@@ -948,7 +1048,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                   className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-indigo-600/30 transition-all cursor-pointer"
                >
                   <Plus className="w-4 h-4" />
-                  <span>ADD NEW ITEM</span>
+                  <span>ADD NEW MENU</span>
                </button>
             )}
          </div>
@@ -988,7 +1088,8 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
          {filteredItems.map(item => {
             const itemRecipe = getRecipeForMenuItem(item.id, item.name, recipes);
-            const stockInfo = calculateMenuItemStockInfo(item.id, item.name, availableRawItems, recipes);
+            const itemLimit = item.stock !== undefined ? Number(item.stock) : (item.max !== undefined ? Number(item.max) : (item.Quantity !== undefined ? Number(item.Quantity) : undefined));
+            const stockInfo = calculateMenuItemStockInfo(item.id, item.name, availableRawItems, recipes, itemLimit);
             // Realtime cost calculated directly from Recipe Formulation (20 Pax)
             const displayCost = calculateMenuPortionCostFrom20Pax(item, recipes20Pax, availableRawItems);
             const priceNum = Number(item.price) || 0;
@@ -1126,7 +1227,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       {filteredItems.length === 0 && (
          <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-12 text-center">
             <UtensilsCrossed className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-            <h4 className="text-white font-black text-sm uppercase tracking-wider mb-1">No Menu Items Found</h4>
+            <h4 className="text-white font-black text-sm uppercase tracking-wider mb-1">No Menu Found</h4>
             <p className="text-slate-400 text-xs">Try adjusting your search query or category filter.</p>
          </div>
       )}
@@ -1224,7 +1325,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                               </div>
                            </div>
 
-                           <div className="grid grid-cols-2 gap-3">
+                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                               <div>
                                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Category</label>
                                  <select 
@@ -1246,6 +1347,17 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                                     type="number" 
                                     value={modalFormData.price ?? ""}
                                     onChange={(e) => setModalFormData(prev => ({ ...prev, price: Number(e.target.value) || 0 }))}
+                                    className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+                                 />
+                              </div>
+
+                              <div>
+                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Daily Stock / লিমিট</label>
+                                 <input 
+                                    type="number"
+                                    min="0"
+                                    value={modalFormData.stock ?? 50}
+                                    onChange={(e) => setModalFormData(prev => ({ ...prev, stock: Number(e.target.value) || 0 }))}
                                     className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
                                  />
                               </div>
@@ -1336,11 +1448,13 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
 
                            {/* Live Stock & Portions Breakdown Box */}
                            {(() => {
+                              const modalLimit = modalFormData.stock !== undefined ? Number(modalFormData.stock) : (selectedItemForModal.stock !== undefined ? Number(selectedItemForModal.stock) : undefined);
                               const stockInfo = calculateMenuItemStockInfo(
                                  selectedItemForModal.id, 
                                  modalFormData.name || selectedItemForModal.name, 
                                  availableRawItems, 
-                                 recipes
+                                 recipes,
+                                 modalLimit
                               );
                               return (
                                  <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 space-y-3">
@@ -1527,7 +1641,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                         title="Delete this menu item"
                      >
                         <Trash2 className="w-4 h-4" />
-                        <span>Delete Item</span>
+                        <span>Delete Menu</span>
                      </button>
 
                      {/* Bottom Right: Cancel & Save Changes */}
@@ -1750,7 +1864,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-xl shadow-2xl flex flex-col max-h-[90vh]">
                <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0 mb-4">
                   <h3 className="text-lg font-black text-white uppercase tracking-tight">
-                     {isEditMode ? "EDIT MENU ITEM" : "ADD NEW ENTRY"}
+                     {isEditMode ? "EDIT MENU" : "ADD NEW MENU"}
                   </h3>
                   <button
                      onClick={() => setShowAddModal(false)}
@@ -1796,7 +1910,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                      </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                      <div>
                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Category</label>
                         <select 
@@ -1820,6 +1934,18 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                            onChange={(e) => setNewItem(prev => ({ ...prev, price: Number(e.target.value) || 0 }))}
                            className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold focus:outline-none"
                            placeholder="0"
+                        />
+                     </div>
+
+                     <div>
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Daily Stock / মজুত</label>
+                        <input 
+                           type="number" 
+                           min="0"
+                           value={(newItem as any).stock ?? 50}
+                           onChange={(e) => setNewItem(prev => ({ ...prev, stock: Number(e.target.value) || 0 } as any))}
+                           className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold focus:outline-none"
+                           placeholder="50"
                         />
                      </div>
                   </div>
@@ -1879,9 +2005,9 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                      onClick={handleAddItem}
                      isSaving={isSavingAdd}
                      isSaved={isSavedAdd}
-                     idleText={isEditMode ? "UPDATE MENU ITEM" : "SAVE TO INVENTORY"}
+                     idleText={isEditMode ? "UPDATE MENU" : "SAVE TO MENU"}
                      savingText="SAVING..."
-                     savedText={isEditMode ? "ITEM UPDATED! ✓" : "SAVED TO INVENTORY! ✓"}
+                     savedText={isEditMode ? "MENU UPDATED! ✓" : "SAVED TO MENU! ✓"}
                      className="w-full py-3.5"
                   />
                </div>
@@ -1909,8 +2035,8 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
               <div className="w-16 h-16 bg-rose-500/10 border border-rose-500/30 text-rose-500 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-inner">
                 <Trash2 className="w-8 h-8 animate-pulse" />
               </div>
-              <h3 className="text-lg font-black text-white uppercase tracking-tight mb-2">Delete Item?</h3>
-              <p className="text-xs font-bold text-slate-400 mb-6">Are you sure you want to delete this item?</p>
+              <h3 className="text-lg font-black text-white uppercase tracking-tight mb-2">Delete Menu?</h3>
+              <p className="text-xs font-bold text-slate-400 mb-6">Are you sure you want to delete this menu?</p>
               
               <div className="flex space-x-3">
                 <button 

@@ -27,7 +27,7 @@ import {
   CANTEEN_DAILY_MENU_KEY, CANTEEN_DAILY_MENU_TIMESTAMP_KEY 
 } from '../utils/canteenSettings';
 import { queuePushKeyToCloud } from '../utils/canteenCloudSync';
-import { getCanteenMenuCache, fetchCanteenMenuOnce, getCanteenMembersCache, fetchCanteenMembersOnce } from '../utils/canteenMenuData';
+import { getCanteenMenuCache, setCanteenMenuCache, fetchCanteenMenuOnce, getCanteenMembersCache, fetchCanteenMembersOnce } from '../utils/canteenMenuData';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { deductRawStockForSales, restoreRawStockForSaleCancellation, calculateMenuItemStockInfo, getRawInventoryItems, getMenuRecipes } from '../utils/recipeManager';
 import {
@@ -426,6 +426,26 @@ export const ManagerDashboard: React.FC = () => {
           name: i.name,
           quantity: i.qty || 1
         })));
+
+        // Also restore menu item stock in cache
+        try {
+          const currentMenu = getCanteenMenuCache();
+          if (currentMenu && currentMenu.length > 0) {
+            const restoredMenu = currentMenu.map((m: any) => {
+              const matchedOrder = order.items.find((i: any) => 
+                (i.id && String(i.id) === String(m.id)) ||
+                (i.name && (i.name.trim().toLowerCase() === (m.name || '').trim().toLowerCase() || i.name.trim().toLowerCase() === (m.name_en || '').trim().toLowerCase()))
+              );
+              if (matchedOrder) {
+                const cur = m.stock !== undefined ? Number(m.stock) : (m.max !== undefined ? Number(m.max) : 50);
+                const restored = cur + (matchedOrder.qty || 1);
+                return { ...m, stock: restored, max: restored };
+              }
+              return m;
+            });
+            setCanteenMenuCache(restoredMenu);
+          }
+        } catch {}
       }
       
       const txs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');

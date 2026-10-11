@@ -114,12 +114,15 @@ import {
   BAF_RANKS_WITH_BN,
   syncMemberBanglaNamesFromCloud 
 } from '../utils/memberBanglaNames';
+import { getMenuItemBanglaName } from '../utils/menuBanglaNames';
 import { 
   fetchCanteenMembersOnce, 
   getCanteenMembersCache, 
   setCanteenMembersCache,
   fetchCanteenMenuOnce, 
-  getCanteenMenuCache 
+  getCanteenMenuCache,
+  setCanteenMenuCache,
+  normalizeCatalogKey
 } from '../utils/canteenMenuData';
 import { playCelebrationSound } from '../utils/audioFeedback';
 import { FundBatchBillPage } from './FundBatchBillPage';
@@ -459,9 +462,9 @@ export const DEFAULT_MENU_PRICES: Record<string, number> = {
   'SWARMA': 50,
   'SHWARMA': 50,
   'BOILED EGG': 15,
-  'CHICKEN BIRIYANI': 65,
+  'CHICKEN BIRIYANI': 70,
   'CHICKEN CURRY': 50,
-  'CHICKEN BIRYANI': 65,
+  'CHICKEN BIRYANI': 70,
   'CHICKEN KHICHURI': 65,
   'SINGARA': 10,
   'SHINGARA': 10,
@@ -526,8 +529,15 @@ export const DEFAULT_MENU_PRICES: Record<string, number> = {
   'শর্মা': 50,
   'ডিম সিদ্ধ': 15,
   'সিদ্ধ ডিম': 15,
-  'চিকেন বিরিয়ানি': 65,
-  'চিকেন বিরিয়ানী': 65,
+  'চিকেন বিরিয়ানি': 70,
+  'চিকেন বিরিয়ানী': 70,
+  'চিকেন বিরিয়ানি': 70,
+  'চিকেন বিরিয়ানী': 70,
+  'চিকেন বিরানি': 70,
+  'বিরিয়ানি': 70,
+  'বিরিয়ানি': 70,
+  'বিরিয়ানী': 70,
+  'বিরিয়ানী': 70,
   'চিকেন কারি': 50,
   'চিকেন কারী': 50,
   'সিঙ্গারা': 10,
@@ -542,43 +552,61 @@ export const DEFAULT_MENU_PRICES: Record<string, number> = {
   'চিকেন স্যান্ডউইচ': 40
 };
 
-// Robust catalog price resolver
+// Robust catalog price resolver with multi-spelling Bengali and English normalization
 export const lookupCatalogPrice = (itemName: string, catalog: any[] = []): number => {
   if (!itemName) return 0;
   const raw = String(itemName).trim();
   const clean = raw.toUpperCase().replace(/\s+/g, ' ');
+  const normSearch = normalizeCatalogKey(raw);
+  const rawBn = getMenuItemBanglaName(itemName) || raw;
+  const normBn = normalizeCatalogKey(rawBn);
 
-  // 1. Check live catalog from Supabase Canteen_Menu first
-  if (Array.isArray(catalog) && catalog.length > 0) {
-    const direct = catalog.find((c: any) => {
-      const cName = String(c.name || '').toUpperCase().trim().replace(/\s+/g, ' ');
-      return cName === clean;
+  // 1. Check live catalog from Supabase Canteen_Menu or local cache first
+  const activeCatalog = (Array.isArray(catalog) && catalog.length > 0) ? catalog : getCanteenMenuCache();
+  if (Array.isArray(activeCatalog) && activeCatalog.length > 0) {
+    const direct = activeCatalog.find((c: any) => {
+      const cEn = String(c.name || c.name_en || '').toUpperCase().trim().replace(/\s+/g, ' ');
+      const cBn = String(c.name_bn || c['Name (BN)'] || c.nameBn || getMenuItemBanglaName(c) || '').trim();
+      const cId = String(c.id || '');
+      const normCEn = normalizeCatalogKey(cEn);
+      const normCBn = normalizeCatalogKey(cBn);
+
+      return cEn === clean || cBn === raw || cBn === rawBn || cEn === rawBn || cId === raw ||
+             (normSearch && (normCEn === normSearch || normCBn === normSearch || normCBn === normBn));
     });
     if (direct && Number(direct.price ?? direct.Price) > 0) {
       return Number(direct.price ?? direct.Price);
     }
-  }
 
-  // 2. Direct match in DEFAULT_MENU_PRICES dictionary
-  if (DEFAULT_MENU_PRICES[clean] !== undefined) {
-    return DEFAULT_MENU_PRICES[clean];
-  }
+    const fuzzy = activeCatalog.find((c: any) => {
+      const cEn = String(c.name || c.name_en || '').toUpperCase().trim().replace(/\s+/g, ' ');
+      const cBn = String(c.name_bn || c['Name (BN)'] || c.nameBn || getMenuItemBanglaName(c) || '').trim();
+      const normCEn = normalizeCatalogKey(cEn);
+      const normCBn = normalizeCatalogKey(cBn);
 
-  // 3. Normalized / fuzzy match in Supabase catalog
-  if (Array.isArray(catalog) && catalog.length > 0) {
-    const fuzzy = catalog.find((c: any) => {
-      const cName = String(c.name || '').toUpperCase().trim().replace(/\s+/g, ' ');
-      return cName.includes(clean) || clean.includes(cName);
+      return (cEn && (cEn.includes(clean) || clean.includes(cEn))) ||
+             (cBn && (cBn.includes(raw) || raw.includes(cBn) || cBn.includes(rawBn) || rawBn.includes(cBn))) ||
+             (normSearch && ((normCEn && (normCEn.includes(normSearch) || normSearch.includes(normCEn))) ||
+                             (normCBn && (normCBn.includes(normSearch) || normSearch.includes(normCBn)))));
     });
     if (fuzzy && Number(fuzzy.price ?? fuzzy.Price) > 0) {
       return Number(fuzzy.price ?? fuzzy.Price);
     }
   }
 
-  // 4. Substring / alias matching in DEFAULT_MENU_PRICES
+  // 2. Direct match in DEFAULT_MENU_PRICES dictionary
+  if (DEFAULT_MENU_PRICES[clean] !== undefined) return DEFAULT_MENU_PRICES[clean];
+  if (DEFAULT_MENU_PRICES[raw] !== undefined) return DEFAULT_MENU_PRICES[raw];
+  if (DEFAULT_MENU_PRICES[rawBn] !== undefined) return DEFAULT_MENU_PRICES[rawBn];
+
+  // 3. Substring / normalized alias matching in DEFAULT_MENU_PRICES
   for (const [key, price] of Object.entries(DEFAULT_MENU_PRICES)) {
     const kUpper = key.toUpperCase();
-    if (clean.includes(kUpper) || kUpper.includes(clean)) {
+    const kNorm = normalizeCatalogKey(key);
+    if (kNorm === normSearch || kNorm === normBn ||
+        clean.includes(kUpper) || kUpper.includes(clean) ||
+        raw.includes(key) || key.includes(raw) ||
+        (normSearch && (normSearch.includes(kNorm) || kNorm.includes(normSearch)))) {
       return price;
     }
   }
@@ -948,11 +976,30 @@ export const MemberDB: React.FC<MemberDBProps> = ({
   const [menuCatalog, setMenuCatalog] = useState<any[]>(() => getCanteenMenuCache());
 
   useEffect(() => {
-    fetchCanteenMenuOnce().then((data) => {
-      if (data && data.length > 0) {
-        setMenuCatalog(data);
+    const refreshCatalog = () => {
+      const cached = getCanteenMenuCache();
+      if (cached && cached.length > 0) {
+        setMenuCatalog(cached);
       }
-    });
+      fetchCanteenMenuOnce().then((data) => {
+        if (data && data.length > 0) {
+          setMenuCatalog(data);
+        }
+      });
+    };
+
+    refreshCatalog();
+
+    window.addEventListener('canteen_menu_updated', refreshCatalog);
+    window.addEventListener('canteen_daily_menu_updated', refreshCatalog);
+    window.addEventListener('canteen_state_updated', refreshCatalog);
+    window.addEventListener('storage', refreshCatalog);
+    return () => {
+      window.removeEventListener('canteen_menu_updated', refreshCatalog);
+      window.removeEventListener('canteen_daily_menu_updated', refreshCatalog);
+      window.removeEventListener('canteen_state_updated', refreshCatalog);
+      window.removeEventListener('storage', refreshCatalog);
+    };
   }, []);
 
   const getMenuItemPrice = (name: string): number => {
@@ -1387,7 +1434,19 @@ export const MemberDB: React.FC<MemberDBProps> = ({
         String(tx.items || '').includes('Changed amount from');
 
       if (!isInit) {
-        salesTotal += Number(tx.amount || 0);
+        if (Array.isArray(tx.soldItems) && tx.soldItems.length > 0) {
+          const liveGross = tx.soldItems.reduce((sum: number, si: any) => {
+            const name = String(si.menuItemName || si.name || '').trim();
+            const qty = Number(si.qty || si.quantity || 1);
+            const liveRate = lookupCatalogPrice(name, menuCatalog) || lookupCatalogPrice(si.name || '', menuCatalog);
+            const rate = liveRate > 0 ? liveRate : Number(si.price || si.rate || 0);
+            return sum + (rate * qty);
+          }, 0);
+          const discount = Number(tx.discount || 0);
+          salesTotal += Math.max(0, liveGross - discount);
+        } else {
+          salesTotal += Number(tx.amount || 0);
+        }
       } else {
         const mKey = tx.monthKey || getTxMonthKey(tx.date) || 'DEFAULT';
         const cKey = getTxCategory(tx);
@@ -2508,10 +2567,11 @@ export const MemberDB: React.FC<MemberDBProps> = ({
         tx.soldItems.forEach((si: any) => {
           const name = String(si.menuItemName || si.name || 'ক্যান্টিন খাদ্যদ্রব্য').trim();
           const qty = Number(si.qty || si.quantity || 1);
-          let itemRate = Number(si.price || si.rate || 0);
-          if (itemRate <= 0) {
-            itemRate = lookupCatalogPrice(name, menuCatalog);
-          }
+          // Prioritize live catalog price so updated menu prices reflect dynamically on statements!
+          const idMatch = (si.menuItemId || si.id) ? (menuCatalog.find((c: any) => String(c.id) === String(si.menuItemId || si.id))) : null;
+          const idRate = idMatch ? Number(idMatch.price ?? idMatch.Price) : 0;
+          const liveCatRate = idRate > 0 ? idRate : (lookupCatalogPrice(name, menuCatalog) || lookupCatalogPrice(si.name || '', menuCatalog));
+          const itemRate = liveCatRate > 0 ? liveCatRate : Number(si.price || si.rate || 0);
           const itemTotal = itemRate > 0 ? itemRate * qty : (Number(tx.amount || 0) / (tx.soldItems.length || 1));
 
           if (!itemMap.has(name)) {
@@ -3198,8 +3258,25 @@ export const MemberDB: React.FC<MemberDBProps> = ({
             memberName: targetMember ? `${targetMember['Rank'] || ''} ${targetMember['Surname'] || ''}` : '',
             date: txToRemove.date
           });
+          const currentMenu = getCanteenMenuCache();
+          if (currentMenu && currentMenu.length > 0) {
+            const restoredMenu = currentMenu.map((m: any) => {
+              const matched = itemsToRestore.find(it => 
+                (it.menuItemId && String(it.menuItemId) === String(m.id)) ||
+                (it.menuItemName && (it.menuItemName.trim().toLowerCase() === (m.name || '').trim().toLowerCase() || it.menuItemName.trim().toLowerCase() === (m.name_en || '').trim().toLowerCase()))
+              );
+              if (matched) {
+                const cur = m.stock !== undefined ? Number(m.stock) : (m.max !== undefined ? Number(m.max) : 50);
+                const restored = cur + (matched.qty || 1);
+                return { ...m, stock: restored, max: restored };
+              }
+              return m;
+            });
+            setCanteenMenuCache(restoredMenu);
+          }
           window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
           window.dispatchEvent(new Event('canteen_inventory_updated'));
+          window.dispatchEvent(new Event('canteen_menu_updated'));
         } catch (err) {
           console.warn('Failed to restore raw stock in MemberDB handleRemoveTx:', err);
         }
@@ -4085,8 +4162,10 @@ export const MemberDB: React.FC<MemberDBProps> = ({
         tx.soldItems.forEach((si: any) => {
           const name = String(si.menuItemName || si.name || 'ক্যান্টিন খাদ্যদ্রব্য').trim();
           const qty = Number(si.qty || si.quantity || 1);
-          let itemRate = Number(si.price || si.rate || 0);
-          if (itemRate <= 0) itemRate = lookupCatalogPrice(name, menuCatalog);
+          const idMatch = (si.menuItemId || si.id) ? (menuCatalog.find((c: any) => String(c.id) === String(si.menuItemId || si.id))) : null;
+          const idRate = idMatch ? Number(idMatch.price ?? idMatch.Price) : 0;
+          const liveCatRate = idRate > 0 ? idRate : (lookupCatalogPrice(name, menuCatalog) || lookupCatalogPrice(si.name || '', menuCatalog));
+          const itemRate = liveCatRate > 0 ? liveCatRate : Number(si.price || si.rate || 0);
           const itemTotal = itemRate > 0 ? itemRate * qty : (Number(tx.amount || 0) / (tx.soldItems.length || 1));
           addItem(name, qty, itemTotal, itemRate);
         });

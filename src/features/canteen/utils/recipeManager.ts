@@ -264,13 +264,13 @@ export const getIngredientToInventoryRatio = (
   const isPcs = ['pcs', 'pc', 'piece', 'pieces', 'টি', 'টা', 'পিস', 'slice', 'স্লাইস', 'cup', 'কাপ', 'sheet'].includes(ingUnit);
   const isCase = ['case', 'crate', 'কেস', 'ক্রেট'].includes(rawUnit);
   if (isCase && isPcs) {
-    return packSize > 1 ? packSize : 30;
+    return packSize > 0 ? packSize : 30;
   }
 
   // 4. Packet / Box to Pcs / SubUnits
   const isPkt = ['packet', 'box', 'pkt', 'বক্স', 'প্যাকেট', 'pack'].includes(rawUnit);
   if (isPkt && isPcs) {
-    return packSize > 1 ? packSize : 24;
+    return packSize > 0 ? packSize : 1;
   }
 
   // 5. Explicit Sub-unit match
@@ -1115,8 +1115,8 @@ const DEFAULT_MENU_RECIPES: Record<string, RecipeIngredient[]> = {
     { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 2, unit: 'gm' }
   ],
   'EGG NOODLES': [
-    { rawItemId: 'raw-6', rawItemName: 'Noodles', quantity: 1, unit: 'pcs' },
-    { rawItemId: 'raw-18', rawItemName: 'Maggi Masala', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-6', rawItemName: 'Noodles', quantity: 1, unit: 'packet' },
+    { rawItemId: 'raw-18', rawItemName: 'Maggi Masala', quantity: 1, unit: 'packet' },
     { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 20, unit: 'gm' },
     { rawItemId: 'raw-19', rawItemName: 'Green Chili', quantity: 5, unit: 'gm' },
     { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 15, unit: 'ml' },
@@ -1130,7 +1130,7 @@ const DEFAULT_MENU_RECIPES: Record<string, RecipeIngredient[]> = {
   ],
   'HALIM': [
     { rawItemId: 'raw-1', rawItemName: 'Chicken', quantity: 50, unit: 'gm' },
-    { rawItemId: 'raw-15', rawItemName: 'Halim Mix', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-15', rawItemName: 'Halim Mix', quantity: 1, unit: 'packet' },
     { rawItemId: 'raw-3', rawItemName: 'Dal', quantity: 30, unit: 'gm' },
     { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 25, unit: 'gm' },
     { rawItemId: 'raw-29', rawItemName: 'Garlic', quantity: 4, unit: 'gm' },
@@ -1160,6 +1160,12 @@ const DEFAULT_MENU_RECIPES: Record<string, RecipeIngredient[]> = {
     { rawItemId: 'raw-28', rawItemName: 'Lemon', quantity: 0.25, unit: 'pcs' },
     { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.001, unit: 'cylinder' }
   ],
+  'LEMON TEA': [
+    { rawItemId: 'raw-5', rawItemName: 'Tea Bag', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-28', rawItemName: 'Lemon', quantity: 0.25, unit: 'pcs' },
+    { rawItemId: 'raw-13', rawItemName: 'Sugar', quantity: 15, unit: 'gm' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.001, unit: 'cylinder' }
+  ],
   'MILK COFFEE': [
     { rawItemId: 'raw-20', rawItemName: 'Coffee', quantity: 2, unit: 'gm' },
     { rawItemId: 'raw-4', rawItemName: 'Milk Powder', quantity: 20, unit: 'gm' },
@@ -1179,8 +1185,8 @@ const DEFAULT_MENU_RECIPES: Record<string, RecipeIngredient[]> = {
     { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.0015, unit: 'cylinder' }
   ],
   'NOODLES': [
-    { rawItemId: 'raw-6', rawItemName: 'Noodles', quantity: 1, unit: 'pcs' },
-    { rawItemId: 'raw-18', rawItemName: 'Maggi Masala', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-6', rawItemName: 'Noodles', quantity: 1, unit: 'packet' },
+    { rawItemId: 'raw-18', rawItemName: 'Maggi Masala', quantity: 1, unit: 'packet' },
     { rawItemId: 'raw-14', rawItemName: 'Onion', quantity: 15, unit: 'gm' },
     { rawItemId: 'raw-19', rawItemName: 'Green Chili', quantity: 5, unit: 'gm' },
     { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 10, unit: 'ml' },
@@ -1188,10 +1194,10 @@ const DEFAULT_MENU_RECIPES: Record<string, RecipeIngredient[]> = {
     { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 2, unit: 'gm' }
   ],
   'NORMAL BISCUIT': [
-    { rawItemId: 'raw-8', rawItemName: 'Biscuit', quantity: 1, unit: 'pcs' }
+    { rawItemId: 'raw-8', rawItemName: 'Biscuit', quantity: 1, unit: 'packet' }
   ],
   'DRY CAKE': [
-    { rawItemId: 'raw-21', rawItemName: 'Dry Cake', quantity: 1, unit: 'pcs' }
+    { rawItemId: 'raw-21', rawItemName: 'Dry Cake', quantity: 1, unit: 'packet' }
   ],
   'BUTTER BAN': [
     { rawItemId: 'raw-23', rawItemName: 'Butter Ban', quantity: 1, unit: 'pcs' }
@@ -1527,26 +1533,29 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
     if (!item) continue;
     const cleanId = String(item.id || '').trim();
     const idKey = cleanId ? cleanId.toLowerCase() : '';
-    const normKey = normalizeRawItemName(item.name || item.nameBn || '');
-    const isStandardCanonical = [
-      'egg', 'tea-bag', 'sandwich-bread', 'cucumber', 'oil', 'sugar', 'onion',
-      'chicken', 'rice', 'dal', 'milk-powder', 'noodles', 'garlic', 'ginger',
-      'turmeric', 'chili-powder', 'salt', 'gas-cylinder', 'coffee', 'black-salt'
-    ].includes(normKey);
+    const normKey = normalizeRawItemName(item.name || '');
+    const bnKey = normalizeRawItemName(item.nameBn || '');
+    const combinedNorm = normalizeRawItemName(item.name || item.nameBn || '');
 
-    // Group items together if they share the exact same ID or canonical name
+    // Group items together if they share the exact same ID or normalized name (English or Bengali)
     let key: string | undefined = undefined;
     if (idKey && idToGroupMap.has(idKey)) {
       key = idToGroupMap.get(idKey);
-    } else if (isStandardCanonical && canonicalToGroupMap.has(normKey)) {
+    } else if (normKey && canonicalToGroupMap.has(normKey)) {
       key = canonicalToGroupMap.get(normKey);
+    } else if (bnKey && canonicalToGroupMap.has(bnKey)) {
+      key = canonicalToGroupMap.get(bnKey);
+    } else if (combinedNorm && canonicalToGroupMap.has(combinedNorm)) {
+      key = canonicalToGroupMap.get(combinedNorm);
     }
 
     if (!key) {
       // First time seeing this item
-      key = isStandardCanonical ? `canon_${normKey}` : (idKey ? `id_${idKey}` : (normKey ? `name_${normKey}` : `item_${Math.random()}`));
+      key = normKey ? `canon_${normKey}` : (bnKey ? `canon_${bnKey}` : (idKey ? `id_${idKey}` : `item_${Math.random()}`));
       if (idKey) idToGroupMap.set(idKey, key);
-      if (isStandardCanonical) canonicalToGroupMap.set(normKey, key);
+      if (normKey) canonicalToGroupMap.set(normKey, key);
+      if (bnKey) canonicalToGroupMap.set(bnKey, key);
+      if (combinedNorm) canonicalToGroupMap.set(combinedNorm, key);
     }
     const u = (item.unit || '').toLowerCase().trim();
     const subCatLower = (item.subCategory || '').toLowerCase().trim();
@@ -2056,12 +2065,16 @@ export const getRecipeForMenuItem = (menuItemId: string, menuItemName?: string, 
       // Bengali common names fallback
       if (!found || found.length === 0) {
         const lower = menuItemName.toLowerCase();
-        if ((lower.includes('দুধ চা') || lower.includes('মিল্ক চা') || lower.includes('milk tea') || lower.includes('চা') || lower.includes('tea')) && recipes['MILK TEA']) {
-          found = recipes['MILK TEA'];
+        if ((lower.includes('লেবু চা') || lower.includes('lemon tea')) && (recipes['LEMON TEA'] || recipes['LIQUOR TEA'])) {
+          found = recipes['LEMON TEA'] || recipes['LIQUOR TEA'];
         } else if ((lower.includes('রং চা') || lower.includes('লাল চা') || lower.includes('liquor tea') || lower.includes('black tea')) && recipes['LIQUOR TEA']) {
           found = recipes['LIQUOR TEA'];
         } else if ((lower.includes('গ্রিন টি') || lower.includes('green tea')) && recipes['GREEN TEA']) {
           found = recipes['GREEN TEA'];
+        } else if ((lower.includes('দুধ চা') || lower.includes('মিল্ক চা') || lower.includes('milk tea')) && recipes['MILK TEA']) {
+          found = recipes['MILK TEA'];
+        } else if ((lower.includes('চা') || lower.includes('tea')) && recipes['MILK TEA']) {
+          found = recipes['MILK TEA'];
         } else if ((lower.includes('কোল্ড কফি') || lower.includes('cold coffee')) && recipes['COLD COFFEE']) {
           found = recipes['COLD COFFEE'];
         } else if ((lower.includes('কফি') || lower.includes('দুধ কফি') || lower.includes('coffee') || lower.includes('milk coffee')) && recipes['MILK COFFEE']) {
@@ -2169,10 +2182,40 @@ export const calculateMenuItemStockInfo = (
   menuItemId: string,
   menuItemName: string,
   rawItemsList?: RawInventoryItem[],
-  recipesMap?: MenuRecipeMap
+  recipesMap?: MenuRecipeMap,
+  configuredMaxStock?: number | null
 ): MenuItemStockInfo => {
   const rawItems = rawItemsList && rawItemsList.length > 0 ? rawItemsList : getRawInventoryItems();
   const recipes = recipesMap || getMenuRecipes();
+
+  // Resolve configured stock limit if provided or from cached menu item
+  let itemLimit: number | undefined = (configuredMaxStock !== undefined && configuredMaxStock !== null && !isNaN(Number(configuredMaxStock)))
+    ? Number(configuredMaxStock)
+    : undefined;
+
+  if (itemLimit === undefined && typeof window !== 'undefined') {
+    try {
+      const cacheStr = localStorage.getItem('canteen_menu_cache') || localStorage.getItem('canteen_menu_items_list');
+      if (cacheStr) {
+        const cachedList = JSON.parse(cacheStr);
+        if (Array.isArray(cachedList)) {
+          const normSearch = (menuItemName || '').toLowerCase().trim();
+          const found = cachedList.find((it: any) =>
+            (menuItemId && String(it.id) === String(menuItemId)) ||
+            (it.name && it.name.toLowerCase().trim() === normSearch) ||
+            (it.name_en && it.name_en.toLowerCase().trim() === normSearch) ||
+            (it.name_bn && it.name_bn.toLowerCase().trim() === normSearch)
+          );
+          if (found) {
+            const val = found.stock ?? found.max ?? found.Quantity;
+            if (val !== undefined && val !== null && !isNaN(Number(val))) {
+              itemLimit = Number(val);
+            }
+          }
+        }
+      }
+    } catch {}
+  }
 
   // 1. Resolve Recipe for this menu item
   const recipe = getRecipeForMenuItem(menuItemId, menuItemName, recipes);
@@ -2253,7 +2296,15 @@ export const calculateMenuItemStockInfo = (
       }
     }
 
-    const finalStock = minPortions === Infinity ? 0 : Math.max(0, minPortions);
+    const rawPossible = minPortions === Infinity ? 0 : Math.max(0, minPortions);
+    let finalStock = rawPossible;
+    if (itemLimit !== undefined) {
+      finalStock = Math.min(itemLimit, rawPossible);
+    } else {
+      // Sensible canteen batch ceiling if no explicit limit set (prevents 1400/900 anomaly from raw storeroom bulk sacks)
+      finalStock = Math.min(50, rawPossible);
+    }
+
     return {
       availableStock: finalStock,
       isRecipeBased: true,
@@ -2277,17 +2328,18 @@ export const calculateMenuItemStockInfo = (
 
   if (directRaw) {
     const isCase = (directRaw.unit || '').toLowerCase() === 'case';
-    const packSize = (directRaw.packSize && directRaw.packSize > 1) ? directRaw.packSize : 1;
+    const packSize = (directRaw.packSize && directRaw.packSize > 0) ? directRaw.packSize : 1;
     const rawStock = Math.max(0, Number(directRaw.currentStock ?? (directRaw as any).stock ?? (directRaw as any).Quantity ?? 0));
     const stockVal = isCase ? Math.floor(rawStock * packSize) : Math.floor(rawStock);
+    const finalStock = itemLimit !== undefined ? Math.min(itemLimit, stockVal) : stockVal;
 
     return {
-      availableStock: stockVal,
+      availableStock: finalStock,
       isRecipeBased: false,
       limitingIngredient: {
         rawItemId: directRaw.id,
         rawItemName: directRaw.name,
-        portions: stockVal,
+        portions: finalStock,
         currentStock: rawStock,
         stockUnit: directRaw.unit,
         requiredPerPortion: 1,
@@ -2300,14 +2352,14 @@ export const calculateMenuItemStockInfo = (
         unit: directRaw.unit,
         currentStock: rawStock,
         stockUnit: directRaw.unit,
-        portionsPossible: stockVal
+        portionsPossible: finalStock
       }]
     };
   }
 
   // 3. Fallback: item without linked recipe or raw stock
   return {
-    availableStock: 50,
+    availableStock: itemLimit !== undefined ? itemLimit : 50,
     isRecipeBased: false,
     ingredientsBreakdown: []
   };
@@ -2317,9 +2369,10 @@ export const getMenuItemAvailableStock = (
   menuItemId: string,
   menuItemName: string,
   rawItemsList?: RawInventoryItem[],
-  recipesMap?: MenuRecipeMap
+  recipesMap?: MenuRecipeMap,
+  configuredMaxStock?: number | null
 ): number => {
-  return calculateMenuItemStockInfo(menuItemId, menuItemName, rawItemsList, recipesMap).availableStock;
+  return calculateMenuItemStockInfo(menuItemId, menuItemName, rawItemsList, recipesMap, configuredMaxStock).availableStock;
 };
 
 /**

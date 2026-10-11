@@ -18,6 +18,7 @@ import {
   getRawInventoryItems,
   saveRawInventoryItems,
   deduplicateRawItems,
+  normalizeRawItemName,
   getEffectiveRawUnitCost,
   getRawItemSubUnitInfo,
   getRecipeForMenuItem,
@@ -1453,6 +1454,20 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
     });
     } else {
       // Add new
+      // Prevent duplicate item addition in inventory
+      const normInputEn = normalizeRawItemName(newItemData.name || '');
+      const normInputBn = normalizeRawItemName(newItemData.nameBn || '');
+      const duplicateRaw = items.find(it => {
+        const itEn = normalizeRawItemName(it.name || '');
+        const itBn = normalizeRawItemName(it.nameBn || '');
+        return (normInputEn && itEn && normInputEn === itEn) ||
+               (normInputBn && itBn && normInputBn === itBn);
+      });
+      if (duplicateRaw) {
+        alert(`"${newItemData.name}" নামের আইটেমটি ইনভেন্টরিতে ইতিমধ্যে রয়েছে! একই নামের আইটেম ডাবল যোগ করা যাবে না।`);
+        return;
+      }
+
       const parsedStock = (newItemData.currentStock !== '' && newItemData.currentStock !== undefined && !isNaN(Number(newItemData.currentStock)))
         ? Number(newItemData.currentStock)
         : 0;

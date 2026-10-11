@@ -255,7 +255,32 @@ async function startServer() {
         }
       }
       
-      const supabaseRes = await fetch(targetUrl, reqOptions);
+      // Perform upstream fetch with 4.5s timeout and automatic single retry
+      let supabaseRes: Response | null = null;
+      let lastFetchErr: any = null;
+
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 4500);
+          supabaseRes = await fetch(targetUrl, {
+            ...reqOptions,
+            signal: controller.signal
+          });
+          clearTimeout(timer);
+          break;
+        } catch (fetchErr: any) {
+          lastFetchErr = fetchErr;
+          if (attempt === 0) {
+            await new Promise(r => setTimeout(r, 150));
+            continue;
+          }
+        }
+      }
+
+      if (!supabaseRes) {
+        throw lastFetchErr || new Error('Upstream timeout');
+      }
       
       const hopByHopHeaders = new Set([
         'connection',
@@ -280,8 +305,13 @@ async function startServer() {
       const arrayBuffer = await supabaseRes.arrayBuffer();
       res.send(Buffer.from(arrayBuffer));
     } catch (e: any) {
-      console.error('Supabase proxy error:', e, 'Target:', targetUrl);
-      res.status(502).json({ error: 'Proxy error', details: e.message, cause: e.cause ? String(e.cause) : null, targetUrl });
+      // Gracefully handle timeout/upstream disconnection without throwing unhandled exceptions
+      console.warn('[Proxy Notice] Upstream database temporarily unavailable:', e?.message || e);
+      res.status(503).json({
+        message: 'Upstream database temporarily unavailable. Falling back to local state.',
+        code: 'PGRST_UPSTREAM_TIMEOUT',
+        details: e?.message || 'Connection timeout'
+      });
     }
   });
 

@@ -6,6 +6,7 @@ export interface CanteenMenuItem {
   name_en?: string;
   name_bn?: string;
   nameBn?: string;
+  'Name (BN)'?: string;
   category: string;
   price: number;
   stock?: number;
@@ -18,6 +19,7 @@ export interface CanteenMenuItem {
   image?: string;
   created_at?: string;
   updated_at?: string;
+  [key: string]: any;
 }
 
 import defaultMenuItemsData from '../data/defaultMenuItems.json';
@@ -26,7 +28,46 @@ import { getLocalSeniorityMap } from './memberSeniority';
 import { sortCanteenMembersByOfficeSeniority, normalizeCanteenMembersSeniority, deduplicateCanteenMembers } from './canteenSeniority';
 import { getMemberBanglaRank } from './memberBanglaNames';
 
-export const DEFAULT_CANTEEN_MENU_ITEMS: CanteenMenuItem[] = (defaultMenuItemsData as any[]).map((it) => ({
+export const isOneTimeBoxItem = (it: any): boolean => {
+  if (!it) return false;
+  const n = String(it.name || it.name_en || '').toUpperCase().trim();
+  const bn = String(it.name_bn || it['Name (BN)'] || it.nameBn || '').trim();
+  return n.includes('ONE TIME BOX') || bn.includes('ওয়ান টাইম বক্স') || bn.includes('ওয়ান টাইম ফুড বক্স');
+};
+
+/**
+ * Normalizes item names across Bengali character variations (য় vs য়, ী vs ি)
+ * and English spelling variations (Biriyani vs Biryani) for 100% resilient matches.
+ */
+export const normalizeCatalogKey = (s: string): string => {
+  if (!s) return '';
+  return String(s)
+    .toLowerCase()
+    .replace(/\u09af\u09bc/g, '\u09df') // য় to য়
+    .replace(/\u09a1\u09bc/g, '\u09dc') // ড় to ড়
+    .replace(/\u09a2\u09bc/g, '\u09dd') // ঢ় to ঢ়
+    .replace(/ী/g, 'ি') // dirghoi to hroshwoi
+    .replace(/biryani/g, 'biriyani')
+    .replace(/[\s\-_]+/g, ' ')
+    .trim();
+};
+
+export const PARCEL_BOX_ITEM: CanteenMenuItem = {
+  id: 'parcel-one-time-box',
+  name: 'ONE TIME BOX',
+  name_en: 'ONE TIME BOX',
+  name_bn: 'ওয়ান টাইম বক্স',
+  nameBn: 'ওয়ান টাইম বক্স',
+  'Name (BN)': 'ওয়ান টাইম বক্স',
+  category: 'SNACKS',
+  price: 5,
+  Cost: 4,
+  cost: 4
+};
+
+export const DEFAULT_CANTEEN_MENU_ITEMS: CanteenMenuItem[] = (defaultMenuItemsData as any[])
+  .filter((it) => !isOneTimeBoxItem(it))
+  .map((it) => ({
   id: it.id,
   name: it.name,
   name_en: it.name,
@@ -52,12 +93,101 @@ let inMemoryMembersCache: any[] | null = null;
 let memberFetchPromise: Promise<any[]> | null = null;
 
 /**
+ * Strictly deduplicates canteen menu items to guarantee that no duplicate item exists
+ * anywhere in Menu or Inventory. Deduplicates by:
+ * 1. Matching ID (case-insensitive)
+ * 2. Matching normalized English name
+ * 3. Matching normalized Bengali name
+ */
+export function deduplicateCanteenMenuItems(items: CanteenMenuItem[]): CanteenMenuItem[] {
+  if (!Array.isArray(items) || items.length === 0) return [];
+
+  const seen = new Map<string, CanteenMenuItem>();
+  const idToGroup = new Map<string, string>();
+  const nameToGroup = new Map<string, string>();
+  const bnNameToGroup = new Map<string, string>();
+
+  for (const rawItem of items) {
+    if (!rawItem || isOneTimeBoxItem(rawItem)) continue;
+    const cleanId = String(rawItem.id || '').trim().toLowerCase();
+    const enName = String(rawItem.name || rawItem.name_en || '').trim();
+    const bnName = String(rawItem.name_bn || rawItem.nameBn || rawItem['Name (BN)'] || getMenuItemBanglaName(rawItem) || '').trim();
+
+    const normEn = normalizeCatalogKey(enName);
+    const normBn = normalizeCatalogKey(bnName);
+
+    let groupKey: string | undefined;
+    if (cleanId && idToGroup.has(cleanId)) {
+      groupKey = idToGroup.get(cleanId);
+    } else if (normEn && nameToGroup.has(normEn)) {
+      groupKey = nameToGroup.get(normEn);
+    } else if (normBn && bnNameToGroup.has(normBn)) {
+      groupKey = bnNameToGroup.get(normBn);
+    }
+
+    if (!groupKey) {
+      groupKey = cleanId ? `id_${cleanId}` : (normEn ? `name_${normEn}` : (normBn ? `bn_${normBn}` : `idx_${Math.random()}`));
+      if (cleanId) idToGroup.set(cleanId, groupKey);
+      if (normEn) nameToGroup.set(normEn, groupKey);
+      if (normBn) bnNameToGroup.set(normBn, groupKey);
+
+      seen.set(groupKey, {
+        ...rawItem,
+        id: rawItem.id || `menu-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        name: enName || bnName || 'Item',
+        name_en: enName || rawItem.name_en || rawItem.name || '',
+        name_bn: bnName,
+        nameBn: bnName,
+        'Name (BN)': bnName,
+        price: Number(rawItem.price) || 0,
+        cost: Number(rawItem.cost ?? rawItem.Cost ?? 0),
+        Cost: Number(rawItem.Cost ?? rawItem.cost ?? 0),
+        DP: rawItem.DP || rawItem.img || rawItem.image || '',
+        img: rawItem.DP || rawItem.img || rawItem.image || '',
+        image: rawItem.DP || rawItem.img || rawItem.image || '',
+        category: rawItem.category || rawItem.meal || 'SNACKS'
+      });
+    } else {
+      const existing = seen.get(groupKey)!;
+      const mergedPrice = Number(rawItem.price) > 0 ? Number(rawItem.price) : Number(existing.price || 0);
+      const mergedCost = Number(rawItem.cost ?? rawItem.Cost) > 0 ? Number(rawItem.cost ?? rawItem.Cost) : Number(existing.cost ?? existing.Cost ?? 0);
+      const mergedDp = (rawItem.DP || rawItem.img || rawItem.image || existing.DP || existing.img || existing.image || '');
+      const mergedEn = existing.name || enName;
+      const mergedBn = existing.name_bn || existing.nameBn || bnName;
+
+      seen.set(groupKey, {
+        ...existing,
+        ...rawItem,
+        id: existing.id,
+        name: mergedEn,
+        name_en: mergedEn,
+        name_bn: mergedBn,
+        nameBn: mergedBn,
+        'Name (BN)': mergedBn,
+        price: mergedPrice,
+        cost: mergedCost,
+        Cost: mergedCost,
+        DP: mergedDp,
+        img: mergedDp,
+        image: mergedDp,
+        category: existing.category || rawItem.category || 'SNACKS'
+      });
+      if (cleanId) idToGroup.set(cleanId, groupKey);
+      if (normEn) nameToGroup.set(normEn, groupKey);
+      if (normBn) bnNameToGroup.set(normBn, groupKey);
+    }
+  }
+
+  return Array.from(seen.values());
+}
+
+/**
  * Returns cached menu catalog synchronously (0ms delay).
  * Checks memory first, then localStorage, then defaults.
  */
 export function getCanteenMenuCache(): CanteenMenuItem[] {
   if (inMemoryMenuCache && inMemoryMenuCache.length > 0) {
-    return inMemoryMenuCache;
+    return deduplicateCanteenMenuItems(inMemoryMenuCache.filter((p) => !isOneTimeBoxItem(p)));
   }
   if (typeof window === 'undefined') return DEFAULT_CANTEEN_MENU_ITEMS;
   try {
@@ -65,7 +195,9 @@ export function getCanteenMenuCache(): CanteenMenuItem[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        const hydrated = parsed.map((p: any) => {
+        const hydrated = parsed
+          .filter((p: any) => !isOneTimeBoxItem(p))
+          .map((p: any) => {
           if (!p.DP && !p.img && !p.image) {
             const def = DEFAULT_CANTEEN_MENU_ITEMS.find((d) => d.id === p.id || d.name?.toLowerCase() === p.name?.toLowerCase());
             if (def?.DP) {
@@ -74,16 +206,18 @@ export function getCanteenMenuCache(): CanteenMenuItem[] {
           }
           return p;
         });
-        inMemoryMenuCache = hydrated;
-        return hydrated;
+        const clean = deduplicateCanteenMenuItems(hydrated);
+        inMemoryMenuCache = clean;
+        return clean;
       }
     }
     const rawList = localStorage.getItem('canteen_menu_items_list');
     if (rawList) {
       const parsed = JSON.parse(rawList);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        inMemoryMenuCache = parsed;
-        return parsed;
+        const cleanList = deduplicateCanteenMenuItems(parsed.filter((p: any) => !isOneTimeBoxItem(p)));
+        inMemoryMenuCache = cleanList;
+        return cleanList;
       }
     }
   } catch {}
@@ -97,16 +231,17 @@ export function getCanteenMenuCache(): CanteenMenuItem[] {
  * (CanteenInventory, MenuManagement, POS, RawDistribution, PersonalPortal) update in real-time.
  */
 export function setCanteenMenuCache(items: CanteenMenuItem[]): void {
-  inMemoryMenuCache = items;
+  const cleanItems = deduplicateCanteenMenuItems(items.filter((it) => !isOneTimeBoxItem(it)));
+  inMemoryMenuCache = cleanItems;
   if (typeof window !== 'undefined') {
     try {
-      localStorage.setItem('canteen_menu_cache', JSON.stringify(items));
-      localStorage.setItem('canteen_menu_items_list', JSON.stringify(items));
+      localStorage.setItem('canteen_menu_cache', JSON.stringify(cleanItems));
+      localStorage.setItem('canteen_menu_items_list', JSON.stringify(cleanItems));
     } catch (e) {
       console.warn('Error persisting canteen_menu_cache:', e);
     }
     // Instant event dispatch (0ms)
-    window.dispatchEvent(new CustomEvent('canteen_menu_updated', { detail: items }));
+    window.dispatchEvent(new CustomEvent('canteen_menu_updated', { detail: cleanItems }));
     window.dispatchEvent(new Event('canteen_state_updated'));
     window.dispatchEvent(new Event('storage'));
   }
@@ -165,16 +300,17 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
                 'Name (BN)': bn
               };
             });
-            inMemoryMenuCache = hydrated;
+            const cleanHydrated = deduplicateCanteenMenuItems(hydrated);
+            inMemoryMenuCache = cleanHydrated;
             if (typeof window !== 'undefined') {
               try {
-                localStorage.setItem('canteen_menu_cache', JSON.stringify(hydrated));
+                localStorage.setItem('canteen_menu_cache', JSON.stringify(cleanHydrated));
               } catch {}
               setTimeout(() => {
-                window.dispatchEvent(new CustomEvent('canteen_menu_updated', { detail: hydrated }));
+                window.dispatchEvent(new CustomEvent('canteen_menu_updated', { detail: cleanHydrated }));
               }, 0);
             }
-            return hydrated;
+            return cleanHydrated;
           }
         } catch (e) {
           console.warn('[CanteenMenuData] Background menu refresh error:', e);
@@ -219,16 +355,17 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
             'Name (BN)': bn
           };
         });
-        inMemoryMenuCache = hydrated;
+        const cleanHydrated = deduplicateCanteenMenuItems(hydrated);
+        inMemoryMenuCache = cleanHydrated;
         if (typeof window !== 'undefined') {
           try {
-            localStorage.setItem('canteen_menu_cache', JSON.stringify(hydrated));
+            localStorage.setItem('canteen_menu_cache', JSON.stringify(cleanHydrated));
           } catch {}
           setTimeout(() => {
-            window.dispatchEvent(new CustomEvent('canteen_menu_updated', { detail: hydrated }));
+            window.dispatchEvent(new CustomEvent('canteen_menu_updated', { detail: cleanHydrated }));
           }, 0);
         }
-        return hydrated;
+        return cleanHydrated;
       }
     } catch (e) {
       console.warn('[CanteenMenuData] Error fetching menu from cloud:', e);

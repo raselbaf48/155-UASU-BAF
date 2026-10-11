@@ -88,11 +88,25 @@ if (!isSupabaseConfigured) {
 // so we don't repeat failed network attempts and spam console warnings
 let isDirectFetchBlocked = false;
 
+const fetchWithTimeout = async (url: RequestInfo | URL, init?: RequestInit, ms = 4500): Promise<Response> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    clearTimeout(timer);
+    return res;
+  } catch (e) {
+    clearTimeout(timer);
+    throw e;
+  }
+};
+
 /**
  * Smart fetch for Supabase:
  * Attempts direct fetch first for maximum speed.
  * If direct fetch is blocked by an ad-blocker or iframe restriction (Failed to fetch),
- * it seamlessly and quietly falls back to the same-origin /api/supabase proxy.
+ * it seamlessly falls back to the same-origin /api/supabase proxy.
+ * If network is offline or times out, returns a safe synthetic response to prevent uncaught exceptions.
  */
 const smartFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
@@ -119,41 +133,47 @@ const smartFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
     }
     const proxyUrl = urlStr.replace(/^https?:\/\/[^\/]+/, proxyBase);
 
-    // If direct fetch is already known to be blocked, go straight to proxy without throwing console errors
-    if (isDirectFetchBlocked) {
+    // 1. Try direct fetch first (standard CORS, fast, native)
+    if (!isDirectFetchBlocked) {
       try {
-        const proxyRes = await fetch(proxyUrl, modifiedInit);
-        if (proxyRes.ok || (proxyRes.status >= 200 && proxyRes.status < 500)) {
-          return proxyRes;
+        const directRes = await fetchWithTimeout(input, modifiedInit, 4500);
+        if (directRes.ok || (directRes.status >= 200 && directRes.status < 500)) {
+          return directRes;
         }
       } catch {
-        // Fallback to direct fetch
-        return fetch(input, modifiedInit);
+        // Direct fetch failed or blocked by CORS / Adblocker
+        isDirectFetchBlocked = true;
       }
     }
 
-    // 1. Try direct fetch first (standard CORS, fast, native)
+    // 2. Try proxy fetch
     try {
-      const directRes = await fetch(input, modifiedInit);
-      // Return if successful or if Supabase PostgREST returned standard HTTP response
-      if (directRes.ok || (directRes.status >= 200 && directRes.status < 500)) {
-        return directRes;
-      }
+      const proxyRes = await fetchWithTimeout(proxyUrl, modifiedInit, 4500);
+      return proxyRes;
     } catch {
-      // Network failure, browser block, or Adblocker blocked supabase.co
-      // Remember so all subsequent requests use the proxy cleanly without noisy errors
-      isDirectFetchBlocked = true;
+      // Proxy timed out or unavailable
     }
 
-    // 2. Fallback to same-origin proxy cleanly
-    try {
-      const proxyRes = await fetch(proxyUrl, modifiedInit);
-      if (proxyRes.ok || (proxyRes.status >= 200 && proxyRes.status < 500)) {
-        return proxyRes;
+    // 3. Fallback: try direct fetch once more if proxy failed
+    if (isDirectFetchBlocked) {
+      try {
+        const fallbackRes = await fetchWithTimeout(input, modifiedInit, 3000);
+        isDirectFetchBlocked = false;
+        return fallbackRes;
+      } catch {
+        // Still unreachable
       }
-    } catch {
-      // Quiet fallback
     }
+
+    // 4. Safe offline synthetic response: guarantees no uncaught TypeError exceptions
+    return new Response(
+      JSON.stringify({ message: 'Database temporarily offline or unreachable', code: 'PGRST_OFFLINE' }),
+      {
+        status: 503,
+        statusText: 'Service Unavailable',
+        headers: { 'Content-Type': 'application/json' }
+      }
+    );
   }
 
   // Fallback to direct fetch

@@ -15,9 +15,12 @@ import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
 import { playSuccessChime, playTrashPopSound } from '../utils/audioFeedback';
 import { 
   getCanteenMenuCache, 
+  setCanteenMenuCache,
   fetchCanteenMenuOnce, 
   getCanteenMembersCache, 
-  fetchCanteenMembersOnce 
+  fetchCanteenMembersOnce,
+  isOneTimeBoxItem,
+  normalizeCatalogKey
 } from '../utils/canteenMenuData';
 
 const isOfficerMember = (m: any): boolean => {
@@ -203,12 +206,32 @@ export const PosSales: React.FC = () => {
       try { setRecentMembers(JSON.parse(stored)); } catch(e){}
     }
 
-    const handleInventoryUpdated = () => {
-      fetchCatalog();
+    const handleInventoryUpdated = (e?: any) => {
+      if (e?.detail && Array.isArray(e.detail)) {
+        setCatalog(e.detail.filter((it: any) => !isOneTimeBoxItem(it)));
+      } else {
+        const cached = getCanteenMenuCache();
+        if (cached && cached.length > 0) {
+          setCatalog(cached.filter((it: any) => !isOneTimeBoxItem(it)));
+        }
+        fetchCatalog();
+      }
+      const history = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+      setSalesHistory(history.filter((tx: any) => isSaleTransaction(tx)));
     };
     window.addEventListener('canteen_inventory_updated', handleInventoryUpdated);
+    window.addEventListener('canteen_menu_updated', handleInventoryUpdated);
+    window.addEventListener('canteen_daily_menu_updated', handleInventoryUpdated);
+    window.addEventListener('canteen_txs_updated', handleInventoryUpdated);
+    window.addEventListener('canteen_state_updated', handleInventoryUpdated);
+    window.addEventListener('storage', handleInventoryUpdated);
     return () => {
       window.removeEventListener('canteen_inventory_updated', handleInventoryUpdated);
+      window.removeEventListener('canteen_menu_updated', handleInventoryUpdated);
+      window.removeEventListener('canteen_daily_menu_updated', handleInventoryUpdated);
+      window.removeEventListener('canteen_txs_updated', handleInventoryUpdated);
+      window.removeEventListener('canteen_state_updated', handleInventoryUpdated);
+      window.removeEventListener('storage', handleInventoryUpdated);
     };
   }, []);
 
@@ -236,12 +259,89 @@ export const PosSales: React.FC = () => {
 
   const fetchCatalog = async () => {
     try {
-      const data = await fetchCanteenMenuOnce();
+      const data = await fetchCanteenMenuOnce(true);
       if (data && data.length > 0) {
-        setCatalog(data);
+        setCatalog(data.filter((it: any) => !isOneTimeBoxItem(it)));
       }
     } catch(e) {
       console.warn("Error in POS fetchCatalog:", e);
+    }
+  };
+
+  // Helper to dynamically resolve live name and updated unit price from catalog for any transaction item
+  const resolveLiveItem = (item: { menuItemId?: string; id?: string; menuItemName?: string; name?: string; price?: number; unitPrice?: number; qty?: number }) => {
+    const itemId = item.menuItemId || item.id;
+    const rawName = String(item.menuItemName || item.name || '').trim();
+    const qty = Number(item.qty || 1);
+
+    // 1. One Time Box check
+    if (isOneTimeBoxItem(item) || itemId === 'parcel-one-time-box') {
+      return {
+        name: 'ওয়ান টাইম বক্স',
+        unitPrice: 5,
+        qty,
+        itemTotal: 5 * qty
+      };
+    }
+
+    // 2. Look up in current catalog by ID
+    let matched = catalog.find(c => String(c.id) === String(itemId));
+
+    // 3. If not found by ID, match by English or Bangla name with normalization
+    if (!matched && rawName) {
+      const rawLower = rawName.toLowerCase();
+      const bnLower = getMenuItemBanglaName(rawName).toLowerCase();
+      const normRaw = normalizeCatalogKey(rawName);
+      const normBn = normalizeCatalogKey(bnLower);
+
+      matched = catalog.find(c => {
+        const cEn = String(c.name || c.name_en || '').toLowerCase().trim();
+        const cBn = String(c.name_bn || c['Name (BN)'] || getMenuItemBanglaName(c) || '').toLowerCase().trim();
+        const normCEn = normalizeCatalogKey(cEn);
+        const normCBn = normalizeCatalogKey(cBn);
+
+        return cEn === rawLower || cBn === rawLower || cBn === bnLower || cEn === bnLower ||
+               (normRaw && (normCEn === normRaw || normCBn === normRaw || normCBn === normBn)) ||
+               (normRaw && ((normCEn && (normCEn.includes(normRaw) || normRaw.includes(normCEn))) ||
+                            (normCBn && (normCBn.includes(normRaw) || normRaw.includes(normCBn)))));
+      });
+    }
+
+    const livePrice = matched ? Number(matched.price) : Number(item.price ?? item.unitPrice ?? 0);
+    const liveName = matched
+      ? (getMenuItemBanglaName(matched) || matched.name_bn || matched['Name (BN)'] || matched.name)
+      : (getMenuItemBanglaName(rawName) || rawName);
+
+    return {
+      name: liveName,
+      unitPrice: livePrice,
+      qty,
+      itemTotal: livePrice * qty
+    };
+  };
+
+  // Parcel status: active if basket has One Time Box
+  const isParcelActive = useMemo(() => {
+    return basket.some(b => isOneTimeBoxItem(b) || b.id === 'parcel-one-time-box');
+  }, [basket]);
+
+  const toggleParcel = () => {
+    if (isParcelActive) {
+      // Remove Parcel Box
+      setBasket(prev => prev.filter(b => !isOneTimeBoxItem(b) && b.id !== 'parcel-one-time-box'));
+    } else {
+      // Add One Time Box
+      setBasket(prev => [
+        ...prev,
+        {
+          id: 'parcel-one-time-box',
+          name: 'ওয়ান টাইম বক্স',
+          name_en: 'ONE TIME BOX',
+          name_bn: 'ওয়ান টাইম বক্স',
+          price: 5,
+          qty: 1
+        }
+      ]);
     }
   };
 
@@ -328,9 +428,19 @@ export const PosSales: React.FC = () => {
 
   const openEditTxModal = (tx: any) => {
     setEditingTx(tx);
-    const existingAmount = Number(tx.amount || 0);
+    let base = Number(tx.originalAmount || 0);
+    if (tx.soldItems && Array.isArray(tx.soldItems) && tx.soldItems.length > 0) {
+      base = tx.soldItems.reduce((s: number, it: any) => {
+        const resolved = resolveLiveItem(it);
+        return s + resolved.itemTotal;
+      }, 0);
+    } else if (!base) {
+      const existingAmount = Number(tx.amount || 0);
+      const existingDiscount = Number(tx.discount || 0);
+      base = existingAmount + existingDiscount;
+    }
     const existingDiscount = Number(tx.discount || 0);
-    const base = Number(tx.originalAmount || (existingAmount + existingDiscount));
+    const existingAmount = Math.max(0, base - existingDiscount);
     setEditBaseAmount(base);
     setEditDiscount(String(existingDiscount));
     setEditAmount(String(existingAmount));
@@ -453,7 +563,8 @@ export const PosSales: React.FC = () => {
   };
 
   const addToBasket = (item: any) => {
-    const stockInfo = calculateMenuItemStockInfo(item.id, item.name, rawInventory, recipesMap);
+    const itemLimit = item.stock !== undefined ? Number(item.stock) : (item.max !== undefined ? Number(item.max) : undefined);
+    const stockInfo = calculateMenuItemStockInfo(item.id, item.name, rawInventory, recipesMap, itemLimit);
     const available = stockInfo.availableStock;
     if (available <= 0) {
       return;
@@ -473,7 +584,8 @@ export const PosSales: React.FC = () => {
   const updateQty = (id: string, delta: number) => {
     setBasket(basket.map(b => {
       if (b.id === id) {
-        const stockInfo = calculateMenuItemStockInfo(b.id, b.name, rawInventory, recipesMap);
+        const itemLimit = b.stock !== undefined ? Number(b.stock) : (b.max !== undefined ? Number(b.max) : undefined);
+        const stockInfo = calculateMenuItemStockInfo(b.id, b.name, rawInventory, recipesMap, itemLimit);
         const available = stockInfo.availableStock;
         let newQty = b.qty + delta;
         if (newQty < 1) newQty = 1;
@@ -646,6 +758,29 @@ export const PosSales: React.FC = () => {
       }));
       deductRawStockForSales(itemsForDeduction);
 
+      // Deduct menu item stock in cache & state so Menu and Inventory remain synchronized
+      try {
+        const currentCache = getCanteenMenuCache();
+        if (currentCache && currentCache.length > 0) {
+          const updatedCache = currentCache.map((menuItem: any) => {
+            const soldMatch = itemsForDeduction.find(s => 
+              String(s.menuItemId) === String(menuItem.id) ||
+              normalizeCatalogKey(s.menuItemName) === normalizeCatalogKey(menuItem.name || menuItem.name_en || '')
+            );
+            if (soldMatch) {
+              const currentItemStock = menuItem.stock !== undefined ? Number(menuItem.stock) : (menuItem.max !== undefined ? Number(menuItem.max) : 50);
+              const newStock = Math.max(0, currentItemStock - soldMatch.qty);
+              return { ...menuItem, stock: newStock, max: newStock };
+            }
+            return menuItem;
+          });
+          setCanteenMenuCache(updatedCache);
+          setCatalog(updatedCache);
+        }
+      } catch (e) {
+        console.warn('Error deducting menu stock in POS:', e);
+      }
+
       window.dispatchEvent(new Event('canteen_txs_updated'));
       window.dispatchEvent(new Event('canteen_state_updated'));
       window.dispatchEvent(new Event('canteen_fund_updated'));
@@ -695,6 +830,7 @@ export const PosSales: React.FC = () => {
   const filteredCatalog = useMemo(() => {
     return catalog
       .filter(item => {
+        if (isOneTimeBoxItem(item)) return false;
         const matchesSearch = (item.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
                               (item.name_bn || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                               (item.category || '').toLowerCase().includes(searchTerm.toLowerCase());
@@ -831,7 +967,8 @@ export const PosSales: React.FC = () => {
                     <div className="flex flex-col space-y-2 lg:hidden">
                       {filteredCatalog.map((item, i) => {
                         const inBasket = basket.find(b => b.id === item.id);
-                        const stockInfo = calculateMenuItemStockInfo(item.id, item.name, rawInventory, recipesMap);
+                        const itemLimit = item.stock !== undefined ? Number(item.stock) : (item.max !== undefined ? Number(item.max) : undefined);
+                        const stockInfo = calculateMenuItemStockInfo(item.id, item.name, rawInventory, recipesMap, itemLimit);
                         const isOutOfStock = stockInfo.availableStock <= 0;
                         const isLowStock = stockInfo.availableStock > 0 && stockInfo.availableStock < 5;
 
@@ -936,7 +1073,8 @@ export const PosSales: React.FC = () => {
                     <div className="hidden lg:flex lg:flex-col lg:space-y-2">
                       {filteredCatalog.map((item, i) => {
                         const inBasket = basket.find(b => b.id === item.id);
-                        const stockInfo = calculateMenuItemStockInfo(item.id, item.name, rawInventory, recipesMap);
+                        const itemLimit = item.stock !== undefined ? Number(item.stock) : (item.max !== undefined ? Number(item.max) : undefined);
+                        const stockInfo = calculateMenuItemStockInfo(item.id, item.name, rawInventory, recipesMap, itemLimit);
                         const isOutOfStock = stockInfo.availableStock <= 0;
                         const isLowStock = stockInfo.availableStock > 0 && stockInfo.availableStock < 5;
 
@@ -1066,8 +1204,21 @@ export const PosSales: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Cart Total & Clear Button */}
+                  {/* Parcel Toggle & Clear Button */}
                   <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={toggleParcel}
+                      className={`px-2.5 py-1 rounded-xl text-xs font-black tracking-wide flex items-center space-x-1.5 border transition-all cursor-pointer ${
+                        isParcelActive
+                          ? 'bg-amber-500/25 border-amber-500 text-amber-300 shadow-sm shadow-amber-500/20'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
+                      }`}
+                      title={isParcelActive ? 'Parcel যোগ করা হয়েছে (ওয়ান টাইম বক্স)' : 'Parcel (ওয়ান টাইম বক্স যোগ করতে ক্লিক করুন)'}
+                    >
+                      <PackageIcon className="w-3.5 h-3.5" />
+                      <span>Parcel</span>
+                    </button>
                     {basket.length > 0 && (
                       <button 
                         type="button"
@@ -1373,23 +1524,101 @@ export const PosSales: React.FC = () => {
 
                 </div>
 
-                {/* Amount Summary */}
-                <div className="bg-slate-900/90 rounded-xl p-3 border border-slate-800 flex flex-col justify-center space-y-1">
-                  <div className="flex justify-between text-[11px] font-mono text-slate-400">
-                    <span>Cart Subtotal:</span>
-                    <span className="text-white font-bold">৳{(basketTotal * (selectedMembers.length || 1)).toLocaleString()}</span>
-                  </div>
-                  {totalDiscount > 0 && (
-                    <div className="flex justify-between text-[11px] font-mono text-rose-400">
-                      <span>Total Discount:</span>
-                      <span className="font-bold">
-                        -৳{totalDiscount.toLocaleString()} {selectedMembers.length > 1 ? `(৳${numDiscount} x ${selectedMembers.length})` : ''}
-                      </span>
+                {/* Cart Subtotal & Sale Summary Breakdown (বিক্রয় সারসংক্ষেপ) */}
+                <div className="bg-slate-900/95 rounded-2xl p-3.5 border border-slate-800 space-y-2.5 shadow-inner">
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
+                    <div className="flex items-center space-x-1.5 text-xs font-black text-indigo-300 uppercase tracking-wider">
+                      <Utensils className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>বিক্রয় সারসংক্ষেপ (Sale Summary)</span>
                     </div>
+                    {basket.length > 0 && (
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-indigo-950/70 border border-indigo-500/30 text-indigo-300 font-bold">
+                        {basket.length}টি আইটেম • {basket.reduce((s, b) => s + b.qty, 0)} পিস
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Member Name in Sale Summary */}
+                  <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/80 space-y-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-[11px] font-bold text-slate-300 flex items-center space-x-1.5">
+                        <Users className="w-3.5 h-3.5 text-indigo-400" />
+                        <span>মেম্বার / Member ({selectedMembers.length} জন):</span>
+                      </span>
+                      {selectedMembers.length > 0 && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-950 text-indigo-300 border border-indigo-500/30 font-mono">
+                          {selectedMembers.length === 1 ? '১ জন নির্বাচিত' : `${selectedMembers.length} জন নির্বাচিত`}
+                        </span>
+                      )}
+                    </div>
+                    {selectedMembers.length > 0 ? (
+                      <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto pr-1">
+                        {selectedMembers.map((m, idx) => {
+                          const rank = m['Rank'] || '';
+                          const name = m['Surname'] || m['Name'] || m.name || '';
+                          const fullName = [rank, name].filter(Boolean).join(' ') || 'Member';
+                          const bdNo = m['BD No'] || m['BD_No'] || m.airman_id || m.id;
+                          return (
+                            <span 
+                              key={m.airman_id || `summary_m_${bdNo || idx}`}
+                              className="inline-flex items-center px-2 py-0.5 rounded-lg bg-indigo-950/90 border border-indigo-500/30 text-indigo-200 text-xs font-bold"
+                            >
+                              <span>{fullName}</span>
+                              {bdNo && <span className="ml-1 text-[10px] text-slate-400 font-mono">({bdNo})</span>}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-amber-400/90 italic flex items-center space-x-1">
+                        <span>⚠️ কোনো মেম্বার নির্বাচন করা হয়নি (নিচ থেকে মেম্বার সিলেক্ট করুন)</span>
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Itemized List of what is being sold */}
+                  {basket.length > 0 ? (
+                    <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                      {basket.map((b) => (
+                        <div key={b.id} className="flex items-center justify-between text-xs py-0.5">
+                          <span className="text-slate-200 font-semibold truncate max-w-[180px]">
+                            {getMenuItemBanglaName(b.name) || b.name}
+                          </span>
+                          <div className="flex items-center space-x-2 shrink-0 font-mono">
+                            <span className="text-slate-400 text-[11px]">৳{b.price} × {b.qty}</span>
+                            <span className="text-emerald-400 font-bold w-12 text-right">৳{b.price * b.qty}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-500 italic py-1 text-center">কোনো আইটেম সিলেক্ট করা হয়নি</p>
                   )}
-                  <div className="flex justify-between text-xs font-mono font-black pt-1.5 border-t border-slate-800">
-                    <span className="text-slate-300">Net Payable:</span>
-                    <span className="text-emerald-400 text-sm sm:text-base">৳{Math.round(grandTotal).toLocaleString()}</span>
+
+                  {/* Subtotal, Discount & Net Payable */}
+                  <div className="pt-2 border-t border-slate-800/80 space-y-1 text-xs font-mono">
+                    <div className="flex justify-between text-[11px] text-slate-400">
+                      <span>Cart Subtotal:</span>
+                      <span className="text-white font-bold">৳{(basketTotal * (selectedMembers.length || 1)).toLocaleString()}</span>
+                    </div>
+                    {totalDiscount > 0 && (
+                      <div className="flex justify-between text-[11px] text-rose-400">
+                        <span>Total Discount:</span>
+                        <span className="font-bold">
+                          -৳{totalDiscount.toLocaleString()} {selectedMembers.length > 1 ? `(৳${numDiscount} x ${selectedMembers.length})` : ''}
+                        </span>
+                      </div>
+                    )}
+                    {selectedMembers.length > 1 && (
+                      <div className="flex justify-between text-indigo-300 text-[10px]">
+                        <span>মেম্বার সংখ্যা ({selectedMembers.length} জন):</span>
+                        <span className="font-bold">জনপ্রতি ৳{Math.round(perMemberFinalAmount)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between items-center text-xs font-mono font-black pt-1.5 border-t border-slate-800">
+                      <span className="text-slate-200">Net Payable:</span>
+                      <span className="text-emerald-400 text-sm sm:text-base font-black">৳{Math.round(grandTotal).toLocaleString()}</span>
+                    </div>
                   </div>
                 </div>
 
@@ -1464,13 +1693,28 @@ export const PosSales: React.FC = () => {
                       Sales Cart & Checkout
                     </h3>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsMobileCartOpen(false)}
-                    className="p-1.5 text-slate-400 hover:text-white rounded-lg bg-slate-800"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={toggleParcel}
+                      className={`px-2.5 py-1 rounded-xl text-xs font-black tracking-wide flex items-center space-x-1.5 border transition-all cursor-pointer ${
+                        isParcelActive
+                          ? 'bg-amber-500/25 border-amber-500 text-amber-300 shadow-sm shadow-amber-500/20'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
+                      }`}
+                      title={isParcelActive ? 'Parcel যোগ করা হয়েছে (ওয়ান টাইম বক্স)' : 'Parcel (ওয়ান টাইম বক্স যোগ করতে ক্লিক করুন)'}
+                    >
+                      <PackageIcon className="w-3.5 h-3.5" />
+                      <span>Parcel</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsMobileCartOpen(false)}
+                      className="p-1.5 text-slate-400 hover:text-white rounded-lg bg-slate-800"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Selected Members Header */}
@@ -1532,10 +1776,60 @@ export const PosSales: React.FC = () => {
 
                 {/* Drawer Footer & Checkout */}
                 <div className="p-4 border-t border-slate-800 bg-slate-950 space-y-3 shrink-0">
-                  <div className="flex items-center justify-between text-xs font-mono">
-                    <span className="text-slate-400">Total Sales Amount:</span>
-                    <span className="text-xl font-black text-white">৳{Math.round(grandTotal).toLocaleString()}</span>
+                  {/* Itemized Sale Summary Breakdown for Mobile */}
+                  <div className="bg-slate-900/90 rounded-2xl p-3 border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between pb-1.5 border-b border-slate-800/80 text-xs font-bold text-indigo-300">
+                      <span>বিক্রয় সারসংক্ষেপ (Sale Summary)</span>
+                      <span className="font-mono text-[10px] text-slate-400">{basket.length} আইটেম • {basket.reduce((s, b) => s + b.qty, 0)} পিস</span>
+                    </div>
+
+                    {/* Member Name in Mobile Sale Summary */}
+                    <div className="p-2 rounded-xl bg-slate-950/80 border border-slate-800/80 space-y-1">
+                      <div className="flex items-center justify-between text-[11px] font-bold text-slate-300">
+                        <span className="flex items-center space-x-1.5">
+                          <Users className="w-3.5 h-3.5 text-indigo-400" />
+                          <span>মেম্বার / Member ({selectedMembers.length} জন):</span>
+                        </span>
+                      </div>
+                      {selectedMembers.length > 0 ? (
+                        <div className="flex flex-wrap gap-1 max-h-16 overflow-y-auto pr-1">
+                          {selectedMembers.map((m, idx) => {
+                            const rank = m['Rank'] || '';
+                            const name = m['Surname'] || m['Name'] || m.name || '';
+                            const fullName = [rank, name].filter(Boolean).join(' ') || 'Member';
+                            const bdNo = m['BD No'] || m['BD_No'] || m.airman_id || m.id;
+                            return (
+                              <span 
+                                key={m.airman_id || `m_summary_${bdNo || idx}`}
+                                className="inline-flex items-center px-1.5 py-0.5 rounded bg-indigo-950/90 border border-indigo-500/30 text-indigo-200 text-[11px] font-bold"
+                              >
+                                <span>{fullName}</span>
+                                {bdNo && <span className="ml-1 text-[9px] text-slate-400 font-mono">({bdNo})</span>}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="text-[10px] text-amber-400/90 italic">
+                          ⚠️ কোনো মেম্বার সিলেক্ট করা হয়নি
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
+                      {basket.map((b) => (
+                        <div key={b.id} className="flex items-center justify-between text-xs">
+                          <span className="text-slate-300 truncate max-w-[170px]">{getMenuItemBanglaName(b.name) || b.name}</span>
+                          <span className="font-mono text-emerald-400 font-bold">৳{b.price} × {b.qty} = ৳{b.price * b.qty}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="pt-1.5 border-t border-slate-800/80 flex items-center justify-between text-xs font-mono">
+                      <span className="text-slate-400">Total Net Payable:</span>
+                      <span className="text-lg font-black text-emerald-400">৳{Math.round(grandTotal).toLocaleString()}</span>
+                    </div>
                   </div>
+
                   <button
                     type="button"
                     onClick={handleCheckout}
@@ -1963,43 +2257,56 @@ export const PosSales: React.FC = () => {
                         const memberSurname = (m ? m['Surname'] : '') || tx.memberName || tx.airman_id;
                         const memberBdNo = tx.bdNo || (m ? m['BD No'] : '') || '';
                         
-                        let parsedItemsList: Array<{ name: string; qty: number }> = [];
+                        let parsedItemsList: Array<{ name: string; qty: number; unitPrice: number; itemTotal: number }> = [];
                         let totalQty = 0;
                         if (tx.soldItems && Array.isArray(tx.soldItems) && tx.soldItems.length > 0) {
                           parsedItemsList = tx.soldItems.map((si: any) => {
-                            const raw = si.menuItemName || si.name || 'Item';
-                            const bn = getMenuItemBanglaName(raw) || raw;
+                            const resolved = resolveLiveItem(si);
                             return {
-                              name: bn,
-                              qty: Number(si.qty || si.quantity || 1)
+                              name: resolved.name,
+                              qty: resolved.qty,
+                              unitPrice: resolved.unitPrice,
+                              itemTotal: resolved.itemTotal
                             };
                           });
                           totalQty = parsedItemsList.reduce((sum, it) => sum + it.qty, 0);
                         } else if (tx.items) {
                           const parts = String(tx.items).split(/[,+;|\n]+/).map(s => s.trim()).filter(Boolean);
                           parsedItemsList = parts.map(part => {
+                            let q = 1;
+                            let raw = part;
                             const parenMatch = part.match(/^(.+?)\s*\(\s*(\d+)\s*\)$/);
                             if (parenMatch) {
-                              const q = parseInt(parenMatch[2], 10);
-                              totalQty += q;
-                              const raw = parenMatch[1].trim();
-                              const bn = getMenuItemBanglaName(raw) || raw;
-                              return { name: bn, qty: q };
+                              raw = parenMatch[1].trim();
+                              q = parseInt(parenMatch[2], 10) || 1;
+                            } else {
+                              const xMatch = part.match(/^(.+?)\s*[xX]\s*(\d+)$/);
+                              if (xMatch) {
+                                raw = xMatch[1].trim();
+                                q = parseInt(xMatch[2], 10) || 1;
+                              }
                             }
-                            const xMatch = part.match(/^(.+?)\s*[xX]\s*(\d+)$/);
-                            if (xMatch) {
-                              const q = parseInt(xMatch[2], 10);
-                              totalQty += q;
-                              const raw = xMatch[1].trim();
-                              const bn = getMenuItemBanglaName(raw) || raw;
-                              return { name: bn, qty: q };
+                            totalQty += q;
+                            const resolved = resolveLiveItem({ name: raw, qty: q });
+                            let unitPrice = resolved.unitPrice;
+                            let itemTotal = resolved.itemTotal;
+                            if (unitPrice === 0 && tx.amount) {
+                              itemTotal = Math.round(Number(tx.amount || 0) / Math.max(1, parts.length));
+                              unitPrice = Math.round(itemTotal / q);
                             }
-                            totalQty += 1;
-                            const bn = getMenuItemBanglaName(part) || part;
-                            return { name: bn, qty: 1 };
+                            return {
+                              name: resolved.name,
+                              qty: q,
+                              unitPrice,
+                              itemTotal
+                            };
                           });
                         }
                         if (totalQty === 0) totalQty = 1;
+
+                        const liveTxAmount = parsedItemsList.length > 0 
+                          ? parsedItemsList.reduce((sum, it) => sum + it.itemTotal, 0)
+                          : Number(tx.amount || 0);
 
                         const isPaid = tx.status === 'PAID' || tx.paymentStatus === 'PAID' || String(tx.gateway || tx.paymentMethod || '').toUpperCase() === 'CASH';
 
@@ -2074,9 +2381,31 @@ export const PosSales: React.FC = () => {
                               </div>
                             </td>
 
-                            {/* Total */}
-                            <td className="py-2.5 px-3 text-right font-mono font-black text-emerald-400 text-sm">
-                              ৳{Number(tx.amount || 0).toLocaleString()}
+                            {/* Total (Item onujayi Total - 3 ta item er 3 ta total) */}
+                            <td className="py-2.5 px-3 text-right">
+                              <div className="flex flex-col gap-1.5 py-0.5 items-end justify-center">
+                                {parsedItemsList.length > 0 ? (
+                                  parsedItemsList.map((item, i) => (
+                                    <div key={i} className="min-h-[24px] flex items-center justify-end">
+                                      <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-emerald-950/40 border border-emerald-500/20 text-emerald-400 font-mono font-black text-xs">
+                                        ৳{item.itemTotal.toLocaleString()}
+                                      </span>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <div className="min-h-[24px] flex items-center justify-end">
+                                    <span className="font-mono font-black text-emerald-400 text-sm">
+                                      ৳{Number(tx.amount || 0).toLocaleString()}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                              {parsedItemsList.length > 1 && (
+                                <div className="mt-1 pt-1 border-t border-slate-800/80 text-[10px] font-mono text-slate-400 flex items-center justify-end gap-1">
+                                  <span>মোট:</span>
+                                  <span className="font-black text-emerald-400 text-xs">৳{liveTxAmount.toLocaleString()}</span>
+                                </div>
+                              )}
                             </td>
 
                             {/* Status (DUE/Paid) */}
@@ -2101,7 +2430,16 @@ export const PosSales: React.FC = () => {
             {/* Footer Summary Bar */}
             <div className="p-3 sm:p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-between text-xs font-mono font-bold text-slate-400 shrink-0">
               <span>Total Records: <strong className="text-white">{filteredSalesHistory.length}</strong></span>
-              <span>Grand Total: <strong className="text-emerald-400 text-sm">৳{filteredSalesHistory.reduce((sum, t) => sum + Number(t.amount || 0), 0).toLocaleString()}</strong></span>
+              <span>Grand Total: <strong className="text-emerald-400 text-sm">৳{filteredSalesHistory.reduce((sum, t) => {
+                let tAmount = Number(t.amount || 0);
+                if (t.soldItems && Array.isArray(t.soldItems) && t.soldItems.length > 0) {
+                  tAmount = t.soldItems.reduce((s: number, it: any) => {
+                    const resolved = resolveLiveItem(it);
+                    return s + resolved.itemTotal;
+                  }, 0);
+                }
+                return sum + tAmount;
+              }, 0).toLocaleString()}</strong></span>
             </div>
           </div>
         </div>
