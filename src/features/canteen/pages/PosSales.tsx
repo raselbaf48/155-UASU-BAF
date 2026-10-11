@@ -37,7 +37,8 @@ import {
   setCanteenMembersCache,
   fetchCanteenMembersOnce,
   isOneTimeBoxItem,
-  normalizeCatalogKey
+  normalizeCatalogKey,
+  sortCanteenMenuItems
 } from '../utils/canteenMenuData';
 
 const isOfficerMember = (m: any): boolean => {
@@ -1299,7 +1300,7 @@ export const PosSales: React.FC = () => {
   }, [catalog]);
 
   const filteredCatalog = useMemo(() => {
-    return catalog
+    const list = catalog
       .filter(item => {
         if (isOneTimeBoxItem(item)) return false;
         const matchesSearch = (item.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -1308,8 +1309,8 @@ export const PosSales: React.FC = () => {
         const itemCat = (item.category || 'SNACKS').toUpperCase();
         const matchesCat = selectedCategory === 'ALL' || itemCat === selectedCategory;
         return matchesSearch && matchesCat;
-      })
-      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      });
+    return sortCanteenMenuItems(list);
   }, [catalog, searchTerm, selectedCategory]);
 
   return (

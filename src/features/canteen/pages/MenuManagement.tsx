@@ -7,6 +7,7 @@ import { queuePushKeyToCloud } from '../utils/canteenCloudSync';
 import { getCanteenMenuCache, fetchCanteenMenuOnce, setCanteenMenuCache, isOneTimeBoxItem, normalizeCatalogKey, deduplicateCanteenMenuItems } from '../utils/canteenMenuData';
 import { calculateMenuItemStockInfo, getRawInventoryItems, getMenuRecipes } from '../utils/recipeManager';
 import { getMenuItemBanglaName, saveMenuItemBanglaName } from '../utils/menuBanglaNames';
+import { sortCanteenMenuItems } from '../utils/menuOrdering';
 
 export const MenuManagement: React.FC = () => {
   const { t, i18n } = useTranslation();
@@ -15,7 +16,7 @@ export const MenuManagement: React.FC = () => {
     try {
       const cached = getCanteenMenuCache();
       if (cached && cached.length > 0) {
-        return cached
+        const mapped = cached
           .filter((d: any) => !isOneTimeBoxItem(d))
           .map((d: any) => {
             const bn = d.name_bn || d['Name (BN)'] || d.nameBn || getMenuItemBanglaName(d) || d.name;
@@ -29,6 +30,7 @@ export const MenuManagement: React.FC = () => {
               DP: d.DP || d.img || d.image || ''
             };
           });
+        return sortCanteenMenuItems(mapped);
       }
     } catch {}
     return [];
@@ -52,7 +54,7 @@ export const MenuManagement: React.FC = () => {
               DP: d.DP || d.img || d.image || ''
             };
           });
-        setItems(mapped);
+        setItems(sortCanteenMenuItems(mapped));
       }
     } catch (e) {
       console.warn('Error loading menu data in MenuManagement:', e);
@@ -78,8 +80,9 @@ export const MenuManagement: React.FC = () => {
                 DP: d.DP || d.img || d.image || ''
               };
             });
-          setItems(mapped);
-          localStorage.setItem('canteen_menu_items_list', JSON.stringify(mapped));
+          const sorted = sortCanteenMenuItems(mapped);
+          setItems(sorted);
+          localStorage.setItem('canteen_menu_items_list', JSON.stringify(sorted));
         }
       } catch (e) {
         console.warn('Could not fetch cloud menu in MenuManagement:', e);

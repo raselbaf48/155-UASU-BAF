@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Wallet, Landmark, CreditCard, Receipt, ArrowRightLeft, 
   X, RefreshCw, CheckCircle2, AlertCircle, Building2, Briefcase, PieChart, Layers, Trash2, Loader2
@@ -57,8 +57,11 @@ export const CanteenFund: React.FC = () => {
   const [toastMessage, setToastMessage] = useState<string>('');
   const [expToDelete, setExpToDelete] = useState<any | null>(null);
   const [isDeletingExp, setIsDeletingExp] = useState(false);
+  const isReconcilingRef = useRef(false);
 
   const loadData = () => {
+    if (isReconcilingRef.current) return;
+    isReconcilingRef.current = true;
     try {
       const rawTxs = localStorage.getItem(TXS_KEY);
       const parsedTxs: any[] = rawTxs ? JSON.parse(rawTxs) : [];
@@ -119,33 +122,43 @@ export const CanteenFund: React.FC = () => {
             eDesc.startsWith('UNIT FUND') || 
             eId.startsWith('exp-unit_fund-');
 
-          if (!isOthersExp && !isUnitExp) {
+          // CRITICAL: Unit Fund transactions are strictly member bill/subscription dues and NEVER deduct from Manager/Staff Cash!
+          if (isUnitExp) {
+            recordDeletedExpenseId(String(e.id));
+            cleaned = true;
+            return false;
+          }
+
+          if (!isOthersExp) {
             return true;
           }
 
-          const candidateTxs = isOthersExp ? activeOtherTxs : activeUnitTxs;
+          const candidateTxs = activeOtherTxs;
 
           // 1. Exact match by batchExpenseId
           let matchingTxs = candidateTxs.filter((t: any) => 
             t.batchExpenseId && String(t.batchExpenseId).toLowerCase() === eId
           );
 
-          // 2. If no direct batchExpenseId match and expense was not an exp- batch, match unassigned txs
-          if (matchingTxs.length === 0 && !eId.startsWith('exp-')) {
+          // 2. If no direct batchExpenseId match, match unassigned txs by date
+          if (matchingTxs.length === 0) {
             const eDate = e.date || '';
             matchingTxs = candidateTxs.filter((t: any) => {
               if (matchedTxIds.has(String(t.id))) return false;
-              if (t.batchExpenseId) return false;
+              if (t.batchExpenseId && String(t.batchExpenseId).toLowerCase() !== eId) return false;
               const tDate = t.date || '';
               return tDate === eDate || (Math.abs(new Date(tDate).getTime() - new Date(eDate).getTime()) < 86400000);
             });
           }
 
-          // If no active transactions exist for this batch, delete it permanently!
+          // If no active transactions exist for this batch, only delete if this was an automatically reconciled exp- batch
           if (matchingTxs.length === 0) {
-            recordDeletedExpenseId(String(e.id));
-            cleaned = true;
-            return false;
+            if (eId.startsWith('exp-others-') || eId.startsWith('exp-grp-')) {
+              recordDeletedExpenseId(String(e.id));
+              cleaned = true;
+              return false;
+            }
+            return true;
           }
 
           // Mark transactions as matched
@@ -188,9 +201,10 @@ export const CanteenFund: React.FC = () => {
           return true;
         });
 
-        // Reverse Reconciliation: Ensure ANY active Others / Unit Fund transactions in canteen_txs
+        // Reverse Reconciliation: Ensure ANY active Others transactions in canteen_txs
         // that are not yet in Capital (canteen_expenses) get automatically created and displayed!
-        const allActiveFundTxs = [...activeOtherTxs, ...activeUnitTxs];
+        // NOTE: Unit Fund is NEVER included here! Unit Fund is strictly member due and does not deduct from Manager Cash.
+        const allActiveFundTxs = activeOtherTxs;
         const unmatchedTxs = allActiveFundTxs.filter((t: any) => !matchedTxIds.has(String(t.id)));
 
         if (unmatchedTxs.length > 0) {
@@ -247,13 +261,15 @@ export const CanteenFund: React.FC = () => {
         exps = filteredExps;
         if (cleaned) {
           localStorage.setItem(EXPENSES_KEY, JSON.stringify(exps));
-          pushKeyToCloud(EXPENSES_KEY, exps).catch(() => {});
+          // Note: Do not call pushKeyToCloud here to prevent infinite ping-pong loops
         }
       }
 
       setExpenses(Array.isArray(exps) ? exps : []);
     } catch (_err) {
       setExpenses([]);
+    } finally {
+      isReconcilingRef.current = false;
     }
 
     try {
@@ -344,12 +360,20 @@ export const CanteenFund: React.FC = () => {
     return lower === 'ucb' || lower.startsWith('ucb') || lower.includes('bank');
   };
 
+  const isUnitFundExpense = (exp: any) => {
+    if (!exp) return false;
+    const cat = String(exp.category || '').toLowerCase();
+    const desc = String(exp.desc || '').toUpperCase();
+    const id = String(exp.id || '').toLowerCase();
+    return cat.includes('unit') || desc.startsWith('UNIT FUND') || id.includes('unit_fund');
+  };
+
   const expenseCash = expenses
-    .filter(exp => isCashMethod(exp.paymentMethod))
+    .filter(exp => isCashMethod(exp.paymentMethod) && !isUnitFundExpense(exp))
     .reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
 
   const expenseUCB = expenses
-    .filter(exp => isUcbMethod(exp.paymentMethod))
+    .filter(exp => isUcbMethod(exp.paymentMethod) && !isUnitFundExpense(exp))
     .reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
 
   // 3. Transfers In/Out
@@ -399,11 +423,11 @@ export const CanteenFund: React.FC = () => {
 
   const cashExpenses = expenses.filter(e => {
     const d = String(e.desc || '').toLowerCase();
-    return isCashMethod(e.paymentMethod) && !d.includes('advance settle payout') && !d.includes('cash advance');
+    return isCashMethod(e.paymentMethod) && !isUnitFundExpense(e) && !d.includes('advance settle payout') && !d.includes('cash advance');
   });
   const ucbExpenses = expenses.filter(e => {
     const d = String(e.desc || '').toLowerCase();
-    return isUcbMethod(e.paymentMethod) && !d.includes('advance settle payout') && !d.includes('cash advance');
+    return isUcbMethod(e.paymentMethod) && !isUnitFundExpense(e) && !d.includes('advance settle payout') && !d.includes('cash advance');
   });
 
   // Helper to extract upto month text for Bill Payments (e.g., "upto Sep 26")

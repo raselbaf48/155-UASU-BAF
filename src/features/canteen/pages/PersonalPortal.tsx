@@ -7,6 +7,7 @@ import {
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, getCanteenConfig, checkPreOrderWindow, getCuratedDailyMenu, getCleanActivePreOrders, CanteenConfig, PreOrderTimeStatus, getItemDisplayName } from '../utils/canteenSettings';
 import { getCanteenMenuCache, fetchCanteenMenuOnce } from '../utils/canteenMenuData';
+import { sortCanteenMenuItems } from '../utils/menuOrdering';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { calculateMenuItemStockInfo, getRawInventoryItems, getMenuRecipes } from '../utils/recipeManager';
 
@@ -33,7 +34,7 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
       const ids = getCuratedDailyMenu();
       if (Array.isArray(ids) && ids.length > 0) {
         const allItems = getCanteenMenuCache();
-        return allItems.filter(item => ids.includes(item.id));
+        return sortCanteenMenuItems(allItems.filter(item => ids.includes(item.id)));
       }
     } catch {}
     return [];
@@ -580,13 +581,13 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
     const ids = getCuratedDailyMenu();
     if (ids && ids.length > 0) {
       const cachedItems = getCanteenMenuCache();
-      const filtered = cachedItems.filter(item => ids.includes(item.id));
+      const filtered = sortCanteenMenuItems(cachedItems.filter(item => ids.includes(item.id)));
       setDailyMenu(filtered);
 
       try {
         const liveItems = await fetchCanteenMenuOnce();
         if (liveItems && liveItems.length > 0) {
-          setDailyMenu(liveItems.filter(item => ids.includes(item.id)));
+          setDailyMenu(sortCanteenMenuItems(liveItems.filter(item => ids.includes(item.id))));
         }
       } catch(err) {
         console.warn("fetchMenu background sync error:", err);

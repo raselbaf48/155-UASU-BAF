@@ -74,11 +74,19 @@ export const AllFundsOverviewSection: React.FC<AllFundsOverviewProps> = ({ onSel
     .filter(r => r.type === 'BILL PAYMENT' && String(r.gateway || '').toUpperCase() === 'UCB')
     .reduce((a, b) => a + (Number(b.amount) || 0), 0);
 
+  const isUnitFundExpense = (exp: any) => {
+    if (!exp) return false;
+    const cat = String(exp.category || '').toLowerCase();
+    const desc = String(exp.desc || '').toUpperCase();
+    const id = String(exp.id || '').toLowerCase();
+    return cat.includes('unit') || desc.startsWith('UNIT FUND') || id.includes('unit_fund');
+  };
+
   const expenseCash = canteenExpenses
-    .filter(exp => String(exp.paymentMethod || 'Cash').toLowerCase() === 'cash')
+    .filter(exp => String(exp.paymentMethod || 'Cash').toLowerCase() === 'cash' && !isUnitFundExpense(exp))
     .reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
   const expenseUCB = canteenExpenses
-    .filter(exp => String(exp.paymentMethod || '').toLowerCase() === 'ucb')
+    .filter(exp => String(exp.paymentMethod || '').toLowerCase() === 'ucb' && !isUnitFundExpense(exp))
     .reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
 
   const cashToUcbTotal = canteenTransfers

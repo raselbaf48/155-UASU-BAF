@@ -48,6 +48,7 @@ import {
   saveMenuItemBanglaName,
   fetchMenuBanglaNamesFromCloud
 } from '../utils/menuBanglaNames';
+import { sortCanteenMenuItems } from '../utils/menuOrdering';
 
 export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = false}) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -206,7 +207,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
               };
             });
             const deduped = deduplicateCanteenMenuItems(formatted);
-            const sorted = deduped.sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
+            const sorted = sortCanteenMenuItems(deduped);
             setItems(sorted);
         } else {
             console.error('Failed or empty fetch:', error);
@@ -1029,7 +1030,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
   }, [items]);
 
   const filteredItems = useMemo(() => {
-    return items
+    const list = items
       .filter(item => {
         const bnName = (item.nameBn || item.name_bn || getMenuItemBanglaName(item) || '').toLowerCase();
         const matchesSearch = (item.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -1038,13 +1039,9 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
         const itemCategory = (item.category || 'SNACKS').toUpperCase();
         const matchesCategory = selectedCategory === 'ALL' || itemCategory === selectedCategory;
         return matchesSearch && matchesCategory;
-      })
-      .sort((a, b) => {
-        const nameA = getItemDisplayName(a, 'menu', canteenConfig).primary;
-        const nameB = getItemDisplayName(b, 'menu', canteenConfig).primary;
-        return nameA.localeCompare(nameB);
       });
-  }, [items, searchTerm, selectedCategory, canteenConfig]);
+    return sortCanteenMenuItems(list);
+  }, [items, searchTerm, selectedCategory]);
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300 pb-10">

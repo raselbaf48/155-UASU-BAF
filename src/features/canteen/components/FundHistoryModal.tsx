@@ -738,7 +738,10 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
                       const isUnit = txCat === 'UNIT_FUND';
                       
                       const txMethod = (() => {
-                        if (isUnit) return 'DUE';
+                        if (isUnit) return 'Unit Fund (Due)';
+                        if (tx.isPrevManager || tx.cashDeductTarget === 'PREV_MANAGER' || String(tx.source || '').toLowerCase().includes('prev manager')) {
+                          return 'Cash (Prev Manager)';
+                        }
                         const pm = String(tx.paymentMethod || tx.method || tx.source || '').trim();
                         if (pm.startsWith('Cash (') || pm === 'UCB') {
                           return pm;

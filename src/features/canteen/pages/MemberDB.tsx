@@ -154,49 +154,62 @@ export const formatItemNameBn = (rawName?: string): string => {
   const upper = trimmed.toUpperCase();
   const itemMap: Record<string, string> = {
     'COLD COFFEE': 'কোল্ড কফি',
-    'HOT COFFEE': 'হট কফি',
-    'MILK COFFEE': 'মিল্ক কফি',
-    'COFFEE': 'কফি',
-    'GREEN TEA': 'গ্রিন টি',
+    'HOT COFFEE': 'দুধ কফি',
+    'MILK COFFEE': 'দুধ কফি',
+    'COFFEE': 'দুধ কফি',
+    'BLACK COFFEE': 'ব্ল্যাক কফি',
+    'GREEN TEA': 'গ্রীন টি',
     'LIQUOR TEA': 'রং চা',
     'MILK TEA': 'দুধ চা',
     'RAW TEA': 'রং চা',
-    'TEA': 'চা',
-    'LEMON JUICE': 'লেমন জুস',
-    'CHICKEN ONION': 'চিকেন অনিয়ন (পেঁয়াজু)',
+    'BLACK TEA': 'রং চা',
+    'TEA': 'দুধ চা',
+    'LEMON JUICE': 'লেবুর শরবত',
+    'CHICKEN ONION': 'চিকেন অনিয়ন',
     'CHICKEN PASTA': 'চিকেন পাস্তা',
     'PASTA': 'পাস্তা',
     'CHICKEN PULAW': 'চিকেন পোলাও',
+    'CHICKEN POLAO': 'চিকেন পোলাও',
     'CHOTPOTI': 'চটপটি',
     'DRY CAKE': 'ড্রাই কেক',
-    'CAKE': 'কেক',
+    'CAKE': 'ড্রাই কেক',
     'EGG FRY': 'ডিম ভাজি',
-    'BOILED EGG': 'সিদ্ধ ডিম',
-    'EGG MUMLET': 'ডিম অমলেট',
-    'EGG KHICURI': 'ডিম খিচুড়ি',
-    'EGG KHICHURI': 'ডিম খিচুড়ি',
-    'EGG NOODLES': 'এগ নুডুলস',
+    'BOILED EGG': 'ডিম সিদ্ধ',
+    'EGG POACH': 'ডিম পোচ',
+    'EGG MUMLET': 'ডিম ভাজি',
+    'EGG OMLET': 'ডিম ভাজি',
+    'EGG KHICURI': 'ডিম খিচুড়ি',
+    'EGG KHICHURI': 'ডিম খিচুড়ি',
+    'EGG NOODLES': 'ডিম নুডুলস',
     'NOODLES': 'নুডুলস',
-    'HALIM': 'হালিম',
-    'NORMAL BISCUIT': 'বিস্কুট',
-    'BISCUIT': 'বিস্কুট',
+    'HALIM': 'চিকেন হালিম',
+    'CHICKEN HALIM': 'চিকেন হালিম',
+    'NORMAL BISCUIT': 'নরমাল বিস্কুট',
+    'BISCUIT': 'নরমাল বিস্কুট',
+    'ENERGY BISCUIT': 'এনার্জি বিস্কুট',
     'ONE TIME BOX': 'ওয়ান টাইম বক্স',
-    'PORATA': 'পরোটা',
-    'PORATA (HOTEL)': 'পরোটা (হোটেল)',
-    'PORATA (UNIT)': 'পরোটা (ইউনিট)',
+    'PORATA': 'পরোটা প্রিমিয়াম',
+    'PORATA (HOTEL)': 'পরোটা হোটেল',
+    'PORATA (UNIT)': 'পরোটা প্রিমিয়াম',
+    'PORATA (PREMIUM)': 'পরোটা প্রিমিয়াম',
     'ROASTED CHICKEN': 'রোস্ট চিকেন',
-    'BEEF BURGER': 'বিফ বার্গার',
-    'CHICKEN BURGER': 'চিকেন বার্গার',
-    'BURGER': 'বার্গার',
+    'BEEF BURGER': 'মিনি বার্গার',
+    'CHICKEN BURGER': 'মিনি বার্গার',
+    'BURGER': 'মিনি বার্গার',
+    'MINI BURGER': 'মিনি বার্গার',
     'SOSA': 'শসা',
     'SWARMA': 'শর্মা',
     'SHWARMA': 'শর্মা',
     'CHICKEN BIRIYANI': 'চিকেন বিরিয়ানি',
     'CHICKEN BIRYANI': 'চিকেন বিরিয়ানি',
     'CHICKEN CURRY': 'চিকেন কারি',
-    'CHICKEN KHICHURI': 'চিকেন খিচুড়ি',
-    'SINGARA': 'সিঙ্গারা',
-    'SHINGARA': 'সিঙ্গারা',
+    'CHICKEN KHICURI': 'চিকেন খিচুড়ি',
+    'CHICKEN KHICHURI': 'চিকেন খিচুড়ি',
+    'SINGARA': 'সিংগারা',
+    'SHINGARA': 'সিংগারা',
+    'PIZZA': 'পিজ্জা',
+    'HOTEL BANANA': 'কলা',
+    'BANANA': 'কলা',
     'SAMOSA': 'সমুচা',
     'SOMOSA': 'সমুচা',
     'PATTIES': 'প্যাটিস',
@@ -205,11 +218,9 @@ export const formatItemNameBn = (rawName?: string): string => {
     'CHICKEN ROLL': 'চিকেন রোল',
     'SWEET': 'মিষ্টি',
     'SANDWICH': 'স্যান্ডউইচ',
-    'CHICKEN SANDWICH': 'চিকেন স্যান্ডউইচ',
+    'CHICKEN SANDWICH': 'স্যান্ডউইচ',
     'UNIT FUND': 'ইউনিট ফান্ড',
     'UNIT FUND BILL': 'ইউনিট ফান্ড বিল',
-    'OTHERS': 'অন্যান্য',
-    'OTHERS BILL': 'অন্যান্য বিল',
     'CANTEEN': 'ক্যান্টিন বিল',
     'CANTEEN BILL': 'ক্যান্টিন বিল',
     'INITIAL BILL': 'প্রারম্ভিক বিল'
@@ -691,11 +702,20 @@ export const getTxCategory = (tx: any): 'CANTEEN' | 'UNIT_FUND' | 'OTHERS' => {
   }
   const txId = String(tx.id || '').toLowerCase();
   if (txId.includes('unit_fund') || txId.includes('unit-fund') || txId.includes('unitfund')) return 'UNIT_FUND';
-  if (txId.includes('others') || txId.includes('other-fund')) return 'OTHERS';
+  if (txId.includes('others') || txId.includes('other-fund') || txId.includes('tx-others')) return 'OTHERS';
 
-  const desc = String(tx.items || tx.type || tx.description || tx.note || '').toLowerCase();
+  const desc = String(tx.items || tx.purpose || tx.type || tx.description || tx.note || '').toLowerCase();
   if (desc.includes('unit fund') || desc.includes('unit_fund') || desc.includes('ইউনিট ফান্ড') || desc.includes('unit fund bill')) return 'UNIT_FUND';
-  if (desc.includes('others') || desc.includes('other bill') || desc.includes('অন্যান্য') || desc.includes('others fund')) return 'OTHERS';
+  if (
+    desc.includes('others') || 
+    desc.includes('other bill') || 
+    desc.includes('অন্যান্য') || 
+    desc.includes('others fund') ||
+    desc.includes('supply item') ||
+    desc.includes('supply') ||
+    desc.includes('bazar') ||
+    desc.includes('বাজার')
+  ) return 'OTHERS';
   return 'CANTEEN';
 };
 
@@ -1916,13 +1936,21 @@ export const MemberDB: React.FC<MemberDBProps> = ({
       const freshStmtTxs = filterMemberTxs(statementMemberRef.current, allTxs);
       setStatementTx(freshStmtTxs);
       const liveDue = getMemberTotalDue(statementMemberRef.current, statementCategoryRef.current);
-      setStatementMember((prev: any) => prev ? { ...prev, Due: liveDue, due: liveDue, baki: liveDue } : null);
+      setStatementMember((prev: any) => {
+        if (!prev) return null;
+        if (prev.Due === liveDue && prev.due === liveDue && prev.baki === liveDue) return prev;
+        return { ...prev, Due: liveDue, due: liveDue, baki: liveDue };
+      });
     }
     if (profileMemberRef.current) {
       const freshProfTxs = filterMemberTxs(profileMemberRef.current, allTxs);
       setProfileTx(freshProfTxs);
       const liveDue = getMemberTotalDue(profileMemberRef.current, 'ALL');
-      setProfileMember((prev: any) => prev ? { ...prev, Due: liveDue, due: liveDue, baki: liveDue } : null);
+      setProfileMember((prev: any) => {
+        if (!prev) return null;
+        if (prev.Due === liveDue && prev.due === liveDue && prev.baki === liveDue) return prev;
+        return { ...prev, Due: liveDue, due: liveDue, baki: liveDue };
+      });
     }
   }, [allTxs]);
 
@@ -1988,7 +2016,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
       const mergedTxs = deduplicateCanteenTransactions(Array.from(txMap.values()));
       setProfileTx(filterMemberTxs(profileMember, mergedTxs));
     }
-  }, [allTxs, profileMember]);
+  }, [allTxs, profileMember?.airman_id, profileMember?.['BD No']]);
 
   useEffect(() => {
     if (statementMember) {
@@ -2002,7 +2030,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
       const mergedTxs = deduplicateCanteenTransactions(Array.from(txMap.values()));
       setStatementTx(filterMemberTxs(statementMember, mergedTxs));
     }
-  }, [allTxs, statementMember]);
+  }, [allTxs, statementMember?.airman_id, statementMember?.['BD No']]);
 
   // Auto-dismiss dynamic payment confirmation animation after 4.5 seconds
   useEffect(() => {
@@ -2862,7 +2890,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
       });
     });
 
-    return rows.sort((a, b) => b.total - a.total);
+    return sortCanteenMenuItems(rows, (r) => r.itemName);
   };
 
   // Build Statement rows matching legacy breakdown if needed
@@ -2990,6 +3018,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
           remainingAdvance,
           unitFundBill,
           othersFundBill,
+          othersBreakdown: othersFundBreakdown,
           effectivePayments,
           netPayable: totalDue,
           rankBn: rank,
@@ -3111,6 +3140,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
           remainingAdvance,
           unitFundBill,
           othersFundBill,
+          othersBreakdown: othersFundBreakdown,
           effectivePayments,
           netPayable: totalDue,
           rankBn: rank,
@@ -4202,6 +4232,26 @@ export const MemberDB: React.FC<MemberDBProps> = ({
       ];
       let str = String(val || '').trim().replace(/[০-৯]/g, ch => bnDigits[ch] || ch);
 
+      // Check DD Mon YY or DD Mon YYYY (e.g. "11 Oct 26" or "11 October 2026")
+      const monMatch = str.match(/^(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{2,4})/);
+      if (monMatch) {
+        const d = monMatch[1].padStart(2, '0');
+        const monStr = monMatch[2].slice(0, 3).toLowerCase();
+        const monIdx = monthAbbrs.findIndex(m => m.toLowerCase() === monStr);
+        let y = monMatch[3];
+        if (y.length === 2) y = `20${y}`;
+        const validMonIdx = monIdx >= 0 ? monIdx : 9;
+        const monName = monthAbbrs[validMonIdx];
+        const monBn = bnMonthShort[validMonIdx] || toBengaliNum(String(validMonIdx + 1));
+        const dayBnNoZero = toBengaliNum(parseInt(d, 10));
+        const mm = String(validMonIdx + 1).padStart(2, '0');
+        return {
+          iso: `${y}-${mm}-${d}`,
+          displayBn: `${dayBnNoZero} ${monBn}`,
+          displayEn: `${d} ${monName}`
+        };
+      }
+
       // Check DD/MM/YYYY or DD-MM-YYYY
       const dmy = str.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
       if (dmy) {
@@ -4264,7 +4314,8 @@ export const MemberDB: React.FC<MemberDBProps> = ({
     const dateMap = new Map<string, {
       dateBn: string;
       dateEn: string;
-      itemsMap: Map<string, { qty: number; total: number; rates: number[] }>;
+      itemsMap: Map<string, { qty: number; total: number; rates: number[]; isNonCanteen?: boolean }>;
+      categoryNotesMap?: Map<string, string[]>;
     }>();
 
     effectiveTxs.forEach((tx) => {
@@ -4282,33 +4333,68 @@ export const MemberDB: React.FC<MemberDBProps> = ({
         dateMap.set(dateInfo.iso, {
           dateBn: dateInfo.displayBn,
           dateEn: dateInfo.displayEn,
-          itemsMap: new Map()
+          itemsMap: new Map(),
+          categoryNotesMap: new Map<string, string[]>()
         });
       }
       const dateEntry = dateMap.get(dateInfo.iso)!;
 
-      const addItem = (rawName: string, qty: number, total: number, rate?: number) => {
+      const addItem = (rawName: string, qty: number, total: number, rate?: number, isNonCanteen = false) => {
         const name = String(rawName).trim();
         if (!dateEntry.itemsMap.has(name)) {
-          dateEntry.itemsMap.set(name, { qty: 0, total: 0, rates: [] });
+          dateEntry.itemsMap.set(name, { qty: 0, total: 0, rates: [], isNonCanteen });
         }
         const rec = dateEntry.itemsMap.get(name)!;
         rec.qty += qty;
         rec.total += total;
+        if (isNonCanteen) rec.isNonCanteen = true;
         if (rate && rate > 0) rec.rates.push(rate);
       };
 
       // 1. If Category is OTHERS or UNIT_FUND, include them in the date-wise table with merged flag
-      if (cat === 'OTHERS' || cat === 'UNIT_FUND' || itemsStrLower.includes('unit fund') || itemsStrLower.includes('ইউনিট ফান্ড') || itemsStrLower.includes('others') || itemsStrLower.includes('অন্যান্য')) {
-        let name = itemsStr || (cat === 'UNIT_FUND' ? 'ইউনিট ফান্ড' : 'অন্যান্য বিল');
-        const isOthers = cat === 'OTHERS' || itemsStrLower.includes('others') || itemsStrLower.includes('অন্যান্য');
-        if (isOthers && !name.includes('অন্যান্য')) {
-          name = `অন্যান্য (${name})`;
-        } else if (!isOthers && !name.includes('ইউনিট ফান্ড')) {
-          name = `ইউনিট ফান্ড (${name})`;
+      if (
+        cat === 'OTHERS' || 
+        cat === 'UNIT_FUND' || 
+        itemsStrLower.includes('unit fund') || 
+        itemsStrLower.includes('ইউনিট ফান্ড') || 
+        itemsStrLower.includes('others') || 
+        itemsStrLower.includes('অন্যান্য') ||
+        itemsStrLower.includes('supply item')
+      ) {
+        const isOthers = cat === 'OTHERS' || itemsStrLower.includes('others') || itemsStrLower.includes('অন্যান্য') || itemsStrLower.includes('supply item');
+        let name = itemsStr || (cat === 'UNIT_FUND' ? 'ইউনিট ফান্ড' : 'Supply Item');
+        if (isOthers) {
+          // Clean legacy "অন্যান্য (...)" or "Others (...)" wrapper so it preserves original category name (যেমন: Supply Item, বাজার)
+          let catName = itemsStr.replace(/^অন্যান্য\s*\((.*?)\)$/i, '$1').replace(/^Others\s*\((.*?)\)$/i, '$1').trim();
+          if (!catName || catName.toLowerCase() === 'others' || catName.toLowerCase() === 'others bill' || catName === 'অন্যান্য' || catName === 'অন্যান্য বিল') {
+            catName = String(tx.purpose || '').trim();
+            catName = catName.replace(/^অন্যান্য\s*\((.*?)\)$/i, '$1').replace(/^Others\s*\((.*?)\)$/i, '$1').trim();
+            if (!catName || catName.toLowerCase() === 'others' || catName.toLowerCase() === 'others bill' || catName === 'অন্যান্য' || catName === 'অন্যান্য বিল') {
+              catName = 'Supply Item';
+            }
+          }
+
+          // Pic 3: Note thakle (er vetore asbe, multiple thakbe comma diye diye hbe)
+          const rawNote = String(tx.note || '').trim();
+          if (rawNote) {
+            if (!dateEntry.categoryNotesMap) {
+              dateEntry.categoryNotesMap = new Map();
+            }
+            if (!dateEntry.categoryNotesMap.has(catName)) {
+              dateEntry.categoryNotesMap.set(catName, []);
+            }
+            const notesArr = dateEntry.categoryNotesMap.get(catName)!;
+            rawNote.split(',').map(s => s.trim()).filter(Boolean).forEach(n => {
+              if (!notesArr.includes(n)) notesArr.push(n);
+            });
+          }
+
+          name = catName;
+        } else if (!name.includes('ইউনিট ফান্ড')) {
+          name = `ইউনিট ফান্ড${itemsStr && itemsStr !== 'Unit Fund Bill' ? ` (${itemsStr})` : ''}`;
         }
         const amt = Number(tx.amount || 0);
-        addItem(name, 1, amt, amt);
+        addItem(name, 1, amt, amt, true);
         return;
       }
 
@@ -4392,7 +4478,10 @@ export const MemberDB: React.FC<MemberDBProps> = ({
         lower.includes('unit fund') ||
         lower.includes('ইউনিট ফান্ড') ||
         lower.includes('others') ||
-        lower.includes('অন্যান্য')
+        lower.includes('অন্যান্য') ||
+        lower.includes('supply item') ||
+        lower.includes('বাজার') ||
+        lower.includes('bazar')
       );
     };
 
@@ -4417,8 +4506,20 @@ export const MemberDB: React.FC<MemberDBProps> = ({
 
       itemsList.forEach(([name, val], index) => {
         const isGeneric = isGenericCanteenBill(name);
-        const displayName = isGeneric ? `ক্যান্টিন বিল (${formatBengaliMonthYear(statementMonth)})` : formatItemNameBn(name);
-        const isNonCanteen = isNonCanteenBill(name);
+        const isNonCanteen = (val as any).isNonCanteen || isNonCanteenBill(name);
+
+        let displayName = name;
+        if (isNonCanteen) {
+          const notesArr = entry.categoryNotesMap?.get(name) || [];
+          if (notesArr.length > 0) {
+            displayName = `${name} (${notesArr.join(', ')})`;
+          } else {
+            displayName = name;
+          }
+        } else {
+          displayName = isGeneric ? `ক্যান্টিন বিল (${formatBengaliMonthYear(statementMonth)})` : formatItemNameBn(name);
+        }
+
         // Generic imported bills (ক্যান্টিন বিল/খরচ without quantity & rate) and Non-canteen bills have merged Qty & Rate cells
         const merged = isNonCanteen || isGeneric;
         const rate = val.rates.length > 0 ? val.rates[0] : (val.qty > 0 ? Math.round((val.total / val.qty) * 100) / 100 : val.total);
@@ -4461,6 +4562,26 @@ export const MemberDB: React.FC<MemberDBProps> = ({
     return filteredStatementTxs
       .filter((tx) => getTxCategory(tx) === 'OTHERS' && tx.type !== 'BILL PAYMENT')
       .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
+  }, [filteredStatementTxs]);
+
+  // Category-wise breakdown for Others Fund (যেমন: বাজার, Supply Item ইত্যাদি) - 'অন্যান্য' থাকবে না
+  const othersFundBreakdown = useMemo(() => {
+    const map = new Map<string, number>();
+    filteredStatementTxs
+      .filter((tx) => getTxCategory(tx) === 'OTHERS' && tx.type !== 'BILL PAYMENT')
+      .forEach((tx) => {
+        let catName = String(tx.items || tx.purpose || '').trim();
+        catName = catName.replace(/^অন্যান্য\s*\((.*?)\)$/i, '$1').replace(/^Others\s*\((.*?)\)$/i, '$1').trim();
+        if (!catName || catName.toLowerCase() === 'others' || catName.toLowerCase() === 'others bill' || catName === 'অন্যান্য' || catName === 'অন্যান্য বিল') {
+          catName = tx.purpose ? String(tx.purpose).replace(/^অন্যান্য\s*\((.*?)\)$/i, '$1').replace(/^Others\s*\((.*?)\)$/i, '$1').trim() : '';
+        }
+        if (!catName || catName.toLowerCase() === 'others' || catName.toLowerCase() === 'others bill' || catName === 'অন্যান্য' || catName === 'অন্যান্য বিল') {
+          catName = 'Supply Item';
+        }
+        const amt = Number(tx.amount || 0);
+        map.set(catName, (map.get(catName) || 0) + amt);
+      });
+    return Array.from(map.entries()).map(([category, amount]) => ({ category, amount }));
   }, [filteredStatementTxs]);
 
   const memberTotalDue = statementMember ? getMemberTotalDue(statementMember, 'ALL') : 0;
@@ -4562,6 +4683,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
       remainingAdvance,
       unitFundBill,
       othersFundBill,
+      othersBreakdown: othersFundBreakdown,
       effectivePayments,
       netPayable,
       rankBn: rank,
@@ -4603,6 +4725,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
     remainingAdvance,
     unitFundBill,
     othersFundBill,
+    othersFundBreakdown,
     effectivePayments,
     netPayable
   ]);
@@ -4627,6 +4750,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
           remainingAdvance,
           unitFundBill,
           othersFundBill,
+          othersBreakdown: othersFundBreakdown,
           effectivePayments,
           netPayable,
           rankBn: rank,
@@ -6330,107 +6454,133 @@ export const MemberDB: React.FC<MemberDBProps> = ({
                       )
                     )}
 
-                    {/* Summary Rows - Normal white cells, colSpan matches view mode */}
-                    {totalMonthBill > 0 && (
+                    {/* Summary Rows - In DATE mode: Dt wise jehetu sob (Unit Fund, Others ........) opoprei deya thakbe tahole niche abar deyar dorkar nai, sudhu সর্বমোট প্রদেয় বিল থাকবে */}
+                    {statementViewMode === 'DATE' ? (
                       <tr className="bg-white">
-                        <td className="border border-black p-3 text-right font-black bg-white" colSpan={statementViewMode === 'DATE' ? 4 : 3}>
-                          মোট ক্যান্টিন বিল
+                        <td className="border border-black p-3 text-right font-black bg-white" colSpan={4}>
+                          সর্বমোট প্রদেয় বিল
                         </td>
-                        <td className="border border-black p-3 text-center font-black bg-white">
-                          ৳{toBengaliNum(totalMonthBill)}
+                        <td className="border border-black p-3 text-center font-black text-[#e11d48] bg-white text-base sm:text-lg">
+                          ৳{toBengaliNum(netPayable)}
                         </td>
                       </tr>
-                    )}
+                    ) : (
+                      <>
+                        {totalMonthBill > 0 && (
+                          <tr className="bg-white">
+                            <td className="border border-black p-3 text-right font-black bg-white" colSpan={3}>
+                              মোট ক্যান্টিন বিল
+                            </td>
+                            <td className="border border-black p-3 text-center font-black bg-white">
+                              ৳{toBengaliNum(totalMonthBill)}
+                            </td>
+                          </tr>
+                        )}
 
-                    {/* ডিসকাউন্ট (যদি > ০ থাকে, মোট ক্যান্টিন বিল এর ঠিক নিচে) */}
-                    {totalMonthDiscount > 0 && (
-                      <tr className="bg-white">
-                        <td className="border border-black p-3 text-right font-black bg-white text-emerald-700" colSpan={statementViewMode === 'DATE' ? 4 : 3}>
-                          ডিসকাউন্ট
-                        </td>
-                        <td className="border border-black p-3 text-center font-black bg-white text-emerald-700">
-                          -৳{toBengaliNum(totalMonthDiscount)}
-                        </td>
-                      </tr>
-                    )}
+                        {/* ডিসকাউন্ট (যদি > ০ থাকে, মোট ক্যান্টিন বিল এর ঠিক নিচে) */}
+                        {totalMonthDiscount > 0 && (
+                          <tr className="bg-white">
+                            <td className="border border-black p-3 text-right font-black bg-white text-emerald-700" colSpan={3}>
+                              ডিসকাউন্ট
+                            </td>
+                            <td className="border border-black p-3 text-center font-black bg-white text-emerald-700">
+                              -৳{toBengaliNum(totalMonthDiscount)}
+                            </td>
+                          </tr>
+                        )}
 
-                    {/* বকেয়া বিল (যদি ০ থাকে তাহলে Hide থাকবে) */}
-                    {previousDue > 0 && (
-                      <tr className="bg-white">
-                        <td className="border border-black p-3 text-right font-black bg-white" colSpan={statementViewMode === 'DATE' ? 4 : 3}>
-                          বকেয়া বিল
-                        </td>
-                        <td className="border border-black p-3 text-center font-black bg-white">
-                          ৳{toBengaliNum(previousDue)}
-                        </td>
-                      </tr>
-                    )}
+                        {/* বকেয়া বিল (যদি ০ থাকে তাহলে Hide থাকবে) */}
+                        {previousDue > 0 && (
+                          <tr className="bg-white">
+                            <td className="border border-black p-3 text-right font-black bg-white" colSpan={3}>
+                              বকেয়া বিল
+                            </td>
+                            <td className="border border-black p-3 text-center font-black bg-white">
+                              ৳{toBengaliNum(previousDue)}
+                            </td>
+                          </tr>
+                        )}
 
-                    {/* পূর্বের অগ্রিম (Advance from prior month) - যদি ০ থাকে তাহলে Hide থাকবে */}
-                    {previousAdvance > 0 && (
-                      <tr className="bg-white">
-                        <td className="border border-black p-3 text-right font-black bg-white text-emerald-700" colSpan={statementViewMode === 'DATE' ? 4 : 3}>
-                          পূর্বের অগ্রিম
-                        </td>
-                        <td className="border border-black p-3 text-center font-black bg-white text-emerald-700">
-                          ৳{toBengaliNum(previousAdvance)}
-                        </td>
-                      </tr>
-                    )}
+                        {/* পূর্বের অগ্রিম (Advance from prior month) - যদি ০ থাকে তাহলে Hide থাকবে */}
+                        {previousAdvance > 0 && (
+                          <tr className="bg-white">
+                            <td className="border border-black p-3 text-right font-black bg-white text-emerald-700" colSpan={3}>
+                              পূর্বের অগ্রিম
+                            </td>
+                            <td className="border border-black p-3 text-center font-black bg-white text-emerald-700">
+                              ৳{toBengaliNum(previousAdvance)}
+                            </td>
+                          </tr>
+                        )}
 
-                    {/* ইউনিট ফান্ড (যদি ০ থাকে তাহলে Hide থাকবে) */}
-                    {unitFundBill > 0 && (
-                      <tr className="bg-white">
-                        <td className="border border-black p-3 text-right font-black bg-white" colSpan={statementViewMode === 'DATE' ? 4 : 3}>
-                          ইউনিট ফান্ড
-                        </td>
-                        <td className="border border-black p-3 text-center font-black bg-white">
-                          ৳{toBengaliNum(unitFundBill)}
-                        </td>
-                      </tr>
-                    )}
+                        {/* ইউনিট ফান্ড (শুধুমাত্র ITEM মোডে) */}
+                        {unitFundBill > 0 && (
+                          <tr className="bg-white">
+                            <td className="border border-black p-3 text-right font-black bg-white" colSpan={3}>
+                              ইউনিট ফান্ড
+                            </td>
+                            <td className="border border-black p-3 text-center font-black bg-white">
+                              ৳{toBengaliNum(unitFundBill)}
+                            </td>
+                          </tr>
+                        )}
 
-                    {/* অন্যান্য (যদি ০ থাকে তাহলে Hide থাকবে) */}
-                    {othersFundBill > 0 && (
-                      <tr className="bg-white">
-                        <td className="border border-black p-3 text-right font-black bg-white" colSpan={statementViewMode === 'DATE' ? 4 : 3}>
-                          অন্যান্য
-                        </td>
-                        <td className="border border-black p-3 text-center font-black bg-white">
-                          ৳{toBengaliNum(othersFundBill)}
-                        </td>
-                      </tr>
-                    )}
+                        {/* Category-wise Breakdown (যেমন: বাজার, Supply Item ইত্যাদি - শুধুমাত্র ITEM মোডে) */}
+                        {othersFundBreakdown.length > 0 ? (
+                          othersFundBreakdown.map((b, bIdx) => (
+                            <tr key={`other-cat-row-${bIdx}`} className="bg-white">
+                              <td className="border border-black p-3 text-right font-black bg-white" colSpan={3}>
+                                {b.category}
+                              </td>
+                              <td className="border border-black p-3 text-center font-black bg-white">
+                                ৳{toBengaliNum(b.amount)}
+                              </td>
+                            </tr>
+                          ))
+                        ) : (
+                          othersFundBill > 0 && (
+                            <tr className="bg-white">
+                              <td className="border border-black p-3 text-right font-black bg-white" colSpan={3}>
+                                Supply Item
+                              </td>
+                              <td className="border border-black p-3 text-center font-black bg-white">
+                                ৳{toBengaliNum(othersFundBill)}
+                              </td>
+                            </tr>
+                          )
+                        )}
 
-                    {effectivePayments > 0 && (
-                      <tr className="bg-white">
-                        <td className="border border-black p-3 text-right font-black bg-white" colSpan={statementViewMode === 'DATE' ? 4 : 3}>
-                          পরিশোধিত বিল
-                        </td>
-                        <td className="border border-black p-3 text-center font-black bg-white text-emerald-700">
-                          ৳{toBengaliNum(effectivePayments)}
-                        </td>
-                      </tr>
-                    )}
-                    <tr className="bg-white">
-                      <td className="border border-black p-3 text-right font-black bg-white" colSpan={statementViewMode === 'DATE' ? 4 : 3}>
-                        সর্বমোট প্রদেয় বিল
-                      </td>
-                      <td className="border border-black p-3 text-center font-black text-[#e11d48] bg-white text-base sm:text-lg">
-                        ৳{toBengaliNum(netPayable)}
-                      </td>
-                    </tr>
+                        {effectivePayments > 0 && (
+                          <tr className="bg-white">
+                            <td className="border border-black p-3 text-right font-black bg-white" colSpan={3}>
+                              পরিশোধিত বিল
+                            </td>
+                            <td className="border border-black p-3 text-center font-black bg-white text-emerald-700">
+                              ৳{toBengaliNum(effectivePayments)}
+                            </td>
+                          </tr>
+                        )}
+                        <tr className="bg-white">
+                          <td className="border border-black p-3 text-right font-black bg-white" colSpan={3}>
+                            সর্বমোট প্রদেয় বিল
+                          </td>
+                          <td className="border border-black p-3 text-center font-black text-[#e11d48] bg-white text-base sm:text-lg">
+                            ৳{toBengaliNum(netPayable)}
+                          </td>
+                        </tr>
 
-                    {/* অবশিষ্ট অগ্রিম (যদি অগ্রিম পুরো বিল সমন্বয় করার পরও অবশিষ্ট থাকে) */}
-                    {remainingAdvance > 0 && (
-                      <tr className="bg-white">
-                        <td className="border border-black p-3 text-right font-black bg-white text-emerald-700" colSpan={statementViewMode === 'DATE' ? 4 : 3}>
-                          অবশিষ্ট অগ্রিম
-                        </td>
-                        <td className="border border-black p-3 text-center font-black bg-white text-emerald-700">
-                          ৳{toBengaliNum(remainingAdvance)}
-                        </td>
-                      </tr>
+                        {/* অবশিষ্ট অগ্রিম (যদি অগ্রিম পুরো বিল সমন্বয় করার পরও অবশিষ্ট থাকে) */}
+                        {remainingAdvance > 0 && (
+                          <tr className="bg-white">
+                            <td className="border border-black p-3 text-right font-black bg-white text-emerald-700" colSpan={3}>
+                              অবশিষ্ট অগ্রিম
+                            </td>
+                            <td className="border border-black p-3 text-center font-black bg-white text-emerald-700">
+                              ৳{toBengaliNum(remainingAdvance)}
+                            </td>
+                          </tr>
+                        )}
+                      </>
                     )}
                   </tbody>
                 </table>

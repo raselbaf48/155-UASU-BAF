@@ -42,6 +42,7 @@ import { pushKeyToCloud, pullKeyFromCloud, recordDeletedTxId, reconcileExpenseOn
 import { resolveImageUrl, getCanteenConfig } from '../utils/canteenSettings';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { formatBengaliMonthYear } from '../utils/exportCanteenBillExcel';
+import { getMenuItemBanglaName } from '../utils/menuBanglaNames';
 import { DateNavigator, getTodayYMD } from '../components/DateNavigator';
 import { FundHistoryModal } from '../components/FundHistoryModal';
 import { 
@@ -51,7 +52,8 @@ import {
   isCivilianMember, 
   getRunningMonthKey,
   getTxMonthKey,
-  getTxCategory 
+  getTxCategory,
+  formatItemNameBn
 } from './MemberDB';
 import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
 
@@ -158,10 +160,11 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
 
   // Purpose Presets & Notes State
   const DEFAULT_PURPOSE_PRESETS = [
-    'Mess Dinner Fee',
-    'মেস ডিনার ফি',
+    'Supply Item',
     'Bazar / Market',
     'বাজার / বাজার সদাই',
+    'Mess Dinner Fee',
+    'মেস ডিনার ফি',
     'Picnic & Refreshment',
     'পিকনিক ও রিফ্রেশমেন্ট',
     'Special Event Catering',
@@ -188,7 +191,13 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
           const filtered = parsed.filter(p => typeof p === 'string' && !deletedSet.has(p.trim()));
-          if (filtered.length > 0) return filtered;
+          if (filtered.length > 0) {
+            // Guarantee Supply Item is available as primary preset
+            if (!deletedSet.has('Supply Item') && !filtered.includes('Supply Item')) {
+              return ['Supply Item', ...filtered];
+            }
+            return filtered;
+          }
         }
       }
       return DEFAULT_PURPOSE_PRESETS.filter(p => !deletedSet.has(p.trim()));
@@ -222,9 +231,10 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
         if (Array.isArray(cloudPresets) && cloudPresets.length > 0) {
           const filtered = cloudPresets.filter((p: any) => typeof p === 'string' && !deletedSet.has(p.trim()));
           if (filtered.length > 0) {
-            setPurposePresets(filtered);
+            const withSupply = (!deletedSet.has('Supply Item') && !filtered.includes('Supply Item')) ? ['Supply Item', ...filtered] : filtered;
+            setPurposePresets(withSupply);
             try {
-              localStorage.setItem('canteen_purpose_presets', JSON.stringify(filtered));
+              localStorage.setItem('canteen_purpose_presets', JSON.stringify(withSupply));
               localStorage.setItem('canteen_purpose_presets_customized', 'true');
             } catch {}
           } else {
@@ -241,9 +251,10 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
     })();
     return () => { isMounted = false; };
   }, []);
-  const [purpose, setPurpose] = useState<string>('');
-  const [singleMemberCategories, setSingleMemberCategories] = useState<string[]>([]);
+  const [purpose, setPurpose] = useState<string>(() => isUnitFund ? '' : 'Supply Item');
+  const [singleMemberCategories, setSingleMemberCategories] = useState<string[]>(() => isUnitFund ? [] : ['Supply Item']);
   const [singleMemberCategoryAmounts, setSingleMemberCategoryAmounts] = useState<Record<string, string>>({});
+  const [singleMemberCategoryNotes, setSingleMemberCategoryNotes] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState<string>('');
   const [newPresetInput, setNewPresetInput] = useState<string>('');
   const [isAddingPreset, setIsAddingPreset] = useState<boolean>(false);
@@ -523,7 +534,13 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       pushKeyToCloud('canteen_deleted_purpose_presets', updatedDeleted).catch(() => {});
       showToast(`Category "${trimmed}" added and saved!`);
     }
-    setPurpose(trimmed);
+    if (isMultiCatMode) {
+      setSingleMemberCategories(prev => prev.includes(trimmed) ? prev : [...prev, trimmed]);
+      setPurpose(prev => prev ? `${prev}, ${trimmed}` : trimmed);
+    } else {
+      setPurpose(trimmed);
+      setSingleMemberCategories([trimmed]);
+    }
     setNewPresetInput('');
     setIsAddingPreset(false);
   };
@@ -869,7 +886,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       );
 
       const now = Date.now();
-      const finalPurpose = purpose.trim() || (isUnitFund ? 'Unit Fund Bill' : 'Others Bill');
+      const finalPurpose = purpose.trim() || (isUnitFund ? 'Unit Fund Bill' : 'Supply Item');
       const finalNotes = notes.trim();
       const defaultDesc = isUnitFund ? 'Unit Fund Bill' : finalPurpose;
 
@@ -894,6 +911,9 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
         newBatchTxs = activeSingleMemberCats.map((catName, idx) => {
           const raw = singleMemberCategoryAmounts[catName] !== undefined ? singleMemberCategoryAmounts[catName] : amount;
           const memberAmt = parseFloat(raw || '0') || 0;
+          const catNote = (singleMemberCategoryNotes[catName] || '').trim();
+          const txNote = catNote || finalNotes || undefined;
+          const effectiveCatName = catName.trim() || 'Supply Item';
 
           return {
             id: `tx-${category.toLowerCase()}-${cleanBdNo}-${targetMonth}-${now + idx}`,
@@ -906,8 +926,9 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
             bdNo: singleMem['BD No'] || singleMem.bdNo,
             memberName: `${singleMem['Rank'] || ''} ${singleMem['Surname'] || ''}`.trim(),
             rank: singleMem['Rank'] || singleMem.rank || '',
-            items: catName,
-            note: finalNotes || undefined,
+            items: effectiveCatName,
+            purpose: effectiveCatName,
+            note: txNote,
             soldItems: [],
             amount: memberAmt,
             type: 'INITIAL_BILL',
@@ -941,6 +962,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
             memberName: `${m['Rank'] || ''} ${m['Surname'] || ''}`.trim(),
             rank: m['Rank'] || m.rank || '',
             items: isUnitFund ? 'Unit Fund Bill' : defaultDesc,
+            purpose: isUnitFund ? 'Unit Fund Bill' : defaultDesc,
             note: isUnitFund ? undefined : (finalNotes || undefined),
             soldItems: [],
             amount: memberAmt,
@@ -1158,6 +1180,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       setMemberCustomAmounts({});
       setSingleMemberCategories([]);
       setSingleMemberCategoryAmounts({});
+      setSingleMemberCategoryNotes({});
       setAmountMode('SAME');
       setFillAllInput('');
       setNotes('');
@@ -1411,6 +1434,102 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
   const activeSingleMemberCats = useMemo(() => {
     return singleMemberCategories.length > 0 ? singleMemberCategories : (purpose.trim() ? [purpose.trim()] : []);
   }, [singleMemberCategories, purpose]);
+
+  // When multiple members are selected, multi-category is strictly disabled ("ager moto kore dao")
+  useEffect(() => {
+    if (!isUnitFund && selectedCount > 1) {
+      if (singleMemberCategories.length > 1) {
+        const firstCat = singleMemberCategories[0] || '';
+        setPurpose(firstCat);
+        setSingleMemberCategories(firstCat ? [firstCat] : []);
+      }
+    }
+  }, [selectedCount, isUnitFund, singleMemberCategories]);
+
+  // Helper to retrieve member's purchases on the active txDate (Pic 2: e.g. "চিকেন বিরিয়ানি x ১ , রং চা x ২")
+  const getMemberPurchasesOnDate = (m: any): string => {
+    if (!m || !txDate) return '';
+    const formattedTargetDate = formatCanteenDate(txDate);
+    const cleanBd = String(m['BD No'] || m.bdNo || m.airman_id || '').replace(/\D/g, '');
+    const cleanBdNoZeros = cleanBd.replace(/^0+/, '');
+    const mAirmanId = String(m.airman_id || '').toLowerCase().trim();
+
+    const localTxs = (() => {
+      try {
+        return JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+      } catch {
+        return [];
+      }
+    })();
+    const sourceTxs = [...(allTxs || []), ...localTxs];
+    if (sourceTxs.length === 0) return '';
+
+    const seenTxIds = new Set<string>();
+    const dayTxs = sourceTxs.filter((tx) => {
+      if (!tx || tx.isReverted || tx.status === 'REVERTED' || tx.type === 'BILL PAYMENT') return false;
+      const txId = String(tx.id || '');
+      if (txId) {
+        if (seenTxIds.has(txId)) return false;
+        seenTxIds.add(txId);
+      }
+      const cat = getTxCategory(tx);
+      if (cat === 'UNIT_FUND' || cat === 'OTHERS' || tx.billType === 'UNIT_FUND' || tx.billType === 'OTHERS') return false;
+
+      const txBd = String(tx.bdNo || tx['BD No'] || tx.airman_id || '').replace(/\D/g, '');
+      const txBdNoZeros = txBd.replace(/^0+/, '');
+      const txAirmanId = String(tx.airman_id || '').toLowerCase().trim();
+
+      const isBdMatch = cleanBd && txBd && (cleanBd === txBd || cleanBdNoZeros === txBdNoZeros);
+      const isAirmanMatch = mAirmanId && txAirmanId && mAirmanId === txAirmanId;
+      if (!isBdMatch && !isAirmanMatch) return false;
+
+      const txD = tx.date || tx.created_at || tx.createdAt || tx.timestamp;
+      return formatCanteenDate(txD) === formattedTargetDate;
+    });
+
+    if (dayTxs.length === 0) return '';
+
+    const itemCounts = new Map<string, number>();
+    dayTxs.forEach((tx) => {
+      if (Array.isArray(tx.soldItems) && tx.soldItems.length > 0) {
+        tx.soldItems.forEach((si: any) => {
+          const rawName = String(si.menuItemName || si.name || 'ক্যান্টিন খাবার').trim();
+          const bnName = getMenuItemBanglaName(rawName) || formatItemNameBn(rawName) || rawName;
+          const qty = Number(si.qty || si.quantity || 1);
+          itemCounts.set(bnName, (itemCounts.get(bnName) || 0) + qty);
+        });
+      } else {
+        const itemsStr = String(tx.items || '').trim();
+        if (!itemsStr || itemsStr.includes('ক্যান্টিন বিল') || itemsStr.includes('বকেয়া')) return;
+        const parts = itemsStr.split(',').map(s => s.trim()).filter(Boolean);
+        parts.forEach((p) => {
+          const parenMatch = p.match(/^(.+?)\s*\(([0-9]+)\)$/);
+          const xMatch = p.match(/^(.+?)\s*[xX*×]\s*([0-9০-৯]+)$/);
+          if (parenMatch) {
+            const nm = parenMatch[1].trim();
+            const bnName = getMenuItemBanglaName(nm) || formatItemNameBn(nm) || nm;
+            const qty = parseInt(parenMatch[2], 10) || 1;
+            itemCounts.set(bnName, (itemCounts.get(bnName) || 0) + qty);
+          } else if (xMatch) {
+            const nm = xMatch[1].trim();
+            const bnName = getMenuItemBanglaName(nm) || formatItemNameBn(nm) || nm;
+            const qtyRaw = xMatch[2].replace(/[০-৯]/g, d => '0123456789'['০১২৩৪৫৬৭৮৯'.indexOf(d)]);
+            const qty = parseInt(qtyRaw, 10) || 1;
+            itemCounts.set(bnName, (itemCounts.get(bnName) || 0) + qty);
+          } else {
+            const bnName = getMenuItemBanglaName(p) || formatItemNameBn(p) || p;
+            itemCounts.set(bnName, (itemCounts.get(bnName) || 0) + 1);
+          }
+        });
+      }
+    });
+
+    if (itemCounts.size === 0) return '';
+    const toBn = (n: number) => String(n).replace(/[0-9]/g, d => '০১২৩৪৫৬৭৮৯'[parseInt(d, 10)]);
+    return Array.from(itemCounts.entries())
+      .map(([name, qty]) => `${name} x ${toBn(qty)}`)
+      .join(' , ');
+  };
 
   // Selected members list sorted by seniority
   const selectedMembersList = useMemo(() => {
@@ -1819,6 +1938,17 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                         <div className="text-[11px] font-mono text-slate-400 mt-0.5 truncate">
                           BD/{m['BD No']} • {m.Role || 'Member'}
                         </div>
+                        {/* Member purchase details on selected date (Pic 2: e.g. চিকেন বিরিয়ানি x ১ , রং চা x ২) */}
+                        {(() => {
+                          const purchases = getMemberPurchasesOnDate(m);
+                          if (!purchases) return null;
+                          return (
+                            <div className="mt-1 text-[10px] text-amber-300 font-bold bg-amber-950/60 border border-amber-500/30 px-2 py-0.5 rounded-lg inline-flex items-center gap-1.5 shadow-xs max-w-full" title={purchases}>
+                              <span className="text-xs shrink-0">🛒</span>
+                              <span className="truncate">{purchases}</span>
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
 
@@ -1879,7 +2009,9 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                 </div>
                 <div className="flex items-center space-x-2">
                   <span className="text-[11px] font-mono font-bold bg-indigo-500/20 text-indigo-300 px-2.5 py-1 rounded-lg border border-indigo-500/30">
-                    {activeSingleMemberCats.length} Selected
+                    {isMultiCatMode 
+                      ? `${activeSingleMemberCats.length} Selected (Multi-Cat)` 
+                      : (purpose ? `Selected: ${purpose}` : '0 Selected')}
                   </span>
                   {/* Settings Gear Icon to toggle edit/delete mode */}
                   <button
@@ -1916,7 +2048,11 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
               {/* Preset Pills */}
               <div className="flex flex-wrap items-center gap-2">
                 {purposePresets.map((preset, idx) => {
-                  const isSelected = !isEditingPresets && activeSingleMemberCats.includes(preset);
+                  const isSelected = !isEditingPresets && (
+                    isMultiCatMode 
+                      ? activeSingleMemberCats.includes(preset) 
+                      : purpose === preset
+                  );
                   return (
                     <div 
                       key={preset} 
@@ -1967,11 +2103,20 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                         type="button"
                         onClick={() => {
                           if (isEditingPresets) return;
-                          const nextList = activeSingleMemberCats.includes(preset)
-                            ? activeSingleMemberCats.filter(p => p !== preset)
-                            : [...activeSingleMemberCats, preset];
-                          setSingleMemberCategories(nextList);
-                          setPurpose(nextList.join(', '));
+                          if (isMultiCatMode) {
+                            // Single Member: Multi-Category allowed
+                            const nextList = activeSingleMemberCats.includes(preset)
+                              ? activeSingleMemberCats.filter(p => p !== preset)
+                              : [...activeSingleMemberCats, preset];
+                            setSingleMemberCategories(nextList);
+                            setPurpose(nextList.join(', '));
+                          } else {
+                            // Multiple Members: Multi-Category NOT allowed! Single category only like before!
+                            const isCurrentlySelected = purpose === preset;
+                            const nextPurpose = isCurrentlySelected ? '' : preset;
+                            setPurpose(nextPurpose);
+                            setSingleMemberCategories(nextPurpose ? [nextPurpose] : []);
+                          }
                         }}
                         className={`py-1.5 rounded-xl text-xs font-bold transition-all truncate cursor-pointer ${
                           isEditingPresets 
@@ -2184,11 +2329,21 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                                   {m['Surname']}
                                 </span>
                               </div>
-                              <div className="text-[11px] font-mono text-slate-400 mt-0.5 flex items-center gap-1.5">
+                              <div className="text-[11px] font-mono text-slate-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
                                 <span>BD/{m['BD No']}</span>
                                 <span>•</span>
                                 <span className="text-emerald-400 font-bold">একক সদস্য (Single Member)</span>
                               </div>
+                              {(() => {
+                                const purchases = getMemberPurchasesOnDate(m);
+                                if (!purchases) return null;
+                                return (
+                                  <div className="mt-1.5 text-[11px] text-amber-300 font-bold bg-amber-950/40 border border-amber-500/30 px-2.5 py-0.5 rounded-lg inline-flex items-center gap-1.5 shadow-xs">
+                                    <span className="text-xs">🛒</span>
+                                    <span>{purchases}</span>
+                                  </div>
+                                );
+                              })()}
                             </div>
                           </div>
 
@@ -2254,8 +2409,23 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                                     </div>
                                   </div>
 
-                                  {/* Amount Box + Quick Remove Category */}
+                                  {/* Note option beside the category + Amount Box + Quick Remove Category */}
                                   <div className="flex items-center space-x-2 shrink-0">
+                                    <div className="relative w-32 sm:w-44">
+                                      <input
+                                        type="text"
+                                        placeholder="Note (ঐচ্ছিক)"
+                                        value={singleMemberCategoryNotes[catName] || ''}
+                                        onChange={(e) => {
+                                          const val = convertAvroAnsiToUnicode(e.target.value);
+                                          setSingleMemberCategoryNotes(prev => ({
+                                            ...prev,
+                                            [catName]: val
+                                          }));
+                                        }}
+                                        className="w-full bg-slate-950 border border-slate-700 focus:border-indigo-500 rounded-xl px-2.5 py-1.5 text-xs text-white placeholder-slate-500 outline-none transition-all shadow-inner"
+                                      />
+                                    </div>
                                     <div className="relative w-28 sm:w-32">
                                       <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-mono font-bold text-slate-400 text-xs">
                                         ৳
@@ -2303,7 +2473,27 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                   </div>
                 ) : (
                   /* Multiple Members List */
-                  <div className="max-h-72 overflow-y-auto space-y-2 p-2 bg-slate-950/70 border border-slate-800 rounded-2xl scrollbar-none">
+                  <div className="space-y-2">
+                    {!isUnitFund && purpose && (
+                      <div className="p-2.5 bg-slate-950/90 rounded-2xl border border-indigo-500/30 flex items-center justify-between gap-3 shadow-xs">
+                        <div className="flex items-center space-x-2 min-w-0">
+                          <Tag className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                          <span className="text-xs font-black text-white truncate">
+                            ক্যাটাগরি: <span className="text-indigo-300">{purpose}</span>
+                          </span>
+                        </div>
+                        <div className="relative w-40 sm:w-56 shrink-0">
+                          <input
+                            type="text"
+                            placeholder="Note (ঐচ্ছিক)"
+                            value={notes}
+                            onChange={(e) => setNotes(convertAvroAnsiToUnicode(e.target.value))}
+                            className="w-full bg-slate-900 border border-slate-700 focus:border-indigo-500 rounded-xl px-2.5 py-1 text-xs text-white placeholder-slate-500 outline-none transition-all shadow-inner"
+                          />
+                        </div>
+                      </div>
+                    )}
+                    <div className="max-h-72 overflow-y-auto space-y-2 p-2 bg-slate-950/70 border border-slate-800 rounded-2xl scrollbar-none">
                     {selectedMembersList.map((m, idx) => {
                       const mId = String(m.airman_id || m['BD No']);
                       const memberDp = resolveImageUrl(m.DP);
@@ -2352,6 +2542,15 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                               <div className="text-[10px] font-mono text-slate-400 truncate">
                                 BD/{m['BD No']}
                               </div>
+                              {(() => {
+                                const purchases = getMemberPurchasesOnDate(m);
+                                if (!purchases) return null;
+                                return (
+                                  <div className="mt-1 text-[10px] text-amber-300 font-bold bg-amber-950/40 border border-amber-500/20 px-2 py-0.5 rounded-md inline-block max-w-full truncate shadow-2xs" title={purchases}>
+                                    🛒 {purchases}
+                                  </div>
+                                );
+                              })()}
                             </div>
                           </div>
 
@@ -2393,6 +2592,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                         </div>
                       );
                     })}
+                    </div>
                   </div>
                 )}
 
@@ -2651,13 +2851,17 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
               <div className="flex items-center justify-between text-xs font-bold text-slate-400">
                 <span>Payment Channel:</span>
                 <span className={`font-mono font-bold ${
-                  !isUnitFund && (isPrevManager || cashDeductTarget === 'PREV_MANAGER')
-                    ? 'text-amber-400'
-                    : 'text-emerald-400'
+                  isUnitFund
+                    ? 'text-indigo-400'
+                    : (isPrevManager || cashDeductTarget === 'PREV_MANAGER')
+                      ? 'text-amber-400'
+                      : 'text-emerald-400'
                 }`}>
-                  {!isUnitFund && (isPrevManager || cashDeductTarget === 'PREV_MANAGER')
-                    ? 'Cash (Prev Manager) • No Account Deduction'
-                    : `Cash (${cashDeductTarget === 'STAFF' ? selectedStaffName : 'Manager Cash'})`}
+                  {isUnitFund
+                    ? 'Unit Fund (Member Due)'
+                    : (isPrevManager || cashDeductTarget === 'PREV_MANAGER')
+                      ? 'Cash (Prev Manager) • No Account Deduction'
+                      : `Cash (${cashDeductTarget === 'STAFF' ? selectedStaffName : 'Manager Cash'})`}
                 </span>
               </div>
               <div className="border-t border-slate-800 pt-2.5 flex items-center justify-between text-sm font-black text-white">
