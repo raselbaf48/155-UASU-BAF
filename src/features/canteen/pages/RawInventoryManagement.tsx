@@ -4,7 +4,7 @@ import {
   CheckCircle2, RotateCcw, Layers, ArrowDownRight, ArrowUpRight, ArrowLeft,
   History, Filter, ShoppingBag, X, Save, AlertCircle, FileSpreadsheet,
   Boxes, ChefHat, Sparkles, Percent, LayoutGrid, List, Calendar,
-  Upload, Image as ImageIcon, Camera, Loader2
+  Upload, Image as ImageIcon, Camera, Loader2, Lock
 } from 'lucide-react';
 import { processGalleryImage } from '../utils/imageUpload';
 import { formatMoney, formatNumber } from '../i18n';
@@ -26,7 +26,8 @@ import {
   cleanPureBanglaName,
   markRawItemAsDeleted,
   unmarkRawItemAsDeleted,
-  DELETED_RAW_ITEMS_STORAGE_KEY
+  DELETED_RAW_ITEMS_STORAGE_KEY,
+  isProtectedRawItem
 } from '../utils/recipeManager';
 import { queuePushKeyToCloud } from '../utils/canteenCloudSync';
 import { SaveButton } from '../components/SaveButton';
@@ -937,7 +938,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
               }
               return m;
             });
-            const combined = [...(Array.isArray(prev) ? prev : []), ...resolvedMapped];
+            const combined = [...INITIAL_RAW_ITEMS, ...(Array.isArray(prev) ? prev : []), ...resolvedMapped];
             const { deduplicated } = deduplicateRawItems(combined);
             const dedupJson = JSON.stringify(deduplicated);
             if (dedupJson === lastSavedItemsJsonRef.current) {
@@ -1714,12 +1715,21 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
   };
 
   const handleDeleteItem = (item: RawInventoryItem) => {
+    if (isProtectedRawItem(item)) {
+      alert(`"${item.name}" (${item.nameBn}) একটি অপরিহার্য মৌলিক কাঁচামাল (Protected Core Item)। এটি ডিলিট করা সম্ভব নয় কারণ ক্যান্টিনের অন্যান্য মেনু ও রেসিপি এই উপাদানের ওপর নির্ভরশীল।`);
+      return;
+    }
     setItemToDelete(item);
   };
 
   const confirmAndDeleteItem = async () => {
     if (!itemToDelete) return;
     const target = itemToDelete;
+    if (isProtectedRawItem(target)) {
+      alert(`"${target.name}" (${target.nameBn}) একটি অপরিহার্য মৌলিক কাঁচামাল (Protected Core Item)। এটি ডিলিট করা সম্ভব নয়।`);
+      setItemToDelete(null);
+      return;
+    }
     setIsDeletingItem(true);
     try {
       // Mark as deleted in persistent blacklist to prevent re-seeding from initial items
@@ -2579,14 +2589,23 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                               >
                                 <Edit2 className="w-3.5 h-3.5" />
                               </button>
-                              <button
-                                type="button"
-                                onClick={() => setItemToDelete(item)}
-                                className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/20 transition-all cursor-pointer shadow-sm active:scale-95"
-                                title="Delete Item (আইটেম ডিলিট করুন)"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                              {isProtectedRawItem(item) ? (
+                                <span 
+                                  className="p-1.5 rounded-lg bg-slate-800/40 border border-slate-700/40 text-slate-500 cursor-not-allowed flex items-center justify-center" 
+                                  title="সুরক্ষিত মৌলিক উপাদান (Protected Core Item - Cannot be deleted)"
+                                >
+                                  <Lock className="w-3.5 h-3.5 text-slate-500" />
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setItemToDelete(item)}
+                                  className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/20 transition-all cursor-pointer shadow-sm active:scale-95"
+                                  title="Delete Item (আইটেম ডিলিট করুন)"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                             </div>
                           ) : (
                             <span className="text-slate-600 text-xs">-</span>
@@ -3179,16 +3198,23 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
 
                 <div className="flex items-center justify-between pt-3 border-t border-slate-800">
                   {editingItem ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        handleDeleteItem(editingItem);
-                      }}
-                      className="px-3.5 py-2 bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white rounded-xl text-xs font-bold transition-colors border border-rose-500/20 flex items-center space-x-1.5 cursor-pointer"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                      <span>Delete Item</span>
-                    </button>
+                    isProtectedRawItem(editingItem) ? (
+                      <div className="px-3 py-1.5 rounded-xl bg-slate-800/80 border border-slate-700/80 text-amber-300 text-xs font-bold flex items-center space-x-1.5 shadow-sm" title="This is a core kitchen item protected against accidental deletion">
+                        <Lock className="w-3.5 h-3.5 text-amber-400" />
+                        <span>সুরক্ষিত উপাদান (Protected)</span>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleDeleteItem(editingItem);
+                        }}
+                        className="px-3.5 py-2 bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white rounded-xl text-xs font-bold transition-colors border border-rose-500/20 flex items-center space-x-1.5 cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        <span>Delete Item</span>
+                      </button>
+                    )
                   ) : (
                     <div></div>
                   )}

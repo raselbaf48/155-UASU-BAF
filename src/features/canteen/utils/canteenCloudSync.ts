@@ -297,11 +297,14 @@ export async function performCanteenBackup(forceAll = false): Promise<boolean> {
     }
 
     const results = await Promise.allSettled(promises);
-    const hasFailures = results.some(r => r.status === 'rejected' || (r.status === 'fulfilled' && r.value === false));
+    const successfulKeys: string[] = [];
+    const failedKeys: string[] = [];
 
-    if (!hasFailures) {
-      // Clear backed up dirty keys and record their synced values
-      backedUpKeys.forEach(k => {
+    backedUpKeys.forEach((k, idx) => {
+      const res = results[idx];
+      const isSuccess = res && res.status === 'fulfilled' && res.value === true;
+      if (isSuccess) {
+        successfulKeys.push(k);
         dirtyCanteenKeys.delete(k);
         const valPushed = dirtyCanteenValues.get(k);
         dirtyCanteenValues.delete(k);
@@ -309,17 +312,21 @@ export async function performCanteenBackup(forceAll = false): Promise<boolean> {
           ? (typeof valPushed === 'string' ? valPushed : JSON.stringify(valPushed))
           : localStorage.getItem(k);
         if (raw) lastSyncedCloudHashes.set(k, raw);
-      });
-
-      if (dirtyCanteenKeys.size === 0) {
-        localStorage.removeItem('canteen_pending_sync');
+      } else {
+        failedKeys.push(k);
       }
+    });
 
-      const readableKeys = backedUpKeys
+    if (dirtyCanteenKeys.size === 0) {
+      localStorage.removeItem('canteen_pending_sync');
+    }
+
+    if (failedKeys.length === 0) {
+      const readableKeys = successfulKeys
         .map(k => k.replace(/^canteen_/, '').replace(/_/g, ' '))
         .slice(0, 4)
         .join(', ');
-      const moreCount = backedUpKeys.length > 4 ? ` +${backedUpKeys.length - 4} more` : '';
+      const moreCount = successfulKeys.length > 4 ? ` +${successfulKeys.length - 4} more` : '';
       const summaryMsg = `Uploaded changes (${readableKeys}${moreCount}) to Cloud database.`;
 
       addCanteenSyncLog({
@@ -333,11 +340,15 @@ export async function performCanteenBackup(forceAll = false): Promise<boolean> {
       isCanteenBackingUp = false;
       return true;
     } else {
+      const readableFails = failedKeys
+        .map(k => k.replace(/^canteen_/, '').replace(/_/g, ' '))
+        .slice(0, 3)
+        .join(', ');
       addCanteenSyncLog({
         timestamp: new Date().toISOString(),
         type: 'PUSH',
         status: 'ERROR',
-        message: 'Cloud backup partially failed. Will retry automatically.'
+        message: `Cloud backup retry needed for (${readableFails}). Auto-retrying.`
       });
 
       notifyStatus({ status: 'error', errorMessage: 'Sync failed' });
@@ -675,7 +686,7 @@ function mergeArrayData(localArr: any[], cloudArr: any[], keyField = 'id', keyNa
 /**
  * Push a specific key directly to Supabase app_settings Cloud table
  */
-export async function pushKeyToCloud(key: string, data: any): Promise<boolean> {
+export async function pushKeyToCloud(key: string, data: any, retryCount = 1): Promise<boolean> {
   try {
     const strVal = typeof data === 'string' ? data : JSON.stringify(data);
     const payload = {
@@ -689,12 +700,20 @@ export async function pushKeyToCloud(key: string, data: any): Promise<boolean> {
       .upsert(payload, { onConflict: 'setting_key' });
 
     if (error) {
+      if (retryCount > 0) {
+        await new Promise(r => setTimeout(r, 600));
+        return pushKeyToCloud(key, data, retryCount - 1);
+      }
       console.warn(`[CanteenCloudSync] Push error for ${key}:`, error);
       return false;
     }
     lastSyncedCloudHashes.set(key, strVal);
     return true;
   } catch (err) {
+    if (retryCount > 0) {
+      await new Promise(r => setTimeout(r, 600));
+      return pushKeyToCloud(key, data, retryCount - 1);
+    }
     console.warn(`[CanteenCloudSync] Network error pushing ${key}:`, err);
     return false;
   }

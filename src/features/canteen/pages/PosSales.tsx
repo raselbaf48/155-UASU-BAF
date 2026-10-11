@@ -10,7 +10,20 @@ import { resolveImageUrl, getItemDisplayName, getCanteenConfig, CanteenConfig } 
 import { formatCanteenDate, toYMDDate } from '../utils/dateUtils';
 import { getMenuItemBanglaName } from '../utils/menuBanglaNames';
 import { DateNavigator, getTodayYMD } from '../components/DateNavigator';
-import { deductRawStockForSales, getRawInventoryItems, calculateMenuItemStockInfo, getMenuRecipes } from '../utils/recipeManager';
+import { 
+  deductRawStockForSales, 
+  getRawInventoryItems, 
+  calculateMenuItemStockInfo, 
+  getMenuRecipes,
+  RawInventoryItem,
+  decodeNotesMeta,
+  deduplicateRawItems,
+  cleanPureBanglaName,
+  RAW_ITEMS_STORAGE_KEY,
+  INITIAL_RAW_ITEMS,
+  isReadymadeItem,
+  InventoryItemType
+} from '../utils/recipeManager';
 import { pushKeyToCloud } from '../utils/canteenCloudSync';
 import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
 import { playSuccessChime, playTrashPopSound } from '../utils/audioFeedback';
@@ -164,46 +177,69 @@ export const PosSales: React.FC = () => {
   const [editDate, setEditDate] = useState<string>('');
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
-  useEffect(() => {
-    const handleSyncStock = () => {
+  const fetchRawInventoryFromDb = async () => {
+    try {
+      const { data, error } = await supabase.from('Canteen_Inventory').select('*');
+      if (!error && data && data.length > 0) {
+        const mapped: RawInventoryItem[] = data.map((r: any) => {
+          const meta = decodeNotesMeta(r.notes);
+          const cleanNotes = (r.notes || '').replace(/<!--META:[\s\S]*?-->/g, '').trim();
+          const unit = r.unit || 'kg';
+          const isKg = unit.toLowerCase().trim() === 'kg';
+          const isLtr = unit.toLowerCase().trim() === 'liter';
+          const isCyl = ['cylinder', 'সিলিন্ডার'].includes(unit.toLowerCase().trim());
+          const rawSubUnit = r['Sub Unit'] ?? r.subUnit ?? r.sub_unit ?? meta.subUnit;
+          const itemDp = r.DP || r.dp || meta.dp || r.image || r.image_url || undefined;
+          const rawType = meta.itemType || r.itemType || r.item_type;
+          const itemType: InventoryItemType = (rawType === 'READY_MADE' || rawType === 'RAW')
+            ? rawType
+            : (isReadymadeItem({ ...r, notes: cleanNotes }) ? 'READY_MADE' : 'RAW');
+
+          return {
+            id: String(r.id),
+            name: r.name || '',
+            nameBn: cleanPureBanglaName(r.nameBn || r.name_bn || '') || r.name || '',
+            category: meta.category || r.category || 'Packaging & Disposables',
+            subCategory: meta.subCategory || r.subCategory || r.sub_category || '',
+            itemType,
+            unit: unit,
+            currentStock: Number(r.currentStock ?? r.current_stock ?? 0),
+            minStockAlert: Number(r.minStockAlert ?? r.min_stock_alert ?? 5),
+            unitCost: Number(r.unitCost ?? r.unit_cost ?? 0),
+            wastagePercentage: Number(r.wastagePercentage ?? r.wastage_percentage ?? 0),
+            lastRestockedDate: r.lastRestockedDate || r.last_restocked_date || '',
+            supplier: r.supplier || '',
+            notes: cleanNotes,
+            hasSubUnits: (isKg || isCyl) ? true : Boolean(meta.hasSubUnits ?? r.hasSubUnits ?? r.has_sub_units ?? Boolean(rawSubUnit) ?? (Number(r.packSize ?? r.pack_size) > 1)),
+            packSize: isKg ? (Number(meta.packSize ?? r.packSize ?? r.pack_size) > 1 ? Number(meta.packSize ?? r.packSize ?? r.pack_size) : 1000) : (isCyl ? (Number(meta.packSize ?? r.packSize ?? r.pack_size) > 1 ? Number(meta.packSize ?? r.packSize ?? r.pack_size) : 12) : Number(meta.packSize ?? r.packSize ?? r.pack_size ?? 1)),
+            subUnit: rawSubUnit || (isKg ? 'gm' : (isLtr ? 'ml' : (isCyl ? 'kg' : (meta.subUnit || r.subUnit || r.sub_unit || 'pcs')))),
+            dp: itemDp,
+            DP: itemDp,
+            image: itemDp
+          };
+        });
+        const { deduplicated } = deduplicateRawItems([...INITIAL_RAW_ITEMS, ...mapped]);
+        setRawInventory(deduplicated);
+        setRecipesMap(getMenuRecipes());
+        try {
+          localStorage.setItem(RAW_ITEMS_STORAGE_KEY, JSON.stringify(deduplicated));
+        } catch {}
+      } else {
+        setRawInventory(getRawInventoryItems());
+        setRecipesMap(getMenuRecipes());
+      }
+    } catch (e) {
+      console.warn('POS fetchRawInventoryFromDb note:', e);
       setRawInventory(getRawInventoryItems());
       setRecipesMap(getMenuRecipes());
-    };
-    const handleCfgUpdate = (e: any) => {
-      setCanteenConfig(e.detail || getCanteenConfig());
-    };
-    window.addEventListener('canteen_settings_updated', handleCfgUpdate);
-    window.addEventListener('canteen_raw_inventory_updated', handleSyncStock);
-    window.addEventListener('canteen_menu_recipes_updated', handleSyncStock);
-    window.addEventListener('storage', handleSyncStock);
-    window.addEventListener('storage', handleCfgUpdate);
-    return () => {
-      window.removeEventListener('canteen_settings_updated', handleCfgUpdate);
-      window.removeEventListener('canteen_raw_inventory_updated', handleSyncStock);
-      window.removeEventListener('canteen_menu_recipes_updated', handleSyncStock);
-      window.removeEventListener('storage', handleSyncStock);
-      window.removeEventListener('storage', handleCfgUpdate);
-    };
-  }, []);
-
-  // Members state
-  const [members, setMembers] = useState<any[]>(() => {
-    const cached = getCanteenMembersCache();
-    return cached
-      .filter((m: any) => {
-        const bd = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
-        return bd !== '48456';
-      })
-      .map((m: any) => ({
-        ...m,
-        Due: Number(m.Due ?? m.due ?? m.baki ?? 0),
-        baki: Number(m.Due ?? m.due ?? m.baki ?? 0)
-      }));
-  });
+    }
+  };
 
   useEffect(() => {
+    fetchRawInventoryFromDb();
     fetchCatalog();
     fetchMembers();
+
     const stored = localStorage.getItem('canteen_recent_members');
     if (stored) {
       try { setRecentMembers(JSON.parse(stored)); } catch(e){}
@@ -222,19 +258,61 @@ export const PosSales: React.FC = () => {
       const history = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
       setSalesHistory(history.filter((tx: any) => isSaleTransaction(tx)));
     };
+
+    const handleSyncStock = () => {
+      setRawInventory(getRawInventoryItems());
+      setRecipesMap(getMenuRecipes());
+    };
+    const handleCfgUpdate = (e: any) => {
+      setCanteenConfig(e.detail || getCanteenConfig());
+    };
+
+    window.addEventListener('canteen_settings_updated', handleCfgUpdate);
+    window.addEventListener('canteen_raw_inventory_updated', handleSyncStock);
+    window.addEventListener('canteen_menu_recipes_updated', handleSyncStock);
     window.addEventListener('canteen_inventory_updated', handleInventoryUpdated);
     window.addEventListener('canteen_menu_updated', handleInventoryUpdated);
     window.addEventListener('canteen_daily_menu_updated', handleInventoryUpdated);
     window.addEventListener('canteen_txs_updated', handleInventoryUpdated);
     window.addEventListener('canteen_state_updated', handleInventoryUpdated);
     window.addEventListener('storage', handleInventoryUpdated);
+    window.addEventListener('storage', handleSyncStock);
+    window.addEventListener('storage', handleCfgUpdate);
+
+    // Supabase Realtime Channels for 100% live synchronization with database
+    const channelName = `pos_realtime_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const channel = supabase
+      .channel(channelName)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'Canteen_Inventory' }, () => {
+        fetchRawInventoryFromDb();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'Canteen_Menu' }, () => {
+        fetchCatalog();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'Canteen_Member' }, () => {
+        fetchMembers();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'app_settings', filter: 'setting_key=eq.canteen_raw_inventory_items_v2' }, () => {
+        fetchRawInventoryFromDb();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'app_settings', filter: 'setting_key=eq.canteen_menu_recipes_v3' }, () => {
+        setRecipesMap(getMenuRecipes());
+      })
+      .subscribe();
+
     return () => {
+      supabase.removeChannel(channel);
+      window.removeEventListener('canteen_settings_updated', handleCfgUpdate);
+      window.removeEventListener('canteen_raw_inventory_updated', handleSyncStock);
+      window.removeEventListener('canteen_menu_recipes_updated', handleSyncStock);
       window.removeEventListener('canteen_inventory_updated', handleInventoryUpdated);
       window.removeEventListener('canteen_menu_updated', handleInventoryUpdated);
       window.removeEventListener('canteen_daily_menu_updated', handleInventoryUpdated);
       window.removeEventListener('canteen_txs_updated', handleInventoryUpdated);
       window.removeEventListener('canteen_state_updated', handleInventoryUpdated);
       window.removeEventListener('storage', handleInventoryUpdated);
+      window.removeEventListener('storage', handleSyncStock);
+      window.removeEventListener('storage', handleCfgUpdate);
     };
   }, []);
 
@@ -2471,6 +2549,22 @@ export const PosSales: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* POS Sales Bulk Import Modal */}
+      {showImportSalesModal && (
+        <ImportPosSalesModal
+          isOpen={showImportSalesModal}
+          onClose={() => setShowImportSalesModal(false)}
+          members={members}
+          catalog={catalog}
+          onImportComplete={() => {
+            const history = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+            setSalesHistory(history.filter((tx: any) => isSaleTransaction(tx)));
+            setToastMessage('POS sales imported successfully!');
+            setTimeout(() => setToastMessage(''), 3000);
+          }}
+        />
       )}
 
       {/* Toast Notification */}

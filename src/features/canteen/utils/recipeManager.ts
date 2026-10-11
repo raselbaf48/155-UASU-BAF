@@ -1494,12 +1494,44 @@ export const normalizeRawItemName = (name: string): string => {
   if (s.includes('porota') || s.includes('পরোটা')) return 'porota';
   if (s.includes('lemon') || s.includes('লেবু')) return 'lemon';
   if (s.includes('tea bag') || s.includes('টি ব্যাগ')) return 'tea-bag';
-  if (s.includes('chicken') || s.includes('মুরগি')) return 'chicken';
+  if (s.includes('chicken roll') || s.includes('চিকেন রোল')) return 'chicken-roll';
+  if (s.includes('chicken burger') || s.includes('চিকেন বার্গার')) return 'chicken-burger';
+  if (s.includes('chicken patties') || s.includes('চিকেন পেটিস')) return 'chicken-patties';
+  if (s.includes('chicken swarma') || s.includes('চিকেন শর্মা')) return 'chicken-swarma';
+  if (
+    s === 'chicken' ||
+    s === 'raw chicken' ||
+    s === 'chicken meat' ||
+    s === 'broiler chicken' ||
+    s === 'মুরগি' ||
+    s === 'মুরগির মাংস' ||
+    s === 'ব্রয়লার মুরগি' ||
+    s === 'ব্রয়লার মুরগির মাংস' ||
+    (s.includes('chicken') && !s.includes('roll') && !s.includes('burger') && !s.includes('pat') && !s.includes('swarma') && !s.includes('biscuit') && !s.includes('cake') && !s.includes('bread') && !s.includes('bun')) ||
+    (s.includes('মুরগি') && !s.includes('রোল') && !s.includes('বার্গার') && !s.includes('পেটিস') && !s.includes('শর্মা'))
+  ) return 'chicken';
   if (s.includes('rice') || s.includes('চাল')) return 'rice';
   if (s.includes('dal') || s.includes('ডাল')) return 'dal';
   if (s.includes('milk') || s.includes('দুধ')) return 'milk-powder';
   if (s.includes('noodle') || s.includes('নুডলস')) return 'noodles';
-  if (s.includes('egg') || s.includes('ডিম')) return 'egg';
+  if (s.includes('egg noodles') || s.includes('ডিম নুডলস')) return 'egg-noodles';
+  if (s.includes('egg khichuri') || s.includes('ডিম খিচুড়ি') || s.includes('ডিম খিচুড়ি')) return 'egg-khichuri';
+  if (s.includes('egg mumlet') || s.includes('egg omelet') || s.includes('egg omlet') || s.includes('ডিম ওমলেট') || s.includes('মামলেট')) return 'egg-mumlet';
+  if (s.includes('egg fry') || s.includes('ভাজি ডিম') || s.includes('ডিম ভাজি')) return 'egg-fry';
+  if (s.includes('egg poach') || s.includes('পোচ') || s.includes('ডিম পোচ')) return 'egg-poach';
+  if (s.includes('boiled egg') || s.includes('সিদ্ধ ডিম') || s.includes('ডিম সিদ্ধ')) return 'boiled-egg';
+  if (s.includes('egg pasta') || s.includes('ডিম পাস্তা')) return 'egg-pasta';
+  if (
+    s === 'egg' ||
+    s === 'raw egg' ||
+    s === 'eggs' ||
+    s === 'মুরগির ডিম' ||
+    s === 'ডিম' ||
+    s === 'লাল ডিম' ||
+    s === 'egg case' ||
+    (s.includes('egg') && !s.includes('roll') && !s.includes('noodle') && !s.includes('khich') && !s.includes('mumlet') && !s.includes('omlet') && !s.includes('fry') && !s.includes('poach') && !s.includes('pasta') && !s.includes('curry') && !s.includes('chop') && !s.includes('bread') && !s.includes('cake') && !s.includes('biscuit')) ||
+    (s.includes('ডিম') && !s.includes('নুডল') && !s.includes('খিচু') && !s.includes('ওমলেট') && !s.includes('মামলেট') && !s.includes('ভাজি') && !s.includes('পোচ') && !s.includes('সিদ্ধ') && !s.includes('পাস্তা') && !s.includes('কারী') && !s.includes('চপ'))
+  ) return 'egg';
   if (s.includes('oil') || s.includes('তেল')) return 'oil';
   if (s.includes('sugar') || s.includes('চিনি')) return 'sugar';
   if (s.includes('onion') || s.includes('পেঁয়াজ') || s.includes('পেয়াজ')) return 'onion';
@@ -1572,7 +1604,7 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
     const isPcs = u === 'pcs' || u === 'pc' || u === 'piece' || u === 'টি' || u === 'টা';
     const isKg = !isPcs && (['kg', 'kg.', 'কেজি', 'কে.জি.'].includes(u) || explicitSub === 'gm' || subCatLower.includes('kg'));
     const isLtr = !isPcs && (['liter', 'ltr', 'litre', 'l', 'লিটার'].includes(u) || explicitSub === 'ml' || subCatLower.includes('ltr'));
-    const isCase = !isPcs && (['case', 'crate', 'কেস', 'ক্রেট'].includes(u) || subCatLower.includes('case') || (key === 'egg'));
+    const isCase = !isPcs && (['case', 'crate', 'কেস', 'ক্রেট'].includes(u) || subCatLower.includes('case') || (key === 'egg' || key === 'canon_egg' || normKey === 'egg'));
     const isPacket = !isPcs && (['packet', 'box', 'pkt', 'bottle', 'cylinder', 'can', 'tin', 'jar', 'pack', 'প্যাকেট', 'বক্স', 'বোতল'].includes(u) || subCatLower.includes('packet'));
 
     const explicitHasSubUnits = item.hasSubUnits !== undefined 
@@ -1601,7 +1633,7 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
       subUnit = item.subUnit || explicitSub || 'ml';
       packSize = explicitPackSize > 1 ? explicitPackSize : 1000;
       hasSubUnits = true;
-    } else if (isCase || key === 'egg') {
+    } else if (isCase || key === 'egg' || key === 'canon_egg' || normKey === 'egg') {
       subCategory = item.subCategory || 'Case - Pcs';
       subUnit = item.subUnit || explicitSub || 'pcs';
       packSize = explicitPackSize > 1 ? explicitPackSize : 30;
@@ -1627,7 +1659,7 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
     const normalizedItem: RawInventoryItem = {
       ...item,
       nameBn: pureBn || item.nameBn || item.name,
-      unit: (isCase || key === 'egg') ? 'case' : item.unit,
+      unit: (isCase || key === 'egg' || key === 'canon_egg' || normKey === 'egg') ? 'case' : item.unit,
       subCategory: isPcs ? (item.subCategory || 'Pcs') : subCategory,
       hasSubUnits: isPcs ? false : hasSubUnits,
       packSize: isPcs ? 1 : (packSize || 1),
@@ -1635,7 +1667,7 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
     };
 
     if (!seenKeys.has(key)) {
-      if (key === 'egg') {
+      if (key === 'egg' || key === 'canon_egg' || normKey === 'egg') {
         const wasPcs = u === 'pcs';
         const eggPackSize = (item.packSize && item.packSize > 1) ? item.packSize : 30;
         const currentStock = wasPcs ? Math.round(((item.currentStock ?? 0) / eggPackSize) * 100) / 100 : (item.currentStock ?? 10);
@@ -1654,7 +1686,7 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
           minStockAlert,
           notes: normalizedItem.notes || 'Daily breakfast and snacks omelet supply (১ কেস = ৩০ পিস ডিম)'
         });
-      } else if (key === 'tea-bag') {
+      } else if (key === 'tea-bag' || key === 'canon_tea-bag' || normKey === 'tea-bag') {
         seenKeys.set(key, {
           ...normalizedItem,
           subCategory: 'Packet - Pcs',
@@ -1663,7 +1695,7 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
           hasSubUnits: true,
           notes: normalizedItem.notes || '১ প্যাকেটে ১০০ টি টি-ব্যাগ থাকে (1 packet = 100 pcs)'
         });
-      } else if (key === 'sandwich-bread') {
+      } else if (key === 'sandwich-bread' || key === 'canon_sandwich-bread' || normKey === 'sandwich-bread') {
         seenKeys.set(key, {
           ...normalizedItem,
           subCategory: 'Packet - Pcs',
@@ -1671,7 +1703,7 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
           subUnit: 'slice',
           hasSubUnits: true
         });
-      } else if (key === 'cucumber') {
+      } else if (key === 'cucumber' || key === 'canon_cucumber' || normKey === 'cucumber') {
         seenKeys.set(key, {
           ...normalizedItem,
           category: 'Vegetables',
@@ -1681,7 +1713,7 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
           subUnit: 'gm',
           hasSubUnits: true
         });
-      } else if (key === 'black-salt') {
+      } else if (key === 'black-salt' || key === 'canon_black-salt' || normKey === 'black-salt') {
         seenKeys.set(key, {
           ...normalizedItem,
           category: 'Oil & Spices',
@@ -1715,7 +1747,9 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
       const chosenSubCategory = normalizedItem.subCategory || existing.subCategory || (key === 'gas-cylinder' ? 'Gas Cylinder' : '');
 
       if (currentIsStandard && !existingIsStandard) {
-        removedIds.push(existing.id);
+        if (!isProtectedRawItem(existing)) {
+          removedIds.push(existing.id);
+        }
         const mergedUnit = normalizedItem.unit || existing.unit || 'kg';
         const mergedIsPcs = ['pcs', 'pc', 'piece', 'টি', 'টা'].includes(mergedUnit.toLowerCase().trim());
         const mergedItemType = normalizedItem.itemType || existing.itemType || (isReadymadeItem(normalizedItem) ? 'READY_MADE' : 'RAW');
@@ -1733,7 +1767,9 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
           hasSubUnits: mergedIsPcs ? false : (normalizedItem.hasSubUnits ?? existing.hasSubUnits)
         });
       } else {
-        removedIds.push(item.id);
+        if (!isProtectedRawItem(item)) {
+          removedIds.push(item.id);
+        }
         const mergedUnit = normalizedItem.unit || existing.unit || 'kg';
         const mergedIsPcs = ['pcs', 'pc', 'piece', 'টি', 'টা'].includes(mergedUnit.toLowerCase().trim());
         const mergedItemType = normalizedItem.itemType || existing.itemType || (isReadymadeItem(normalizedItem) ? 'READY_MADE' : 'RAW');
@@ -1823,12 +1859,34 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
 
 export const DELETED_RAW_ITEMS_STORAGE_KEY = 'canteen_deleted_raw_items_keys_v1';
 
+export const PROTECTED_RAW_ITEM_KEYS = new Set([
+  'chicken', 'raw-1', 'egg', 'raw-7', 'rice', 'raw-2', 'dal', 'raw-3',
+  'milk-powder', 'raw-4', 'tea-bag', 'raw-5', 'noodles', 'raw-6',
+  'oil', 'raw-12', 'sugar', 'raw-13', 'onion', 'raw-14', 'gas-cylinder', 'lpg', 'raw-16', 'salt', 'raw-27'
+]);
+
+export const isProtectedRawItem = (itemOrId: string | RawInventoryItem): boolean => {
+  if (!itemOrId) return false;
+  if (typeof itemOrId === 'string') {
+    const s = itemOrId.toLowerCase().trim();
+    return PROTECTED_RAW_ITEM_KEYS.has(s) || PROTECTED_RAW_ITEM_KEYS.has(normalizeRawItemName(s));
+  }
+  const idStr = String(itemOrId.id || '').toLowerCase().trim();
+  const nameNorm = normalizeRawItemName(itemOrId.name || '');
+  const bnNorm = normalizeRawItemName(itemOrId.nameBn || '');
+  return PROTECTED_RAW_ITEM_KEYS.has(idStr) || PROTECTED_RAW_ITEM_KEYS.has(nameNorm) || PROTECTED_RAW_ITEM_KEYS.has(bnNorm);
+};
+
 export const getDeletedRawItemKeys = (): Set<string> => {
   try {
     const stored = localStorage.getItem(DELETED_RAW_ITEMS_STORAGE_KEY);
     if (stored) {
       const arr = JSON.parse(stored);
-      if (Array.isArray(arr)) return new Set(arr);
+      if (Array.isArray(arr)) {
+        // Strip any protected items from the deleted keys set so they never stay blacklisted
+        const filtered = arr.filter((k: string) => !PROTECTED_RAW_ITEM_KEYS.has(String(k).toLowerCase()));
+        return new Set(filtered);
+      }
     }
   } catch {}
   return new Set();
@@ -1836,6 +1894,10 @@ export const getDeletedRawItemKeys = (): Set<string> => {
 
 export const markRawItemAsDeleted = (itemOrId: string | RawInventoryItem): void => {
   try {
+    if (isProtectedRawItem(itemOrId)) {
+      console.warn('Cannot mark protected core item as deleted:', itemOrId);
+      return;
+    }
     const deleted = getDeletedRawItemKeys();
     if (typeof itemOrId === 'string') {
       deleted.add(itemOrId.toLowerCase().trim());
@@ -1883,6 +1945,20 @@ export const getRawInventoryItems = (): RawInventoryItem[] => {
     // Merge newly added essential raw items if missing from inventory AND not explicitly deleted by user
     let hasAdded = false;
     const deletedKeys = getDeletedRawItemKeys();
+    // Safety auto-recovery: Never block core essential items (Egg, Chicken, Rice, etc.) from accidental deletion collisions
+    const protectedKeys = ['chicken', 'raw-1', 'egg', 'raw-7', 'rice', 'raw-2', 'milk-powder', 'raw-4', 'oil', 'raw-12', 'sugar', 'raw-13', 'onion', 'raw-14', 'lpg', 'raw-16'];
+    let changedDeleted = false;
+    for (const pk of protectedKeys) {
+      if (deletedKeys.has(pk)) {
+        deletedKeys.delete(pk);
+        changedDeleted = true;
+      }
+    }
+    if (changedDeleted) {
+      try {
+        localStorage.setItem(DELETED_RAW_ITEMS_STORAGE_KEY, JSON.stringify(Array.from(deletedKeys)));
+      } catch {}
+    }
     const currentKeys = new Set(deduplicated.map(it => normalizeRawItemName(it.name)));
     const currentIds = new Set(deduplicated.map(it => String(it.id || '').toLowerCase().trim()));
     for (const init of INITIAL_RAW_ITEMS) {
@@ -1908,10 +1984,6 @@ export const getRawInventoryItems = (): RawInventoryItem[] => {
     if (removedIds.length > 0 || hasAdded || cleanJson !== stored) {
       try {
         localStorage.setItem(RAW_ITEMS_STORAGE_KEY, cleanJson);
-        if (removedIds.length > 0) {
-          Promise.resolve(supabase.from('Canteen_Inventory').delete().in('id', removedIds))
-            .catch(err => console.warn('Cleaned duplicate raw items from DB:', err));
-        }
       } catch {}
     }
 

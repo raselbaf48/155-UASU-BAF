@@ -1434,12 +1434,15 @@ export const MemberDB: React.FC<MemberDBProps> = ({
         String(tx.items || '').includes('Changed amount from');
 
       if (!isInit) {
-        if (Array.isArray(tx.soldItems) && tx.soldItems.length > 0) {
+        if (tx.amount !== undefined && tx.amount !== null && !isNaN(Number(tx.amount)) && Number(tx.amount) > 0) {
+          salesTotal += Number(tx.amount);
+        } else if (Array.isArray(tx.soldItems) && tx.soldItems.length > 0) {
           const liveGross = tx.soldItems.reduce((sum: number, si: any) => {
             const name = String(si.menuItemName || si.name || '').trim();
             const qty = Number(si.qty || si.quantity || 1);
+            const recordedPrice = Number(si.price ?? si.rate ?? 0);
             const liveRate = lookupCatalogPrice(name, menuCatalog) || lookupCatalogPrice(si.name || '', menuCatalog);
-            const rate = liveRate > 0 ? liveRate : Number(si.price || si.rate || 0);
+            const rate = recordedPrice > 0 ? recordedPrice : (liveRate > 0 ? liveRate : 0);
             return sum + (rate * qty);
           }, 0);
           const discount = Number(tx.discount || 0);
@@ -2567,11 +2570,12 @@ export const MemberDB: React.FC<MemberDBProps> = ({
         tx.soldItems.forEach((si: any) => {
           const name = String(si.menuItemName || si.name || 'ক্যান্টিন খাদ্যদ্রব্য').trim();
           const qty = Number(si.qty || si.quantity || 1);
-          // Prioritize live catalog price so updated menu prices reflect dynamically on statements!
+          // Prioritize recorded purchase price so historical transactions stay accurate and match POS & DB Due!
+          const recordedPrice = Number(si.price ?? si.rate ?? 0);
           const idMatch = (si.menuItemId || si.id) ? (menuCatalog.find((c: any) => String(c.id) === String(si.menuItemId || si.id))) : null;
           const idRate = idMatch ? Number(idMatch.price ?? idMatch.Price) : 0;
           const liveCatRate = idRate > 0 ? idRate : (lookupCatalogPrice(name, menuCatalog) || lookupCatalogPrice(si.name || '', menuCatalog));
-          const itemRate = liveCatRate > 0 ? liveCatRate : Number(si.price || si.rate || 0);
+          const itemRate = recordedPrice > 0 ? recordedPrice : (liveCatRate > 0 ? liveCatRate : 0);
           const itemTotal = itemRate > 0 ? itemRate * qty : (Number(tx.amount || 0) / (tx.soldItems.length || 1));
 
           if (!itemMap.has(name)) {
@@ -4162,10 +4166,11 @@ export const MemberDB: React.FC<MemberDBProps> = ({
         tx.soldItems.forEach((si: any) => {
           const name = String(si.menuItemName || si.name || 'ক্যান্টিন খাদ্যদ্রব্য').trim();
           const qty = Number(si.qty || si.quantity || 1);
+          const recordedPrice = Number(si.price ?? si.rate ?? 0);
           const idMatch = (si.menuItemId || si.id) ? (menuCatalog.find((c: any) => String(c.id) === String(si.menuItemId || si.id))) : null;
           const idRate = idMatch ? Number(idMatch.price ?? idMatch.Price) : 0;
           const liveCatRate = idRate > 0 ? idRate : (lookupCatalogPrice(name, menuCatalog) || lookupCatalogPrice(si.name || '', menuCatalog));
-          const itemRate = liveCatRate > 0 ? liveCatRate : Number(si.price || si.rate || 0);
+          const itemRate = recordedPrice > 0 ? recordedPrice : (liveCatRate > 0 ? liveCatRate : 0);
           const itemTotal = itemRate > 0 ? itemRate * qty : (Number(tx.amount || 0) / (tx.soldItems.length || 1));
           addItem(name, qty, itemTotal, itemRate);
         });
