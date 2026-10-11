@@ -204,7 +204,10 @@ export const CanteenMemberDB: React.FC = () => {
   const isDuplicateAddBd = useMemo(() => {
     const clean = String(singleMember.bdNo || '').replace(/\D/g, '').trim();
     if (!clean) return false;
-    return members.some(m => String(m['BD No'] || '').replace(/\D/g, '') === clean);
+    return members.some(m => {
+      const mBd = String(m['BD No'] || m.bdNo || m.airman_id || '').replace(/\D/g, '');
+      return mBd === clean;
+    });
   }, [singleMember.bdNo, members]);
 
   const isDuplicateEditBd = useMemo(() => {

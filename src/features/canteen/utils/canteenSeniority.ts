@@ -426,23 +426,53 @@ export const isAirmanMember = (member: any): boolean => {
  */
 export const isTxBelongingToMember = (member: any, tx: any): boolean => {
   if (!member || !tx) return false;
+
+  // 1st Priority: BD Number
+  // Multiple members can share the same Name/Rank (e.g., multiple "Jahid"),
+  // but BD Numbers are strictly unique and must never cross-match.
+  const mBdClean = String(member['BD No'] || member.bdNo || member.bd_no || '').replace(/\D/g, '');
+  const txBdClean = String(tx.bdNo || tx['BD No'] || tx.bd_no || '').replace(/\D/g, '');
+  const mBdCleanNoZero = mBdClean.replace(/^0+/, '');
+  const txBdCleanNoZero = txBdClean.replace(/^0+/, '');
+
+  if (mBdClean && txBdClean) {
+    return mBdClean === txBdClean || (mBdCleanNoZero && mBdCleanNoZero === txBdCleanNoZero);
+  }
+
+  // If member has a BD number, but transaction has no explicit BD field:
+  if (mBdClean && !txBdClean) {
+    if (tx.memberName) {
+      const txName = String(tx.memberName).toLowerCase();
+      // Match ONLY if transaction memberName explicitly states this member's BD number
+      if (
+        txName.includes(`bd/${mBdClean}`) ||
+        txName.includes(`bd-${mBdClean}`) ||
+        txName.includes(`bd ${mBdClean}`) ||
+        (mBdCleanNoZero && (txName.includes(`bd/${mBdCleanNoZero}`) || txName.includes(`bd ${mBdCleanNoZero}`)))
+      ) {
+        return true;
+      }
+    }
+    // Member has a BD number, so NEVER match by surname alone!
+    return false;
+  }
+
+  // If transaction has a BD number, but member does not:
+  if (!mBdClean && txBdClean) {
+    return false;
+  }
+
+  // Airman ID match only when neither record had a clean BD number
   const mAirman = String(member.airman_id || member.airmanId || '').trim().toLowerCase();
   const txAirman = String(tx.airman_id || tx.airmanId || '').trim().toLowerCase();
   if (mAirman && txAirman && mAirman === txAirman) return true;
 
-  const mBdClean = String(member['BD No'] || member.bdNo || member.bd_no || member.airman_id || '').replace(/\D/g, '');
-  const txBdClean = String(tx.bdNo || tx['BD No'] || tx.bd_no || tx.airman_id || '').replace(/\D/g, '');
-  const mBdCleanNoZero = mBdClean.replace(/^0+/, '');
-  const txBdCleanNoZero = txBdClean.replace(/^0+/, '');
-  if (mBdClean && txBdClean && (mBdClean === txBdClean || (mBdCleanNoZero && mBdCleanNoZero === txBdCleanNoZero))) {
-    return true;
-  }
-
+  // Fallback: only when NEITHER member NOR transaction has any BD number
   const mSurname = String(member['Surname'] || member.surname || '').trim().toLowerCase();
   const mRank = String(member['Rank'] || member.rank || '').trim().toLowerCase();
   if (mSurname && tx.memberName) {
     const txName = String(tx.memberName).toLowerCase();
-    if (txName.includes(mSurname) && (!mRank || txName.includes(mRank))) {
+    if (txName.includes(mSurname) && (!mRank || mRank === '-' || txName.includes(mRank))) {
       return true;
     }
   }

@@ -202,7 +202,7 @@ function findMemberByRankAndName(rankVal: string, nameVal: string, members: any[
 
   const bdMatch = cleanName.match(/\b(\d{4,7})\b/) || cleanRank.match(/\b(\d{4,7})\b/);
   if (bdMatch) {
-    const mem = members.find(m => String(m['BD No'] || m.airman_id || '').includes(bdMatch[1]));
+    const mem = members.find(m => String(m['BD No'] || m.airman_id || '').replace(/\D/g, '') === bdMatch[1]);
     if (mem) return mem;
   }
 
@@ -374,9 +374,12 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
   };
 
   // Generate and download Template 2: Date-wise Matrix Template (Member Fixed, Left: 1-31 Date)
-  const handleDownloadDateWiseMatrixTemplate = (overrideMemberId?: string) => {
+  const handleDownloadDateWiseMatrixTemplate = (overrideMemberId?: any) => {
     try {
-      const targetMemberId = overrideMemberId || dateTemplateMemberId;
+      const rawTarget = (typeof overrideMemberId === 'string' && overrideMemberId.trim()) 
+        ? overrideMemberId 
+        : dateTemplateMemberId;
+      const targetMemberId = String(rawTarget || 'ALL').trim();
       const sortedMembers = sortCanteenMembersByOfficeSeniority(members);
       const workbook = XLSX.utils.book_new();
       const daysInMonth = 31; // Monthly 31-day ledger
@@ -393,7 +396,14 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
       // If specific member selected, generate single sheet. If ALL, generate for unit members
       let membersToGenerate: any[] = [];
       if (targetMemberId && targetMemberId !== 'ALL') {
-        const found = sortedMembers.find(m => String(m.airman_id || m['BD No'] || '').toLowerCase() === targetMemberId.toLowerCase());
+        const targetLower = targetMemberId.toLowerCase();
+        const found = sortedMembers.find(m => {
+          const mId = String(m.airman_id || '').toLowerCase();
+          const mBd = String(m['BD No'] || '').toLowerCase();
+          const mCleanBd = mBd.replace(/\D/g, '');
+          const targetClean = targetLower.replace(/\D/g, '');
+          return mId === targetLower || mBd === targetLower || (targetClean && mCleanBd === targetClean);
+        });
         membersToGenerate = found ? [found] : sortedMembers.slice(0, 10);
       } else {
         membersToGenerate = sortedMembers.slice(0, Math.min(15, sortedMembers.length));
@@ -762,7 +772,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             let matchedMem = null;
             if (fixedBd) {
               const cleanBd = fixedBd.replace(/\D/g, '');
-              matchedMem = members.find(m => String(m['BD No'] || m.airman_id || '').replace(/\D/g, '').includes(cleanBd));
+              matchedMem = members.find(m => String(m['BD No'] || m.airman_id || '').replace(/\D/g, '') === cleanBd);
             }
             if (!matchedMem && (fixedName || fixedRank)) {
               matchedMem = findMemberByRankAndName(fixedRank, fixedName, members);
@@ -1194,7 +1204,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             {/* Template 2: Date-wise Matrix (Member Fixed, Left: 1-31 Date) */}
             <button
               type="button"
-              onClick={handleDownloadDateWiseMatrixTemplate}
+              onClick={() => handleDownloadDateWiseMatrixTemplate()}
               className="flex items-center space-x-1.5 px-3 py-1.5 bg-teal-900/80 hover:bg-teal-800 text-teal-200 border border-teal-500/50 rounded-xl text-xs font-black tracking-wider transition-all shadow-sm cursor-pointer"
               title="Template 2: Date-wise (Member fixed, Left: 1-31 Date)"
             >

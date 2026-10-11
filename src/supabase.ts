@@ -88,7 +88,7 @@ if (!isSupabaseConfigured) {
 // so we don't repeat failed network attempts and spam console warnings
 let isDirectFetchBlocked = false;
 
-const fetchWithTimeout = async (url: RequestInfo | URL, init?: RequestInit, ms = 4500): Promise<Response> => {
+const fetchWithTimeout = async (url: RequestInfo | URL, init?: RequestInit, ms = 20000): Promise<Response> => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
   try {
@@ -136,33 +136,35 @@ const smartFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
     // 1. Try direct fetch first (standard CORS, fast, native)
     if (!isDirectFetchBlocked) {
       try {
-        const directRes = await fetchWithTimeout(input, modifiedInit, 4500);
+        const directRes = await fetchWithTimeout(input, modifiedInit, 18000);
         if (directRes.ok || (directRes.status >= 200 && directRes.status < 500)) {
           return directRes;
         }
-      } catch {
-        // Direct fetch failed or blocked by CORS / Adblocker
-        isDirectFetchBlocked = true;
+      } catch (err: any) {
+        // Only mark direct fetch as blocked if it is a true TypeError (CORS/Adblocker), not an AbortError timeout
+        if (err?.name !== 'AbortError') {
+          isDirectFetchBlocked = true;
+        }
       }
     }
 
     // 2. Try proxy fetch
     try {
-      const proxyRes = await fetchWithTimeout(proxyUrl, modifiedInit, 4500);
-      return proxyRes;
+      const proxyRes = await fetchWithTimeout(proxyUrl, modifiedInit, 20000);
+      if (proxyRes.ok || (proxyRes.status >= 200 && proxyRes.status < 500)) {
+        return proxyRes;
+      }
     } catch {
       // Proxy timed out or unavailable
     }
 
-    // 3. Fallback: try direct fetch once more if proxy failed
-    if (isDirectFetchBlocked) {
-      try {
-        const fallbackRes = await fetchWithTimeout(input, modifiedInit, 3000);
-        isDirectFetchBlocked = false;
-        return fallbackRes;
-      } catch {
-        // Still unreachable
-      }
+    // 3. Fallback: try direct fetch once more if proxy failed or returned 503
+    try {
+      const fallbackRes = await fetchWithTimeout(input, modifiedInit, 15000);
+      isDirectFetchBlocked = false;
+      return fallbackRes;
+    } catch {
+      // Still unreachable
     }
 
     // 4. Safe offline synthetic response: guarantees no uncaught TypeError exceptions

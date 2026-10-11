@@ -2084,7 +2084,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
         if (!airmanMap.has(txAirman)) airmanMap.set(txAirman, []);
         airmanMap.get(txAirman)!.push(tx);
       }
-      const txBdClean = String(tx.bdNo || tx['BD No'] || tx.bd_no || tx.airman_id || '').replace(/\D/g, '');
+      const txBdClean = String(tx.bdNo || tx['BD No'] || tx.bd_no || '').replace(/\D/g, '');
       const txBdNoZero = txBdClean.replace(/^0+/, '');
       if (txBdClean) {
         if (!bdMap.has(txBdClean)) bdMap.set(txBdClean, []);
@@ -2100,27 +2100,24 @@ export const MemberDB: React.FC<MemberDBProps> = ({
   }, [allTxs]);
 
   // Helper to filter all transactions belonging to a specific member safely
+  // 1st Priority: BD Number
+  // Multiple members can share the same name (e.g. multiple "Jahid"),
+  // but BD Numbers are strictly unique and must never cross-match.
   const filterMemberTxs = (member: any, txs: any[]): any[] => {
     if (!member || !Array.isArray(txs)) return [];
 
-    if (txs === allTxs) {
-      const mAirman = String(member.airman_id || member.airmanId || '').trim().toLowerCase();
-      const mBdClean = String(member['BD No'] || member.bdNo || member.bd_no || member.airman_id || '').replace(/\D/g, '');
-      const mBdCleanNoZero = mBdClean.replace(/^0+/, '');
+    const mBdClean = String(member['BD No'] || member.bdNo || member.bd_no || '').replace(/\D/g, '');
+    const mBdCleanNoZero = mBdClean.replace(/^0+/, '');
+    const mAirman = String(member.airman_id || member.airmanId || '').trim().toLowerCase();
+    const mSurname = String(member['Surname'] || member.surname || '').trim().toLowerCase();
+    const mRank = String(member['Rank'] || member.rank || '').trim().toLowerCase();
 
+    // Fast indexed path when checking allTxs and member has a clean BD Number
+    if (txs === allTxs && mBdClean) {
       const foundTxs: any[] = [];
       const seenTxIds = new Set<string>();
 
-      if (mAirman && txIndex.airmanMap.has(mAirman)) {
-        txIndex.airmanMap.get(mAirman)!.forEach(t => {
-          if (t && t.id && !seenTxIds.has(String(t.id))) {
-            seenTxIds.add(String(t.id));
-            foundTxs.push(t);
-          }
-        });
-      }
-
-      if (mBdClean && txIndex.bdMap.has(mBdClean)) {
+      if (txIndex.bdMap.has(mBdClean)) {
         txIndex.bdMap.get(mBdClean)!.forEach(t => {
           if (t && t.id && !seenTxIds.has(String(t.id))) {
             seenTxIds.add(String(t.id));
@@ -2138,24 +2135,62 @@ export const MemberDB: React.FC<MemberDBProps> = ({
         });
       }
 
-      if (foundTxs.length > 0) return foundTxs;
-    }
+      // Also check transactions without explicit bdNo but memberName has `BD/<number>`
+      txs.forEach((tx: any) => {
+        if (!tx || isAdvanceRelated(tx) || seenTxIds.has(String(tx.id))) return;
+        const txBdClean = String(tx.bdNo || tx['BD No'] || tx.bd_no || '').replace(/\D/g, '');
+        if (!txBdClean && tx.memberName) {
+          const txName = String(tx.memberName).toLowerCase();
+          if (
+            txName.includes(`bd/${mBdClean}`) ||
+            txName.includes(`bd-${mBdClean}`) ||
+            txName.includes(`bd ${mBdClean}`) ||
+            (mBdCleanNoZero && (txName.includes(`bd/${mBdCleanNoZero}`) || txName.includes(`bd ${mBdCleanNoZero}`)))
+          ) {
+            seenTxIds.add(String(tx.id));
+            foundTxs.push(tx);
+          }
+        }
+      });
 
-    const mAirman = String(member.airman_id || member.airmanId || '').trim().toLowerCase();
-    const mBdClean = String(member['BD No'] || member.bdNo || member.bd_no || member.airman_id || '').replace(/\D/g, '');
-    const mBdCleanNoZero = mBdClean.replace(/^0+/, '');
-    const mSurname = String(member['Surname'] || member.surname || '').trim().toLowerCase();
-    const mRank = String(member['Rank'] || member.rank || '').trim().toLowerCase();
+      return foundTxs;
+    }
 
     return txs.filter((tx: any) => {
       if (!tx || isAdvanceRelated(tx)) return false;
+
+      const txBdClean = String(tx.bdNo || tx['BD No'] || tx.bd_no || '').replace(/\D/g, '');
+      const txBdCleanNoZero = txBdClean.replace(/^0+/, '');
+
+      if (mBdClean && txBdClean) {
+        return mBdClean === txBdClean || (mBdCleanNoZero && mBdCleanNoZero === txBdCleanNoZero);
+      }
+
+      if (mBdClean && !txBdClean) {
+        if (tx.memberName) {
+          const txName = String(tx.memberName).toLowerCase();
+          if (
+            txName.includes(`bd/${mBdClean}`) ||
+            txName.includes(`bd-${mBdClean}`) ||
+            txName.includes(`bd ${mBdClean}`) ||
+            (mBdCleanNoZero && (txName.includes(`bd/${mBdCleanNoZero}`) || txName.includes(`bd ${mBdCleanNoZero}`)))
+          ) {
+            return true;
+          }
+        }
+        // Member has BD Number -> NEVER cross match by surname alone
+        return false;
+      }
+
+      if (!mBdClean && txBdClean) {
+        return false;
+      }
+
+      // Airman ID match only when neither record had a clean BD number
       const txAirman = String(tx.airman_id || tx.airmanId || '').trim().toLowerCase();
       if (mAirman && txAirman && mAirman === txAirman) return true;
 
-      const txBdClean = String(tx.bdNo || tx['BD No'] || tx.bd_no || tx.airman_id || '').replace(/\D/g, '');
-      const txBdCleanNoZero = txBdClean.replace(/^0+/, '');
-      if (mBdClean && txBdClean && (mBdClean === txBdClean || (mBdCleanNoZero && mBdCleanNoZero === txBdCleanNoZero))) return true;
-
+      // Fallback: only when neither member nor transaction has any BD number
       if (mSurname && tx.memberName) {
         const txName = String(tx.memberName).toLowerCase();
         if (txName.includes(mSurname) && (!mRank || mRank === '-' || txName.includes(mRank))) {
@@ -3176,7 +3211,10 @@ export const MemberDB: React.FC<MemberDBProps> = ({
       if (txBd && mBd && txBd.toLowerCase() === mBd.toLowerCase()) return true;
       const txBdClean = txBd.replace(/\D/g, '');
       const mBdClean = mBd.replace(/\D/g, '');
-      if (txBdClean && mBdClean && txBdClean === mBdClean) return true;
+      if (txBdClean && mBdClean) {
+        if (txBdClean === mBdClean) return true;
+        return false;
+      }
       const txName = String(txToRemove.memberName || txToRemove.name || '').trim().toLowerCase();
       const mSurname = String(m.Surname || m.surname || '').trim().toLowerCase();
       if (txName && mSurname && (txName.includes(mSurname) || mSurname.includes(txName))) return true;

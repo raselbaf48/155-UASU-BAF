@@ -497,9 +497,15 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
             const myTxs = txs.filter((tx: any) => {
               const txAid = String(tx.airman_id || '');
               const txBd = String(tx.bdNo || '');
-              return matchKeys.includes(txAid) || 
-                     matchKeys.includes(txBd) || 
-                     (cleanBd && (txAid.includes(cleanBd) || txBd.includes(cleanBd)));
+              const txCleanBd = txBd.replace(/\D/g, '');
+              const txCleanAid = txAid.replace(/\D/g, '');
+              if (cleanBd && txCleanBd) {
+                return cleanBd === txCleanBd;
+              }
+              if (cleanBd && txCleanAid) {
+                return cleanBd === txCleanAid;
+              }
+              return matchKeys.includes(txAid) || matchKeys.includes(txBd);
             }).map((tx: any) => {
               const isPayment = tx.type === 'BILL PAYMENT' || tx.type === 'PAYMENT' || (typeof tx.items === 'string' && tx.items.toUpperCase().includes('BILL PAYMENT'));
               return {

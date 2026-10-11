@@ -586,14 +586,14 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
       <div className="fixed bottom-10 right-10 w-72 h-72 bg-sky-600/10 rounded-full blur-3xl pointer-events-none z-0 print:hidden" />
       
       {/* Content Area */}
-      <div className={`w-full ${(activeTab === 'Nt Count' || (activeTab === 'Canteen' && isCanteenAuth)) ? 'flex-1 z-10 p-0 m-0' : 'max-w-[360px] sm:max-w-[380px] relative z-10'}`}>
+      <div className={`w-full ${(activeTab === 'Nt Count' || (activeTab === 'Canteen' && isCanteenAuth)) ? 'flex-1 z-10 p-0 m-0' : 'max-w-[325px] sm:max-w-[340px] relative z-10'}`}>
         
         {(activeTab === 'Office' || (activeTab === 'Canteen' && !isCanteenAuth)) && (
-          <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-800 rounded-2xl p-6 sm:p-7 shadow-2xl space-y-5 text-white text-center mb-16">
+          <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-2xl space-y-4 sm:space-y-5 text-white text-center mb-16">
             {/* Header */}
             <div className="flex flex-col items-center space-y-2.5">
               <div className="flex items-center justify-center p-1">
-                <Logo155UASU size="md" />
+                <Logo155UASU size="lg" />
               </div>
               <div>
                 <div className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-500/30 text-emerald-400 text-[10px] font-black uppercase tracking-widest mb-1">

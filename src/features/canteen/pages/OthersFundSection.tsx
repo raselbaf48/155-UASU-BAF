@@ -13,6 +13,7 @@ import {
   OthersFundExpense, 
   OthersFundTransfer 
 } from '../types/fundTypes';
+import { pushKeyToCloud, pullKeyFromCloud } from '../utils/canteenCloudSync';
 
 const OTHERS_CATEGORIES_KEY = 'baf_others_fund_categories';
 const OTHERS_INFLOWS_KEY = 'baf_others_fund_inflows';
@@ -104,15 +105,27 @@ export const OthersFundSection: React.FC = () => {
 
   const loadData = () => {
     try {
+      const isCustomized = localStorage.getItem('baf_others_fund_categories_customized') === 'true';
+      const deletedSet = new Set<string>();
+      try {
+        const d = JSON.parse(localStorage.getItem('baf_deleted_others_fund_categories') || '[]');
+        if (Array.isArray(d)) d.forEach(x => deletedSet.add(String(x).trim()));
+      } catch {}
+
       const rawCats = localStorage.getItem(OTHERS_CATEGORIES_KEY);
       if (rawCats) {
         const parsed = JSON.parse(rawCats);
-        const cleaned = Array.isArray(parsed) ? parsed.map(sanitizeCategory) : DEFAULT_CATEGORIES;
+        const cleaned = Array.isArray(parsed) 
+          ? parsed.map(sanitizeCategory).filter(c => !deletedSet.has(String(c.id).trim()) && !deletedSet.has(String(c.name).trim())) 
+          : (isCustomized ? [] : DEFAULT_CATEGORIES.filter(c => !deletedSet.has(String(c.id).trim()) && !deletedSet.has(String(c.name).trim())));
         setCategories(cleaned);
         localStorage.setItem(OTHERS_CATEGORIES_KEY, JSON.stringify(cleaned));
+      } else if (!isCustomized) {
+        const initial = DEFAULT_CATEGORIES.filter(c => !deletedSet.has(String(c.id).trim()) && !deletedSet.has(String(c.name).trim()));
+        setCategories(initial);
+        localStorage.setItem(OTHERS_CATEGORIES_KEY, JSON.stringify(initial));
       } else {
-        setCategories(DEFAULT_CATEGORIES);
-        localStorage.setItem(OTHERS_CATEGORIES_KEY, JSON.stringify(DEFAULT_CATEGORIES));
+        setCategories([]);
       }
     } catch {
       setCategories(DEFAULT_CATEGORIES);
@@ -142,6 +155,36 @@ export const OthersFundSection: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    (async () => {
+      try {
+        const [cloudCats, cloudDeleted] = await Promise.all([
+          pullKeyFromCloud(OTHERS_CATEGORIES_KEY),
+          pullKeyFromCloud('baf_deleted_others_fund_categories')
+        ]);
+
+        const deletedSet = new Set<string>();
+        try {
+          const localDel = JSON.parse(localStorage.getItem('baf_deleted_others_fund_categories') || '[]');
+          if (Array.isArray(localDel)) localDel.forEach(d => deletedSet.add(String(d).trim()));
+        } catch {}
+        if (Array.isArray(cloudDeleted)) {
+          cloudDeleted.forEach(d => deletedSet.add(String(d).trim()));
+          try {
+            localStorage.setItem('baf_deleted_others_fund_categories', JSON.stringify(Array.from(deletedSet)));
+          } catch {}
+        }
+
+        if (Array.isArray(cloudCats)) {
+          const cleaned = cloudCats
+            .map(sanitizeCategory)
+            .filter(c => !deletedSet.has(String(c.id).trim()) && !deletedSet.has(String(c.name).trim()));
+          setCategories(cleaned);
+          localStorage.setItem(OTHERS_CATEGORIES_KEY, JSON.stringify(cleaned));
+          localStorage.setItem('baf_others_fund_categories_customized', 'true');
+        }
+      } catch {}
+    })();
+
     const handleSync = () => loadData();
     window.addEventListener('others_fund_updated', handleSync);
     window.addEventListener('storage', handleSync);
@@ -253,11 +296,59 @@ export const OthersFundSection: React.FC = () => {
 
     const updated = [...categories, newCategory];
     setCategories(updated);
-    localStorage.setItem(OTHERS_CATEGORIES_KEY, JSON.stringify(updated));
+
+    // Un-delete if this name or id was previously deleted
+    const currentDeleted: string[] = (() => {
+      try {
+        const d = localStorage.getItem('baf_deleted_others_fund_categories');
+        return d ? JSON.parse(d) : [];
+      } catch { return []; }
+    })();
+    const updatedDeleted = currentDeleted.filter(x => x !== newCategory.id && x !== newCategory.name);
+
+    try {
+      localStorage.setItem(OTHERS_CATEGORIES_KEY, JSON.stringify(updated));
+      localStorage.setItem('baf_others_fund_categories_customized', 'true');
+      localStorage.setItem('baf_deleted_others_fund_categories', JSON.stringify(updatedDeleted));
+    } catch {}
+    pushKeyToCloud(OTHERS_CATEGORIES_KEY, updated).catch(() => {});
+    pushKeyToCloud('baf_deleted_others_fund_categories', updatedDeleted).catch(() => {});
     triggerUpdate();
     setShowNewCategoryModal(false);
     setNewCatName('');
     showToast(`"${newCategory.name}" fund created successfully!`);
+  };
+
+  // Delete / Remove Category
+  const handleDeleteCategory = (e: React.MouseEvent, catId: string, catName: string) => {
+    e.stopPropagation();
+    if (!window.confirm(`Are you sure you want to remove the category "${catName}"?`)) {
+      return;
+    }
+    const updated = categories.filter(c => c.id !== catId);
+    setCategories(updated);
+
+    // Add to deleted list permanently
+    const currentDeleted: string[] = (() => {
+      try {
+        const d = localStorage.getItem('baf_deleted_others_fund_categories');
+        return d ? JSON.parse(d) : [];
+      } catch { return []; }
+    })();
+    const updatedDeleted = Array.from(new Set([...currentDeleted, catId, catName]));
+
+    try {
+      localStorage.setItem(OTHERS_CATEGORIES_KEY, JSON.stringify(updated));
+      localStorage.setItem('baf_others_fund_categories_customized', 'true');
+      localStorage.setItem('baf_deleted_others_fund_categories', JSON.stringify(updatedDeleted));
+    } catch {}
+    pushKeyToCloud(OTHERS_CATEGORIES_KEY, updated).catch(() => {});
+    pushKeyToCloud('baf_deleted_others_fund_categories', updatedDeleted).catch(() => {});
+    if (selectedFundId === catId) {
+      setSelectedFundId('ALL');
+    }
+    triggerUpdate();
+    showToast(`"${catName}" category removed successfully! It will not return.`);
   };
 
   // Add Inflow
@@ -617,21 +708,30 @@ export const OthersFundSection: React.FC = () => {
           const bal = getFundBalance(cat.id);
           const isSelected = selectedFundId === cat.id;
           return (
-            <button
-              key={cat.id}
-              type="button"
-              onClick={() => setSelectedFundId(cat.id)}
-              className={`px-4 py-2 rounded-2xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 shrink-0 cursor-pointer ${
-                isSelected
-                  ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 shadow-lg shadow-amber-500/30 scale-102'
-                  : 'bg-slate-800/90 text-slate-400 hover:text-white border border-slate-700'
-              }`}
-            >
-              <span>{cat.name.split('(')[0].trim()}</span>
-              <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono ${isSelected ? 'bg-slate-950/30 text-slate-950 font-bold' : 'bg-slate-900/60 text-amber-400'}`}>
-                ৳{bal.total.toLocaleString('en-US')}
-              </span>
-            </button>
+            <div key={cat.id} className="relative group shrink-0">
+              <button
+                type="button"
+                onClick={() => setSelectedFundId(cat.id)}
+                className={`px-4 py-2 pr-8 rounded-2xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2 shrink-0 cursor-pointer ${
+                  isSelected
+                    ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 shadow-lg shadow-amber-500/30 scale-102'
+                    : 'bg-slate-800/90 text-slate-400 hover:text-white border border-slate-700'
+                }`}
+              >
+                <span>{cat.name.split('(')[0].trim()}</span>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono ${isSelected ? 'bg-slate-950/30 text-slate-950 font-bold' : 'bg-slate-900/60 text-amber-400'}`}>
+                  ৳{bal.total.toLocaleString('en-US')}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={(e) => handleDeleteCategory(e, cat.id, cat.name)}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded-full text-slate-400 hover:text-rose-400 hover:bg-slate-950/80 transition-colors cursor-pointer opacity-70 group-hover:opacity-100"
+                title={`Remove ${cat.name}`}
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
           );
         })}
       </div>

@@ -184,9 +184,17 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
       const txs = JSON.parse(txsStr);
       if (Array.isArray(txs) && cleanBd) {
         const cleanBdLower = cleanBd.toLowerCase();
+        const cleanBdDigits = cleanBd.replace(/\D/g, '');
         const userTxs = txs.filter((t: any) => {
-          const tBd = String(t.bdNo || t.airman_id || '').replace(/^BD\/?/i, '').trim().toLowerCase();
-          return tBd === cleanBdLower || (t.airman_id && String(t.airman_id).toLowerCase().includes(cleanBdLower));
+          const tBd = String(t.bdNo || t['BD No'] || '').replace(/\D/g, '');
+          const tAid = String(t.airman_id || '').trim().toLowerCase();
+          if (cleanBdDigits && tBd) {
+            return tBd === cleanBdDigits;
+          }
+          if (tAid && (tAid === `airman-${cleanBdLower}` || tAid === `bd/${cleanBdLower}` || tAid === cleanBdLower)) {
+            return true;
+          }
+          return false;
         });
         if (userTxs.length > 0) {
           const charges = userTxs
@@ -304,7 +312,6 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
         if (matchKeys.includes(idStr) || matchKeys.includes(bdStr)) return true;
         if (cleanBdStr) {
           if (cleanTarget === cleanBdStr || cleanTargetBd === cleanBdStr) return true;
-          if (idStr.includes(cleanBdStr) || bdStr.includes(cleanBdStr)) return true;
         }
         return false;
       };
@@ -632,7 +639,6 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
             if (matchKeys.includes(idStr)) return true;
             if (cleanBdStr) {
               if (cleanTarget === cleanBdStr) return true;
-              if (idStr.includes(cleanBdStr)) return true;
             }
             return false;
           };

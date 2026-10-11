@@ -52,7 +52,11 @@ export const CANTEEN_CLOUD_KEYS = [
   'canteen_bill_import_history',
   'canteen_member_seniority',
   'canteen_menu_bangla_names',
-  'canteen_due_shops_v1'
+  'canteen_due_shops_v1',
+  'canteen_purpose_presets',
+  'canteen_deleted_purpose_presets',
+  'baf_others_fund_categories',
+  'baf_deleted_others_fund_categories'
 ] as const;
 
 export type CanteenCloudKey = typeof CANTEEN_CLOUD_KEYS[number];
@@ -568,11 +572,33 @@ function mergeArrayData(localArr: any[], cloudArr: any[], keyField = 'id', keyNa
   if (!Array.isArray(localArr)) localArr = [];
   if (!Array.isArray(cloudArr)) cloudArr = [];
 
+  // Filter out any explicitly deleted purpose presets so they NEVER resurrect
+  if (keyName === 'canteen_purpose_presets') {
+    const deletedPresets = new Set<string>();
+    try {
+      const d = JSON.parse(localStorage.getItem('canteen_deleted_purpose_presets') || '[]');
+      if (Array.isArray(d)) d.forEach(x => deletedPresets.add(String(x).trim()));
+    } catch {}
+    localArr = localArr.filter(x => typeof x === 'string' && !deletedPresets.has(x.trim()));
+    cloudArr = cloudArr.filter(x => typeof x === 'string' && !deletedPresets.has(x.trim()));
+  }
+
+  // Filter out any explicitly deleted others fund categories so they NEVER resurrect
+  if (keyName === 'baf_others_fund_categories') {
+    const deletedCats = new Set<string>();
+    try {
+      const d = JSON.parse(localStorage.getItem('baf_deleted_others_fund_categories') || '[]');
+      if (Array.isArray(d)) d.forEach(x => deletedCats.add(String(x).trim()));
+    } catch {}
+    localArr = localArr.filter(c => c && !deletedCats.has(String(c.id).trim()) && !deletedCats.has(String(c.name).trim()));
+    cloudArr = cloudArr.filter(c => c && !deletedCats.has(String(c.id).trim()) && !deletedCats.has(String(c.name).trim()));
+  }
+
   const isLocalStrings = localArr.length > 0 && typeof localArr[0] === 'string';
   const isCloudStrings = cloudArr.length > 0 && typeof cloudArr[0] === 'string';
 
   if (isLocalStrings || isCloudStrings) {
-    // Preserve string IDs (e.g. canteen_daily_menu selected item IDs)
+    // Preserve string IDs (e.g. canteen_daily_menu selected item IDs, purpose presets)
     const set = new Set<string>();
     localArr.forEach(i => { if (typeof i === 'string' && i.trim()) set.add(i.trim()); });
     cloudArr.forEach(i => { if (typeof i === 'string' && i.trim()) set.add(i.trim()); });
@@ -794,6 +820,14 @@ function dispatchKeyUpdateEvent(key: string) {
         break;
       case 'canteen_bill_import_history':
         window.dispatchEvent(new Event('canteen_bill_import_history_updated'));
+        break;
+      case 'canteen_purpose_presets':
+      case 'canteen_deleted_purpose_presets':
+        window.dispatchEvent(new Event('canteen_purpose_presets_updated'));
+        break;
+      case 'baf_others_fund_categories':
+      case 'baf_deleted_others_fund_categories':
+        window.dispatchEvent(new Event('others_fund_updated'));
         break;
     }
     window.dispatchEvent(new Event('canteen_state_updated'));

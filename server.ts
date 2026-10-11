@@ -255,14 +255,14 @@ async function startServer() {
         }
       }
       
-      // Perform upstream fetch with 4.5s timeout and automatic single retry
+      // Perform upstream fetch with 25s timeout and automatic single retry
       let supabaseRes: Response | null = null;
       let lastFetchErr: any = null;
 
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
           const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), 4500);
+          const timer = setTimeout(() => controller.abort(), 25000);
           supabaseRes = await fetch(targetUrl, {
             ...reqOptions,
             signal: controller.signal
@@ -272,7 +272,7 @@ async function startServer() {
         } catch (fetchErr: any) {
           lastFetchErr = fetchErr;
           if (attempt === 0) {
-            await new Promise(r => setTimeout(r, 150));
+            await new Promise(r => setTimeout(r, 350));
             continue;
           }
         }

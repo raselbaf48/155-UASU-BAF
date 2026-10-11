@@ -77,7 +77,7 @@ export function findBestAirmanMatch(
   // 1. Direct BD Number check (Unique military identifier)
   const bdMatch = cleaned.match(/\b(?:bd\/?|)(\d{5,7})\b/i);
   if (bdMatch) {
-    const found = airmenList.find((a) => a.bdNo.includes(bdMatch[1]));
+    const found = airmenList.find((a) => a.bdNo.replace(/\D/g, '') === bdMatch[1]);
     if (found) return { airman: found, confidence: 0.99 };
   }
 

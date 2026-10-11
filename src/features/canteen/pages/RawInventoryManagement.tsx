@@ -731,8 +731,14 @@ const LOGS_STORAGE_KEY = 'canteen_raw_stock_logs_v2';
 // Helper to encode metadata safely into notes so Supabase schema cache doesn't reject with 'column not found'
 const encodeNotesWithMeta = (notes?: string, meta?: any) => {
   let base = (notes || '').replace(/<!--META:[\s\S]*?-->/g, '').trim();
-  if (meta && Object.keys(meta).length > 0) {
-    base = base ? `${base} <!--META:${JSON.stringify(meta)}-->` : `<!--META:${JSON.stringify(meta)}-->`;
+  if (meta && typeof meta === 'object' && Object.keys(meta).length > 0) {
+    const cleanMeta = { ...meta };
+    if (cleanMeta.dp && typeof cleanMeta.dp === 'string' && cleanMeta.dp.startsWith('data:')) {
+      delete cleanMeta.dp;
+    }
+    if (Object.keys(cleanMeta).length > 0) {
+      base = base ? `${base} <!--META:${JSON.stringify(cleanMeta)}-->` : `<!--META:${JSON.stringify(cleanMeta)}-->`;
+    }
   }
   return base;
 };

@@ -3,8 +3,9 @@ import { useTranslation } from 'react-i18next';
 import { 
   Utensils, Search, X, Check, ChefHat, Clock, Plus, XCircle, AlertTriangle, CheckCircle2,
   Layers, Filter, Sparkles, ChevronDown, ChevronUp, RefreshCw, Users, ArrowRight, Eye, Calendar, RotateCcw,
-  CheckSquare, Package as PackageIcon
+  CheckSquare, Package as PackageIcon, TrendingUp
 } from 'lucide-react';
+import { CafePerformanceView } from './CafePerformanceView';
 
 const isOfficerMember = (m: any): boolean => {
   const r = String(m?.Rank || m?.rank || '').toUpperCase().trim();
@@ -52,6 +53,7 @@ const data = [
 ];
 
 export const ManagerDashboard: React.FC = () => {
+  const [dashboardMode, setDashboardMode] = useState<'pre_order' | 'cafe_performance'>('pre_order');
   const [showCurateMenu, setShowCurateMenu] = useState(false);
   const [members, setMembers] = useState<any[]>(() => {
     const cached = getCanteenMembersCache();
@@ -845,7 +847,46 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* Centered Pre-Order Content & Separate Boxes */}
+      {/* DASHBOARD MODE TABS: 1. PRE ORDER | 2. CAFE PERFORMANCE */}
+      <div className="flex justify-center items-center pb-2">
+        <div className="inline-flex p-1.5 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl gap-2 w-full sm:w-auto">
+          <button
+            type="button"
+            onClick={() => setDashboardMode('pre_order')}
+            className={`flex-1 sm:flex-initial px-6 py-3 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider transition-all flex items-center justify-center space-x-2.5 cursor-pointer ${
+              dashboardMode === 'pre_order'
+                ? 'bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 text-white shadow-lg shadow-indigo-600/30 scale-102'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <Clock className="w-4 h-4 text-indigo-300" />
+            <span>PRE ORDER (প্রি-অর্ডার)</span>
+            {todaysPreOrders.length > 0 && (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-black bg-slate-950/80 text-indigo-300 border border-indigo-500/30">
+                {todaysPreOrders.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setDashboardMode('cafe_performance')}
+            className={`flex-1 sm:flex-initial px-6 py-3 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider transition-all flex items-center justify-center space-x-2.5 cursor-pointer ${
+              dashboardMode === 'cafe_performance'
+                ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 text-white shadow-lg shadow-emerald-600/30 scale-102'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <TrendingUp className="w-4 h-4 text-emerald-300" />
+            <span>CAFE PERFORMANCE (ক্যাফে পারফরম্যান্স)</span>
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-950 text-emerald-300 border border-emerald-500/30">
+              SALES
+            </span>
+          </button>
+        </div>
+      </div>
+
+      {dashboardMode === 'pre_order' && (
       <div className="max-w-4xl mx-auto w-full space-y-6">
          {/* Top Centered Curate Menu Button (Visible only when Menu is curated) */}
          {selectedItems && selectedItems.length > 0 && (
@@ -1728,6 +1769,12 @@ export const ManagerDashboard: React.FC = () => {
          </>
          )}
       </div>
+      )}
+
+      {/* CAFE PERFORMANCE SECTION */}
+      {dashboardMode === 'cafe_performance' && (
+        <CafePerformanceView members={members} catalog={catalog} />
+      )}
 
       {/* Cancel Confirm Modal */}
       {cancelConfirmId && (

@@ -32,7 +32,14 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
   if (!isOpen) return null;
 
   const cleanBd = bdNo.replace(/\D/g, '').trim();
-  const isDuplicateBd = Boolean(cleanBd && existingMembers.some(m => String(m['BD No'] || '').replace(/\D/g, '') === cleanBd));
+  const cleanBdNoZero = cleanBd.replace(/^0+/, '');
+  const existingDuplicateMember = cleanBd ? existingMembers.find(m => {
+    const mBd = String(m['BD No'] || m.bdNo || '').replace(/\D/g, '');
+    const mBdNoZero = mBd.replace(/^0+/, '');
+    if (!mBd) return false;
+    return mBd === cleanBd || (cleanBdNoZero && mBdNoZero === cleanBdNoZero);
+  }) : null;
+  const isDuplicateBd = Boolean(existingDuplicateMember);
 
   const handleRankChange = (newRank: string) => {
     setRank(newRank);
@@ -59,7 +66,7 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
     }
 
     if (isDuplicateBd) {
-      setErrorMsg(`বিডি নম্বর #${cleanBd} ইতিমধ্যে একজন সদস্যের জন্য নিবন্ধিত আছে!`);
+      setErrorMsg(`বিডি নম্বর #${cleanBd} ইতিমধ্যে সদস্য "${existingDuplicateMember?.Rank || ''} ${existingDuplicateMember?.Surname || ''}" এর জন্য নিবন্ধিত আছে! একই বিডি নম্বরে ডুপ্লিকেট সদস্য তৈরি করা যাবে না।`);
       return;
     }
 

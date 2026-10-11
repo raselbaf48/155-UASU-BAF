@@ -170,9 +170,10 @@ export async function syncImportHistoryToTransactions(): Promise<any[]> {
       if (Array.isArray(pulled)) cloudTxs = pulled;
     } catch {}
 
+    const deletedIds = getDeletedTxIds();
     const txMap = new Map<string, any>();
     [...localTxs, ...cloudTxs].forEach(t => {
-      if (t && t.id) txMap.set(String(t.id), t);
+      if (t && t.id && !deletedIds.has(String(t.id))) txMap.set(String(t.id), t);
     });
 
     // 3. For each import batch, ensure its members have their corresponding transactions
@@ -189,6 +190,12 @@ export async function syncImportHistoryToTransactions(): Promise<any[]> {
         // a. Due This Month (e.g. September 2026 canteen bill)
         if (item.dueThisMonth > 0) {
           const deterministicId = `tx-import-${batch.id}-${cleanBd}-dueThis`;
+          const wasDeleted = deletedIds.has(deterministicId) || (
+            Array.isArray(batch.createdTransactionIds) &&
+            batch.createdTransactionIds.some(id => deletedIds.has(String(id)) && String(id).includes(cleanBd) && String(id).includes('dueThis'))
+          );
+          if (wasDeleted) return;
+
           let exists = txMap.has(deterministicId);
           if (!exists && Array.isArray(batch.createdTransactionIds)) {
             exists = batch.createdTransactionIds.some(id => txMap.has(String(id)) && String(id).includes(cleanBd) && String(id).includes('dueThis'));
@@ -225,6 +232,12 @@ export async function syncImportHistoryToTransactions(): Promise<any[]> {
         // b. Due Last Month
         if (item.dueLastMonth > 0) {
           const deterministicId = `tx-import-${batch.id}-${cleanBd}-dueLast`;
+          const wasDeleted = deletedIds.has(deterministicId) || (
+            Array.isArray(batch.createdTransactionIds) &&
+            batch.createdTransactionIds.some(id => deletedIds.has(String(id)) && String(id).includes(cleanBd) && String(id).includes('dueLast'))
+          );
+          if (wasDeleted) return;
+
           let exists = txMap.has(deterministicId);
           if (!exists && Array.isArray(batch.createdTransactionIds)) {
             exists = batch.createdTransactionIds.some(id => txMap.has(String(id)) && String(id).includes(cleanBd) && String(id).includes('dueLast'));
@@ -261,6 +274,7 @@ export async function syncImportHistoryToTransactions(): Promise<any[]> {
         // c. Unit Fund
         if (item.unitFund > 0) {
           const deterministicId = `tx-import-${batch.id}-${cleanBd}-unitFund`;
+          if (deletedIds.has(deterministicId)) return;
           let exists = txMap.has(deterministicId);
           if (!exists) {
             const hasMatch = Array.from(txMap.values()).some(t => {
@@ -294,6 +308,7 @@ export async function syncImportHistoryToTransactions(): Promise<any[]> {
         // d. Others Fund
         if (item.othersFund > 0) {
           const deterministicId = `tx-import-${batch.id}-${cleanBd}-othersFund`;
+          if (deletedIds.has(deterministicId)) return;
           let exists = txMap.has(deterministicId);
           if (!exists) {
             const hasMatch = Array.from(txMap.values()).some(t => {
