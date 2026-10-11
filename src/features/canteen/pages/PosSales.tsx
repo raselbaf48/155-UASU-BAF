@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Search, Plus, ShoppingCart, Minus, Trash2, CheckCircle2, X, History, Calendar, 
@@ -25,7 +25,7 @@ import {
   InventoryItemType
 } from '../utils/recipeManager';
 import { pushKeyToCloud } from '../utils/canteenCloudSync';
-import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
+import { sortCanteenMembersByOfficeSeniority, deduplicateCanteenMembers } from '../utils/canteenSeniority';
 import { playSuccessChime, playTrashPopSound } from '../utils/audioFeedback';
 import { ImportPosSalesModal } from '../components/ImportPosSalesModal';
 import { 
@@ -33,6 +33,7 @@ import {
   setCanteenMenuCache,
   fetchCanteenMenuOnce, 
   getCanteenMembersCache, 
+  setCanteenMembersCache,
   fetchCanteenMembersOnce,
   isOneTimeBoxItem,
   normalizeCatalogKey
@@ -46,7 +47,8 @@ const isOfficerMember = (m: any): boolean => {
 
 const isCivilianMember = (m: any): boolean => {
   const r = String(m?.Rank || m?.rank || '').toUpperCase().trim();
-  return r.includes('CIV') || r.includes('NC(E)') || r.includes('NCE');
+  const role = String(m?.Role || m?.role || '').toUpperCase().trim();
+  return r.includes('CIV') || r.includes('NC(E)') || r.includes('NCE') || r === '-' || role.includes('CIV');
 };
 
 const isAirmanMember = (m: any): boolean => {
@@ -130,11 +132,14 @@ const isSaleTransaction = (tx: any): boolean => {
 
 export const PosSales: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
+  const menuSearchInputRef = useRef<HTMLInputElement>(null);
+  const memberSearchInputRef = useRef<HTMLInputElement>(null);
   const [catalog, setCatalog] = useState<any[]>(() => getCanteenMenuCache());
   const [basket, setBasket] = useState<any[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
 
   // Member Selection States (Mode 1 style for Normal POS)
+  const [members, setMembers] = useState<any[]>(() => getCanteenMembersCache());
   const [memberRankFilter, setMemberRankFilter] = useState<'ALL' | 'OFFICER' | 'AIRMEN' | 'CIVILIAN'>('ALL');
   const [memberSearchTerm, setMemberSearchTerm] = useState('');
   const [selectedMembers, setSelectedMembers] = useState<any[]>([]);
@@ -188,7 +193,8 @@ export const PosSales: React.FC = () => {
           const isKg = unit.toLowerCase().trim() === 'kg';
           const isLtr = unit.toLowerCase().trim() === 'liter';
           const isCyl = ['cylinder', 'সিলিন্ডার'].includes(unit.toLowerCase().trim());
-          const rawSubUnit = r['Sub Unit'] ?? r.subUnit ?? r.sub_unit ?? meta.subUnit;
+          const isCase = ['case', 'crate', 'কেস', 'ক্রেট'].includes(unit.toLowerCase().trim()) || String(r.id) === 'raw-7';
+          const rawSubUnit = (String(r.id) === 'raw-7' || r.name === 'Egg') ? 'pcs' : (r['Sub Unit'] ?? r.subUnit ?? r.sub_unit ?? meta.subUnit);
           const itemDp = r.DP || r.dp || meta.dp || r.image || r.image_url || undefined;
           const rawType = meta.itemType || r.itemType || r.item_type;
           const itemType: InventoryItemType = (rawType === 'READY_MADE' || rawType === 'RAW')
@@ -200,7 +206,7 @@ export const PosSales: React.FC = () => {
             name: r.name || '',
             nameBn: cleanPureBanglaName(r.nameBn || r.name_bn || '') || r.name || '',
             category: meta.category || r.category || 'Packaging & Disposables',
-            subCategory: meta.subCategory || r.subCategory || r.sub_category || '',
+            subCategory: isCase ? 'Case - Pcs' : (meta.subCategory || r.subCategory || r.sub_category || ''),
             itemType,
             unit: unit,
             currentStock: Number(r.currentStock ?? r.current_stock ?? 0),
@@ -210,9 +216,9 @@ export const PosSales: React.FC = () => {
             lastRestockedDate: r.lastRestockedDate || r.last_restocked_date || '',
             supplier: r.supplier || '',
             notes: cleanNotes,
-            hasSubUnits: (isKg || isCyl) ? true : Boolean(meta.hasSubUnits ?? r.hasSubUnits ?? r.has_sub_units ?? Boolean(rawSubUnit) ?? (Number(r.packSize ?? r.pack_size) > 1)),
-            packSize: isKg ? (Number(meta.packSize ?? r.packSize ?? r.pack_size) > 1 ? Number(meta.packSize ?? r.packSize ?? r.pack_size) : 1000) : (isCyl ? (Number(meta.packSize ?? r.packSize ?? r.pack_size) > 1 ? Number(meta.packSize ?? r.packSize ?? r.pack_size) : 12) : Number(meta.packSize ?? r.packSize ?? r.pack_size ?? 1)),
-            subUnit: rawSubUnit || (isKg ? 'gm' : (isLtr ? 'ml' : (isCyl ? 'kg' : (meta.subUnit || r.subUnit || r.sub_unit || 'pcs')))),
+            hasSubUnits: (isKg || isCyl || isCase) ? true : Boolean(meta.hasSubUnits ?? r.hasSubUnits ?? r.has_sub_units ?? Boolean(rawSubUnit) ?? (Number(r.packSize ?? r.pack_size) > 1)),
+            packSize: isCase ? (Number(meta.packSize ?? r.packSize ?? r.pack_size) > 1 ? Number(meta.packSize ?? r.packSize ?? r.pack_size) : 30) : (isKg ? (Number(meta.packSize ?? r.packSize ?? r.pack_size) > 1 ? Number(meta.packSize ?? r.packSize ?? r.pack_size) : 1000) : (isCyl ? (Number(meta.packSize ?? r.packSize ?? r.pack_size) > 1 ? Number(meta.packSize ?? r.packSize ?? r.pack_size) : 12) : Number(meta.packSize ?? r.packSize ?? r.pack_size ?? 1))),
+            subUnit: isCase ? 'pcs' : (rawSubUnit || (isKg ? 'gm' : (isLtr ? 'ml' : (isCyl ? 'kg' : (meta.subUnit || r.subUnit || r.sub_unit || 'pcs'))))),
             dp: itemDp,
             DP: itemDp,
             image: itemDp
@@ -267,6 +273,25 @@ export const PosSales: React.FC = () => {
       setCanteenConfig(e.detail || getCanteenConfig());
     };
 
+    const handleMembersUpdated = (e?: any) => {
+      const data = e?.detail && Array.isArray(e.detail) ? e.detail : getCanteenMembersCache();
+      if (data && data.length > 0) {
+        setMembers(
+          data
+            .filter((m: any) => {
+              const bd = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
+              return bd !== '48456';
+            })
+            .map((m: any) => ({
+              ...m,
+              Due: Number(m.Due ?? m.due ?? m.baki ?? 0),
+              baki: Number(m.Due ?? m.due ?? m.baki ?? 0)
+            }))
+        );
+      }
+    };
+
+    window.addEventListener('canteen_members_updated', handleMembersUpdated);
     window.addEventListener('canteen_settings_updated', handleCfgUpdate);
     window.addEventListener('canteen_raw_inventory_updated', handleSyncStock);
     window.addEventListener('canteen_menu_recipes_updated', handleSyncStock);
@@ -274,8 +299,13 @@ export const PosSales: React.FC = () => {
     window.addEventListener('canteen_menu_updated', handleInventoryUpdated);
     window.addEventListener('canteen_daily_menu_updated', handleInventoryUpdated);
     window.addEventListener('canteen_txs_updated', handleInventoryUpdated);
-    window.addEventListener('canteen_state_updated', handleInventoryUpdated);
-    window.addEventListener('storage', handleInventoryUpdated);
+    const handleGeneralStateUpdated = () => {
+      handleInventoryUpdated();
+      handleMembersUpdated();
+    };
+
+    window.addEventListener('canteen_state_updated', handleGeneralStateUpdated);
+    window.addEventListener('storage', handleGeneralStateUpdated);
     window.addEventListener('storage', handleSyncStock);
     window.addEventListener('storage', handleCfgUpdate);
 
@@ -302,6 +332,7 @@ export const PosSales: React.FC = () => {
 
     return () => {
       supabase.removeChannel(channel);
+      window.removeEventListener('canteen_members_updated', handleMembersUpdated);
       window.removeEventListener('canteen_settings_updated', handleCfgUpdate);
       window.removeEventListener('canteen_raw_inventory_updated', handleSyncStock);
       window.removeEventListener('canteen_menu_recipes_updated', handleSyncStock);
@@ -318,10 +349,12 @@ export const PosSales: React.FC = () => {
 
   const fetchMembers = async () => {
     try {
-      const data = await fetchCanteenMembersOnce();
-      if (data && data.length > 0) {
+      const data = await fetchCanteenMembersOnce(true);
+      const localCached = getCanteenMembersCache();
+      const combined = deduplicateCanteenMembers([...(data || []), ...localCached]);
+      if (combined && combined.length > 0) {
         setMembers(
-          data
+          combined
             .filter((m: any) => {
               const bd = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
               return bd !== '48456';
@@ -458,6 +491,132 @@ export const PosSales: React.FC = () => {
     });
   }, [salesHistory, historyDateFilter, historySearchTerm, members]);
 
+  // Expand multi-item purchases into separate, individual rows in History so each item is shown on its own line
+  const expandedSalesHistoryRows = useMemo(() => {
+    const rows: Array<{
+      rowKey: string;
+      tx: any;
+      date: string;
+      customerName: string;
+      bdNo: string;
+      itemName: string;
+      qty: number;
+      unitPrice: number;
+      itemTotal: number;
+      status: string;
+      isPaid: boolean;
+    }> = [];
+
+    filteredSalesHistory.forEach((tx) => {
+      const m = members.find(mem => mem.airman_id === tx.airman_id);
+      const memberRank = tx.rank || (m ? m['Rank'] : '') || '';
+      const memberSurname = (m ? m['Surname'] : '') || tx.memberName || tx.airman_id;
+      const memberBdNo = tx.bdNo || (m ? m['BD No'] : '') || '';
+      const customerName = memberRank && !String(memberSurname).startsWith(memberRank) ? `${memberRank} ${memberSurname}` : String(memberSurname);
+      const isPaid = tx.status === 'PAID' || tx.paymentStatus === 'PAID' || String(tx.gateway || tx.paymentMethod || '').toUpperCase() === 'CASH';
+      const status = isPaid ? 'PAID' : 'DUE';
+      const formattedDate = formatCanteenDate(tx.date || tx.paymentDate || tx.timestamp || tx.created_at || (typeof tx.id === 'number' ? tx.id : undefined));
+
+      if (tx.soldItems && Array.isArray(tx.soldItems) && tx.soldItems.length > 0) {
+        tx.soldItems.forEach((si: any, sIdx: number) => {
+          const resolved = resolveLiveItem(si);
+          rows.push({
+            rowKey: `${tx.id}_si_${sIdx}`,
+            tx,
+            date: formattedDate,
+            customerName,
+            bdNo: memberBdNo,
+            itemName: resolved.name,
+            qty: resolved.qty,
+            unitPrice: resolved.unitPrice,
+            itemTotal: resolved.itemTotal,
+            status,
+            isPaid
+          });
+        });
+      } else if (tx.items) {
+        const parts = String(tx.items).split(/[,+;|\n]+/).map((s: string) => s.trim()).filter(Boolean);
+        if (parts.length > 1) {
+          parts.forEach((part: string, pIdx: number) => {
+            let q = 1;
+            let raw = part;
+            const parenMatch = part.match(/^(.+?)\s*\(\s*(\d+)\s*\)$/);
+            if (parenMatch) {
+              raw = parenMatch[1].trim();
+              q = parseInt(parenMatch[2], 10) || 1;
+            } else {
+              const xMatch = part.match(/^(.+?)\s*[xX]\s*(\d+)$/);
+              if (xMatch) {
+                raw = xMatch[1].trim();
+                q = parseInt(xMatch[2], 10) || 1;
+              }
+            }
+            const resolved = resolveLiveItem({ name: raw, qty: q });
+            let unitPrice = resolved.unitPrice;
+            let itemTotal = resolved.itemTotal;
+            if (unitPrice === 0 && tx.amount) {
+              itemTotal = Math.round(Number(tx.amount || 0) / Math.max(1, parts.length));
+              unitPrice = Math.round(itemTotal / q);
+            }
+            rows.push({
+              rowKey: `${tx.id}_part_${pIdx}`,
+              tx,
+              date: formattedDate,
+              customerName,
+              bdNo: memberBdNo,
+              itemName: resolved.name,
+              qty: q,
+              unitPrice,
+              itemTotal,
+              status,
+              isPaid
+            });
+          });
+        } else {
+          let q = 1;
+          let raw = tx.items;
+          const match = tx.items.match(/^(.+?)\s*\(\s*(\d+)\s*\)$/);
+          if (match) {
+            raw = match[1].trim();
+            q = parseInt(match[2], 10) || 1;
+          }
+          const resolved = resolveLiveItem({ name: raw, qty: q });
+          const totalAmt = Number(tx.amount || resolved.itemTotal || 0);
+          rows.push({
+            rowKey: `${tx.id}_single`,
+            tx,
+            date: formattedDate,
+            customerName,
+            bdNo: memberBdNo,
+            itemName: resolved.name || raw,
+            qty: q,
+            unitPrice: q > 0 ? Math.round(totalAmt / q) : totalAmt,
+            itemTotal: totalAmt,
+            status,
+            isPaid
+          });
+        }
+      } else {
+        const totalAmt = Number(tx.amount || 0);
+        rows.push({
+          rowKey: `${tx.id}_empty`,
+          tx,
+          date: formattedDate,
+          customerName,
+          bdNo: memberBdNo,
+          itemName: 'মেনু আইটেম',
+          qty: 1,
+          unitPrice: totalAmt,
+          itemTotal: totalAmt,
+          status,
+          isPaid
+        });
+      }
+    });
+
+    return rows;
+  }, [filteredSalesHistory, members, catalog]);
+
   const removeHistoryItem = async (txId: string) => {
     const txToRemove = salesHistory.find(tx => tx.id === txId);
     if (!txToRemove) return;
@@ -482,7 +641,9 @@ export const PosSales: React.FC = () => {
         const currentDue = Number(m.Due ?? m.due ?? m.baki ?? 0);
         const newDue = Math.max(0, currentDue - Number(txToRemove.amount || 0));
         await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', txToRemove.airman_id);
-        setMembers(members.map(member => member.airman_id === txToRemove.airman_id ? {...member, Due: newDue, baki: newDue} : member));
+        const updated = members.map(member => member.airman_id === txToRemove.airman_id ? {...member, Due: newDue, baki: newDue} : member);
+        setMembers(updated);
+        setCanteenMembersCache(updated);
       }
     }
 
@@ -578,7 +739,11 @@ export const PosSales: React.FC = () => {
 
           if (newDue !== currentDue) {
             await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', editingTx.airman_id);
-            setMembers(prev => prev.map(mem => mem.airman_id === editingTx.airman_id ? { ...mem, Due: newDue, baki: newDue } : mem));
+            setMembers(prev => {
+              const updated = prev.map(mem => mem.airman_id === editingTx.airman_id ? { ...mem, Due: newDue, baki: newDue } : mem);
+              setCanteenMembersCache(updated);
+              return updated;
+            });
           }
         }
       }
@@ -700,10 +865,13 @@ export const PosSales: React.FC = () => {
 
       if (!memberSearchTerm.trim()) return true;
       const term = memberSearchTerm.toLowerCase().trim();
-      const surname = String(m['Surname'] || m.surname || '').toLowerCase();
+      const surname = String(m['Surname'] || m.surname || m.name || m.Name || '').toLowerCase();
       const rank = String(m['Rank'] || m.rank || '').toLowerCase();
       const bd = String(m['BD No'] || m.bdNo || m.airman_id || '').toLowerCase();
-      return surname.includes(term) || rank.includes(term) || bd.includes(term);
+      const nameBn = String(m.Name_BN || m.name_bn || m.nameBn || '').toLowerCase();
+      const rankBn = String(m.Rank_BN || m.rank_bn || m.rankBn || '').toLowerCase();
+      const contact = String(m.Contact || m['Contact'] || m['Mobile No'] || '').toLowerCase();
+      return surname.includes(term) || rank.includes(term) || bd.includes(term) || nameBn.includes(term) || rankBn.includes(term) || contact.includes(term);
     });
   }, [sortedMembers, memberRankFilter, memberSearchTerm]);
 
@@ -770,36 +938,44 @@ export const PosSales: React.FC = () => {
         }
 
         const txMemberName = [m.Rank || m.rank, m.Surname || m.surname || m.Name || m.name].filter(Boolean).join(' ') || m['BD No'] || m.airman_id;
-        const tx = {
-          id: Date.now() + Math.random(),
-          date: txDateStr,
-          airman_id: m.airman_id,
-          bdNo: m['BD No'] || m.bdNo || m.airman_id,
-          memberName: txMemberName,
-          rank: m.Rank || m.rank || '',
-          items: basket.map((b) => `${b.name} (${b.qty})`).join(', '),
-          soldItems: basket.map((b) => ({
-            menuItemId: b.id,
-            menuItemName: b.name,
-            price: Number(b.price || 0),
-            qty: b.qty
-          })),
-          originalAmount: basketTotal,
-          discount: roundedPerMemberDiscount,
-          amount: roundedPerMemberAmount,
-          type: 'SALE',
-          status: paymentMode, // 'DUE' or 'PAID'
-          paymentStatus: paymentMode,
-          gateway: paymentMode === 'PAID' ? 'CASH' : 'DUE',
-          paymentMethod: paymentMode === 'PAID' ? 'CASH' : 'DUE'
-        };
-        newTransactions.push(tx);
+        
+        // Save each purchased menu item as an individual transaction so history shows each menu item separately
+        basket.forEach((b, bIdx) => {
+          const itemBase = Number(b.price || 0) * Number(b.qty || 1);
+          const proportionalDiscount = basketTotal > 0 ? Math.round((itemBase / basketTotal) * roundedPerMemberDiscount * 100) / 100 : 0;
+          const itemFinalAmount = Math.max(0, itemBase - proportionalDiscount);
+
+          const tx = {
+            id: Date.now() + Math.random() + bIdx,
+            date: txDateStr,
+            airman_id: m.airman_id,
+            bdNo: m['BD No'] || m.bdNo || m.airman_id,
+            memberName: txMemberName,
+            rank: m.Rank || m.rank || '',
+            items: `${b.name} (${b.qty})`,
+            soldItems: [{
+              menuItemId: b.id,
+              menuItemName: b.name,
+              price: Number(b.price || 0),
+              qty: b.qty
+            }],
+            originalAmount: itemBase,
+            discount: proportionalDiscount,
+            amount: itemFinalAmount,
+            type: 'SALE',
+            status: paymentMode, // 'DUE' or 'PAID'
+            paymentStatus: paymentMode,
+            gateway: paymentMode === 'PAID' ? 'CASH' : 'DUE',
+            paymentMethod: paymentMode === 'PAID' ? 'CASH' : 'DUE'
+          };
+          newTransactions.push(tx);
+        });
       }
 
       // Update members in memory if DUE
       if (paymentMode === 'DUE') {
-        setMembers((prev) =>
-          prev.map((member) => {
+        setMembers((prev) => {
+          const updated = prev.map((member) => {
             const matched = targetMembersList.find((tm) => tm.airman_id === member.airman_id);
             if (matched) {
               const currentDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
@@ -811,8 +987,10 @@ export const PosSales: React.FC = () => {
               };
             }
             return member;
-          })
-        );
+          });
+          setCanteenMembersCache(updated);
+          return updated;
+        });
       }
 
       // Save transactions to local & cloud
@@ -1000,6 +1178,7 @@ export const PosSales: React.FC = () => {
               <div className="relative w-full">
                 <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-indigo-400" />
                 <input 
+                  ref={menuSearchInputRef}
                   type="text" 
                   placeholder="Search menu items..."
                   value={searchTerm}
@@ -1009,8 +1188,14 @@ export const PosSales: React.FC = () => {
                 {searchTerm && (
                   <button 
                     type="button"
-                    onClick={() => setSearchTerm('')}
-                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800 text-xs font-bold"
+                    onClick={() => {
+                      setSearchTerm('');
+                      setTimeout(() => {
+                        menuSearchInputRef.current?.focus();
+                      }, 10);
+                    }}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800 text-xs font-bold cursor-pointer transition-colors"
+                    title="Clear search and focus"
                   >
                     ✕
                   </button>
@@ -1420,6 +1605,7 @@ export const PosSales: React.FC = () => {
                 <div className="relative w-full">
                   <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-indigo-400" />
                   <input 
+                    ref={memberSearchInputRef}
                     type="text"
                     value={memberSearchTerm}
                     onChange={(e) => setMemberSearchTerm(e.target.value)}
@@ -1429,8 +1615,14 @@ export const PosSales: React.FC = () => {
                   {memberSearchTerm && (
                     <button 
                       type="button"
-                      onClick={() => setMemberSearchTerm('')}
-                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs font-bold p-1 rounded-full hover:bg-slate-800"
+                      onClick={() => {
+                        setMemberSearchTerm('');
+                        setTimeout(() => {
+                          memberSearchInputRef.current?.focus();
+                        }, 10);
+                      }}
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs font-bold p-1 rounded-full hover:bg-slate-800 cursor-pointer transition-colors"
+                      title="Clear search and focus"
                     >
                       ✕
                     </button>
@@ -1490,10 +1682,15 @@ export const PosSales: React.FC = () => {
                               </div>
                               <div className="min-w-0 flex-1">
                                 <div className="text-xs sm:text-sm font-black text-white truncate leading-tight">
-                                  {m['Rank']} {m['Surname']}
+                                  {m['Rank'] || m.rank || ''} {m['Surname'] || m.surname || m.name || m.Name || 'Member'}
+                                  {(m.Name_BN || m.name_bn || m.nameBn) ? (
+                                    <span className="text-[11px] font-normal text-slate-400 ml-1.5">
+                                      ({m.Name_BN || m.name_bn || m.nameBn})
+                                    </span>
+                                  ) : null}
                                 </div>
                                 <div className="flex items-center space-x-2 mt-0.5 text-[11px] font-mono leading-tight">
-                                  <span className="text-slate-400">BD: {m['BD No']}</span>
+                                  <span className="text-slate-400">BD: {m['BD No'] || m.bdNo || m.airman_id}</span>
                                   <span className="text-slate-600">•</span>
                                   <span className="text-amber-400 font-bold">Due: ৳{m.Due || 0}</span>
                                 </div>
@@ -2268,7 +2465,7 @@ export const PosSales: React.FC = () => {
                     <div className="flex items-center space-x-2">
                       <h3 className="text-sm font-black text-white uppercase tracking-wider">HISTORY</h3>
                       <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-mono text-[10px] font-black">
-                        {filteredSalesHistory.length}
+                        {expandedSalesHistoryRows.length}
                       </span>
                     </div>
                     <p className="text-[10px] font-bold text-slate-400">Sales records & transaction ledger</p>
@@ -2334,7 +2531,7 @@ export const PosSales: React.FC = () => {
             
             {/* Scrollable Table Body */}
             <div className="p-3 sm:p-5 overflow-y-auto flex-1 flex flex-col min-h-0">
-              {filteredSalesHistory.length === 0 ? (
+              {expandedSalesHistoryRows.length === 0 ? (
                 <div className="flex-1 flex flex-col items-center justify-center text-center py-12 text-slate-400 bg-slate-950/40 rounded-2xl border border-slate-800/80 p-6 min-h-[250px]">
                   <History className="w-12 h-12 mx-auto opacity-20 mb-3" />
                   <p className="text-xs font-bold uppercase tracking-widest text-slate-300">No Sales Records Found</p>
@@ -2357,176 +2554,68 @@ export const PosSales: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/70">
-                      {filteredSalesHistory.map((tx, idx) => {
-                        const m = members.find(mem => mem.airman_id === tx.airman_id);
-                        const memberRank = tx.rank || (m ? m['Rank'] : '') || '';
-                        const memberSurname = (m ? m['Surname'] : '') || tx.memberName || tx.airman_id;
-                        const memberBdNo = tx.bdNo || (m ? m['BD No'] : '') || '';
-                        
-                        let parsedItemsList: Array<{ name: string; qty: number; unitPrice: number; itemTotal: number }> = [];
-                        let totalQty = 0;
-                        if (tx.soldItems && Array.isArray(tx.soldItems) && tx.soldItems.length > 0) {
-                          parsedItemsList = tx.soldItems.map((si: any) => {
-                            const resolved = resolveLiveItem(si);
-                            return {
-                              name: resolved.name,
-                              qty: resolved.qty,
-                              unitPrice: resolved.unitPrice,
-                              itemTotal: resolved.itemTotal
-                            };
-                          });
-                          totalQty = parsedItemsList.reduce((sum, it) => sum + it.qty, 0);
-                        } else if (tx.items) {
-                          const parts = String(tx.items).split(/[,+;|\n]+/).map(s => s.trim()).filter(Boolean);
-                          parsedItemsList = parts.map(part => {
-                            let q = 1;
-                            let raw = part;
-                            const parenMatch = part.match(/^(.+?)\s*\(\s*(\d+)\s*\)$/);
-                            if (parenMatch) {
-                              raw = parenMatch[1].trim();
-                              q = parseInt(parenMatch[2], 10) || 1;
-                            } else {
-                              const xMatch = part.match(/^(.+?)\s*[xX]\s*(\d+)$/);
-                              if (xMatch) {
-                                raw = xMatch[1].trim();
-                                q = parseInt(xMatch[2], 10) || 1;
-                              }
-                            }
-                            totalQty += q;
-                            const resolved = resolveLiveItem({ name: raw, qty: q });
-                            let unitPrice = resolved.unitPrice;
-                            let itemTotal = resolved.itemTotal;
-                            if (unitPrice === 0 && tx.amount) {
-                              itemTotal = Math.round(Number(tx.amount || 0) / Math.max(1, parts.length));
-                              unitPrice = Math.round(itemTotal / q);
-                            }
-                            return {
-                              name: resolved.name,
-                              qty: q,
-                              unitPrice,
-                              itemTotal
-                            };
-                          });
-                        }
-                        if (totalQty === 0) totalQty = 1;
+                      {expandedSalesHistoryRows.map((row, idx) => (
+                        <tr 
+                          key={row.rowKey} 
+                          onClick={() => openEditTxModal(row.tx)}
+                          title="Click row to Edit or Remove record"
+                          className="hover:bg-indigo-950/30 hover:border-indigo-500/30 transition-colors cursor-pointer group"
+                        >
+                          {/* Ser No */}
+                          <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-400 group-hover:text-indigo-300">
+                            {idx + 1}
+                          </td>
 
-                        const liveTxAmount = parsedItemsList.length > 0 
-                          ? parsedItemsList.reduce((sum, it) => sum + it.itemTotal, 0)
-                          : Number(tx.amount || 0);
+                          {/* Date */}
+                          <td className="py-2.5 px-3 text-center font-mono font-bold text-indigo-300 text-xs whitespace-nowrap">
+                            {row.date}
+                          </td>
 
-                        const isPaid = tx.status === 'PAID' || tx.paymentStatus === 'PAID' || String(tx.gateway || tx.paymentMethod || '').toUpperCase() === 'CASH';
-
-                        return (
-                          <tr 
-                            key={tx.id} 
-                            onClick={() => openEditTxModal(tx)}
-                            title="Click row to Edit or Remove record"
-                            className="hover:bg-indigo-950/30 hover:border-indigo-500/30 transition-colors cursor-pointer group"
-                          >
-                            {/* Ser No */}
-                            <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-400 group-hover:text-indigo-300">
-                              {idx + 1}
-                            </td>
-
-                            {/* Date (Added after Ser No) */}
-                            <td className="py-2.5 px-3 text-center font-mono font-bold text-indigo-300 text-xs whitespace-nowrap">
-                              {formatCanteenDate(tx.date || tx.paymentDate || tx.timestamp || tx.created_at || (typeof tx.id === 'number' ? tx.id : undefined))}
-                            </td>
-
-                            {/* Customer Name */}
-                            <td className="py-2.5 px-3">
-                              <div className="font-black text-white text-xs group-hover:text-indigo-200">
-                                {memberRank && !String(memberSurname).startsWith(memberRank) ? `${memberRank} ` : ''}{memberSurname}
+                          {/* Customer Name */}
+                          <td className="py-2.5 px-3">
+                            <div className="font-black text-white text-xs group-hover:text-indigo-200">
+                              {row.customerName}
+                            </div>
+                            {row.bdNo && (
+                              <div className="text-[10px] font-mono text-slate-400 mt-0.5">
+                                BD: {row.bdNo}
                               </div>
-                              {memberBdNo && (
-                                <div className="text-[10px] font-mono text-slate-400 mt-0.5">
-                                  BD: {memberBdNo}
-                                </div>
-                              )}
-                            </td>
+                            )}
+                          </td>
 
-                            {/* Item Name (Each item on its own row) */}
-                            <td className="py-2.5 px-3">
-                              <div className="flex flex-col gap-1.5 py-0.5">
-                                {parsedItemsList.length > 0 ? (
-                                  parsedItemsList.map((item, i) => (
-                                    <div key={i} className="min-h-[24px] flex items-center">
-                                      <span 
-                                        className="inline-flex items-center px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-700/80 text-emerald-300 text-[11px] font-medium"
-                                      >
-                                        <span className="truncate max-w-[170px]">{item.name}</span>
-                                      </span>
-                                    </div>
-                                  ))
-                                ) : (
-                                  <div className="min-h-[24px] flex items-center">
-                                    <span className="text-slate-400 text-xs">
-                                      {getMenuItemBanglaName(tx.items) || tx.items || 'মেনু আইটেম'}
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-                            </td>
+                          {/* Item Name (Each item on its own separate row) */}
+                          <td className="py-2.5 px-3">
+                            <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700/80 text-emerald-300 text-xs font-semibold">
+                              <span className="truncate max-w-[220px]">{row.itemName}</span>
+                            </span>
+                          </td>
 
-                            {/* Qty (Vertically aligned row-by-row with each item) */}
-                            <td className="py-2.5 px-3 text-center">
-                              <div className="flex flex-col gap-1.5 py-0.5 items-center justify-center">
-                                {parsedItemsList.length > 0 ? (
-                                  parsedItemsList.map((item, i) => (
-                                    <div key={i} className="min-h-[24px] flex items-center justify-center">
-                                      <span className="inline-flex items-center justify-center min-w-[24px] px-1.5 py-0.5 rounded-md bg-indigo-950/60 border border-indigo-500/30 text-indigo-300 font-mono font-black text-xs">
-                                        {item.qty}
-                                      </span>
-                                    </div>
-                                  ))
-                                ) : (
-                                  <div className="min-h-[24px] flex items-center justify-center">
-                                    <span className="font-mono font-bold text-indigo-300 text-xs">1</span>
-                                  </div>
-                                )}
-                              </div>
-                            </td>
+                          {/* Qty */}
+                          <td className="py-2.5 px-3 text-center">
+                            <span className="inline-flex items-center justify-center min-w-[26px] px-2 py-0.5 rounded-md bg-indigo-950/60 border border-indigo-500/30 text-indigo-300 font-mono font-black text-xs">
+                              {row.qty}
+                            </span>
+                          </td>
 
-                            {/* Total (Item onujayi Total - 3 ta item er 3 ta total) */}
-                            <td className="py-2.5 px-3 text-right">
-                              <div className="flex flex-col gap-1.5 py-0.5 items-end justify-center">
-                                {parsedItemsList.length > 0 ? (
-                                  parsedItemsList.map((item, i) => (
-                                    <div key={i} className="min-h-[24px] flex items-center justify-end">
-                                      <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-emerald-950/40 border border-emerald-500/20 text-emerald-400 font-mono font-black text-xs">
-                                        ৳{item.itemTotal.toLocaleString()}
-                                      </span>
-                                    </div>
-                                  ))
-                                ) : (
-                                  <div className="min-h-[24px] flex items-center justify-end">
-                                    <span className="font-mono font-black text-emerald-400 text-sm">
-                                      ৳{Number(tx.amount || 0).toLocaleString()}
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-                              {parsedItemsList.length > 1 && (
-                                <div className="mt-1 pt-1 border-t border-slate-800/80 text-[10px] font-mono text-slate-400 flex items-center justify-end gap-1">
-                                  <span>মোট:</span>
-                                  <span className="font-black text-emerald-400 text-xs">৳{liveTxAmount.toLocaleString()}</span>
-                                </div>
-                              )}
-                            </td>
+                          {/* Total */}
+                          <td className="py-2.5 px-3 text-right">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-emerald-950/40 border border-emerald-500/20 text-emerald-400 font-mono font-black text-xs">
+                              ৳{row.itemTotal.toLocaleString()}
+                            </span>
+                          </td>
 
-                            {/* Status (DUE/Paid) */}
-                            <td className="py-2.5 px-3 text-center">
-                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border ${
-                                isPaid 
-                                  ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' 
-                                  : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                              }`}>
-                                {isPaid ? 'PAID' : 'DUE'}
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
+                          {/* Status (DUE/Paid) */}
+                          <td className="py-2.5 px-3 text-center">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border ${
+                              row.isPaid 
+                                ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' 
+                                : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                            }`}>
+                              {row.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>

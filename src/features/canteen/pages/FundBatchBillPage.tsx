@@ -277,32 +277,49 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       : getRunningMonthKey();
   }, [txDate]);
 
-  // Set of member IDs who already have a Unit Fund entry in this target month
+  // Set of member IDs who already have a Unit Fund entry in this target month (Prevent double entry)
   const membersWithUnitFundThisMonth = useMemo(() => {
     const set = new Set<string>();
     if (category !== 'UNIT_FUND') return set;
 
-    (allTxs || []).forEach((tx: any) => {
+    const localTxs = (() => {
+      try {
+        return JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+      } catch {
+        return [];
+      }
+    })();
+    const combinedTxs = [...(allTxs || []), ...localTxs];
+
+    combinedTxs.forEach((tx: any) => {
+      if (!tx) return;
       if (getTxCategory(tx) !== 'UNIT_FUND') return;
       if (tx.type === 'BILL PAYMENT' || tx.gateway === 'PAID') return;
+      if (deletedTxIds.has(String(tx.id))) return;
 
-      const txMonth = tx.monthKey || getTxMonthKey(tx);
+      const txMonth = tx.monthKey || getTxMonthKey(tx.date || tx.created_at || tx.createdAt || tx.timestamp || tx);
       if (txMonth !== targetMonthKey) return;
 
       const cleanBd = String(tx.bdNo || tx['BD No'] || tx.airman_id || '').replace(/\D/g, '');
+      const cleanBdNoZeros = cleanBd.replace(/^0+/, '');
       const airmanId = String(tx.airman_id || '').toLowerCase().trim();
 
       members.forEach((m) => {
         const mCleanBd = String(m['BD No'] || m.bdNo || m.airman_id || '').replace(/\D/g, '');
+        const mCleanBdNoZeros = mCleanBd.replace(/^0+/, '');
         const mAirman = String(m.airman_id || '').toLowerCase().trim();
-        if ((cleanBd && mCleanBd === cleanBd) || (airmanId && mAirman === airmanId)) {
+
+        const isBdMatch = cleanBd && mCleanBd && (cleanBd === mCleanBd || cleanBdNoZeros === mCleanBdNoZeros);
+        const isAirmanMatch = airmanId && mAirman && airmanId === mAirman;
+
+        if (isBdMatch || isAirmanMatch) {
           set.add(String(m.airman_id || m['BD No']));
         }
       });
     });
 
     return set;
-  }, [allTxs, category, targetMonthKey, members]);
+  }, [allTxs, category, targetMonthKey, members, deletedTxIds]);
 
   // Member Selection State
   const [selectedAirmanIds, setSelectedAirmanIds] = useState<Set<string>>(new Set());
@@ -524,7 +541,9 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
   // Selection helpers
   const handleToggleMember = (airmanId: string) => {
     if (isUnitFund && membersWithUnitFundThisMonth.has(airmanId)) {
-      showToast(`Unit Fund has already been billed for this member for ${targetMonthKey}! Duplicate billing in the same month is restricted.`, 'error');
+      const m = members.find(mem => String(mem.airman_id || mem['BD No']) === airmanId);
+      const mName = m ? `${m['Rank'] || ''} ${m['Surname'] || m['BD No']}`.trim() : 'এই সদস্য';
+      showToast(`${mName} এর জন্য ${formatBengaliMonthYear(targetMonthKey)} (${targetMonthKey}) মাসে ইতিমধ্যে Unit Fund এন্ট্রি রয়েছে! একই মাসে ডাবল এন্ট্রি দেওয়া যাবে না।`, 'error');
       return;
     }
     setSelectedAirmanIds((prev) => {
@@ -541,13 +560,18 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
   const handleSelectAllFiltered = () => {
     setSelectedAirmanIds((prev) => {
       const next = new Set(prev);
+      let skippedCount = 0;
       filteredMembers.forEach((m) => {
         const id = String(m.airman_id || m['BD No']);
         if (isUnitFund && membersWithUnitFundThisMonth.has(id)) {
+          skippedCount++;
           return; // Skip members already billed for this month
         }
         next.add(id);
       });
+      if (isUnitFund && skippedCount > 0) {
+        showToast(`${skippedCount} জন সদস্যের এই মাসে ইতিমধ্যে Unit Fund থাকায় নির্বাচন থেকে বাদ রাখা হয়েছে।`, 'success');
+      }
       return next;
     });
   };
@@ -559,6 +583,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
   const handleSelectGroup = (filter: 'OFFICER' | 'AIRMEN' | 'CIVILIAN') => {
     setSelectedAirmanIds((prev) => {
       const next = new Set(prev);
+      let skippedCount = 0;
       members.forEach((m) => {
         const matches = 
           (filter === 'OFFICER' && isOfficerMember(m)) ||
@@ -567,11 +592,15 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
         if (matches) {
           const id = String(m.airman_id || m['BD No']);
           if (isUnitFund && membersWithUnitFundThisMonth.has(id)) {
+            skippedCount++;
             return; // Skip members already billed for this month
           }
           next.add(id);
         }
       });
+      if (isUnitFund && skippedCount > 0) {
+        showToast(`${skippedCount} জন সদস্যের এই মাসে ইতিমধ্যে Unit Fund থাকায় নির্বাচন থেকে বাদ রাখা হয়েছে।`, 'success');
+      }
       return next;
     });
   };
@@ -613,13 +642,13 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
 
       if (duplicateMembers.length > 0) {
         const dupNames = duplicateMembers
-          .map((m) => `${m['Rank'] || ''} ${m['Surname'] || m['BD No']}`)
-          .slice(0, 3)
+          .map((m) => `${m['Rank'] || ''} ${m['Surname'] || m['BD No']}`.trim())
+          .slice(0, 4)
           .join(', ');
         showToast(
-          `The following members already have Unit Fund billed for ${targetMonthKey}: ${dupNames}${
-            duplicateMembers.length > 3 ? ' and others' : ''
-          }! Duplicate billing in the same month is restricted.`,
+          `নিম্নলিখিত সদস্যদের জন্য ${formatBengaliMonthYear(targetMonthKey)} (${targetMonthKey}) মাসে ইতিমধ্যে Unit Fund এন্ট্রি রয়েছে: ${dupNames}${
+            duplicateMembers.length > 4 ? ` এবং আরও ${duplicateMembers.length - 4} জন` : ''
+          }! একই মাসে ডাবল এন্ট্রি দেওয়া যাবে না।`,
           'error'
         );
         return;
@@ -642,11 +671,9 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       );
 
       const now = Date.now();
-      const finalPurpose = purpose.trim() || (isUnitFund ? 'Unit Fund Subscription' : 'Others Bill');
+      const finalPurpose = purpose.trim() || (isUnitFund ? 'Unit Fund Bill' : 'Others Bill');
       const finalNotes = notes.trim();
-      const defaultDesc = isUnitFund
-        ? (finalPurpose ? `Unit Fund (${finalPurpose})` : 'Unit Fund Bill')
-        : finalPurpose;
+      const defaultDesc = isUnitFund ? 'Unit Fund Bill' : finalPurpose;
 
       // Format date for display matching POS Sales (e.g. 09 Oct 26)
       const formattedTxDate = formatCanteenDate(txDate);
@@ -675,127 +702,165 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
           bdNo: m['BD No'] || m.bdNo,
           memberName: `${m['Rank'] || ''} ${m['Surname'] || ''}`.trim(),
           rank: m['Rank'] || m.rank || '',
-          items: defaultDesc,
-          note: finalNotes || undefined,
+          items: isUnitFund ? 'Unit Fund Bill' : defaultDesc,
+          note: isUnitFund ? undefined : (finalNotes || undefined),
           soldItems: [],
           amount: memberAmt,
           type: 'INITIAL_BILL',
           gateway: 'DUE',
-          billType: category,
-          batchExpenseId,
-          paymentMethod: paymentMethodFormatted,
-          method: paymentMethodFormatted,
-          source: othersFundSource,
-          staffName: cashDeductTarget === 'STAFF' ? (selectedStaffName || 'Civ Tanvir') : (managerName || 'Manager'),
-          cashDeductTarget
+          billType: isUnitFund ? 'UNIT_FUND' : category,
+          batchExpenseId: isUnitFund ? undefined : batchExpenseId,
+          paymentMethod: isUnitFund ? 'DUE' : paymentMethodFormatted,
+          method: isUnitFund ? 'DUE' : paymentMethodFormatted,
+          source: isUnitFund ? 'DUE' : othersFundSource,
+          staffName: isUnitFund ? undefined : (cashDeductTarget === 'STAFF' ? (selectedStaffName || 'Civ Tanvir') : (managerName || 'Manager')),
+          cashDeductTarget: isUnitFund ? undefined : cashDeductTarget
         };
       });
 
       const updatedTxs = [...newBatchTxs, ...existingTxs];
       localStorage.setItem('canteen_txs', JSON.stringify(updatedTxs));
 
-      // Automatically deduct total billed amount from Fund Cash or UCB as an expense so Capital All Logs receives entry
-      const totalBatchDeduction = totalBatchAmount;
-      const existingExpenses = (() => {
-        try {
-          return JSON.parse(localStorage.getItem('canteen_expenses') || '[]');
-        } catch {
-          return [];
-        }
-      })();
-
-      const memberBreakdown = selectedMemberList.map((m) => {
-        const cleanBdNo = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
+      // Update members' Due in memory, localStorage and Supabase directly
+      selectedMemberList.forEach((m) => {
         const mId = String(m.airman_id || m['BD No']);
         const raw = memberCustomAmounts[mId] !== undefined ? memberCustomAmounts[mId] : amount;
         const memberAmt = parseFloat(raw || '0') || 0;
-        const name = `${m['Rank'] || ''} ${m['Surname'] || ''}`.trim() || `BD-${cleanBdNo}`;
-        return {
-          airman_id: m.airman_id,
-          bdNo: m['BD No'] || m.bdNo,
-          name,
-          amount: memberAmt,
-          label: `${name}${m['BD No'] ? ` (BD-${m['BD No']})` : ''}: ৳${memberAmt.toLocaleString('en-US')}`
-        };
-      });
+        const curDue = Number(m.Due ?? m.due ?? m.baki ?? 0);
+        const newDue = curDue + memberAmt;
+        m.Due = newDue;
+        m.due = newDue;
+        m.baki = newDue;
 
-      const memberNamesStr = memberBreakdown.map(mb => mb.label).join(' • ');
-      const detailedPersonDisplay = memberBreakdown.length === 1 
-        ? memberBreakdown[0].label 
-        : `${memberBreakdown.length} Members: ${memberNamesStr}`;
-
-      const fundExpenseRecord = {
-        id: batchExpenseId,
-        date: formattedTxDate,
-        desc: `${isUnitFund ? 'UNIT FUND' : 'OTHERS BILL'}: ${finalPurpose}`.toUpperCase(),
-        subdesc: `Kar Jonno: ${memberNamesStr}${finalNotes ? ` • Note: ${finalNotes}` : ''} [${paymentMethodFormatted}]`,
-        category: isUnitFund ? 'Unit Fund' : 'Others Bill',
-        paymentMethod: paymentMethodFormatted,
-        amount: totalBatchDeduction,
-        detailedPerson: detailedPersonDisplay,
-        memberBreakdown: memberBreakdown,
-        isCustom: true
-      };
-
-      const updatedExpenses = [fundExpenseRecord, ...existingExpenses];
-      localStorage.setItem('canteen_expenses', JSON.stringify(updatedExpenses));
-      window.dispatchEvent(new Event('canteen_expenses_updated'));
-
-      // If Cash and Staff is selected: deduct from the staff member's account!
-      let updatedAdvances: any[] = [];
-      if (othersFundSource === 'Cash' && cashDeductTarget === 'STAFF' && selectedStaffName) {
-        const advancesRaw = localStorage.getItem('canteen_bazar_advances');
-        const advances: any[] = advancesRaw ? JSON.parse(advancesRaw) : [];
-
-        const targetStaff = selectedStaffName.trim().toLowerCase();
-        const personActive = advances.filter((a) => {
-          const pName = String(a.personName || '').trim().toLowerCase();
-          const isSettled = a.status === 'SETTLED' || Number(a.returnAmount) > 0 || (a.notes && a.notes.includes('[Settled]')) || Boolean(a.settledDate);
-          return (pName === targetStaff || pName.includes(targetStaff) || targetStaff.includes(pName)) &&
-                 String(a.status || 'ACTIVE').toUpperCase() === 'ACTIVE' &&
-                 !isSettled;
-        });
-
-        if (personActive.length === 0) {
-          // If person had no active advance, create one so their spent balance is updated
-          const newNegativeAdv = {
-            id: `adv-${now}-${Math.random().toString(36).substring(2, 6)}`,
-            date: formattedTxDate,
-            personName: selectedStaffName,
-            amount: 0,
-            spentAmount: totalBatchDeduction,
-            returnAmount: 0,
-            channel: 'CASH',
-            purpose: `${isUnitFund ? 'UNIT FUND' : 'OTHERS BILL'}: ${finalPurpose}`.toUpperCase(),
-            status: 'ACTIVE',
-            notes: `Auto deducted for ${isUnitFund ? 'Unit Fund' : 'Others'} Bill (${selectedMemberList.length} members)`
-          };
-          updatedAdvances = [newNegativeAdv, ...advances];
-        } else {
-          let deducted = false;
-          updatedAdvances = advances.map((a) => {
-            const pName = String(a.personName || '').trim().toLowerCase();
-            const isSettled = a.status === 'SETTLED' || Number(a.returnAmount) > 0 || (a.notes && a.notes.includes('[Settled]')) || Boolean(a.settledDate);
-            if (!deducted && (pName === targetStaff || pName.includes(targetStaff) || targetStaff.includes(pName)) && String(a.status || 'ACTIVE').toUpperCase() === 'ACTIVE' && !isSettled) {
-              deducted = true;
-              return {
-                ...a,
-                spentAmount: (Number(a.spentAmount) || 0) + totalBatchDeduction
-              };
-            }
-            return a;
-          });
+        const cleanBd = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
+        if (cleanBd) {
+          try {
+            const rawStored = localStorage.getItem(`canteen_member_${cleanBd}`);
+            const stored = rawStored ? JSON.parse(rawStored) : {};
+            localStorage.setItem(`canteen_member_${cleanBd}`, JSON.stringify({ ...stored, Due: newDue, due: newDue, baki: newDue }));
+          } catch {}
         }
 
-        localStorage.setItem('canteen_bazar_advances', JSON.stringify(updatedAdvances));
-        window.dispatchEvent(new Event('canteen_bazar_advances_updated'));
+        (async () => {
+          try {
+            if (m.airman_id) {
+              await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', m.airman_id);
+            }
+            if (m['BD No']) {
+              await supabase.from('Canteen_Member').update({ Due: newDue }).eq('BD No', String(m['BD No']).trim());
+            }
+          } catch (e) {
+            console.warn('Member due update error on Unit Fund batch bill:', e);
+          }
+        })();
+      });
+
+      // ONLY for Others Fund: deduct total billed amount from Fund Cash or UCB as an expense so Capital All Logs receives entry
+      // For Unit Fund: Purpose and Payment Method are NOT used, everything goes to Due directly without fund expense deduction.
+      let updatedExpenses: any[] = [];
+      let updatedAdvances: any[] = [];
+
+      if (!isUnitFund) {
+        const totalBatchDeduction = totalBatchAmount;
+        const existingExpenses = (() => {
+          try {
+            return JSON.parse(localStorage.getItem('canteen_expenses') || '[]');
+          } catch {
+            return [];
+          }
+        })();
+
+        const memberBreakdown = selectedMemberList.map((m) => {
+          const cleanBdNo = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
+          const mId = String(m.airman_id || m['BD No']);
+          const raw = memberCustomAmounts[mId] !== undefined ? memberCustomAmounts[mId] : amount;
+          const memberAmt = parseFloat(raw || '0') || 0;
+          const name = `${m['Rank'] || ''} ${m['Surname'] || ''}`.trim() || `BD-${cleanBdNo}`;
+          return {
+            airman_id: m.airman_id,
+            bdNo: m['BD No'] || m.bdNo,
+            name,
+            amount: memberAmt,
+            label: `${name}${m['BD No'] ? ` (BD-${m['BD No']})` : ''}: ৳${memberAmt.toLocaleString('en-US')}`
+          };
+        });
+
+        const memberNamesStr = memberBreakdown.map(mb => mb.label).join(' • ');
+        const detailedPersonDisplay = memberBreakdown.length === 1 
+          ? memberBreakdown[0].label 
+          : `${memberBreakdown.length} Members: ${memberNamesStr}`;
+
+        const fundExpenseRecord = {
+          id: batchExpenseId,
+          date: formattedTxDate,
+          desc: `OTHERS BILL: ${finalPurpose}`.toUpperCase(),
+          subdesc: `Kar Jonno: ${memberNamesStr}${finalNotes ? ` • Note: ${finalNotes}` : ''} [${paymentMethodFormatted}]`,
+          category: 'Others Bill',
+          paymentMethod: paymentMethodFormatted,
+          amount: totalBatchDeduction,
+          detailedPerson: detailedPersonDisplay,
+          memberBreakdown: memberBreakdown,
+          isCustom: true
+        };
+
+        updatedExpenses = [fundExpenseRecord, ...existingExpenses];
+        localStorage.setItem('canteen_expenses', JSON.stringify(updatedExpenses));
+        window.dispatchEvent(new Event('canteen_expenses_updated'));
+
+        // If Cash and Staff is selected: deduct from the staff member's account!
+        if (othersFundSource === 'Cash' && cashDeductTarget === 'STAFF' && selectedStaffName) {
+          const advancesRaw = localStorage.getItem('canteen_bazar_advances');
+          const advances: any[] = advancesRaw ? JSON.parse(advancesRaw) : [];
+
+          const targetStaff = selectedStaffName.trim().toLowerCase();
+          const personActive = advances.filter((a) => {
+            const pName = String(a.personName || '').trim().toLowerCase();
+            const isSettled = a.status === 'SETTLED' || Number(a.returnAmount) > 0 || (a.notes && a.notes.includes('[Settled]')) || Boolean(a.settledDate);
+            return (pName === targetStaff || pName.includes(targetStaff) || targetStaff.includes(pName)) &&
+                   String(a.status || 'ACTIVE').toUpperCase() === 'ACTIVE' &&
+                   !isSettled;
+          });
+
+          if (personActive.length === 0) {
+            const newNegativeAdv = {
+              id: `adv-${now}-${Math.random().toString(36).substring(2, 6)}`,
+              date: formattedTxDate,
+              personName: selectedStaffName,
+              amount: 0,
+              spentAmount: totalBatchDeduction,
+              returnAmount: 0,
+              channel: 'CASH',
+              purpose: `OTHERS BILL: ${finalPurpose}`.toUpperCase(),
+              status: 'ACTIVE',
+              notes: `Auto deducted for Others Bill (${selectedMemberList.length} members)`
+            };
+            updatedAdvances = [newNegativeAdv, ...advances];
+          } else {
+            let deducted = false;
+            updatedAdvances = advances.map((a) => {
+              const pName = String(a.personName || '').trim().toLowerCase();
+              const isSettled = a.status === 'SETTLED' || Number(a.returnAmount) > 0 || (a.notes && a.notes.includes('[Settled]')) || Boolean(a.settledDate);
+              if (!deducted && (pName === targetStaff || pName.includes(targetStaff) || targetStaff.includes(pName)) && String(a.status || 'ACTIVE').toUpperCase() === 'ACTIVE' && !isSettled) {
+                deducted = true;
+                return {
+                  ...a,
+                  spentAmount: (Number(a.spentAmount) || 0) + totalBatchDeduction
+                };
+              }
+              return a;
+            });
+          }
+
+          localStorage.setItem('canteen_bazar_advances', JSON.stringify(updatedAdvances));
+          window.dispatchEvent(new Event('canteen_bazar_advances_updated'));
+        }
       }
 
       // Fast background push to Supabase cloud without freezing user UI
       Promise.all([
         pushKeyToCloud('canteen_txs', updatedTxs),
-        pushKeyToCloud('canteen_expenses', updatedExpenses),
-        ...(othersFundSource === 'Cash' && cashDeductTarget === 'STAFF' && selectedStaffName ? [pushKeyToCloud('canteen_bazar_advances', updatedAdvances)] : [])
+        ...(!isUnitFund && updatedExpenses.length > 0 ? [pushKeyToCloud('canteen_expenses', updatedExpenses)] : []),
+        ...(!isUnitFund && othersFundSource === 'Cash' && cashDeductTarget === 'STAFF' && selectedStaffName && updatedAdvances.length > 0 ? [pushKeyToCloud('canteen_bazar_advances', updatedAdvances)] : [])
       ]).catch((err) => console.warn('Background batch sync warning:', err));
 
       // Trigger sync events across the entire app
@@ -809,11 +874,11 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
 
       setBatchSuccessData({
         memberCount: selectedMemberList.length,
-        totalAmount: totalBatchDeduction,
+        totalAmount: totalBatchAmount,
         category: isUnitFund ? 'Unit Fund' : 'Others Bill',
-        purpose: finalPurpose,
-        source: othersFundSource,
-        targetStaff: othersFundSource === 'Cash' && cashDeductTarget === 'STAFF' ? selectedStaffName : undefined
+        purpose: isUnitFund ? 'Unit Fund Bill' : finalPurpose,
+        source: isUnitFund ? 'DUE' : othersFundSource,
+        targetStaff: (!isUnitFund && othersFundSource === 'Cash' && cashDeductTarget === 'STAFF') ? selectedStaffName : undefined
       });
 
       // Reset form fields
@@ -1499,8 +1564,8 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                             {m['Surname']}
                           </span>
                           {isAlreadyBilledThisMonth && (
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
-                              ✓ Billed
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                              ⚠️ অলরেডি যুক্ত
                             </span>
                           )}
                         </div>
@@ -1528,160 +1593,162 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
           </div>
         </div>
 
-        {/* STEP 3: SELECT CAT */}
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
-            <div className="flex items-center space-x-2.5">
-              <span className="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-400 font-mono font-black text-xs flex items-center justify-center">
-                3
-              </span>
-              <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center space-x-2">
-                <Tag className="w-4 h-4 text-indigo-400" />
-                <span>Select Category / Purpose {!isUnitFund && <span className="text-rose-400">*</span>}</span>
-              </h3>
+        {/* STEP 3: SELECT CAT / PURPOSE (Only for Others Fund; Unit Fund does not need Purpose) */}
+        {!isUnitFund && (
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+              <div className="flex items-center space-x-2.5">
+                <span className="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-400 font-mono font-black text-xs flex items-center justify-center">
+                  3
+                </span>
+                <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center space-x-2">
+                  <Tag className="w-4 h-4 text-indigo-400" />
+                  <span>Select Category / Purpose <span className="text-rose-400">*</span></span>
+                </h3>
+              </div>
+              {/* Settings Gear Icon to toggle edit mode */}
+              <button
+                type="button"
+                onClick={() => setIsEditingPresets(!isEditingPresets)}
+                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                  isEditingPresets
+                    ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title={isEditingPresets ? 'Done Editing Presets' : 'Manage Saved Presets'}
+              >
+                <Settings className="w-4 h-4" />
+              </button>
             </div>
-            {/* Settings Gear Icon to toggle edit mode */}
-            <button
-              type="button"
-              onClick={() => setIsEditingPresets(!isEditingPresets)}
-              className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                isEditingPresets
-                  ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title={isEditingPresets ? 'Done Editing Presets' : 'Manage Saved Presets'}
-            >
-              <Settings className="w-4 h-4" />
-            </button>
-          </div>
 
-          {/* Preset Pills */}
-          <div className="flex flex-wrap items-center gap-2">
-            {purposePresets.map((preset) => {
-              const isSelected = !isEditingPresets && purpose === preset;
-              return (
-                <div key={preset} className="relative group">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (isEditingPresets) return;
-                      setPurpose(preset);
-                    }}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all truncate ${
-                      isEditingPresets
-                        ? 'pr-7 opacity-85 cursor-default bg-slate-950 border-slate-700 text-slate-300'
-                        : 'cursor-pointer'
-                    } ${
-                      isSelected
-                        ? 'ring-2 ring-indigo-500 border-indigo-500 bg-indigo-950/90 text-indigo-100 shadow-sm'
-                        : !isEditingPresets
-                        ? 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-900'
-                        : ''
-                    }`}
-                  >
-                    {preset}
-                  </button>
-                  {isEditingPresets && (
+            {/* Preset Pills */}
+            <div className="flex flex-wrap items-center gap-2">
+              {purposePresets.map((preset) => {
+                const isSelected = !isEditingPresets && purpose === preset;
+                return (
+                  <div key={preset} className="relative group">
                     <button
                       type="button"
-                      onClick={() => handleRemovePreset(preset)}
-                      className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 rounded-full bg-red-900/60 text-red-300 hover:bg-red-800 hover:text-white transition-colors cursor-pointer"
-                      title="Delete preset"
+                      onClick={() => {
+                        if (isEditingPresets) return;
+                        setPurpose(preset);
+                      }}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all truncate ${
+                        isEditingPresets
+                          ? 'pr-7 opacity-85 cursor-default bg-slate-950 border-slate-700 text-slate-300'
+                          : 'cursor-pointer'
+                      } ${
+                        isSelected
+                          ? 'ring-2 ring-indigo-500 border-indigo-500 bg-indigo-950/90 text-indigo-100 shadow-sm'
+                          : !isEditingPresets
+                          ? 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-900'
+                          : ''
+                      }`}
                     >
-                      <X className="w-3 h-3" />
+                      {preset}
                     </button>
-                  )}
-                </div>
-              );
-            })}
+                    {isEditingPresets && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemovePreset(preset)}
+                        className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 rounded-full bg-red-900/60 text-red-300 hover:bg-red-800 hover:text-white transition-colors cursor-pointer"
+                        title="Delete preset"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
 
-            {/* Inline Add Preset */}
-            {!isEditingPresets && (
-              isAddingPreset ? (
-                <div className="flex items-center gap-1.5 bg-slate-950 border border-indigo-500/60 rounded-xl p-1 max-w-full">
-                  <input
-                    type="text"
-                    placeholder="New preset..."
-                    value={newPresetInput}
-                    onChange={(e) => setNewPresetInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleAddPreset();
-                      } else if (e.key === 'Escape') {
-                        setIsAddingPreset(false);
-                      }
-                    }}
-                    className="bg-transparent border-0 px-2 py-1 text-xs font-bold text-white outline-none placeholder:text-slate-500 w-32 sm:w-44"
-                    autoFocus
-                  />
+              {/* Inline Add Preset */}
+              {!isEditingPresets && (
+                isAddingPreset ? (
+                  <div className="flex items-center gap-1.5 bg-slate-950 border border-indigo-500/60 rounded-xl p-1 max-w-full">
+                    <input
+                      type="text"
+                      placeholder="New preset..."
+                      value={newPresetInput}
+                      onChange={(e) => setNewPresetInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddPreset();
+                        } else if (e.key === 'Escape') {
+                          setIsAddingPreset(false);
+                        }
+                      }}
+                      className="bg-transparent border-0 px-2 py-1 text-xs font-bold text-white outline-none placeholder:text-slate-500 w-32 sm:w-44"
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddPreset}
+                      className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-all cursor-pointer shrink-0"
+                    >
+                      Add
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setIsAddingPreset(false); setNewPresetInput(''); }}
+                      className="p-1 text-slate-400 hover:text-white rounded-lg transition-all cursor-pointer"
+                      title="Cancel"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : (
                   <button
                     type="button"
-                    onClick={handleAddPreset}
-                    className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-all cursor-pointer shrink-0"
+                    onClick={() => setIsAddingPreset(true)}
+                    className="px-2.5 py-1.5 rounded-xl text-xs font-bold border border-dashed border-slate-700 hover:border-indigo-500 text-slate-400 hover:text-indigo-300 bg-slate-950 transition-all cursor-pointer flex items-center space-x-1"
+                    title="Add Preset"
                   >
-                    Add
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Preset</span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => { setIsAddingPreset(false); setNewPresetInput(''); }}
-                    className="p-1 text-slate-400 hover:text-white rounded-lg transition-all cursor-pointer"
-                    title="Cancel"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setIsAddingPreset(true)}
-                  className="px-2.5 py-1.5 rounded-xl text-xs font-bold border border-dashed border-slate-700 hover:border-indigo-500 text-slate-400 hover:text-indigo-300 bg-slate-950 transition-all cursor-pointer flex items-center space-x-1"
-                  title="Add Preset"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Add Preset</span>
-                </button>
-              )
-            )}
-          </div>
+                )
+              )}
+            </div>
 
-          {/* Specify Custom Purpose Name */}
-          <div className="p-3 bg-slate-950/70 border border-slate-800 rounded-2xl space-y-1">
-            <label className="text-[11px] font-bold text-slate-300 block">
-              Purpose / Description {!isUnitFund && <span className="text-rose-400">*</span>}
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. Mess Dinner Fee, Refreshment, etc."
-              value={purpose}
-              onChange={(e) => setPurpose(e.target.value)}
-              className="w-full px-3 py-2 text-xs font-bold rounded-xl border border-slate-700 bg-slate-900 text-white outline-none focus:border-indigo-500 shadow-inner"
-              required={!isUnitFund}
-            />
-          </div>
+            {/* Specify Custom Purpose Name */}
+            <div className="p-3 bg-slate-950/70 border border-slate-800 rounded-2xl space-y-1">
+              <label className="text-[11px] font-bold text-slate-300 block">
+                Purpose / Description <span className="text-rose-400">*</span>
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Mess Dinner Fee, Refreshment, etc."
+                value={purpose}
+                onChange={(e) => setPurpose(e.target.value)}
+                className="w-full px-3 py-2 text-xs font-bold rounded-xl border border-slate-700 bg-slate-900 text-white outline-none focus:border-indigo-500 shadow-inner"
+                required
+              />
+            </div>
 
-          {/* Notes (Optional) */}
-          <div>
-            <label className="block text-xs font-black uppercase text-slate-300 mb-1.5 flex items-center space-x-1.5">
-              <FileText className="w-3.5 h-3.5 text-slate-400" />
-              <span>Notes (Optional)</span>
-            </label>
-            <textarea
-              rows={2}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Any additional notes or remarks..."
-              className="w-full bg-slate-950 border border-slate-700 rounded-2xl p-3 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 shadow-inner resize-none"
-            />
+            {/* Notes (Optional) */}
+            <div>
+              <label className="block text-xs font-black uppercase text-slate-300 mb-1.5 flex items-center space-x-1.5">
+                <FileText className="w-3.5 h-3.5 text-slate-400" />
+                <span>Notes (Optional)</span>
+              </label>
+              <textarea
+                rows={2}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Any additional notes or remarks..."
+                className="w-full bg-slate-950 border border-slate-700 rounded-2xl p-3 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 shadow-inner resize-none"
+              />
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* STEP 4: AMOUNT */}
+        {/* STEP AMOUNT: Step 3 for Unit Fund, Step 4 for Others */}
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
             <div className="flex items-center space-x-2.5">
               <span className="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-400 font-mono font-black text-xs flex items-center justify-center">
-                4
+                {isUnitFund ? '3' : '4'}
               </span>
               <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center space-x-2">
                 <Coins className="w-4 h-4 text-indigo-400" />
@@ -1844,142 +1911,144 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
           )}
         </div>
 
-        {/* STEP 5: PAYMENT METHOD */}
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
-            <div className="flex items-center space-x-2.5">
-              <span className="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-400 font-mono font-black text-xs flex items-center justify-center">
-                5
-              </span>
-              <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center space-x-2">
-                <Wallet className="w-4 h-4 text-cyan-400" />
-                <span>Payment Method <span className="text-rose-400">*</span></span>
-              </h3>
-            </div>
-            <span className="text-[10px] text-slate-400 font-mono">Capital Fund</span>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2.5">
-            <button
-              type="button"
-              onClick={() => setOthersFundSource('Cash')}
-              className={`py-3 px-4 rounded-2xl text-xs font-black flex items-center justify-center space-x-2 transition-all cursor-pointer ${
-                othersFundSource === 'Cash'
-                  ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-950/50 ring-2 ring-emerald-400'
-                  : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
-              }`}
-            >
-              <Wallet className="w-4 h-4" />
-              <span>Cash</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setOthersFundSource('UCB')}
-              className={`py-3 px-4 rounded-2xl text-xs font-black flex items-center justify-center space-x-2 transition-all cursor-pointer ${
-                othersFundSource === 'UCB'
-                  ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-950/50 ring-2 ring-cyan-400'
-                  : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
-              }`}
-            >
-              <CreditCard className="w-4 h-4" />
-              <span>UCB</span>
-            </button>
-          </div>
-
-          {/* When Cash is selected: Source Selection (Manager Cash vs Staff Account) without checkbox */}
-          {othersFundSource === 'Cash' && (
-            <div className="bg-slate-950/90 rounded-2xl p-3.5 border border-slate-800 space-y-3">
-              <div className="text-xs font-bold text-slate-300">
-                Cash Channel / Source:
+        {/* STEP 5: PAYMENT METHOD (Only for Others Fund; Unit Fund does not need Payment Method, goes straight to Due) */}
+        {!isUnitFund && (
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+              <div className="flex items-center space-x-2.5">
+                <span className="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-400 font-mono font-black text-xs flex items-center justify-center">
+                  5
+                </span>
+                <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center space-x-2">
+                  <Wallet className="w-4 h-4 text-cyan-400" />
+                  <span>Payment Method <span className="text-rose-400">*</span></span>
+                </h3>
               </div>
-
-              {/* Segmented Switch Buttons instead of Checkbox */}
-              <div className="grid grid-cols-2 gap-2 p-1 bg-slate-900 rounded-xl border border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setCashDeductTarget('MANAGER')}
-                  className={`py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1.5 ${
-                    cashDeductTarget === 'MANAGER'
-                      ? 'bg-slate-800 text-white shadow-xs border border-slate-700'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>Manager Cash</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCashDeductTarget('STAFF')}
-                  className={`py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1.5 ${
-                    cashDeductTarget === 'STAFF'
-                      ? 'bg-emerald-600 text-white shadow-xs'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <Users className="w-3.5 h-3.5 text-emerald-200" />
-                  <span>Staff Account</span>
-                </button>
-              </div>
-
-              {/* Modern Staff Selection without Checkbox */}
-              {cashDeductTarget === 'STAFF' ? (
-                <div className="space-y-2 pt-1">
-                  <div className="flex items-center justify-between">
-                    <label className="block text-[11px] font-black uppercase tracking-wider text-slate-300">
-                      Civilian Staff Member <span className="text-rose-400">*</span>
-                    </label>
-                    <span className="text-[10px] text-emerald-400 font-mono font-bold">
-                      Selected: {selectedStaffName}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    {civilianStaffList.map((st) => {
-                      const isSelected = selectedStaffName === st.name;
-                      return (
-                        <button
-                          key={st.id || st.name}
-                          type="button"
-                          onClick={() => setSelectedStaffName(st.name)}
-                          className={`p-2.5 rounded-xl text-left transition-all cursor-pointer border flex items-center space-x-2.5 ${
-                            isSelected
-                              ? 'bg-emerald-950/80 border-emerald-500 text-white shadow-sm ring-1 ring-emerald-500/50'
-                              : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700 hover:text-white'
-                          }`}
-                        >
-                          <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-black shrink-0 ${
-                            isSelected ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'
-                          }`}>
-                            {st.name.replace(/^(Civ\s*|Civilian\s*)/i, '').charAt(0) || 'S'}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-xs font-black truncate">{st.name}</p>
-                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tight block">
-                              Staff
-                            </span>
-                          </div>
-                          {isSelected && (
-                            <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : (
-                <div className="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-300 font-bold flex items-center space-x-2">
-                  <ShieldCheck className="w-4 h-4 text-indigo-400 shrink-0" />
-                  <span>Deduction logged under Manager Cash ({managerName}).</span>
-                </div>
-              )}
+              <span className="text-[10px] text-slate-400 font-mono">Capital Fund</span>
             </div>
-          )}
-        </div>
 
-        {/* STEP 6: CONFIRM */}
+            <div className="grid grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={() => setOthersFundSource('Cash')}
+                className={`py-3 px-4 rounded-2xl text-xs font-black flex items-center justify-center space-x-2 transition-all cursor-pointer ${
+                  othersFundSource === 'Cash'
+                    ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-950/50 ring-2 ring-emerald-400'
+                    : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+                }`}
+              >
+                <Wallet className="w-4 h-4" />
+                <span>Cash</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setOthersFundSource('UCB')}
+                className={`py-3 px-4 rounded-2xl text-xs font-black flex items-center justify-center space-x-2 transition-all cursor-pointer ${
+                  othersFundSource === 'UCB'
+                    ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-950/50 ring-2 ring-cyan-400'
+                    : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+                }`}
+              >
+                <CreditCard className="w-4 h-4" />
+                <span>UCB</span>
+              </button>
+            </div>
+
+            {/* When Cash is selected: Source Selection (Manager Cash vs Staff Account) without checkbox */}
+            {othersFundSource === 'Cash' && (
+              <div className="bg-slate-950/90 rounded-2xl p-3.5 border border-slate-800 space-y-3">
+                <div className="text-xs font-bold text-slate-300">
+                  Cash Channel / Source:
+                </div>
+
+                {/* Segmented Switch Buttons instead of Checkbox */}
+                <div className="grid grid-cols-2 gap-2 p-1 bg-slate-900 rounded-xl border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setCashDeductTarget('MANAGER')}
+                    className={`py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1.5 ${
+                      cashDeductTarget === 'MANAGER'
+                        ? 'bg-slate-800 text-white shadow-xs border border-slate-700'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Manager Cash</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCashDeductTarget('STAFF')}
+                    className={`py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1.5 ${
+                      cashDeductTarget === 'STAFF'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Users className="w-3.5 h-3.5 text-emerald-200" />
+                    <span>Staff Account</span>
+                  </button>
+                </div>
+
+                {/* Modern Staff Selection without Checkbox */}
+                {cashDeductTarget === 'STAFF' ? (
+                  <div className="space-y-2 pt-1">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-[11px] font-black uppercase tracking-wider text-slate-300">
+                        Civilian Staff Member <span className="text-rose-400">*</span>
+                      </label>
+                      <span className="text-[10px] text-emerald-400 font-mono font-bold">
+                        Selected: {selectedStaffName}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {civilianStaffList.map((st) => {
+                        const isSelected = selectedStaffName === st.name;
+                        return (
+                          <button
+                            key={st.id || st.name}
+                            type="button"
+                            onClick={() => setSelectedStaffName(st.name)}
+                            className={`p-2.5 rounded-xl text-left transition-all cursor-pointer border flex items-center space-x-2.5 ${
+                              isSelected
+                                ? 'bg-emerald-950/80 border-emerald-500 text-white shadow-sm ring-1 ring-emerald-500/50'
+                                : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700 hover:text-white'
+                            }`}
+                          >
+                            <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-black shrink-0 ${
+                              isSelected ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'
+                            }`}>
+                              {st.name.replace(/^(Civ\s*|Civilian\s*)/i, '').charAt(0) || 'S'}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-black truncate">{st.name}</p>
+                              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tight block">
+                                Staff
+                              </span>
+                            </div>
+                            {isSelected && (
+                              <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-300 font-bold flex items-center space-x-2">
+                    <ShieldCheck className="w-4 h-4 text-indigo-400 shrink-0" />
+                    <span>Deduction logged under Manager Cash ({managerName}).</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* STEP CONFIRM: Step 4 for Unit Fund, Step 6 for Others */}
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
           <div className="flex items-center space-x-2.5 border-b border-slate-800 pb-2.5">
             <span className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 font-mono font-black text-xs flex items-center justify-center">
-              6
+              {isUnitFund ? '4' : '6'}
             </span>
             <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center space-x-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-400" />
@@ -1994,13 +2063,19 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
               <span className="font-mono text-white font-black">{formatCanteenDate(txDate)}</span>
             </div>
             <div className="flex items-center justify-between text-xs font-bold text-slate-400">
+              <span>Target Month:</span>
+              <span className="font-mono text-indigo-300 font-black">{formatBengaliMonthYear(targetMonthKey)}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs font-bold text-slate-400">
               <span>Selected Members:</span>
               <span className="font-mono text-white font-black">{selectedCount} members</span>
             </div>
-            <div className="flex items-center justify-between text-xs font-bold text-slate-400">
-              <span>Purpose / Category:</span>
-              <span className="text-indigo-300 font-bold truncate max-w-[200px]">{purpose || (isUnitFund ? 'Unit Fund Subscription' : 'Others Bill')}</span>
-            </div>
+            {!isUnitFund && (
+              <div className="flex items-center justify-between text-xs font-bold text-slate-400">
+                <span>Purpose / Category:</span>
+                <span className="text-indigo-300 font-bold truncate max-w-[200px]">{purpose || 'Others Bill'}</span>
+              </div>
+            )}
             <div className="flex items-center justify-between text-xs font-bold text-slate-400">
               <span>Amount Per Member:</span>
               <span className="font-mono text-emerald-400 font-black">
@@ -2009,12 +2084,21 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                   : `Individual Rates`}
               </span>
             </div>
-            <div className="flex items-center justify-between text-xs font-bold text-slate-400">
-              <span>Payment Channel:</span>
-              <span className="font-mono text-cyan-300 font-bold">
-                {othersFundSource} {othersFundSource === 'Cash' ? `(${cashDeductTarget === 'STAFF' ? selectedStaffName : 'Manager Cash'})` : ''}
-              </span>
-            </div>
+            {isUnitFund ? (
+              <div className="flex items-center justify-between text-xs font-bold text-slate-400">
+                <span>Billing Type:</span>
+                <span className="font-mono text-amber-400 font-bold">
+                  Member Due (সরাসরি বকেয়া যুক্ত হবে)
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between text-xs font-bold text-slate-400">
+                <span>Payment Channel:</span>
+                <span className="font-mono text-cyan-300 font-bold">
+                  {othersFundSource} {othersFundSource === 'Cash' ? `(${cashDeductTarget === 'STAFF' ? selectedStaffName : 'Manager Cash'})` : ''}
+                </span>
+              </div>
+            )}
             <div className="border-t border-slate-800 pt-2.5 flex items-center justify-between text-sm font-black text-white">
               <span>Total Batch Amount:</span>
               <span className="font-mono text-xl text-amber-400 font-black">
@@ -2039,7 +2123,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
             ) : (
               <Check className="w-4 h-4" />
             )}
-            <span>Confirm</span>
+            <span>{isUnitFund ? 'Confirm & Post Unit Fund Due' : 'Confirm'}</span>
           </button>
         </div>
       </div>
@@ -2197,22 +2281,35 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                   ৳{batchSuccessData.totalAmount.toLocaleString()}
                 </span>
               </div>
-              <div className="flex justify-between items-center text-slate-300">
-                <span className="text-slate-400 flex items-center gap-1.5">
-                  <Tag className="w-3.5 h-3.5 text-slate-400" /> উদ্দেশ্য / ফান্ড:
-                </span>
-                <span className="font-bold text-slate-200 line-clamp-1 max-w-[180px] text-right">
-                  {batchSuccessData.purpose}
-                </span>
-              </div>
-              <div className="flex justify-between items-center text-slate-300">
-                <span className="text-slate-400 flex items-center gap-1.5">
-                  <Wallet className="w-3.5 h-3.5 text-slate-400" /> ফান্ড সোর্স:
-                </span>
-                <span className="font-semibold text-slate-300">
-                  {batchSuccessData.source} {batchSuccessData.targetStaff ? `(${batchSuccessData.targetStaff})` : ''}
-                </span>
-              </div>
+              {batchSuccessData.category !== 'Unit Fund' ? (
+                <>
+                  <div className="flex justify-between items-center text-slate-300">
+                    <span className="text-slate-400 flex items-center gap-1.5">
+                      <Tag className="w-3.5 h-3.5 text-slate-400" /> উদ্দেশ্য / ফান্ড:
+                    </span>
+                    <span className="font-bold text-slate-200 line-clamp-1 max-w-[180px] text-right">
+                      {batchSuccessData.purpose}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-slate-300">
+                    <span className="text-slate-400 flex items-center gap-1.5">
+                      <Wallet className="w-3.5 h-3.5 text-slate-400" /> ফান্ড সোর্স:
+                    </span>
+                    <span className="font-semibold text-slate-300">
+                      {batchSuccessData.source} {batchSuccessData.targetStaff ? `(${batchSuccessData.targetStaff})` : ''}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <div className="flex justify-between items-center text-slate-300">
+                  <span className="text-slate-400 flex items-center gap-1.5">
+                    <Tag className="w-3.5 h-3.5 text-amber-400" /> বিলের ধরন:
+                  </span>
+                  <span className="font-bold text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/20">
+                    Unit Fund (সরাসরি বকেয়া যুক্ত হয়েছে)
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Done Button */}
@@ -2320,11 +2417,14 @@ export const EditFundTxModal: React.FC<EditFundTxModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const num = parseFloat(editAmount);
+    const isUnit = tx ? getTxCategory(tx) === 'UNIT_FUND' : false;
+    const derivedItems = isUnit ? 'Unit Fund Bill' : editItems.trim();
+
     if (isNaN(num) || num <= 0) {
       setErrorMsg('Please enter a valid amount greater than 0');
       return;
     }
-    if (!editItems.trim()) {
+    if (!isUnit && !editItems.trim()) {
       setErrorMsg('Purpose or description cannot be empty');
       return;
     }
@@ -2342,7 +2442,7 @@ export const EditFundTxModal: React.FC<EditFundTxModalProps> = ({
       await onSave({
         amount: num,
         date: editDate,
-        items: editItems.trim(),
+        items: derivedItems,
         note: editNote.trim() || undefined,
         monthKey: derivedMonthKey
       });
@@ -2432,36 +2532,45 @@ export const EditFundTxModal: React.FC<EditFundTxModalProps> = ({
             />
           </div>
 
-          {/* Purpose / Items */}
-          <div>
-            <label className="block text-xs font-black uppercase text-slate-300 mb-1">
-              Purpose / Description <span className="text-rose-400">*</span>
-            </label>
-            <div className="flex flex-wrap gap-1 mb-1.5">
-              {purposePresets.map((preset) => (
-                <button
-                  key={preset}
-                  type="button"
-                  onClick={() => setEditItems(preset)}
-                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                    editItems === preset
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                  }`}
-                >
-                  {preset}
-                </button>
-              ))}
+          {/* Purpose / Items (Only for Others Fund; Unit Fund has fixed bill type) */}
+          {!isUnit ? (
+            <div>
+              <label className="block text-xs font-black uppercase text-slate-300 mb-1">
+                Purpose / Description <span className="text-rose-400">*</span>
+              </label>
+              <div className="flex flex-wrap gap-1 mb-1.5">
+                {purposePresets.map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setEditItems(preset)}
+                    className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                      editItems === preset
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    {preset}
+                  </button>
+                ))}
+              </div>
+              <input
+                type="text"
+                value={editItems}
+                onChange={(e) => setEditItems(e.target.value)}
+                placeholder="Enter purpose or description..."
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-indigo-500"
+                required
+              />
             </div>
-            <input
-              type="text"
-              value={editItems}
-              onChange={(e) => setEditItems(e.target.value)}
-              placeholder="Enter purpose or description..."
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-indigo-500"
-              required
-            />
-          </div>
+          ) : (
+            <div className="p-3 rounded-2xl bg-slate-950/80 border border-slate-800 text-xs flex justify-between items-center">
+              <span className="text-slate-400 font-bold">Category:</span>
+              <span className="font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/20 font-mono">
+                Unit Fund Bill (Due)
+              </span>
+            </div>
+          )}
 
           {/* Note */}
           <div>

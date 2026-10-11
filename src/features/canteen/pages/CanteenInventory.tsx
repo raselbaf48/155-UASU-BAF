@@ -32,7 +32,8 @@ import {
   deduplicateRawItems,
   calculateMenuItemStockInfo,
   isReadymadeItem,
-  saveMenuRecipes
+  saveMenuRecipes,
+  INITIAL_RAW_ITEMS
 } from '../utils/recipeManager';
 import {
   get20PaxRecipes,
@@ -123,9 +124,21 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
 
   const fetchRawItems = async () => {
     try {
+      let dbData: any[] = [];
       const { data, error } = await supabase.from('Canteen_Inventory').select('*');
       if (!error && data && data.length > 0) {
-        const parsedRaw = data.map((r: any) => {
+        dbData = data;
+      }
+      const { data: settingData } = await supabase.from('app_settings').select('*').eq('setting_key', 'canteen_raw_inventory_items_v2');
+      let appRaw: any[] = [];
+      if (settingData && settingData[0]) {
+        try {
+          appRaw = typeof settingData[0].setting_value === 'string' ? JSON.parse(settingData[0].setting_value) : settingData[0].setting_value;
+        } catch {}
+      }
+
+      if (dbData.length > 0 || appRaw.length > 0) {
+        const parsedRaw = dbData.map((r: any) => {
           const meta = decodeNotesMeta(r.notes);
           const sub = r['Sub Unit'] ?? r.subUnit ?? r.sub_unit ?? meta.subUnit;
           const pSize = Number(r.packSize) || Number(meta.packSize) || (['kg', 'কেজি'].includes((r.unit || '').toLowerCase()) ? 1000 : (['liter', 'ltr', 'লিটার'].includes((r.unit || '').toLowerCase()) ? 1000 : 1));
@@ -143,7 +156,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
           };
         });
         const currentLocal = getRawInventoryItems();
-        const combined = [...currentLocal, ...parsedRaw];
+        const combined = [...INITIAL_RAW_ITEMS, ...currentLocal, ...(Array.isArray(appRaw) ? appRaw : []), ...parsedRaw];
         const { deduplicated } = deduplicateRawItems(combined);
         const sortedRaw = deduplicated.sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
         setAvailableRawItems(sortedRaw);
@@ -229,6 +242,13 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       .channel(`canteen_inv_catalog_realtime_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'Canteen_Inventory' }, () => {
         fetchRawItems().then(() => fetchItems());
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'app_settings', filter: 'setting_key=eq.canteen_raw_inventory_items_v2' }, () => {
+        fetchRawItems().then(() => fetchItems());
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'app_settings', filter: 'setting_key=eq.canteen_menu_recipes_v3' }, () => {
+        setRecipes(getMenuRecipes());
+        fetchItems();
       })
       .subscribe();
 

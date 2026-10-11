@@ -127,6 +127,7 @@ import {
 import { playCelebrationSound } from '../utils/audioFeedback';
 import { FundBatchBillPage } from './FundBatchBillPage';
 import { FundHistoryModal } from '../components/FundHistoryModal';
+import { AddMemberModal } from '../components/AddMemberModal';
 
 export type BillCategory = 'ALL' | 'CANTEEN' | 'UNIT_FUND' | 'OTHERS';
 
@@ -769,6 +770,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
   onNavigateToTab
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const memberDbSearchInputRef = useRef<HTMLInputElement>(null);
   const [selectedCategory, setSelectedCategory] = useState<BillCategory>(() => forcedCategory || initialCategory);
 
   useEffect(() => {
@@ -777,7 +779,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
     }
   }, [forcedCategory]);
   const [selectedMonth, setSelectedMonth] = useState<string>(() => getRunningMonthKey());
-  const [filterMode, setFilterMode] = useState<'AUTO' | 'ALL' | 'DUE'>('AUTO');
+  const [filterMode, setFilterMode] = useState<'AUTO' | 'ALL' | 'DUE'>(hideFundTabs ? 'ALL' : 'AUTO');
   const [rankTypeFilter, setRankTypeFilter] = useState<'OVERALL' | 'OFFICER' | 'AIRMEN' | 'CIVILIAN'>('OVERALL');
   const [viewMode, setViewMode] = useState<'BOX' | 'TABLE'>('BOX');
   const [, setBanglaVersion] = useState<number>(0);
@@ -837,6 +839,9 @@ export const MemberDB: React.FC<MemberDBProps> = ({
   const [isEditingBanglaName, setIsEditingBanglaName] = useState(false);
   const [editingBanglaNameVal, setEditingBanglaNameVal] = useState('');
   const [isSavingBanglaName, setIsSavingBanglaName] = useState(false);
+
+  // Add Member Modal state
+  const [isAddMemberModalOpen, setIsAddMemberModalOpen] = useState(false);
 
   // Initial Bill Modals state
   const [isImportBillsModalOpen, setIsImportBillsModalOpen] = useState(false);
@@ -2646,11 +2651,16 @@ export const MemberDB: React.FC<MemberDBProps> = ({
         });
 
         const txAmount = Number(tx.amount || 0);
+        const catalogTotal = parsed.reduce((sum, p) => sum + (p.rate > 0 ? p.rate * p.qty : 0), 0);
         parsed.forEach((item) => {
           let itemRate = item.rate;
           let subTotal = 0;
-          if (itemRate > 0) {
+          if (itemRate > 0 && Math.abs(catalogTotal - txAmount) <= 1) {
             subTotal = itemRate * item.qty;
+          } else if (catalogTotal > 0 && txAmount > 0) {
+            const ratio = (item.rate * item.qty) / catalogTotal;
+            subTotal = Math.round(txAmount * ratio * 100) / 100;
+            itemRate = item.qty > 0 ? Math.round((subTotal / item.qty) * 100) / 100 : itemRate;
           } else {
             const totalQty = parsed.reduce((sum, p) => sum + p.qty, 0);
             itemRate = totalQty > 0 ? Math.round((txAmount / totalQty) * 100) / 100 : txAmount / parts.length;
@@ -3531,26 +3541,11 @@ export const MemberDB: React.FC<MemberDBProps> = ({
         if (cleanBd && iBd && cleanBd === iBd) return true;
         if (airmanId && iAirman && airmanId === iAirman) return true;
 
-        const iSurname = String(item.Surname || '').trim().toLowerCase();
-        const iRank = String(item.Rank || '').trim().toLowerCase();
-        if (mSurname && iSurname && mSurname === iSurname && mRank && iRank && mRank === iRank) {
-          const mNum = parseInt(cleanBd, 10);
-          const iNum = parseInt(iBd, 10);
-          if (!isNaN(mNum) && !isNaN(iNum) && ((mNum < 50 && iNum >= 50) || (iNum < 50 && mNum >= 50))) {
-            return true;
-          }
-        }
         return false;
       });
 
       if (existingIdx >= 0) {
         const existing = uniqueList[existingIdx];
-        const exBdNum = parseInt(String(existing['BD No'] || '').replace(/\D/g, ''), 10);
-        const curBdNum = parseInt(cleanBd, 10);
-        if (curBdNum >= 50 && exBdNum < 50) {
-          existing['BD No'] = m['BD No'] || cleanBd;
-          if (m.airman_id) existing.airman_id = m.airman_id;
-        }
 
         if (m.Due !== undefined && m.Due !== null) {
           existing.Due = Number(m.Due);
@@ -3805,6 +3800,18 @@ export const MemberDB: React.FC<MemberDBProps> = ({
           }
         }
 
+        // Also preserve any newly added local members that haven't reached cloudData yet
+        for (const [key, localM] of localMap.entries()) {
+          const alreadyInList = updatedList.some((m) => {
+            const mKey = String(m.airman_id || m['BD No'] || '').trim();
+            return mKey && (mKey === key || mKey.toLowerCase() === key.toLowerCase());
+          });
+          if (!alreadyInList) {
+            hasAnyDifference = true;
+            updatedList.push(localM);
+          }
+        }
+
         if (updatedList.length !== baseList.length) {
           hasAnyDifference = true;
         }
@@ -3960,19 +3967,25 @@ export const MemberDB: React.FC<MemberDBProps> = ({
     return { totalFilteredBill: sum, countWithBills: count };
   }, [filteredMembers, selectedCategory, selectedMonth, allTxs]);
 
-  // When selectedMonth or selectedCategory changes, reset filterMode to AUTO
-  // so that if the new month has no due, 'ALL' is automatically selected; if it has due, 'DUE' is selected
+  // When selectedMonth or selectedCategory changes, reset filterMode:
+  // For Member DB (hideFundTabs = true), keep 'ALL' as default so zero-due members (e.g. Jahid) are always visible!
   useEffect(() => {
-    setFilterMode('AUTO');
-  }, [selectedMonth, selectedCategory]);
+    if (hideFundTabs) {
+      setFilterMode('ALL');
+    } else {
+      setFilterMode('AUTO');
+    }
+  }, [selectedMonth, selectedCategory, hideFundTabs]);
 
   // Determine if Due filter is active:
   // Default is AUTO: filters by Due if countWithBills > 0, otherwise shows All if Due is 0.
+  // When hideFundTabs is true (Member DB), defaults to showing All members.
   const isDueFilterActive = useMemo(() => {
     if (filterMode === 'DUE') return true;
     if (filterMode === 'ALL') return false;
+    if (hideFundTabs) return false;
     return countWithBills > 0;
-  }, [filterMode, countWithBills]);
+  }, [filterMode, countWithBills, hideFundTabs]);
 
   const displayedMemberList = useMemo(() => {
     // When user types in search bar, do not suppress members with 0 current-month bill so their search always returns the matched members
@@ -4213,11 +4226,16 @@ export const MemberDB: React.FC<MemberDBProps> = ({
           }
         });
         const txAmount = Number(tx.amount || 0);
+        const catalogTotal = parsed.reduce((sum, p) => sum + (p.rate > 0 ? p.rate * p.qty : 0), 0);
         parsed.forEach((item) => {
           let itemRate = item.rate;
           let subTotal = 0;
-          if (itemRate > 0) {
+          if (itemRate > 0 && Math.abs(catalogTotal - txAmount) <= 1) {
             subTotal = itemRate * item.qty;
+          } else if (catalogTotal > 0 && txAmount > 0) {
+            const ratio = (item.rate * item.qty) / catalogTotal;
+            subTotal = Math.round(txAmount * ratio * 100) / 100;
+            itemRate = item.qty > 0 ? Math.round((subTotal / item.qty) * 100) / 100 : itemRate;
           } else {
             const totalQty = parsed.reduce((sum, p) => sum + p.qty, 0);
             itemRate = totalQty > 0 ? Math.round((txAmount / totalQty) * 100) / 100 : txAmount / parts.length;
@@ -4817,6 +4835,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
         <div className="relative flex-1">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <input 
+            ref={memberDbSearchInputRef}
             type="text" 
             placeholder="Search members by BD No, Surname, Bill, or বাংলা নাম..." 
             value={searchTerm}
@@ -4826,7 +4845,12 @@ export const MemberDB: React.FC<MemberDBProps> = ({
           {searchTerm && (
             <button
               type="button"
-              onClick={() => setSearchTerm('')}
+              onClick={() => {
+                setSearchTerm('');
+                setTimeout(() => {
+                  memberDbSearchInputRef.current?.focus();
+                }, 10);
+              }}
               className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800 transition-colors cursor-pointer"
               title="Clear search"
             >
@@ -4835,10 +4859,20 @@ export const MemberDB: React.FC<MemberDBProps> = ({
           )}
         </div>
 
-        {/* Actions: Import Button & Export Button (Only when ALL is selected) & View Mode Toggle (Icons Only) */}
+        {/* Actions: Add Member Button, Import Button & Export Button (Only when ALL is selected) & View Mode Toggle (Icons Only) */}
         <div className="flex items-center space-x-2 self-end sm:self-auto shrink-0 flex-wrap gap-y-2">
           {selectedCategory === 'ALL' && (
             <>
+              <button
+                type="button"
+                onClick={() => setIsAddMemberModalOpen(true)}
+                className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-2xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 shadow-md shadow-indigo-500/25 border-t border-indigo-300/40 active:translate-y-0.5 transition-all cursor-pointer"
+                title="Add New Member (নতুন সদস্য যুক্ত করুন)"
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>+ ADD MEMBER</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => {
@@ -6967,6 +7001,19 @@ export const MemberDB: React.FC<MemberDBProps> = ({
             </button>
           </div>
         </div>
+      )}
+
+      {/* Add New Member Modal */}
+      {isAddMemberModalOpen && (
+        <AddMemberModal
+          isOpen={isAddMemberModalOpen}
+          onClose={() => setIsAddMemberModalOpen(false)}
+          existingMembers={members}
+          onMemberAdded={(newM) => {
+            setMembers((prev) => formatAndSortMembers([newM, ...prev]));
+            fetchMembers(true);
+          }}
+        />
       )}
 
       {/* Bulk Import Initial Bills Modal */}

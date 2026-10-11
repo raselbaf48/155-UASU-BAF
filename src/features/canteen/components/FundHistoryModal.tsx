@@ -725,7 +725,9 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
                       <th className="py-3 px-3 font-black min-w-[160px]">Member Name</th>
                       <th className="py-3 px-3 font-black text-center w-24">Category</th>
                       <th className="py-3 px-3 font-black min-w-[180px]">Purpose / Description</th>
-                      <th className="py-3 px-3 font-black text-center w-28">Payment Method</th>
+                      {categoryFilter !== 'UNIT_FUND' && (
+                        <th className="py-3 px-3 font-black text-center w-28">Payment Channel</th>
+                      )}
                       <th className="py-3 px-3 font-black text-right w-24">Amount</th>
                       <th className="py-3 px-3 font-black text-center w-20">Action</th>
                     </tr>
@@ -736,6 +738,7 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
                       const isUnit = txCat === 'UNIT_FUND';
                       
                       const txMethod = (() => {
+                        if (isUnit) return 'DUE';
                         const pm = String(tx.paymentMethod || tx.method || tx.source || '').trim();
                         if (pm.startsWith('Cash (') || pm === 'UCB') {
                           return pm;
@@ -836,7 +839,7 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
                           <td className="py-3 px-3 text-slate-300">
                             <div className="flex flex-col">
                               <span className="font-semibold text-slate-200">
-                                {tx.items || tx.purpose || (isUnit ? 'Unit Fund Subscription' : 'Others Bill')}
+                                {isUnit ? 'Unit Fund Bill' : (tx.items || tx.purpose || 'Others Bill')}
                               </span>
                               {tx.note && (
                                 <span className="text-[10px] text-slate-400 italic">
@@ -845,15 +848,23 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
                               )}
                             </div>
                           </td>
-                          <td className="py-3 px-3 text-center">
-                            <span className={`px-2 py-0.5 rounded-lg text-[11px] font-semibold border ${
-                              txMethod.startsWith('Cash')
-                                ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/30'
-                                : 'bg-blue-950/60 text-blue-300 border-blue-500/30'
-                            }`}>
-                              {txMethod}
-                            </span>
-                          </td>
+                          {categoryFilter !== 'UNIT_FUND' && (
+                            <td className="py-3 px-3 text-center">
+                              {isUnit ? (
+                                <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-amber-950/60 text-amber-300 border border-amber-500/30 font-mono">
+                                  DUE BILL
+                                </span>
+                              ) : (
+                                <span className={`px-2 py-0.5 rounded-lg text-[11px] font-semibold border ${
+                                  txMethod.startsWith('Cash')
+                                    ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/30'
+                                    : 'bg-blue-950/60 text-blue-300 border-blue-500/30'
+                                }`}>
+                                  {txMethod}
+                                </span>
+                              )}
+                            </td>
+                          )}
                           <td className="py-3 px-3 text-right font-mono font-black text-emerald-400 text-sm">
                             ৳{Number(tx.amount || 0).toLocaleString()}
                           </td>

@@ -1291,6 +1291,38 @@ export async function syncCanteenMembersFromCloud(forceFull = false): Promise<vo
       }
     }
 
+    // Also preserve any newly added local members that haven't reached cloudData yet
+    for (const [key, localM] of localMap.entries()) {
+      const alreadyInMerged = mergedList.some((m) => {
+        const mKey = String(m.airman_id || m['BD No'] || '').trim();
+        return mKey && (mKey === key || mKey.toLowerCase() === key.toLowerCase());
+      });
+      if (!alreadyInMerged) {
+        hasDelta = true;
+        mergedList.push(localM);
+        // Background push to Supabase Canteen_Member so it syncs up to cloud
+        try {
+          const cleanBd = String(localM['BD No'] || localM.airman_id || '').replace(/\D/g, '');
+          const aid = localM.airman_id || (cleanBd ? `airman-${cleanBd}` : '');
+          if (aid) {
+            supabase.from('Canteen_Member').upsert([{
+              airman_id: aid,
+              "BD No": cleanBd,
+              Rank: localM.Rank || 'LAC',
+              Surname: localM.Surname || localM.surname || localM.name || '',
+              Contact: localM.Contact || '',
+              Role: localM.Role || 'Member',
+              Due: Number(localM.Due) || 0,
+              DP: localM.DP || null,
+              Name_BN: localM.Name_BN || localM.name_bn || null,
+              Rank_BN: localM.Rank_BN || localM.rank_bn || null,
+              active: true
+            }], { onConflict: 'airman_id' }).then();
+          }
+        } catch {}
+      }
+    }
+
     if (hasDelta) {
       const finalSorted = normalizeCanteenMembersSeniority(sortCanteenMembersByOfficeSeniority(mergedList));
       localStorage.setItem('canteen_members_cache', JSON.stringify(finalSorted));

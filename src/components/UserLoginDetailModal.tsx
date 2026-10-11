@@ -366,8 +366,10 @@ export const UserLoginDetailModal: React.FC<UserLoginDetailModalProps> = ({
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Admin Passcode</label>
                 <input
                   type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={addAdminPass}
-                  onChange={(e) => { setAddAdminPass(e.target.value); setErrorMsg(''); }}
+                  onChange={(e) => { setAddAdminPass(e.target.value.replace(/[^0-9]/g, '')); setErrorMsg(''); }}
                   className="w-full bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800 rounded-xl px-4 py-3 outline-none focus:border-emerald-500 font-mono text-slate-900 dark:text-white"
                   placeholder="e.g. 1124"
                 />

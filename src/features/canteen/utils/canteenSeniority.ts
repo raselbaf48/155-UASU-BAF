@@ -120,19 +120,6 @@ export function deduplicateCanteenMembers(members: any[]): any[] {
       if (cleanBd && iBd && cleanBd === iBd) return true;
       if (cleanAid && iAid && cleanAid === iAid) return true;
 
-      // Also detect if the same person has both a temporary small BD and a real BD
-      const mSurname = String(m.Surname || '').trim().toLowerCase();
-      const iSurname = String(item.Surname || '').trim().toLowerCase();
-      const mRank = String(m.Rank || '').trim().toLowerCase();
-      const iRank = String(item.Rank || '').trim().toLowerCase();
-      if (mSurname && iSurname && mSurname === iSurname && mRank && iRank && mRank === iRank) {
-        const mNum = parseInt(cleanBd, 10);
-        const iNum = parseInt(iBd, 10);
-        if (!isNaN(mNum) && !isNaN(iNum) && ((mNum < 50 && iNum >= 50) || (iNum < 50 && mNum >= 50))) {
-          return true;
-        }
-      }
-
       return false;
     });
 
@@ -144,12 +131,8 @@ export function deduplicateCanteenMembers(members: any[]): any[] {
 
     if (existingIdx >= 0) {
       const existing = uniqueList[existingIdx];
-      const exBd = String(existing['BD No'] || '').replace(/\D/g, '');
-      const curBd = cleanBd;
-      const preferCur = (parseInt(curBd, 10) >= 50 && parseInt(exBd, 10) < 50);
-
-      const resolvedBd = preferCur ? (m['BD No'] ? String(m['BD No']).trim() : curBd) : (existing['BD No'] || curBd);
-      const resolvedAid = preferCur ? (effectiveAirmanId || existing.airman_id) : (existing.airman_id || effectiveAirmanId);
+      const resolvedBd = m['BD No'] ? String(m['BD No']).trim() : (cleanBd || existing['BD No']);
+      const resolvedAid = effectiveAirmanId || existing.airman_id;
 
       uniqueList[existingIdx] = {
         ...existing,

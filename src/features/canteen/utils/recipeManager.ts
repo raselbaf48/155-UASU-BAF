@@ -151,22 +151,23 @@ export const getRawItemSubUnitInfo = (item?: Partial<RawInventoryItem> | null): 
     return { hasSubUnit: false, subUnit: '', packSize: 1, label: '' };
   }
 
-  // 3. Kg - gm (1 kg = 1000 gm)
+  // 3. Case / Crate - Pcs (1 Case = packSize pcs, default 30) - check before Kg/Ltr to ensure Egg is never matched as weight!
+  const isEgg = item.id === 'raw-7' || normalizeRawItemName(item.name || '') === 'egg' || (Boolean(item.nameBn) && normalizeRawItemName(item.nameBn || '').includes('ডিম'));
+  if (['case', 'crate', 'কেস', 'ক্রেট'].includes(u) || (u && u.includes('case')) || isEgg) {
+    const size = packSizeVal > 1 ? packSizeVal : 30;
+    return { hasSubUnit: true, subUnit: 'pcs', packSize: size, label: `১ কেস = ${size} পিস` };
+  }
+
+  // 4. Kg - gm (1 kg = 1000 gm)
   if (['kg', 'kg.', 'কেজি', 'কে.জি.', 'কে.জি', 'kilo', 'kilogram'].includes(u) || (explicitSub === 'gm' && !['gm', 'g', 'gram', 'গ্রাম'].includes(u))) {
     const size = packSizeVal > 1 ? packSizeVal : 1000;
     return { hasSubUnit: true, subUnit: 'gm', packSize: size, label: `১ কেজি = ${size} গ্রাম` };
   }
 
-  // 4. Ltr - ml (1 Ltr = 1000 ml)
+  // 5. Ltr - ml (1 Ltr = 1000 ml)
   if (['liter', 'ltr', 'litre', 'l', 'লিটার', 'লি.'].includes(u) || (explicitSub === 'ml' && !['ml', 'milli', 'milliliter', 'মিলি'].includes(u))) {
     const size = packSizeVal > 1 ? packSizeVal : 1000;
     return { hasSubUnit: true, subUnit: 'ml', packSize: size, label: `১ লিটার = ${size} মিলি` };
-  }
-
-  // 5. Case / Crate - Pcs (1 Case = packSize pcs, default 30)
-  if (['case', 'crate', 'কেস', 'ক্রেট'].includes(u) || (u.includes('case') && explicitSub === 'pcs')) {
-    const size = packSizeVal > 1 ? packSizeVal : 30;
-    return { hasSubUnit: true, subUnit: 'pcs', packSize: size, label: `১ কেস = ${size} পিস` };
   }
 
   // 6. Cylinder - kg / gm / pcs (LPG gas cylinder)
@@ -1498,22 +1499,6 @@ export const normalizeRawItemName = (name: string): string => {
   if (s.includes('chicken burger') || s.includes('চিকেন বার্গার')) return 'chicken-burger';
   if (s.includes('chicken patties') || s.includes('চিকেন পেটিস')) return 'chicken-patties';
   if (s.includes('chicken swarma') || s.includes('চিকেন শর্মা')) return 'chicken-swarma';
-  if (
-    s === 'chicken' ||
-    s === 'raw chicken' ||
-    s === 'chicken meat' ||
-    s === 'broiler chicken' ||
-    s === 'মুরগি' ||
-    s === 'মুরগির মাংস' ||
-    s === 'ব্রয়লার মুরগি' ||
-    s === 'ব্রয়লার মুরগির মাংস' ||
-    (s.includes('chicken') && !s.includes('roll') && !s.includes('burger') && !s.includes('pat') && !s.includes('swarma') && !s.includes('biscuit') && !s.includes('cake') && !s.includes('bread') && !s.includes('bun')) ||
-    (s.includes('মুরগি') && !s.includes('রোল') && !s.includes('বার্গার') && !s.includes('পেটিস') && !s.includes('শর্মা'))
-  ) return 'chicken';
-  if (s.includes('rice') || s.includes('চাল')) return 'rice';
-  if (s.includes('dal') || s.includes('ডাল')) return 'dal';
-  if (s.includes('milk') || s.includes('দুধ')) return 'milk-powder';
-  if (s.includes('noodle') || s.includes('নুডলস')) return 'noodles';
   if (s.includes('egg noodles') || s.includes('ডিম নুডলস')) return 'egg-noodles';
   if (s.includes('egg khichuri') || s.includes('ডিম খিচুড়ি') || s.includes('ডিম খিচুড়ি')) return 'egg-khichuri';
   if (s.includes('egg mumlet') || s.includes('egg omelet') || s.includes('egg omlet') || s.includes('ডিম ওমলেট') || s.includes('মামলেট')) return 'egg-mumlet';
@@ -1532,6 +1517,22 @@ export const normalizeRawItemName = (name: string): string => {
     (s.includes('egg') && !s.includes('roll') && !s.includes('noodle') && !s.includes('khich') && !s.includes('mumlet') && !s.includes('omlet') && !s.includes('fry') && !s.includes('poach') && !s.includes('pasta') && !s.includes('curry') && !s.includes('chop') && !s.includes('bread') && !s.includes('cake') && !s.includes('biscuit')) ||
     (s.includes('ডিম') && !s.includes('নুডল') && !s.includes('খিচু') && !s.includes('ওমলেট') && !s.includes('মামলেট') && !s.includes('ভাজি') && !s.includes('পোচ') && !s.includes('সিদ্ধ') && !s.includes('পাস্তা') && !s.includes('কারী') && !s.includes('চপ'))
   ) return 'egg';
+  if (
+    s === 'chicken' ||
+    s === 'raw chicken' ||
+    s === 'chicken meat' ||
+    s === 'broiler chicken' ||
+    s === 'মুরগি' ||
+    s === 'মুরগির মাংস' ||
+    s === 'ব্রয়লার মুরগি' ||
+    s === 'ব্রয়লার মুরগির মাংস' ||
+    (s.includes('chicken') && !s.includes('roll') && !s.includes('burger') && !s.includes('pat') && !s.includes('swarma') && !s.includes('biscuit') && !s.includes('cake') && !s.includes('bread') && !s.includes('bun') && !s.includes('egg') && !s.includes('ডিম')) ||
+    (s.includes('মুরগি') && !s.includes('রোল') && !s.includes('বার্গার') && !s.includes('পেটিস') && !s.includes('শর্মা') && !s.includes('ডিম') && !s.includes('egg'))
+  ) return 'chicken';
+  if (s.includes('rice') || s.includes('চাল')) return 'rice';
+  if ((s.includes('dal') || s.includes('ডাল')) && !s.includes('পুরি') && !s.includes('puri')) return 'dal';
+  if (s.includes('milk') || s.includes('দুধ')) return 'milk-powder';
+  if (s.includes('noodle') || s.includes('নুডলস')) return 'noodles';
   if (s.includes('oil') || s.includes('তেল')) return 'oil';
   if (s.includes('sugar') || s.includes('চিনি')) return 'sugar';
   if (s.includes('onion') || s.includes('পেঁয়াজ') || s.includes('পেয়াজ')) return 'onion';
@@ -1571,7 +1572,12 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
 
     // Group items together if they share the exact same ID or normalized name (English or Bengali)
     let key: string | undefined = undefined;
-    if (idKey && idToGroupMap.has(idKey)) {
+    // Strict isolation for core essential items: Chicken and Egg MUST NEVER collide
+    if (idKey === 'raw-1' || normKey === 'chicken') {
+      key = 'canon_chicken';
+    } else if (idKey === 'raw-7' || normKey === 'egg') {
+      key = 'canon_egg';
+    } else if (idKey && idToGroupMap.has(idKey)) {
       key = idToGroupMap.get(idKey);
     } else if (normKey && canonicalToGroupMap.has(normKey)) {
       key = canonicalToGroupMap.get(normKey);
@@ -1667,15 +1673,36 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
     };
 
     if (!seenKeys.has(key)) {
-      if (key === 'egg' || key === 'canon_egg' || normKey === 'egg') {
+      if (key === 'chicken' || key === 'canon_chicken' || normKey === 'chicken' || idKey === 'raw-1') {
+        seenKeys.set('canon_chicken', {
+          ...normalizedItem,
+          id: 'raw-1',
+          name: normalizedItem.name || 'Chicken',
+          nameBn: normalizedItem.nameBn || 'ব্রয়লার মুরগির মাংস',
+          category: 'Meat & Poultry',
+          subCategory: 'Kg - gm',
+          unit: 'kg',
+          packSize: 1000,
+          subUnit: 'gm',
+          hasSubUnits: true,
+          currentStock: Number(item.currentStock ?? 35),
+          unitCost: Number(item.unitCost ?? 230),
+          minStockAlert: Number(item.minStockAlert ?? 12),
+          notes: normalizedItem.notes || 'Fresh broiler chicken for daily dishes'
+        });
+      } else if (key === 'egg' || key === 'canon_egg' || normKey === 'egg' || idKey === 'raw-7') {
         const wasPcs = u === 'pcs';
         const eggPackSize = (item.packSize && item.packSize > 1) ? item.packSize : 30;
         const currentStock = wasPcs ? Math.round(((item.currentStock ?? 0) / eggPackSize) * 100) / 100 : (item.currentStock ?? 10);
         const unitCost = wasPcs ? Math.round((item.unitCost ?? 12.5) * eggPackSize) : (item.unitCost ?? 375);
         const minStockAlert = wasPcs ? Math.max(1, Math.round(((item.minStockAlert ?? 80) / eggPackSize) * 10) / 10) : (item.minStockAlert ?? 3);
 
-        seenKeys.set(key, {
+        seenKeys.set('canon_egg', {
           ...normalizedItem,
+          id: 'raw-7',
+          name: normalizedItem.name || 'Egg',
+          nameBn: normalizedItem.nameBn || 'মুরগির ডিম (লাল ডিম)',
+          category: 'Meat & Poultry',
           unit: 'case',
           subCategory: 'Case - Pcs',
           packSize: eggPackSize,
@@ -1797,6 +1824,22 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
     const itSub = (it.subUnit || '').toLowerCase().trim();
     const itIsPcs = itUnit === 'pcs' || itUnit === 'pc' || itUnit === 'piece' || itUnit === 'টি' || itUnit === 'টা';
     const isSame = Boolean(itUnit && itSub && itUnit === itSub);
+
+    if (it.id === 'raw-1' || normalizeRawItemName(it.name) === 'chicken') {
+      return {
+        ...it,
+        id: 'raw-1',
+        name: it.name || 'Chicken',
+        nameBn: it.nameBn || 'ব্রয়লার মুরগির মাংস',
+        category: 'Meat & Poultry',
+        subCategory: 'Kg - gm',
+        unit: 'kg',
+        packSize: 1000,
+        subUnit: 'gm',
+        hasSubUnits: true,
+        currentStock: Number(it.currentStock ?? 35)
+      };
+    }
 
     if (it.id === 'raw-7' || normalizeRawItemName(it.name) === 'egg') {
       const wasPcs = (it.unit || '').toLowerCase().trim() === 'pcs';
@@ -1973,6 +2016,24 @@ export const getRawInventoryItems = (): RawInventoryItem[] => {
       }
     }
 
+    // Explicitly guarantee core essential items (Chicken and Egg) are always present
+    const hasChicken = deduplicated.some(it => it.id === 'raw-1' || normalizeRawItemName(it.name) === 'chicken');
+    if (!hasChicken) {
+      const initChicken = INITIAL_RAW_ITEMS.find(it => it.id === 'raw-1');
+      if (initChicken) {
+        deduplicated.push(initChicken);
+        hasAdded = true;
+      }
+    }
+    const hasEgg = deduplicated.some(it => it.id === 'raw-7' || normalizeRawItemName(it.name) === 'egg');
+    if (!hasEgg) {
+      const initEgg = INITIAL_RAW_ITEMS.find(it => it.id === 'raw-7');
+      if (initEgg) {
+        deduplicated.push(initEgg);
+        hasAdded = true;
+      }
+    }
+
     if (hasAdded) {
       const reDedup = deduplicateRawItems(deduplicated);
       deduplicated = reDedup.deduplicated;
@@ -2017,12 +2078,18 @@ export const saveRawInventoryItems = (items: RawInventoryItem[]): void => {
     if (deduplicated && deduplicated.length > 0) {
       const payload = deduplicated.map(it => {
         const resolvedType = it.itemType || (isReadymadeItem(it) ? 'READY_MADE' : 'RAW');
+        const isEggItem = it.id === 'raw-7' || normalizeRawItemName(it.name || '') === 'egg';
+        const itemSubUnit = isEggItem ? 'pcs' : (it.subUnit || (it.unit?.toLowerCase() === 'kg' ? 'gm' : (it.unit?.toLowerCase() === 'liter' ? 'ml' : (it.unit?.toLowerCase() === 'case' || it.unit?.toLowerCase() === 'packet' ? 'pcs' : null))));
+        const itemPackSize = isEggItem ? 30 : (it.packSize ?? (it.unit?.toLowerCase() === 'case' ? 30 : (it.unit?.toLowerCase() === 'kg' ? 1000 : 1)));
+        const itemHasSubUnits = isEggItem ? true : Boolean(it.hasSubUnits ?? (itemPackSize > 1));
         return {
           id: it.id,
           name: it.name,
           nameBn: it.nameBn || '',
           unit: it.unit || 'kg',
-          "Sub Unit": it.subUnit || (it.unit?.toLowerCase() === 'kg' ? 'gm' : (it.unit?.toLowerCase() === 'liter' ? 'ml' : (it.unit?.toLowerCase() === 'case' || it.unit?.toLowerCase() === 'packet' ? 'pcs' : null))),
+          "Sub Unit": itemSubUnit,
+          packSize: itemPackSize,
+          hasSubUnits: itemHasSubUnits,
           currentStock: it.currentStock ?? 0,
           minStockAlert: it.minStockAlert ?? 5,
           unitCost: it.unitCost ?? 0,
@@ -2033,10 +2100,10 @@ export const saveRawInventoryItems = (items: RawInventoryItem[]): void => {
           itemType: resolvedType,
           notes: encodeNotesWithMeta(it.notes, {
             category: it.category,
-            subCategory: it.subCategory,
-            hasSubUnits: it.hasSubUnits,
-            packSize: it.packSize,
-            subUnit: it.subUnit,
+            subCategory: isEggItem ? 'Case - Pcs' : it.subCategory,
+            hasSubUnits: itemHasSubUnits,
+            packSize: itemPackSize,
+            subUnit: itemSubUnit,
             dp: it.dp || it.DP || it.image,
             itemType: resolvedType
           })

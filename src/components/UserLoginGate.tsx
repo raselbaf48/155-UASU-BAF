@@ -47,7 +47,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
   const [bdInput, setBdInput] = useState(() => {
     try {
       const initialPortal = getLastUsedPortal();
-      return getLastUsedIdForPortal(initialPortal);
+      return (getLastUsedIdForPortal(initialPortal) || '').replace(/[^0-9]/g, '');
     } catch { return ''; }
   });
   const [passwordInput, setPasswordInput] = useState('');
@@ -125,9 +125,9 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
     syncLastUsedIdsFromCloud().then((ids) => {
       const currentPortal = getLastUsedPortal();
       if (currentPortal === 'Canteen' && ids.canteenId) {
-        setBdInput((prev) => prev || ids.canteenId || '');
+        setBdInput((prev) => prev || (ids.canteenId || '').replace(/[^0-9]/g, ''));
       } else if (currentPortal === 'Office' && ids.officeId) {
-        setBdInput((prev) => prev || ids.officeId || '');
+        setBdInput((prev) => prev || (ids.officeId || '').replace(/[^0-9]/g, ''));
       }
     });
 
@@ -169,7 +169,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
     setIsMenuOpen(false);
 
     if (newPortal === 'Canteen' || newPortal === 'Office') {
-      const lastId = getLastUsedIdForPortal(newPortal);
+      const lastId = (getLastUsedIdForPortal(newPortal) || '').replace(/[^0-9]/g, '');
       setBdInput(lastId);
     } else {
       setBdInput('');
@@ -672,101 +672,208 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                 </div>
               </motion.div>
             ) : !isResetMode ? (
-              <form onSubmit={handleSubmit} className="space-y-4" ref={loginPinRef}>
-                <div className="text-left space-y-1.5">
-                  <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider">{activeTab === 'Canteen' ? 'Member ID' : 'User ID'}</label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      inputMode="numeric" pattern="[0-9]*" value={bdInput}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setBdInput(val);
-                        setErrorMsg('');
-                        if (targetAirman) setTargetAirman(null);
-                        if (activeTab === 'Canteen') {
-                          saveLastUsedIdForPortal('Canteen', val);
-                        } else if (activeTab === 'Office') {
-                          saveLastUsedIdForPortal('Office', val);
-                        }
-                      }}
-                      onFocus={() => { setIsUserIdFocused(true); setIsPasswordFocused(false); }}
-                      onBlur={() => {
-                        const cleanInput = bdInput.replace(/^BD\/?/i, '').trim();
-                        if (cleanInput) {
-                           if (activeTab === 'Canteen') {
-                             saveLastUsedIdForPortal('Canteen', cleanInput);
-                           } else if (activeTab === 'Office') {
-                             saveLastUsedIdForPortal('Office', cleanInput);
-                             const found = airmen.find(a => (a.bdNo || '').replace(/^BD\/?/i, '').trim().toLowerCase() === cleanInput.toLowerCase());
-                             setTargetAirman(found || null);
-                           }
-                        }
-                      }}
-                      className="w-full bg-slate-800/90 border border-slate-700 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-xl px-3.5 py-2.5 text-sm font-mono font-bold text-white outline-none transition-all"
-                      placeholder=""
-                      autoComplete="username"
-                    />
-                  </div>
-                  
-                  {recentLogins.length > 0 && isUserIdFocused && (
-                    <div className="mt-2 p-2 bg-slate-800/50 rounded-xl border border-slate-700">
-                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 px-1">Recent Accounts</div>
-                      {recentLogins.map(id => (
-                        <div key={id} className="flex items-center justify-between p-1.5 hover:bg-slate-700 rounded-lg group transition-colors">
-                          <button
-                            type="button"
-                            onClick={() => {
-                               setBdInput(id);
-                               setIsUserIdFocused(false);
-                               setIsPasswordFocused(true);
-                               if (activeTab === 'Canteen') {
-                                 saveLastUsedIdForPortal('Canteen', id);
-                               } else {
-                                 saveLastUsedIdForPortal('Office', id);
-                                 const found = airmen.find(a => a.bdNo === id);
-                                 setTargetAirman(found || null);
-                               }
-                            }}
-                            className="flex-1 text-left font-mono text-xs text-slate-300 group-hover:text-white flex items-center space-x-2"
-                          >
-                             <Lock className="w-3 h-3 text-slate-500 group-hover:text-emerald-400" />
-                             <span>{id}</span>
-                          </button>
-                          <button type="button" onClick={() => removeRecent(id)} className="p-1 text-slate-500 hover:text-red-400 rounded-full hover:bg-slate-700 transition-colors ml-2">
-                            <X className="w-3 h-3" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+              <form onSubmit={handleSubmit} className="space-y-4 pt-1" ref={loginPinRef}>
+                {(() => {
+                  const isUserIdFloating = isUserIdFocused || bdInput.trim().length > 0;
+                  const isPinFloating = isPasswordFocused || passwordInput.trim().length > 0;
 
-                {activeTab !== 'Canteen' && (<div className="text-left space-y-1.5">
-                  <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider">PIN</label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      style={{ WebkitTextSecurity: showPin ? "none" : "disc" }}
-                      
-                      inputMode="numeric" pattern="[0-9]*" value={passwordInput}
-                      onChange={(e) => {
-                        setPasswordInput(e.target.value);
-                        setErrorMsg('');
-                      }}
-                      className="w-full bg-slate-800/90 border border-slate-700 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-xl px-3.5 py-2.5 pr-11 text-sm font-mono font-bold text-white outline-none transition-all"
-                      placeholder="Enter PIN"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPin(!showPin)}
-                      className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-emerald-400 transition-colors"
-                    >
-                      {showPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                  
-                </div>)}
+                  return (
+                    <>
+                      <div className="text-left relative pt-1">
+                        <div className="relative">
+                          <input
+                            id="login-user-id"
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            value={bdInput}
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/[^0-9]/g, '');
+                              setBdInput(val);
+                              setErrorMsg('');
+                              if (targetAirman) setTargetAirman(null);
+                              if (activeTab === 'Canteen') {
+                                saveLastUsedIdForPortal('Canteen', val);
+                              } else if (activeTab === 'Office') {
+                                saveLastUsedIdForPortal('Office', val);
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if (
+                                ['Backspace', 'Delete', 'Tab', 'Enter', 'Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key) ||
+                                e.ctrlKey || e.metaKey
+                              ) {
+                                return;
+                              }
+                              if (!/^[0-9]$/.test(e.key)) {
+                                e.preventDefault();
+                              }
+                            }}
+                            onPaste={(e) => {
+                              e.preventDefault();
+                              const pasted = e.clipboardData.getData('text').replace(/[^0-9]/g, '');
+                              if (pasted) {
+                                setBdInput(pasted);
+                                setErrorMsg('');
+                                if (activeTab === 'Canteen') {
+                                  saveLastUsedIdForPortal('Canteen', pasted);
+                                } else if (activeTab === 'Office') {
+                                  saveLastUsedIdForPortal('Office', pasted);
+                                }
+                              }
+                            }}
+                            onFocus={() => {
+                              setIsUserIdFocused(true);
+                              setIsPasswordFocused(false);
+                            }}
+                            onBlur={() => {
+                              setTimeout(() => setIsUserIdFocused(false), 200);
+                              const cleanInput = bdInput.replace(/^BD\/?/i, '').replace(/[^0-9]/g, '').trim();
+                              if (cleanInput) {
+                                if (activeTab === 'Canteen') {
+                                  saveLastUsedIdForPortal('Canteen', cleanInput);
+                                } else if (activeTab === 'Office') {
+                                  saveLastUsedIdForPortal('Office', cleanInput);
+                                  const found = airmen.find(
+                                    (a) => (a.bdNo || '').replace(/^BD\/?/i, '').replace(/[^0-9]/g, '').trim().toLowerCase() === cleanInput.toLowerCase()
+                                  );
+                                  setTargetAirman(found || null);
+                                }
+                              }
+                            }}
+                            className={`w-full bg-slate-900 border rounded-xl px-3.5 py-3 text-sm font-mono font-bold text-white outline-none transition-all duration-200 ${
+                              isUserIdFocused
+                                ? 'border-emerald-500 ring-2 ring-emerald-500/20'
+                                : 'border-slate-700 hover:border-slate-600'
+                            }`}
+                            placeholder=""
+                            autoComplete="username"
+                          />
+                          <label
+                            htmlFor="login-user-id"
+                            className={`absolute left-3.5 pointer-events-none transition-all duration-200 ease-out select-none ${
+                              isUserIdFloating
+                                ? 'top-0 -translate-y-1/2 text-[10px] font-black uppercase tracking-wider px-1.5 bg-slate-900 z-10 ' +
+                                  (isUserIdFocused ? 'text-emerald-400' : 'text-slate-400')
+                                : 'top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400 tracking-wider bg-transparent'
+                            }`}
+                          >
+                            {activeTab === 'Canteen' ? 'MEMBER ID' : 'USER ID'}
+                          </label>
+                        </div>
+
+                        {recentLogins.length > 0 && isUserIdFocused && (
+                          <div className="mt-2 p-2 bg-slate-800/50 rounded-xl border border-slate-700">
+                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 px-1">Recent Accounts</div>
+                            {recentLogins.map((id) => (
+                              <div key={id} className="flex items-center justify-between p-1.5 hover:bg-slate-700 rounded-lg group transition-colors">
+                                <button
+                                  type="button"
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => {
+                                    setBdInput(id.replace(/[^0-9]/g, ''));
+                                    setIsUserIdFocused(false);
+                                    setIsPasswordFocused(true);
+                                    if (activeTab === 'Canteen') {
+                                      saveLastUsedIdForPortal('Canteen', id);
+                                    } else {
+                                      saveLastUsedIdForPortal('Office', id);
+                                      const found = airmen.find((a) => a.bdNo === id);
+                                      setTargetAirman(found || null);
+                                    }
+                                  }}
+                                  className="flex-1 text-left font-mono text-xs text-slate-300 group-hover:text-white flex items-center space-x-2"
+                                >
+                                  <Lock className="w-3 h-3 text-slate-500 group-hover:text-emerald-400" />
+                                  <span>{id}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => removeRecent(id)}
+                                  className="p-1 text-slate-500 hover:text-red-400 rounded-full hover:bg-slate-700 transition-colors ml-2"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {activeTab !== 'Canteen' && (
+                        <div className="text-left relative pt-1">
+                          <div className="relative">
+                            <input
+                              id="login-pin"
+                              type="text"
+                              style={{ WebkitTextSecurity: showPin ? 'none' : 'disc' }}
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              value={passwordInput}
+                              onChange={(e) => {
+                                setPasswordInput(e.target.value.replace(/[^0-9]/g, ''));
+                                setErrorMsg('');
+                              }}
+                              onKeyDown={(e) => {
+                                if (
+                                  ['Backspace', 'Delete', 'Tab', 'Enter', 'Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key) ||
+                                  e.ctrlKey || e.metaKey
+                                ) {
+                                  return;
+                                }
+                                if (!/^[0-9]$/.test(e.key)) {
+                                  e.preventDefault();
+                                }
+                              }}
+                              onPaste={(e) => {
+                                e.preventDefault();
+                                const pasted = e.clipboardData.getData('text').replace(/[^0-9]/g, '');
+                                if (pasted) {
+                                  setPasswordInput(pasted);
+                                  setErrorMsg('');
+                                }
+                              }}
+                              onFocus={() => {
+                                setIsPasswordFocused(true);
+                                setIsUserIdFocused(false);
+                              }}
+                              onBlur={() => {
+                                setIsPasswordFocused(false);
+                              }}
+                              className={`w-full bg-slate-900 border rounded-xl px-3.5 py-3 pr-11 text-sm font-mono font-bold text-white outline-none transition-all duration-200 ${
+                                isPasswordFocused
+                                  ? 'border-emerald-500 ring-2 ring-emerald-500/20'
+                                  : 'border-slate-700 hover:border-slate-600'
+                              }`}
+                              placeholder=""
+                              autoComplete="current-password"
+                            />
+                            <label
+                              htmlFor="login-pin"
+                              className={`absolute left-3.5 pointer-events-none transition-all duration-200 ease-out select-none ${
+                                isPinFloating
+                                  ? 'top-0 -translate-y-1/2 text-[10px] font-black uppercase tracking-wider px-1.5 bg-slate-900 z-10 ' +
+                                    (isPasswordFocused ? 'text-emerald-400' : 'text-slate-400')
+                                  : 'top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400 tracking-wider bg-transparent'
+                              }`}
+                            >
+                              PIN
+                            </label>
+                            <button
+                              type="button"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => setShowPin(!showPin)}
+                              className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-emerald-400 transition-colors cursor-pointer z-10"
+                            >
+                              {showPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
                 
                 <button
                   type="submit"
@@ -805,8 +912,26 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                     <div className="relative">
                       <input
                         type="text"
-                        inputMode="numeric" pattern="[0-9]*" value={resetBd}
-                        onChange={(e) => setResetBd(e.target.value)}
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={resetBd}
+                        onChange={(e) => setResetBd(e.target.value.replace(/[^0-9]/g, ''))}
+                        onKeyDown={(e) => {
+                          if (
+                            ['Backspace', 'Delete', 'Tab', 'Enter', 'Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key) ||
+                            e.ctrlKey || e.metaKey
+                          ) {
+                            return;
+                          }
+                          if (!/^[0-9]$/.test(e.key)) {
+                            e.preventDefault();
+                          }
+                        }}
+                        onPaste={(e) => {
+                          e.preventDefault();
+                          const pasted = e.clipboardData.getData('text').replace(/[^0-9]/g, '');
+                          if (pasted) setResetBd(pasted);
+                        }}
                         className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition-all text-sm"
                         placeholder=""
                         required
@@ -851,10 +976,31 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                     <div className="space-y-1.5" ref={resetPinRef}>
                       <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Enter New PIN</label>
                       <input
-                        type="text" style={{ WebkitTextSecurity: "disc" }}
-                        
-                        inputMode="numeric" pattern="[0-9]*" value={newPass}
-                        onChange={(e) => { setNewPass(e.target.value); setErrorMsg(''); }}
+                        type="text"
+                        style={{ WebkitTextSecurity: "disc" }}
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={newPass}
+                        onChange={(e) => { setNewPass(e.target.value.replace(/[^0-9]/g, '')); setErrorMsg(''); }}
+                        onKeyDown={(e) => {
+                          if (
+                            ['Backspace', 'Delete', 'Tab', 'Enter', 'Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key) ||
+                            e.ctrlKey || e.metaKey
+                          ) {
+                            return;
+                          }
+                          if (!/^[0-9]$/.test(e.key)) {
+                            e.preventDefault();
+                          }
+                        }}
+                        onPaste={(e) => {
+                          e.preventDefault();
+                          const pasted = e.clipboardData.getData('text').replace(/[^0-9]/g, '');
+                          if (pasted) {
+                            setNewPass(pasted);
+                            setErrorMsg('');
+                          }
+                        }}
                         className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition-all text-sm"
                         placeholder="Enter New PIN"
                         required
@@ -863,10 +1009,31 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                     <div className="space-y-1.5" ref={confirmPinRef}>
                       <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Confirm Your PIN</label>
                       <input
-                        type="text" style={{ WebkitTextSecurity: "disc" }}
-                        
-                        inputMode="numeric" pattern="[0-9]*" value={confirmPass}
-                        onChange={(e) => { setConfirmPass(e.target.value); setErrorMsg(''); }}
+                        type="text"
+                        style={{ WebkitTextSecurity: "disc" }}
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={confirmPass}
+                        onChange={(e) => { setConfirmPass(e.target.value.replace(/[^0-9]/g, '')); setErrorMsg(''); }}
+                        onKeyDown={(e) => {
+                          if (
+                            ['Backspace', 'Delete', 'Tab', 'Enter', 'Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key) ||
+                            e.ctrlKey || e.metaKey
+                          ) {
+                            return;
+                          }
+                          if (!/^[0-9]$/.test(e.key)) {
+                            e.preventDefault();
+                          }
+                        }}
+                        onPaste={(e) => {
+                          e.preventDefault();
+                          const pasted = e.clipboardData.getData('text').replace(/[^0-9]/g, '');
+                          if (pasted) {
+                            setConfirmPass(pasted);
+                            setErrorMsg('');
+                          }
+                        }}
                         className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition-all text-sm"
                         placeholder="Confirm New PIN"
                         required
@@ -931,7 +1098,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
              onBack={() => { 
                setIsCanteenAuth(false); 
                setIsCanteenManagerMode(false); 
-               setBdInput(getLastUsedIdForPortal('Canteen') || canteenRecentLogins[0] || ''); 
+               setBdInput((getLastUsedIdForPortal('Canteen') || canteenRecentLogins[0] || '').replace(/[^0-9]/g, '')); 
                setPasswordInput(''); 
                setSuccessAirman(null); 
                setTargetAirman(null); 

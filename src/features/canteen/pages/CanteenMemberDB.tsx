@@ -322,7 +322,16 @@ export const CanteenMemberDB: React.FC = () => {
     };
     window.addEventListener('canteen_settings_updated', handleSettingsUpdate);
 
+    const channelName = `canteen_member_db_realtime_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const channel = supabase
+      .channel(channelName)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'Canteen_Member' }, () => {
+        fetchMembersFromCloud();
+      })
+      .subscribe();
+
     return () => {
+      supabase.removeChannel(channel);
       window.removeEventListener('canteen_members_updated', handleSync);
       window.removeEventListener('canteen_settings_updated', handleSettingsUpdate);
     };
@@ -500,6 +509,57 @@ export const CanteenMemberDB: React.FC = () => {
     queuePushKeyToCloud('canteen_members_cache', updated);
     window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: updated }));
     window.dispatchEvent(new Event('canteen_state_updated'));
+    window.dispatchEvent(new Event('storage'));
+
+    // 2. Direct Cloud Sync to Supabase Canteen_Member
+    try {
+      if (nameBn) {
+        await saveMemberBanglaName(newLocalMember.airman_id, nameBn, [cleanBd, singleMember.surname.trim()]);
+      }
+      if (rankBn) {
+        await saveMemberBanglaRank(newLocalMember.airman_id, rankBn, [cleanBd]);
+      }
+      const supabaseRecord = {
+        airman_id: newLocalMember.airman_id,
+        "BD No": cleanBd,
+        Rank: newLocalMember.Rank,
+        Surname: newLocalMember.Surname,
+        Contact: newLocalMember.Contact,
+        Role: newLocalMember.Role,
+        DP: newLocalMember.DP,
+        Due: 0,
+        Name_BN: nameBn || null,
+        Rank_BN: rankBn || null,
+        active: true
+      };
+      const { error: upsertErr } = await supabase.from('Canteen_Member').upsert([supabaseRecord], { onConflict: 'airman_id' });
+      if (upsertErr) {
+        console.warn('Supabase Canteen_Member upsert warning:', upsertErr);
+      }
+      // Also optionally keep Canteen table in sync if exists
+      try {
+        await supabase.from('Canteen').upsert([{
+          airman_id: newLocalMember.airman_id,
+          "BD No": cleanBd,
+          Rank: newLocalMember.Rank,
+          Surname: newLocalMember.Surname,
+          Name: newLocalMember.Surname,
+          Contact: newLocalMember.Contact || '',
+          Role: newLocalMember.Role,
+          Due: 0
+        }], { onConflict: 'airman_id' });
+      } catch {}
+    } catch (cloudErr) {
+      console.warn('Cloud save warning for new member:', cloudErr);
+    }
+
+    // Force refresh cache and notify all components across the app
+    try {
+      const refreshedList = await fetchCanteenMembersOnce(true);
+      window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: refreshedList || updated }));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
+    } catch {}
 
     setIsSavedSingle(true);
     showToast(`Member #${cleanBd} (${newLocalMember.Surname}) saved successfully!`);
@@ -510,34 +570,6 @@ export const CanteenMemberDB: React.FC = () => {
       setShowAddModal(false);
       setSingleMember({ bdNo: '', rank: 'LAC', rankBn: 'এলএসি', surname: '', nameBn: '', contact: '', dp: '' });
     }, 600);
-
-    // 2. Background Cloud Sync (sanitized payload only)
-    (async () => {
-      try {
-        if (nameBn) {
-          await saveMemberBanglaName(newLocalMember.airman_id, nameBn, [cleanBd, singleMember.surname.trim()]);
-        }
-        if (rankBn) {
-          await saveMemberBanglaRank(newLocalMember.airman_id, rankBn, [cleanBd]);
-        }
-        const supabaseRecord = {
-          airman_id: newLocalMember.airman_id,
-          "BD No": cleanBd,
-          Rank: newLocalMember.Rank,
-          Surname: newLocalMember.Surname,
-          Contact: newLocalMember.Contact,
-          Role: newLocalMember.Role,
-          DP: newLocalMember.DP,
-          Due: 0,
-          Name_BN: nameBn || null,
-          Rank_BN: rankBn || null,
-          active: true
-        };
-        await supabase.from('Canteen_Member').upsert([supabaseRecord], { onConflict: 'airman_id' });
-      } catch (cloudErr) {
-        console.warn('Background sync note for new member:', cloudErr);
-      }
-    })();
   };
 
   // Download Sample Excel Template
@@ -712,7 +744,10 @@ export const CanteenMemberDB: React.FC = () => {
 
       // Refresh members
       await fetchMembersFromCloud();
-      window.dispatchEvent(new Event('canteen_members_updated'));
+      const refreshedList = await fetchCanteenMembersOnce(true);
+      window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: refreshedList }));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
 
       setTimeout(() => {
         setIsSavingExcel(false);

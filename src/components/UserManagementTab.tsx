@@ -498,7 +498,7 @@ export const UserManagementTab: React.FC<UserManagementTabProps> = ({
           <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-slate-200 dark:border-slate-700">
             <h4 className="text-base font-bold text-slate-900 dark:text-white mb-4">Add New User</h4>
             <div className="space-y-4">
-              <input type="text" placeholder="User ID" value={newUser.bdNo} onChange={e => setNewUser({...newUser, bdNo: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-900 dark:text-white outline-none focus:border-emerald-500" />
+              <input type="text" inputMode="numeric" pattern="[0-9]*" placeholder="User ID (Only numbers)" value={newUser.bdNo} onChange={e => setNewUser({...newUser, bdNo: e.target.value.replace(/[^0-9]/g, '')})} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-900 dark:text-white outline-none focus:border-emerald-500 font-mono" />
               <input type="text" placeholder="Name" value={newUser.name} onChange={e => setNewUser({...newUser, name: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-900 dark:text-white outline-none focus:border-emerald-500" />
               <input type="text" placeholder="Rank" value={newUser.rank} onChange={e => setNewUser({...newUser, rank: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-900 dark:text-white outline-none focus:border-emerald-500" />
               <input type="text" placeholder="Mobile No" value={newUser.mobileNo} onChange={e => setNewUser({...newUser, mobileNo: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-900 dark:text-white outline-none focus:border-emerald-500" />
@@ -507,7 +507,7 @@ export const UserManagementTab: React.FC<UserManagementTabProps> = ({
                 <option value="ADMIN">Admin</option>
                 <option value="SUPER_ADMIN">Super Admin</option>
               </select>
-              <input type="text" placeholder="User Login Portal PIN (Optional)" value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-900 dark:text-white outline-none focus:border-emerald-500" />
+              <input type="text" inputMode="numeric" pattern="[0-9]*" placeholder="User Login Portal PIN (Optional, only numbers)" value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value.replace(/[^0-9]/g, '')})} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2 text-sm text-slate-900 dark:text-white outline-none focus:border-emerald-500 font-mono" />
             </div>
             <div className="flex justify-end gap-3 mt-6">
               <button onClick={() => setIsAddingUser(false)} className="px-4 py-2 text-sm font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-xl transition-colors">Cancel</button>

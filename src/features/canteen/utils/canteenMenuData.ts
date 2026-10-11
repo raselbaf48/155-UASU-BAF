@@ -454,10 +454,8 @@ export function setCanteenMembersCache(members: any[]): void {
  */
 export async function fetchCanteenMembersOnce(force = false): Promise<any[]> {
   const cached = getCanteenMembersCache();
-  if (!force && cached.length > 0) {
-    return cached;
-  }
-  if (memberFetchPromise) {
+
+  if (memberFetchPromise && !force) {
     if (cached.length > 0) return cached;
     return memberFetchPromise;
   }
@@ -468,24 +466,7 @@ export async function fetchCanteenMembersOnce(force = false): Promise<any[]> {
         .from('Canteen_Member')
         .select('*');
       if (!error && data && data.length > 0) {
-        // Filter out obsolete small temporary BD numbers if a real military BD record exists for the same member
-        const cleanedData = data.filter((m: any) => {
-          const bdNum = parseInt(String(m['BD No'] || '').replace(/\D/g, ''), 10);
-          if (!isNaN(bdNum) && bdNum < 50) {
-            const surname = String(m.Surname || '').trim().toLowerCase();
-            const rank = String(m.Rank || '').trim().toLowerCase();
-            if (surname && rank) {
-              const hasRealBd = data.some((other: any) => {
-                const otherBdNum = parseInt(String(other['BD No'] || '').replace(/\D/g, ''), 10);
-                const otherSurname = String(other.Surname || '').trim().toLowerCase();
-                const otherRank = String(other.Rank || '').trim().toLowerCase();
-                return otherSurname === surname && otherRank === rank && otherBdNum >= 100;
-              });
-              if (hasRealBd) return false;
-            }
-          }
-          return true;
-        });
+        const cleanedData = data;
 
         const localSeniorityMap = getLocalSeniorityMap();
         const merged = cleanedData.map((m: any) => {
@@ -513,7 +494,9 @@ export async function fetchCanteenMembersOnce(force = false): Promise<any[]> {
             seniority: sen
           };
         });
-        const sorted = normalizeCanteenMembersSeniority(sortCanteenMembersByOfficeSeniority(merged));
+        const currentLocal = getCanteenMembersCache();
+        const mergedWithLocal = deduplicateCanteenMembers([...merged, ...currentLocal]);
+        const sorted = normalizeCanteenMembersSeniority(sortCanteenMembersByOfficeSeniority(mergedWithLocal));
         setCanteenMembersCache(sorted);
         return sorted;
       }
@@ -525,7 +508,7 @@ export async function fetchCanteenMembersOnce(force = false): Promise<any[]> {
     return getCanteenMembersCache();
   })();
 
-  if (cached.length > 0) {
+  if (!force && cached.length > 0) {
     return cached;
   }
 
