@@ -2054,57 +2054,76 @@ export const getRecipeForMenuItem = (menuItemId: string, menuItemName?: string, 
     if (recipes[normalized]) {
       found = recipes[normalized];
     } else {
-      // Fuzzy match by key substring
-      for (const [key, ings] of Object.entries(recipes)) {
-        const kUpper = key.toUpperCase();
-        if (normalized.includes(kUpper) || kUpper.includes(normalized)) {
-          found = ings;
-          break;
+      // 1. Bengali & Specific common names matching first
+      const lower = menuItemName.toLowerCase().trim();
+      if ((lower.includes('লেবু চা') || lower.includes('lemon tea')) && (recipes['LEMON TEA'] || recipes['LIQUOR TEA'])) {
+        found = recipes['LEMON TEA'] || recipes['LIQUOR TEA'];
+      } else if ((lower.includes('রং চা') || lower.includes('লাল চা') || lower.includes('liquor tea') || lower.includes('black tea')) && recipes['LIQUOR TEA']) {
+        found = recipes['LIQUOR TEA'];
+      } else if ((lower.includes('গ্রিন টি') || lower.includes('green tea')) && recipes['GREEN TEA']) {
+        found = recipes['GREEN TEA'];
+      } else if ((lower.includes('দুধ চা') || lower.includes('মিল্ক চা') || lower.includes('milk tea')) && recipes['MILK TEA']) {
+        found = recipes['MILK TEA'];
+      } else if (lower === 'চা' || lower === 'tea' || lower === 'cup tea') {
+        found = recipes['MILK TEA'];
+      } else if ((lower.includes('কোল্ড কফি') || lower.includes('cold coffee')) && recipes['COLD COFFEE']) {
+        found = recipes['COLD COFFEE'];
+      } else if ((lower.includes('কফি') || lower.includes('দুধ কফি') || lower.includes('coffee') || lower.includes('milk coffee')) && recipes['MILK COFFEE']) {
+        found = recipes['MILK COFFEE'];
+      } else if ((lower.includes('মামলেট') || lower.includes('ওমলেট') || lower.includes('omelet') || lower.includes('mumlet')) && recipes['EGG MUMLET']) {
+        found = recipes['EGG MUMLET'];
+      } else if ((lower.includes('পোচ') || lower.includes('poach')) && recipes['EGG POACH']) {
+        found = recipes['EGG POACH'];
+      } else if ((lower.includes('সিদ্ধ ডিম') || lower.includes('boiled egg')) && recipes['BOILED EGG']) {
+        found = recipes['BOILED EGG'];
+      } else if ((lower.includes('ডিম ভাজি') || lower.includes('egg fry')) && recipes['EGG FRY']) {
+        found = recipes['EGG FRY'];
+      } else if ((lower.includes('নুডুলস') || lower.includes('noodles')) && (recipes['EGG NOODLES'] || recipes['NOODLES'])) {
+        found = recipes['EGG NOODLES'] || recipes['NOODLES'];
+      } else if ((lower.includes('বার্গার') || lower.includes('burger')) && recipes['BURGER']) {
+        found = recipes['BURGER'];
+      } else if ((lower.includes('স্যান্ডউইচ') || lower.includes('sandwich') || lower.includes('sandwitch')) && (recipes['SANDWICH'] || recipes['SANDWITCH'])) {
+        found = recipes['SANDWICH'] || recipes['SANDWITCH'];
+      } else if ((lower.includes('পাস্তা') || lower.includes('pasta')) && recipes['PASTA']) {
+        found = recipes['PASTA'];
+      } else if ((lower.includes('চটপটি') || lower.includes('chotpoti')) && recipes['CHOTPOTI']) {
+        found = recipes['CHOTPOTI'];
+      } else if ((lower.includes('হালিম') || lower.includes('halim')) && recipes['HALIM']) {
+        found = recipes['HALIM'];
+      } else if ((lower.includes('লেবু জুস') || lower.includes('lemon juice')) && recipes['LEMON JUICE']) {
+        found = recipes['LEMON JUICE'];
+      } else if ((lower.includes('শসা') || lower.includes('sosa')) && recipes['SOSA']) {
+        found = recipes['SOSA'];
+      } else if ((lower.includes('সালাদ') || lower.includes('salad')) && recipes['SALAD']) {
+        found = recipes['SALAD'];
+      } else if ((lower.includes('বাটার বন') || lower.includes('butter ban')) && recipes['BUTTER BAN']) {
+        found = recipes['BUTTER BAN'];
+      } else if ((lower.includes('ড্রাই কেক') || lower.includes('dry cake')) && recipes['DRY CAKE']) {
+        found = recipes['DRY CAKE'];
+      } else if ((lower.includes('বিস্কুট') || lower.includes('biscuit')) && recipes['NORMAL BISCUIT']) {
+        found = recipes['NORMAL BISCUIT'];
+      }
+
+      // 2. Strict normalized key match
+      if (!found) {
+        for (const [key, ings] of Object.entries(recipes)) {
+          const kNorm = key.toLowerCase().replace(/[\s\-_]+/g, '');
+          const mNorm = lower.replace(/[\s\-_]+/g, '');
+          if (kNorm && mNorm && (kNorm === mNorm)) {
+            found = ings;
+            break;
+          }
         }
       }
-      // Bengali common names fallback
-      if (!found || found.length === 0) {
-        const lower = menuItemName.toLowerCase();
-        if ((lower.includes('লেবু চা') || lower.includes('lemon tea')) && (recipes['LEMON TEA'] || recipes['LIQUOR TEA'])) {
-          found = recipes['LEMON TEA'] || recipes['LIQUOR TEA'];
-        } else if ((lower.includes('রং চা') || lower.includes('লাল চা') || lower.includes('liquor tea') || lower.includes('black tea')) && recipes['LIQUOR TEA']) {
-          found = recipes['LIQUOR TEA'];
-        } else if ((lower.includes('গ্রিন টি') || lower.includes('green tea')) && recipes['GREEN TEA']) {
-          found = recipes['GREEN TEA'];
-        } else if ((lower.includes('দুধ চা') || lower.includes('মিল্ক চা') || lower.includes('milk tea')) && recipes['MILK TEA']) {
-          found = recipes['MILK TEA'];
-        } else if ((lower.includes('চা') || lower.includes('tea')) && recipes['MILK TEA']) {
-          found = recipes['MILK TEA'];
-        } else if ((lower.includes('কোল্ড কফি') || lower.includes('cold coffee')) && recipes['COLD COFFEE']) {
-          found = recipes['COLD COFFEE'];
-        } else if ((lower.includes('কফি') || lower.includes('দুধ কফি') || lower.includes('coffee') || lower.includes('milk coffee')) && recipes['MILK COFFEE']) {
-          found = recipes['MILK COFFEE'];
-        } else if ((lower.includes('মামলেট') || lower.includes('ওমলেট') || lower.includes('omelet') || lower.includes('mumlet')) && recipes['EGG MUMLET']) {
-          found = recipes['EGG MUMLET'];
-        } else if ((lower.includes('পোচ') || lower.includes('poach')) && recipes['EGG POACH']) {
-          found = recipes['EGG POACH'];
-        } else if ((lower.includes('সিদ্ধ ডিম') || lower.includes('boiled egg')) && recipes['BOILED EGG']) {
-          found = recipes['BOILED EGG'];
-        } else if ((lower.includes('ডিম ভাজি') || lower.includes('egg fry')) && recipes['EGG FRY']) {
-          found = recipes['EGG FRY'];
-        } else if ((lower.includes('নুডুলস') || lower.includes('noodles')) && (recipes['EGG NOODLES'] || recipes['NOODLES'])) {
-          found = recipes['EGG NOODLES'] || recipes['NOODLES'];
-        } else if ((lower.includes('বার্গার') || lower.includes('burger')) && recipes['BURGER']) {
-          found = recipes['BURGER'];
-        } else if ((lower.includes('স্যান্ডউইচ') || lower.includes('sandwich') || lower.includes('sandwitch')) && (recipes['SANDWICH'] || recipes['SANDWITCH'])) {
-          found = recipes['SANDWICH'] || recipes['SANDWITCH'];
-        } else if ((lower.includes('পাস্তা') || lower.includes('pasta')) && recipes['PASTA']) {
-          found = recipes['PASTA'];
-        } else if ((lower.includes('চটপটি') || lower.includes('chotpoti')) && recipes['CHOTPOTI']) {
-          found = recipes['CHOTPOTI'];
-        } else if ((lower.includes('হালিম') || lower.includes('halim')) && recipes['HALIM']) {
-          found = recipes['HALIM'];
-        } else if ((lower.includes('লেবু') || lower.includes('lemon')) && recipes['LEMON JUICE']) {
-          found = recipes['LEMON JUICE'];
-        } else if ((lower.includes('শসা') || lower.includes('sosa')) && recipes['SOSA']) {
-          found = recipes['SOSA'];
-        } else if ((lower.includes('সালাদ') || lower.includes('salad')) && recipes['SALAD']) {
-          found = recipes['SALAD'];
+
+      // 3. Substring match only for specific longer words (never let short words like 'egg' match 'egg noodles')
+      if (!found) {
+        for (const [key, ings] of Object.entries(recipes)) {
+          const kUpper = key.toUpperCase();
+          if (kUpper.length >= 6 && normalized.includes(kUpper)) {
+            found = ings;
+            break;
+          }
         }
       }
     }
@@ -2301,8 +2320,17 @@ export const calculateMenuItemStockInfo = (
     if (itemLimit !== undefined) {
       finalStock = Math.min(itemLimit, rawPossible);
     } else {
-      // Sensible canteen batch ceiling if no explicit limit set (prevents 1400/900 anomaly from raw storeroom bulk sacks)
-      finalStock = Math.min(50, rawPossible);
+      // For single ready-made / packaged items (e.g., Biscuit, Dry Cake, Butter Ban, Drink/Juice):
+      // Reflect true raw inventory stock (e.g. 95 packets of biscuits = 95 stock)!
+      const isSingleReadyMade = recipe.length === 1 && (
+        ['packet', 'pkt', 'pcs', 'piece', 'pieces', 'bottle', 'can', 'tin', 'box'].includes((recipe[0].unit || '').toLowerCase())
+      );
+      if (isSingleReadyMade) {
+        finalStock = rawPossible;
+      } else {
+        // Sensible canteen batch ceiling if no explicit limit set (prevents 1400/900 anomaly from raw storeroom bulk sacks)
+        finalStock = Math.min(50, rawPossible);
+      }
     }
 
     return {

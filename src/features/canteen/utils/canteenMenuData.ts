@@ -131,6 +131,14 @@ export function deduplicateCanteenMenuItems(items: CanteenMenuItem[]): CanteenMe
       if (normEn) nameToGroup.set(normEn, groupKey);
       if (normBn) bnNameToGroup.set(normBn, groupKey);
 
+      const initialStock = (rawItem.stock !== undefined && rawItem.stock !== null && !isNaN(Number(rawItem.stock)))
+        ? Number(rawItem.stock)
+        : ((rawItem.max !== undefined && rawItem.max !== null && !isNaN(Number(rawItem.max)))
+          ? Number(rawItem.max)
+          : ((rawItem.Quantity !== undefined && rawItem.Quantity !== null && !isNaN(Number(rawItem.Quantity)))
+            ? Number(rawItem.Quantity)
+            : undefined));
+
       seen.set(groupKey, {
         ...rawItem,
         id: rawItem.id || `menu-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -140,6 +148,8 @@ export function deduplicateCanteenMenuItems(items: CanteenMenuItem[]): CanteenMe
         nameBn: bnName,
         'Name (BN)': bnName,
         price: Number(rawItem.price) || 0,
+        stock: initialStock,
+        max: initialStock,
         cost: Number(rawItem.cost ?? rawItem.Cost ?? 0),
         Cost: Number(rawItem.Cost ?? rawItem.cost ?? 0),
         DP: rawItem.DP || rawItem.img || rawItem.image || '',
@@ -154,6 +164,16 @@ export function deduplicateCanteenMenuItems(items: CanteenMenuItem[]): CanteenMe
       const mergedDp = (rawItem.DP || rawItem.img || rawItem.image || existing.DP || existing.img || existing.image || '');
       const mergedEn = existing.name || enName;
       const mergedBn = existing.name_bn || existing.nameBn || bnName;
+      const incomingStock = (rawItem.stock !== undefined && rawItem.stock !== null && !isNaN(Number(rawItem.stock)))
+        ? Number(rawItem.stock)
+        : ((rawItem.max !== undefined && rawItem.max !== null && !isNaN(Number(rawItem.max)))
+          ? Number(rawItem.max)
+          : ((rawItem.Quantity !== undefined && rawItem.Quantity !== null && !isNaN(Number(rawItem.Quantity)))
+            ? Number(rawItem.Quantity)
+            : undefined));
+      const mergedStock = incomingStock !== undefined 
+        ? incomingStock 
+        : (existing.stock !== undefined ? Number(existing.stock) : (existing.max !== undefined ? Number(existing.max) : undefined));
 
       seen.set(groupKey, {
         ...existing,
@@ -165,6 +185,8 @@ export function deduplicateCanteenMenuItems(items: CanteenMenuItem[]): CanteenMe
         nameBn: mergedBn,
         'Name (BN)': mergedBn,
         price: mergedPrice,
+        stock: mergedStock,
+        max: mergedStock,
         cost: mergedCost,
         Cost: mergedCost,
         DP: mergedDp,
@@ -305,6 +327,7 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
             if (typeof window !== 'undefined') {
               try {
                 localStorage.setItem('canteen_menu_cache', JSON.stringify(cleanHydrated));
+                localStorage.setItem('canteen_menu_items_list', JSON.stringify(cleanHydrated));
               } catch {}
               setTimeout(() => {
                 window.dispatchEvent(new CustomEvent('canteen_menu_updated', { detail: cleanHydrated }));
@@ -360,6 +383,7 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
         if (typeof window !== 'undefined') {
           try {
             localStorage.setItem('canteen_menu_cache', JSON.stringify(cleanHydrated));
+            localStorage.setItem('canteen_menu_items_list', JSON.stringify(cleanHydrated));
           } catch {}
           setTimeout(() => {
             window.dispatchEvent(new CustomEvent('canteen_menu_updated', { detail: cleanHydrated }));

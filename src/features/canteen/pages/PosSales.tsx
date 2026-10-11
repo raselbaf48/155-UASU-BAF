@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Search, Plus, ShoppingCart, Minus, Trash2, CheckCircle2, X, History, Calendar, 
-  Package as PackageIcon, Users, Utensils, CheckSquare, Check, Banknote, Edit2, Edit3
+  Package as PackageIcon, Users, Utensils, CheckSquare, Check, Banknote, Edit2, Edit3,
+  Upload
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, getItemDisplayName, getCanteenConfig, CanteenConfig } from '../utils/canteenSettings';
@@ -13,6 +14,7 @@ import { deductRawStockForSales, getRawInventoryItems, calculateMenuItemStockInf
 import { pushKeyToCloud } from '../utils/canteenCloudSync';
 import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
 import { playSuccessChime, playTrashPopSound } from '../utils/audioFeedback';
+import { ImportPosSalesModal } from '../components/ImportPosSalesModal';
 import { 
   getCanteenMenuCache, 
   setCanteenMenuCache,
@@ -144,6 +146,7 @@ export const PosSales: React.FC = () => {
 
   // History Modal State
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [showImportSalesModal, setShowImportSalesModal] = useState(false);
   const [historySearchTerm, setHistorySearchTerm] = useState('');
   const [historyFilterType, setHistoryFilterType] = useState<'ALL' | 'TODAY'>('ALL');
   const [historyDateFilter, setHistoryDateFilter] = useState(() => getTodayYMD());
@@ -868,11 +871,22 @@ export const PosSales: React.FC = () => {
                 format="dd_mm_yy"
               />
 
+              {/* POS Sales Import Button */}
+              <button 
+                type="button"
+                onClick={() => setShowImportSalesModal(true)}
+                className="flex items-center justify-center space-x-1.5 px-3 py-1.5 bg-emerald-950/70 hover:bg-emerald-900/60 active:bg-emerald-950 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-sm cursor-pointer shrink-0 ml-auto sm:ml-0"
+                title="Bulk Import Sales via Excel / CSV"
+              >
+                <Upload className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Import Sales</span>
+              </button>
+
               {/* History Button pushed to Right Corner */}
               <button 
                 type="button"
                 onClick={loadHistory}
-                className="flex items-center justify-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-slate-200 border border-slate-700 rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-sm cursor-pointer shrink-0 ml-auto sm:ml-0"
+                className="flex items-center justify-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-slate-200 border border-slate-700 rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-sm cursor-pointer shrink-0"
               >
                 <History className="w-3.5 h-3.5 text-indigo-400" />
                 <span>History</span>
@@ -2182,14 +2196,28 @@ export const PosSales: React.FC = () => {
                     <p className="text-[10px] font-bold text-slate-400">Sales records & transaction ledger</p>
                   </div>
                 </div>
-                <button 
-                  type="button"
-                  onClick={() => setShowHistoryModal(false)} 
-                  className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
-                  title="Close"
-                >
-                  <X className="w-5 h-5" />
-                </button>
+                <div className="flex items-center space-x-2">
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      setShowHistoryModal(false);
+                      setShowImportSalesModal(true);
+                    }}
+                    className="flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-950/70 hover:bg-emerald-900/60 active:bg-emerald-950 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-sm cursor-pointer"
+                    title="Import Sales from Excel / CSV"
+                  >
+                    <Upload className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Import Sales</span>
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => setShowHistoryModal(false)} 
+                    className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                    title="Close"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
 
               {/* Filter & Search Bar */}
