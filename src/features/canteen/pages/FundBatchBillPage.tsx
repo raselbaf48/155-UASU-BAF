@@ -34,7 +34,8 @@ import {
   ShieldCheck,
   AlertTriangle,
   Pencil,
-  Settings
+  Settings,
+  GripVertical
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { pushKeyToCloud, pullKeyFromCloud, recordDeletedTxId, reconcileExpenseOnFundTxDelete } from '../utils/canteenCloudSync';
@@ -241,13 +242,16 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
     return () => { isMounted = false; };
   }, []);
   const [purpose, setPurpose] = useState<string>('');
+  const [singleMemberCategories, setSingleMemberCategories] = useState<string[]>([]);
+  const [singleMemberCategoryAmounts, setSingleMemberCategoryAmounts] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState<string>('');
   const [newPresetInput, setNewPresetInput] = useState<string>('');
   const [isAddingPreset, setIsAddingPreset] = useState<boolean>(false);
   const [isEditingPresets, setIsEditingPresets] = useState<boolean>(false);
 
   const [othersFundSource, setOthersFundSource] = useState<'Cash' | 'UCB'>('Cash');
-  const [cashDeductTarget, setCashDeductTarget] = useState<'MANAGER' | 'STAFF'>('MANAGER');
+  const [cashDeductTarget, setCashDeductTarget] = useState<'MANAGER' | 'STAFF' | 'PREV_MANAGER'>('MANAGER');
+  const [isPrevManager, setIsPrevManager] = useState<boolean>(false);
   const [selectedStaffName, setSelectedStaffName] = useState<string>('Civ Tanvir');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -480,7 +484,15 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       pushKeyToCloud('canteen_deleted_purpose_presets', updatedDeleted).catch(() => {});
       showToast(`Category "${trimmed}" added and saved!`);
     }
-    setPurpose(trimmed);
+    if (selectedCount === 1 && !isUnitFund) {
+      setSingleMemberCategories(prev => {
+        const next = prev.includes(trimmed) ? prev : [...prev, trimmed];
+        setPurpose(next.join(', '));
+        return next;
+      });
+    } else {
+      setPurpose(trimmed);
+    }
     setNewPresetInput('');
     setIsAddingPreset(false);
   };
@@ -540,6 +552,26 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       setPurpose(updated[0] || '');
     }
     showToast(`Category "${presetToRemove}" removed! It will not return.`);
+  };
+
+  const handleMovePreset = (fromIndex: number, toIndex: number) => {
+    if (
+      fromIndex < 0 || 
+      toIndex < 0 || 
+      fromIndex >= purposePresets.length || 
+      toIndex >= purposePresets.length || 
+      fromIndex === toIndex
+    ) return;
+    const copy = [...purposePresets];
+    const [movedItem] = copy.splice(fromIndex, 1);
+    copy.splice(toIndex, 0, movedItem);
+    setPurposePresets(copy);
+    try {
+      localStorage.setItem('canteen_purpose_presets', JSON.stringify(copy));
+      localStorage.setItem('canteen_purpose_presets_customized', 'true');
+    } catch {}
+    pushKeyToCloud('canteen_purpose_presets', copy).catch(() => {});
+    showToast(`"${movedItem}" এর অবস্থান পরিবর্তন করা হয়েছে`);
   };
 
   // Distinct officer ranks for officer rank filter
@@ -765,19 +797,34 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       return;
     }
 
-    // Validate each selected member has an amount > 0
-    for (const id of Array.from(selectedAirmanIds)) {
-      const raw = memberCustomAmounts[id] !== undefined ? memberCustomAmounts[id] : amount;
-      const val = parseFloat(raw || '0');
-      if (isNaN(val) || val <= 0) {
-        const m = members.find(mem => String(mem.airman_id || mem['BD No']) === id);
-        const name = m ? `${m['Rank'] || ''} ${m['Surname'] || m['BD No']}` : id;
-        showToast(`Please enter a valid amount for ${name}`, 'error');
+    // Validate each selected member or category has an amount > 0
+    if (isMultiCatMode) {
+      if (activeSingleMemberCats.length === 0) {
+        showToast('অনুগ্রহ করে এই সদস্যের জন্য অন্তত একটি ক্যাটাগরি সিলেক্ট করুন', 'error');
         return;
+      }
+      for (const c of activeSingleMemberCats) {
+        const raw = singleMemberCategoryAmounts[c] !== undefined ? singleMemberCategoryAmounts[c] : amount;
+        const val = parseFloat(raw || '0');
+        if (isNaN(val) || val <= 0) {
+          showToast(`অনুগ্রহ করে "${c}" ক্যাটাগরির জন্য সঠিক টাকার পরিমাণ লিখুন`, 'error');
+          return;
+        }
+      }
+    } else {
+      for (const id of Array.from(selectedAirmanIds)) {
+        const raw = memberCustomAmounts[id] !== undefined ? memberCustomAmounts[id] : amount;
+        const val = parseFloat(raw || '0');
+        if (isNaN(val) || val <= 0) {
+          const m = members.find(mem => String(mem.airman_id || mem['BD No']) === id);
+          const name = m ? `${m['Rank'] || ''} ${m['Surname'] || m['BD No']}` : id;
+          showToast(`Please enter a valid amount for ${name}`, 'error');
+          return;
+        }
       }
     }
 
-    if (!isUnitFund && !purpose.trim()) {
+    if (!isUnitFund && (isMultiCatMode ? activeSingleMemberCats.length === 0 : !purpose.trim())) {
       showToast('A description note or purpose is required for Others Bill', 'error');
       return;
     }
@@ -832,58 +879,99 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       const targetMonth = targetMonthKey;
       const batchExpenseId = `exp-${category.toLowerCase()}-${now}`;
 
+      const isPrevMgrActive = !isUnitFund && (isPrevManager || cashDeductTarget === 'PREV_MANAGER');
+
       const paymentMethodFormatted = othersFundSource === 'Cash'
-        ? `Cash (${cashDeductTarget === 'STAFF' ? (selectedStaffName || 'Civ Tanvir') : (managerName || 'Manager')})`
+        ? (isPrevMgrActive
+            ? 'Cash (Prev Manager)'
+            : `Cash (${cashDeductTarget === 'STAFF' ? (selectedStaffName || 'Civ Tanvir') : (managerName || 'Manager')})`)
         : 'UCB';
 
-      const newBatchTxs = selectedMemberList.map((m, idx) => {
-        const cleanBdNo = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
-        const mId = String(m.airman_id || m['BD No']);
-        const raw = memberCustomAmounts[mId] !== undefined ? memberCustomAmounts[mId] : amount;
-        const memberAmt = parseFloat(raw || '0') || 0;
+      let newBatchTxs: any[] = [];
+      if (isMultiCatMode && activeSingleMemberCats.length > 0) {
+        const singleMem = selectedMemberList[0];
+        const cleanBdNo = String(singleMem['BD No'] || singleMem.airman_id || '').replace(/\D/g, '');
+        newBatchTxs = activeSingleMemberCats.map((catName, idx) => {
+          const raw = singleMemberCategoryAmounts[catName] !== undefined ? singleMemberCategoryAmounts[catName] : amount;
+          const memberAmt = parseFloat(raw || '0') || 0;
 
-        return {
-          id: `tx-${category.toLowerCase()}-${cleanBdNo}-${targetMonth}-${now + idx}`,
-          created_at: new Date().toISOString(),
-          createdAt: new Date().toISOString(),
-          timestamp: now + idx,
-          date: formattedTxDate,
-          monthKey: targetMonth,
-          airman_id: m.airman_id,
-          bdNo: m['BD No'] || m.bdNo,
-          memberName: `${m['Rank'] || ''} ${m['Surname'] || ''}`.trim(),
-          rank: m['Rank'] || m.rank || '',
-          items: isUnitFund ? 'Unit Fund Bill' : defaultDesc,
-          note: isUnitFund ? undefined : (finalNotes || undefined),
-          soldItems: [],
-          amount: memberAmt,
-          type: 'INITIAL_BILL',
-          gateway: 'DUE',
-          billType: isUnitFund ? 'UNIT_FUND' : category,
-          batchExpenseId: isUnitFund ? undefined : batchExpenseId,
-          paymentMethod: isUnitFund ? 'DUE' : paymentMethodFormatted,
-          method: isUnitFund ? 'DUE' : paymentMethodFormatted,
-          source: isUnitFund ? 'DUE' : othersFundSource,
-          staffName: isUnitFund ? undefined : (cashDeductTarget === 'STAFF' ? (selectedStaffName || 'Civ Tanvir') : (managerName || 'Manager')),
-          cashDeductTarget: isUnitFund ? undefined : cashDeductTarget
-        };
-      });
+          return {
+            id: `tx-${category.toLowerCase()}-${cleanBdNo}-${targetMonth}-${now + idx}`,
+            created_at: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+            timestamp: now + idx,
+            date: formattedTxDate,
+            monthKey: targetMonth,
+            airman_id: singleMem.airman_id,
+            bdNo: singleMem['BD No'] || singleMem.bdNo,
+            memberName: `${singleMem['Rank'] || ''} ${singleMem['Surname'] || ''}`.trim(),
+            rank: singleMem['Rank'] || singleMem.rank || '',
+            items: catName,
+            note: finalNotes || undefined,
+            soldItems: [],
+            amount: memberAmt,
+            type: 'INITIAL_BILL',
+            gateway: 'DUE',
+            billType: category,
+            batchExpenseId,
+            paymentMethod: paymentMethodFormatted,
+            method: paymentMethodFormatted,
+            source: isPrevMgrActive ? 'Cash (Prev Manager)' : othersFundSource,
+            staffName: isPrevMgrActive ? 'Prev Manager' : (cashDeductTarget === 'STAFF' ? (selectedStaffName || 'Civ Tanvir') : (managerName || 'Manager')),
+            cashDeductTarget: isPrevMgrActive ? 'PREV_MANAGER' : cashDeductTarget,
+            isPrevManager: isPrevMgrActive ? true : undefined
+          };
+        });
+      } else {
+        newBatchTxs = selectedMemberList.map((m, idx) => {
+          const cleanBdNo = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
+          const mId = String(m.airman_id || m['BD No']);
+          const raw = memberCustomAmounts[mId] !== undefined ? memberCustomAmounts[mId] : amount;
+          const memberAmt = parseFloat(raw || '0') || 0;
+
+          return {
+            id: `tx-${category.toLowerCase()}-${cleanBdNo}-${targetMonth}-${now + idx}`,
+            created_at: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+            timestamp: now + idx,
+            date: formattedTxDate,
+            monthKey: targetMonth,
+            airman_id: m.airman_id,
+            bdNo: m['BD No'] || m.bdNo,
+            memberName: `${m['Rank'] || ''} ${m['Surname'] || ''}`.trim(),
+            rank: m['Rank'] || m.rank || '',
+            items: isUnitFund ? 'Unit Fund Bill' : defaultDesc,
+            note: isUnitFund ? undefined : (finalNotes || undefined),
+            soldItems: [],
+            amount: memberAmt,
+            type: 'INITIAL_BILL',
+            gateway: 'DUE',
+            billType: isUnitFund ? 'UNIT_FUND' : category,
+            batchExpenseId: isUnitFund ? undefined : batchExpenseId,
+            paymentMethod: isUnitFund ? 'DUE' : paymentMethodFormatted,
+            method: isUnitFund ? 'DUE' : paymentMethodFormatted,
+            source: isUnitFund ? 'DUE' : (isPrevMgrActive ? 'Cash (Prev Manager)' : othersFundSource),
+            staffName: isUnitFund ? undefined : (isPrevMgrActive ? 'Prev Manager' : (cashDeductTarget === 'STAFF' ? (selectedStaffName || 'Civ Tanvir') : (managerName || 'Manager'))),
+            cashDeductTarget: isUnitFund ? undefined : (isPrevMgrActive ? 'PREV_MANAGER' : cashDeductTarget),
+            isPrevManager: isPrevMgrActive ? true : undefined
+          };
+        });
+      }
 
       const updatedTxs = [...newBatchTxs, ...existingTxs];
       localStorage.setItem('canteen_txs', JSON.stringify(updatedTxs));
 
       // Update members' Due in memory, localStorage and Supabase directly
-      selectedMemberList.forEach((m) => {
-        const mId = String(m.airman_id || m['BD No']);
-        const raw = memberCustomAmounts[mId] !== undefined ? memberCustomAmounts[mId] : amount;
-        const memberAmt = parseFloat(raw || '0') || 0;
-        const curDue = Number(m.Due ?? m.due ?? m.baki ?? 0);
-        const newDue = curDue + memberAmt;
-        m.Due = newDue;
-        m.due = newDue;
-        m.baki = newDue;
+      if (isMultiCatMode && activeSingleMemberCats.length > 0) {
+        const singleMem = selectedMemberList[0];
+        const totalSingleMemberAddedDue = newBatchTxs.reduce((sum, t) => sum + Number(t.amount || 0), 0);
+        const curDue = Number(singleMem.Due ?? singleMem.due ?? singleMem.baki ?? 0);
+        const newDue = curDue + totalSingleMemberAddedDue;
+        singleMem.Due = newDue;
+        singleMem.due = newDue;
+        singleMem.baki = newDue;
 
-        const cleanBd = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
+        const cleanBd = String(singleMem['BD No'] || singleMem.airman_id || '').replace(/\D/g, '');
         if (cleanBd) {
           try {
             const rawStored = localStorage.getItem(`canteen_member_${cleanBd}`);
@@ -894,24 +982,57 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
 
         (async () => {
           try {
-            if (m.airman_id) {
-              await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', m.airman_id);
+            if (singleMem.airman_id) {
+              await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', singleMem.airman_id);
             }
-            if (m['BD No']) {
-              await supabase.from('Canteen_Member').update({ Due: newDue }).eq('BD No', String(m['BD No']).trim());
+            if (singleMem['BD No']) {
+              await supabase.from('Canteen_Member').update({ Due: newDue }).eq('BD No', String(singleMem['BD No']).trim());
             }
           } catch (e) {
-            console.warn('Member due update error on Unit Fund batch bill:', e);
+            console.warn('Member due update error on multi-category batch bill:', e);
           }
         })();
-      });
+      } else {
+        selectedMemberList.forEach((m) => {
+          const mId = String(m.airman_id || m['BD No']);
+          const raw = memberCustomAmounts[mId] !== undefined ? memberCustomAmounts[mId] : amount;
+          const memberAmt = parseFloat(raw || '0') || 0;
+          const curDue = Number(m.Due ?? m.due ?? m.baki ?? 0);
+          const newDue = curDue + memberAmt;
+          m.Due = newDue;
+          m.due = newDue;
+          m.baki = newDue;
+
+          const cleanBd = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
+          if (cleanBd) {
+            try {
+              const rawStored = localStorage.getItem(`canteen_member_${cleanBd}`);
+              const stored = rawStored ? JSON.parse(rawStored) : {};
+              localStorage.setItem(`canteen_member_${cleanBd}`, JSON.stringify({ ...stored, Due: newDue, due: newDue, baki: newDue }));
+            } catch {}
+          }
+
+          (async () => {
+            try {
+              if (m.airman_id) {
+                await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', m.airman_id);
+              }
+              if (m['BD No']) {
+                await supabase.from('Canteen_Member').update({ Due: newDue }).eq('BD No', String(m['BD No']).trim());
+              }
+            } catch (e) {
+              console.warn('Member due update error on Unit Fund batch bill:', e);
+            }
+          })();
+        });
+      }
 
       // ONLY for Others Fund: deduct total billed amount from Fund Cash or UCB as an expense so Capital All Logs receives entry
       // For Unit Fund: Purpose and Payment Method are NOT used, everything goes to Due directly without fund expense deduction.
       let updatedExpenses: any[] = [];
       let updatedAdvances: any[] = [];
 
-      if (!isUnitFund) {
+      if (!isUnitFund && !isPrevMgrActive) {
         const totalBatchDeduction = totalBatchAmount;
         const existingExpenses = (() => {
           try {
@@ -1010,8 +1131,8 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       // Fast background push to Supabase cloud without freezing user UI
       Promise.all([
         pushKeyToCloud('canteen_txs', updatedTxs),
-        ...(!isUnitFund && updatedExpenses.length > 0 ? [pushKeyToCloud('canteen_expenses', updatedExpenses)] : []),
-        ...(!isUnitFund && othersFundSource === 'Cash' && cashDeductTarget === 'STAFF' && selectedStaffName && updatedAdvances.length > 0 ? [pushKeyToCloud('canteen_bazar_advances', updatedAdvances)] : [])
+        ...(!isUnitFund && !isPrevMgrActive && updatedExpenses.length > 0 ? [pushKeyToCloud('canteen_expenses', updatedExpenses)] : []),
+        ...(!isUnitFund && !isPrevMgrActive && othersFundSource === 'Cash' && cashDeductTarget === 'STAFF' && selectedStaffName && updatedAdvances.length > 0 ? [pushKeyToCloud('canteen_bazar_advances', updatedAdvances)] : [])
       ]).catch((err) => console.warn('Background batch sync warning:', err));
 
       // Trigger sync events across the entire app
@@ -1028,13 +1149,15 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
         totalAmount: totalBatchAmount,
         category: isUnitFund ? 'Unit Fund' : 'Others Bill',
         purpose: isUnitFund ? 'Unit Fund Bill' : finalPurpose,
-        source: isUnitFund ? 'DUE' : othersFundSource,
-        targetStaff: (!isUnitFund && othersFundSource === 'Cash' && cashDeductTarget === 'STAFF') ? selectedStaffName : undefined
+        source: isPrevMgrActive ? 'Prev Manager' : (isUnitFund ? 'DUE' : othersFundSource),
+        targetStaff: (!isUnitFund && !isPrevMgrActive && othersFundSource === 'Cash' && cashDeductTarget === 'STAFF') ? selectedStaffName : undefined
       });
 
       // Reset form fields
       setAmount('');
       setMemberCustomAmounts({});
+      setSingleMemberCategories([]);
+      setSingleMemberCategoryAmounts({});
       setAmountMode('SAME');
       setFillAllInput('');
       setNotes('');
@@ -1284,6 +1407,10 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
 
   const selectedCount = selectedAirmanIds.size;
   const numAmount = parseFloat(amount) || 0;
+  const isMultiCatMode = selectedCount === 1 && !isUnitFund;
+  const activeSingleMemberCats = useMemo(() => {
+    return singleMemberCategories.length > 0 ? singleMemberCategories : (purpose.trim() ? [purpose.trim()] : []);
+  }, [singleMemberCategories, purpose]);
 
   // Selected members list sorted by seniority
   const selectedMembersList = useMemo(() => {
@@ -1295,6 +1422,15 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
 
   const totalBatchAmount = useMemo(() => {
     if (selectedCount === 0) return 0;
+    if (isMultiCatMode) {
+      if (activeSingleMemberCats.length === 0) return 0;
+      let sum = 0;
+      activeSingleMemberCats.forEach((c) => {
+        const raw = singleMemberCategoryAmounts[c] !== undefined ? singleMemberCategoryAmounts[c] : amount;
+        sum += (parseFloat(raw || '0') || 0);
+      });
+      return sum;
+    }
     let sum = 0;
     selectedAirmanIds.forEach((id) => {
       const raw = memberCustomAmounts[id] !== undefined ? memberCustomAmounts[id] : amount;
@@ -1302,20 +1438,38 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       sum += val;
     });
     return sum;
-  }, [selectedCount, selectedAirmanIds, memberCustomAmounts, amount]);
+  }, [selectedCount, isMultiCatMode, activeSingleMemberCats, singleMemberCategoryAmounts, selectedAirmanIds, memberCustomAmounts, amount]);
 
   const isAllMemberAmountsValid = useMemo(() => {
     if (selectedCount === 0) return false;
+    if (isMultiCatMode) {
+      if (activeSingleMemberCats.length === 0) return false;
+      return activeSingleMemberCats.every((c) => {
+        const raw = singleMemberCategoryAmounts[c] !== undefined ? singleMemberCategoryAmounts[c] : amount;
+        const val = parseFloat(raw || '0');
+        return !isNaN(val) && val > 0;
+      });
+    }
     for (const id of Array.from(selectedAirmanIds)) {
       const raw = memberCustomAmounts[id] !== undefined ? memberCustomAmounts[id] : amount;
       const val = parseFloat(raw || '0');
       if (isNaN(val) || val <= 0) return false;
     }
     return true;
-  }, [selectedCount, selectedAirmanIds, memberCustomAmounts, amount]);
+  }, [selectedCount, isMultiCatMode, activeSingleMemberCats, singleMemberCategoryAmounts, selectedAirmanIds, memberCustomAmounts, amount]);
 
   const invalidCustomAmountsCount = useMemo(() => {
     if (selectedCount === 0) return 0;
+    if (isMultiCatMode) {
+      if (activeSingleMemberCats.length === 0) return 0;
+      let count = 0;
+      activeSingleMemberCats.forEach((c) => {
+        const raw = singleMemberCategoryAmounts[c] !== undefined ? singleMemberCategoryAmounts[c] : amount;
+        const val = parseFloat(raw || '0');
+        if (isNaN(val) || val <= 0) count++;
+      });
+      return count;
+    }
     let count = 0;
     selectedAirmanIds.forEach((id) => {
       const raw = memberCustomAmounts[id] !== undefined ? memberCustomAmounts[id] : amount;
@@ -1323,7 +1477,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       if (isNaN(val) || val <= 0) count++;
     });
     return count;
-  }, [selectedCount, selectedAirmanIds, memberCustomAmounts, amount]);
+  }, [selectedCount, isMultiCatMode, activeSingleMemberCats, singleMemberCategoryAmounts, selectedAirmanIds, memberCustomAmounts, amount]);
 
   const allSameMembers = useMemo(() => {
     if (selectedCount <= 1) return true;
@@ -1723,43 +1877,143 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                     <span>Select Category <span className="text-rose-400">*</span></span>
                   </h3>
                 </div>
-                {/* Settings Gear Icon to toggle edit/delete mode */}
-                <button
-                  type="button"
-                  onClick={() => setIsEditingPresets(!isEditingPresets)}
-                  className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                    isEditingPresets
-                      ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40 shadow-xs'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                  title={isEditingPresets ? 'Done Editing Presets' : 'Manage Saved Presets'}
-                >
-                  <Settings className="w-4 h-4" />
-                </button>
+                <div className="flex items-center space-x-2">
+                  <span className="text-[11px] font-mono font-bold bg-indigo-500/20 text-indigo-300 px-2.5 py-1 rounded-lg border border-indigo-500/30">
+                    {activeSingleMemberCats.length} Selected
+                  </span>
+                  {/* Settings Gear Icon to toggle edit/delete mode */}
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingPresets(!isEditingPresets)}
+                    className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                      isEditingPresets
+                        ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40 shadow-xs'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                    title={isEditingPresets ? 'Done Editing Presets' : 'Manage Saved Presets'}
+                  >
+                    <Settings className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
+
+              {isEditingPresets && (
+                <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-1.5 font-bold">
+                    <Settings className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <span>ক্যাটাগরি সাজানো ও মোছার মোড: ◀ ▶ বা ড্র্যাগ দিয়ে অবস্থান পরিবর্তন করুন, ✖ দিয়ে মুছুন</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingPresets(false)}
+                    className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[11px] cursor-pointer shrink-0 transition-all shadow-xs"
+                  >
+                    সম্পন্ন (Done)
+                  </button>
+                </div>
+              )}
 
               {/* Preset Pills */}
               <div className="flex flex-wrap items-center gap-2">
-                {purposePresets.map((preset) => {
-                  const isSelected = !isEditingPresets && purpose === preset;
+                {purposePresets.map((preset, idx) => {
+                  const isSelected = !isEditingPresets && activeSingleMemberCats.includes(preset);
                   return (
-                    <div key={preset} className="relative">
+                    <div 
+                      key={preset} 
+                      draggable={isEditingPresets}
+                      onDragStart={(e) => {
+                        if (isEditingPresets) {
+                          e.dataTransfer.setData('text/plain', String(idx));
+                        }
+                      }}
+                      onDragOver={(e) => {
+                        if (isEditingPresets) e.preventDefault();
+                      }}
+                      onDrop={(e) => {
+                        if (!isEditingPresets) return;
+                        e.preventDefault();
+                        const fromIdx = Number(e.dataTransfer.getData('text/plain'));
+                        if (!isNaN(fromIdx)) {
+                          handleMovePreset(fromIdx, idx);
+                        }
+                      }}
+                      className={`relative flex items-center transition-all ${
+                        isEditingPresets 
+                          ? 'bg-slate-950 border border-amber-500/40 rounded-xl p-1 shadow-sm gap-1' 
+                          : ''
+                      }`}
+                    >
+                      {/* Left arrow to move position earlier */}
+                      {isEditingPresets && (
+                        <button
+                          type="button"
+                          disabled={idx === 0}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleMovePreset(idx, idx - 1);
+                          }}
+                          className={`p-1 rounded-lg text-xs transition-all cursor-pointer ${
+                            idx === 0
+                              ? 'text-slate-600 cursor-not-allowed'
+                              : 'text-amber-400 hover:bg-amber-500/20 active:scale-95'
+                          }`}
+                          title="Move Left (←)"
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+
                       <button
                         type="button"
                         onClick={() => {
                           if (isEditingPresets) return;
-                          setPurpose(preset);
+                          const nextList = activeSingleMemberCats.includes(preset)
+                            ? activeSingleMemberCats.filter(p => p !== preset)
+                            : [...activeSingleMemberCats, preset];
+                          setSingleMemberCategories(nextList);
+                          setPurpose(nextList.join(', '));
                         }}
-                        className={`py-1.5 rounded-xl text-xs font-bold border transition-all truncate cursor-pointer ${
-                          isEditingPresets ? 'px-3 pr-7' : 'px-3'
+                        className={`py-1.5 rounded-xl text-xs font-bold transition-all truncate cursor-pointer ${
+                          isEditingPresets 
+                            ? 'px-2 border border-transparent text-amber-200 cursor-grab active:cursor-grabbing flex items-center gap-1' 
+                            : 'px-3 border'
                         } ${
-                          isSelected
+                          !isEditingPresets && isSelected
                             ? 'ring-2 ring-indigo-500 border-indigo-500 bg-indigo-950/90 text-indigo-100 shadow-sm'
-                            : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-900'
+                            : !isEditingPresets 
+                              ? 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-900'
+                              : ''
                         }`}
                       >
-                        {preset}
+                        {isEditingPresets && (
+                          <GripVertical className="w-3 h-3 text-amber-400/60" />
+                        )}
+                        <span>{preset}</span>
+                        {isSelected && !isEditingPresets && (
+                          <span className="ml-1 text-emerald-400 font-bold">✓</span>
+                        )}
                       </button>
+
+                      {/* Right arrow to move position later */}
+                      {isEditingPresets && (
+                        <button
+                          type="button"
+                          disabled={idx === purposePresets.length - 1}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleMovePreset(idx, idx + 1);
+                          }}
+                          className={`p-1 rounded-lg text-xs transition-all cursor-pointer ${
+                            idx === purposePresets.length - 1
+                              ? 'text-slate-600 cursor-not-allowed'
+                              : 'text-amber-400 hover:bg-amber-500/20 active:scale-95'
+                          }`}
+                          title="Move Right (→)"
+                        >
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+
                       {/* ONLY show X button when gear button is ON (isEditingPresets is true) */}
                       {isEditingPresets && (
                         <button
@@ -1768,7 +2022,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                             e.stopPropagation();
                             handleRemovePreset(preset);
                           }}
-                          className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded-full bg-rose-600 hover:bg-rose-500 text-white transition-all cursor-pointer shadow-xs"
+                          className="p-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white transition-all cursor-pointer shadow-xs active:scale-95"
                           title={`Delete "${preset}"`}
                         >
                           <X className="w-3 h-3" />
@@ -1858,132 +2112,289 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
               </div>
             ) : (
               <div className="space-y-3">
-                {/* Quick Toolbar: Fill All */}
-                <div className="flex items-center justify-between gap-2.5 p-3 bg-slate-950/80 rounded-2xl border border-slate-800">
-                  <div className="text-xs font-bold text-slate-300">
-                    Apply to all members:
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="relative w-28 sm:w-32">
-                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-mono font-bold text-slate-400 text-xs">৳</span>
-                      <input
-                        type="number"
-                        placeholder="Amount"
-                        value={fillAllInput}
-                        onChange={(e) => setFillAllInput(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-6 pr-2 py-1.5 text-xs font-mono text-white outline-none focus:border-indigo-500"
-                      />
+                {/* Quick Toolbar: Fill All - ONLY shown if multiple members selected */}
+                {selectedCount > 1 && (
+                  <div className="flex items-center justify-between gap-2.5 p-3 bg-slate-950/80 rounded-2xl border border-slate-800">
+                    <div className="text-xs font-bold text-slate-300">
+                      Apply to all members:
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!fillAllInput) return;
-                        const next: Record<string, string> = {};
-                        selectedAirmanIds.forEach((id) => {
-                          next[id] = fillAllInput;
-                        });
-                        setMemberCustomAmounts(next);
-                        showToast(`Applied ৳${fillAllInput} to all members`);
-                      }}
-                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shadow-sm"
-                    >
-                      Apply All
-                    </button>
-                  </div>
-                </div>
-
-                {/* Cart Member Rows */}
-                <div className="max-h-72 overflow-y-auto space-y-2 p-2 bg-slate-950/70 border border-slate-800 rounded-2xl scrollbar-none">
-                  {selectedMembersList.map((m, idx) => {
-                    const mId = String(m.airman_id || m['BD No']);
-                    const memberDp = resolveImageUrl(m.DP);
-                    const memberVal = memberCustomAmounts[mId] !== undefined ? memberCustomAmounts[mId] : '';
-                    const numVal = parseFloat(memberVal);
-                    const isValidVal = !isNaN(numVal) && numVal > 0;
-
-                    return (
-                      <div
-                        key={mId}
-                        className={`p-2.5 rounded-xl border flex items-center justify-between gap-2.5 transition-all ${
-                          isValidVal
-                            ? 'bg-slate-900/90 border-slate-800/90 hover:border-slate-700'
-                            : 'bg-rose-950/10 border-rose-500/30'
-                        }`}
+                    <div className="flex items-center gap-2">
+                      <div className="relative w-28 sm:w-32">
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-mono font-bold text-slate-400 text-xs">৳</span>
+                        <input
+                          type="number"
+                          placeholder="Amount"
+                          value={fillAllInput}
+                          onChange={(e) => setFillAllInput(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-6 pr-2 py-1.5 text-xs font-mono text-white outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!fillAllInput) return;
+                          const next: Record<string, string> = {};
+                          selectedAirmanIds.forEach((id) => {
+                            next[id] = fillAllInput;
+                          });
+                          setMemberCustomAmounts(next);
+                          showToast(`Applied ৳${fillAllInput} to all members`);
+                        }}
+                        className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shadow-sm"
                       >
-                        <div className="flex items-center space-x-2.5 min-w-0 flex-1">
-                          <span className="w-5 text-[10px] font-mono text-slate-500 text-center shrink-0">
-                            {idx + 1}
-                          </span>
-                          <div className="w-8 h-8 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-center overflow-hidden shrink-0">
-                            {memberDp ? (
-                              <img
-                                src={memberDp}
-                                alt={m['Surname']}
-                                className="w-full h-full object-cover"
-                                onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                              />
-                            ) : (
-                              <span className="font-black text-xs text-indigo-400">
-                                {(m['Surname'] || 'M').charAt(0)}
-                              </span>
-                            )}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center space-x-1.5 flex-wrap">
-                              {m['Rank'] && m['Rank'] !== '-' && (
-                                <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase bg-indigo-500/15 text-indigo-300 font-mono">
-                                  {m['Rank']}
+                        Apply All
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Cart Rows: Single Member Multi-Category Mode vs Multiple Members Mode */}
+                {isMultiCatMode ? (
+                  <div className="space-y-3">
+                    {/* Selected Member Header Card */}
+                    {(() => {
+                      const m = selectedMembersList[0];
+                      if (!m) return null;
+                      const memberDp = resolveImageUrl(m.DP);
+                      return (
+                        <div className="p-3.5 bg-slate-950/90 rounded-2xl border border-indigo-500/30 flex items-center justify-between gap-3 shadow-md">
+                          <div className="flex items-center space-x-3 min-w-0 flex-1">
+                            <div className="w-10 h-10 rounded-xl bg-slate-900 border border-indigo-500/30 flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
+                              {memberDp ? (
+                                <img
+                                  src={memberDp}
+                                  alt={m['Surname']}
+                                  className="w-full h-full object-cover"
+                                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                />
+                              ) : (
+                                <span className="font-black text-sm text-indigo-400">
+                                  {(m['Surname'] || 'M').charAt(0)}
                                 </span>
                               )}
-                              <span className="font-bold text-white text-xs truncate">
-                                {m['Surname']}
-                              </span>
                             </div>
-                            <div className="text-[10px] font-mono text-slate-400 truncate">
-                              BD/{m['BD No']}
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center space-x-1.5 flex-wrap">
+                                {m['Rank'] && m['Rank'] !== '-' && (
+                                  <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-indigo-500/20 text-indigo-300 font-mono border border-indigo-500/30">
+                                    {m['Rank']}
+                                  </span>
+                                )}
+                                <span className="font-black text-white text-sm truncate">
+                                  {m['Surname']}
+                                </span>
+                              </div>
+                              <div className="text-[11px] font-mono text-slate-400 mt-0.5 flex items-center gap-1.5">
+                                <span>BD/{m['BD No']}</span>
+                                <span>•</span>
+                                <span className="text-emerald-400 font-bold">একক সদস্য (Single Member)</span>
+                              </div>
                             </div>
                           </div>
-                        </div>
 
-                        {/* Amount Box + Quick Remove from Cart Button */}
-                        <div className="flex items-center space-x-2 shrink-0">
-                          <div className="relative w-28 sm:w-32">
-                            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-mono font-bold text-slate-400 text-xs">
-                              ৳
+                          <div className="shrink-0 text-right">
+                            <span className="text-[10px] font-mono font-bold text-indigo-300 bg-indigo-950/80 px-2.5 py-1 rounded-xl border border-indigo-800/60 block">
+                              {activeSingleMemberCats.length} Categories Selected
                             </span>
-                            <input
-                              type="number"
-                              min="1"
-                              step="1"
-                              placeholder="Amount"
-                              value={memberVal}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                setMemberCustomAmounts((prev) => ({
-                                  ...prev,
-                                  [mId]: val
-                                }));
-                              }}
-                              className={`w-full bg-slate-950 border rounded-xl pl-6 pr-2 py-1.5 text-xs font-mono font-black text-white outline-none shadow-inner transition-all ${
-                                isValidVal
-                                  ? 'border-slate-700 focus:border-indigo-500'
-                                  : 'border-rose-500/50 focus:border-rose-400'
-                              }`}
-                            />
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => handleToggleMember(mId)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 transition-colors cursor-pointer"
-                            title="Remove from Cart"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
                         </div>
+                      );
+                    })()}
+
+                    {/* Category List & Amount Boxes */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between px-1">
+                        <span className="text-xs font-black text-slate-300">
+                          ক্যাটাগরি ভিত্তিক বিলের তালিকা ও টাকার পরিমাণ
+                        </span>
+                        <span className="text-[10px] text-indigo-400 font-bold">
+                          {activeSingleMemberCats.length}টি ক্যাটাগরি
+                        </span>
                       </div>
-                    );
-                  })}
-                </div>
+
+                      {activeSingleMemberCats.length === 0 ? (
+                        <div className="p-5 text-center text-slate-400 text-xs font-bold bg-slate-950/70 rounded-2xl border border-dashed border-slate-800 space-y-2">
+                          <Tag className="w-6 h-6 text-indigo-400 mx-auto opacity-70" />
+                          <p className="text-white font-bold">উপরে "Select Category" থেকে ক্যাটাগরি সিলেক্ট করুন</p>
+                          <p className="text-[11px] text-slate-500 font-normal">
+                            কোনো ক্যাটাগরি নির্বাচিত নেই। উপরে ক্যাটাগরি বাটনে ক্লিক করে নির্বাচন করুন।
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="max-h-72 overflow-y-auto space-y-2 p-2 bg-slate-950/70 border border-slate-800 rounded-2xl scrollbar-none">
+                            {activeSingleMemberCats.map((catName, idx) => {
+                              const catVal = singleMemberCategoryAmounts[catName] !== undefined ? singleMemberCategoryAmounts[catName] : '';
+                              const numVal = parseFloat(catVal);
+                              const isValidVal = !isNaN(numVal) && numVal > 0;
+
+                              return (
+                                <div
+                                  key={`${catName}-${idx}`}
+                                  className={`p-3 rounded-xl border flex items-center justify-between gap-2.5 transition-all ${
+                                    isValidVal
+                                      ? 'bg-slate-900/95 border-slate-800/90 hover:border-slate-700'
+                                      : 'bg-rose-950/15 border-rose-500/40'
+                                  }`}
+                                >
+                                  <div className="flex items-center space-x-2.5 min-w-0 flex-1">
+                                    <span className="w-5 text-[10px] font-mono text-indigo-400 font-bold text-center shrink-0">
+                                      {idx + 1}
+                                    </span>
+                                    <div className="p-2 rounded-xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-400 shrink-0">
+                                      <Tag className="w-4 h-4" />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <span className="font-bold text-white text-xs block truncate">
+                                        {catName}
+                                      </span>
+                                      <span className="text-[9px] text-slate-400 font-mono block mt-0.5">
+                                        ক্যাটাগরি বিল এন্ট্রি
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  {/* Amount Box + Quick Remove Category */}
+                                  <div className="flex items-center space-x-2 shrink-0">
+                                    <div className="relative w-28 sm:w-32">
+                                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-mono font-bold text-slate-400 text-xs">
+                                        ৳
+                                      </span>
+                                      <input
+                                        type="number"
+                                        min="1"
+                                        step="1"
+                                        placeholder="Amount"
+                                        value={catVal}
+                                        onChange={(e) => {
+                                          const val = e.target.value;
+                                          setSingleMemberCategoryAmounts(prev => ({
+                                            ...prev,
+                                            [catName]: val
+                                          }));
+                                        }}
+                                        className={`w-full bg-slate-950 border rounded-xl pl-6 pr-2 py-1.5 text-xs font-mono font-black text-white outline-none shadow-inner transition-all ${
+                                          isValidVal
+                                            ? 'border-slate-700 focus:border-indigo-500'
+                                            : 'border-rose-500/50 focus:border-rose-400'
+                                        }`}
+                                      />
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const nextList = activeSingleMemberCats.filter(c => c !== catName);
+                                        setSingleMemberCategories(nextList);
+                                        setPurpose(nextList.join(', '));
+                                      }}
+                                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 transition-colors cursor-pointer"
+                                      title={`Remove "${catName}"`}
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  /* Multiple Members List */
+                  <div className="max-h-72 overflow-y-auto space-y-2 p-2 bg-slate-950/70 border border-slate-800 rounded-2xl scrollbar-none">
+                    {selectedMembersList.map((m, idx) => {
+                      const mId = String(m.airman_id || m['BD No']);
+                      const memberDp = resolveImageUrl(m.DP);
+                      const memberVal = memberCustomAmounts[mId] !== undefined ? memberCustomAmounts[mId] : '';
+                      const numVal = parseFloat(memberVal);
+                      const isValidVal = !isNaN(numVal) && numVal > 0;
+
+                      return (
+                        <div
+                          key={mId}
+                          className={`p-2.5 rounded-xl border flex items-center justify-between gap-2.5 transition-all ${
+                            isValidVal
+                              ? 'bg-slate-900/90 border-slate-800/90 hover:border-slate-700'
+                              : 'bg-rose-950/10 border-rose-500/30'
+                          }`}
+                        >
+                          <div className="flex items-center space-x-2.5 min-w-0 flex-1">
+                            <span className="w-5 text-[10px] font-mono text-slate-500 text-center shrink-0">
+                              {idx + 1}
+                            </span>
+                            <div className="w-8 h-8 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-center overflow-hidden shrink-0">
+                              {memberDp ? (
+                                <img
+                                  src={memberDp}
+                                  alt={m['Surname']}
+                                  className="w-full h-full object-cover"
+                                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                />
+                              ) : (
+                                <span className="font-black text-xs text-indigo-400">
+                                  {(m['Surname'] || 'M').charAt(0)}
+                                </span>
+                              )}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center space-x-1.5 flex-wrap">
+                                {m['Rank'] && m['Rank'] !== '-' && (
+                                  <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase bg-indigo-500/15 text-indigo-300 font-mono">
+                                    {m['Rank']}
+                                  </span>
+                                )}
+                                <span className="font-bold text-white text-xs truncate">
+                                  {m['Surname']}
+                                </span>
+                              </div>
+                              <div className="text-[10px] font-mono text-slate-400 truncate">
+                                BD/{m['BD No']}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Amount Box + Quick Remove from Cart Button */}
+                          <div className="flex items-center space-x-2 shrink-0">
+                            <div className="relative w-28 sm:w-32">
+                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-mono font-bold text-slate-400 text-xs">
+                                ৳
+                              </span>
+                              <input
+                                type="number"
+                                min="1"
+                                step="1"
+                                placeholder="Amount"
+                                value={memberVal}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setMemberCustomAmounts((prev) => ({
+                                    ...prev,
+                                    [mId]: val
+                                  }));
+                                }}
+                                className={`w-full bg-slate-950 border rounded-xl pl-6 pr-2 py-1.5 text-xs font-mono font-black text-white outline-none shadow-inner transition-all ${
+                                  isValidVal
+                                    ? 'border-slate-700 focus:border-indigo-500'
+                                    : 'border-rose-500/50 focus:border-rose-400'
+                                }`}
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleMember(mId)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 transition-colors cursor-pointer"
+                              title="Remove from Cart"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {/* Live Total Banner */}
                 <div className="p-3 rounded-2xl bg-slate-950/90 border border-indigo-500/30 flex items-center justify-between gap-2 text-xs">
@@ -2012,7 +2423,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
           {/* 4. PAYMENT METHOD (Only Cash + Cash Channel; Only for Others Fund) */}
           {!isUnitFund && (
             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-sm space-y-3.5">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2.5 flex-wrap gap-2">
                 <div className="flex items-center space-x-2.5">
                   <span className="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-400 font-mono font-black text-xs flex items-center justify-center">
                     5
@@ -2022,47 +2433,120 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                     <span>Payment Method: Cash <span className="text-rose-400">*</span></span>
                   </h3>
                 </div>
-                <span className="text-[10px] text-emerald-400 font-mono font-bold bg-emerald-950/70 px-2 py-0.5 rounded-lg border border-emerald-500/30">
-                  CASH ONLY
-                </span>
+
+                <div className="flex items-center space-x-2">
+                  {/* Prev Manager Toggle Button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextState = !(isPrevManager || cashDeductTarget === 'PREV_MANAGER');
+                      setIsPrevManager(nextState);
+                      if (nextState) {
+                        setCashDeductTarget('PREV_MANAGER');
+                      } else {
+                        setCashDeductTarget('MANAGER');
+                      }
+                    }}
+                    className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer border ${
+                      isPrevManager || cashDeductTarget === 'PREV_MANAGER'
+                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/60 shadow-sm ring-1 ring-amber-500/40'
+                        : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
+                    }`}
+                    title="Toggle Prev Manager (Bills add to Member Due & Statement, but will NOT deduct from Manager/Staff account)"
+                  >
+                    <span className={`w-2 h-2 rounded-full ${
+                      isPrevManager || cashDeductTarget === 'PREV_MANAGER' ? 'bg-amber-400 animate-pulse' : 'bg-slate-500'
+                    }`} />
+                    <span>Prev Manager</span>
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono font-bold ${
+                      isPrevManager || cashDeductTarget === 'PREV_MANAGER'
+                        ? 'bg-amber-500/30 text-amber-200'
+                        : 'bg-slate-700 text-slate-400'
+                    }`}>
+                      {isPrevManager || cashDeductTarget === 'PREV_MANAGER' ? 'ON' : 'OFF'}
+                    </span>
+                  </button>
+
+                  <span className="text-[10px] text-emerald-400 font-mono font-bold bg-emerald-950/70 px-2 py-0.5 rounded-lg border border-emerald-500/30">
+                    CASH ONLY
+                  </span>
+                </div>
               </div>
 
               {/* Cash Channel / Source */}
               <div className="bg-slate-950/90 rounded-2xl p-3.5 border border-slate-800 space-y-3">
-                <div className="text-xs font-bold text-slate-300">
-                  Cash Channel / Source:
+                <div className="flex items-center justify-between text-xs font-bold text-slate-300">
+                  <span>Cash Channel / Source:</span>
+                  {(isPrevManager || cashDeductTarget === 'PREV_MANAGER') && (
+                    <span className="text-[10px] font-bold text-amber-400 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-lg">
+                      ⚠️ No Cash Account Deduction
+                    </span>
+                  )}
                 </div>
 
-                {/* Segmented Switch Buttons */}
-                <div className="grid grid-cols-2 gap-2 p-1 bg-slate-900 rounded-xl border border-slate-800">
+                {/* Segmented Switch Buttons with Manager Cash, Staff Account, and Prev Manager */}
+                <div className="grid grid-cols-3 gap-2 p-1 bg-slate-900 rounded-xl border border-slate-800">
                   <button
                     type="button"
-                    onClick={() => setCashDeductTarget('MANAGER')}
-                    className={`py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1.5 ${
-                      cashDeductTarget === 'MANAGER'
+                    onClick={() => {
+                      setCashDeductTarget('MANAGER');
+                      setIsPrevManager(false);
+                    }}
+                    className={`py-2 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1.5 ${
+                      cashDeductTarget === 'MANAGER' && !isPrevManager
                         ? 'bg-slate-800 text-white shadow-xs border border-slate-700'
                         : 'text-slate-400 hover:text-white'
                     }`}
                   >
-                    <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
-                    <span>Manager Cash</span>
+                    <ShieldCheck className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                    <span className="truncate">Manager Cash</span>
                   </button>
                   <button
                     type="button"
-                    onClick={() => setCashDeductTarget('STAFF')}
-                    className={`py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1.5 ${
-                      cashDeductTarget === 'STAFF'
+                    onClick={() => {
+                      setCashDeductTarget('STAFF');
+                      setIsPrevManager(false);
+                    }}
+                    className={`py-2 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1.5 ${
+                      cashDeductTarget === 'STAFF' && !isPrevManager
                         ? 'bg-emerald-600 text-white shadow-xs'
                         : 'text-slate-400 hover:text-white'
                     }`}
                   >
-                    <Users className="w-3.5 h-3.5 text-emerald-200" />
-                    <span>Staff Account</span>
+                    <Users className="w-3.5 h-3.5 text-emerald-200 shrink-0" />
+                    <span className="truncate">Staff Account</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCashDeductTarget('PREV_MANAGER');
+                      setIsPrevManager(true);
+                    }}
+                    className={`py-2 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center space-x-1.5 ${
+                      cashDeductTarget === 'PREV_MANAGER' || isPrevManager
+                        ? 'bg-amber-600 text-white shadow-xs'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-200 shrink-0" />
+                    <span className="truncate">Prev Manager</span>
                   </button>
                 </div>
 
-                {/* Staff Selection Grid */}
-                {cashDeductTarget === 'STAFF' ? (
+                {/* Channel Details Banner */}
+                {isPrevManager || cashDeductTarget === 'PREV_MANAGER' ? (
+                  <div className="p-3 rounded-xl bg-amber-950/40 border border-amber-500/40 text-xs text-amber-200 flex items-start space-x-2.5">
+                    <span className="text-base leading-none">ℹ️</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-bold text-amber-300">
+                        Prev Manager মোড সক্রিয় (No Cash Deduction)
+                      </p>
+                      <p className="text-[11px] text-amber-200/80 mt-0.5 leading-relaxed">
+                        বিল মেম্বারের একাউন্ট ও স্টেটমেন্টে যোগ হবে (Due বৃদ্ধি পাবে), কিন্তু বর্তমান ম্যানেজার বা স্টাফ ক্যাশ অ্যাকাউন্ট থেকে কোনো টাকা কাটা হবে না।
+                      </p>
+                    </div>
+                  </div>
+                ) : cashDeductTarget === 'STAFF' ? (
                   <div className="space-y-2 pt-1">
                     <div className="flex items-center justify-between">
                       <label className="block text-[11px] font-black uppercase tracking-wider text-slate-300">
@@ -2159,15 +2643,21 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
               {!isUnitFund && (
                 <div className="flex items-center justify-between text-xs font-bold text-slate-400">
                   <span>Category:</span>
-                  <span className={`font-bold truncate max-w-[200px] ${purpose ? 'text-indigo-300' : 'text-slate-500 italic'}`}>
-                    {purpose || 'Not Selected'}
+                  <span className={`font-bold truncate max-w-[200px] ${(isMultiCatMode ? activeSingleMemberCats.length > 0 : purpose) ? 'text-indigo-300' : 'text-slate-500 italic'}`}>
+                    {isMultiCatMode ? (activeSingleMemberCats.join(', ') || 'Not Selected') : (purpose || 'Not Selected')}
                   </span>
                 </div>
               )}
               <div className="flex items-center justify-between text-xs font-bold text-slate-400">
                 <span>Payment Channel:</span>
-                <span className="font-mono text-emerald-400 font-bold">
-                  Cash ({cashDeductTarget === 'STAFF' ? selectedStaffName : 'Manager Cash'})
+                <span className={`font-mono font-bold ${
+                  !isUnitFund && (isPrevManager || cashDeductTarget === 'PREV_MANAGER')
+                    ? 'text-amber-400'
+                    : 'text-emerald-400'
+                }`}>
+                  {!isUnitFund && (isPrevManager || cashDeductTarget === 'PREV_MANAGER')
+                    ? 'Cash (Prev Manager) • No Account Deduction'
+                    : `Cash (${cashDeductTarget === 'STAFF' ? selectedStaffName : 'Manager Cash'})`}
                 </span>
               </div>
               <div className="border-t border-slate-800 pt-2.5 flex items-center justify-between text-sm font-black text-white">
@@ -2181,10 +2671,10 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
             {/* Action Submit Button */}
             <button
               type="button"
-              disabled={isSubmitting || selectedCount === 0 || !isAllMemberAmountsValid || (!isUnitFund && !purpose.trim())}
+              disabled={isSubmitting || selectedCount === 0 || !isAllMemberAmountsValid || (!isUnitFund && (isMultiCatMode ? activeSingleMemberCats.length === 0 : !purpose.trim()))}
               onClick={handleBatchAddBill}
               className={`w-full py-4 rounded-2xl text-xs font-black uppercase tracking-wider flex items-center justify-center space-x-2 transition-all cursor-pointer shadow-xl active:scale-98 ${
-                selectedCount > 0 && isAllMemberAmountsValid && (isUnitFund || purpose.trim())
+                selectedCount > 0 && isAllMemberAmountsValid && (isUnitFund || (isMultiCatMode ? activeSingleMemberCats.length > 0 : purpose.trim()))
                   ? 'bg-gradient-to-r from-emerald-600 via-indigo-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-950/50'
                   : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-800 shadow-none'
               }`}

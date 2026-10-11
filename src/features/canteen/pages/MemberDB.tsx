@@ -124,6 +124,7 @@ import {
   setCanteenMenuCache,
   normalizeCatalogKey
 } from '../utils/canteenMenuData';
+import { getCanteenMenuItemOrder, sortCanteenMenuItems } from '../utils/menuOrdering';
 import { playCelebrationSound } from '../utils/audioFeedback';
 import { FundBatchBillPage } from './FundBatchBillPage';
 import { FundHistoryModal } from '../components/FundHistoryModal';
@@ -1447,16 +1448,14 @@ export const MemberDB: React.FC<MemberDBProps> = ({
       const isPaidSale = (tx.status === 'PAID' || tx.paymentStatus === 'PAID' || String(tx.gateway || tx.paymentMethod || '').toUpperCase() === 'CASH');
       if (isPaidSale) return;
 
-      const isInit = tx.type === 'INITIAL_BILL' || 
-        tx.type === 'AMOUNT_CHANGE' ||
+      // Only true amount change corrections should replace prior values for the same group;
+      // regular batch bills and distinct initial bills must always be included in full.
+      const isAmountChangeCorrection = tx.type === 'AMOUNT_CHANGE' ||
         tx.isAmountChange ||
-        String(tx.id || '').startsWith('tx-init-') || 
-        String(tx.id || '').startsWith('init-') || 
-        String(tx.items || '').includes('ক্যান্টিন বিল') || 
-        String(tx.items || '').includes('বকেয়া বিল') ||
+        String(tx.id || '').startsWith('tx-init-change-') ||
         String(tx.items || '').includes('Changed amount from');
 
-      if (!isInit) {
+      if (!isAmountChangeCorrection) {
         if (tx.amount !== undefined && tx.amount !== null && !isNaN(Number(tx.amount)) && Number(tx.amount) > 0) {
           salesTotal += Number(tx.amount);
         } else if (Array.isArray(tx.soldItems) && tx.soldItems.length > 0) {
@@ -1824,7 +1823,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
         try {
           const deletedIds = getDeletedTxIds();
           const raw = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-          const clean = raw.filter((t: any) => t && !deletedIds.has(String(t.id)) && !t.isReverted && t.status !== 'REVERTED');
+          const clean = raw.filter((t: any) => t && !deletedIds.has(String(t.id).trim()) && !deletedIds.has(String(Number(t.id))) && !t.isReverted && t.status !== 'REVERTED');
           setAllTxs(clean);
 
           // Real-time update for currently active Statement Modal
@@ -1848,27 +1847,50 @@ export const MemberDB: React.FC<MemberDBProps> = ({
 
     const handleTxDeleted = (e: any) => {
       try {
-        const deletedId = String(e?.detail?.id || '');
+        const deletedId = String(e?.detail?.id || '').trim();
         if (!deletedId) return;
         const deletedIds = getDeletedTxIds();
         deletedIds.add(deletedId);
+        const delNum = Number(deletedId);
+        if (!isNaN(delNum)) deletedIds.add(String(delNum));
+        recordDeletedTxId(deletedId);
 
-        setAllTxs(prev => prev.filter(t => String(t.id) !== deletedId));
+        const filterFn = (t: any) => String(t?.id || '').trim() !== deletedId && (isNaN(delNum) || Number(t?.id) !== delNum);
+
+        setAllTxs(prev => prev.filter(filterFn));
+
         if (statementMemberRef.current) {
-          setStatementTx(prev => prev.filter(t => String(t.id) !== deletedId));
-          const target = e?.detail?.member;
-          if (target && (statementMemberRef.current.airman_id === target.airman_id || String(statementMemberRef.current['BD No'] || '').trim() === String(target['BD No'] || '').trim())) {
-            const updatedDue = e.detail.newDue;
-            setStatementMember((prev: any) => prev ? { ...prev, Due: updatedDue, due: updatedDue, baki: updatedDue } : null);
-          }
+          setStatementTx(prev => {
+            const next = prev.filter(filterFn);
+            const target = e?.detail?.member;
+            const currentMem = statementMemberRef.current;
+            const isMatch = target ? (
+              (target.airman_id && currentMem.airman_id === target.airman_id) ||
+              (target['BD No'] && String(currentMem['BD No'] || '').replace(/\D/g, '') === String(target['BD No'] || '').replace(/\D/g, ''))
+            ) : true;
+            if (isMatch) {
+              const liveDue = e.detail?.newDue !== undefined ? e.detail.newDue : getMemberTotalDue(currentMem, statementCategoryRef.current, next);
+              setStatementMember((m: any) => m ? { ...m, Due: liveDue, due: liveDue, baki: liveDue } : null);
+            }
+            return next;
+          });
         }
+
         if (profileMemberRef.current) {
-          setProfileTx(prev => prev.filter(t => String(t.id) !== deletedId));
-          const target = e?.detail?.member;
-          if (target && (profileMemberRef.current.airman_id === target.airman_id || String(profileMemberRef.current['BD No'] || '').trim() === String(target['BD No'] || '').trim())) {
-            const updatedDue = e.detail.newDue;
-            setProfileMember((prev: any) => prev ? { ...prev, Due: updatedDue, due: updatedDue, baki: updatedDue } : null);
-          }
+          setProfileTx(prev => {
+            const next = prev.filter(filterFn);
+            const target = e?.detail?.member;
+            const currentMem = profileMemberRef.current;
+            const isMatch = target ? (
+              (target.airman_id && currentMem.airman_id === target.airman_id) ||
+              (target['BD No'] && String(currentMem['BD No'] || '').replace(/\D/g, '') === String(target['BD No'] || '').replace(/\D/g, ''))
+            ) : true;
+            if (isMatch) {
+              const liveDue = e.detail?.newDue !== undefined ? e.detail.newDue : getMemberTotalDue(currentMem, 'ALL', next);
+              setProfileMember((m: any) => m ? { ...m, Due: liveDue, due: liveDue, baki: liveDue } : null);
+            }
+            return next;
+          });
         }
       } catch {}
     };
@@ -2538,13 +2560,10 @@ export const MemberDB: React.FC<MemberDBProps> = ({
     const rawLocal = (() => {
       try { return JSON.parse(localStorage.getItem('canteen_txs') || '[]'); } catch { return []; }
     })();
-    const cleanLocal = rawLocal.filter((t: any) => t && t.id && !deletedIds.has(String(t.id)) && !t.isReverted && t.status !== 'REVERTED');
-    const cleanAllTxs = (allTxs || []).filter((t: any) => t && t.id && !deletedIds.has(String(t.id)) && !t.isReverted && t.status !== 'REVERTED');
+    const cleanLocal = rawLocal.filter((t: any) => t && t.id && !deletedIds.has(String(t.id).trim()) && !deletedIds.has(String(Number(t.id))) && !t.isReverted && t.status !== 'REVERTED');
 
-    const txMap = new Map<string, any>();
-    cleanAllTxs.forEach((t: any) => { txMap.set(String(t.id), t); });
-    cleanLocal.forEach((t: any) => { txMap.set(String(t.id), t); });
-    const mergedTxs = deduplicateCanteenTransactions(Array.from(txMap.values()));
+    setAllTxs(cleanLocal);
+    const mergedTxs = deduplicateCanteenTransactions(cleanLocal);
     const memberTxs = filterMemberTxs(member, mergedTxs);
 
     const effDue = getMemberTotalDue(member, 'ALL', mergedTxs);
@@ -2574,13 +2593,10 @@ export const MemberDB: React.FC<MemberDBProps> = ({
       const rawLocal = (() => {
         try { return JSON.parse(localStorage.getItem('canteen_txs') || '[]'); } catch { return []; }
       })();
-      const cleanLocal = rawLocal.filter((t: any) => t && t.id && !deletedIds.has(String(t.id)) && !t.isReverted && t.status !== 'REVERTED');
-      const cleanAllTxs = (allTxs || []).filter((t: any) => t && t.id && !deletedIds.has(String(t.id)) && !t.isReverted && t.status !== 'REVERTED');
+      const cleanLocal = rawLocal.filter((t: any) => t && t.id && !deletedIds.has(String(t.id).trim()) && !deletedIds.has(String(Number(t.id))) && !t.isReverted && t.status !== 'REVERTED');
 
-      const txMap = new Map<string, any>();
-      cleanAllTxs.forEach((t: any) => { txMap.set(String(t.id), t); });
-      cleanLocal.forEach((t: any) => { txMap.set(String(t.id), t); });
-      const mergedTxs = deduplicateCanteenTransactions(Array.from(txMap.values()));
+      setAllTxs(cleanLocal);
+      const mergedTxs = deduplicateCanteenTransactions(cleanLocal);
       const memberTxs = filterMemberTxs(member, mergedTxs);
       setProfileTx(memberTxs);
     } catch (e) {
@@ -2645,23 +2661,19 @@ export const MemberDB: React.FC<MemberDBProps> = ({
   const parseStatementAggregatedItems = (txs: any[]): StatementItemRow[] => {
     const itemMap = new Map<string, { itemName: string; qty: number; total: number; rates: number[] }>();
 
-    // Deduplicate initial bills per month and category, keeping only the latest corrected amount
+    // Deduplicate only true initial bill amount corrections per month and category
     const initialTxsByGroup = new Map<string, any>();
     const regularTxs: any[] = [];
 
     (txs || []).forEach((tx) => {
       if (!tx || tx.type === 'BILL PAYMENT' || tx.type === 'REVERTED' || tx.isReverted || tx.status === 'REVERTED' || String(tx.items || '').includes('[বাতিল')) return;
 
-      const isInit = tx.type === 'INITIAL_BILL' || 
-        tx.type === 'AMOUNT_CHANGE' ||
+      const isAmountChangeCorrection = tx.type === 'AMOUNT_CHANGE' ||
         tx.isAmountChange ||
-        String(tx.id || '').startsWith('tx-init-') || 
-        String(tx.id || '').startsWith('init-') || 
-        String(tx.items || '').includes('ক্যান্টিন বিল') || 
-        String(tx.items || '').includes('বকেয়া বিল') ||
+        String(tx.id || '').startsWith('tx-init-change-') ||
         String(tx.items || '').includes('Changed amount from');
 
-      if (isInit) {
+      if (isAmountChangeCorrection) {
         const mKey = tx.monthKey || getTxMonthKey(tx.date) || 'DEFAULT';
         const cKey = getTxCategory(tx);
         const groupKey = `${mKey}__${cKey}`;
@@ -4145,23 +4157,19 @@ export const MemberDB: React.FC<MemberDBProps> = ({
 
   // Date-wise rows calculation for Statement modal ('Dt wise')
   const statementDateWiseRows = useMemo(() => {
-    // 1. Group/deduplicate initial bills per month & category (identical to parseStatementAggregatedItems)
+    // 1. Group/deduplicate only true initial bill amount corrections per month & category
     const initialTxsByGroup = new Map<string, any>();
     const regularTxs: any[] = [];
 
     (filteredStatementTxs || []).forEach((tx) => {
       if (!tx || tx.type === 'BILL PAYMENT' || tx.type === 'REVERTED' || tx.isReverted || tx.status === 'REVERTED' || String(tx.items || '').includes('[বাতিল')) return;
 
-      const isInit = tx.type === 'INITIAL_BILL' || 
-        tx.type === 'AMOUNT_CHANGE' ||
+      const isAmountChangeCorrection = tx.type === 'AMOUNT_CHANGE' ||
         tx.isAmountChange ||
-        String(tx.id || '').startsWith('tx-init-') || 
-        String(tx.id || '').startsWith('init-') || 
-        String(tx.items || '').includes('ক্যান্টিন বিল') || 
-        String(tx.items || '').includes('বকেয়া বিল') ||
+        String(tx.id || '').startsWith('tx-init-change-') ||
         String(tx.items || '').includes('Changed amount from');
 
-      if (isInit) {
+      if (isAmountChangeCorrection) {
         const mKey = tx.monthKey || getTxMonthKey(tx.date) || 'DEFAULT';
         const cKey = getTxCategory(tx);
         const groupKey = `${mKey}__${cKey}`;

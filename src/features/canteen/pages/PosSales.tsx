@@ -635,8 +635,15 @@ export const PosSales: React.FC = () => {
       (JSON.parse(localStorage.getItem('canteen_txs') || '[]')).find((tx: any) => String(tx.id) === txIdStr || Number(tx.id) === Number(txId));
     if (!txToRemove) return;
 
-    // 1. Tombstone in local & cloud so it NEVER returns
+    // 1. Tombstone in local & cloud so it NEVER returns on any device or refresh
+    recordDeletedTxId(txId);
+    recordDeletedTxId(txIdStr);
     await recordDeletedTxIdAsync(txIdStr);
+    if (txToRemove.id) {
+      recordDeletedTxId(txToRemove.id);
+      recordDeletedTxId(String(txToRemove.id).trim());
+      await recordDeletedTxIdAsync(txToRemove.id);
+    }
 
     // 0ms instant feedback: play sound and display success card in modal immediately
     playTrashPopSound();
@@ -705,8 +712,16 @@ export const PosSales: React.FC = () => {
     }
 
     const currentHistory = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-    const updatedHistory = currentHistory.filter((tx: any) => String(tx.id) !== txIdStr && Number(tx.id) !== Number(txId));
-    setSalesHistory(prev => prev.filter(tx => String(tx.id) !== txIdStr && Number(tx.id) !== Number(txId)));
+    const updatedHistory = currentHistory.filter((tx: any) => 
+      String(tx.id).trim() !== txIdStr && 
+      Number(tx.id) !== Number(txId) &&
+      (txToRemove.id ? (String(tx.id).trim() !== String(txToRemove.id).trim() && Number(tx.id) !== Number(txToRemove.id)) : true)
+    );
+    setSalesHistory(prev => prev.filter((tx: any) => 
+      String(tx.id).trim() !== txIdStr && 
+      Number(tx.id) !== Number(txId) &&
+      (txToRemove.id ? (String(tx.id).trim() !== String(txToRemove.id).trim() && Number(tx.id) !== Number(txToRemove.id)) : true)
+    ));
     localStorage.setItem('canteen_txs', JSON.stringify(updatedHistory));
     clearDirtyCanteenKey('canteen_txs');
     try {

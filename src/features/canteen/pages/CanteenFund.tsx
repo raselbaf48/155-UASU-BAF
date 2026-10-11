@@ -79,6 +79,15 @@ export const CanteenFund: React.FC = () => {
         // Collect all active others and unit fund transactions
         const activeOtherTxs = txs.filter((t: any) => {
           if (!t) return false;
+          if (
+            t.isPrevManager || 
+            t.cashDeductTarget === 'PREV_MANAGER' || 
+            String(t.paymentMethod || '').toLowerCase().includes('prev manager') || 
+            String(t.source || '').toLowerCase().includes('prev manager') ||
+            String(t.method || '').toLowerCase().includes('prev manager')
+          ) {
+            return false; // Skip Prev Manager transactions so they NEVER deduct from Manager/Staff capital!
+          }
           const bType = String(t.billType || t.category || '').toUpperCase();
           const tId = String(t.id || '').toLowerCase();
           const tItems = String(t.items || '').toLowerCase();

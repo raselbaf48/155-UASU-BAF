@@ -27,6 +27,9 @@ import { getMenuItemBanglaName } from './menuBanglaNames';
 import { getLocalSeniorityMap } from './memberSeniority';
 import { sortCanteenMembersByOfficeSeniority, normalizeCanteenMembersSeniority, deduplicateCanteenMembers } from './canteenSeniority';
 import { getMemberBanglaRank } from './memberBanglaNames';
+import { sortCanteenMenuItems, getCanteenMenuItemOrder, OFFICIAL_CANTEEN_MENU_ORDER } from './menuOrdering';
+
+export { sortCanteenMenuItems, getCanteenMenuItemOrder, OFFICIAL_CANTEEN_MENU_ORDER };
 
 export const isOneTimeBoxItem = (it: any): boolean => {
   if (!it) return false;
@@ -65,7 +68,7 @@ export const PARCEL_BOX_ITEM: CanteenMenuItem = {
   cost: 4
 };
 
-export const DEFAULT_CANTEEN_MENU_ITEMS: CanteenMenuItem[] = (defaultMenuItemsData as any[])
+export const DEFAULT_CANTEEN_MENU_ITEMS: CanteenMenuItem[] = sortCanteenMenuItems((defaultMenuItemsData as any[])
   .filter((it) => !isOneTimeBoxItem(it))
   .map((it) => ({
   id: it.id,
@@ -83,7 +86,7 @@ export const DEFAULT_CANTEEN_MENU_ITEMS: CanteenMenuItem[] = (defaultMenuItemsDa
   img: it.DP || it.img || it.image || '',
   image: it.DP || it.img || it.image || '',
   created_at: it.created_at || new Date().toISOString()
-}));
+})));
 
 // In-Memory Caches for Instant (0ms) Access
 let inMemoryMenuCache: CanteenMenuItem[] | null = null;
@@ -200,7 +203,7 @@ export function deduplicateCanteenMenuItems(items: CanteenMenuItem[]): CanteenMe
     }
   }
 
-  return Array.from(seen.values());
+  return sortCanteenMenuItems(Array.from(seen.values()));
 }
 
 /**
