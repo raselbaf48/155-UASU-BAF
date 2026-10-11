@@ -388,12 +388,34 @@ export function recordDeletedTxId(txId: string | number) {
   if (typeof window === 'undefined' || !txId) return;
   try {
     const set = getDeletedTxIds();
-    set.add(String(txId));
+    const str = String(txId);
+    set.add(str);
+    const num = Number(txId);
+    if (!isNaN(num)) set.add(String(num));
     const arr = Array.from(set);
     localStorage.setItem('canteen_deleted_tx_ids', JSON.stringify(arr));
     // Persist tombstones to cloud immediately so deleted items NEVER return on any device/refresh
     pushKeyToCloud('canteen_deleted_tx_ids', arr).catch(() => {});
   } catch {}
+}
+
+export async function recordDeletedTxIdAsync(txId: string | number): Promise<void> {
+  if (typeof window === 'undefined' || !txId) return;
+  try {
+    const set = getDeletedTxIds();
+    const str = String(txId);
+    set.add(str);
+    const num = Number(txId);
+    if (!isNaN(num)) set.add(String(num));
+    const arr = Array.from(set);
+    localStorage.setItem('canteen_deleted_tx_ids', JSON.stringify(arr));
+    await pushKeyToCloud('canteen_deleted_tx_ids', arr);
+  } catch {}
+}
+
+export function clearDirtyCanteenKey(key: string) {
+  dirtyCanteenKeys.delete(key);
+  dirtyCanteenValues.delete(key);
 }
 
 /**

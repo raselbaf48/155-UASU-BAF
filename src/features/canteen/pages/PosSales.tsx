@@ -22,9 +22,10 @@ import {
   RAW_ITEMS_STORAGE_KEY,
   INITIAL_RAW_ITEMS,
   isReadymadeItem,
-  InventoryItemType
+  InventoryItemType,
+  restoreRawStockForSaleCancellation
 } from '../utils/recipeManager';
-import { pushKeyToCloud } from '../utils/canteenCloudSync';
+import { pushKeyToCloud, recordDeletedTxId, getDeletedTxIds, recordDeletedTxIdAsync, clearDirtyCanteenKey } from '../utils/canteenCloudSync';
 import { sortCanteenMembersByOfficeSeniority, deduplicateCanteenMembers } from '../utils/canteenSeniority';
 import { playSuccessChime, playTrashPopSound } from '../utils/audioFeedback';
 import { ImportPosSalesModal } from '../components/ImportPosSalesModal';
@@ -174,7 +175,16 @@ export const PosSales: React.FC = () => {
   const [deleteSuccessData, setDeleteSuccessData] = useState<{ desc: string; amount: number } | null>(null);
   
   // History Record Detail/Edit State
+  interface EditTxItem {
+    id: string;
+    name: string;
+    qty: number;
+    unitPrice: number;
+    menuItemId?: string;
+  }
   const [editingTx, setEditingTx] = useState<any | null>(null);
+  const [highlightedItemName, setHighlightedItemName] = useState<string | null>(null);
+  const [editItemsList, setEditItemsList] = useState<EditTxItem[]>([]);
   const [editAmount, setEditAmount] = useState<string>('');
   const [editDiscount, setEditDiscount] = useState<string>('0');
   const [editBaseAmount, setEditBaseAmount] = useState<number>(0);
@@ -262,7 +272,8 @@ export const PosSales: React.FC = () => {
         fetchCatalog();
       }
       const history = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-      setSalesHistory(history.filter((tx: any) => isSaleTransaction(tx)));
+      const deletedIds = getDeletedTxIds();
+      setSalesHistory(history.filter((tx: any) => isSaleTransaction(tx) && !deletedIds.has(String(tx?.id))));
     };
 
     const handleSyncStock = () => {
@@ -461,7 +472,8 @@ export const PosSales: React.FC = () => {
 
   const loadHistory = () => {
     const history = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-    const onlySales = history.filter((tx: any) => isSaleTransaction(tx));
+    const deletedIds = getDeletedTxIds();
+    const onlySales = history.filter((tx: any) => isSaleTransaction(tx) && !deletedIds.has(String(tx?.id)));
     setSalesHistory(onlySales);
     setHistoryDateFilter(saleDate || getTodayYMD());
     setShowHistoryModal(true);
@@ -618,8 +630,13 @@ export const PosSales: React.FC = () => {
   }, [filteredSalesHistory, members, catalog]);
 
   const removeHistoryItem = async (txId: string) => {
-    const txToRemove = salesHistory.find(tx => tx.id === txId);
+    const txIdStr = String(txId);
+    const txToRemove = salesHistory.find(tx => String(tx.id) === txIdStr || Number(tx.id) === Number(txId)) ||
+      (JSON.parse(localStorage.getItem('canteen_txs') || '[]')).find((tx: any) => String(tx.id) === txIdStr || Number(tx.id) === Number(txId));
     if (!txToRemove) return;
+
+    // 1. Tombstone in local & cloud so it NEVER returns
+    await recordDeletedTxIdAsync(txIdStr);
 
     // 0ms instant feedback: play sound and display success card in modal immediately
     playTrashPopSound();
@@ -631,32 +648,82 @@ export const PosSales: React.FC = () => {
     setTimeout(() => {
       setDeleteSuccessData(null);
       setTxDeleteConfirmId(null);
+      setEditingTx(null);
     }, 2200);
 
     // Reverse Due ONLY if transaction was DUE
     const isPaid = txToRemove.status === 'PAID' || txToRemove.paymentStatus === 'PAID' || String(txToRemove.gateway || txToRemove.paymentMethod || '').toUpperCase() === 'CASH';
+    let targetMem: any = null;
+    let newDue = 0;
+    let updatedMembers = members;
+
     if (!isPaid) {
-      const m = members.find(m => m.airman_id === txToRemove.airman_id);
-      if (m) {
-        const currentDue = Number(m.Due ?? m.due ?? m.baki ?? 0);
-        const newDue = Math.max(0, currentDue - Number(txToRemove.amount || 0));
-        await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', txToRemove.airman_id);
-        const updated = members.map(member => member.airman_id === txToRemove.airman_id ? {...member, Due: newDue, baki: newDue} : member);
-        setMembers(updated);
-        setCanteenMembersCache(updated);
+      targetMem = members.find(m => 
+        (txToRemove.airman_id && m.airman_id === txToRemove.airman_id) || 
+        (txToRemove.bdNo && String(m['BD No'] || '').trim() === String(txToRemove.bdNo).trim())
+      );
+      if (targetMem) {
+        const currentDue = Number(targetMem.Due ?? targetMem.due ?? targetMem.baki ?? 0);
+        newDue = Math.max(0, currentDue - Number(txToRemove.amount || 0));
+        
+        try {
+          if (targetMem.airman_id) {
+            await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', targetMem.airman_id);
+          }
+          if (targetMem['BD No']) {
+            await supabase.from('Canteen_Member').update({ Due: newDue }).eq('BD No', String(targetMem['BD No']).trim());
+          }
+        } catch (e) {
+          console.warn('Supabase member due update on remove note:', e);
+        }
+
+        updatedMembers = members.map(m => 
+          (m.airman_id === targetMem.airman_id || String(m['BD No'] || '').trim() === String(targetMem['BD No'] || '').trim())
+            ? { ...m, Due: newDue, baki: newDue }
+            : m
+        );
+        setMembers(updatedMembers);
+        setCanteenMembersCache(updatedMembers);
+      }
+    }
+
+    // Restore raw inventory stock if this transaction had sold items
+    if (txToRemove.soldItems && Array.isArray(txToRemove.soldItems) && txToRemove.soldItems.length > 0) {
+      try {
+        restoreRawStockForSaleCancellation(txToRemove.soldItems.map((si: any) => ({
+          menuItemId: si.menuItemId || si.id,
+          menuItemName: si.menuItemName || si.name || '',
+          qty: Number(si.qty || si.quantity || 1)
+        })), {
+          id: txToRemove.id,
+          memberName: targetMem ? `${targetMem['Rank'] || ''} ${targetMem['Surname'] || ''}` : '',
+          date: txToRemove.date
+        });
+      } catch (e) {
+        console.warn('Raw stock restore note:', e);
       }
     }
 
     const currentHistory = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-    const updatedHistory = currentHistory.filter((tx: any) => String(tx.id) !== String(txId));
-    setSalesHistory(prev => prev.filter(tx => String(tx.id) !== String(txId)));
+    const updatedHistory = currentHistory.filter((tx: any) => String(tx.id) !== txIdStr && Number(tx.id) !== Number(txId));
+    setSalesHistory(prev => prev.filter(tx => String(tx.id) !== txIdStr && Number(tx.id) !== Number(txId)));
     localStorage.setItem('canteen_txs', JSON.stringify(updatedHistory));
+    clearDirtyCanteenKey('canteen_txs');
     try {
       await pushKeyToCloud('canteen_txs', updatedHistory);
     } catch (e) {
       console.warn('Cloud sync error for canteen_txs:', e);
     }
 
+    window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: updatedMembers }));
+    window.dispatchEvent(new CustomEvent('canteen_tx_deleted', { 
+      detail: { 
+        id: txIdStr, 
+        member: targetMem, 
+        newDue,
+        amount: Number(txToRemove.amount || 0)
+      } 
+    }));
     window.dispatchEvent(new Event('canteen_txs_updated'));
     window.dispatchEvent(new Event('canteen_state_updated'));
     window.dispatchEvent(new Event('canteen_fund_updated'));
@@ -664,23 +731,132 @@ export const PosSales: React.FC = () => {
     window.dispatchEvent(new Event('canteen_inventory_updated'));
     window.dispatchEvent(new Event('storage'));
 
-    setToastMessage(isPaid ? '✅ Cash sale record removed from history!' : '✅ Sale record removed and member due adjusted!');
+    setToastMessage(isPaid ? '✅ ক্যাশ বিক্রয় রেকর্ড ইতিহাস থেকে মুছে ফেলা হয়েছে!' : '✅ বিক্রয় রেকর্ড মোছা হয়েছে এবং সদস্যের বকেয়া সমন্বয় করা হয়েছে!');
     setTimeout(() => setToastMessage(''), 4000);
   };
 
-  const openEditTxModal = (tx: any) => {
-    setEditingTx(tx);
-    let base = Number(tx.originalAmount || 0);
-    if (tx.soldItems && Array.isArray(tx.soldItems) && tx.soldItems.length > 0) {
-      base = tx.soldItems.reduce((s: number, it: any) => {
-        const resolved = resolveLiveItem(it);
-        return s + resolved.itemTotal;
-      }, 0);
-    } else if (!base) {
-      const existingAmount = Number(tx.amount || 0);
-      const existingDiscount = Number(tx.discount || 0);
-      base = existingAmount + existingDiscount;
+  const recalculateEditTotals = (items: EditTxItem[], discStr: string) => {
+    const base = items.reduce((sum, it) => sum + (Number(it.unitPrice || 0) * Math.max(1, Number(it.qty || 1))), 0);
+    setEditBaseAmount(base);
+    const disc = Math.min(base, parseFloat(discStr) || 0);
+    setEditAmount(String(Math.max(0, base - disc)));
+  };
+
+  const updateEditItemQty = (itemId: string, newQty: number) => {
+    const validQty = Math.max(1, newQty);
+    setEditItemsList(prev => {
+      const updated = prev.map(it => it.id === itemId ? { ...it, qty: validQty } : it);
+      recalculateEditTotals(updated, editDiscount);
+      return updated;
+    });
+  };
+
+  const changeEditItemCatalog = (itemId: string, menuItemId: string) => {
+    const foundMenu = catalog.find(c => String(c.id) === String(menuItemId));
+    if (!foundMenu) return;
+    const name = getMenuItemBanglaName(foundMenu) || foundMenu.name_bn || foundMenu.name;
+    const unitPrice = Number(foundMenu.price || 0);
+    setEditItemsList(prev => {
+      const updated = prev.map(it => it.id === itemId ? { ...it, name, unitPrice, menuItemId } : it);
+      recalculateEditTotals(updated, editDiscount);
+      return updated;
+    });
+  };
+
+  const removeEditItemFromList = (itemId: string) => {
+    if (editItemsList.length <= 1) {
+      alert('অর্ডারে কমপক্ষে ১টি আইটেম থাকতে হবে। সম্পূর্ণ রেকর্ড মুছতে নিচের Remove বাটনে ক্লিক করুন।');
+      return;
     }
+    setEditItemsList(prev => {
+      const updated = prev.filter(it => it.id !== itemId);
+      recalculateEditTotals(updated, editDiscount);
+      return updated;
+    });
+  };
+
+  const addEditItemToList = () => {
+    const defaultCatalogItem = catalog[0];
+    const name = defaultCatalogItem ? (getMenuItemBanglaName(defaultCatalogItem) || defaultCatalogItem.name_bn || defaultCatalogItem.name) : 'ডিম পোচ';
+    const unitPrice = defaultCatalogItem ? Number(defaultCatalogItem.price || 0) : 15;
+    const newItem: EditTxItem = {
+      id: `item_add_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      name,
+      qty: 1,
+      unitPrice,
+      menuItemId: defaultCatalogItem?.id || ''
+    };
+    setEditItemsList(prev => {
+      const updated = [...prev, newItem];
+      recalculateEditTotals(updated, editDiscount);
+      return updated;
+    });
+  };
+
+  const openEditTxModal = (tx: any, clickedItemName?: string) => {
+    setEditingTx(tx);
+    setHighlightedItemName(clickedItemName || null);
+
+    let parsedItems: EditTxItem[] = [];
+
+    if (tx.soldItems && Array.isArray(tx.soldItems) && tx.soldItems.length > 0) {
+      parsedItems = tx.soldItems.map((si: any, idx: number) => {
+        const resolved = resolveLiveItem(si);
+        return {
+          id: `item_${idx}_${Date.now()}`,
+          name: resolved.name,
+          qty: resolved.qty > 0 ? resolved.qty : 1,
+          unitPrice: resolved.unitPrice,
+          menuItemId: si.menuItemId || si.id || ''
+        };
+      });
+    } else if (tx.items) {
+      const parts = String(tx.items).split(/[,+;|\n]+/).map(s => s.trim()).filter(Boolean);
+      parsedItems = parts.map((part, idx) => {
+        let q = 1;
+        let raw = part;
+        const parenMatch = part.match(/^(.+?)\s*\(\s*(\d+)\s*\)$/);
+        if (parenMatch) {
+          raw = parenMatch[1].trim();
+          q = parseInt(parenMatch[2], 10) || 1;
+        } else {
+          const xMatch = part.match(/^(.+?)\s*[xX]\s*(\d+)$/);
+          if (xMatch) {
+            raw = xMatch[1].trim();
+            q = parseInt(xMatch[2], 10) || 1;
+          }
+        }
+        const resolved = resolveLiveItem({ name: raw, qty: q });
+        let unitPrice = resolved.unitPrice;
+        if (unitPrice === 0 && tx.amount) {
+          unitPrice = Math.round(Number(tx.amount || 0) / Math.max(1, parts.length * q));
+        }
+        return {
+          id: `item_${idx}_${Date.now()}`,
+          name: resolved.name || raw,
+          qty: q,
+          unitPrice: unitPrice,
+          menuItemId: ''
+        };
+      });
+    }
+
+    if (parsedItems.length === 0) {
+      const rawName = tx.items || 'ক্যান্টিন খাবার';
+      const resolved = resolveLiveItem({ name: rawName, qty: 1 });
+      const amt = Number(tx.amount || 0);
+      parsedItems = [{
+        id: `item_0_${Date.now()}`,
+        name: resolved.name || rawName,
+        qty: 1,
+        unitPrice: resolved.unitPrice || amt,
+        menuItemId: ''
+      }];
+    }
+
+    setEditItemsList(parsedItems);
+
+    const base = parsedItems.reduce((sum, it) => sum + (Number(it.unitPrice || 0) * Math.max(1, Number(it.qty || 1))), 0);
     const existingDiscount = Number(tx.discount || 0);
     const existingAmount = Math.max(0, base - existingDiscount);
     setEditBaseAmount(base);
@@ -712,6 +888,14 @@ export const PosSales: React.FC = () => {
     const newDiscount = Math.max(0, parseFloat(editDiscount) || 0);
     const savedDateFormatted = formatCanteenDate(editDate) || editDate;
 
+    const updatedSoldItems = editItemsList.map(it => ({
+      menuItemId: it.menuItemId || '',
+      menuItemName: it.name,
+      price: it.unitPrice,
+      qty: it.qty
+    }));
+    const updatedItemsStr = editItemsList.map(it => `${it.name} (${it.qty})`).join(', ');
+
     setIsSavingEdit(true);
     try {
       const oldAmount = Number(editingTx.amount || 0);
@@ -719,10 +903,10 @@ export const PosSales: React.FC = () => {
       const newIsPaid = editPaymentStatus === 'PAID';
 
       // Update Member Due if member exists
-      if (editingTx.airman_id) {
-        const m = members.find(mem => mem.airman_id === editingTx.airman_id);
-        if (m) {
-          const currentDue = Number(m.Due ?? m.due ?? m.baki ?? 0);
+      if (editingTx.airman_id || editingTx.bdNo) {
+        const targetMem = members.find(mem => mem.airman_id === editingTx.airman_id || String(mem['BD No']).trim() === String(editingTx.bdNo || '').trim());
+        if (targetMem) {
+          const currentDue = Number(targetMem.Due ?? targetMem.due ?? targetMem.baki ?? 0);
           let newDue = currentDue;
 
           if (!oldIsPaid && newIsPaid) {
@@ -738,12 +922,21 @@ export const PosSales: React.FC = () => {
           }
 
           if (newDue !== currentDue) {
-            await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', editingTx.airman_id);
-            setMembers(prev => {
-              const updated = prev.map(mem => mem.airman_id === editingTx.airman_id ? { ...mem, Due: newDue, baki: newDue } : mem);
-              setCanteenMembersCache(updated);
-              return updated;
-            });
+            try {
+              if (targetMem.airman_id) {
+                await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', targetMem.airman_id);
+              }
+              if (targetMem['BD No']) {
+                await supabase.from('Canteen_Member').update({ Due: newDue }).eq('BD No', String(targetMem['BD No']).trim());
+              }
+            } catch (e) {
+              console.warn('Supabase member due update note:', e);
+            }
+
+            const updated = members.map(mem => (mem.airman_id === targetMem.airman_id || mem['BD No'] === targetMem['BD No']) ? { ...mem, Due: newDue, baki: newDue } : mem);
+            setMembers(updated);
+            setCanteenMembersCache(updated);
+            window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: updated }));
           }
         }
       }
@@ -754,6 +947,8 @@ export const PosSales: React.FC = () => {
         if (String(tx.id) === String(editingTx.id)) {
           return {
             ...tx,
+            items: updatedItemsStr,
+            soldItems: updatedSoldItems,
             originalAmount: editBaseAmount,
             discount: newDiscount,
             amount: newAmt,
@@ -771,6 +966,8 @@ export const PosSales: React.FC = () => {
         if (String(tx.id) === String(editingTx.id)) {
           return {
             ...tx,
+            items: updatedItemsStr,
+            soldItems: updatedSoldItems,
             originalAmount: editBaseAmount,
             discount: newDiscount,
             amount: newAmt,
@@ -2286,36 +2483,134 @@ export const PosSales: React.FC = () => {
                   )}
                 </div>
 
-                {/* Items info (Fixed / Read-only) */}
+                {/* Items & Quantity Section - Fully Editable */}
                 <div>
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-                    মেনু আইটেম (Items)
-                  </span>
-                  <div className="p-3 bg-slate-950/70 rounded-2xl border border-slate-800/80 flex flex-wrap gap-1.5">
-                    {(() => {
-                      let itemsList: Array<{ name: string; qty: number }> = [];
-                      if (editingTx.soldItems && Array.isArray(editingTx.soldItems) && editingTx.soldItems.length > 0) {
-                        itemsList = editingTx.soldItems.map((si: any) => ({
-                          name: getMenuItemBanglaName(si.menuItemName || si.name || '') || si.menuItemName || si.name || 'আইটেম',
-                          qty: Number(si.qty || si.quantity || 1)
-                        }));
-                      } else if (editingTx.items) {
-                        const parts = String(editingTx.items).split(/[,+;|\n]+/).map(s => s.trim()).filter(Boolean);
-                        itemsList = parts.map(part => {
-                          const clean = part.replace(/\s*\(\s*\d+\s*\)$/, '').replace(/\s*[xX]\s*\d+$/, '').trim();
-                          const bn = getMenuItemBanglaName(clean) || clean;
-                          return { name: bn, qty: 1 };
-                        });
-                      }
-                      return itemsList.map((it, idx) => (
-                        <span key={idx} className="px-2.5 py-1 rounded-xl bg-slate-900 border border-slate-700/80 text-emerald-300 font-bold text-xs flex items-center gap-1.5">
-                          <span>{it.name}</span>
-                          {it.qty > 1 && (
-                            <span className="text-indigo-400 font-mono text-[10px] font-black">x{it.qty}</span>
-                          )}
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <span className="text-[11px] font-bold text-slate-300 block">
+                        মেনু আইটেম ও পরিমাণ (Items & Qty)
+                      </span>
+                      {editItemsList.length > 1 ? (
+                        <span className="text-[10px] text-indigo-400 font-medium">
+                          এই অর্ডারে {editItemsList.length}টি আইটেম রয়েছে{highlightedItemName ? ` • নির্বাচিত: "${highlightedItemName}"` : ''}
                         </span>
-                      ));
-                    })()}
+                      ) : (
+                        <span className="text-[10px] text-slate-400">
+                          আইটেম বা পরিমাণ পরিবর্তন করুন
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addEditItemToList}
+                      className="px-2.5 py-1 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 rounded-xl text-[11px] font-black tracking-wide flex items-center space-x-1 cursor-pointer transition-all active:scale-95"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>+ আইটেম যোগ করুন</span>
+                    </button>
+                  </div>
+
+                  <div className="space-y-2 max-h-[240px] overflow-y-auto pr-1">
+                    {editItemsList.map((it, idx) => {
+                      const isClicked = highlightedItemName && (
+                        it.name.toLowerCase().includes(highlightedItemName.toLowerCase()) || 
+                        highlightedItemName.toLowerCase().includes(it.name.toLowerCase())
+                      );
+                      return (
+                        <div
+                          key={it.id}
+                          className={`p-2.5 rounded-2xl border transition-all ${
+                            isClicked
+                              ? 'bg-indigo-950/40 border-indigo-500/60 shadow-md shadow-indigo-950/40 ring-1 ring-indigo-500/40'
+                              : 'bg-slate-950/70 border-slate-800'
+                          }`}
+                        >
+                          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                            {/* Item Dropdown / Catalog Selection */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-[10px] font-mono text-slate-400">আইটেম #{idx + 1}</span>
+                                {isClicked && (
+                                  <span className="px-1.5 py-0.2 rounded-md bg-indigo-500/25 text-indigo-300 font-mono text-[9px] font-bold border border-indigo-500/30">
+                                    ক্লিককৃত আইটেম
+                                  </span>
+                                )}
+                              </div>
+                              <select
+                                value={it.menuItemId || ''}
+                                onChange={(e) => changeEditItemCatalog(it.id, e.target.value)}
+                                className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700/80 focus:border-indigo-500 rounded-xl text-xs font-bold text-white outline-none cursor-pointer"
+                              >
+                                {(!it.menuItemId || !catalog.some(c => String(c.id) === String(it.menuItemId))) && (
+                                  <option value={it.menuItemId || ''}>{it.name} (৳{it.unitPrice})</option>
+                                )}
+                                {catalog.map(cat => {
+                                  const bName = getMenuItemBanglaName(cat) || cat.name_bn || cat.name;
+                                  return (
+                                    <option key={cat.id} value={cat.id}>
+                                      {bName} — ৳{cat.price || 0}
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                            </div>
+
+                            {/* Qty Controls & Item Price */}
+                            <div className="flex items-center justify-between sm:justify-end gap-2.5 shrink-0 pt-1 sm:pt-0">
+                              {/* Qty Selector with Minus and Plus */}
+                              <div>
+                                <span className="text-[10px] font-mono text-slate-400 block mb-0.5 text-center">পরিমাণ</span>
+                                <div className="flex items-center border border-slate-700 bg-slate-900 rounded-xl overflow-hidden shadow-sm">
+                                  <button
+                                    type="button"
+                                    onClick={() => updateEditItemQty(it.id, Math.max(1, it.qty - 1))}
+                                    className="w-7 h-7 flex items-center justify-center text-slate-300 hover:text-white hover:bg-slate-800 active:scale-90 transition-all cursor-pointer"
+                                    title="পরিমাণ কমান"
+                                  >
+                                    <Minus className="w-3.5 h-3.5" />
+                                  </button>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    value={it.qty}
+                                    onChange={(e) => updateEditItemQty(it.id, parseInt(e.target.value) || 1)}
+                                    className="w-9 h-7 text-center font-mono font-black text-xs text-white bg-transparent outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => updateEditItemQty(it.id, it.qty + 1)}
+                                    className="w-7 h-7 flex items-center justify-center text-slate-300 hover:text-white hover:bg-slate-800 active:scale-90 transition-all cursor-pointer"
+                                    title="পরিমাণ বাড়ান"
+                                  >
+                                    <Plus className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Item Total */}
+                              <div className="text-right min-w-[50px]">
+                                <span className="text-[10px] font-mono text-slate-400 block mb-0.5">মোট</span>
+                                <span className="text-xs font-mono font-black text-emerald-400 block py-0.5">
+                                  ৳{(it.unitPrice * it.qty).toLocaleString()}
+                                </span>
+                              </div>
+
+                              {/* Remove Individual Item from Order */}
+                              <div className="pt-3">
+                                <button
+                                  type="button"
+                                  onClick={() => removeEditItemFromList(it.id)}
+                                  className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
+                                  title="এই আইটেমটি অর্ডার থেকে মুছুন"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -2557,7 +2852,7 @@ export const PosSales: React.FC = () => {
                       {expandedSalesHistoryRows.map((row, idx) => (
                         <tr 
                           key={row.rowKey} 
-                          onClick={() => openEditTxModal(row.tx)}
+                          onClick={() => openEditTxModal(row.tx, row.itemName)}
                           title="Click row to Edit or Remove record"
                           className="hover:bg-indigo-950/30 hover:border-indigo-500/30 transition-colors cursor-pointer group"
                         >

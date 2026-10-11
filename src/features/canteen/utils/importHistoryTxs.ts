@@ -171,6 +171,13 @@ export async function syncImportHistoryToTransactions(): Promise<any[]> {
     } catch {}
 
     const deletedIds = getDeletedTxIds();
+    try {
+      const cloudDeleted = await pullKeyFromCloud('canteen_deleted_tx_ids');
+      if (Array.isArray(cloudDeleted)) {
+        cloudDeleted.forEach(id => deletedIds.add(String(id)));
+      }
+    } catch {}
+
     const txMap = new Map<string, any>();
     [...localTxs, ...cloudTxs].forEach(t => {
       if (t && t.id && !deletedIds.has(String(t.id))) txMap.set(String(t.id), t);

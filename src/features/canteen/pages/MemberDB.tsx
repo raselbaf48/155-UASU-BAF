@@ -861,6 +861,24 @@ export const MemberDB: React.FC<MemberDBProps> = ({
   const [statementCategory, setStatementCategory] = useState<BillCategory>('ALL');
   const [statementMonth, setStatementMonth] = useState<string>(() => getRunningMonthKey());
   const [statementViewMode, setStatementViewMode] = useState<'ITEM' | 'DATE'>('ITEM');
+
+  // Live refs to guarantee real-time updates for open modals on background events
+  const statementMemberRef = useRef<any>(null);
+  const profileMemberRef = useRef<any>(null);
+  const statementCategoryRef = useRef<BillCategory>('ALL');
+
+  useEffect(() => {
+    statementMemberRef.current = statementMember;
+  }, [statementMember]);
+
+  useEffect(() => {
+    profileMemberRef.current = profileMember;
+  }, [profileMember]);
+
+  useEffect(() => {
+    statementCategoryRef.current = statementCategory;
+  }, [statementCategory]);
+
   const [isCapturingPic, setIsCapturingPic] = useState(false);
   const [statementImageFile, setStatementImageFile] = useState<File | null>(null);
   const [statementImageBlob, setStatementImageBlob] = useState<Blob | null>(null);
@@ -1761,6 +1779,14 @@ export const MemberDB: React.FC<MemberDBProps> = ({
     let isMounted = true;
     (async () => {
       try {
+        // 0. Automatically sync deleted transaction IDs from cloud first
+        const cloudDeleted = await pullKeyFromCloud('canteen_deleted_tx_ids');
+        if (Array.isArray(cloudDeleted) && cloudDeleted.length > 0) {
+          const localDeleted = getDeletedTxIds();
+          cloudDeleted.forEach(id => localDeleted.add(String(id)));
+          localStorage.setItem('canteen_deleted_tx_ids', JSON.stringify(Array.from(localDeleted)));
+        }
+
         // 1. Automatically reconcile transactions from import history (Aug, Sep, etc.)
         const reconciled = await syncImportHistoryToTransactions();
         if (isMounted && Array.isArray(reconciled) && reconciled.length > 0) {
@@ -1799,27 +1825,84 @@ export const MemberDB: React.FC<MemberDBProps> = ({
           const deletedIds = getDeletedTxIds();
           const raw = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
           const clean = raw.filter((t: any) => t && !deletedIds.has(String(t.id)) && !t.isReverted && t.status !== 'REVERTED');
-          setAllTxs(prev => {
-            if (prev.length === clean.length && JSON.stringify(prev) === JSON.stringify(clean)) {
-              return prev;
-            }
-            return clean;
-          });
+          setAllTxs(clean);
+
+          // Real-time update for currently active Statement Modal
+          if (statementMemberRef.current) {
+            const freshStmtTxs = filterMemberTxs(statementMemberRef.current, clean);
+            setStatementTx(freshStmtTxs);
+            const liveDue = getMemberTotalDue(statementMemberRef.current, statementCategoryRef.current, clean);
+            setStatementMember((prev: any) => prev ? { ...prev, Due: liveDue, due: liveDue, baki: liveDue } : null);
+          }
+
+          // Real-time update for currently active Profile Modal
+          if (profileMemberRef.current) {
+            const freshProfTxs = filterMemberTxs(profileMemberRef.current, clean);
+            setProfileTx(freshProfTxs);
+            const liveDue = getMemberTotalDue(profileMemberRef.current, 'ALL', clean);
+            setProfileMember((prev: any) => prev ? { ...prev, Due: liveDue, due: liveDue, baki: liveDue } : null);
+          }
         } catch {}
-      }, 100);
+      }, 30);
     };
+
+    const handleTxDeleted = (e: any) => {
+      try {
+        const deletedId = String(e?.detail?.id || '');
+        if (!deletedId) return;
+        const deletedIds = getDeletedTxIds();
+        deletedIds.add(deletedId);
+
+        setAllTxs(prev => prev.filter(t => String(t.id) !== deletedId));
+        if (statementMemberRef.current) {
+          setStatementTx(prev => prev.filter(t => String(t.id) !== deletedId));
+          const target = e?.detail?.member;
+          if (target && (statementMemberRef.current.airman_id === target.airman_id || String(statementMemberRef.current['BD No'] || '').trim() === String(target['BD No'] || '').trim())) {
+            const updatedDue = e.detail.newDue;
+            setStatementMember((prev: any) => prev ? { ...prev, Due: updatedDue, due: updatedDue, baki: updatedDue } : null);
+          }
+        }
+        if (profileMemberRef.current) {
+          setProfileTx(prev => prev.filter(t => String(t.id) !== deletedId));
+          const target = e?.detail?.member;
+          if (target && (profileMemberRef.current.airman_id === target.airman_id || String(profileMemberRef.current['BD No'] || '').trim() === String(target['BD No'] || '').trim())) {
+            const updatedDue = e.detail.newDue;
+            setProfileMember((prev: any) => prev ? { ...prev, Due: updatedDue, due: updatedDue, baki: updatedDue } : null);
+          }
+        }
+      } catch {}
+    };
+
     window.addEventListener('canteen_txs_updated', handleTxsSync);
+    window.addEventListener('canteen_tx_deleted', handleTxDeleted);
     window.addEventListener('canteen_bill_import_history_updated', handleTxsSync);
     window.addEventListener('canteen_state_updated', handleTxsSync);
     window.addEventListener('storage', handleTxsSync);
     return () => {
       clearTimeout(debounceTimer);
       window.removeEventListener('canteen_txs_updated', handleTxsSync);
+      window.removeEventListener('canteen_tx_deleted', handleTxDeleted);
       window.removeEventListener('canteen_bill_import_history_updated', handleTxsSync);
       window.removeEventListener('canteen_state_updated', handleTxsSync);
       window.removeEventListener('storage', handleTxsSync);
     };
   }, []);
+
+  // Guarantee statement and profile stay in sync with allTxs in real-time
+  useEffect(() => {
+    if (statementMemberRef.current) {
+      const freshStmtTxs = filterMemberTxs(statementMemberRef.current, allTxs);
+      setStatementTx(freshStmtTxs);
+      const liveDue = getMemberTotalDue(statementMemberRef.current, statementCategoryRef.current);
+      setStatementMember((prev: any) => prev ? { ...prev, Due: liveDue, due: liveDue, baki: liveDue } : null);
+    }
+    if (profileMemberRef.current) {
+      const freshProfTxs = filterMemberTxs(profileMemberRef.current, allTxs);
+      setProfileTx(freshProfTxs);
+      const liveDue = getMemberTotalDue(profileMemberRef.current, 'ALL');
+      setProfileMember((prev: any) => prev ? { ...prev, Due: liveDue, due: liveDue, baki: liveDue } : null);
+    }
+  }, [allTxs]);
 
   // Listen to canteen members updates across all components and sync channels
   useEffect(() => {
@@ -1873,12 +1956,13 @@ export const MemberDB: React.FC<MemberDBProps> = ({
   // Keep open Profile and open Statement in real-time sync with transactions (merging all sources)
   useEffect(() => {
     if (profileMember) {
+      const deletedIds = getDeletedTxIds();
       const local = (() => {
         try { return JSON.parse(localStorage.getItem('canteen_txs') || '[]'); } catch { return []; }
       })();
       const txMap = new Map<string, any>();
-      (allTxs || []).forEach(t => { if (t?.id) txMap.set(String(t.id), t); });
-      local.forEach((t: any) => { if (t?.id) txMap.set(String(t.id), t); });
+      (allTxs || []).forEach(t => { if (t?.id && !deletedIds.has(String(t.id))) txMap.set(String(t.id), t); });
+      local.forEach((t: any) => { if (t?.id && !deletedIds.has(String(t.id))) txMap.set(String(t.id), t); });
       const mergedTxs = deduplicateCanteenTransactions(Array.from(txMap.values()));
       setProfileTx(filterMemberTxs(profileMember, mergedTxs));
     }
@@ -1886,12 +1970,13 @@ export const MemberDB: React.FC<MemberDBProps> = ({
 
   useEffect(() => {
     if (statementMember) {
+      const deletedIds = getDeletedTxIds();
       const local = (() => {
         try { return JSON.parse(localStorage.getItem('canteen_txs') || '[]'); } catch { return []; }
       })();
       const txMap = new Map<string, any>();
-      (allTxs || []).forEach(t => { if (t?.id) txMap.set(String(t.id), t); });
-      local.forEach((t: any) => { if (t?.id) txMap.set(String(t.id), t); });
+      (allTxs || []).forEach(t => { if (t?.id && !deletedIds.has(String(t.id))) txMap.set(String(t.id), t); });
+      local.forEach((t: any) => { if (t?.id && !deletedIds.has(String(t.id))) txMap.set(String(t.id), t); });
       const mergedTxs = deduplicateCanteenTransactions(Array.from(txMap.values()));
       setStatementTx(filterMemberTxs(statementMember, mergedTxs));
     }
@@ -2257,10 +2342,11 @@ export const MemberDB: React.FC<MemberDBProps> = ({
   };
 
   // Helper to calculate Member's Total Due (পূর্ববর্তী সব বকেয়া + চলতি মাসের বিল - মোট পরিশোধ)
-  const getMemberTotalDue = (member: any, category: BillCategory = 'ALL'): number => {
+  const getMemberTotalDue = (member: any, category: BillCategory = 'ALL', overrideTxs?: any[]): number => {
     if (!member) return 0;
     const profileDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
-    const memberTxs = filterMemberTxs(member, allTxs);
+    const txSource = overrideTxs || allTxs;
+    const memberTxs = filterMemberTxs(member, txSource);
 
     if (category === 'ALL') {
       const allCharges = calculateEffectiveCharges(memberTxs);
@@ -2448,7 +2534,20 @@ export const MemberDB: React.FC<MemberDBProps> = ({
   // Open Statement Modal
   const openStatement = (member: any) => {
     const effDp = getMemberEffectiveDp(member);
-    const effDue = getMemberTotalDue(member, 'ALL');
+    const deletedIds = getDeletedTxIds();
+    const rawLocal = (() => {
+      try { return JSON.parse(localStorage.getItem('canteen_txs') || '[]'); } catch { return []; }
+    })();
+    const cleanLocal = rawLocal.filter((t: any) => t && t.id && !deletedIds.has(String(t.id)) && !t.isReverted && t.status !== 'REVERTED');
+    const cleanAllTxs = (allTxs || []).filter((t: any) => t && t.id && !deletedIds.has(String(t.id)) && !t.isReverted && t.status !== 'REVERTED');
+
+    const txMap = new Map<string, any>();
+    cleanAllTxs.forEach((t: any) => { txMap.set(String(t.id), t); });
+    cleanLocal.forEach((t: any) => { txMap.set(String(t.id), t); });
+    const mergedTxs = deduplicateCanteenTransactions(Array.from(txMap.values()));
+    const memberTxs = filterMemberTxs(member, mergedTxs);
+
+    const effDue = getMemberTotalDue(member, 'ALL', mergedTxs);
     setStatementMember({ 
       ...member, 
       Due: effDue,
@@ -2459,19 +2558,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
     setStatementCategory('ALL');
     const runningMonth = getRunningMonthKey();
     setStatementMonth(selectedMonth !== 'ALL' ? selectedMonth : runningMonth);
-    try {
-      const local = (() => {
-        try { return JSON.parse(localStorage.getItem('canteen_txs') || '[]'); } catch { return []; }
-      })();
-      const txMap = new Map<string, any>();
-      (allTxs || []).forEach((t: any) => { if (t?.id) txMap.set(String(t.id), t); });
-      local.forEach((t: any) => { if (t?.id) txMap.set(String(t.id), t); });
-      const mergedTxs = deduplicateCanteenTransactions(Array.from(txMap.values()));
-      const memberTxs = filterMemberTxs(member, mergedTxs);
-      setStatementTx(memberTxs);
-    } catch (e) {
-      setStatementTx([]);
-    }
+    setStatementTx(memberTxs);
   };
 
   // Open Profile Modal (Read-only view of member details and history)
@@ -2483,12 +2570,16 @@ export const MemberDB: React.FC<MemberDBProps> = ({
     };
     setProfileMember(fullMember);
     try {
-      const local = (() => {
+      const deletedIds = getDeletedTxIds();
+      const rawLocal = (() => {
         try { return JSON.parse(localStorage.getItem('canteen_txs') || '[]'); } catch { return []; }
       })();
+      const cleanLocal = rawLocal.filter((t: any) => t && t.id && !deletedIds.has(String(t.id)) && !t.isReverted && t.status !== 'REVERTED');
+      const cleanAllTxs = (allTxs || []).filter((t: any) => t && t.id && !deletedIds.has(String(t.id)) && !t.isReverted && t.status !== 'REVERTED');
+
       const txMap = new Map<string, any>();
-      (allTxs || []).forEach((t: any) => { if (t?.id) txMap.set(String(t.id), t); });
-      local.forEach((t: any) => { if (t?.id) txMap.set(String(t.id), t); });
+      cleanAllTxs.forEach((t: any) => { txMap.set(String(t.id), t); });
+      cleanLocal.forEach((t: any) => { txMap.set(String(t.id), t); });
       const mergedTxs = deduplicateCanteenTransactions(Array.from(txMap.values()));
       const memberTxs = filterMemberTxs(member, mergedTxs);
       setProfileTx(memberTxs);
