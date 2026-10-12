@@ -4,7 +4,7 @@
  * must strictly preserve this order.
  */
 export const OFFICIAL_CANTEEN_MENU_ORDER: string[] = [
-  'পরোটা প্রিমিয়াম',
+  'পরোটা',
   'পরোটা হোটেল',
   'ডিম ভাজি',
   'ডিম পোচ',

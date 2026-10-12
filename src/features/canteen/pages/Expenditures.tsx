@@ -13,6 +13,7 @@ import { DateNavigator } from '../components/DateNavigator';
 import { 
   autoRestockFromExpense, 
   getRawInventoryItems, 
+  saveRawInventoryItems,
   RawInventoryItem 
 } from '../utils/recipeManager';
 import { supabase } from '../../../supabase';
@@ -800,7 +801,7 @@ export const Expenditures: React.FC = () => {
     });
   }, [rawItems, inventorySearch, inventoryCategoryFilter]);
 
-  // Select an inventory item into cart or increment quantity
+  // Select an inventory item into cart
   const handleSelectInventoryItem = (item: RawInventoryItem) => {
     const itemName = item.nameBn || item.name;
     const cat = item.category || 'Grocery';
@@ -810,19 +811,8 @@ export const Expenditures: React.FC = () => {
     setItemRows(prev => {
       const existingIdx = prev.findIndex(r => r.rawItemId === item.id || r.desc === itemName);
       if (existingIdx !== -1) {
-        // Increment quantity by 1
-        return prev.map((r, i) => {
-          if (i !== existingIdx) return r;
-          const currentQty = Number(r.qty) || 1;
-          const newQty = currentQty + 1;
-          const uPrice = Number(r.unitPrice) || rate;
-          return {
-            ...r,
-            qty: newQty,
-            unitPrice: uPrice > 0 ? uPrice : '',
-            amount: uPrice > 0 ? Math.round(newQty * uPrice) : r.amount
-          };
-        });
+        // Already in cart - keep it without modifying user's inputs
+        return prev;
       }
 
       // First check if there is an empty placeholder row
@@ -835,15 +825,15 @@ export const Expenditures: React.FC = () => {
             desc: itemName,
             category: cat,
             rawItemId: item.id,
-            qty: 1,
+            qty: '',
             unit: unit,
             unitPrice: rate > 0 ? rate : '',
-            amount: rate > 0 ? rate : ''
+            amount: ''
           };
         });
       }
 
-      // Otherwise append new cart item
+      // Otherwise append new cart item with empty quantity and total
       return [
         ...prev.filter(r => r.desc.trim()),
         {
@@ -851,10 +841,10 @@ export const Expenditures: React.FC = () => {
           desc: itemName,
           category: cat,
           rawItemId: item.id,
-          qty: 1,
+          qty: '',
           unit: unit,
           unitPrice: rate > 0 ? rate : '',
-          amount: rate > 0 ? rate : ''
+          amount: ''
         }
       ];
     });
@@ -898,7 +888,7 @@ export const Expenditures: React.FC = () => {
         desc: '',
         category: formPaymentMethod === 'Due' && formDueShop === 'Poultry Shop' ? 'Poultry' :
                   formPaymentMethod === 'Due' && formDueShop === 'Bake & Bite' ? 'Bakery' : 'Grocery',
-        qty: 1,
+        qty: '',
         unit: 'kg',
         unitPrice: '',
         amount: ''
@@ -920,11 +910,38 @@ export const Expenditures: React.FC = () => {
       if (r.id !== id) return r;
       const updated = { ...r, [field]: value };
 
-      if (field === 'qty' || field === 'unitPrice') {
-        const q = field === 'qty' ? parseFloat(value) : parseFloat(r.qty as any);
-        const p = field === 'unitPrice' ? parseFloat(value) : parseFloat(r.unitPrice as any);
-        if (!isNaN(q) && !isNaN(p) && q > 0 && p > 0) {
-          updated.amount = Math.round(q * p);
+      if (field === 'qty') {
+        const q = parseFloat(value);
+        const p = parseFloat(r.unitPrice as any);
+        const a = parseFloat(r.amount as any);
+        if (!isNaN(q) && q > 0) {
+          if (!isNaN(p) && p > 0) {
+            updated.amount = Math.round(q * p * 100) / 100;
+          } else if (!isNaN(a) && a > 0) {
+            updated.unitPrice = Math.round((a / q) * 100) / 100;
+          }
+        }
+      } else if (field === 'unitPrice') {
+        const p = parseFloat(value);
+        const q = parseFloat(r.qty as any);
+        const a = parseFloat(r.amount as any);
+        if (!isNaN(p) && p > 0) {
+          if (!isNaN(q) && q > 0) {
+            updated.amount = Math.round(q * p * 100) / 100;
+          } else if (!isNaN(a) && a > 0) {
+            updated.qty = Math.round((a / p) * 100) / 100;
+          }
+        }
+      } else if (field === 'amount') {
+        const a = parseFloat(value);
+        const q = parseFloat(r.qty as any);
+        const p = parseFloat(r.unitPrice as any);
+        if (!isNaN(a) && a > 0) {
+          if (!isNaN(q) && q > 0) {
+            updated.unitPrice = Math.round((a / q) * 100) / 100;
+          } else if (!isNaN(p) && p > 0) {
+            updated.qty = Math.round((a / p) * 100) / 100;
+          }
         }
       }
 
@@ -1029,6 +1046,36 @@ export const Expenditures: React.FC = () => {
             });
           } catch {}
         }
+      }
+
+      // Update unitCost for raw inventory items from the latest rate in this voucher
+      try {
+        const allCurrentRaw = getRawInventoryItems();
+        let rawItemsChanged = false;
+        const updatedRawList = allCurrentRaw.map(item => {
+          const matchingRow = validRows.find(r => 
+            (r.rawItemId && r.rawItemId === item.id) ||
+            (r.desc && (
+              item.nameBn?.trim().toLowerCase() === r.desc.trim().toLowerCase() || 
+              item.name?.trim().toLowerCase() === r.desc.trim().toLowerCase()
+            ))
+          );
+          if (matchingRow && matchingRow.unitPrice && Number(matchingRow.unitPrice) > 0) {
+            rawItemsChanged = true;
+            return {
+              ...item,
+              unitCost: Number(matchingRow.unitPrice)
+            };
+          }
+          return item;
+        });
+
+        if (rawItemsChanged) {
+          saveRawInventoryItems(updatedRawList);
+          setRawItems(updatedRawList);
+        }
+      } catch (e) {
+        console.warn('Failed to update raw item unitCost:', e);
       }
 
       // 2. Instant UI feedback & Clear cart for next entry
@@ -1720,7 +1767,7 @@ export const Expenditures: React.FC = () => {
                         <div className="flex items-center space-x-2 shrink-0">
                           {isSelected && (
                             <span className="text-[11px] font-mono font-black text-indigo-300 bg-indigo-500/20 px-2 py-1 rounded-lg border border-indigo-500/30">
-                              {inCartQty} {item.unit || 'kg'} কার্টে
+                              {inCartQty > 0 ? `${inCartQty} ${item.unit || 'kg'} কার্টে` : 'কার্টে যুক্ত'}
                             </span>
                           )}
                           <button
@@ -1814,7 +1861,17 @@ export const Expenditures: React.FC = () => {
                 </div>
 
                 {/* Cart Items List */}
-                <div className="max-h-[280px] overflow-y-auto pr-1 space-y-2">
+                {itemRows.length > 0 && (
+                  <div className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-slate-400 bg-slate-950/60 rounded-xl border border-slate-800/80 mb-2">
+                    <span className="flex-1 min-w-[110px]">পণ্যের নাম</span>
+                    <span className="w-24 sm:w-28 text-center">পরিমাণ ও একক</span>
+                    <span className="w-20 sm:w-24 text-center">দর (৳)</span>
+                    <span className="w-20 sm:w-24 text-center">মোট (৳)</span>
+                    <span className="w-7 text-center">মুছুন</span>
+                  </div>
+                )}
+
+                <div className="max-h-[300px] overflow-y-auto pr-1 space-y-2">
                   {itemRows.length === 0 ? (
                     <div className="py-8 text-center text-slate-500 bg-slate-900/40 rounded-2xl border border-slate-800">
                       <ShoppingCart className="w-7 h-7 mx-auto opacity-25 mb-1.5" />
@@ -1823,93 +1880,84 @@ export const Expenditures: React.FC = () => {
                     </div>
                   ) : (
                     itemRows.map((row) => {
-                      const qty = Number(row.qty) || 0;
-                      const rate = Number(row.unitPrice) || 0;
-                      const amt = Number(row.amount) || (qty * rate);
-
                       return (
                         <div 
                           key={row.id}
-                          className="p-3 bg-slate-900/90 rounded-2xl border border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shadow-xs hover:border-slate-700 transition-all"
+                          className="p-2 sm:p-2.5 bg-slate-900/95 rounded-2xl border border-slate-800 hover:border-slate-700 transition-all shadow-xs flex items-center gap-2 w-full"
                         >
-                          {/* Item Name (editable) */}
-                          <div className="min-w-0 flex-1">
+                          {/* ১. পণ্যের নাম */}
+                          <div className="flex-1 min-w-[110px]">
                             <input
                               type="text"
                               value={row.desc}
                               onChange={(e) => handleUpdateRow(row.id, 'desc', e.target.value)}
-                              placeholder="Item Name"
-                              className="w-full bg-transparent text-xs font-black text-white focus:outline-none focus:border-b border-indigo-500/50 placeholder:text-slate-500 truncate"
+                              placeholder="পণ্যের নাম"
+                              className="w-full bg-slate-950 border border-slate-800 hover:border-slate-700 focus:border-indigo-500 rounded-xl px-2.5 py-1.5 text-xs font-black text-white focus:outline-none transition-colors truncate placeholder:text-slate-500"
                             />
-                            <div className="flex items-center space-x-2 text-[10px] text-slate-400 mt-1">
-                              <span>দর: ৳</span>
-                              <input
-                                type="number"
-                                value={row.unitPrice}
-                                onChange={(e) => handleUpdateRow(row.id, 'unitPrice', e.target.value)}
-                                placeholder="Rate"
-                                className="w-14 bg-slate-950 border border-slate-800 rounded px-1.5 py-0.5 text-[10px] font-mono font-bold text-amber-300 text-center focus:outline-none"
-                              />
-                              <span>/</span>
-                              <select
-                                value={row.unit}
-                                onChange={(e) => handleUpdateRow(row.id, 'unit', e.target.value)}
-                                className="bg-slate-950 border border-slate-800 rounded px-1 py-0.5 text-[10px] text-slate-300 focus:outline-none"
-                              >
-                                <option value="kg">kg</option>
-                                <option value="pcs">pcs</option>
-                                <option value="litre">litre</option>
-                                <option value="pkt">pkt</option>
-                                <option value="can">can</option>
-                                <option value="gm">gm</option>
-                                <option value="box">box</option>
-                              </select>
-                            </div>
                           </div>
 
-                          {/* Qty Controls */}
-                          <div className="flex items-center space-x-1.5 shrink-0 bg-slate-950 p-1 rounded-xl border border-slate-800">
-                            <button
-                              type="button"
-                              onClick={() => updateCartItemQty(row.id, -1)}
-                              className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white cursor-pointer transition-colors"
-                            >
-                              <Minus className="w-3.5 h-3.5" />
-                            </button>
+                          {/* ২. পরিমাণ (পাশে একক) */}
+                          <div className="flex items-center shrink-0 w-24 sm:w-28 bg-slate-950 border border-slate-800 rounded-xl overflow-hidden focus-within:border-indigo-500 transition-colors">
                             <input
                               type="number"
                               step="any"
-                              value={row.qty}
+                              value={row.qty !== undefined && row.qty !== '' ? row.qty : ''}
                               onChange={(e) => handleUpdateRow(row.id, 'qty', e.target.value)}
-                              className="w-12 bg-transparent text-xs font-mono font-black text-white text-center focus:outline-none"
+                              placeholder="পরিমাণ"
+                              className="w-full min-w-0 px-1.5 py-1.5 text-xs font-mono font-bold text-white text-center focus:outline-none bg-transparent"
                             />
-                            <button
-                              type="button"
-                              onClick={() => updateCartItemQty(row.id, 1)}
-                              className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white cursor-pointer transition-colors"
+                            <select
+                              value={row.unit || 'kg'}
+                              onChange={(e) => handleUpdateRow(row.id, 'unit', e.target.value)}
+                              className="bg-slate-900 border-l border-slate-800 text-[10px] sm:text-[11px] font-bold text-slate-300 px-1 py-1.5 focus:outline-none cursor-pointer shrink-0"
                             >
-                              <Plus className="w-3.5 h-3.5" />
-                            </button>
+                              <option value="kg">কেজি</option>
+                              <option value="pcs">পিস</option>
+                              <option value="litre">লিটার</option>
+                              <option value="pkt">প্যাকেট</option>
+                              <option value="gm">গ্রাম</option>
+                              <option value="can">ক্যান</option>
+                              <option value="box">বক্স</option>
+                            </select>
                           </div>
 
-                          {/* Total Amount & Delete */}
-                          <div className="flex items-center justify-between sm:justify-end space-x-3 shrink-0">
-                            <div className="text-right">
-                              <span className="text-[10px] text-slate-500 font-mono block">মোট</span>
-                              <span className="text-xs font-mono font-black text-emerald-400">
-                                ৳{amt.toLocaleString()}
-                              </span>
-                            </div>
-
-                            <button
-                              type="button"
-                              onClick={() => removeCartItem(row.id)}
-                              className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-950/30 rounded-xl cursor-pointer transition-colors"
-                              title="Remove from Cart"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                          {/* ৩. দর (latest ta default e bose thakbe, change kora jbe) */}
+                          <div className="flex items-center shrink-0 w-20 sm:w-24 bg-slate-950 border border-slate-800 rounded-xl px-1.5 py-1.5 focus-within:border-amber-500 transition-colors">
+                            <span className="text-[10px] font-bold text-amber-400 mr-0.5">৳</span>
+                            <input
+                              type="number"
+                              step="any"
+                              value={row.unitPrice !== undefined && row.unitPrice !== '' ? row.unitPrice : ''}
+                              onChange={(e) => handleUpdateRow(row.id, 'unitPrice', e.target.value)}
+                              placeholder="দর"
+                              title="দর (পরিবর্তনযোগ্য)"
+                              className="w-full min-w-0 text-xs font-mono font-bold text-amber-300 text-center focus:outline-none bg-transparent"
+                            />
                           </div>
+
+                          {/* ৪. মোট */}
+                          <div className="flex items-center shrink-0 w-20 sm:w-24 bg-slate-950 border border-slate-800 rounded-xl px-1.5 py-1.5 focus-within:border-emerald-500 transition-colors">
+                            <span className="text-[10px] font-bold text-emerald-400 mr-0.5">৳</span>
+                            <input
+                              type="number"
+                              step="any"
+                              value={row.amount !== undefined && row.amount !== '' ? row.amount : ''}
+                              onChange={(e) => handleUpdateRow(row.id, 'amount', e.target.value)}
+                              placeholder="মোট"
+                              title="মোট টাকা"
+                              className="w-full min-w-0 text-xs font-mono font-bold text-emerald-400 text-right focus:outline-none bg-transparent"
+                            />
+                          </div>
+
+                          {/* ৫. ডিলেট আইকন (তার পাশে) */}
+                          <button
+                            type="button"
+                            onClick={() => removeCartItem(row.id)}
+                            className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 rounded-xl cursor-pointer transition-colors shrink-0"
+                            title="আইটেম মুছুন"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </div>
                       );
                     })

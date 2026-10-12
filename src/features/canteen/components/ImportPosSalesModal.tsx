@@ -6,6 +6,7 @@ import {
   Calendar, ChevronDown, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import XLSX from 'xlsx-js-style';
+import JSZip from 'jszip';
 import { supabase } from '../../../supabase';
 import { pushKeyToCloud } from '../utils/canteenCloudSync';
 import { deductRawStockForSales } from '../utils/recipeManager';
@@ -168,15 +169,15 @@ function applyExcelTableStyles(
 
         const isEvenDataRow = (R - headerRowIdx) % 2 === 0;
         const rowBgColor = isHeaderRow 
-          ? 'E2E8F0' 
-          : (isEvenDataRow ? 'F8FAFC' : 'FFFFFF');
+          ? '64748B' 
+          : (isEvenDataRow ? 'FFFFFF' : 'CBD5E1');
 
         cell.s = {
           font: {
             name: 'Calibri',
             sz: 11,
             bold: isHeaderRow,
-            color: { rgb: '000000' }
+            color: { rgb: isHeaderRow ? 'FFFFFF' : '000000' }
           },
           alignment: {
             horizontal: 'center',
@@ -205,6 +206,51 @@ function applyExcelTableStyles(
       }
     }
   }
+}
+
+/**
+ * Injects OpenXML freeze panes directly into the XLSX package zip before download.
+ * Guarantees Microsoft Excel, Google Sheets, Apple Numbers & LibreOffice lock the exact panes:
+ * - Member-wise format: E Column & Row 5 (xSplit=5, ySplit=5, topLeftCell='F6')
+ * - Date-wise format: C Column & Row 5 (xSplit=3, ySplit=5, topLeftCell='D6')
+ */
+async function downloadExcelWithNativeFreeze(
+  workbook: any,
+  filename: string,
+  freezeOptions: { xSplit: number; ySplit: number; topLeftCell: string }
+) {
+  const rawArray = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+  const zip = await JSZip.loadAsync(rawArray);
+  
+  const paneXml = `<sheetViews><sheetView workbookViewId="0"><pane xSplit="${freezeOptions.xSplit}" ySplit="${freezeOptions.ySplit}" topLeftCell="${freezeOptions.topLeftCell}" activePane="bottomRight" state="frozen"/><selection pane="bottomRight" activeCell="${freezeOptions.topLeftCell}" sqref="${freezeOptions.topLeftCell}"/></sheetView></sheetViews>`;
+
+  for (const fileName of Object.keys(zip.files)) {
+    if (fileName.startsWith('xl/worksheets/sheet') && fileName.endsWith('.xml')) {
+      const fileEntry = zip.file(fileName);
+      if (fileEntry) {
+        let content = await fileEntry.async('string');
+        if (content.includes('<sheetViews>')) {
+          content = content.replace(/<sheetViews>[\s\S]*?<\/sheetViews>/, paneXml);
+        } else {
+          content = content.replace(/(<worksheet[^>]*>)/, `$1${paneXml}`);
+        }
+        zip.file(fileName, content);
+      }
+    }
+  }
+
+  const modifiedBlob = await zip.generateAsync({ 
+    type: 'blob', 
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+  });
+  const url = URL.createObjectURL(modifiedBlob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 function banglaToEnglishDigits(str: any): string {
@@ -433,7 +479,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
   if (!isOpen) return null;
 
   // Generate and download Official 155 UASU BAF Daily Canteen Bill Matrix Template (31 Date tabs for selected Month)
-  const handleDownloadOfficialMatrixTemplate = () => {
+  const handleDownloadOfficialMatrixTemplate = async () => {
     try {
       const sortedMembers = sortCanteenMembersByOfficeSeniority(members);
       const workbook = XLSX.utils.book_new();
@@ -464,15 +510,14 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         right: { style: 'thin', color: { rgb: '000000' } },
       };
 
-      // Header row
+      // Header row (Last column "মোট বিল" removed as requested)
       const headerRow = [
         '',
         'ক্রমিক নং',
         'বিডি নং',
         'পদবী',
         'নাম',
-        ...allMemberFoodCols.map(c => c.bn),
-        'মোট বিল'
+        ...allMemberFoodCols.map(c => c.bn)
       ];
 
       // Generate 31 separate tabs (tab name '1'..'31') for the selected month
@@ -504,7 +549,6 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         rows.push(headerRow);
 
         const colFoodTotals = new Array(allMemberFoodCols.length).fill(0);
-        let dayGrandBillTotal = 0;
 
         // Rows 6+: Member data rows in official seniority order
         sortedMembers.forEach((m, idx) => {
@@ -534,7 +578,6 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           });
 
           const foodQtyMap = new Map<number, number>();
-          let dayMemberFallbackTotal = 0;
 
           dayTxs.forEach((tx: any) => {
             let soldItems = tx.soldItems;
@@ -595,24 +638,15 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                 }
               });
             }
-
-            dayMemberFallbackTotal += Number(tx.amount || 0);
           });
 
-          // Calculate total bill by multiplying quantity with price for each food column
-          let rowBillTotal = 0;
-          allMemberFoodCols.forEach((col, cIdx) => {
+          // Accumulate totals per food item column across members
+          allMemberFoodCols.forEach((_, cIdx) => {
             const q = foodQtyMap.get(cIdx);
             if (q && q > 0) {
-              rowBillTotal += q * (col.price || 0);
               colFoodTotals[cIdx] = (colFoodTotals[cIdx] || 0) + q;
             }
           });
-
-          const finalBill = rowBillTotal > 0 ? rowBillTotal : (dayMemberFallbackTotal > 0 ? dayMemberFallbackTotal : '');
-          if (typeof finalBill === 'number' && finalBill > 0) {
-            dayGrandBillTotal += finalBill;
-          }
 
           const rawBd = String(m['BD No'] || m.bdNo || m.airman_id || '').trim();
           const cleanDigits = rawBd.replace(/\D/g, '');
@@ -629,14 +663,14 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             ...allMemberFoodCols.map((_, cIdx) => {
               const q = foodQtyMap.get(cIdx);
               return q && q > 0 ? q : '';
-            }),
-            finalBill
+            })
           ];
           rows.push(rowData);
         });
 
-        // Last row: Total for this date (e.g. ১ তারিখে মোট কতগুলো পরোটা, ডিম ও মোট বিল)
-        const totalFooterRow = [
+        // Last row: Total Sum for Member 1 to Last with SUM formula
+        const endMemberRowNumber = 5 + sortedMembers.length;
+        const totalFooterRow: any[] = [
           '',
           'সর্বমোট',
           '',
@@ -644,27 +678,30 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           '',
           ...allMemberFoodCols.map((_, cIdx) => {
             const tot = colFoodTotals[cIdx];
-            return tot && tot > 0 ? tot : '';
-          }),
-          dayGrandBillTotal > 0 ? dayGrandBillTotal : ''
+            const colLetter = XLSX.utils.encode_col(cIdx + 5);
+            return {
+              t: 'n',
+              v: tot && tot > 0 ? tot : 0,
+              f: `SUM(${colLetter}6:${colLetter}${endMemberRowNumber})`
+            };
+          })
         ];
         rows.push(totalFooterRow);
 
         const worksheet = XLSX.utils.aoa_to_sheet(rows);
 
-        // Freeze header pane so Row 5 stays visible
-        worksheet['!views'] = [{ state: 'frozen', ySplit: 5, xSplit: 0, activePane: 'bottomLeft' }];
-        worksheet['!freeze'] = { xSplit: 0, ySplit: 5 };
+        // Freeze BOTH header Row 5 AND leading member Columns (A..E) so they stay visible when scrolling
+        worksheet['!views'] = [{ state: 'frozen', ySplit: 5, xSplit: 5, activePane: 'bottomRight' }];
+        worksheet['!freeze'] = { xSplit: 5, ySplit: 5 };
 
-        // Set column widths
+        // Set column widths (Last column 'মোট বিল' removed)
         worksheet['!cols'] = [
           { wch: 3 },  // Col A
           { wch: 10 }, // ক্রমিক নং
           { wch: 13 }, // বিডি নং
           { wch: 14 }, // পদবী
           { wch: 18 }, // নাম
-          ...allMemberFoodCols.map(() => ({ wch: 12 })),
-          { wch: 14 }  // মোট বিল
+          ...allMemberFoodCols.map(() => ({ wch: 12 }))
         ];
 
         // Format and style cells (B5 to Last Col / Row)
@@ -672,8 +709,6 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         const totalRows = rows.length;
 
         // Month & Date Banner styling (C2:D3)
-        // C2: 'মাস', D2: মাসের নাম
-        // C3: 'তারিখ', D3: তারিখের মান (মাস ও মাসের নামের নিচের সেলে)
         const c2Addr = XLSX.utils.encode_cell({ r: 1, c: 2 });
         const d2Addr = XLSX.utils.encode_cell({ r: 1, c: 3 });
         const c3Addr = XLSX.utils.encode_cell({ r: 2, c: 2 });
@@ -684,7 +719,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
             alignment: { horizontal: 'center', vertical: 'center' },
             border: cellBorder,
-            fill: { fgColor: { rgb: 'E2E8F0' } }
+            fill: { fgColor: { rgb: 'CBD5E1' } }
           };
         }
         if (worksheet[d2Addr]) {
@@ -700,7 +735,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
             alignment: { horizontal: 'center', vertical: 'center' },
             border: cellBorder,
-            fill: { fgColor: { rgb: 'E2E8F0' } }
+            fill: { fgColor: { rgb: 'CBD5E1' } }
           };
         }
         if (worksheet[d3Addr]) {
@@ -712,23 +747,23 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           };
         }
 
-        // Header row styling: Bold, Center aligned (horizontal & vertical), with border
+        // Header row styling: Bold, Center aligned, fill 64748B with white text
         for (let c = 1; c < totalCols; c++) {
           const addr = XLSX.utils.encode_cell({ r: 4, c });
           if (worksheet[addr]) {
             worksheet[addr].s = {
-              font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
+              font: { name: 'Arial', sz: 11, bold: true, color: { rgb: 'FFFFFF' } },
               alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
               border: cellBorder,
-              fill: { fgColor: { rgb: 'E2E8F0' } }
+              fill: { fgColor: { rgb: '64748B' } }
             };
           }
         }
 
-        // Data rows styling: Alternating colors (White #FFFFFF and Gray #F1F5F9), All row-col center align (horizontal & vertical), with borders
+        // Data rows styling: Deep, clearly visible alternating colors (White #FFFFFF and Slate #CBD5E1)
         for (let r = 5; r < totalRows - 1; r++) {
           const isEvenDataRow = (r - 5) % 2 === 0;
-          const rowBgColor = isEvenDataRow ? 'FFFFFF' : 'F1F5F9';
+          const rowBgColor = isEvenDataRow ? 'FFFFFF' : 'CBD5E1';
           for (let c = 1; c < totalCols; c++) {
             const addr = XLSX.utils.encode_cell({ r, c });
             if (!worksheet[addr]) {
@@ -743,7 +778,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           }
         }
 
-        // Total footer row styling (r = totalRows - 1): Bold, Center aligned, background #E2E8F0, with borders
+        // Total footer row styling (r = totalRows - 1): Bold, Center aligned, background #94A3B8, with borders
         const totalRowIdx = totalRows - 1;
         for (let c = 1; c < totalCols; c++) {
           const addr = XLSX.utils.encode_cell({ r: totalRowIdx, c });
@@ -754,7 +789,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
             alignment: { horizontal: 'center', vertical: 'center' },
             border: cellBorder,
-            fill: { fgColor: { rgb: 'E2E8F0' } }
+            fill: { fgColor: { rgb: '94A3B8' } }
           };
         }
 
@@ -762,7 +797,11 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         XLSX.utils.book_append_sheet(workbook, worksheet, String(day));
       }
 
-      XLSX.writeFile(workbook, `155_UASU_Canteen_MemberWise_31Days_Matrix_${selectedYm}.xlsx`);
+      await downloadExcelWithNativeFreeze(
+        workbook,
+        `155_UASU_Canteen_MemberWise_31Days_Matrix_${selectedYm}.xlsx`,
+        { xSplit: 5, ySplit: 5, topLeftCell: 'F6' }
+      );
     } catch (err: any) {
       console.error('Failed to download official matrix template:', err);
       setErrorMessage('Failed to generate template file. Please try again.');
@@ -770,7 +809,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
   };
 
   // Generate and download Template 2: Date-wise Matrix Template (Member Fixed, Left: 1-31 Date)
-  const handleDownloadDateWiseMatrixTemplate = (overrideMemberId?: any) => {
+  const handleDownloadDateWiseMatrixTemplate = async (overrideMemberId?: any) => {
     try {
       const rawTarget = (typeof overrideMemberId === 'string' && overrideMemberId.trim()) 
         ? overrideMemberId 
@@ -788,13 +827,12 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
       // 1. Real-time active food columns matching the App's menu catalog
       const allFoodColumns = getRealtimeCanteenFoodColumns(catalog);
 
-      // Header row for Date-wise matrix (Col 1: Sl, Col 2: Date, Col 3..: Food items, Last: Total)
+      // Header row for Date-wise matrix (Col 1: Sl, Col 2: Date, Col 3..: Food items; Last Col "মোট বিল" removed as requested)
       const dateHeaderRow = [
         '',
         'ক্রমিক নং',
         'তারিখ',
-        ...allFoodColumns.map(c => c.bn),
-        'মোট বিল'
+        ...allFoodColumns.map(c => c.bn)
       ];
 
       // Existing sales transactions in the system
@@ -846,11 +884,10 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         rows.push(['', 'মাস', formatBengaliMonthYear(selectedYm)]);
         // Row 4: Spacer
         rows.push([]);
-        // Row 5: Column Headers (Col B: 'ক্রমিক নং', Col C: 'তারিখ', Col D..: Foods, Last: 'মোট বিল')
+        // Row 5: Column Headers (Col B: 'ক্রমিক নং', Col C: 'তারিখ', Col D..: Foods)
         rows.push(dateHeaderRow);
 
         const colFoodTotals = new Array(allFoodColumns.length).fill(0);
-        let monthGrandBillTotal = 0;
 
         // Rows 6.. (Days 1 to daysInMonth)
         for (let d = 1; d <= daysInMonth; d++) {
@@ -945,46 +982,46 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             dStrBn
           ];
 
-          let rowBillTotal = 0;
-          allFoodColumns.forEach((col, cIdx) => {
+          allFoodColumns.forEach((_, cIdx) => {
             const qty = foodQtyMap.get(cIdx);
             if (qty && qty > 0) {
               rowData.push(qty);
-              rowBillTotal += qty * (col.price || 0);
               colFoodTotals[cIdx] = (colFoodTotals[cIdx] || 0) + qty;
             } else {
               rowData.push('');
             }
           });
-          // Last column: মোট বিল (ফিল আপ থাকবে)
-          rowData.push(rowBillTotal > 0 ? rowBillTotal : '');
-          monthGrandBillTotal += rowBillTotal;
 
           rows.push(rowData);
         }
 
-        // Last row: Month total for each food item and total bill ("লাস্ট রো তে কোন মেনু কতগুলো খেয়ে ছে ঐটার টোটাল থাকবে")
+        // Last row: Month total for each food item across Days 1 to 31 (with SUM formula)
+        const endDayRowNumber = 5 + daysInMonth;
         const totalFooterRow: any[] = [
           '',
           'সর্বমোট',
           '',
           ...allFoodColumns.map((_, cIdx) => {
             const totalQty = colFoodTotals[cIdx];
-            return totalQty && totalQty > 0 ? totalQty : '';
-          }),
-          monthGrandBillTotal > 0 ? monthGrandBillTotal : ''
+            const colLetter = XLSX.utils.encode_col(cIdx + 3);
+            return {
+              t: 'n',
+              v: totalQty && totalQty > 0 ? totalQty : 0,
+              f: `SUM(${colLetter}6:${colLetter}${endDayRowNumber})`
+            };
+          })
         ];
         rows.push(totalFooterRow);
 
         const ws = XLSX.utils.aoa_to_sheet(rows);
-        ws['!views'] = [{ state: 'frozen', ySplit: 5, xSplit: 0, activePane: 'bottomLeft' }];
-        ws['!freeze'] = { xSplit: 0, ySplit: 5 };
+        // Freeze BOTH header Row 5 AND leading columns (A..C: Serial & Date) so they stay visible when scrolling
+        ws['!views'] = [{ state: 'frozen', ySplit: 5, xSplit: 3, activePane: 'bottomRight' }];
+        ws['!freeze'] = { xSplit: 3, ySplit: 5 };
         ws['!cols'] = [
           { wch: 3 },  // Col A
           { wch: 12 }, // ক্রমিক নং
           { wch: 16 }, // তারিখ
-          ...allFoodColumns.map(() => ({ wch: 14 })),
-          { wch: 14 }  // মোট বিল
+          ...allFoodColumns.map(() => ({ wch: 14 }))
         ];
 
         // Common black thin border for table cells
@@ -999,9 +1036,6 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         const totalRows = rows.length;
 
         // Top banner styling (B1..C3)
-        // B1: 'র‍্যাংক ও নাম', C1: Rank & Name
-        // B2: 'বিডি নং', C2: BD Number
-        // B3: 'মাস', C3: Month Name
         for (let r = 0; r <= 2; r++) {
           for (let c = 1; c <= 2; c++) {
             const addr = XLSX.utils.encode_cell({ r, c });
@@ -1011,29 +1045,29 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                 font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
                 alignment: { horizontal: 'center', vertical: 'center' },
                 border: cellBorder,
-                fill: { fgColor: { rgb: isLabel ? 'E2E8F0' : 'FFFFFF' } }
+                fill: { fgColor: { rgb: isLabel ? 'CBD5E1' : 'FFFFFF' } }
               };
             }
           }
         }
 
-        // Header row styling (r=4, Col B to Last): Bold, Center Aligned, with borders
+        // Header row styling (r=4, Col B to Last): Bold, Center Aligned, with borders, fill 64748B with white text
         for (let c = 1; c < totalCols; c++) {
           const addr = XLSX.utils.encode_cell({ r: 4, c });
           if (ws[addr]) {
             ws[addr].s = {
-              font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
+              font: { name: 'Arial', sz: 11, bold: true, color: { rgb: 'FFFFFF' } },
               alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
               border: cellBorder,
-              fill: { fgColor: { rgb: 'E2E8F0' } }
+              fill: { fgColor: { rgb: '64748B' } }
             };
           }
         }
 
-        // Data rows styling (r=5 to totalRows-2): Alternating colors (White #FFFFFF and Gray #F1F5F9), All cells Center Aligned (horizontal & vertical), with borders
+        // Data rows styling (r=5 to totalRows-2): Deep, clearly visible alternating colors (White #FFFFFF and Slate #CBD5E1)
         for (let r = 5; r < totalRows - 1; r++) {
           const isEvenDataRow = (r - 5) % 2 === 0;
-          const rowBgColor = isEvenDataRow ? 'FFFFFF' : 'F1F5F9';
+          const rowBgColor = isEvenDataRow ? 'FFFFFF' : 'CBD5E1';
           for (let c = 1; c < totalCols; c++) {
             const addr = XLSX.utils.encode_cell({ r, c });
             if (!ws[addr]) {
@@ -1048,7 +1082,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           }
         }
 
-        // Total footer row styling (r = totalRows - 1): Bold, Center aligned, background #E2E8F0, with borders
+        // Total footer row styling (r = totalRows - 1): Bold, Center aligned, background #94A3B8, with borders
         const totalRowIdx = totalRows - 1;
         for (let c = 1; c < totalCols; c++) {
           const addr = XLSX.utils.encode_cell({ r: totalRowIdx, c });
@@ -1059,7 +1093,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
             alignment: { horizontal: 'center', vertical: 'center' },
             border: cellBorder,
-            fill: { fgColor: { rgb: 'E2E8F0' } }
+            fill: { fgColor: { rgb: '94A3B8' } }
           };
         }
 
@@ -1070,7 +1104,12 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
       const memberSuffix = (targetMemberId && targetMemberId !== 'ALL' && membersToGenerate[0])
         ? `_${(membersToGenerate[0].Surname || 'Member').replace(/\s+/g, '_')}`
         : '_MultiMembers';
-      XLSX.writeFile(workbook, `155_UASU_Canteen_DateWise_Bill_Matrix_${selectedYm}${memberSuffix}.xlsx`);
+
+      await downloadExcelWithNativeFreeze(
+        workbook,
+        `155_UASU_Canteen_DateWise_Bill_Matrix_${selectedYm}${memberSuffix}.xlsx`,
+        { xSplit: 3, ySplit: 5, topLeftCell: 'D6' }
+      );
     } catch (err: any) {
       console.error('Failed to download date-wise matrix template:', err);
       setErrorMessage('Failed to generate Date-wise template.');
@@ -1761,9 +1800,11 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
       const groupedByMemberDate = new Map<string, ParsedSaleRow[]>();
       for (const row of rowsToImport) {
         const rowDateYmd = toYMDDate(row.date) || row.date;
-        const airmanId = String(row.matchedMember?.airman_id || row.bdNo || '').trim();
-        const bdDigits = String(row.bdNo || '').replace(/\D/g, '');
-        const key = `${airmanId || bdDigits}__${rowDateYmd}`;
+        const airmanId = String(row.matchedMember?.airman_id || '').trim();
+        const bdDigits = String(row.bdNo || row.matchedMember?.['BD No'] || '').replace(/\D/g, '');
+        const memberNameClean = String(row.matchedMember?.Surname || row.matchedMember?.Name || row.memberName || '').trim().toLowerCase();
+        const memberKey = airmanId || (bdDigits ? `bd_${bdDigits}` : `name_${memberNameClean}`);
+        const key = `${memberKey}__${rowDateYmd}`;
         if (!groupedByMemberDate.has(key)) {
           groupedByMemberDate.set(key, []);
         }
@@ -1774,15 +1815,19 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
       const importedMemberDateKeys = new Set<string>();
       rowsToImport.forEach(r => {
         const rowDateYmd = toYMDDate(r.date) || r.date;
-        const mAirman = String(r.matchedMember?.airman_id || r.matchedMember?.['BD No'] || '').toLowerCase().trim();
-        const mBd = String(r.matchedMember?.['BD No'] || r.bdNo || '').toLowerCase().trim();
-        const mDigits = String(r.bdNo || r.matchedMember?.airman_id || '').replace(/\D/g, '');
+        if (!rowDateYmd) return;
 
-        if (rowDateYmd) {
-          if (mAirman) importedMemberDateKeys.add(`${mAirman}__${rowDateYmd}`);
-          if (mBd) importedMemberDateKeys.add(`${mBd}__${rowDateYmd}`);
-          if (mDigits) importedMemberDateKeys.add(`digits_${mDigits}__${rowDateYmd}`);
-        }
+        const mAirman = String(r.matchedMember?.airman_id || '').toLowerCase().trim();
+        const mBd = String(r.matchedMember?.['BD No'] || r.bdNo || '').toLowerCase().trim();
+        const mDigits = String(r.bdNo || r.matchedMember?.airman_id || r.matchedMember?.['BD No'] || '').replace(/\D/g, '');
+        const mName = String(r.matchedMember?.Surname || r.matchedMember?.Name || r.memberName || '').toLowerCase().trim();
+        const mNameClean = mName.replace(/^(উইং কমাঃ|উইং কমান্ডার|স্কোয়াড্রন লিডার|ফ্লাইট লেফটেন্যান্ট|ফ্লাইং অফিসার|সুপারিন্টেন্ডেন্ট|ওয়ারেন্ট অফিসার|মাস্টার ওয়ারেন্ট অফিসার|কর্পোরাল|সার্জেন্ট|সিনিয়র ওয়ারেন্ট অফিসার|wg cdr|sqn ldr|flt lt|fg off|swo|mwo|wo|sgt|cpl|lac|ac)\.?\s*/i, '').trim();
+
+        if (mAirman) importedMemberDateKeys.add(`${mAirman}__${rowDateYmd}`);
+        if (mBd) importedMemberDateKeys.add(`${mBd}__${rowDateYmd}`);
+        if (mDigits && mDigits.length >= 3) importedMemberDateKeys.add(`digits_${mDigits}__${rowDateYmd}`);
+        if (mName) importedMemberDateKeys.add(`name_${mName}__${rowDateYmd}`);
+        if (mNameClean) importedMemberDateKeys.add(`name_${mNameClean}__${rowDateYmd}`);
       });
 
       // Filter existing transactions: Keep transactions that are NOT on the replaced (member, date)
@@ -1800,11 +1845,15 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         const txAirman = String(tx.airman_id || tx.member_id || '').toLowerCase().trim();
         const txBd = String(tx.bdNo || '').toLowerCase().trim();
         const txDigits = (tx.bdNo || tx.airman_id || '').toString().replace(/\D/g, '');
+        const txName = String(tx.memberName || tx.name || '').toLowerCase().trim();
+        const txNameClean = txName.replace(/^(উইং কমাঃ|উইং কমান্ডার|স্কোয়াড্রন লিডার|ফ্লাইট লেফটেন্যান্ট|ফ্লাইং অফিসার|সুপারিন্টেন্ডেন্ট|ওয়ারেন্ট অফিসার|মাস্টার ওয়ারেন্ট অফিসার|কর্পোরাল|সার্জেন্ট|সিনিয়র ওয়ারেন্ট অফিসার|wg cdr|sqn ldr|flt lt|fg off|swo|mwo|wo|sgt|cpl|lac|ac)\.?\s*/i, '').trim();
 
         const isMatch = (
           (txAirman && txDateYmd && importedMemberDateKeys.has(`${txAirman}__${txDateYmd}`)) ||
           (txBd && txDateYmd && importedMemberDateKeys.has(`${txBd}__${txDateYmd}`)) ||
-          (txDigits && txDateYmd && importedMemberDateKeys.has(`digits_${txDigits}__${txDateYmd}`))
+          (txDigits && txDigits.length >= 3 && txDateYmd && importedMemberDateKeys.has(`digits_${txDigits}__${txDateYmd}`)) ||
+          (txName && txDateYmd && importedMemberDateKeys.has(`name_${txName}__${txDateYmd}`)) ||
+          (txNameClean && txDateYmd && importedMemberDateKeys.has(`name_${txNameClean}__${txDateYmd}`))
         );
 
         if (isMatch) {
@@ -1838,15 +1887,26 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         const dayDiscount = rowsGroup.reduce((sum, r) => sum + r.discount, 0);
         const txDateStr = formatCanteenDate(first.date);
 
-        const soldItems = rowsGroup.map(r => ({
-          menuItemId: r.matchedMenuItem?.id || `item-${Date.now()}`,
-          menuItemName: r.menuItemName,
-          price: r.unitPrice,
-          qty: r.qty,
-          totalPrice: r.totalAmount
-        }));
-
-        const itemsSummary = rowsGroup.map(r => `${r.menuItemName} (${r.qty})`).join(', ');
+        // Aggregate food items on that day so each unique food item has one clean line
+        const itemAggMap = new Map<string, { menuItemId: string; menuItemName: string; price: number; qty: number; totalPrice: number }>();
+        rowsGroup.forEach(r => {
+          const normName = getMenuItemBanglaName(r.menuItemName) || formatItemNameBn(r.menuItemName) || r.menuItemName;
+          const existing = itemAggMap.get(normName);
+          if (existing) {
+            existing.qty += r.qty;
+            existing.totalPrice += r.totalAmount;
+          } else {
+            itemAggMap.set(normName, {
+              menuItemId: r.matchedMenuItem?.id || `item-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+              menuItemName: normName,
+              price: r.unitPrice,
+              qty: r.qty,
+              totalPrice: r.totalAmount
+            });
+          }
+        });
+        const soldItems = Array.from(itemAggMap.values());
+        const itemsSummary = soldItems.map(s => `${s.menuItemName} (${s.qty})`).join(', ');
 
         const tx = {
           id: `tx-sale-import-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,

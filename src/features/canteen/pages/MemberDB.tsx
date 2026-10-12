@@ -163,7 +163,12 @@ export const formatItemNameBn = (rawName?: string): string => {
     return 'Supply Item';
   }
 
-  if (/[\u0980-\u09FF]/.test(trimmed)) return trimmed;
+  if (/[\u0980-\u09FF]/.test(trimmed)) {
+    if (trimmed.includes('পরোটা প্রিমিয়াম') || trimmed.includes('পরোটা প্রিমিয়াম')) {
+      return trimmed.replace(/পরোটা\s*প্রিমি[য়াা]ম/g, 'পরোটা').trim();
+    }
+    return trimmed;
+  }
 
   const itemMap: Record<string, string> = {
     'COLD COFFEE': 'কোল্ড কফি',
@@ -201,10 +206,11 @@ export const formatItemNameBn = (rawName?: string): string => {
     'BISCUIT': 'নরমাল বিস্কুট',
     'ENERGY BISCUIT': 'এনার্জি বিস্কুট',
     'ONE TIME BOX': 'ওয়ান টাইম বক্স',
-    'PORATA': 'পরোটা প্রিমিয়াম',
+    'PORATA': 'পরোটা',
     'PORATA (HOTEL)': 'পরোটা হোটেল',
-    'PORATA (UNIT)': 'পরোটা প্রিমিয়াম',
-    'PORATA (PREMIUM)': 'পরোটা প্রিমিয়াম',
+    'PORATA (UNIT)': 'পরোটা',
+    'PORATA (PREMIUM)': 'পরোটা',
+    'PARATHA': 'পরোটা',
     'ROASTED CHICKEN': 'রোস্ট চিকেন',
     'BEEF BURGER': 'মিনি বার্গার',
     'CHICKEN BURGER': 'মিনি বার্গার',
@@ -2752,7 +2758,8 @@ export const MemberDB: React.FC<MemberDBProps> = ({
       // 1. If tx has structured soldItems array (from POS)
       if (Array.isArray(tx.soldItems) && tx.soldItems.length > 0) {
         tx.soldItems.forEach((si: any) => {
-          const name = String(si.menuItemName || si.name || 'ক্যান্টিন খাদ্যদ্রব্য').trim();
+          const rawName = String(si.menuItemName || si.name || 'ক্যান্টিন খাদ্যদ্রব্য').trim();
+          const name = formatItemNameBn(rawName) || rawName;
           const qty = Number(si.qty || si.quantity || 1);
           // Prioritize recorded purchase price so historical transactions stay accurate and match POS & DB Due!
           const recordedPrice = Number(si.price ?? si.rate ?? 0);
@@ -2780,7 +2787,8 @@ export const MemberDB: React.FC<MemberDBProps> = ({
       if (parts.length === 1) {
         const match = parts[0].match(/^(.+?)\s*\(([0-9]+)\)$/);
         if (match) {
-          const name = match[1].trim();
+          const rawName = match[1].trim();
+          const name = formatItemNameBn(rawName) || rawName;
           const qty = parseInt(match[2], 10) || 1;
           const total = Number(tx.amount || 0);
           let rate = lookupCatalogPrice(name, menuCatalog);
@@ -2797,9 +2805,12 @@ export const MemberDB: React.FC<MemberDBProps> = ({
           rec.total += finalTotal;
           if (rate > 0) rec.rates.push(rate);
         } else {
-          let name = parts[0].trim();
-          if (name.includes('Changed amount') || tx.isAmountChange) {
+          let rawName = parts[0].trim();
+          let name = rawName;
+          if (rawName.includes('Changed amount') || tx.isAmountChange) {
             name = `ক্যান্টিন বিল (${formatBengaliMonthYear(tx.monthKey || statementMonth)})`;
+          } else {
+            name = formatItemNameBn(rawName) || rawName;
           }
           const total = Number(tx.amount || 0);
           let rate = lookupCatalogPrice(name, menuCatalog);
@@ -2819,11 +2830,11 @@ export const MemberDB: React.FC<MemberDBProps> = ({
           const match = p.match(/^(.+?)\s*\(([0-9]+)\)$/);
           if (match) {
             const q = parseInt(match[2], 10) || 1;
-            const nm = match[1].trim();
+            const nm = formatItemNameBn(match[1].trim()) || match[1].trim();
             const r = lookupCatalogPrice(nm, menuCatalog);
             parsed.push({ name: nm, qty: q, rate: r });
           } else {
-            const nm = p.trim();
+            const nm = formatItemNameBn(p.trim()) || p.trim();
             const r = lookupCatalogPrice(nm, menuCatalog);
             parsed.push({ name: nm, qty: 1, rate: r });
           }
@@ -2855,7 +2866,8 @@ export const MemberDB: React.FC<MemberDBProps> = ({
           if (itemRate > 0) rec.rates.push(itemRate);
         });
       } else if (itemsStr.trim().length > 0 && Number(tx.amount || 0) > 0) {
-        const name = itemsStr.trim();
+        const rawName = itemsStr.trim();
+        const name = formatItemNameBn(rawName) || rawName;
         const total = Number(tx.amount || 0);
         let rate = lookupCatalogPrice(name, menuCatalog);
         if (rate <= 0) rate = total;
