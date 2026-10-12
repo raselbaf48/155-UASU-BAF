@@ -57,8 +57,8 @@ export function isGenericCanteenBill(rawName?: string): boolean {
   );
 }
 
-// SutonnyMJ serif font fallback chain for authentic Bengali typography
-export const BENGALI_SUTONNY_FONT = '"SuttonyMJ", "SutonnyMJ", "SutonnyOMJ", "Sutonny MJ", "Noto Serif Bengali", "Tiro Bangla", "SolaimanLipi", "Kalpurush", serif';
+// Bengali and English serif typography font fallback chain
+export const BENGALI_SUTONNY_FONT = '"Noto Serif Bengali", "Tiro Bangla", "SolaimanLipi", "Kalpurush", "Hind Siliguri", "Inter", sans-serif';
 
 /**
  * Generates an exact high-resolution canvas matching Pic 2.
@@ -496,7 +496,10 @@ export function generateStatementCanvas(data: StatementCanvasData): HTMLCanvasEl
     if (data.othersBreakdown && data.othersBreakdown.length > 0) {
       data.othersBreakdown.forEach((b) => {
         if (b.amount > 0) {
-          drawSummaryRow(b.category, `৳${toBengaliNum(b.amount)}`, '#000000');
+          const rawCat = String(b.category || '').trim();
+          const isSupply = rawCat.toLowerCase() === 'supply items' || rawCat.toLowerCase() === 'supply item';
+          const displayCat = isSupply ? 'Supply Item' : rawCat;
+          drawSummaryRow(displayCat, `৳${toBengaliNum(b.amount)}`, '#000000');
         }
       });
     } else if (othersFundBill > 0) {

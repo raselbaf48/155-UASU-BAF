@@ -40,6 +40,8 @@ import {
   normalizeCatalogKey,
   sortCanteenMenuItems
 } from '../utils/canteenMenuData';
+import { formatItemNameBn } from './MemberDB';
+import { toBengaliNum } from '../utils/exportCanteenBillExcel';
 
 const isOfficerMember = (m: any): boolean => {
   const r = String(m?.Rank || m?.rank || '').toUpperCase().trim();
@@ -171,7 +173,15 @@ export const PosSales: React.FC = () => {
   const [historyFilterType, setHistoryFilterType] = useState<'ALL' | 'TODAY'>('ALL');
   const [historyDateFilter, setHistoryDateFilter] = useState(() => getTodayYMD());
   const [toastMessage, setToastMessage] = useState('');
-  const [salesHistory, setSalesHistory] = useState<any[]>([]);
+  const [salesHistory, setSalesHistory] = useState<any[]>(() => {
+    try {
+      const history = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+      const deletedIds = getDeletedTxIds();
+      return history.filter((tx: any) => isSaleTransaction(tx) && !deletedIds.has(String(tx?.id)));
+    } catch {
+      return [];
+    }
+  });
   const [txDeleteConfirmId, setTxDeleteConfirmId] = useState<string | null>(null);
   const [deleteSuccessData, setDeleteSuccessData] = useState<{ desc: string; amount: number } | null>(null);
   
@@ -1088,6 +1098,131 @@ export const PosSales: React.FC = () => {
     });
   }, [sortedMembers, memberRankFilter, memberSearchTerm]);
 
+  // Purchases on currently selected saleDate for each member
+  const memberPurchasesOnSelectedDate = useMemo(() => {
+    const map = new Map<string, string>();
+    if (!saleDate || !Array.isArray(salesHistory) || salesHistory.length === 0) {
+      return map;
+    }
+
+    const targetYMD = toYMDDate(saleDate);
+    if (!targetYMD) return map;
+
+    // Filter sales for the target sale date
+    const dateSales = salesHistory.filter((tx: any) => {
+      if (!isSaleTransaction(tx)) return false;
+      const txYMD = toYMDDate(tx.date || tx.paymentDate || tx.timestamp || tx.created_at || (typeof tx.id === 'number' ? tx.id : undefined));
+      return txYMD === targetYMD;
+    });
+
+    if (dateSales.length === 0) return map;
+
+    // Group items by member (using airman_id, bdNo, and normalized digits)
+    const memberItemsMap = new Map<string, Map<string, number>>();
+
+    const getKeys = (tx: any): string[] => {
+      const keys: string[] = [];
+      if (tx.airman_id) {
+        keys.push(String(tx.airman_id).trim().toLowerCase());
+      }
+      if (tx.bdNo) {
+        keys.push(String(tx.bdNo).trim().toLowerCase());
+        const digits = String(tx.bdNo).replace(/\D/g, '');
+        if (digits) keys.push(`bd_${digits}`);
+      }
+      return keys;
+    };
+
+    dateSales.forEach((tx: any) => {
+      const txKeys = getKeys(tx);
+      if (txKeys.length === 0) return;
+
+      // Find or create map for this member
+      let itemsMap: Map<string, number> | null = null;
+      for (const k of txKeys) {
+        if (memberItemsMap.has(k)) {
+          itemsMap = memberItemsMap.get(k)!;
+          break;
+        }
+      }
+      if (!itemsMap) {
+        itemsMap = new Map<string, number>();
+      }
+      for (const k of txKeys) {
+        memberItemsMap.set(k, itemsMap);
+      }
+
+      if (Array.isArray(tx.soldItems) && tx.soldItems.length > 0) {
+        tx.soldItems.forEach((si: any) => {
+          const rawName = String(si.menuItemName || si.name || si.itemName || '').trim();
+          if (!rawName) return;
+          const bnName = getMenuItemBanglaName(rawName) || formatItemNameBn(rawName) || rawName;
+          const qty = Number(si.qty || si.quantity || 1);
+          itemsMap!.set(bnName, (itemsMap!.get(bnName) || 0) + qty);
+        });
+      } else if (tx.items && typeof tx.items === 'string') {
+        const parts = tx.items.split(',').map((s: string) => s.trim()).filter(Boolean);
+        parts.forEach((p: string) => {
+          const match = p.match(/^(.+?)\s*\(([0-9]+)\)$/);
+          if (match) {
+            const rawName = match[1].trim();
+            const bnName = getMenuItemBanglaName(rawName) || formatItemNameBn(rawName) || rawName;
+            const q = parseInt(match[2], 10) || 1;
+            itemsMap!.set(bnName, (itemsMap!.get(bnName) || 0) + q);
+          } else {
+            const xMatch = p.match(/^(.+?)\s*[xX*×]\s*([0-9]+)$/);
+            if (xMatch) {
+              const rawName = xMatch[1].trim();
+              const bnName = getMenuItemBanglaName(rawName) || formatItemNameBn(rawName) || rawName;
+              const q = parseInt(xMatch[2], 10) || 1;
+              itemsMap!.set(bnName, (itemsMap!.get(bnName) || 0) + q);
+            } else {
+              const rawName = p.trim();
+              if (rawName) {
+                const bnName = getMenuItemBanglaName(rawName) || formatItemNameBn(rawName) || rawName;
+                itemsMap!.set(bnName, (itemsMap!.get(bnName) || 0) + 1);
+              }
+            }
+          }
+        });
+      }
+    });
+
+    // Generate formatted purchase summary string
+    const processedMaps = new Set<Map<string, number>>();
+    memberItemsMap.forEach((itemsMap) => {
+      if (processedMaps.has(itemsMap)) return;
+      processedMaps.add(itemsMap);
+      const parts: string[] = [];
+      itemsMap.forEach((qty, name) => {
+        parts.push(`${name} x ${toBengaliNum(qty)}`);
+      });
+      const summaryStr = parts.join(' , ');
+      memberItemsMap.forEach((mMap, k) => {
+        if (mMap === itemsMap) {
+          map.set(k, summaryStr);
+        }
+      });
+    });
+
+    return map;
+  }, [saleDate, salesHistory]);
+
+  const getPurchasedItemsForMember = (m: any): string => {
+    if (!m) return '';
+    const idKey = m.airman_id ? String(m.airman_id).trim().toLowerCase() : '';
+    const bdKey = m['BD No'] || m.bdNo ? String(m['BD No'] || m.bdNo).trim().toLowerCase() : '';
+    const digits = String(m['BD No'] || m.bdNo || m.airman_id || '').replace(/\D/g, '');
+    const digitsKey = digits ? `bd_${digits}` : '';
+
+    return (
+      (idKey && memberPurchasesOnSelectedDate.get(idKey)) ||
+      (bdKey && memberPurchasesOnSelectedDate.get(bdKey)) ||
+      (digitsKey && memberPurchasesOnSelectedDate.get(digitsKey)) ||
+      ''
+    );
+  };
+
   const toggleMember = (member: any) => {
     setSelectedMembers((prev) => {
       const exists = prev.some((sm) => sm.airman_id === member.airman_id);
@@ -1875,18 +2010,19 @@ export const PosSales: React.FC = () => {
                     <div className="flex flex-col space-y-2">
                       {filteredMembers.map((m, i) => {
                         const isSelected = selectedMembers.some((sm) => sm.airman_id === m.airman_id);
+                        const purchasedItemsText = getPurchasedItemsForMember(m);
                         return (
                           <div
                             key={m.airman_id || `norm_${m['BD No'] || i}_${i}`}
                             onClick={() => toggleMember(m)}
-                            className={`p-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 select-none active:scale-[0.99] ${
+                            className={`p-2.5 rounded-xl border transition-all cursor-pointer flex items-start justify-between gap-3 select-none active:scale-[0.99] ${
                               isSelected
                                 ? 'bg-indigo-950/60 border-indigo-500 shadow-md ring-1 ring-indigo-500/40'
                                 : 'bg-slate-900/60 border-slate-800/80 hover:border-slate-700 hover:bg-slate-900'
                             }`}
                           >
-                            <div className="flex items-center space-x-3 min-w-0 flex-1">
-                              <div className={`w-4.5 h-4.5 rounded-md flex items-center justify-center shrink-0 border transition-colors ${
+                            <div className="flex items-start space-x-3 min-w-0 flex-1">
+                              <div className={`w-4.5 h-4.5 rounded-md flex items-center justify-center shrink-0 border transition-colors mt-0.5 ${
                                 isSelected 
                                   ? 'bg-indigo-600 border-indigo-500 text-white' 
                                   : 'border-slate-700 bg-slate-950 text-transparent'
@@ -1907,11 +2043,24 @@ export const PosSales: React.FC = () => {
                                   <span className="text-slate-600">•</span>
                                   <span className="text-amber-400 font-bold">Due: ৳{m.Due || 0}</span>
                                 </div>
+
+                                {/* Food purchased on selected date: (যেমন: চিকেন বিরিয়ানি x ১ , রং চা x ২) */}
+                                {purchasedItemsText ? (
+                                  <div 
+                                    className="mt-1.5 flex items-center space-x-1.5 text-[11px] font-medium text-amber-300 bg-amber-950/50 border border-amber-500/30 rounded-lg px-2 py-0.5 max-w-full"
+                                    title={`Purchased on selected date: ${purchasedItemsText}`}
+                                  >
+                                    <span className="shrink-0 text-xs">🍽️</span>
+                                    <span className="truncate leading-tight">
+                                      {purchasedItemsText}
+                                    </span>
+                                  </div>
+                                ) : null}
                               </div>
                             </div>
 
                             {isSelected && basketTotal > 0 && (
-                              <span className="text-xs font-mono font-bold text-emerald-400 shrink-0 bg-emerald-950/60 px-2 py-0.5 rounded-lg border border-emerald-500/30">
+                              <span className="text-xs font-mono font-bold text-emerald-400 shrink-0 bg-emerald-950/60 px-2 py-0.5 rounded-lg border border-emerald-500/30 mt-0.5">
                                 +৳{Math.round(perMemberFinalAmount)}
                               </span>
                             )}

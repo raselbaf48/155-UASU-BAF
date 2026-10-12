@@ -4359,9 +4359,10 @@ export const MemberDB: React.FC<MemberDBProps> = ({
         itemsStrLower.includes('ইউনিট ফান্ড') || 
         itemsStrLower.includes('others') || 
         itemsStrLower.includes('অন্যান্য') ||
-        itemsStrLower.includes('supply item')
+        itemsStrLower.includes('supply item') ||
+        itemsStrLower.includes('supply items')
       ) {
-        const isOthers = cat === 'OTHERS' || itemsStrLower.includes('others') || itemsStrLower.includes('অন্যান্য') || itemsStrLower.includes('supply item');
+        const isOthers = cat === 'OTHERS' || itemsStrLower.includes('others') || itemsStrLower.includes('অন্যান্য') || itemsStrLower.includes('supply item') || itemsStrLower.includes('supply items');
         let name = itemsStr || (cat === 'UNIT_FUND' ? 'ইউনিট ফান্ড' : 'Supply Item');
         if (isOthers) {
           // Clean legacy "অন্যান্য (...)" or "Others (...)" wrapper so it preserves original category name (যেমন: Supply Item, বাজার)
@@ -4372,6 +4373,9 @@ export const MemberDB: React.FC<MemberDBProps> = ({
             if (!catName || catName.toLowerCase() === 'others' || catName.toLowerCase() === 'others bill' || catName === 'অন্যান্য' || catName === 'অন্যান্য বিল') {
               catName = 'Supply Item';
             }
+          }
+          if (catName.toLowerCase() === 'supply items' || catName.toLowerCase() === 'supply item') {
+            catName = 'Supply Item';
           }
 
           // Pic 3: Note thakle (er vetore asbe, multiple thakbe comma diye diye hbe)
@@ -4510,11 +4514,13 @@ export const MemberDB: React.FC<MemberDBProps> = ({
 
         let displayName = name;
         if (isNonCanteen) {
-          const notesArr = entry.categoryNotesMap?.get(name) || [];
+          const isSupplyItem = name.toLowerCase().includes('supply item') || name.toLowerCase().includes('supply items');
+          const cleanName = isSupplyItem ? 'Supply Item' : name;
+          const notesArr = entry.categoryNotesMap?.get(name) || (isSupplyItem ? entry.categoryNotesMap?.get('Supply Item') : []) || [];
           if (notesArr.length > 0) {
-            displayName = `${name} (${notesArr.join(', ')})`;
+            displayName = `${cleanName} (${notesArr.join(', ')})`;
           } else {
-            displayName = name;
+            displayName = cleanName;
           }
         } else {
           displayName = isGeneric ? `ক্যান্টিন বিল (${formatBengaliMonthYear(statementMonth)})` : formatItemNameBn(name);
@@ -4576,6 +4582,9 @@ export const MemberDB: React.FC<MemberDBProps> = ({
           catName = tx.purpose ? String(tx.purpose).replace(/^অন্যান্য\s*\((.*?)\)$/i, '$1').replace(/^Others\s*\((.*?)\)$/i, '$1').trim() : '';
         }
         if (!catName || catName.toLowerCase() === 'others' || catName.toLowerCase() === 'others bill' || catName === 'অন্যান্য' || catName === 'অন্যান্য বিল') {
+          catName = 'Supply Item';
+        }
+        if (catName.toLowerCase() === 'supply items' || catName.toLowerCase() === 'supply item') {
           catName = 'Supply Item';
         }
         const amt = Number(tx.amount || 0);
@@ -6299,7 +6308,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
             <div className="p-3 sm:p-6 pb-12 overflow-y-auto overflow-x-auto bg-slate-950/70 flex-1 print:p-0 print:bg-white print:overflow-visible">
               <div 
                 id="statement-paper-slip" 
-                style={{ fontFamily: "'SuttonyMJ', 'SutonnyMJ', 'SutonnyOMJ', 'Sutonny MJ', 'Noto Serif Bengali', 'Tiro Bangla', 'SolaimanLipi', 'Kalpurush', serif" }}
+                style={{ fontFamily: "'Noto Serif Bengali', 'Tiro Bangla', 'SolaimanLipi', 'Kalpurush', 'Hind Siliguri', 'Inter', system-ui, serif" }}
                 className="bg-white rounded-2xl p-6 sm:p-8 pb-8 sm:pb-10 text-black w-full max-w-lg mx-auto shadow-2xl border border-slate-200/90 print:border-none print:shadow-none print:rounded-none my-2 sm:my-4 transition-all"
               >
                 
@@ -6527,21 +6536,28 @@ export const MemberDB: React.FC<MemberDBProps> = ({
 
                         {/* Category-wise Breakdown (যেমন: বাজার, Supply Item ইত্যাদি - শুধুমাত্র ITEM মোডে) */}
                         {othersFundBreakdown.length > 0 ? (
-                          othersFundBreakdown.map((b, bIdx) => (
-                            <tr key={`other-cat-row-${bIdx}`} className="bg-white">
-                              <td className="border border-black p-3 text-right font-black bg-white" colSpan={3}>
-                                {b.category}
-                              </td>
-                              <td className="border border-black p-3 text-center font-black bg-white">
-                                ৳{toBengaliNum(b.amount)}
-                              </td>
-                            </tr>
-                          ))
+                          othersFundBreakdown.map((b, bIdx) => {
+                            const isSupply = b.category.toLowerCase().includes('supply item') || b.category.toLowerCase().includes('supply items');
+                            return (
+                              <tr key={`other-cat-row-${bIdx}`} className="bg-white">
+                                <td className="border border-black p-3 text-right font-black bg-white" colSpan={3}>
+                                  {isSupply ? (
+                                    <span className="font-sans font-black">Supply Item</span>
+                                  ) : (
+                                    b.category
+                                  )}
+                                </td>
+                                <td className="border border-black p-3 text-center font-black bg-white">
+                                  ৳{toBengaliNum(b.amount)}
+                                </td>
+                              </tr>
+                            );
+                          })
                         ) : (
                           othersFundBill > 0 && (
                             <tr className="bg-white">
                               <td className="border border-black p-3 text-right font-black bg-white" colSpan={3}>
-                                Supply Item
+                                <span className="font-sans font-black">Supply Item</span>
                               </td>
                               <td className="border border-black p-3 text-center font-black bg-white">
                                 ৳{toBengaliNum(othersFundBill)}
