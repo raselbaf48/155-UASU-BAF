@@ -210,10 +210,10 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
             const sorted = sortCanteenMenuItems(deduped);
             setItems(sorted);
         } else {
-            console.error('Failed or empty fetch:', error);
+            console.warn('Canteen_Menu DB fetch note:', error);
         }
     } catch (err) {
-        console.error('Exception fetching items:', err);
+        console.warn('Exception fetching items note:', err);
     }
   };
 
@@ -684,9 +684,12 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       }
 
       // Save to local cache & localStorage
+      if (newItem.nameBn?.trim()) {
+        saveMenuItemBanglaName({ id: targetId, name: newItem.name.trim() }, newItem.nameBn.trim());
+      }
       setCanteenMenuCache(updatedMenu);
       localStorage.setItem('canteen_menu_items_list', JSON.stringify(updatedMenu));
-      pushKeyToCloud('canteen_daily_menu', updatedMenu).catch(() => {});
+      queuePushKeyToCloud('canteen_menu_items_catalog_v1', updatedMenu);
 
       // Recalculate past transactions in canteen_txs so statements & history reflect new menu prices
       try {

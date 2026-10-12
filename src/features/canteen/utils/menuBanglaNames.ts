@@ -205,7 +205,7 @@ export function getMenuItemBanglaName(itemOrName: any): string {
  * persists to localStorage, dispatches update event, and pushes to Cloud.
  */
 export async function saveMenuItemBanglaName(
-  identifier: { id?: string; name: string },
+  identifier: string | { id?: string; name: string },
   nameBn: string
 ): Promise<void> {
   const trimmedBn = String(nameBn || '').trim();
@@ -215,13 +215,16 @@ export async function saveMenuItemBanglaName(
     if (raw) currentMap = JSON.parse(raw);
   } catch {}
 
-  const normName = normalizeKey(identifier.name);
+  const rawName = typeof identifier === 'string' ? identifier : (identifier?.name || '');
+  const rawId = typeof identifier === 'object' && identifier ? identifier.id : undefined;
+  const normName = normalizeKey(rawName);
 
   if (trimmedBn) {
-    if (identifier.id) currentMap[identifier.id] = trimmedBn;
+    if (rawId) currentMap[String(rawId)] = trimmedBn;
     if (normName) currentMap[normName] = trimmedBn;
+    if (rawName && rawName.trim()) currentMap[rawName.trim()] = trimmedBn;
   } else {
-    if (identifier.id) delete currentMap[identifier.id];
+    if (rawId) delete currentMap[String(rawId)];
     if (normName) delete currentMap[normName];
   }
 

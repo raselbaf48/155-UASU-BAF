@@ -49,6 +49,7 @@ export const CANTEEN_CLOUD_KEYS = [
   'canteen_expense_last_unit_prices',
   'canteen_recent_members',
   'canteen_raw_inventory_items_v2',
+  'canteen_menu_items_catalog_v1',
   'canteen_bill_import_history',
   'canteen_member_seniority',
   'canteen_menu_bangla_names',
@@ -836,6 +837,9 @@ function dispatchKeyUpdateEvent(key: string) {
       case 'canteen_raw_inventory_items_v2':
         window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
         break;
+      case 'canteen_menu_items_catalog_v1':
+        window.dispatchEvent(new Event('canteen_menu_updated'));
+        break;
       case 'canteen_daily_menu':
       case 'canteen_daily_menu_updated_at':
         window.dispatchEvent(new Event('canteen_daily_menu_updated'));
@@ -941,6 +945,10 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
           if (key === 'canteen_raw_inventory_items_v2') {
             const { deduplicated } = deduplicateRawItems([...localVal, ...cloudVal]);
             finalVal = deduplicated;
+          } else if (key === 'canteen_menu_items_catalog_v1') {
+            const mergedMenu = deduplicateCanteenMenuItems([...(Array.isArray(localVal) ? localVal : []), ...(Array.isArray(cloudVal) ? cloudVal : [])]);
+            finalVal = mergedMenu;
+            setCanteenMenuCache(mergedMenu);
           } else if (key === 'canteen_daily_menu') {
             const localUpdated = typeof window !== 'undefined' ? localStorage.getItem('canteen_daily_menu_updated_at') : null;
             const cloudUpdated = cloudKeyMap.get('canteen_daily_menu_updated_at');
@@ -1444,8 +1452,12 @@ export function initCanteenCloudSync(): () => void {
             let mergedVal = parsed;
             if (Array.isArray(parsed) && Array.isArray(currentLocal)) {
               if (key === 'canteen_raw_inventory_items_v2') {
-                const { deduplicated } = deduplicateRawItems([...parsed, ...currentLocal]);
+                const { deduplicated } = deduplicateRawItems([...currentLocal, ...parsed]);
                 mergedVal = deduplicated;
+              } else if (key === 'canteen_menu_items_catalog_v1') {
+                const mergedMenu = deduplicateCanteenMenuItems([...(Array.isArray(currentLocal) ? currentLocal : []), ...(Array.isArray(parsed) ? parsed : [])]);
+                mergedVal = mergedMenu;
+                setCanteenMenuCache(mergedMenu);
               } else if (key === 'canteen_daily_menu') {
                 const localUpdated = typeof window !== 'undefined' ? localStorage.getItem('canteen_daily_menu_updated_at') : null;
                 const localTime = new Date(localUpdated || 0).getTime();
@@ -1611,6 +1623,12 @@ export function initCanteenCloudSync(): () => void {
   const handleLocalStockLogs = () => queuePushKeyToCloud('canteen_raw_stock_logs_v2');
   const handleLocalRawInventory = () => queuePushKeyToCloud('canteen_raw_inventory_items_v2');
   const handleLocalBillHistory = () => queuePushKeyToCloud('canteen_bill_import_history');
+  const handleLocalMenuCatalog = () => {
+    try {
+      const raw = localStorage.getItem('canteen_menu_items_list');
+      if (raw) queuePushKeyToCloud('canteen_menu_items_catalog_v1', JSON.parse(raw));
+    } catch {}
+  };
   const handleLocalSettings = (e: any) => {
     if (e?.detail) {
       queuePushKeyToCloud('baf_canteen_settings_v1', e.detail);
@@ -1640,6 +1658,7 @@ export function initCanteenCloudSync(): () => void {
   window.addEventListener('canteen_raw_inventory_updated', handleLocalRawInventory);
   window.addEventListener('canteen_daily_menu_updated', handleLocalDailyMenu);
   window.addEventListener('canteen_bill_import_history_updated', handleLocalBillHistory);
+  window.addEventListener('canteen_menu_updated', handleLocalMenuCatalog);
   window.addEventListener('canteen_settings_updated', handleLocalSettings);
 
   // 10-Second interval:
@@ -1684,6 +1703,7 @@ export function initCanteenCloudSync(): () => void {
     window.removeEventListener('visibilitychange', handleVisibilityChange);
     window.removeEventListener('beforeunload', handleBeforeUnload);
     window.removeEventListener('canteen_daily_menu_updated', handleLocalDailyMenu);
+    window.removeEventListener('canteen_menu_updated', handleLocalMenuCatalog);
     isInitialized = false;
   };
 }

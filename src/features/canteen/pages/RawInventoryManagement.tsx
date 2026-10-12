@@ -881,6 +881,41 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
   const lastSavedLogsJsonRef = useRef<string>('');
   const isSelfDispatchingRef = useRef<boolean>(false);
 
+  // Offline queue helper for resilient Canteen_Inventory syncing
+  const enqueueOfflineInventorySync = (itemPayload: any) => {
+    try {
+      const raw = localStorage.getItem('canteen_inventory_offline_sync_queue');
+      const queue: any[] = raw ? JSON.parse(raw) : [];
+      const existingIdx = queue.findIndex(q => q.id === itemPayload.id);
+      if (existingIdx >= 0) {
+        queue[existingIdx] = itemPayload;
+      } else {
+        queue.push(itemPayload);
+      }
+      localStorage.setItem('canteen_inventory_offline_sync_queue', JSON.stringify(queue));
+    } catch (err) {
+      console.warn('Failed to queue offline inventory item:', err);
+    }
+  };
+
+  const flushOfflineInventoryQueue = async () => {
+    try {
+      const raw = localStorage.getItem('canteen_inventory_offline_sync_queue');
+      if (!raw) return;
+      const queue: any[] = JSON.parse(raw);
+      if (!Array.isArray(queue) || queue.length === 0) return;
+
+      const { error } = await supabase.from('Canteen_Inventory').upsert(queue, { onConflict: 'id' });
+      if (!error) {
+        localStorage.removeItem('canteen_inventory_offline_sync_queue');
+      } else if (error.code !== 'PGRST_OFFLINE') {
+        console.warn('Offline queue flush note:', error.message || error);
+      }
+    } catch {
+      // Retained in queue for next online reconnection
+    }
+  };
+
   // Initialize cached strings
   if (!lastSavedItemsJsonRef.current && items && items.length > 0) {
     lastSavedItemsJsonRef.current = JSON.stringify(items);
@@ -936,15 +971,19 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
             const currentMap = new Map((Array.isArray(prev) ? prev : []).map(p => [p.id, p]));
             const resolvedMapped = mapped.map(m => {
               const current = currentMap.get(m.id);
-              if (current && (current.itemType === 'RAW' || current.itemType === 'READY_MADE')) {
+              if (current) {
                 return {
                   ...m,
-                  itemType: current.itemType
+                  itemType: current.itemType || m.itemType,
+                  packSize: (current.packSize && current.packSize > 0) ? current.packSize : m.packSize,
+                  subUnit: current.subUnit || m.subUnit,
+                  hasSubUnits: current.hasSubUnits !== undefined ? current.hasSubUnits : m.hasSubUnits
                 };
               }
               return m;
             });
-            const combined = [...INITIAL_RAW_ITEMS, ...(Array.isArray(prev) ? prev : []), ...resolvedMapped];
+            const baseItems = (Array.isArray(prev) && prev.length > 0) ? prev : INITIAL_RAW_ITEMS;
+            const combined = [...baseItems, ...resolvedMapped];
             const { deduplicated } = deduplicateRawItems(combined);
             const dedupJson = JSON.stringify(deduplicated);
             if (dedupJson === lastSavedItemsJsonRef.current) {
@@ -962,6 +1001,12 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
       }
     };
     fetchFromDb();
+    flushOfflineInventoryQueue();
+
+    const handleOnline = () => {
+      flushOfflineInventoryQueue();
+    };
+    window.addEventListener('online', handleOnline);
 
     // Realtime listener for Canteen_Inventory with unique channel name
     const channelName = `raw_inventory_realtime_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -969,10 +1014,12 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
       .channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'Canteen_Inventory' }, () => {
         fetchFromDb();
+        flushOfflineInventoryQueue();
       })
       .subscribe();
 
     return () => {
+      window.removeEventListener('online', handleOnline);
       supabase.removeChannel(channel);
     };
   }, []);
@@ -1379,7 +1426,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
 
           const packSize = (!hasSubUnits)
             ? 1
-            : (Number(newItemData.packSize) > 1 ? Number(newItemData.packSize) : (isKg || isLtr ? 1000 : isCase ? 30 : isCyl ? 12 : 100));
+            : (Number(newItemData.packSize) > 0 ? Number(newItemData.packSize) : (isKg || isLtr ? 1000 : isCase ? 30 : isCyl ? 12 : 100));
 
           const subUnit = (!hasSubUnits)
             ? undefined
@@ -1448,7 +1495,18 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
           };
           supabase.from('Canteen_Inventory').upsert([dbItem], { onConflict: 'id' })
             .then(({ error }) => {
-              if (error) console.error('Failed to sync updated item to Canteen_Inventory:', error);
+              if (error) {
+                enqueueOfflineInventorySync(dbItem);
+                if (error.code === 'PGRST_OFFLINE' || error.message?.includes('offline') || error.message?.includes('unreachable')) {
+                  console.warn('Canteen_Inventory is temporarily offline; updated item safely preserved in offline sync queue:', error.message);
+                } else {
+                  console.warn('Note syncing updated item to Canteen_Inventory:', error);
+                }
+              }
+            })
+            .catch(err => {
+              enqueueOfflineInventorySync(dbItem);
+              console.warn('Network issue syncing updated item to Canteen_Inventory:', err);
             });
 
           return updated;
@@ -1514,7 +1572,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
 
       const packSize = (!hasSubUnits)
         ? 1
-        : (Number(newItemData.packSize) > 1 ? Number(newItemData.packSize) : (isKg || isLtr ? 1000 : isCase ? 30 : isCyl ? 12 : 100));
+        : (Number(newItemData.packSize) > 0 ? Number(newItemData.packSize) : (isKg || isLtr ? 1000 : isCase ? 30 : isCyl ? 12 : 100));
 
       const subUnit = (!hasSubUnits)
         ? undefined
@@ -1577,7 +1635,18 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
       };
       supabase.from('Canteen_Inventory').upsert([newDbItem], { onConflict: 'id' })
         .then(({ error }) => {
-          if (error) console.error('Failed to sync new item to Canteen_Inventory:', error);
+          if (error) {
+            enqueueOfflineInventorySync(newDbItem);
+            if (error.code === 'PGRST_OFFLINE' || error.message?.includes('offline') || error.message?.includes('unreachable')) {
+              console.warn('Canteen_Inventory is temporarily offline; new item safely preserved in offline sync queue:', error.message);
+            } else {
+              console.warn('Note syncing new item to Canteen_Inventory:', error);
+            }
+          }
+        })
+        .catch(err => {
+          enqueueOfflineInventorySync(newDbItem);
+          console.warn('Network issue syncing new item to Canteen_Inventory:', err);
         });
 
       // Add log
@@ -1698,7 +1767,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
 
     const defaultSubForUnit = isKg ? 'gm' : (isLtr ? 'ml' : (isCase ? 'pcs' : (isCyl ? 'kg' : 'pcs')));
     const defaultPackSizeForUnit = isKg || isLtr ? 1000 : (isCase ? 30 : (isCyl ? 12 : (isPkt ? 24 : 100)));
-    const activePackSize = item.packSize && item.packSize > 1 ? item.packSize : defaultPackSizeForUnit;
+    const activePackSize = item.packSize && item.packSize > 0 ? item.packSize : defaultPackSizeForUnit;
     const activeSubUnit = (item.subUnit && item.subUnit.toLowerCase().trim() !== u) ? item.subUnit : defaultSubForUnit;
 
     setNewItemData({
@@ -1762,7 +1831,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
       setShowAddModal(false);
       setEditingItem(null);
     } catch (err) {
-      console.error('Error deleting raw item:', err);
+      console.warn('Error deleting raw item note:', err);
     } finally {
       setIsDeletingItem(false);
     }
@@ -1821,7 +1890,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
         window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
       }, 0);
     } catch (e) {
-      console.error('Failed to quick update DP:', e);
+      console.warn('Failed to quick update DP note:', e);
     } finally {
       setIsUpdatingDp(false);
       setQuickDpItem(null);

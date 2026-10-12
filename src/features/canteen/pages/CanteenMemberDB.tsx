@@ -1030,7 +1030,7 @@ export const CanteenMemberDB: React.FC = () => {
             .upsert([supabasePayload], { onConflict: 'airman_id' });
 
           if (upsertErr) {
-            console.error('Supabase Canteen_Member background sync error:', upsertErr);
+            console.warn('Supabase Canteen_Member background sync note:', upsertErr);
           }
 
           // Also keep Canteen table in sync if present

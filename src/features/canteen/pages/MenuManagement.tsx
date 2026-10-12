@@ -179,7 +179,7 @@ export const MenuManagement: React.FC = () => {
       setItems(updated);
       localStorage.setItem('canteen_menu_items_list', JSON.stringify(updated));
       setCanteenMenuCache(updated);
-      saveMenuItemBanglaName(nameEn, nameBn);
+      saveMenuItemBanglaName({ id: editingItem.id, name: nameEn }, nameBn);
 
       // Recalculate and update past transactions in canteen_txs in real-time
       try {
@@ -248,18 +248,21 @@ export const MenuManagement: React.FC = () => {
 
       // Sync updated menu item to Cloud & Supabase
       queuePushKeyToCloud('canteen_daily_menu');
+      queuePushKeyToCloud('canteen_menu_items_catalog_v1', updated);
       supabase.from('Canteen_Menu').upsert({
         id: editingItem.id,
         name: nameEn,
-        name_en: nameEn,
         name_bn: nameBn,
-        'Name (BN)': nameBn,
         price: priceNum,
         stock: maxNum,
         DP: dpTrimmed,
         category: editingItem.meal || 'SNACKS',
         updated_at: new Date().toISOString()
-      }).then(() => {});
+      }, { onConflict: 'id' })
+      .then(({ error }) => {
+        if (error) console.warn('Canteen_Menu upsert note:', error.message);
+      })
+      .catch(err => console.warn('Canteen_Menu network note:', err));
 
       // Instant global real-time notifications
       window.dispatchEvent(new CustomEvent('canteen_menu_updated', { detail: updated }));
@@ -306,22 +309,26 @@ export const MenuManagement: React.FC = () => {
       setItems(updated);
       localStorage.setItem('canteen_menu_items_list', JSON.stringify(updated));
       setCanteenMenuCache(updated);
-      saveMenuItemBanglaName(nameEn, nameBn);
+      saveMenuItemBanglaName({ id: newItem.id, name: nameEn }, nameBn);
 
       // Cloud sync
       queuePushKeyToCloud('canteen_daily_menu');
+      queuePushKeyToCloud('canteen_menu_items_catalog_v1', updated);
       supabase.from('Canteen_Menu').insert({
         id: newItem.id,
         name: newItem.name_en,
-        name_en: newItem.name_en,
         name_bn: newItem.name_bn,
-        'Name (BN)': newItem.name_bn,
         price: newItem.price,
         stock: newItem.max,
         DP: newItem.DP,
         category: 'SNACKS',
-        created_at: newItem.created_at
-      }).then(() => {});
+        created_at: newItem.created_at,
+        updated_at: new Date().toISOString()
+      })
+      .then(({ error }) => {
+        if (error) console.warn('Canteen_Menu insert note:', error.message);
+      })
+      .catch(err => console.warn('Canteen_Menu insert network note:', err));
 
       // Instant global real-time notifications
       window.dispatchEvent(new CustomEvent('canteen_menu_updated', { detail: updated }));

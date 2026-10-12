@@ -312,14 +312,19 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
               if (local) {
                 const localTime = local.updated_at ? new Date(local.updated_at).getTime() : 0;
                 const serverTime = it.updated_at ? new Date(it.updated_at).getTime() : 0;
-                // Preserve local changes if updated in last 30s and server hasn't caught up
-                if (localTime > serverTime && now - localTime < 30000) {
+                // Preserve local changes if local timestamp is newer than server
+                if (localTime > serverTime) {
                   return local;
                 }
               }
-              const bn = it.name_bn || it.nameBn || it['Name (BN)'] || getMenuItemBanglaName(it) || local?.name_bn || '';
+              const localBn = local?.name_bn || local?.nameBn || local?.['Name (BN)'];
+              const bn = it.name_bn || it.nameBn || it['Name (BN)'] || localBn || getMenuItemBanglaName(it) || '';
+              const localName = local?.name || local?.name_en;
+              const name = it.name || it.name_en || localName || '';
               return {
                 ...it,
+                name,
+                name_en: name,
                 name_bn: bn,
                 nameBn: bn,
                 'Name (BN)': bn
@@ -369,13 +374,18 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
           if (local) {
             const localTime = local.updated_at ? new Date(local.updated_at).getTime() : 0;
             const serverTime = it.updated_at ? new Date(it.updated_at).getTime() : 0;
-            if (localTime > serverTime && now - localTime < 30000) {
+            if (localTime > serverTime) {
               return local;
             }
           }
-          const bn = it.name_bn || it.nameBn || it['Name (BN)'] || getMenuItemBanglaName(it) || local?.name_bn || '';
+          const localBn = local?.name_bn || local?.nameBn || local?.['Name (BN)'];
+          const bn = it.name_bn || it.nameBn || it['Name (BN)'] || localBn || getMenuItemBanglaName(it) || '';
+          const localName = local?.name || local?.name_en;
+          const name = it.name || it.name_en || localName || '';
           return {
             ...it,
+            name,
+            name_en: name,
             name_bn: bn,
             nameBn: bn,
             'Name (BN)': bn

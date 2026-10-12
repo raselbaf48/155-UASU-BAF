@@ -84,6 +84,26 @@ function formatShortBengaliDate(day: number, monthIndex: number, year: number): 
   return `${toBengaliNum(day)} ${shortMon} ${shortYr}`;
 }
 
+/**
+ * Determines whether a date is a holiday/weekend:
+ * 1. Checks baf_removed_holidays (if marked as working day override)
+ * 2. Checks official Bangladesh / BAF weekend: Friday (5) & Saturday (6)
+ * 3. Checks baf_custom_holidays / baf_canteen_holidays (official public/special holidays)
+ */
+function isCanteenHolidayDate(dateYmd: string, dObj?: Date): boolean {
+  let customHolidays: string[] = [];
+  let removedHolidays: string[] = [];
+  try {
+    customHolidays = JSON.parse(localStorage.getItem('baf_custom_holidays') || '[]');
+    removedHolidays = JSON.parse(localStorage.getItem('baf_removed_holidays') || '[]');
+  } catch {}
+  if (removedHolidays.includes(dateYmd)) return false;
+  const targetDate = dObj || new Date(dateYmd);
+  const dayOfWeek = targetDate.getDay();
+  const isWeekend = dayOfWeek === 5 || dayOfWeek === 6; // Friday / Saturday in BD
+  return isWeekend || customHolidays.includes(dateYmd);
+}
+
 function parseDateWiseMatrixDate(dateStr: any, fallbackYear = 2026, fallbackMonth = 10): string {
   if (!dateStr) return '';
   const str = banglaToEnglishDigits(String(dateStr)).trim();
@@ -168,14 +188,15 @@ function applyExcelTableStyles(
         }
 
         const isEvenDataRow = (R - headerRowIdx) % 2 === 0;
-        const rowBgColor = isHeaderRow 
+        const isWhiteCell = (R + C) % 2 === 0;
+        const cellBgColor = isHeaderRow 
           ? '64748B' 
-          : (isEvenDataRow ? 'FFFFFF' : 'CBD5E1');
+          : (isWhiteCell ? 'FFFFFF' : 'CBD5E1');
 
         cell.s = {
           font: {
-            name: 'Calibri',
-            sz: 11,
+            name: 'SutonnyMJ',
+            sz: 16,
             bold: isHeaderRow,
             color: { rgb: isHeaderRow ? 'FFFFFF' : '000000' }
           },
@@ -185,14 +206,14 @@ function applyExcelTableStyles(
             wrapText: true
           },
           border: thinBlackBorder,
-          fill: { fgColor: { rgb: rowBgColor } }
+          fill: { fgColor: { rgb: cellBgColor } }
         };
       } else if (cell && C >= startColIdx) {
         // Cells above table (e.g. member banner B1:C3)
         cell.s = {
           font: {
-            name: 'Calibri',
-            sz: 11,
+            name: 'SutonnyMJ',
+            sz: 16,
             bold: C === startColIdx, // B column labels bold
             color: { rgb: '000000' }
           },
@@ -229,8 +250,8 @@ async function downloadExcelWithNativeFreeze(
       const fileEntry = zip.file(fileName);
       if (fileEntry) {
         let content = await fileEntry.async('string');
-        if (content.includes('<sheetViews>')) {
-          content = content.replace(/<sheetViews>[\s\S]*?<\/sheetViews>/, paneXml);
+        if (content.includes('<sheetViews')) {
+          content = content.replace(/<sheetViews[^>]*>[\s\S]*?<\/sheetViews>|<sheetViews[^>]*\/>/, paneXml);
         } else {
           content = content.replace(/(<worksheet[^>]*>)/, `$1${paneXml}`);
         }
@@ -650,9 +671,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
 
           const rawBd = String(m['BD No'] || m.bdNo || m.airman_id || '').trim();
           const cleanDigits = rawBd.replace(/\D/g, '');
-          const bdDisplay = cleanDigits 
-            ? (rawBd.toUpperCase().startsWith('BD') ? rawBd : `BD/${cleanDigits}`) 
-            : (rawBd || '');
+          const bdDisplay = cleanDigits ? cleanDigits : rawBd.replace(/^BD[\/\-\s]*/i, '').trim();
 
           const rowData = [
             '',
@@ -690,19 +709,31 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
 
         const worksheet = XLSX.utils.aoa_to_sheet(rows);
 
-        // Freeze BOTH header Row 5 AND leading member Columns (A..E) so they stay visible when scrolling
-        worksheet['!views'] = [{ state: 'frozen', ySplit: 5, xSplit: 5, activePane: 'bottomRight' }];
-        worksheet['!freeze'] = { xSplit: 5, ySplit: 5 };
+        // Freeze E Column (Columns A..E) and Row 5 (Rows 1..5) so member names & header stay locked
+        worksheet['!views'] = [{ state: 'frozen', ySplit: 5, xSplit: 5, topLeftCell: 'F6', activePane: 'bottomRight' }];
+        worksheet['!freeze'] = { xSplit: 5, ySplit: 5, topLeftCell: 'F6' };
 
-        // Set column widths (Last column 'মোট বিল' removed)
+        // Set column widths formatted for SutonnyMJ 16
         worksheet['!cols'] = [
-          { wch: 3 },  // Col A
-          { wch: 10 }, // ক্রমিক নং
-          { wch: 13 }, // বিডি নং
-          { wch: 14 }, // পদবী
-          { wch: 18 }, // নাম
-          ...allMemberFoodCols.map(() => ({ wch: 12 }))
+          { wch: 4 },  // Col A
+          { wch: 12 }, // ক্রমিক নং
+          { wch: 14 }, // বিডি নং
+          { wch: 16 }, // পদবী
+          { wch: 22 }, // নাম
+          ...allMemberFoodCols.map(() => ({ wch: 15 }))
         ];
+
+        const officialWsRows: any[] = [];
+        officialWsRows[0] = { hpt: 18 };
+        officialWsRows[1] = { hpt: 26 };
+        officialWsRows[2] = { hpt: 26 };
+        officialWsRows[3] = { hpt: 16 };
+        officialWsRows[4] = { hpt: 30 }; // Header Row 5
+        for (let r = 5; r < rows.length - 1; r++) {
+          officialWsRows[r] = { hpt: 26 };
+        }
+        officialWsRows[rows.length - 1] = { hpt: 28 }; // Total footer row
+        worksheet['!rows'] = officialWsRows;
 
         // Format and style cells (B5 to Last Col / Row)
         const totalCols = headerRow.length;
@@ -716,7 +747,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
 
         if (worksheet[c2Addr]) {
           worksheet[c2Addr].s = {
-            font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
+            font: { name: 'SutonnyMJ', sz: 16, bold: true, color: { rgb: '000000' } },
             alignment: { horizontal: 'center', vertical: 'center' },
             border: cellBorder,
             fill: { fgColor: { rgb: 'CBD5E1' } }
@@ -724,7 +755,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         }
         if (worksheet[d2Addr]) {
           worksheet[d2Addr].s = {
-            font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
+            font: { name: 'SutonnyMJ', sz: 16, bold: true, color: { rgb: '000000' } },
             alignment: { horizontal: 'center', vertical: 'center' },
             border: cellBorder,
             fill: { fgColor: { rgb: 'FFFFFF' } }
@@ -732,7 +763,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         }
         if (worksheet[c3Addr]) {
           worksheet[c3Addr].s = {
-            font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
+            font: { name: 'SutonnyMJ', sz: 16, bold: true, color: { rgb: '000000' } },
             alignment: { horizontal: 'center', vertical: 'center' },
             border: cellBorder,
             fill: { fgColor: { rgb: 'CBD5E1' } }
@@ -740,7 +771,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         }
         if (worksheet[d3Addr]) {
           worksheet[d3Addr].s = {
-            font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
+            font: { name: 'SutonnyMJ', sz: 16, bold: true, color: { rgb: '000000' } },
             alignment: { horizontal: 'center', vertical: 'center' },
             border: cellBorder,
             fill: { fgColor: { rgb: 'FFFFFF' } }
@@ -752,7 +783,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           const addr = XLSX.utils.encode_cell({ r: 4, c });
           if (worksheet[addr]) {
             worksheet[addr].s = {
-              font: { name: 'Arial', sz: 11, bold: true, color: { rgb: 'FFFFFF' } },
+              font: { name: 'SutonnyMJ', sz: 16, bold: true, color: { rgb: 'FFFFFF' } },
               alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
               border: cellBorder,
               fill: { fgColor: { rgb: '64748B' } }
@@ -760,20 +791,20 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           }
         }
 
-        // Data rows styling: Deep, clearly visible alternating colors (White #FFFFFF and Slate #CBD5E1)
+        // Data rows styling: Alternating colors row-wise AND column-wise (White #FFFFFF and Slate #CBD5E1)
         for (let r = 5; r < totalRows - 1; r++) {
-          const isEvenDataRow = (r - 5) % 2 === 0;
-          const rowBgColor = isEvenDataRow ? 'FFFFFF' : 'CBD5E1';
           for (let c = 1; c < totalCols; c++) {
             const addr = XLSX.utils.encode_cell({ r, c });
             if (!worksheet[addr]) {
               worksheet[addr] = { t: 's', v: '' };
             }
+            const isWhiteCell = (r + c) % 2 === 0;
+            const cellBgColor = isWhiteCell ? 'FFFFFF' : 'CBD5E1';
             worksheet[addr].s = {
-              font: { name: 'Arial', sz: 11, color: { rgb: '000000' } },
+              font: { name: 'SutonnyMJ', sz: 16, color: { rgb: '000000' } },
               alignment: { horizontal: 'center', vertical: 'center' },
               border: cellBorder,
-              fill: { fgColor: { rgb: rowBgColor } }
+              fill: { fgColor: { rgb: cellBgColor } }
             };
           }
         }
@@ -786,7 +817,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             worksheet[addr] = { t: 's', v: '' };
           }
           worksheet[addr].s = {
-            font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
+            font: { name: 'SutonnyMJ', sz: 16, bold: true, color: { rgb: '000000' } },
             alignment: { horizontal: 'center', vertical: 'center' },
             border: cellBorder,
             fill: { fgColor: { rgb: '94A3B8' } }
@@ -873,7 +904,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         const fullRankAndName = `${rankBn ? rankBn + ' ' : ''}${memberNameBn}`.trim();
         const rawBd = String(m['BD No'] || m.bdNo || m.airman_id || '');
         const cleanDigits = rawBd.replace(/\D/g, '') || cleanBd;
-        const bdDisplay = cleanDigits ? (rawBd.toUpperCase().startsWith('BD') ? rawBd : `BD/${cleanDigits}`) : (rawBd || cleanBd);
+        const bdDisplay = cleanDigits ? cleanDigits : rawBd.replace(/^BD[\/\-\s]*/i, '').trim();
 
         const rows: any[][] = [];
         // Row 1: B1: 'র‍্যাংক ও নাম', C1: fullRankAndName
@@ -1014,15 +1045,40 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         rows.push(totalFooterRow);
 
         const ws = XLSX.utils.aoa_to_sheet(rows);
-        // Freeze BOTH header Row 5 AND leading columns (A..C: Serial & Date) so they stay visible when scrolling
-        ws['!views'] = [{ state: 'frozen', ySplit: 5, xSplit: 3, activePane: 'bottomRight' }];
-        ws['!freeze'] = { xSplit: 3, ySplit: 5 };
+        // Freeze C Column (Columns A..C) and Row 5 (Rows 1..5)
+        ws['!views'] = [{ state: 'frozen', ySplit: 5, xSplit: 3, topLeftCell: 'D6', activePane: 'bottomRight' }];
+        ws['!freeze'] = { xSplit: 3, ySplit: 5, topLeftCell: 'D6' };
         ws['!cols'] = [
-          { wch: 3 },  // Col A
-          { wch: 12 }, // ক্রমিক নং
-          { wch: 16 }, // তারিখ
-          ...allFoodColumns.map(() => ({ wch: 14 }))
+          { wch: 4 },  // Col A
+          { wch: 14 }, // ক্রমিক নং
+          { wch: 18 }, // তারিখ
+          ...allFoodColumns.map(() => ({ wch: 15 }))
         ];
+
+        // Configure row properties: Holiday date rows (Friday, Saturday & custom holidays) are hidden by default.
+        // Users can easily select adjacent rows and manually unhide them in Excel if needed.
+        const wsRows: any[] = [];
+        wsRows[0] = { hpt: 26 };
+        wsRows[1] = { hpt: 26 };
+        wsRows[2] = { hpt: 26 };
+        wsRows[3] = { hpt: 16 };
+        wsRows[4] = { hpt: 30 }; // Header Row 5
+
+        for (let d = 1; d <= daysInMonth; d++) {
+          const r = 4 + d;
+          const dayStr = String(d).padStart(2, '0');
+          const dayYmd = `${selectedYm}-${dayStr}`;
+          const dateObj = new Date(selYear, selMonth - 1, d);
+          const isHoliday = isCanteenHolidayDate(dayYmd, dateObj);
+
+          if (isHoliday) {
+            wsRows[r] = { hidden: true, hpt: 26 };
+          } else {
+            wsRows[r] = { hidden: false, hpt: 26 };
+          }
+        }
+        wsRows[5 + daysInMonth] = { hpt: 28 }; // Total footer row
+        ws['!rows'] = wsRows;
 
         // Common black thin border for table cells
         const cellBorder = {
@@ -1042,7 +1098,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             if (ws[addr]) {
               const isLabel = (c === 1);
               ws[addr].s = {
-                font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
+                font: { name: 'SutonnyMJ', sz: 16, bold: true, color: { rgb: '000000' } },
                 alignment: { horizontal: 'center', vertical: 'center' },
                 border: cellBorder,
                 fill: { fgColor: { rgb: isLabel ? 'CBD5E1' : 'FFFFFF' } }
@@ -1056,7 +1112,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           const addr = XLSX.utils.encode_cell({ r: 4, c });
           if (ws[addr]) {
             ws[addr].s = {
-              font: { name: 'Arial', sz: 11, bold: true, color: { rgb: 'FFFFFF' } },
+              font: { name: 'SutonnyMJ', sz: 16, bold: true, color: { rgb: 'FFFFFF' } },
               alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
               border: cellBorder,
               fill: { fgColor: { rgb: '64748B' } }
@@ -1064,20 +1120,37 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           }
         }
 
-        // Data rows styling (r=5 to totalRows-2): Deep, clearly visible alternating colors (White #FFFFFF and Slate #CBD5E1)
+        // Data rows styling (r=5 to totalRows-2):
+        // Alternating colors row-wise AND column-wise (White #FFFFFF and Slate #CBD5E1).
+        // Holiday rows (when manually unhidden in Excel) are styled with soft rose #FEE2E2 / #FECACA and bold text.
         for (let r = 5; r < totalRows - 1; r++) {
-          const isEvenDataRow = (r - 5) % 2 === 0;
-          const rowBgColor = isEvenDataRow ? 'FFFFFF' : 'CBD5E1';
+          const d = r - 4;
+          const dayStr = String(d).padStart(2, '0');
+          const dayYmd = `${selectedYm}-${dayStr}`;
+          const dateObj = new Date(selYear, selMonth - 1, d);
+          const isHoliday = isCanteenHolidayDate(dayYmd, dateObj);
+
           for (let c = 1; c < totalCols; c++) {
             const addr = XLSX.utils.encode_cell({ r, c });
             if (!ws[addr]) {
               ws[addr] = { t: 's', v: '' };
             }
+
+            const isWhiteCell = (r + c) % 2 === 0;
+            const cellBgColor = isHoliday 
+              ? (isWhiteCell ? 'FEE2E2' : 'FECACA') 
+              : (isWhiteCell ? 'FFFFFF' : 'CBD5E1');
+
             ws[addr].s = {
-              font: { name: 'Arial', sz: 11, color: { rgb: '000000' } },
+              font: { 
+                name: 'SutonnyMJ', 
+                sz: 16, 
+                bold: isHoliday && (c === 1 || c === 2),
+                color: { rgb: isHoliday ? '991B1B' : '000000' } 
+              },
               alignment: { horizontal: 'center', vertical: 'center' },
               border: cellBorder,
-              fill: { fgColor: { rgb: rowBgColor } }
+              fill: { fgColor: { rgb: cellBgColor } }
             };
           }
         }
@@ -1090,7 +1163,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             ws[addr] = { t: 's', v: '' };
           }
           ws[addr].s = {
-            font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
+            font: { name: 'SutonnyMJ', sz: 16, bold: true, color: { rgb: '000000' } },
             alignment: { horizontal: 'center', vertical: 'center' },
             border: cellBorder,
             fill: { fgColor: { rgb: '94A3B8' } }
@@ -1122,7 +1195,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
       const templateData = [
         {
           'Date (YYYY-MM-DD)': new Date().toISOString().split('T')[0],
-          'BD No': 'BD/470696',
+          'BD No': '470696',
           'Rank': 'SWO',
           'Member Name': 'Moshiur',
           'Menu Item': 'PORATA',
@@ -1135,7 +1208,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         },
         {
           'Date (YYYY-MM-DD)': new Date().toISOString().split('T')[0],
-          'BD No': 'BD/465170',
+          'BD No': '465170',
           'Rank': 'WO',
           'Member Name': 'Jahid',
           'Menu Item': 'MILK TEA',
@@ -2197,8 +2270,8 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                       </div>
                       <p className="text-[11px] text-slate-400 leading-relaxed">
                         • <strong>মাসিক ৩১টি ট্যাব:</strong> নির্বাচিত মাসের <strong>১ থেকে ৩১ তারিখের জন্য ৩১টি আলাদা শিট ট্যাব</strong> তৈরি হবে。<br/>
-                        • <strong>বামে সদস্য:</strong> বাম পাশের কলামে সদস্যদের <strong>ক্রমিক, বিডি নং, পদবী ও নাম</strong> সাজানো থাকে。<br/>
-                        • <strong>ডানে খাবার:</strong> পরোটা, ডিম ভাজি, ডিম সিদ্ধ, চা সহ সকল খাবারের কলাম (নতুন মেনু শেষে যুক্ত হবে)।
+                        • <strong>ফ্রিজ প্যান:</strong> <strong>E কলাম</strong> (নাম পর্যন্ত) ও <strong>৫ নম্বর সারি</strong> ফিক্সড/লক থাকে。<br/>
+                        • <strong>ফরম্যাট ও কালার:</strong> সব ফন্ট <strong>SutonnyMJ ১৬ সাইজ</strong>, রো ও কলাম উভয় দিকেই <strong>সাদা ও ধূসর অল্টারনেটিং কালার</strong> এবং বিডি নং-এ <strong>শুধু নম্বর (BD/ ছাড়া)</strong>।
                       </p>
 
                       {/* Month Selection preview in Card 1 - Bill style */}
@@ -2259,9 +2332,10 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-400 leading-relaxed">
-                        • <strong>সদস্য ফিক্সড:</strong> ব্যানারে নির্দিষ্ট সদস্যের <strong>পদবী, নাম ও বিডি নং</strong> থাকে。<br/>
-                        • <strong>বামে তারিখ:</strong> বাম পাশের কলামে ১ থেকে ৩১ তারিখ থাকে。<br/>
-                        • <strong>ডানে খাবার:</strong> পরোটা, ডিম ভাজি, ডিম সিদ্ধ, চা সহ সারা মাসের প্রতিদিনের খাওয়ার সংখ্যা থাকে।
+                        • <strong>সদস্য ফিক্সড:</strong> ব্যানারে নির্দিষ্ট সদস্যের <strong>পদবী, নাম ও বিডি নং (শুধু নম্বর)</strong> থাকে。<br/>
+                        • <strong>ফ্রিজ প্যান:</strong> <strong>C কলাম</strong> (তারিখ পর্যন্ত) ও <strong>৫ নম্বর সারি</strong> ফিক্সড/লক থাকে。<br/>
+                        • <strong>ছুটির দিন হাইড:</strong> শুক্র, শনি ও ছুটির দিনের সারি ডিফল্টভাবে হাইড থাকে (প্রয়োজনে আনহাইড করা যাবে)।<br/>
+                        • <strong>ফরম্যাট ও কালার:</strong> সব ফন্ট <strong>SutonnyMJ ১৬ সাইজ</strong>, রো ও কলাম উভয় দিকেই <strong>সাদা ও ধূসর অল্টারনেটিং কালার</strong>।
                       </p>
 
                       {/* Month Selection - Bill Style */}

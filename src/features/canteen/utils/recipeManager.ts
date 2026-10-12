@@ -185,7 +185,7 @@ export const getRawItemSubUnitInfo = (item?: Partial<RawInventoryItem> | null): 
     const isWeightSub = ['gm', 'g', 'gram', 'গ্রাম', 'kg', 'কেজি'].includes(sub);
     const isVolumeSub = ['ml', 'milli', 'মিলি', 'liter', 'ltr', 'লিটার'].includes(sub);
     const defaultSize = isWeightSub ? 1000 : (isVolumeSub ? 1000 : 24);
-    const size = packSizeVal > 1 ? packSizeVal : defaultSize;
+    const size = packSizeVal > 0 ? packSizeVal : defaultSize;
     return { hasSubUnit: true, subUnit: sub, packSize: size, label: `১ ${item.unit || 'প্যাকেট'} = ${size} ${sub}` };
   }
 
@@ -194,7 +194,7 @@ export const getRawItemSubUnitInfo = (item?: Partial<RawInventoryItem> | null): 
     const isWeightSub = ['gm', 'g', 'gram', 'গ্রাম', 'kg', 'কেজি'].includes(explicitSub);
     const isVolumeSub = ['ml', 'milli', 'মিলি', 'liter', 'ltr', 'লিটার'].includes(explicitSub);
     const defaultSize = isWeightSub ? 1000 : (isVolumeSub ? 1000 : 1);
-    const size = packSizeVal > 1 ? packSizeVal : defaultSize;
+    const size = packSizeVal > 0 ? packSizeVal : defaultSize;
     if (size > 1) {
       return { hasSubUnit: true, subUnit: explicitSub, packSize: size, label: `১ ${item.unit} = ${size} ${explicitSub}` };
     }
@@ -1650,7 +1650,7 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
       const isCyl = ['cylinder', 'সিলিন্ডার'].includes(u);
       subCategory = item.subCategory || (isCyl ? 'Gas Cylinder' : (isWeight ? 'Kg - gm' : (isVol ? 'Ltr - ml' : 'Packet - Pcs')));
       subUnit = item.subUnit || (explicitSub && explicitSub !== u ? explicitSub : (isCyl ? 'kg' : 'pcs'));
-      packSize = explicitPackSize > 1 ? explicitPackSize : (isCyl ? 12 : (isWeight ? 1000 : (isVol ? 1000 : 24)));
+      packSize = explicitPackSize > 0 ? explicitPackSize : (isCyl ? 12 : (isWeight ? 1000 : (isVol ? 1000 : 24)));
       hasSubUnits = true;
     }
 
@@ -1789,9 +1789,9 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
           category: chosenCategory,
           subCategory: chosenSubCategory,
           currentStock: normalizedItem.currentStock !== undefined ? normalizedItem.currentStock : existing.currentStock,
-          packSize: mergedIsPcs ? 1 : (normalizedItem.packSize || existing.packSize || 1),
+          packSize: mergedIsPcs ? 1 : ((normalizedItem.packSize && normalizedItem.packSize > 0) ? normalizedItem.packSize : (existing.packSize || 1)),
           subUnit: mergedIsPcs ? undefined : (normalizedItem.subUnit || existing.subUnit),
-          hasSubUnits: mergedIsPcs ? false : (normalizedItem.hasSubUnits ?? existing.hasSubUnits)
+          hasSubUnits: mergedIsPcs ? false : (normalizedItem.hasSubUnits !== undefined ? normalizedItem.hasSubUnits : (existing.hasSubUnits ?? false))
         });
       } else {
         if (!isProtectedRawItem(item)) {
@@ -1811,9 +1811,9 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
           currentStock: (normalizedItem.currentStock !== undefined && normalizedItem.currentStock !== null) ? normalizedItem.currentStock : existing.currentStock,
           minStockAlert: (normalizedItem.minStockAlert !== undefined && normalizedItem.minStockAlert !== null) ? normalizedItem.minStockAlert : existing.minStockAlert,
           unitCost: (normalizedItem.unitCost !== undefined && normalizedItem.unitCost !== null) ? normalizedItem.unitCost : existing.unitCost,
-          packSize: mergedIsPcs ? 1 : (normalizedItem.packSize || existing.packSize || 1),
+          packSize: mergedIsPcs ? 1 : ((normalizedItem.packSize && normalizedItem.packSize > 0) ? normalizedItem.packSize : (existing.packSize || 1)),
           subUnit: mergedIsPcs ? undefined : (normalizedItem.subUnit || existing.subUnit),
-          hasSubUnits: mergedIsPcs ? false : (normalizedItem.hasSubUnits ?? existing.hasSubUnits)
+          hasSubUnits: mergedIsPcs ? false : (normalizedItem.hasSubUnits !== undefined ? normalizedItem.hasSubUnits : (existing.hasSubUnits ?? false))
         });
       }
     }
