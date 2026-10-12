@@ -1508,12 +1508,12 @@ export const PosSales: React.FC = () => {
                 format="dd_mm_yy"
               />
 
-              {/* POS Sales Import Button */}
+              {/* POS Import Button */}
               <button 
                 type="button"
                 onClick={() => setShowImportSalesModal(true)}
                 className="flex items-center justify-center space-x-1.5 px-3 py-1.5 bg-emerald-950/70 hover:bg-emerald-900/60 active:bg-emerald-950 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-sm cursor-pointer shrink-0 ml-auto sm:ml-0"
-                title="Bulk Import Sales via Excel / CSV"
+                title="Bulk Import via Excel / CSV"
               >
                 <Upload className="w-3.5 h-3.5 text-emerald-400" />
                 <span>Import</span>

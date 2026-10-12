@@ -5,11 +5,11 @@ import {
   Search, Check, Trash2, ShoppingCart, UserCheck, DollarSign,
   Calendar, ChevronDown
 } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import XLSX from 'xlsx-js-style';
 import { supabase } from '../../../supabase';
 import { pushKeyToCloud } from '../utils/canteenCloudSync';
 import { deductRawStockForSales } from '../utils/recipeManager';
-import { getCanteenMenuCache, setCanteenMenuCache, normalizeCatalogKey, isOneTimeBoxItem } from '../utils/canteenMenuData';
+import { getCanteenMenuCache, setCanteenMenuCache, setCanteenMembersCache, normalizeCatalogKey, isOneTimeBoxItem } from '../utils/canteenMenuData';
 import { formatCanteenDate, toYMDDate } from '../utils/dateUtils';
 import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
 import { formatRankBn, formatMemberNameBn, toBengaliNum, formatBengaliMonthYear } from '../utils/exportCanteenBillExcel';
@@ -47,7 +47,7 @@ interface ParsedSaleRow {
   sourceSheet?: string;
 }
 
-// Official 27 food columns matching 155 UASU BAF Canteen daily matrix sheet
+// Official food columns matching 155 UASU BAF Canteen daily matrix sheet
 const OFFICIAL_MATRIX_FOOD_COLUMNS = [
   { bn: 'পরোটা', enMatch: 'porata', price: 10 },
   { bn: 'ডিম ভাজি', enMatch: 'egg fry', price: 15 },
@@ -77,6 +77,173 @@ const OFFICIAL_MATRIX_FOOD_COLUMNS = [
   { bn: 'কলা', enMatch: 'banana', price: 10 },
   { bn: 'অন্যান্য', enMatch: 'other', price: 10 },
 ];
+
+// Exact 31 food columns matching the official 155 UASU BAF Canteen date-wise sheet format (as per user reference screenshot)
+const DATE_WISE_TEMPLATE_BASE_FOOD_COLUMNS = [
+  { bn: 'পরোটা', enMatch: 'porata', price: 10 },
+  { bn: 'প্রিমিয়াম পরোটা', enMatch: 'premium porata', price: 15 },
+  { bn: 'হোটেল ডিম', enMatch: 'hotel egg', price: 15 },
+  { bn: 'ডিম ভাজি', enMatch: 'egg fry', price: 15 },
+  { bn: 'ডিম পোচ', enMatch: 'egg poach', price: 15 },
+  { bn: 'ডিম সিদ্ধ', enMatch: 'boiled egg', price: 15 },
+  { bn: 'দুধ চা', enMatch: 'milk tea', price: 10 },
+  { bn: 'রং চা', enMatch: 'liquor tea', price: 6 },
+  { bn: 'গ্রীন টি', enMatch: 'green tea', price: 8 },
+  { bn: 'ব্ল্যাক কফি', enMatch: 'black coffee', price: 15 },
+  { bn: 'দুধ কফি', enMatch: 'milk coffee', price: 20 },
+  { bn: 'কোল্ড কফি', enMatch: 'cold coffee', price: 30 },
+  { bn: 'নুডুলস', enMatch: 'noodles', price: 25 },
+  { bn: 'ডিম নুডুলস', enMatch: 'egg noodles', price: 35 },
+  { bn: 'ড্রাই কেক', enMatch: 'dry cake', price: 12 },
+  { bn: 'নরমাল বিস্কুট', enMatch: 'normal biscuit', price: 10 },
+  { bn: 'এনার্জি বিস্কুট', enMatch: 'energy biscuit', price: 15 },
+  { bn: 'লেবুর শরবত', enMatch: 'lemon juice', price: 15 },
+  { bn: 'চিকেন অনিয়ন', enMatch: 'chicken onion', price: 35 },
+  { bn: 'চিকেন কারি', enMatch: 'chicken curry', price: 70 },
+  { bn: 'চিকেন পোলাও', enMatch: 'chicken polao', price: 120 },
+  { bn: 'চিকেন বিরিয়ানি', enMatch: 'chicken biryani', price: 120 },
+  { bn: 'চিকেন খিচুড়ি', enMatch: 'chicken khichuri', price: 90 },
+  { bn: 'ডিম খিচুড়ি', enMatch: 'egg khichuri', price: 60 },
+  { bn: 'চিকেন হালিম', enMatch: 'chicken halim', price: 40 },
+  { bn: 'চটপটি', enMatch: 'chotpoti', price: 30 },
+  { bn: 'মিনি বার্গার', enMatch: 'mini burger', price: 40 },
+  { bn: 'পিৎজা', enMatch: 'pizza', price: 60 },
+  { bn: 'স্যান্ডউইচ', enMatch: 'sandwich', price: 30 },
+  { bn: 'কলা', enMatch: 'banana', price: 10 },
+  { bn: 'সিংগারা', enMatch: 'singara', price: 8 },
+];
+
+const SHORT_BENGALI_MONTHS = ['জানু', 'ফেব্রু', 'মার্চ', 'এপ্রিল', 'মে', 'জুন', 'জুলাই', 'আগস্ট', 'সেপ্টে', 'অক্টো', 'নভে', 'ডিসে'];
+
+function formatShortBengaliDate(day: number, monthIndex: number, year: number): string {
+  const shortMon = SHORT_BENGALI_MONTHS[monthIndex] || '';
+  const shortYr = toBengaliNum(String(year).slice(-2));
+  return `${toBengaliNum(day)} ${shortMon} ${shortYr}`;
+}
+
+function parseDateWiseMatrixDate(dateStr: any, fallbackYear = 2026, fallbackMonth = 10): string {
+  if (!dateStr) return '';
+  const str = banglaToEnglishDigits(String(dateStr)).trim();
+  
+  // Look for: (day) (month_str) (year) e.g. "1 oct 26" or "1 অক্টো 26"
+  const match = str.match(/^(\d{1,2})\s+([^\s\d]+)(?:\s+(\d{2,4}))?/i);
+  if (match) {
+    const d = match[1].padStart(2, '0');
+    const monWord = match[2].toLowerCase();
+    
+    const bnMonthMap: Record<string, string> = {
+      'জানু': '01', 'jan': '01',
+      'ফেব্রু': '02', 'feb': '02',
+      'মার্চ': '03', 'mar': '03',
+      'এপ্রিল': '04', 'apr': '04',
+      'মে': '05', 'may': '05',
+      'জুন': '06', 'jun': '06',
+      'জুলাই': '07', 'jul': '07',
+      'আগস্ট': '08', 'আগষ্ট': '08', 'aug': '08',
+      'সেপ্টে': '09', 'sep': '09',
+      'অক্টো': '10', 'oct': '10',
+      'নভে': '11', 'nov': '11',
+      'ডিসে': '12', 'dec': '12',
+    };
+    
+    let foundMonth = '';
+    for (const [k, v] of Object.entries(bnMonthMap)) {
+      if (monWord.includes(k) || k.includes(monWord)) {
+        foundMonth = v;
+        break;
+      }
+    }
+    
+    let yr = match[3];
+    if (yr) {
+      if (yr.length === 2) yr = '20' + yr;
+    } else {
+      yr = String(fallbackYear);
+    }
+    
+    if (foundMonth) {
+      return `${yr}-${foundMonth}-${d}`;
+    }
+  }
+
+  // If simply day number 1-31
+  const numOnly = parseBanglaNumber(str);
+  if (numOnly >= 1 && numOnly <= 31 && !str.includes('-') && !str.includes('/') && !str.includes('.')) {
+    return `${fallbackYear}-${String(fallbackMonth).padStart(2, '0')}-${String(numOnly).padStart(2, '0')}`;
+  }
+
+  return parseBanglaOrEnglishDate(dateStr, `${fallbackYear}-${String(fallbackMonth).padStart(2, '0')}-01`);
+}
+
+const thinBlackBorder = {
+  top: { style: 'thin', color: { rgb: '000000' } },
+  bottom: { style: 'thin', color: { rgb: '000000' } },
+  left: { style: 'thin', color: { rgb: '000000' } },
+  right: { style: 'thin', color: { rgb: '000000' } },
+};
+
+function applyExcelTableStyles(
+  ws: any, 
+  headerRowIdx: number, 
+  startColIdx: number = 1
+) {
+  if (!ws || !ws['!ref']) return;
+  const range = XLSX.utils.decode_range(ws['!ref']);
+
+  for (let R = range.s.r; R <= range.e.r; ++R) {
+    for (let C = range.s.c; C <= range.e.c; ++C) {
+      const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+      let cell = ws[cellAddress];
+
+      const isInsideTable = R >= headerRowIdx && C >= startColIdx;
+      const isHeaderRow = R === headerRowIdx && C >= startColIdx;
+
+      if (isInsideTable) {
+        if (!cell) {
+          cell = { t: 's', v: '' };
+          ws[cellAddress] = cell;
+        }
+
+        const isEvenDataRow = (R - headerRowIdx) % 2 === 0;
+        const rowBgColor = isHeaderRow 
+          ? 'E2E8F0' 
+          : (isEvenDataRow ? 'F8FAFC' : 'FFFFFF');
+
+        cell.s = {
+          font: {
+            name: 'Calibri',
+            sz: 11,
+            bold: isHeaderRow,
+            color: { rgb: '000000' }
+          },
+          alignment: {
+            horizontal: 'center',
+            vertical: 'center',
+            wrapText: true
+          },
+          border: thinBlackBorder,
+          fill: { fgColor: { rgb: rowBgColor } }
+        };
+      } else if (cell && C >= startColIdx) {
+        // Cells above table (e.g. member banner B1:C3)
+        cell.s = {
+          font: {
+            name: 'Calibri',
+            sz: 11,
+            bold: C === startColIdx, // B column labels bold
+            color: { rgb: '000000' }
+          },
+          alignment: {
+            horizontal: 'center',
+            vertical: 'center',
+            wrapText: true
+          },
+          border: thinBlackBorder
+        };
+      }
+    }
+  }
+}
 
 function banglaToEnglishDigits(str: any): string {
   if (typeof str === 'number') return String(str);
@@ -289,108 +456,276 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Generate and download Official 155 UASU BAF Daily Canteen Bill Matrix Template
+  // Generate and download Official 155 UASU BAF Daily Canteen Bill Matrix Template (31 Date tabs for selected Month)
   const handleDownloadOfficialMatrixTemplate = () => {
     try {
       const sortedMembers = sortCanteenMembersByOfficeSeniority(members);
-      const rows: any[][] = [];
+      const workbook = XLSX.utils.book_new();
 
-      // Row 1: Empty spacer
-      rows.push([]);
+      const selectedYm = templateMonth || toYMDDate(new Date()).slice(0, 7);
+      const [selYearStr, selMonthStr] = selectedYm.split('-');
+      const selYear = parseInt(selYearStr, 10);
+      const selMonth = parseInt(selMonthStr, 10);
+      const daysInMonth = new Date(selYear, selMonth, 0).getDate();
 
-      // Row 2: Title Banner (Col C onwards)
-      const titleRow = new Array(30).fill('');
-      titleRow[3] = 'ক্যান্টিন বিল : ১৫৫ ইউএএসইউ বিএএফ';
-      rows.push(titleRow);
+      // Additional catalog items appended to the end of food columns
+      const baseFoodCols = OFFICIAL_MATRIX_FOOD_COLUMNS;
+      const extraCols: Array<{ bn: string; enMatch: string; price: number }> = [];
+      const normBaseEns = new Set(baseFoodCols.map(b => b.enMatch.toLowerCase().trim()));
+      const normBaseBns = new Set(baseFoodCols.map(b => b.bn.trim()));
 
-      // Row 3: Date Banner (Top Right)
-      const dateRow = new Array(30).fill('');
-      const todayDate = new Date();
-      const todayStrBn = `${toBengaliNum(todayDate.getDate())} অক্টোবর ২০২৬`;
-      dateRow[24] = 'তারিখ';
-      dateRow[25] = todayStrBn;
-      rows.push(dateRow);
+      (catalog || []).forEach((cItem: any) => {
+        if (isOneTimeBoxItem(cItem)) return;
+        const cEn = String(cItem.name || cItem.name_en || '').trim();
+        const cBn = String(cItem.name_bn || cItem.nameBn || getMenuItemBanglaName(cItem) || '').trim();
+        const normCEn = cEn.toLowerCase();
 
-      // Row 4: Empty spacer
-      rows.push([]);
+        const alreadyInBase = 
+          (cEn && normBaseEns.has(normCEn)) || 
+          (cBn && normBaseBns.has(cBn)) ||
+          baseFoodCols.some(b => {
+            const bEn = b.enMatch.toLowerCase();
+            return bEn === normCEn || normCEn.includes(bEn) || bEn.includes(normCEn);
+          });
 
-      // Row 5: Column Headers matching official sheet
+        if (!alreadyInBase && (cEn || cBn)) {
+          const alreadyInExtra = extraCols.some(e => e.enMatch.toLowerCase() === normCEn || (cBn && e.bn === cBn));
+          if (!alreadyInExtra) {
+            extraCols.push({
+              bn: cBn || getMenuItemBanglaName(cEn) || formatItemNameBn(cEn) || cEn,
+              enMatch: cEn || cBn,
+              price: Number(cItem.price || 10)
+            });
+          }
+        }
+      });
+
+      const allMemberFoodCols = [...baseFoodCols, ...extraCols];
+
+      // Existing sales transactions in the system
+      const existingTxs: any[] = (() => {
+        try {
+          return JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+        } catch {
+          return [];
+        }
+      })();
+
+      // Common black thin border for table cells
+      const cellBorder = {
+        top: { style: 'thin', color: { rgb: '000000' } },
+        bottom: { style: 'thin', color: { rgb: '000000' } },
+        left: { style: 'thin', color: { rgb: '000000' } },
+        right: { style: 'thin', color: { rgb: '000000' } },
+      };
+
+      // Header row
       const headerRow = [
         '',
         'ক্রমিক নং',
         'পদবী',
         'নাম',
-        ...OFFICIAL_MATRIX_FOOD_COLUMNS.map(c => c.bn),
+        ...allMemberFoodCols.map(c => c.bn),
         'মোট বিল'
       ];
-      rows.push(headerRow);
 
-      // Rows 6+: Member data rows in official seniority order
-      sortedMembers.forEach((m, idx) => {
-        const serBn = toBengaliNum(idx + 1);
-        const rankBn = formatRankBn(m.Rank || m.rank || '');
-        const memberNameBn = m.name_bn || m.NameBn || formatMemberNameBn(m.Surname || m.Name || '') || m.Surname || m.Name || '';
+      // Generate 31 separate tabs (tab name '1'..'31') for the selected month
+      for (let day = 1; day <= daysInMonth; day++) {
+        const dayStr = String(day).padStart(2, '0');
+        const dayYmd = `${selectedYm}-${dayStr}`;
+        const dayStrBn = formatShortBengaliDate(day, selMonth - 1, selYear);
 
-        const rowData = [
-          '',
-          serBn,
-          rankBn,
-          memberNameBn,
-          // Pre-fill a couple sample consumption items on first 3 rows so user sees how it works
-          idx === 0 ? 2 : (idx === 1 ? 1 : ''), // পরোটা
-          idx === 0 ? 1 : (idx === 2 ? 1 : ''), // ডিম ভাজি
-          '', // ডিম পোচ
-          idx === 1 ? 1 : '', // ডিম সিদ্ধ
-          idx === 0 ? 1 : (idx === 1 ? 2 : ''), // দুধ চা
-          ...new Array(OFFICIAL_MATRIX_FOOD_COLUMNS.length - 5).fill(''),
-          idx === 0 ? 45 : (idx === 1 ? 35 : (idx === 2 ? 15 : 0)) // মোট বিল
+        const rows: any[][] = [];
+        // Row 1: Empty spacer
+        rows.push([]);
+
+        // Row 2: Title Banner (Col C onwards)
+        const titleRow = new Array(headerRow.length).fill('');
+        titleRow[3] = 'ক্যান্টিন বিল : ১৫৫ ইউএএসইউ বিএএফ';
+        rows.push(titleRow);
+
+        // Row 3: Date Banner
+        const dateRow = new Array(headerRow.length).fill('');
+        const dateColIdx = Math.max(4, headerRow.length - 4);
+        dateRow[dateColIdx] = 'তারিখ';
+        dateRow[dateColIdx + 1] = dayStrBn;
+        rows.push(dateRow);
+
+        // Row 4: Spacer
+        rows.push([]);
+
+        // Row 5: Column Headers
+        rows.push(headerRow);
+
+        // Rows 6+: Member data rows in official seniority order
+        sortedMembers.forEach((m, idx) => {
+          const serBn = toBengaliNum(idx + 1);
+          const rankBn = formatRankBn(m.Rank || m.rank || '');
+          const memberNameBn = m.name_bn || m.NameBn || formatMemberNameBn(m.Surname || m.Name || '') || m.Surname || m.Name || '';
+
+          const mAirman = String(m.airman_id || '').toLowerCase().trim();
+          const mBd = String(m['BD No'] || m.bdNo || '').toLowerCase().trim();
+          const mCleanDigits = (m['BD No'] || m.bdNo || m.airman_id || '').toString().replace(/\D/g, '');
+
+          // Find existing entries on dayYmd for member m
+          const dayTxs = existingTxs.filter((tx: any) => {
+            if (!isSaleTransaction(tx)) return false;
+            const txYmd = toYMDDate(tx.date || tx.paymentDate || tx.timestamp || tx.created_at || (typeof tx.id === 'number' ? tx.id : undefined));
+            if (txYmd !== dayYmd) return false;
+
+            const txAirman = String(tx.airman_id || tx.member_id || '').toLowerCase().trim();
+            const txBd = String(tx.bdNo || '').toLowerCase().trim();
+            const txDigits = (tx.bdNo || tx.airman_id || '').toString().replace(/\D/g, '');
+
+            return (
+              (mAirman && txAirman === mAirman) ||
+              (mBd && txBd === mBd) ||
+              (mCleanDigits && txDigits && mCleanDigits === txDigits)
+            );
+          });
+
+          const foodQtyMap = new Map<number, number>();
+          let dayMemberTotal = 0;
+
+          dayTxs.forEach((tx: any) => {
+            let soldItems = tx.soldItems;
+            if (typeof soldItems === 'string') {
+              try { soldItems = JSON.parse(soldItems); } catch {}
+            }
+
+            if (Array.isArray(soldItems) && soldItems.length > 0) {
+              soldItems.forEach((si: any) => {
+                const rawName = String(si.menuItemName || si.name || si.itemName || '').trim();
+                const rawBn = getMenuItemBanglaName(rawName) || formatItemNameBn(rawName) || rawName;
+                const q = Number(si.qty || si.quantity || 1);
+
+                let colIdx = allMemberFoodCols.findIndex(col => col.bn === rawBn || col.bn === rawName || col.enMatch.toLowerCase() === rawName.toLowerCase());
+                if (colIdx === -1) {
+                  colIdx = allMemberFoodCols.findIndex(col => {
+                    const cEn = col.enMatch.toLowerCase();
+                    const cBn = col.bn.toLowerCase();
+                    const rLower = rawName.toLowerCase();
+                    const rBnLower = rawBn.toLowerCase();
+                    return cEn.includes(rLower) || rLower.includes(cEn) || cBn.includes(rBnLower) || rBnLower.includes(cBn);
+                  });
+                }
+
+                if (colIdx >= 0) {
+                  foodQtyMap.set(colIdx, (foodQtyMap.get(colIdx) || 0) + q);
+                }
+              });
+            } else if (tx.items) {
+              const parts = String(tx.items).split(/[,+;|\n]+/).map((s: string) => s.trim()).filter(Boolean);
+              parts.forEach((p: string) => {
+                let q = 1;
+                let raw = p;
+                const m1 = p.match(/^(.+?)\s*\(([\d০-৯]+)\)$/);
+                if (m1) {
+                  raw = m1[1].trim();
+                  q = parseBanglaNumber(m1[2]) || 1;
+                } else {
+                  const m2 = p.match(/^(.+?)\s*[xX*×]\s*([\d০-৯]+)$/);
+                  if (m2) {
+                    raw = m2[1].trim();
+                    q = parseBanglaNumber(m2[2]) || 1;
+                  }
+                }
+                const rawBn = getMenuItemBanglaName(raw) || formatItemNameBn(raw) || raw;
+                let colIdx = allMemberFoodCols.findIndex(col => col.bn === rawBn || col.bn === raw || col.enMatch.toLowerCase() === raw.toLowerCase());
+                if (colIdx === -1) {
+                  colIdx = allMemberFoodCols.findIndex(col => {
+                    const cEn = col.enMatch.toLowerCase();
+                    const cBn = col.bn.toLowerCase();
+                    const rLower = raw.toLowerCase();
+                    const rBnLower = rawBn.toLowerCase();
+                    return cEn.includes(rLower) || rLower.includes(cEn) || cBn.includes(rBnLower) || rBnLower.includes(cBn);
+                  });
+                }
+                if (colIdx >= 0) {
+                  foodQtyMap.set(colIdx, (foodQtyMap.get(colIdx) || 0) + q);
+                }
+              });
+            }
+
+            dayMemberTotal += Number(tx.amount || 0);
+          });
+
+          const rowData = [
+            '',
+            serBn,
+            rankBn,
+            memberNameBn,
+            ...allMemberFoodCols.map((_, cIdx) => {
+              const q = foodQtyMap.get(cIdx);
+              return q && q > 0 ? q : '';
+            }),
+            dayMemberTotal > 0 ? dayMemberTotal : ''
+          ];
+          rows.push(rowData);
+        });
+
+        const worksheet = XLSX.utils.aoa_to_sheet(rows);
+
+        // Freeze header pane so Row 5 stays visible
+        worksheet['!views'] = [{ state: 'frozen', ySplit: 5, xSplit: 0, activePane: 'bottomLeft' }];
+        worksheet['!freeze'] = { xSplit: 0, ySplit: 5 };
+
+        // Set column widths
+        worksheet['!cols'] = [
+          { wch: 3 },  // Col A
+          { wch: 10 }, // ক্রমিক নং
+          { wch: 14 }, // পদবী
+          { wch: 18 }, // নাম
+          ...allMemberFoodCols.map(() => ({ wch: 12 })),
+          { wch: 14 }  // মোট বিল
         ];
-        rows.push(rowData);
-      });
 
-      const worksheet = XLSX.utils.aoa_to_sheet(rows);
+        // Format and style cells (B5 to Last Col / Row)
+        const totalCols = headerRow.length;
+        const totalRows = rows.length;
 
-      // Freeze header pane so Row 5 stays visible
-      worksheet['!views'] = [{ state: 'frozen', ySplit: 5, xSplit: 0, activePane: 'bottomLeft' }];
-      worksheet['!freeze'] = { xSplit: 0, ySplit: 5 };
+        // Title styling
+        const titleCell = XLSX.utils.encode_cell({ r: 1, c: 3 });
+        if (worksheet[titleCell]) {
+          worksheet[titleCell].s = {
+            font: { name: 'Arial', sz: 14, bold: true, color: { rgb: '000000' } },
+            alignment: { horizontal: 'center', vertical: 'center' }
+          };
+        }
 
-      // Set column widths
-      worksheet['!cols'] = [
-        { wch: 3 },  // Col A
-        { wch: 10 }, // ক্রমিক নং
-        { wch: 14 }, // পদবী
-        { wch: 18 }, // নাম
-        ...OFFICIAL_MATRIX_FOOD_COLUMNS.map(() => ({ wch: 12 })),
-        { wch: 14 }  // মোট বিল
-      ];
+        // Header row styling: Bold, Center aligned (horizontal & vertical), with border
+        for (let c = 1; c < totalCols; c++) {
+          const addr = XLSX.utils.encode_cell({ r: 4, c });
+          if (worksheet[addr]) {
+            worksheet[addr].s = {
+              font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
+              alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+              border: cellBorder,
+              fill: { fgColor: { rgb: 'E2E8F0' } }
+            };
+          }
+        }
 
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, '1'); // Tab name "1" matching daily tabs
+        // Data rows styling: All row-col center align (horizontal & vertical), with borders
+        for (let r = 5; r < totalRows; r++) {
+          for (let c = 1; c < totalCols; c++) {
+            const addr = XLSX.utils.encode_cell({ r, c });
+            if (!worksheet[addr]) {
+              worksheet[addr] = { t: 's', v: '' };
+            }
+            worksheet[addr].s = {
+              font: { name: 'Arial', sz: 11, color: { rgb: '000000' } },
+              alignment: { horizontal: 'center', vertical: 'center' },
+              border: cellBorder
+            };
+          }
+        }
 
-      // Add a second day tab "2" for multi-day demonstration
-      const worksheetDay2 = XLSX.utils.aoa_to_sheet([
-        [],
-        ['', '', '', 'ক্যান্টিন বিল : ১৫৫ ইউএএসইউ বিএএফ'],
-        ['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 'তারিখ', '২ অক্টোবর ২০২৬'],
-        [],
-        headerRow,
-        ...sortedMembers.slice(0, 15).map((m, idx) => [
-          '',
-          toBengaliNum(idx + 1),
-          formatRankBn(m.Rank || m.rank || ''),
-          m.name_bn || m.NameBn || formatMemberNameBn(m.Surname || m.Name || '') || m.Surname || m.Name || '',
-          idx === 0 ? 1 : '',
-          idx === 0 ? 1 : '',
-          '', '', '',
-          ...new Array(OFFICIAL_MATRIX_FOOD_COLUMNS.length - 5).fill(''),
-          idx === 0 ? 25 : 0
-        ])
-      ]);
-      worksheetDay2['!cols'] = worksheet['!cols'];
-      XLSX.utils.book_append_sheet(workbook, worksheetDay2, '2');
+        // Tab name as day number '1', '2', ..., '31'
+        XLSX.utils.book_append_sheet(workbook, worksheet, String(day));
+      }
 
-      const dateStr = new Date().toISOString().split('T')[0];
-      XLSX.writeFile(workbook, `155_UASU_Canteen_MemberWise_Daily_Bill_Matrix_${dateStr}.xlsx`);
+      XLSX.writeFile(workbook, `155_UASU_Canteen_MemberWise_31Days_Matrix_${selectedYm}.xlsx`);
     } catch (err: any) {
       console.error('Failed to download official matrix template:', err);
       setErrorMessage('Failed to generate template file. Please try again.');
@@ -407,19 +742,18 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
       const sortedMembers = sortCanteenMembersByOfficeSeniority(members);
       const workbook = XLSX.utils.book_new();
 
-      const selectedYm = templateMonth || getTodayYMD().slice(0, 7);
+      const selectedYm = templateMonth || toYMDDate(new Date()).slice(0, 7);
       const [selYearStr, selMonthStr] = selectedYm.split('-');
       const selYear = parseInt(selYearStr, 10);
       const selMonth = parseInt(selMonthStr, 10);
       const daysInMonth = new Date(selYear, selMonth, 0).getDate();
-      const monthBnName = formatBengaliMonthYear(selectedYm);
 
-      // 1. Base official matrix food columns
-      const baseCols = OFFICIAL_MATRIX_FOOD_COLUMNS;
+      // 1. Base 31 official matrix food columns (matching user reference screenshot)
+      const baseCols = DATE_WISE_TEMPLATE_BASE_FOOD_COLUMNS;
 
       // 2. Extra catalog items from catalog (that are not one time box and not already in baseCols) appended to the LAST
       const extraCols: Array<{ en: string; bn: string; catalogItem?: any }> = [];
-      const normBaseEns = new Set(baseCols.map(b => b.en.toLowerCase().trim()));
+      const normBaseEns = new Set(baseCols.map(b => b.enMatch.toLowerCase().trim()));
       const normBaseBns = new Set(baseCols.map(b => b.bn.trim()));
 
       (catalog || []).forEach((cItem: any) => {
@@ -432,7 +766,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           (cEn && normBaseEns.has(normCEn)) || 
           (cBn && normBaseBns.has(cBn)) ||
           baseCols.some(b => {
-            const bEn = b.en.toLowerCase();
+            const bEn = b.enMatch.toLowerCase();
             return bEn === normCEn || normCEn.includes(bEn) || bEn.includes(normCEn);
           });
 
@@ -449,8 +783,8 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
       });
 
       const allFoodColumns = [
-        ...baseCols.map(c => ({ en: c.en, bn: c.bn, catalogKey: c.catalogKey, catalogItem: null as any })),
-        ...extraCols
+        ...baseCols.map(c => ({ en: c.enMatch, bn: c.bn, catalogKey: c.enMatch, catalogItem: null as any })),
+        ...extraCols.map(e => ({ en: e.en, bn: e.bn, catalogKey: e.en, catalogItem: e.catalogItem || null }))
       ];
 
       // Header row for Date-wise matrix (Col 1: Sl, Col 2: Date, Col 3..: Food items)
@@ -458,8 +792,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         '',
         'ক্রমিক নং',
         'তারিখ',
-        ...allFoodColumns.map(c => c.bn),
-        'মোট বিল'
+        ...allFoodColumns.map(c => c.bn)
       ];
 
       // Existing sales transactions in the system
@@ -491,35 +824,29 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         const rankBn = formatRankBn(m.Rank || m.rank || '');
         const memberNameBn = m.name_bn || m.NameBn || formatMemberNameBn(m.Surname || m.Name || '') || m.Surname || m.Name || '';
         const bdNo = String(m['BD No'] || m.airman_id || '');
-        const cleanBd = bdNo.replace(/\D/g, '') || `BD-${mIdx + 1}`;
+        const cleanBd = bdNo.replace(/\D/g, '') || String(mIdx + 1);
 
         const mAirman = String(m.airman_id || '').toLowerCase().trim();
         const mBd = String(m['BD No'] || m.bdNo || '').toLowerCase().trim();
         const mCleanDigits = (m['BD No'] || m.bdNo || m.airman_id || '').toString().replace(/\D/g, '');
 
         const rows: any[][] = [];
-        // Row 1: Title
-        rows.push(['', '', '', 'ক্যান্টিন বিল (মাসিক তারিখ ভিত্তিক শিট) : ১৫৫ ইউএএসইউ বিএএফ']);
-        // Row 2: Member fixed info
-        rows.push([
-          '',
-          '',
-          `সদস্য: ${rankBn} ${memberNameBn}`,
-          `বিডি নং: ${bdNo}`,
-          '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '',
-          'মাস:',
-          monthBnName
-        ]);
-        // Row 3: Spacer
+        // Row 1: B1: 'নাম', C1: memberNameBn
+        rows.push(['', 'নাম', memberNameBn]);
+        // Row 2: B2: 'র‍্যাংক', C2: rankBn
+        rows.push(['', 'র‍্যাংক', rankBn]);
+        // Row 3: B3: 'বিডি নং', C3: cleanBd
+        rows.push(['', 'বিডি নং', cleanBd]);
+        // Row 4: Spacer
         rows.push([]);
-        // Row 4: Column Headers
+        // Row 5: Column Headers (Col B: 'ক্রমিক নং', Col C: 'তারিখ', Col D..: Foods)
         rows.push(dateHeaderRow);
 
-        // Rows 5..: Days 1 to daysInMonth
+        // Rows 6.. (Days 1 to daysInMonth)
         for (let d = 1; d <= daysInMonth; d++) {
           const dayStr = String(d).padStart(2, '0');
           const rowYmd = `${selectedYm}-${dayStr}`;
-          const dStrBn = `${toBengaliNum(d)} ${monthBnName}`;
+          const dStrBn = formatShortBengaliDate(d, selMonth - 1, selYear);
 
           // Find existing entries on that date for member m
           const dayTxs = existingTxs.filter((tx: any) => {
@@ -539,7 +866,6 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           });
 
           const foodQtyMap = new Map<number, number>();
-          let dayTotal = 0;
 
           dayTxs.forEach((tx: any) => {
             let soldItems = tx.soldItems;
@@ -552,19 +878,21 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                 const rawName = String(si.menuItemName || si.name || si.itemName || '').trim();
                 const rawBn = getMenuItemBanglaName(rawName) || formatItemNameBn(rawName) || rawName;
                 const q = Number(si.qty || si.quantity || 1);
-                const pr = Number(si.price || si.rate || 0);
 
-                const colIdx = allFoodColumns.findIndex(col => {
-                  const cEn = col.en.toLowerCase();
-                  const cBn = col.bn.toLowerCase();
-                  const rLower = rawName.toLowerCase();
-                  const rBnLower = rawBn.toLowerCase();
-                  return cEn === rLower || rLower.includes(cEn) || cEn.includes(rLower) || cBn === rBnLower || rBnLower.includes(cBn);
-                });
+                // Find matching column in allFoodColumns
+                let colIdx = allFoodColumns.findIndex(col => col.bn === rawBn || col.bn === rawName || col.en.toLowerCase() === rawName.toLowerCase());
+                if (colIdx === -1) {
+                  colIdx = allFoodColumns.findIndex(col => {
+                    const cEn = col.en.toLowerCase();
+                    const cBn = col.bn.toLowerCase();
+                    const rLower = rawName.toLowerCase();
+                    const rBnLower = rawBn.toLowerCase();
+                    return cEn.includes(rLower) || rLower.includes(cEn) || cBn.includes(rBnLower) || rBnLower.includes(cBn);
+                  });
+                }
 
                 if (colIdx >= 0) {
                   foodQtyMap.set(colIdx, (foodQtyMap.get(colIdx) || 0) + q);
-                  dayTotal += (pr > 0 ? pr : 10) * q;
                 }
               });
             } else if (tx.items) {
@@ -584,18 +912,20 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                   }
                 }
                 const rawBn = getMenuItemBanglaName(raw) || formatItemNameBn(raw) || raw;
-                const colIdx = allFoodColumns.findIndex(col => {
-                  const cEn = col.en.toLowerCase();
-                  const cBn = col.bn.toLowerCase();
-                  const rLower = raw.toLowerCase();
-                  const rBnLower = rawBn.toLowerCase();
-                  return cEn === rLower || rLower.includes(cEn) || cEn.includes(rLower) || cBn === rBnLower || rBnLower.includes(cBn);
-                });
+                let colIdx = allFoodColumns.findIndex(col => col.bn === rawBn || col.bn === raw || col.en.toLowerCase() === raw.toLowerCase());
+                if (colIdx === -1) {
+                  colIdx = allFoodColumns.findIndex(col => {
+                    const cEn = col.en.toLowerCase();
+                    const cBn = col.bn.toLowerCase();
+                    const rLower = raw.toLowerCase();
+                    const rBnLower = rawBn.toLowerCase();
+                    return cEn.includes(rLower) || rLower.includes(cEn) || cBn.includes(rBnLower) || rBnLower.includes(cBn);
+                  });
+                }
                 if (colIdx >= 0) {
                   foodQtyMap.set(colIdx, (foodQtyMap.get(colIdx) || 0) + q);
                 }
               });
-              dayTotal += Number(tx.amount || 0);
             }
           });
 
@@ -610,20 +940,78 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             rowData.push(qty && qty > 0 ? qty : '');
           });
 
-          rowData.push(dayTotal > 0 ? dayTotal : '');
           rows.push(rowData);
         }
 
         const ws = XLSX.utils.aoa_to_sheet(rows);
-        ws['!views'] = [{ state: 'frozen', ySplit: 4, xSplit: 0, activePane: 'bottomLeft' }];
-        ws['!freeze'] = { xSplit: 0, ySplit: 4 };
+        ws['!views'] = [{ state: 'frozen', ySplit: 5, xSplit: 0, activePane: 'bottomLeft' }];
+        ws['!freeze'] = { xSplit: 0, ySplit: 5 };
         ws['!cols'] = [
           { wch: 3 },  // Col A
           { wch: 10 }, // ক্রমিক নং
-          { wch: 18 }, // তারিখ
-          ...allFoodColumns.map(() => ({ wch: 12 })),
-          { wch: 14 }  // মোট বিল
+          { wch: 15 }, // তারিখ
+          ...allFoodColumns.map(() => ({ wch: 14 })),
         ];
+
+        // Common black thin border for table cells
+        const cellBorder = {
+          top: { style: 'thin', color: { rgb: '000000' } },
+          bottom: { style: 'thin', color: { rgb: '000000' } },
+          left: { style: 'thin', color: { rgb: '000000' } },
+          right: { style: 'thin', color: { rgb: '000000' } },
+        };
+
+        const totalCols = dateHeaderRow.length;
+        const totalRows = rows.length;
+
+        // Top banner styling (B1..C3)
+        for (let r = 0; r <= 2; r++) {
+          const addrB = XLSX.utils.encode_cell({ r, c: 1 });
+          const addrC = XLSX.utils.encode_cell({ r, c: 2 });
+          if (ws[addrB]) {
+            ws[addrB].s = {
+              font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
+              alignment: { horizontal: 'center', vertical: 'center' },
+              border: cellBorder,
+              fill: { fgColor: { rgb: 'F1F5F9' } }
+            };
+          }
+          if (ws[addrC]) {
+            ws[addrC].s = {
+              font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
+              alignment: { horizontal: 'center', vertical: 'center' },
+              border: cellBorder
+            };
+          }
+        }
+
+        // Header row styling (r=4, Col B to Last): Bold, Center Aligned, with borders
+        for (let c = 1; c < totalCols; c++) {
+          const addr = XLSX.utils.encode_cell({ r: 4, c });
+          if (ws[addr]) {
+            ws[addr].s = {
+              font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
+              alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+              border: cellBorder,
+              fill: { fgColor: { rgb: 'E2E8F0' } }
+            };
+          }
+        }
+
+        // Data rows styling (r=5 to totalRows-1): All cells Center Aligned (horizontal & vertical), with borders
+        for (let r = 5; r < totalRows; r++) {
+          for (let c = 1; c < totalCols; c++) {
+            const addr = XLSX.utils.encode_cell({ r, c });
+            if (!ws[addr]) {
+              ws[addr] = { t: 's', v: '' };
+            }
+            ws[addr].s = {
+              font: { name: 'Arial', sz: 11, color: { rgb: '000000' } },
+              alignment: { horizontal: 'center', vertical: 'center' },
+              border: cellBorder
+            };
+          }
+        }
 
         const tabTitle = `${memberNameBn.slice(0, 10)} (${cleanBd.slice(-4)})`.replace(/[\\/?*:[\]]/g, '');
         XLSX.utils.book_append_sheet(workbook, ws, tabTitle || `Member_${mIdx + 1}`);
@@ -900,13 +1288,14 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             hasDateWise = true;
             const headerRow = rawMatrix[dateMatrixHeaderRowIdx];
 
-            // 1. Identify Fixed Member for this sheet (from header banner cells or sheet tab name)
+            // 1. Identify Fixed Member for this sheet (from header banner cells B1-C3 or sheet tab name)
             let fixedRank = '';
             let fixedName = '';
             let fixedBd = '';
 
             const sheetBdMatch = sheetName.match(/\b(\d{4,7})\b/);
             if (sheetBdMatch) fixedBd = sheetBdMatch[1];
+            const cleanSheetName = sheetName.replace(/\(\d+\)/, '').trim();
 
             for (let r = 0; r <= dateMatrixHeaderRowIdx; r++) {
               const row = rawMatrix[r] || [];
@@ -917,15 +1306,18 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                 if (bdMatch && !fixedBd) {
                   fixedBd = bdMatch[1];
                 }
-                if (cellText.includes('সদস্য') || cellText.includes('নাম') || cellText.includes('পদবী')) {
-                  const nextCell = String(row[c + 1] || row[c + 2] || '').trim();
-                  const combined = `${cellText} ${nextCell}`;
-                  const m = findMemberByRankAndName('', combined, members) || findMemberByRankAndName('', nextCell, members);
-                  if (m) {
-                    fixedRank = m.Rank || m.rank || '';
-                    fixedName = m.Surname || m.Name || '';
-                    if (!fixedBd) fixedBd = m['BD No'] || m.bdNo || m.airman_id;
-                  }
+                if (cellText === 'নাম' || cellText === 'Name' || cellText.includes('সদস্য')) {
+                  const val = String(row[c + 1] || row[c + 2] || '').trim();
+                  if (val && !fixedName) fixedName = val;
+                }
+                if (cellText === 'র‍্যাংক' || cellText === 'পদবী' || cellText === 'Rank') {
+                  const val = String(row[c + 1] || row[c + 2] || '').trim();
+                  if (val && !fixedRank) fixedRank = val;
+                }
+                if (cellText === 'বিডি নং' || cellText.includes('বিডি')) {
+                  const val = String(row[c + 1] || row[c + 2] || '').trim();
+                  const m = val.match(/\b(\d{4,7})\b/);
+                  if (m && !fixedBd) fixedBd = m[1];
                 }
               }
             }
@@ -939,12 +1331,12 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
               matchedMem = findMemberByRankAndName(fixedRank, fixedName, members);
             }
             if (!matchedMem) {
-              matchedMem = findMemberByRankAndName('', sheetName, members);
+              matchedMem = findMemberByRankAndName('', cleanSheetName || sheetName, members);
             }
 
             const finalBd = matchedMem ? (matchedMem['BD No'] || matchedMem.bdNo || matchedMem.airman_id) : (fixedBd ? `BD/${fixedBd}` : 'N/A');
             const finalRank = matchedMem ? (matchedMem.Rank || matchedMem.rank || '') : (fixedRank || '');
-            const finalName = matchedMem ? (matchedMem.Surname || matchedMem.Name || '') : (fixedName || sheetName);
+            const finalName = matchedMem ? (matchedMem.Surname || matchedMem.Name || '') : (fixedName || cleanSheetName || sheetName);
 
             // 2. Identify month & year from banner or current
             let sheetYear = new Date().getFullYear();
@@ -985,12 +1377,20 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                 break;
               }
 
-              let rowDate = '';
-              const dayNum = parseBanglaNumber(dateStr);
-              if (dayNum >= 1 && dayNum <= 31 && !dateStr.includes('-') && !dateStr.includes('/') && !dateStr.includes('.')) {
-                rowDate = `${sheetYear}-${sheetMonth}-${String(dayNum).padStart(2, '0')}`;
+              let rowDate = parseDateWiseMatrixDate(dateStr, sheetYear, parseInt(sheetMonth, 10));
+              if (!rowDate) {
+                const dayNum = parseBanglaNumber(dateStr);
+                if (dayNum >= 1 && dayNum <= 31 && !dateStr.includes('-') && !dateStr.includes('/') && !dateStr.includes('.')) {
+                  rowDate = `${sheetYear}-${sheetMonth}-${String(dayNum).padStart(2, '0')}`;
+                } else {
+                  rowDate = parseBanglaOrEnglishDate(dateCell, `${sheetYear}-${sheetMonth}-01`);
+                }
               } else {
-                rowDate = parseBanglaOrEnglishDate(dateCell, `${sheetYear}-${sheetMonth}-01`);
+                const ymdParts = rowDate.split('-');
+                if (ymdParts.length === 3) {
+                  sheetYear = parseInt(ymdParts[0], 10) || sheetYear;
+                  sheetMonth = ymdParts[1] || sheetMonth;
+                }
               }
 
               foodCols.forEach((fc) => {
@@ -1189,7 +1589,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
     };
   }, [parsedRows]);
 
-  // Execute Import & commit to canteen_txs, Member Due, and Raw Stock
+  // Execute Import & commit to canteen_txs, Member Due, and Raw Stock (Replaces previous entries on same date)
   const handleExecuteImport = async () => {
     const rowsToImport = parsedRows.filter(r => r.selected);
     if (rowsToImport.length === 0) {
@@ -1202,73 +1602,168 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
     setSuccessMessage(null);
 
     try {
+      // 1. Group imported rows by (member, date) so each day has one clean consolidated sale
+      const groupedByMemberDate = new Map<string, ParsedSaleRow[]>();
+      for (const row of rowsToImport) {
+        const rowDateYmd = toYMDDate(row.date) || row.date;
+        const airmanId = String(row.matchedMember?.airman_id || row.bdNo || '').trim();
+        const bdDigits = String(row.bdNo || '').replace(/\D/g, '');
+        const key = `${airmanId || bdDigits}__${rowDateYmd}`;
+        if (!groupedByMemberDate.has(key)) {
+          groupedByMemberDate.set(key, []);
+        }
+        groupedByMemberDate.get(key)!.push(row);
+      }
+
+      // Build keys to replace:
+      const importedMemberDateKeys = new Set<string>();
+      rowsToImport.forEach(r => {
+        const rowDateYmd = toYMDDate(r.date) || r.date;
+        const mAirman = String(r.matchedMember?.airman_id || r.matchedMember?.['BD No'] || '').toLowerCase().trim();
+        const mBd = String(r.matchedMember?.['BD No'] || r.bdNo || '').toLowerCase().trim();
+        const mDigits = String(r.bdNo || r.matchedMember?.airman_id || '').replace(/\D/g, '');
+
+        if (rowDateYmd) {
+          if (mAirman) importedMemberDateKeys.add(`${mAirman}__${rowDateYmd}`);
+          if (mBd) importedMemberDateKeys.add(`${mBd}__${rowDateYmd}`);
+          if (mDigits) importedMemberDateKeys.add(`digits_${mDigits}__${rowDateYmd}`);
+        }
+      });
+
+      // Filter existing transactions: Keep transactions that are NOT on the replaced (member, date)
+      const existingTxs: any[] = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+      const keptTransactions: any[] = [];
+      const memberDueDeductions = new Map<string, number>();
+
+      existingTxs.forEach((tx: any) => {
+        if (!isSaleTransaction(tx)) {
+          keptTransactions.push(tx);
+          return;
+        }
+
+        const txDateYmd = toYMDDate(tx.date || tx.paymentDate || tx.timestamp || tx.created_at || (typeof tx.id === 'number' ? tx.id : undefined));
+        const txAirman = String(tx.airman_id || tx.member_id || '').toLowerCase().trim();
+        const txBd = String(tx.bdNo || '').toLowerCase().trim();
+        const txDigits = (tx.bdNo || tx.airman_id || '').toString().replace(/\D/g, '');
+
+        const isMatch = (
+          (txAirman && txDateYmd && importedMemberDateKeys.has(`${txAirman}__${txDateYmd}`)) ||
+          (txBd && txDateYmd && importedMemberDateKeys.has(`${txBd}__${txDateYmd}`)) ||
+          (txDigits && txDateYmd && importedMemberDateKeys.has(`digits_${txDigits}__${txDateYmd}`))
+        );
+
+        if (isMatch) {
+          // This old sale is being REPLACED by the new import entry!
+          const txStatus = String(tx.status || tx.paymentStatus || tx.paymentMethod || 'DUE').toUpperCase();
+          if (txStatus === 'DUE') {
+            const memberKey = tx.airman_id || tx.bdNo || txDigits;
+            const currentSub = memberDueDeductions.get(memberKey) || 0;
+            memberDueDeductions.set(memberKey, currentSub + Number(tx.amount || 0));
+          }
+        } else {
+          keptTransactions.push(tx);
+        }
+      });
+
+      // 2. Generate new consolidated transactions
       const newTransactions: any[] = [];
-      const memberDueIncrements = new Map<string, number>();
+      const memberDueAdditions = new Map<string, number>();
       const stockDeductionList: Array<{ menuItemId: string; menuItemName: string; qty: number }> = [];
 
-      for (const row of rowsToImport) {
-        const txDateStr = formatCanteenDate(row.date);
-        const airmanId = row.matchedMember?.airman_id || row.bdNo;
+      groupedByMemberDate.forEach((rowsGroup) => {
+        const first = rowsGroup[0];
+        const targetMember = first.matchedMember;
+        const airmanId = targetMember ? targetMember.airman_id : first.bdNo;
+        const memberName = targetMember ? (targetMember.Surname || targetMember.Name || targetMember.name || first.memberName) : first.memberName;
+        const rank = targetMember ? (targetMember.Rank || targetMember.rank || first.rank) : first.rank;
+        const bdNo = targetMember ? (targetMember['BD No'] || targetMember.bdNo || first.bdNo) : first.bdNo;
+
+        const dayTotal = rowsGroup.reduce((sum, r) => sum + r.totalAmount, 0);
+        const dayOriginal = rowsGroup.reduce((sum, r) => sum + (r.qty * r.unitPrice), 0);
+        const dayDiscount = rowsGroup.reduce((sum, r) => sum + r.discount, 0);
+        const txDateStr = formatCanteenDate(first.date);
+
+        const soldItems = rowsGroup.map(r => ({
+          menuItemId: r.matchedMenuItem?.id || `item-${Date.now()}`,
+          menuItemName: r.menuItemName,
+          price: r.unitPrice,
+          qty: r.qty,
+          totalPrice: r.totalAmount
+        }));
+
+        const itemsSummary = rowsGroup.map(r => `${r.menuItemName} (${r.qty})`).join(', ');
+
         const tx = {
-          id: Date.now() + Math.random(),
+          id: `tx-sale-import-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           date: txDateStr,
+          timestamp: new Date(first.date).getTime() || Date.now(),
           airman_id: airmanId,
-          bdNo: row.bdNo,
-          memberName: row.memberName,
-          rank: row.rank || '',
-          items: `${row.menuItemName} (${row.qty})`,
-          soldItems: [{
-            menuItemId: row.matchedMenuItem?.id || `item-${Date.now()}`,
-            menuItemName: row.menuItemName,
-            price: row.unitPrice,
-            qty: row.qty
-          }],
-          originalAmount: (row.qty * row.unitPrice),
-          discount: row.discount,
-          amount: row.totalAmount,
+          bdNo: bdNo,
+          memberName: memberName,
+          rank: rank || '',
+          items: itemsSummary,
+          soldItems: soldItems,
+          originalAmount: dayOriginal,
+          discount: dayDiscount,
+          amount: dayTotal,
           type: 'SALE',
-          status: row.paymentMode,
-          paymentStatus: row.paymentMode,
-          gateway: row.paymentMode === 'PAID' ? 'CASH' : 'DUE',
-          paymentMethod: row.paymentMode === 'PAID' ? 'CASH' : 'DUE',
-          notes: row.remarks ? `Imported: ${row.remarks}` : 'Imported via Excel POS Sales'
+          status: first.paymentMode || 'DUE',
+          paymentStatus: first.paymentMode || 'DUE',
+          gateway: (first.paymentMode === 'PAID') ? 'CASH' : 'DUE',
+          paymentMethod: (first.paymentMode === 'PAID') ? 'CASH' : 'DUE',
+          notes: `Date-wise Matrix Import (${first.date})`
         };
 
         newTransactions.push(tx);
 
-        if (updateMemberDue && row.paymentMode === 'DUE') {
-          const currentAdd = memberDueIncrements.get(airmanId) || 0;
-          memberDueIncrements.set(airmanId, currentAdd + row.totalAmount);
+        if (updateMemberDue && first.paymentMode !== 'PAID') {
+          const currentAdd = memberDueAdditions.get(airmanId) || 0;
+          memberDueAdditions.set(airmanId, currentAdd + dayTotal);
         }
 
         if (deductStock) {
-          stockDeductionList.push({
-            menuItemId: row.matchedMenuItem?.id || '',
-            menuItemName: row.menuItemName,
-            qty: row.qty
+          rowsGroup.forEach(r => {
+            stockDeductionList.push({
+              menuItemId: r.matchedMenuItem?.id || '',
+              menuItemName: r.menuItemName,
+              qty: r.qty
+            });
           });
         }
+      });
+
+      // 3. Update Member Dues (New Due - Old Replaced Due)
+      if (updateMemberDue) {
+        const allMemberKeys = new Set([...memberDueAdditions.keys(), ...memberDueDeductions.keys()]);
+        for (const key of allMemberKeys) {
+          const add = memberDueAdditions.get(key) || 0;
+          const sub = memberDueDeductions.get(key) || 0;
+          const netChange = add - sub;
+          if (netChange !== 0) {
+            const targetMem = members.find(m => 
+              m.airman_id === key || 
+              m['BD No'] === key || 
+              String(m['BD No'] || '').replace(/\D/g, '') === String(key).replace(/\D/g, '')
+            );
+            if (targetMem) {
+              const currentDue = Number(targetMem.Due ?? targetMem.due ?? targetMem.baki ?? 0);
+              const newDue = Math.max(0, currentDue + netChange);
+              targetMem.Due = newDue;
+              targetMem.due = newDue;
+              targetMem.baki = newDue;
+              supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', targetMem.airman_id).then();
+            }
+          }
+        }
+        setCanteenMembersCache(members);
       }
 
-      // 1. Append transactions to canteen_txs in localStorage & Cloud
-      const existingTxs: any[] = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-      const mergedTxs = [...newTransactions, ...existingTxs];
+      // 4. Save merged transactions (new ones replace old ones on those dates)
+      const mergedTxs = [...newTransactions, ...keptTransactions];
       localStorage.setItem('canteen_txs', JSON.stringify(mergedTxs));
       await pushKeyToCloud('canteen_txs', mergedTxs).catch(() => {});
 
-      // 2. Update Member Dues in Supabase & memory if enabled
-      if (updateMemberDue && memberDueIncrements.size > 0) {
-        for (const [airmanId, addDue] of memberDueIncrements.entries()) {
-          const targetMem = members.find(m => m.airman_id === airmanId || m['BD No'] === airmanId);
-          if (targetMem) {
-            const currentDue = Number(targetMem.Due ?? targetMem.due ?? targetMem.baki ?? 0);
-            const newDue = currentDue + addDue;
-            supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', targetMem.airman_id).then();
-          }
-        }
-      }
-
-      // 3. Deduct stock from raw inventory & menu cache if enabled
+      // 5. Deduct stock from raw inventory & menu cache if enabled
       if (deductStock && stockDeductionList.length > 0) {
         deductRawStockForSales(stockDeductionList);
 
@@ -1295,7 +1790,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         }
       }
 
-      // 4. Dispatch global realtime events
+      // 6. Dispatch global realtime events
       window.dispatchEvent(new Event('canteen_txs_updated'));
       window.dispatchEvent(new Event('canteen_state_updated'));
       window.dispatchEvent(new Event('canteen_fund_updated'));
@@ -1303,7 +1798,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
       window.dispatchEvent(new Event('canteen_inventory_updated'));
       window.dispatchEvent(new Event('storage'));
 
-      setSuccessMessage(`✅ Successfully imported ${newTransactions.length} POS sales transactions (Total ৳${summary.totalAmount.toLocaleString()})!`);
+      setSuccessMessage(`✅ Successfully imported ${newTransactions.length} daily POS entries (Old entries replaced, Total ৳${summary.totalAmount.toLocaleString()})!`);
 
       if (onImportComplete) {
         onImportComplete();
@@ -1333,7 +1828,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             </div>
             <div>
               <h3 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-2">
-                <span>POS Sales Bulk Import (Excel / CSV)</span>
+                <span>POS Import (Excel / CSV)</span>
                 <span className="text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-500/30">
                   {detectedFormat === 'MEMBER_WISE_MATRIX' 
                     ? 'Format: সদস্য ভিত্তিক (Member-Wise)' 
@@ -1351,15 +1846,28 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           </div>
 
           <div className="flex items-center space-x-2">
-            {/* Template 1: Member-wise Matrix (Date Fixed, Left: Rank & Name) */}
+            {/* Month Selection directly in Header */}
+            <div className="flex items-center space-x-1.5 bg-slate-900 border border-slate-700/80 rounded-xl px-2.5 py-1 text-xs">
+              <Calendar className="w-3.5 h-3.5 text-teal-400" />
+              <span className="text-[11px] text-slate-400 font-bold hidden sm:inline">মাস:</span>
+              <input
+                type="month"
+                value={templateMonth}
+                onChange={(e) => setTemplateMonth(e.target.value)}
+                className="bg-transparent text-white font-mono text-xs focus:outline-none cursor-pointer"
+                title="টেমপ্লেট ডাউনলোডের মাস নির্বাচন"
+              />
+            </div>
+
+            {/* Template 1: Member-wise Matrix (31 Date tabs for selected Month) */}
             <button
               type="button"
               onClick={handleDownloadOfficialMatrixTemplate}
               className="flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-900/80 hover:bg-emerald-800 text-emerald-200 border border-emerald-500/50 rounded-xl text-xs font-black tracking-wider transition-all shadow-sm cursor-pointer"
-              title="Template 1: Member-wise (Date fixed, Left: Rank & Name)"
+              title={`Template 1: Member-wise (৩১ দিনের ৩১টি ট্যাব, ${formatBengaliMonthYear(templateMonth)})`}
             >
               <Download className="w-3.5 h-3.5 text-emerald-400" />
-              <span>১. সদস্য ভিত্তিক (দৈনিক শিট)</span>
+              <span>১. সদস্য ভিত্তিক (৩১ দিন)</span>
             </button>
 
             {/* Template 2: Date-wise Matrix (Member Fixed, Left: 1-31 Date) */}
@@ -1367,21 +1875,10 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
               type="button"
               onClick={() => handleDownloadDateWiseMatrixTemplate()}
               className="flex items-center space-x-1.5 px-3 py-1.5 bg-teal-900/80 hover:bg-teal-800 text-teal-200 border border-teal-500/50 rounded-xl text-xs font-black tracking-wider transition-all shadow-sm cursor-pointer"
-              title="Template 2: Date-wise (Member fixed, Left: 1-31 Date)"
+              title={`Template 2: Date-wise (${formatBengaliMonthYear(templateMonth)})`}
             >
               <Download className="w-3.5 h-3.5 text-teal-400" />
-              <span>২. তারিখ ভিত্তিক (মাসিক শিট)</span>
-            </button>
-
-            {/* Secondary Download: Standard List Template */}
-            <button
-              type="button"
-              onClick={handleDownloadStandardListTemplate}
-              className="hidden sm:flex items-center space-x-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-[11px] font-bold transition-all cursor-pointer"
-              title="Download Standard List Template"
-            >
-              <Download className="w-3 h-3 text-slate-400" />
-              <span>লিস্ট</span>
+              <span>২. তারিখ ভিত্তিক</span>
             </button>
 
             <button
@@ -1458,7 +1955,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                 </div>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
-                  {/* Card 1: Member-wise (Date Fixed, Left: Sl, Rank, Name) */}
+                  {/* Card 1: Member-wise (Date Fixed per Tab, 31 Daily Tabs for Selected Month) */}
                   <div className="p-4 rounded-2xl bg-gradient-to-b from-slate-900 to-slate-950 border border-emerald-500/40 space-y-2.5 flex flex-col justify-between shadow-lg">
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
@@ -1467,14 +1964,27 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                           ১. সদস্য ভিত্তিক টেমপ্লেট (Member-wise)
                         </span>
                         <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950/90 text-emerald-300 font-mono font-bold border border-emerald-500/40">
-                          Date Fixed
+                          ৩১ দিনের ৩১টি ট্যাব
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-400 leading-relaxed">
-                        • <strong>তারিখ ফিক্সড:</strong> হেডারে নির্দিষ্ট দিনের তারিখ থাকে。<br/>
+                        • <strong>মাসিক ৩১টি ট্যাব:</strong> নির্বাচিত মাসের <strong>১ থেকে ৩১ তারিখের জন্য ৩১টি আলাদা শিট ট্যাব</strong> তৈরি হবে。<br/>
                         • <strong>বামে সদস্য:</strong> বাম পাশের কলামে সদস্যদের <strong>ক্রমিক, পদবী ও নাম</strong> সাজানো থাকে。<br/>
-                        • <strong>ডানে খাবার:</strong> পরোটা, ডিম ভাজি, ডিম সিদ্ধ, দুধ চা সহ ২৭টি খাবারের কলাম থাকে।
+                        • <strong>ডানে খাবার:</strong> পরোটা, ডিম ভাজি, ডিম সিদ্ধ, চা সহ সকল খাবারের কলাম (নতুন মেনু শেষে যুক্ত হবে)।
                       </p>
+
+                      {/* Month Selection preview in Card 1 */}
+                      <div className="pt-1 space-y-1">
+                        <label className="text-[10px] text-emerald-300 font-bold flex items-center justify-between">
+                          <span className="flex items-center gap-1.5">
+                            <Calendar className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>নির্বাচিত মাস:</span>
+                          </span>
+                          <span className="text-[10px] font-mono text-emerald-300 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/40 font-bold">
+                            {formatBengaliMonthYear(templateMonth)}
+                          </span>
+                        </label>
+                      </div>
                     </div>
 
                     <button
@@ -1483,7 +1993,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                       className="w-full mt-2 flex items-center justify-center space-x-2 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black shadow-md shadow-emerald-600/30 transition-all cursor-pointer active:scale-95"
                     >
                       <Download className="w-4 h-4 text-emerald-200" />
-                      <span>১. সদস্য ভিত্তিক টেমপ্লেট ডাউনলোড (XLSX)</span>
+                      <span>১. সদস্য ভিত্তিক টেমপ্লেট (৩১টি ট্যাব) ডাউনলোড</span>
                     </button>
                   </div>
 
@@ -1505,6 +2015,25 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                         • <strong>ডানে খাবার:</strong> পরোটা, ডিম ভাজি, ডিম সিদ্ধ, চা সহ সারা মাসের প্রতিদিনের খাওয়ার সংখ্যা থাকে।
                       </p>
 
+                      {/* Month Selection */}
+                      <div className="pt-1 space-y-1">
+                        <label className="text-[10px] text-teal-300 font-bold flex items-center justify-between">
+                          <span className="flex items-center gap-1.5">
+                            <Calendar className="w-3.5 h-3.5 text-teal-400" />
+                            <span>টেমপ্লেটের মাস নির্বাচন (Month):</span>
+                          </span>
+                          <span className="text-[10px] font-mono text-teal-300 bg-teal-950/80 px-2 py-0.5 rounded border border-teal-500/40 font-bold">
+                            {formatBengaliMonthYear(templateMonth)}
+                          </span>
+                        </label>
+                        <input
+                          type="month"
+                          value={templateMonth}
+                          onChange={(e) => setTemplateMonth(e.target.value)}
+                          className="w-full bg-slate-950 border border-teal-500/50 rounded-xl px-2.5 py-1.5 text-xs text-white font-medium focus:outline-none focus:border-teal-400 cursor-pointer shadow-inner"
+                        />
+                      </div>
+
                       {/* Optional Member Selection Dropdown */}
                       <div className="pt-1">
                         <label className="text-[10px] text-teal-300/80 font-bold block mb-1">
@@ -1516,7 +2045,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                           className="w-full bg-slate-950 border border-teal-500/40 rounded-xl px-2.5 py-1.5 text-xs text-white font-medium focus:outline-none focus:border-teal-400 cursor-pointer"
                         >
                           <option value="ALL">সকল সদস্য (সদস্য প্রতি আলাদা ট্যাব)</option>
-                          {members.slice(0, 50).map((m: any, mIdx: number) => {
+                          {members.map((m: any, mIdx: number) => {
                             const rank = m.Rank || m.rank || '';
                             const name = m.Surname || m.Name || m.name || '';
                             const bd = m['BD No'] || m.airman_id || '';
