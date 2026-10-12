@@ -12,9 +12,11 @@ import { deductRawStockForSales } from '../utils/recipeManager';
 import { getCanteenMenuCache, setCanteenMenuCache, normalizeCatalogKey, isOneTimeBoxItem } from '../utils/canteenMenuData';
 import { formatCanteenDate, toYMDDate } from '../utils/dateUtils';
 import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
-import { formatRankBn, formatMemberNameBn, toBengaliNum } from '../utils/exportCanteenBillExcel';
+import { formatRankBn, formatMemberNameBn, toBengaliNum, formatBengaliMonthYear } from '../utils/exportCanteenBillExcel';
 import { DEFAULT_MEMBER_BANGLA_NAMES } from '../utils/memberBanglaNames';
 import { getMenuItemBanglaName } from '../utils/menuBanglaNames';
+import { formatItemNameBn } from '../pages/MemberDB';
+import { isSaleTransaction } from '../pages/PosSales';
 
 interface ImportPosSalesModalProps {
   isOpen: boolean;
@@ -256,6 +258,28 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
   const [searchFilter, setSearchFilter] = useState('');
   const [filterMode, setFilterMode] = useState<'ALL' | 'VALID' | 'WARNING'>('ALL');
   const [dateTemplateMemberId, setDateTemplateMemberId] = useState<string>('ALL');
+  const [templateMonth, setTemplateMonth] = useState<string>(() => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    return `${y}-${m}`;
+  });
+
+  const availableTemplateMonths = useMemo(() => {
+    const list = [];
+    const now = new Date();
+    const curYear = now.getFullYear();
+    for (let y = curYear - 1; y <= curYear + 1; y++) {
+      for (let m = 1; m <= 12; m++) {
+        const key = `${y}-${String(m).padStart(2, '0')}`;
+        list.push({
+          key,
+          label: `${formatBengaliMonthYear(key)} (${key})`
+        });
+      }
+    }
+    return list;
+  }, []);
   
   // Options
   const [updateMemberDue, setUpdateMemberDue] = useState(true);
@@ -382,16 +406,70 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
       const targetMemberId = String(rawTarget || 'ALL').trim();
       const sortedMembers = sortCanteenMembersByOfficeSeniority(members);
       const workbook = XLSX.utils.book_new();
-      const daysInMonth = 31; // Monthly 31-day ledger
+
+      const selectedYm = templateMonth || getTodayYMD().slice(0, 7);
+      const [selYearStr, selMonthStr] = selectedYm.split('-');
+      const selYear = parseInt(selYearStr, 10);
+      const selMonth = parseInt(selMonthStr, 10);
+      const daysInMonth = new Date(selYear, selMonth, 0).getDate();
+      const monthBnName = formatBengaliMonthYear(selectedYm);
+
+      // 1. Base official matrix food columns
+      const baseCols = OFFICIAL_MATRIX_FOOD_COLUMNS;
+
+      // 2. Extra catalog items from catalog (that are not one time box and not already in baseCols) appended to the LAST
+      const extraCols: Array<{ en: string; bn: string; catalogItem?: any }> = [];
+      const normBaseEns = new Set(baseCols.map(b => b.en.toLowerCase().trim()));
+      const normBaseBns = new Set(baseCols.map(b => b.bn.trim()));
+
+      (catalog || []).forEach((cItem: any) => {
+        if (isOneTimeBoxItem(cItem)) return;
+        const cEn = String(cItem.name || cItem.name_en || '').trim();
+        const cBn = String(cItem.name_bn || cItem.nameBn || getMenuItemBanglaName(cItem) || '').trim();
+        const normCEn = cEn.toLowerCase();
+
+        const alreadyInBase = 
+          (cEn && normBaseEns.has(normCEn)) || 
+          (cBn && normBaseBns.has(cBn)) ||
+          baseCols.some(b => {
+            const bEn = b.en.toLowerCase();
+            return bEn === normCEn || normCEn.includes(bEn) || bEn.includes(normCEn);
+          });
+
+        if (!alreadyInBase && (cEn || cBn)) {
+          const alreadyInExtra = extraCols.some(e => e.en.toLowerCase() === normCEn || (cBn && e.bn === cBn));
+          if (!alreadyInExtra) {
+            extraCols.push({
+              en: cEn || cBn,
+              bn: cBn || getMenuItemBanglaName(cEn) || formatItemNameBn(cEn) || cEn,
+              catalogItem: cItem
+            });
+          }
+        }
+      });
+
+      const allFoodColumns = [
+        ...baseCols.map(c => ({ en: c.en, bn: c.bn, catalogKey: c.catalogKey, catalogItem: null as any })),
+        ...extraCols
+      ];
 
       // Header row for Date-wise matrix (Col 1: Sl, Col 2: Date, Col 3..: Food items)
       const dateHeaderRow = [
         '',
         'ক্রমিক নং',
         'তারিখ',
-        ...OFFICIAL_MATRIX_FOOD_COLUMNS.map(c => c.bn),
+        ...allFoodColumns.map(c => c.bn),
         'মোট বিল'
       ];
+
+      // Existing sales transactions in the system
+      const existingTxs: any[] = (() => {
+        try {
+          return JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+        } catch {
+          return [];
+        }
+      })();
 
       // If specific member selected, generate single sheet. If ALL, generate for unit members
       let membersToGenerate: any[] = [];
@@ -406,7 +484,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         });
         membersToGenerate = found ? [found] : sortedMembers.slice(0, 10);
       } else {
-        membersToGenerate = sortedMembers.slice(0, Math.min(15, sortedMembers.length));
+        membersToGenerate = sortedMembers;
       }
 
       membersToGenerate.forEach((m, mIdx) => {
@@ -414,6 +492,10 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         const memberNameBn = m.name_bn || m.NameBn || formatMemberNameBn(m.Surname || m.Name || '') || m.Surname || m.Name || '';
         const bdNo = String(m['BD No'] || m.airman_id || '');
         const cleanBd = bdNo.replace(/\D/g, '') || `BD-${mIdx + 1}`;
+
+        const mAirman = String(m.airman_id || '').toLowerCase().trim();
+        const mBd = String(m['BD No'] || m.bdNo || '').toLowerCase().trim();
+        const mCleanDigits = (m['BD No'] || m.bdNo || m.airman_id || '').toString().replace(/\D/g, '');
 
         const rows: any[][] = [];
         // Row 1: Title
@@ -426,29 +508,109 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           `বিডি নং: ${bdNo}`,
           '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '',
           'মাস:',
-          'অক্টোবর ২০২৬'
+          monthBnName
         ]);
         // Row 3: Spacer
         rows.push([]);
         // Row 4: Column Headers
         rows.push(dateHeaderRow);
 
-        // Rows 5..35: Days 1 to 31
+        // Rows 5..: Days 1 to daysInMonth
         for (let d = 1; d <= daysInMonth; d++) {
-          const dStrBn = `${toBengaliNum(d)} অক্টোবর ২০২৬`;
-          const rowData = [
+          const dayStr = String(d).padStart(2, '0');
+          const rowYmd = `${selectedYm}-${dayStr}`;
+          const dStrBn = `${toBengaliNum(d)} ${monthBnName}`;
+
+          // Find existing entries on that date for member m
+          const dayTxs = existingTxs.filter((tx: any) => {
+            if (!isSaleTransaction(tx)) return false;
+            const txYmd = toYMDDate(tx.date || tx.paymentDate || tx.timestamp || tx.created_at || (typeof tx.id === 'number' ? tx.id : undefined));
+            if (txYmd !== rowYmd) return false;
+
+            const txAirman = String(tx.airman_id || tx.member_id || '').toLowerCase().trim();
+            const txBd = String(tx.bdNo || '').toLowerCase().trim();
+            const txDigits = (tx.bdNo || tx.airman_id || '').toString().replace(/\D/g, '');
+
+            return (
+              (mAirman && txAirman === mAirman) ||
+              (mBd && txBd === mBd) ||
+              (mCleanDigits && txDigits && mCleanDigits === txDigits)
+            );
+          });
+
+          const foodQtyMap = new Map<number, number>();
+          let dayTotal = 0;
+
+          dayTxs.forEach((tx: any) => {
+            let soldItems = tx.soldItems;
+            if (typeof soldItems === 'string') {
+              try { soldItems = JSON.parse(soldItems); } catch {}
+            }
+
+            if (Array.isArray(soldItems) && soldItems.length > 0) {
+              soldItems.forEach((si: any) => {
+                const rawName = String(si.menuItemName || si.name || si.itemName || '').trim();
+                const rawBn = getMenuItemBanglaName(rawName) || formatItemNameBn(rawName) || rawName;
+                const q = Number(si.qty || si.quantity || 1);
+                const pr = Number(si.price || si.rate || 0);
+
+                const colIdx = allFoodColumns.findIndex(col => {
+                  const cEn = col.en.toLowerCase();
+                  const cBn = col.bn.toLowerCase();
+                  const rLower = rawName.toLowerCase();
+                  const rBnLower = rawBn.toLowerCase();
+                  return cEn === rLower || rLower.includes(cEn) || cEn.includes(rLower) || cBn === rBnLower || rBnLower.includes(cBn);
+                });
+
+                if (colIdx >= 0) {
+                  foodQtyMap.set(colIdx, (foodQtyMap.get(colIdx) || 0) + q);
+                  dayTotal += (pr > 0 ? pr : 10) * q;
+                }
+              });
+            } else if (tx.items) {
+              const parts = String(tx.items).split(/[,+;|\n]+/).map((s: string) => s.trim()).filter(Boolean);
+              parts.forEach((p: string) => {
+                let q = 1;
+                let raw = p;
+                const m1 = p.match(/^(.+?)\s*\(([\d০-৯]+)\)$/);
+                if (m1) {
+                  raw = m1[1].trim();
+                  q = parseBanglaNumber(m1[2]) || 1;
+                } else {
+                  const m2 = p.match(/^(.+?)\s*[xX*×]\s*([\d০-৯]+)$/);
+                  if (m2) {
+                    raw = m2[1].trim();
+                    q = parseBanglaNumber(m2[2]) || 1;
+                  }
+                }
+                const rawBn = getMenuItemBanglaName(raw) || formatItemNameBn(raw) || raw;
+                const colIdx = allFoodColumns.findIndex(col => {
+                  const cEn = col.en.toLowerCase();
+                  const cBn = col.bn.toLowerCase();
+                  const rLower = raw.toLowerCase();
+                  const rBnLower = rawBn.toLowerCase();
+                  return cEn === rLower || rLower.includes(cEn) || cEn.includes(rLower) || cBn === rBnLower || rBnLower.includes(cBn);
+                });
+                if (colIdx >= 0) {
+                  foodQtyMap.set(colIdx, (foodQtyMap.get(colIdx) || 0) + q);
+                }
+              });
+              dayTotal += Number(tx.amount || 0);
+            }
+          });
+
+          const rowData: any[] = [
             '',
             toBengaliNum(d),
-            dStrBn,
-            // Sample consumption on day 1 & day 2 for demonstration
-            (d === 1 && mIdx === 0) ? 2 : (d === 2 && mIdx === 0 ? 1 : ''), // পরোটা
-            (d === 1 && mIdx === 0) ? 1 : '', // ডিম ভাজি
-            '', // ডিম পোচ
-            '', // ডিম সিদ্ধ
-            (d === 1 && mIdx === 0) ? 1 : (d === 2 && mIdx === 0 ? 2 : ''), // দুধ চা
-            ...new Array(OFFICIAL_MATRIX_FOOD_COLUMNS.length - 5).fill(''),
-            (d === 1 && mIdx === 0) ? 45 : (d === 2 && mIdx === 0 ? 30 : 0) // মোট বিল
+            dStrBn
           ];
+
+          allFoodColumns.forEach((_, cIdx) => {
+            const qty = foodQtyMap.get(cIdx);
+            rowData.push(qty && qty > 0 ? qty : '');
+          });
+
+          rowData.push(dayTotal > 0 ? dayTotal : '');
           rows.push(rowData);
         }
 
@@ -459,7 +621,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           { wch: 3 },  // Col A
           { wch: 10 }, // ক্রমিক নং
           { wch: 18 }, // তারিখ
-          ...OFFICIAL_MATRIX_FOOD_COLUMNS.map(() => ({ wch: 12 })),
+          ...allFoodColumns.map(() => ({ wch: 12 })),
           { wch: 14 }  // মোট বিল
         ];
 
@@ -467,11 +629,10 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         XLSX.utils.book_append_sheet(workbook, ws, tabTitle || `Member_${mIdx + 1}`);
       });
 
-      const dateStr = new Date().toISOString().split('T')[0];
       const memberSuffix = (targetMemberId && targetMemberId !== 'ALL' && membersToGenerate[0])
         ? `_${(membersToGenerate[0].Surname || 'Member').replace(/\s+/g, '_')}`
         : '_MultiMembers';
-      XLSX.writeFile(workbook, `155_UASU_Canteen_DateWise_Bill_Matrix${memberSuffix}_${dateStr}.xlsx`);
+      XLSX.writeFile(workbook, `155_UASU_Canteen_DateWise_Bill_Matrix_${selectedYm}${memberSuffix}.xlsx`);
     } catch (err: any) {
       console.error('Failed to download date-wise matrix template:', err);
       setErrorMessage('Failed to generate Date-wise template.');

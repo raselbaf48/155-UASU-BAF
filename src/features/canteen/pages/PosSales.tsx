@@ -25,7 +25,7 @@ import {
   InventoryItemType,
   restoreRawStockForSaleCancellation
 } from '../utils/recipeManager';
-import { pushKeyToCloud, recordDeletedTxId, getDeletedTxIds, recordDeletedTxIdAsync, clearDirtyCanteenKey } from '../utils/canteenCloudSync';
+import { pushKeyToCloud, pullKeyFromCloud, recordDeletedTxId, getDeletedTxIds, recordDeletedTxIdAsync, clearDirtyCanteenKey } from '../utils/canteenCloudSync';
 import { sortCanteenMembersByOfficeSeniority, deduplicateCanteenMembers } from '../utils/canteenSeniority';
 import { playSuccessChime, playTrashPopSound } from '../utils/audioFeedback';
 import { ImportPosSalesModal } from '../components/ImportPosSalesModal';
@@ -59,7 +59,7 @@ const isAirmanMember = (m: any): boolean => {
   return !isOfficerMember(m) && !isCivilianMember(m);
 };
 
-const isSaleTransaction = (tx: any): boolean => {
+export const isSaleTransaction = (tx: any): boolean => {
   if (!tx) return false;
   const t = String(tx?.type || '').toUpperCase().trim();
   const items = String(tx?.items || '').trim();
@@ -330,6 +330,22 @@ export const PosSales: React.FC = () => {
     window.addEventListener('storage', handleGeneralStateUpdated);
     window.addEventListener('storage', handleSyncStock);
     window.addEventListener('storage', handleCfgUpdate);
+
+    // Initial cloud fetch for canteen_txs to ensure POS sales history is 100% updated
+    pullKeyFromCloud('canteen_txs').then((cloudTxs) => {
+      if (Array.isArray(cloudTxs) && cloudTxs.length > 0) {
+        const local = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+        const merged = [...cloudTxs];
+        local.forEach((ltx: any) => {
+          if (!merged.some((ctx: any) => String(ctx.id) === String(ltx.id))) {
+            merged.push(ltx);
+          }
+        });
+        localStorage.setItem('canteen_txs', JSON.stringify(merged));
+        const deletedIds = getDeletedTxIds();
+        setSalesHistory(merged.filter((tx: any) => isSaleTransaction(tx) && !deletedIds.has(String(tx?.id))));
+      }
+    }).catch(() => {});
 
     // Supabase Realtime Channels for 100% live synchronization with database
     const channelName = `pos_realtime_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -1101,15 +1117,24 @@ export const PosSales: React.FC = () => {
   // Purchases on currently selected saleDate for each member
   const memberPurchasesOnSelectedDate = useMemo(() => {
     const map = new Map<string, string>();
-    if (!saleDate || !Array.isArray(salesHistory) || salesHistory.length === 0) {
-      return map;
-    }
+    if (!saleDate) return map;
 
     const targetYMD = toYMDDate(saleDate);
     if (!targetYMD) return map;
 
-    // Filter sales for the target sale date
-    const dateSales = salesHistory.filter((tx: any) => {
+    // Use salesHistory or direct fallback to localStorage if salesHistory is empty
+    let allTxs: any[] = Array.isArray(salesHistory) && salesHistory.length > 0 ? salesHistory : [];
+    if (allTxs.length === 0) {
+      try {
+        allTxs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+      } catch {
+        allTxs = [];
+      }
+    }
+
+    const deletedIds = getDeletedTxIds();
+    const dateSales = allTxs.filter((tx: any) => {
+      if (!tx || deletedIds.has(String(tx?.id))) return false;
       if (!isSaleTransaction(tx)) return false;
       const txYMD = toYMDDate(tx.date || tx.paymentDate || tx.timestamp || tx.created_at || (typeof tx.id === 'number' ? tx.id : undefined));
       return txYMD === targetYMD;
@@ -1117,96 +1142,104 @@ export const PosSales: React.FC = () => {
 
     if (dateSales.length === 0) return map;
 
-    // Group items by member (using airman_id, bdNo, and normalized digits)
-    const memberItemsMap = new Map<string, Map<string, number>>();
-
-    const getKeys = (tx: any): string[] => {
-      const keys: string[] = [];
-      if (tx.airman_id) {
-        keys.push(String(tx.airman_id).trim().toLowerCase());
-      }
-      if (tx.bdNo) {
-        keys.push(String(tx.bdNo).trim().toLowerCase());
-        const digits = String(tx.bdNo).replace(/\D/g, '');
-        if (digits) keys.push(`bd_${digits}`);
-      }
-      return keys;
+    // Helper to parse numbers in Bengali or English
+    const parseQty = (val: any): number => {
+      if (typeof val === 'number') return isNaN(val) ? 1 : Math.max(1, val);
+      if (!val) return 1;
+      const bnDigits: Record<string, string> = {
+        '০': '0', '১': '1', '২': '2', '৩': '3', '৪': '4',
+        '৫': '5', '৬': '6', '৭': '7', '৮': '8', '৯': '9'
+      };
+      const cleaned = String(val).replace(/[০-৯]/g, ch => bnDigits[ch] || ch).replace(/[^0-9.-]/g, '');
+      const n = parseInt(cleaned, 10);
+      return isNaN(n) || n <= 0 ? 1 : n;
     };
 
-    dateSales.forEach((tx: any) => {
-      const txKeys = getKeys(tx);
-      if (txKeys.length === 0) return;
+    // Process all members in unit
+    (members || []).forEach((m: any) => {
+      const mAirmanId = String(m.airman_id || '').toLowerCase().trim();
+      const mBdNo = String(m['BD No'] || m.bdNo || '').toLowerCase().trim();
+      const mCleanDigits = (m['BD No'] || m.bdNo || m.airman_id || '').toString().replace(/\D/g, '');
+      const mSurname = String(m.Surname || m.Name || m.surname || m.name || '').toLowerCase().trim();
+      const mRank = String(m.Rank || m.rank || '').toLowerCase().trim();
 
-      // Find or create map for this member
-      let itemsMap: Map<string, number> | null = null;
-      for (const k of txKeys) {
-        if (memberItemsMap.has(k)) {
-          itemsMap = memberItemsMap.get(k)!;
-          break;
+      const memberTxs = dateSales.filter((tx: any) => {
+        const txAirmanId = String(tx.airman_id || tx.member_id || tx.airmanId || '').toLowerCase().trim();
+        const txBdNo = String(tx.bdNo || tx['BD No'] || '').toLowerCase().trim();
+        const txDigits = (tx.bdNo || tx['BD No'] || tx.airman_id || '').toString().replace(/\D/g, '');
+        const txMemberName = String(tx.memberName || tx.customerName || tx.name || '').toLowerCase().trim();
+
+        if (mAirmanId && txAirmanId && mAirmanId === txAirmanId) return true;
+        if (mBdNo && txBdNo && mBdNo === txBdNo) return true;
+        if (mCleanDigits && txDigits && mCleanDigits === txDigits) return true;
+        if (mCleanDigits && txAirmanId && txAirmanId.includes(mCleanDigits)) return true;
+        if (mSurname && txMemberName) {
+          if (mRank && txMemberName.includes(mRank) && txMemberName.includes(mSurname)) return true;
+          if (txMemberName.includes(mSurname)) return true;
         }
-      }
-      if (!itemsMap) {
-        itemsMap = new Map<string, number>();
-      }
-      for (const k of txKeys) {
-        memberItemsMap.set(k, itemsMap);
-      }
+        return false;
+      });
 
-      if (Array.isArray(tx.soldItems) && tx.soldItems.length > 0) {
-        tx.soldItems.forEach((si: any) => {
-          const rawName = String(si.menuItemName || si.name || si.itemName || '').trim();
-          if (!rawName) return;
-          const bnName = getMenuItemBanglaName(rawName) || formatItemNameBn(rawName) || rawName;
-          const qty = Number(si.qty || si.quantity || 1);
-          itemsMap!.set(bnName, (itemsMap!.get(bnName) || 0) + qty);
-        });
-      } else if (tx.items && typeof tx.items === 'string') {
-        const parts = tx.items.split(',').map((s: string) => s.trim()).filter(Boolean);
-        parts.forEach((p: string) => {
-          const match = p.match(/^(.+?)\s*\(([0-9]+)\)$/);
-          if (match) {
-            const rawName = match[1].trim();
+      if (memberTxs.length === 0) return;
+
+      const itemsMap = new Map<string, number>();
+
+      memberTxs.forEach((tx: any) => {
+        let soldItems = tx.soldItems;
+        if (typeof soldItems === 'string') {
+          try { soldItems = JSON.parse(soldItems); } catch {}
+        }
+
+        if (Array.isArray(soldItems) && soldItems.length > 0) {
+          soldItems.forEach((si: any) => {
+            const rawName = String(si.menuItemName || si.name || si.itemName || '').trim();
+            if (!rawName) return;
             const bnName = getMenuItemBanglaName(rawName) || formatItemNameBn(rawName) || rawName;
-            const q = parseInt(match[2], 10) || 1;
-            itemsMap!.set(bnName, (itemsMap!.get(bnName) || 0) + q);
-          } else {
-            const xMatch = p.match(/^(.+?)\s*[xX*×]\s*([0-9]+)$/);
+            const qty = Number(si.qty || si.quantity || 1);
+            itemsMap.set(bnName, (itemsMap.get(bnName) || 0) + (isNaN(qty) || qty <= 0 ? 1 : qty));
+          });
+        } else if (tx.items) {
+          const parts = String(tx.items).split(/[,+;|\n]+/).map((s: string) => s.trim()).filter(Boolean);
+          parts.forEach((p: string) => {
+            const parenMatch = p.match(/^(.+?)\s*\(([\d০-৯]+)\)$/);
+            if (parenMatch) {
+              const rawName = parenMatch[1].trim();
+              const bnName = getMenuItemBanglaName(rawName) || formatItemNameBn(rawName) || rawName;
+              const q = parseQty(parenMatch[2]);
+              itemsMap.set(bnName, (itemsMap.get(bnName) || 0) + q);
+              return;
+            }
+            const xMatch = p.match(/^(.+?)\s*[xX*×]\s*([\d০-৯]+)$/);
             if (xMatch) {
               const rawName = xMatch[1].trim();
               const bnName = getMenuItemBanglaName(rawName) || formatItemNameBn(rawName) || rawName;
-              const q = parseInt(xMatch[2], 10) || 1;
-              itemsMap!.set(bnName, (itemsMap!.get(bnName) || 0) + q);
-            } else {
-              const rawName = p.trim();
-              if (rawName) {
-                const bnName = getMenuItemBanglaName(rawName) || formatItemNameBn(rawName) || rawName;
-                itemsMap!.set(bnName, (itemsMap!.get(bnName) || 0) + 1);
-              }
+              const q = parseQty(xMatch[2]);
+              itemsMap.set(bnName, (itemsMap.get(bnName) || 0) + q);
+              return;
             }
-          }
+            const rawName = p.trim();
+            if (rawName) {
+              const bnName = getMenuItemBanglaName(rawName) || formatItemNameBn(rawName) || rawName;
+              itemsMap.set(bnName, (itemsMap.get(bnName) || 0) + 1);
+            }
+          });
+        }
+      });
+
+      if (itemsMap.size > 0) {
+        const parts: string[] = [];
+        itemsMap.forEach((qty, name) => {
+          parts.push(`${name} x ${toBengaliNum(qty)}`);
         });
+        const summaryStr = parts.join(' , ');
+        if (mAirmanId) map.set(mAirmanId, summaryStr);
+        if (mBdNo) map.set(mBdNo, summaryStr);
+        if (mCleanDigits) map.set(`bd_${mCleanDigits}`, summaryStr);
       }
     });
 
-    // Generate formatted purchase summary string
-    const processedMaps = new Set<Map<string, number>>();
-    memberItemsMap.forEach((itemsMap) => {
-      if (processedMaps.has(itemsMap)) return;
-      processedMaps.add(itemsMap);
-      const parts: string[] = [];
-      itemsMap.forEach((qty, name) => {
-        parts.push(`${name} x ${toBengaliNum(qty)}`);
-      });
-      const summaryStr = parts.join(' , ');
-      memberItemsMap.forEach((mMap, k) => {
-        if (mMap === itemsMap) {
-          map.set(k, summaryStr);
-        }
-      });
-    });
-
     return map;
-  }, [saleDate, salesHistory]);
+  }, [saleDate, salesHistory, members]);
 
   const getPurchasedItemsForMember = (m: any): string => {
     if (!m) return '';
@@ -1483,7 +1516,7 @@ export const PosSales: React.FC = () => {
                 title="Bulk Import Sales via Excel / CSV"
               >
                 <Upload className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Import Sales</span>
+                <span>Import</span>
               </button>
 
               {/* History Button pushed to Right Corner */}
@@ -2047,11 +2080,11 @@ export const PosSales: React.FC = () => {
                                 {/* Food purchased on selected date: (যেমন: চিকেন বিরিয়ানি x ১ , রং চা x ২) */}
                                 {purchasedItemsText ? (
                                   <div 
-                                    className="mt-1.5 flex items-center space-x-1.5 text-[11px] font-medium text-amber-300 bg-amber-950/50 border border-amber-500/30 rounded-lg px-2 py-0.5 max-w-full"
+                                    className="mt-1.5 flex items-start space-x-1.5 text-[11px] font-medium text-amber-300 bg-amber-950/70 border border-amber-500/40 rounded-lg px-2.5 py-1 max-w-full shadow-sm"
                                     title={`Purchased on selected date: ${purchasedItemsText}`}
                                   >
-                                    <span className="shrink-0 text-xs">🍽️</span>
-                                    <span className="truncate leading-tight">
+                                    <span className="shrink-0 text-xs mt-0.5">🍽️</span>
+                                    <span className="leading-snug break-words font-sans">
                                       {purchasedItemsText}
                                     </span>
                                   </div>
@@ -2209,13 +2242,22 @@ export const PosSales: React.FC = () => {
                           const name = m['Surname'] || m['Name'] || m.name || '';
                           const fullName = [rank, name].filter(Boolean).join(' ') || 'Member';
                           const bdNo = m['BD No'] || m['BD_No'] || m.airman_id || m.id;
+                          const purchasedItemsText = getPurchasedItemsForMember(m);
                           return (
                             <span 
                               key={m.airman_id || `summary_m_${bdNo || idx}`}
-                              className="inline-flex items-center px-2 py-0.5 rounded-lg bg-indigo-950/90 border border-indigo-500/30 text-indigo-200 text-xs font-bold"
+                              className="inline-flex flex-col px-2.5 py-1 rounded-xl bg-indigo-950/90 border border-indigo-500/40 text-indigo-200 text-xs font-bold"
                             >
-                              <span>{fullName}</span>
-                              {bdNo && <span className="ml-1 text-[10px] text-slate-400 font-mono">({bdNo})</span>}
+                              <div className="flex items-center space-x-1">
+                                <span>{fullName}</span>
+                                {bdNo && <span className="ml-1 text-[10px] text-slate-400 font-mono">({bdNo})</span>}
+                              </div>
+                              {purchasedItemsText && (
+                                <div className="text-[10px] text-amber-300 font-medium font-sans flex items-center space-x-1 mt-0.5">
+                                  <span>🍽️</span>
+                                  <span className="truncate max-w-[200px]">{purchasedItemsText}</span>
+                                </div>
+                              )}
                             </span>
                           );
                         })}
@@ -2942,7 +2984,7 @@ export const PosSales: React.FC = () => {
                     title="Import Sales from Excel / CSV"
                   >
                     <Upload className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Import Sales</span>
+                    <span>Import</span>
                   </button>
                   <button 
                     type="button"

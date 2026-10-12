@@ -149,9 +149,22 @@ export const WhatsAppIcon = ({ className = "w-4 h-4" }: { className?: string }) 
 export const formatItemNameBn = (rawName?: string): string => {
   if (!rawName) return '';
   const trimmed = rawName.trim();
+  const upper = trimmed.toUpperCase();
+
+  // Guarantee Supply Item always returns crisp, authentic "Supply Item"
+  if (
+    upper === 'SUPPLY ITEM' ||
+    upper === 'SUPPLY ITEMS' ||
+    upper === 'SUPPLY' ||
+    upper.includes('SUPPLY ITEM') ||
+    upper.includes('SUPPLY ITEMS') ||
+    trimmed.includes('সাপ্লাই')
+  ) {
+    return 'Supply Item';
+  }
+
   if (/[\u0980-\u09FF]/.test(trimmed)) return trimmed;
 
-  const upper = trimmed.toUpperCase();
   const itemMap: Record<string, string> = {
     'COLD COFFEE': 'কোল্ড কফি',
     'HOT COFFEE': 'দুধ কফি',
@@ -4483,7 +4496,8 @@ export const MemberDB: React.FC<MemberDBProps> = ({
         lower.includes('ইউনিট ফান্ড') ||
         lower.includes('others') ||
         lower.includes('অন্যান্য') ||
-        lower.includes('supply item') ||
+        lower.includes('supply') ||
+        lower.includes('সাপ্লাই') ||
         lower.includes('বাজার') ||
         lower.includes('bazar')
       );
@@ -4514,9 +4528,14 @@ export const MemberDB: React.FC<MemberDBProps> = ({
 
         let displayName = name;
         if (isNonCanteen) {
-          const isSupplyItem = name.toLowerCase().includes('supply item') || name.toLowerCase().includes('supply items');
+          const lower = name.toLowerCase();
+          const isSupplyItem = 
+            lower.includes('supply') || 
+            lower.includes('others') || 
+            name.includes('অন্যান্য') || 
+            name.includes('সাপ্লাই');
           const cleanName = isSupplyItem ? 'Supply Item' : name;
-          const notesArr = entry.categoryNotesMap?.get(name) || (isSupplyItem ? entry.categoryNotesMap?.get('Supply Item') : []) || [];
+          const notesArr = entry.categoryNotesMap?.get(name) || (isSupplyItem ? (entry.categoryNotesMap?.get('Supply Item') || entry.categoryNotesMap?.get('Others') || entry.categoryNotesMap?.get('অন্যান্য') || []) : []) || [];
           if (notesArr.length > 0) {
             displayName = `${cleanName} (${notesArr.join(', ')})`;
           } else {
@@ -6428,13 +6447,21 @@ export const MemberDB: React.FC<MemberDBProps> = ({
                               {/* যদি ক্যান্টিনের আইটেম ব্যাতিত ইউনিট ফান্ড ও অন্যান্য যা বিল আছে -> বিবরণ, পরিমাণ ও দর এর Cell Merge করে লিখবে */}
                               {row.isMerged ? (
                                 <td colSpan={3} className="border border-black p-3 text-left font-bold bg-white whitespace-pre-line leading-relaxed text-xs sm:text-sm">
-                                  {row.itemsText}
+                                  {row.itemsText.includes('Supply Item') ? (
+                                    <span className="font-sans font-black tracking-tight">{row.itemsText}</span>
+                                  ) : (
+                                    row.itemsText
+                                  )}
                                 </td>
                               ) : (
                                 <>
                                   {/* বিবরণ */}
                                   <td className="border border-black p-3 text-left font-bold bg-white whitespace-pre-line leading-relaxed text-xs sm:text-sm">
-                                    {row.itemsText}
+                                    {row.itemsText.includes('Supply Item') ? (
+                                      <span className="font-sans font-black tracking-tight">{row.itemsText}</span>
+                                    ) : (
+                                      row.itemsText
+                                    )}
                                   </td>
                                   {/* পরিমাণ */}
                                   <td className="border border-black py-2.5 px-1 text-center font-bold bg-white text-xs sm:text-sm">

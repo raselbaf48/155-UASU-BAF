@@ -332,7 +332,11 @@ export function generateStatementCanvas(data: StatementCanvasData): HTMLCanvasEl
       ctx.fillRect(col2X, currentY, mergedW, rowHeight);
       drawBorder(col2X, currentY, mergedW, rowHeight);
       ctx.fillStyle = '#000000';
-      ctx.font = `bold 12px ${BENGALI_SUTONNY_FONT}`;
+      if (itemsText.includes('Supply Item')) {
+        ctx.font = 'bold 12px "Inter", system-ui, sans-serif';
+      } else {
+        ctx.font = `bold 12px ${BENGALI_SUTONNY_FONT}`;
+      }
       ctx.textAlign = 'left';
       ctx.fillText(itemsText, col2X + 8, currentY + rowHeight / 2 + 1);
     } else {
@@ -341,7 +345,11 @@ export function generateStatementCanvas(data: StatementCanvasData): HTMLCanvasEl
       ctx.fillRect(col2X, currentY, col2W, rowHeight);
       drawBorder(col2X, currentY, col2W, rowHeight);
       ctx.fillStyle = '#000000';
-      ctx.font = `bold 12px ${BENGALI_SUTONNY_FONT}`;
+      if (itemsText.includes('Supply Item')) {
+        ctx.font = 'bold 12px "Inter", system-ui, sans-serif';
+      } else {
+        ctx.font = `bold 12px ${BENGALI_SUTONNY_FONT}`;
+      }
       ctx.textAlign = 'left';
       ctx.fillText(itemsText, col2X + 6, currentY + rowHeight / 2 + 1);
 
@@ -497,7 +505,7 @@ export function generateStatementCanvas(data: StatementCanvasData): HTMLCanvasEl
       data.othersBreakdown.forEach((b) => {
         if (b.amount > 0) {
           const rawCat = String(b.category || '').trim();
-          const isSupply = rawCat.toLowerCase() === 'supply items' || rawCat.toLowerCase() === 'supply item';
+          const isSupply = rawCat.toLowerCase().includes('supply') || rawCat.toLowerCase().includes('others') || rawCat.includes('অন্যান্য') || rawCat.includes('সাপ্লাই');
           const displayCat = isSupply ? 'Supply Item' : rawCat;
           drawSummaryRow(displayCat, `৳${toBengaliNum(b.amount)}`, '#000000');
         }
