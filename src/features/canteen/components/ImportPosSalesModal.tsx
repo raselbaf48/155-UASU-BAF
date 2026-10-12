@@ -3,7 +3,7 @@ import {
   X, Upload, FileSpreadsheet, Download, CheckCircle2, 
   AlertCircle, AlertTriangle, ArrowRight, Loader2, RefreshCw,
   Search, Check, Trash2, ShoppingCart, UserCheck, DollarSign,
-  Calendar, ChevronDown
+  Calendar, ChevronDown, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import XLSX from 'xlsx-js-style';
 import { supabase } from '../../../supabase';
@@ -17,6 +17,7 @@ import { DEFAULT_MEMBER_BANGLA_NAMES } from '../utils/memberBanglaNames';
 import { getMenuItemBanglaName } from '../utils/menuBanglaNames';
 import { formatItemNameBn } from '../pages/MemberDB';
 import { isSaleTransaction } from '../pages/PosSales';
+import { getCanteenMenuItemOrder } from '../utils/menuOrdering';
 
 interface ImportPosSalesModalProps {
   isOpen: boolean;
@@ -47,71 +48,32 @@ interface ParsedSaleRow {
   sourceSheet?: string;
 }
 
-// Official food columns matching 155 UASU BAF Canteen daily matrix sheet
-const OFFICIAL_MATRIX_FOOD_COLUMNS = [
-  { bn: 'পরোটা', enMatch: 'porata', price: 10 },
-  { bn: 'ডিম ভাজি', enMatch: 'egg fry', price: 15 },
-  { bn: 'ডিম পোচ', enMatch: 'egg poach', price: 15 },
-  { bn: 'ডিম সিদ্ধ', enMatch: 'boiled egg', price: 15 },
-  { bn: 'দুধ চা', enMatch: 'milk tea', price: 10 },
-  { bn: 'রং চা', enMatch: 'liquor tea', price: 6 },
-  { bn: 'ব্ল্যাক কফি', enMatch: 'black coffee', price: 15 },
-  { bn: 'দুধ কফি', enMatch: 'milk coffee', price: 20 },
-  { bn: 'গ্রীন টি', enMatch: 'green tea', price: 8 },
-  { bn: 'নুডুলস', enMatch: 'noodles', price: 25 },
-  { bn: 'ডিম নুডুলস', enMatch: 'egg noodles', price: 35 },
-  { bn: 'ড্রাই কেক', enMatch: 'dry cake', price: 12 },
-  { bn: 'নরমাল বিস্কুট', enMatch: 'normal biscuit', price: 10 },
-  { bn: 'এনার্জি বিস্কুট', enMatch: 'energy biscuit', price: 15 },
-  { bn: 'লেবুর শরবত', enMatch: 'lemon juice', price: 15 },
-  { bn: 'স্পেশাল পোলাও / বিরিয়ানি / খিচুড়ি', enMatch: 'chicken biryani', price: 120 },
-  { bn: 'ডিম খিচুড়ি', enMatch: 'egg khichuri', price: 60 },
-  { bn: 'হালিম', enMatch: 'halim', price: 40 },
-  { bn: 'চটপটি', enMatch: 'chotpoti', price: 30 },
-  { bn: 'গ্রীল সবজি', enMatch: 'vegetable', price: 20 },
-  { bn: 'অফলাতুন / হটডগ', enMatch: 'hotdog', price: 35 },
-  { bn: 'সিংগারা', enMatch: 'singara', price: 8 },
-  { bn: 'সুইট রোল', enMatch: 'chicken roll', price: 25 },
-  { bn: 'সবজি', enMatch: 'vegetable', price: 15 },
-  { bn: 'স্যান্ডউইচ', enMatch: 'sandwich', price: 30 },
-  { bn: 'কলা', enMatch: 'banana', price: 10 },
-  { bn: 'অন্যান্য', enMatch: 'other', price: 10 },
-];
+/**
+ * Returns real-time food columns matching the App's menu catalog.
+ * Strictly preserves official menu ordering and dynamically synchronizes with App's catalog.
+ */
+export function getRealtimeCanteenFoodColumns(catalog: any[]): Array<{ bn: string; enMatch: string; price: number; id?: string }> {
+  const activeCatalog = (Array.isArray(catalog) && catalog.length > 0 ? catalog : getCanteenMenuCache())
+    .filter((item: any) => !isOneTimeBoxItem(item));
 
-// Exact 31 food columns matching the official 155 UASU BAF Canteen date-wise sheet format (as per user reference screenshot)
-const DATE_WISE_TEMPLATE_BASE_FOOD_COLUMNS = [
-  { bn: 'পরোটা', enMatch: 'porata', price: 10 },
-  { bn: 'প্রিমিয়াম পরোটা', enMatch: 'premium porata', price: 15 },
-  { bn: 'হোটেল ডিম', enMatch: 'hotel egg', price: 15 },
-  { bn: 'ডিম ভাজি', enMatch: 'egg fry', price: 15 },
-  { bn: 'ডিম পোচ', enMatch: 'egg poach', price: 15 },
-  { bn: 'ডিম সিদ্ধ', enMatch: 'boiled egg', price: 15 },
-  { bn: 'দুধ চা', enMatch: 'milk tea', price: 10 },
-  { bn: 'রং চা', enMatch: 'liquor tea', price: 6 },
-  { bn: 'গ্রীন টি', enMatch: 'green tea', price: 8 },
-  { bn: 'ব্ল্যাক কফি', enMatch: 'black coffee', price: 15 },
-  { bn: 'দুধ কফি', enMatch: 'milk coffee', price: 20 },
-  { bn: 'কোল্ড কফি', enMatch: 'cold coffee', price: 30 },
-  { bn: 'নুডুলস', enMatch: 'noodles', price: 25 },
-  { bn: 'ডিম নুডুলস', enMatch: 'egg noodles', price: 35 },
-  { bn: 'ড্রাই কেক', enMatch: 'dry cake', price: 12 },
-  { bn: 'নরমাল বিস্কুট', enMatch: 'normal biscuit', price: 10 },
-  { bn: 'এনার্জি বিস্কুট', enMatch: 'energy biscuit', price: 15 },
-  { bn: 'লেবুর শরবত', enMatch: 'lemon juice', price: 15 },
-  { bn: 'চিকেন অনিয়ন', enMatch: 'chicken onion', price: 35 },
-  { bn: 'চিকেন কারি', enMatch: 'chicken curry', price: 70 },
-  { bn: 'চিকেন পোলাও', enMatch: 'chicken polao', price: 120 },
-  { bn: 'চিকেন বিরিয়ানি', enMatch: 'chicken biryani', price: 120 },
-  { bn: 'চিকেন খিচুড়ি', enMatch: 'chicken khichuri', price: 90 },
-  { bn: 'ডিম খিচুড়ি', enMatch: 'egg khichuri', price: 60 },
-  { bn: 'চিকেন হালিম', enMatch: 'chicken halim', price: 40 },
-  { bn: 'চটপটি', enMatch: 'chotpoti', price: 30 },
-  { bn: 'মিনি বার্গার', enMatch: 'mini burger', price: 40 },
-  { bn: 'পিৎজা', enMatch: 'pizza', price: 60 },
-  { bn: 'স্যান্ডউইচ', enMatch: 'sandwich', price: 30 },
-  { bn: 'কলা', enMatch: 'banana', price: 10 },
-  { bn: 'সিংগারা', enMatch: 'singara', price: 8 },
-];
+  // Sort strictly by official order priority
+  const sorted = [...activeCatalog].sort((a: any, b: any) => {
+    const aName = a.name_bn || a.nameBn || getMenuItemBanglaName(a) || a.name || '';
+    const bName = b.name_bn || b.nameBn || getMenuItemBanglaName(b) || b.name || '';
+    return getCanteenMenuItemOrder(aName) - getCanteenMenuItemOrder(bName);
+  });
+
+  return sorted.map((item: any) => {
+    const bn = item.name_bn || item.nameBn || getMenuItemBanglaName(item) || item.name || '';
+    const en = item.name || item.name_en || item.name_bn || '';
+    return {
+      bn: bn.trim(),
+      enMatch: en.trim(),
+      price: Number(item.price || 0),
+      id: item.id
+    };
+  });
+}
 
 const SHORT_BENGALI_MONTHS = ['জানু', 'ফেব্রু', 'মার্চ', 'এপ্রিল', 'মে', 'জুন', 'জুলাই', 'আগস্ট', 'সেপ্টে', 'অক্টো', 'নভে', 'ডিসে'];
 
@@ -432,6 +394,20 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
     return `${y}-${m}`;
   });
 
+  const handlePrevTemplateMonth = () => {
+    const [y, m] = templateMonth.split('-').map(Number);
+    const d = new Date(y, m - 2, 1);
+    const prevKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    setTemplateMonth(prevKey);
+  };
+
+  const handleNextTemplateMonth = () => {
+    const [y, m] = templateMonth.split('-').map(Number);
+    const d = new Date(y, m, 1);
+    const nextKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    setTemplateMonth(nextKey);
+  };
+
   const availableTemplateMonths = useMemo(() => {
     const list = [];
     const now = new Date();
@@ -468,39 +444,8 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
       const selMonth = parseInt(selMonthStr, 10);
       const daysInMonth = new Date(selYear, selMonth, 0).getDate();
 
-      // Additional catalog items appended to the end of food columns
-      const baseFoodCols = OFFICIAL_MATRIX_FOOD_COLUMNS;
-      const extraCols: Array<{ bn: string; enMatch: string; price: number }> = [];
-      const normBaseEns = new Set(baseFoodCols.map(b => b.enMatch.toLowerCase().trim()));
-      const normBaseBns = new Set(baseFoodCols.map(b => b.bn.trim()));
-
-      (catalog || []).forEach((cItem: any) => {
-        if (isOneTimeBoxItem(cItem)) return;
-        const cEn = String(cItem.name || cItem.name_en || '').trim();
-        const cBn = String(cItem.name_bn || cItem.nameBn || getMenuItemBanglaName(cItem) || '').trim();
-        const normCEn = cEn.toLowerCase();
-
-        const alreadyInBase = 
-          (cEn && normBaseEns.has(normCEn)) || 
-          (cBn && normBaseBns.has(cBn)) ||
-          baseFoodCols.some(b => {
-            const bEn = b.enMatch.toLowerCase();
-            return bEn === normCEn || normCEn.includes(bEn) || bEn.includes(normCEn);
-          });
-
-        if (!alreadyInBase && (cEn || cBn)) {
-          const alreadyInExtra = extraCols.some(e => e.enMatch.toLowerCase() === normCEn || (cBn && e.bn === cBn));
-          if (!alreadyInExtra) {
-            extraCols.push({
-              bn: cBn || getMenuItemBanglaName(cEn) || formatItemNameBn(cEn) || cEn,
-              enMatch: cEn || cBn,
-              price: Number(cItem.price || 10)
-            });
-          }
-        }
-      });
-
-      const allMemberFoodCols = [...baseFoodCols, ...extraCols];
+      // Real-time active food columns matching the App's menu catalog
+      const allMemberFoodCols = getRealtimeCanteenFoodColumns(catalog);
 
       // Existing sales transactions in the system
       const existingTxs: any[] = (() => {
@@ -523,6 +468,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
       const headerRow = [
         '',
         'ক্রমিক নং',
+        'বিডি নং',
         'পদবী',
         'নাম',
         ...allMemberFoodCols.map(c => c.bn),
@@ -539,16 +485,16 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         // Row 1: Empty spacer
         rows.push([]);
 
-        // Row 2: Title Banner (Col C onwards)
+        // Row 2: Title Banner (Col C: মাস, Col D: মাসের নাম)
         const titleRow = new Array(headerRow.length).fill('');
-        titleRow[3] = 'ক্যান্টিন বিল : ১৫৫ ইউএএসইউ বিএএফ';
+        titleRow[2] = 'মাস';
+        titleRow[3] = formatBengaliMonthYear(selectedYm);
         rows.push(titleRow);
 
-        // Row 3: Date Banner
+        // Row 3: Date Banner (Col C: তারিখ, Col D: তারিখের মান - মাস ও মাসের নামের ঠিক নিচের সেলে)
         const dateRow = new Array(headerRow.length).fill('');
-        const dateColIdx = Math.max(4, headerRow.length - 4);
-        dateRow[dateColIdx] = 'তারিখ';
-        dateRow[dateColIdx + 1] = dayStrBn;
+        dateRow[2] = 'তারিখ';
+        dateRow[3] = dayStrBn;
         rows.push(dateRow);
 
         // Row 4: Spacer
@@ -556,6 +502,9 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
 
         // Row 5: Column Headers
         rows.push(headerRow);
+
+        const colFoodTotals = new Array(allMemberFoodCols.length).fill(0);
+        let dayGrandBillTotal = 0;
 
         // Rows 6+: Member data rows in official seniority order
         sortedMembers.forEach((m, idx) => {
@@ -585,7 +534,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           });
 
           const foodQtyMap = new Map<number, number>();
-          let dayMemberTotal = 0;
+          let dayMemberFallbackTotal = 0;
 
           dayTxs.forEach((tx: any) => {
             let soldItems = tx.soldItems;
@@ -647,22 +596,59 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
               });
             }
 
-            dayMemberTotal += Number(tx.amount || 0);
+            dayMemberFallbackTotal += Number(tx.amount || 0);
           });
+
+          // Calculate total bill by multiplying quantity with price for each food column
+          let rowBillTotal = 0;
+          allMemberFoodCols.forEach((col, cIdx) => {
+            const q = foodQtyMap.get(cIdx);
+            if (q && q > 0) {
+              rowBillTotal += q * (col.price || 0);
+              colFoodTotals[cIdx] = (colFoodTotals[cIdx] || 0) + q;
+            }
+          });
+
+          const finalBill = rowBillTotal > 0 ? rowBillTotal : (dayMemberFallbackTotal > 0 ? dayMemberFallbackTotal : '');
+          if (typeof finalBill === 'number' && finalBill > 0) {
+            dayGrandBillTotal += finalBill;
+          }
+
+          const rawBd = String(m['BD No'] || m.bdNo || m.airman_id || '').trim();
+          const cleanDigits = rawBd.replace(/\D/g, '');
+          const bdDisplay = cleanDigits 
+            ? (rawBd.toUpperCase().startsWith('BD') ? rawBd : `BD/${cleanDigits}`) 
+            : (rawBd || '');
 
           const rowData = [
             '',
             serBn,
+            bdDisplay,
             rankBn,
             memberNameBn,
             ...allMemberFoodCols.map((_, cIdx) => {
               const q = foodQtyMap.get(cIdx);
               return q && q > 0 ? q : '';
             }),
-            dayMemberTotal > 0 ? dayMemberTotal : ''
+            finalBill
           ];
           rows.push(rowData);
         });
+
+        // Last row: Total for this date (e.g. ১ তারিখে মোট কতগুলো পরোটা, ডিম ও মোট বিল)
+        const totalFooterRow = [
+          '',
+          'সর্বমোট',
+          '',
+          '',
+          '',
+          ...allMemberFoodCols.map((_, cIdx) => {
+            const tot = colFoodTotals[cIdx];
+            return tot && tot > 0 ? tot : '';
+          }),
+          dayGrandBillTotal > 0 ? dayGrandBillTotal : ''
+        ];
+        rows.push(totalFooterRow);
 
         const worksheet = XLSX.utils.aoa_to_sheet(rows);
 
@@ -674,6 +660,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         worksheet['!cols'] = [
           { wch: 3 },  // Col A
           { wch: 10 }, // ক্রমিক নং
+          { wch: 13 }, // বিডি নং
           { wch: 14 }, // পদবী
           { wch: 18 }, // নাম
           ...allMemberFoodCols.map(() => ({ wch: 12 })),
@@ -684,12 +671,44 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         const totalCols = headerRow.length;
         const totalRows = rows.length;
 
-        // Title styling
-        const titleCell = XLSX.utils.encode_cell({ r: 1, c: 3 });
-        if (worksheet[titleCell]) {
-          worksheet[titleCell].s = {
-            font: { name: 'Arial', sz: 14, bold: true, color: { rgb: '000000' } },
-            alignment: { horizontal: 'center', vertical: 'center' }
+        // Month & Date Banner styling (C2:D3)
+        // C2: 'মাস', D2: মাসের নাম
+        // C3: 'তারিখ', D3: তারিখের মান (মাস ও মাসের নামের নিচের সেলে)
+        const c2Addr = XLSX.utils.encode_cell({ r: 1, c: 2 });
+        const d2Addr = XLSX.utils.encode_cell({ r: 1, c: 3 });
+        const c3Addr = XLSX.utils.encode_cell({ r: 2, c: 2 });
+        const d3Addr = XLSX.utils.encode_cell({ r: 2, c: 3 });
+
+        if (worksheet[c2Addr]) {
+          worksheet[c2Addr].s = {
+            font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
+            alignment: { horizontal: 'center', vertical: 'center' },
+            border: cellBorder,
+            fill: { fgColor: { rgb: 'E2E8F0' } }
+          };
+        }
+        if (worksheet[d2Addr]) {
+          worksheet[d2Addr].s = {
+            font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
+            alignment: { horizontal: 'center', vertical: 'center' },
+            border: cellBorder,
+            fill: { fgColor: { rgb: 'FFFFFF' } }
+          };
+        }
+        if (worksheet[c3Addr]) {
+          worksheet[c3Addr].s = {
+            font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
+            alignment: { horizontal: 'center', vertical: 'center' },
+            border: cellBorder,
+            fill: { fgColor: { rgb: 'E2E8F0' } }
+          };
+        }
+        if (worksheet[d3Addr]) {
+          worksheet[d3Addr].s = {
+            font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
+            alignment: { horizontal: 'center', vertical: 'center' },
+            border: cellBorder,
+            fill: { fgColor: { rgb: 'FFFFFF' } }
           };
         }
 
@@ -706,8 +725,10 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           }
         }
 
-        // Data rows styling: All row-col center align (horizontal & vertical), with borders
-        for (let r = 5; r < totalRows; r++) {
+        // Data rows styling: Alternating colors (White #FFFFFF and Gray #F1F5F9), All row-col center align (horizontal & vertical), with borders
+        for (let r = 5; r < totalRows - 1; r++) {
+          const isEvenDataRow = (r - 5) % 2 === 0;
+          const rowBgColor = isEvenDataRow ? 'FFFFFF' : 'F1F5F9';
           for (let c = 1; c < totalCols; c++) {
             const addr = XLSX.utils.encode_cell({ r, c });
             if (!worksheet[addr]) {
@@ -716,9 +737,25 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             worksheet[addr].s = {
               font: { name: 'Arial', sz: 11, color: { rgb: '000000' } },
               alignment: { horizontal: 'center', vertical: 'center' },
-              border: cellBorder
+              border: cellBorder,
+              fill: { fgColor: { rgb: rowBgColor } }
             };
           }
+        }
+
+        // Total footer row styling (r = totalRows - 1): Bold, Center aligned, background #E2E8F0, with borders
+        const totalRowIdx = totalRows - 1;
+        for (let c = 1; c < totalCols; c++) {
+          const addr = XLSX.utils.encode_cell({ r: totalRowIdx, c });
+          if (!worksheet[addr]) {
+            worksheet[addr] = { t: 's', v: '' };
+          }
+          worksheet[addr].s = {
+            font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
+            alignment: { horizontal: 'center', vertical: 'center' },
+            border: cellBorder,
+            fill: { fgColor: { rgb: 'E2E8F0' } }
+          };
         }
 
         // Tab name as day number '1', '2', ..., '31'
@@ -748,51 +785,16 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
       const selMonth = parseInt(selMonthStr, 10);
       const daysInMonth = new Date(selYear, selMonth, 0).getDate();
 
-      // 1. Base 31 official matrix food columns (matching user reference screenshot)
-      const baseCols = DATE_WISE_TEMPLATE_BASE_FOOD_COLUMNS;
+      // 1. Real-time active food columns matching the App's menu catalog
+      const allFoodColumns = getRealtimeCanteenFoodColumns(catalog);
 
-      // 2. Extra catalog items from catalog (that are not one time box and not already in baseCols) appended to the LAST
-      const extraCols: Array<{ en: string; bn: string; catalogItem?: any }> = [];
-      const normBaseEns = new Set(baseCols.map(b => b.enMatch.toLowerCase().trim()));
-      const normBaseBns = new Set(baseCols.map(b => b.bn.trim()));
-
-      (catalog || []).forEach((cItem: any) => {
-        if (isOneTimeBoxItem(cItem)) return;
-        const cEn = String(cItem.name || cItem.name_en || '').trim();
-        const cBn = String(cItem.name_bn || cItem.nameBn || getMenuItemBanglaName(cItem) || '').trim();
-        const normCEn = cEn.toLowerCase();
-
-        const alreadyInBase = 
-          (cEn && normBaseEns.has(normCEn)) || 
-          (cBn && normBaseBns.has(cBn)) ||
-          baseCols.some(b => {
-            const bEn = b.enMatch.toLowerCase();
-            return bEn === normCEn || normCEn.includes(bEn) || bEn.includes(normCEn);
-          });
-
-        if (!alreadyInBase && (cEn || cBn)) {
-          const alreadyInExtra = extraCols.some(e => e.en.toLowerCase() === normCEn || (cBn && e.bn === cBn));
-          if (!alreadyInExtra) {
-            extraCols.push({
-              en: cEn || cBn,
-              bn: cBn || getMenuItemBanglaName(cEn) || formatItemNameBn(cEn) || cEn,
-              catalogItem: cItem
-            });
-          }
-        }
-      });
-
-      const allFoodColumns = [
-        ...baseCols.map(c => ({ en: c.enMatch, bn: c.bn, catalogKey: c.enMatch, catalogItem: null as any })),
-        ...extraCols.map(e => ({ en: e.en, bn: e.bn, catalogKey: e.en, catalogItem: e.catalogItem || null }))
-      ];
-
-      // Header row for Date-wise matrix (Col 1: Sl, Col 2: Date, Col 3..: Food items)
+      // Header row for Date-wise matrix (Col 1: Sl, Col 2: Date, Col 3..: Food items, Last: Total)
       const dateHeaderRow = [
         '',
         'ক্রমিক নং',
         'তারিখ',
-        ...allFoodColumns.map(c => c.bn)
+        ...allFoodColumns.map(c => c.bn),
+        'মোট বিল'
       ];
 
       // Existing sales transactions in the system
@@ -830,17 +832,25 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         const mBd = String(m['BD No'] || m.bdNo || '').toLowerCase().trim();
         const mCleanDigits = (m['BD No'] || m.bdNo || m.airman_id || '').toString().replace(/\D/g, '');
 
+        const fullRankAndName = `${rankBn ? rankBn + ' ' : ''}${memberNameBn}`.trim();
+        const rawBd = String(m['BD No'] || m.bdNo || m.airman_id || '');
+        const cleanDigits = rawBd.replace(/\D/g, '') || cleanBd;
+        const bdDisplay = cleanDigits ? (rawBd.toUpperCase().startsWith('BD') ? rawBd : `BD/${cleanDigits}`) : (rawBd || cleanBd);
+
         const rows: any[][] = [];
-        // Row 1: B1: 'নাম', C1: memberNameBn
-        rows.push(['', 'নাম', memberNameBn]);
-        // Row 2: B2: 'র‍্যাংক', C2: rankBn
-        rows.push(['', 'র‍্যাংক', rankBn]);
-        // Row 3: B3: 'বিডি নং', C3: cleanBd
-        rows.push(['', 'বিডি নং', cleanBd]);
+        // Row 1: B1: 'র‍্যাংক ও নাম', C1: fullRankAndName
+        rows.push(['', 'র‍্যাংক ও নাম', fullRankAndName]);
+        // Row 2: B2: 'বিডি নং', C2: bdDisplay
+        rows.push(['', 'বিডি নং', bdDisplay]);
+        // Row 3: B3: 'মাস', C3: formatBengaliMonthYear(selectedYm)
+        rows.push(['', 'মাস', formatBengaliMonthYear(selectedYm)]);
         // Row 4: Spacer
         rows.push([]);
-        // Row 5: Column Headers (Col B: 'ক্রমিক নং', Col C: 'তারিখ', Col D..: Foods)
+        // Row 5: Column Headers (Col B: 'ক্রমিক নং', Col C: 'তারিখ', Col D..: Foods, Last: 'মোট বিল')
         rows.push(dateHeaderRow);
+
+        const colFoodTotals = new Array(allFoodColumns.length).fill(0);
+        let monthGrandBillTotal = 0;
 
         // Rows 6.. (Days 1 to daysInMonth)
         for (let d = 1; d <= daysInMonth; d++) {
@@ -880,10 +890,10 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                 const q = Number(si.qty || si.quantity || 1);
 
                 // Find matching column in allFoodColumns
-                let colIdx = allFoodColumns.findIndex(col => col.bn === rawBn || col.bn === rawName || col.en.toLowerCase() === rawName.toLowerCase());
+                let colIdx = allFoodColumns.findIndex(col => col.bn === rawBn || col.bn === rawName || col.enMatch.toLowerCase() === rawName.toLowerCase());
                 if (colIdx === -1) {
                   colIdx = allFoodColumns.findIndex(col => {
-                    const cEn = col.en.toLowerCase();
+                    const cEn = col.enMatch.toLowerCase();
                     const cBn = col.bn.toLowerCase();
                     const rLower = rawName.toLowerCase();
                     const rBnLower = rawBn.toLowerCase();
@@ -912,10 +922,10 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                   }
                 }
                 const rawBn = getMenuItemBanglaName(raw) || formatItemNameBn(raw) || raw;
-                let colIdx = allFoodColumns.findIndex(col => col.bn === rawBn || col.bn === raw || col.en.toLowerCase() === raw.toLowerCase());
+                let colIdx = allFoodColumns.findIndex(col => col.bn === rawBn || col.bn === raw || col.enMatch.toLowerCase() === raw.toLowerCase());
                 if (colIdx === -1) {
                   colIdx = allFoodColumns.findIndex(col => {
-                    const cEn = col.en.toLowerCase();
+                    const cEn = col.enMatch.toLowerCase();
                     const cBn = col.bn.toLowerCase();
                     const rLower = raw.toLowerCase();
                     const rBnLower = rawBn.toLowerCase();
@@ -935,22 +945,46 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             dStrBn
           ];
 
-          allFoodColumns.forEach((_, cIdx) => {
+          let rowBillTotal = 0;
+          allFoodColumns.forEach((col, cIdx) => {
             const qty = foodQtyMap.get(cIdx);
-            rowData.push(qty && qty > 0 ? qty : '');
+            if (qty && qty > 0) {
+              rowData.push(qty);
+              rowBillTotal += qty * (col.price || 0);
+              colFoodTotals[cIdx] = (colFoodTotals[cIdx] || 0) + qty;
+            } else {
+              rowData.push('');
+            }
           });
+          // Last column: মোট বিল (ফিল আপ থাকবে)
+          rowData.push(rowBillTotal > 0 ? rowBillTotal : '');
+          monthGrandBillTotal += rowBillTotal;
 
           rows.push(rowData);
         }
+
+        // Last row: Month total for each food item and total bill ("লাস্ট রো তে কোন মেনু কতগুলো খেয়ে ছে ঐটার টোটাল থাকবে")
+        const totalFooterRow: any[] = [
+          '',
+          'সর্বমোট',
+          '',
+          ...allFoodColumns.map((_, cIdx) => {
+            const totalQty = colFoodTotals[cIdx];
+            return totalQty && totalQty > 0 ? totalQty : '';
+          }),
+          monthGrandBillTotal > 0 ? monthGrandBillTotal : ''
+        ];
+        rows.push(totalFooterRow);
 
         const ws = XLSX.utils.aoa_to_sheet(rows);
         ws['!views'] = [{ state: 'frozen', ySplit: 5, xSplit: 0, activePane: 'bottomLeft' }];
         ws['!freeze'] = { xSplit: 0, ySplit: 5 };
         ws['!cols'] = [
           { wch: 3 },  // Col A
-          { wch: 10 }, // ক্রমিক নং
-          { wch: 15 }, // তারিখ
+          { wch: 12 }, // ক্রমিক নং
+          { wch: 16 }, // তারিখ
           ...allFoodColumns.map(() => ({ wch: 14 })),
+          { wch: 14 }  // মোট বিল
         ];
 
         // Common black thin border for table cells
@@ -965,23 +999,21 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         const totalRows = rows.length;
 
         // Top banner styling (B1..C3)
+        // B1: 'র‍্যাংক ও নাম', C1: Rank & Name
+        // B2: 'বিডি নং', C2: BD Number
+        // B3: 'মাস', C3: Month Name
         for (let r = 0; r <= 2; r++) {
-          const addrB = XLSX.utils.encode_cell({ r, c: 1 });
-          const addrC = XLSX.utils.encode_cell({ r, c: 2 });
-          if (ws[addrB]) {
-            ws[addrB].s = {
-              font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
-              alignment: { horizontal: 'center', vertical: 'center' },
-              border: cellBorder,
-              fill: { fgColor: { rgb: 'F1F5F9' } }
-            };
-          }
-          if (ws[addrC]) {
-            ws[addrC].s = {
-              font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
-              alignment: { horizontal: 'center', vertical: 'center' },
-              border: cellBorder
-            };
+          for (let c = 1; c <= 2; c++) {
+            const addr = XLSX.utils.encode_cell({ r, c });
+            if (ws[addr]) {
+              const isLabel = (c === 1);
+              ws[addr].s = {
+                font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
+                alignment: { horizontal: 'center', vertical: 'center' },
+                border: cellBorder,
+                fill: { fgColor: { rgb: isLabel ? 'E2E8F0' : 'FFFFFF' } }
+              };
+            }
           }
         }
 
@@ -998,8 +1030,10 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           }
         }
 
-        // Data rows styling (r=5 to totalRows-1): All cells Center Aligned (horizontal & vertical), with borders
-        for (let r = 5; r < totalRows; r++) {
+        // Data rows styling (r=5 to totalRows-2): Alternating colors (White #FFFFFF and Gray #F1F5F9), All cells Center Aligned (horizontal & vertical), with borders
+        for (let r = 5; r < totalRows - 1; r++) {
+          const isEvenDataRow = (r - 5) % 2 === 0;
+          const rowBgColor = isEvenDataRow ? 'FFFFFF' : 'F1F5F9';
           for (let c = 1; c < totalCols; c++) {
             const addr = XLSX.utils.encode_cell({ r, c });
             if (!ws[addr]) {
@@ -1008,9 +1042,25 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             ws[addr].s = {
               font: { name: 'Arial', sz: 11, color: { rgb: '000000' } },
               alignment: { horizontal: 'center', vertical: 'center' },
-              border: cellBorder
+              border: cellBorder,
+              fill: { fgColor: { rgb: rowBgColor } }
             };
           }
+        }
+
+        // Total footer row styling (r = totalRows - 1): Bold, Center aligned, background #E2E8F0, with borders
+        const totalRowIdx = totalRows - 1;
+        for (let c = 1; c < totalCols; c++) {
+          const addr = XLSX.utils.encode_cell({ r: totalRowIdx, c });
+          if (!ws[addr]) {
+            ws[addr] = { t: 's', v: '' };
+          }
+          ws[addr].s = {
+            font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '000000' } },
+            alignment: { horizontal: 'center', vertical: 'center' },
+            border: cellBorder,
+            fill: { fgColor: { rgb: 'E2E8F0' } }
+          };
         }
 
         const tabTitle = `${memberNameBn.slice(0, 10)} (${cleanBd.slice(-4)})`.replace(/[\\/?*:[\]]/g, '');
@@ -1124,6 +1174,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         let colRankIdx = -1;
         let colNameIdx = -1;
         let colSerIdx = -1;
+        let colBdIdx = -1;
 
         for (let rIdx = 0; rIdx < Math.min(rawMatrix.length, 12); rIdx++) {
           const row = rawMatrix[rIdx];
@@ -1140,6 +1191,9 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             if (cell.includes('ক্রমিক') || cell.includes('ক্র') || cell.toLowerCase().includes('sl') || cell.toLowerCase().includes('ser') || cell.includes('µwgK')) {
               colSerIdx = cIdx;
             }
+            if (cell.includes('বিডি') || cell.toLowerCase().includes('bd') || cell.toLowerCase().includes('service')) {
+              colBdIdx = cIdx;
+            }
           }
 
           if (colRankIdx !== -1 && colNameIdx !== -1) {
@@ -1155,33 +1209,66 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
 
           // Detect Sheet / Header Date
           let sheetDate = '';
-          for (let r = 0; r <= matrixHeaderRowIdx; r++) {
-            const row = rawMatrix[r] || [];
-            for (let c = 0; c < row.length; c++) {
-              const cellText = String(row[c] || '').trim();
-              if (cellText.includes('তারিখ') || cellText.toLowerCase().includes('date') || cellText.includes('ZvwiL')) {
-                const nextCell = String(row[c + 1] || row[c + 2] || '').trim();
-                sheetDate = parseBanglaOrEnglishDate(nextCell || cellText);
-                break;
+          let detectedYear = new Date().getFullYear();
+          let detectedMonth = String(new Date().getMonth() + 1).padStart(2, '0');
+
+          // Check Row 2 (r=1) for C2 'মাস' and D2 month name
+          const r2Daily = rawMatrix[1];
+          if (r2Daily) {
+            const c2 = String(r2Daily[2] || '').trim();
+            const d2 = String(r2Daily[3] || '').trim();
+            if (c2.includes('মাস') && d2) {
+              const parsedM = parseBanglaOrEnglishDate(d2);
+              if (parsedM && parsedM.length === 10) {
+                const parts = parsedM.split('-');
+                detectedYear = parseInt(parts[0], 10) || detectedYear;
+                detectedMonth = parts[1] || detectedMonth;
               }
             }
-            if (sheetDate) break;
+          }
+
+          // Check Row 3 (r=2) for C3 'তারিখ' and D3 date value (directly under মাস & মাসের নাম)
+          const r3Daily = rawMatrix[2];
+          if (r3Daily) {
+            const c3 = String(r3Daily[2] || '').trim();
+            const d3 = String(r3Daily[3] || '').trim();
+            if (c3.includes('তারিখ') && d3) {
+              const parsedDate = parseDateWiseMatrixDate(d3, detectedYear, parseInt(detectedMonth, 10)) || parseBanglaOrEnglishDate(d3);
+              if (parsedDate && parsedDate.length === 10) {
+                sheetDate = parsedDate;
+              }
+            }
+          }
+
+          if (!sheetDate) {
+            for (let r = 0; r <= matrixHeaderRowIdx; r++) {
+              const row = rawMatrix[r] || [];
+              for (let c = 0; c < row.length; c++) {
+                const cellText = String(row[c] || '').trim();
+                if (cellText.includes('তারিখ') || cellText.toLowerCase().includes('date') || cellText.includes('ZvwiL')) {
+                  const nextCell = String(row[c + 1] || row[c + 2] || '').trim();
+                  sheetDate = parseDateWiseMatrixDate(nextCell, detectedYear, parseInt(detectedMonth, 10)) || parseBanglaOrEnglishDate(nextCell || cellText);
+                  break;
+                }
+              }
+              if (sheetDate) break;
+            }
           }
 
           // If no date in cells, check if sheet name is a day number (e.g. "1", "2", "15")
           if (!sheetDate) {
             const dayNum = parseInt(banglaToEnglishDigits(sheetName), 10);
             if (!isNaN(dayNum) && dayNum >= 1 && dayNum <= 31) {
-              const now = new Date();
-              sheetDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+              sheetDate = `${detectedYear}-${detectedMonth}-${String(dayNum).padStart(2, '0')}`;
             } else {
-              sheetDate = new Date().toISOString().split('T')[0];
+              sheetDate = `${detectedYear}-${detectedMonth}-01`;
             }
           }
 
-          // Map Food Columns (columns after Col Name up to "মোট বিল")
+          // Map Food Columns (columns after max member column up to "মোট বিল")
+          const maxMemberColIdx = Math.max(colNameIdx, colRankIdx, colBdIdx);
           const foodCols: Array<{ colIdx: number; headerName: string; catalogItem: any }> = [];
-          for (let c = colNameIdx + 1; c < headerRow.length; c++) {
+          for (let c = maxMemberColIdx + 1; c < headerRow.length; c++) {
             const hText = String(headerRow[c] || '').trim();
             if (!hText) continue;
             if (hText.includes('মোট বিল') || hText.toLowerCase().includes('total')) {
@@ -1198,16 +1285,33 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           // Process Member Data Rows
           for (let r = matrixHeaderRowIdx + 1; r < rawMatrix.length; r++) {
             const row = rawMatrix[r] || [];
-            const rankVal = String(row[colRankIdx] || '').trim();
-            const nameVal = String(row[colNameIdx] || '').trim();
+            const rankVal = colRankIdx !== -1 ? String(row[colRankIdx] || '').trim() : '';
+            const nameVal = colNameIdx !== -1 ? String(row[colNameIdx] || '').trim() : '';
+            const bdVal = colBdIdx !== -1 ? String(row[colBdIdx] || '').trim() : '';
+            const slVal = colSerIdx !== -1 ? String(row[colSerIdx] || '').trim() : '';
 
-            if (!nameVal && !rankVal) continue;
-            if (nameVal.includes('সর্বমোট') || nameVal.includes('মোট') || rankVal.includes('মোট')) {
+            if (!nameVal && !rankVal && !bdVal && !slVal) continue;
+            if (
+              nameVal.includes('সর্বমোট') || nameVal.includes('মোট') || 
+              rankVal.includes('সর্বমোট') || rankVal.includes('মোট') || 
+              bdVal.includes('সর্বমোট') || bdVal.includes('মোট') ||
+              slVal.includes('সর্বমোট') || slVal.includes('মোট')
+            ) {
               break; // Reached footer total row
             }
 
-            const matchedMem = findMemberByRankAndName(rankVal, nameVal, members);
-            const bdNo = matchedMem ? (matchedMem['BD No'] || matchedMem.bdNo || matchedMem.airman_id) : '';
+            let matchedMem = null;
+            if (bdVal) {
+              const cleanDigits = bdVal.replace(/\D/g, '');
+              if (cleanDigits) {
+                matchedMem = members.find(m => String(m['BD No'] || m.airman_id || '').replace(/\D/g, '') === cleanDigits);
+              }
+            }
+            if (!matchedMem) {
+              matchedMem = findMemberByRankAndName(rankVal, nameVal, members);
+            }
+
+            const bdNo = bdVal || (matchedMem ? (matchedMem['BD No'] || matchedMem.bdNo || matchedMem.airman_id) : '');
             const finalRank = rankVal || (matchedMem?.Rank || matchedMem?.rank || '');
             const finalName = nameVal || (matchedMem?.Surname || matchedMem?.Name || 'Member');
 
@@ -1292,6 +1396,8 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             let fixedRank = '';
             let fixedName = '';
             let fixedBd = '';
+            let sheetYear = new Date().getFullYear();
+            let sheetMonth = String(new Date().getMonth() + 1).padStart(2, '0');
 
             const sheetBdMatch = sheetName.match(/\b(\d{4,7})\b/);
             if (sheetBdMatch) fixedBd = sheetBdMatch[1];
@@ -1306,6 +1412,22 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                 if (bdMatch && !fixedBd) {
                   fixedBd = bdMatch[1];
                 }
+                if (
+                  cellText.includes('র‍্যাংক ও নাম') || cellText.includes('পদবী ও নাম') ||
+                  cellText.includes('Rank & Name') || cellText.includes('Rank and Name')
+                ) {
+                  const val = String(row[c + 1] || row[c + 2] || '').trim();
+                  if (val) {
+                    const matched = findMemberByRankAndName('', val, members);
+                    if (matched) {
+                      if (!fixedName) fixedName = matched.Surname || matched.Name || val;
+                      if (!fixedRank) fixedRank = matched.Rank || matched.rank || '';
+                      if (!fixedBd) fixedBd = String(matched['BD No'] || matched.airman_id || '').replace(/\D/g, '');
+                    } else if (!fixedName) {
+                      fixedName = val;
+                    }
+                  }
+                }
                 if (cellText === 'নাম' || cellText === 'Name' || cellText.includes('সদস্য')) {
                   const val = String(row[c + 1] || row[c + 2] || '').trim();
                   if (val && !fixedName) fixedName = val;
@@ -1314,10 +1436,21 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                   const val = String(row[c + 1] || row[c + 2] || '').trim();
                   if (val && !fixedRank) fixedRank = val;
                 }
-                if (cellText === 'বিডি নং' || cellText.includes('বিডি')) {
+                if (cellText.includes('বিডি নং') || cellText.includes('বিডি') || cellText.toLowerCase().includes('bd no')) {
                   const val = String(row[c + 1] || row[c + 2] || '').trim();
                   const m = val.match(/\b(\d{4,7})\b/);
                   if (m && !fixedBd) fixedBd = m[1];
+                }
+                if (cellText.includes('মাস') || cellText.toLowerCase().includes('month')) {
+                  const val = String(row[c + 1] || row[c + 2] || '').trim();
+                  if (val) {
+                    const parsedM = parseBanglaOrEnglishDate(val);
+                    if (parsedM && parsedM.length === 10) {
+                      const parts = parsedM.split('-');
+                      sheetYear = parseInt(parts[0], 10) || sheetYear;
+                      sheetMonth = parts[1] || sheetMonth;
+                    }
+                  }
                 }
               }
             }
@@ -1338,9 +1471,24 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             const finalRank = matchedMem ? (matchedMem.Rank || matchedMem.rank || '') : (fixedRank || '');
             const finalName = matchedMem ? (matchedMem.Surname || matchedMem.Name || '') : (fixedName || cleanSheetName || sheetName);
 
-            // 2. Identify month & year from banner or current
-            let sheetYear = new Date().getFullYear();
-            let sheetMonth = String(new Date().getMonth() + 1).padStart(2, '0');
+            // 2. Identify month & year from banner cells (specifically C2/D2) or current
+            // (sheetYear and sheetMonth already initialized above)
+
+            // Check Row 2 (r=1) for C2 'মাস' and D2 month name
+            const r2DateWise = rawMatrix[1];
+            if (r2DateWise) {
+              const c2Val = String(r2DateWise[2] || '').trim();
+              const d2Val = String(r2DateWise[3] || '').trim();
+              if (c2Val.includes('মাস') && d2Val) {
+                const parsedM = parseBanglaOrEnglishDate(d2Val);
+                if (parsedM && parsedM.length === 10) {
+                  const parts = parsedM.split('-');
+                  sheetYear = parseInt(parts[0], 10) || sheetYear;
+                  sheetMonth = parts[1] || sheetMonth;
+                }
+              }
+            }
+
             for (let r = 0; r <= dateMatrixHeaderRowIdx; r++) {
               const row = rawMatrix[r] || [];
               for (const cell of row) {
@@ -1371,9 +1519,16 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             for (let r = dateMatrixHeaderRowIdx + 1; r < rawMatrix.length; r++) {
               const row = rawMatrix[r] || [];
               const dateCell = row[colDateIdx];
-              if (dateCell === undefined || dateCell === null || String(dateCell).trim() === '') continue;
+              const slCell = colDateIdx > 0 ? String(row[colDateIdx - 1] || '').trim() : '';
+              if (dateCell === undefined || dateCell === null || String(dateCell).trim() === '') {
+                if (slCell.includes('সর্বমোট') || slCell.includes('মোট')) break;
+                continue;
+              }
               const dateStr = String(dateCell).trim();
-              if (dateStr.includes('সর্বমোট') || dateStr.includes('মোট') || dateStr.toLowerCase().includes('total')) {
+              if (
+                dateStr.includes('সর্বমোট') || dateStr.includes('মোট') || dateStr.toLowerCase().includes('total') ||
+                slCell.includes('সর্বমোট') || slCell.includes('মোট') || slCell.toLowerCase().includes('total')
+              ) {
                 break;
               }
 
@@ -1846,17 +2001,30 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           </div>
 
           <div className="flex items-center space-x-2">
-            {/* Month Selection directly in Header */}
-            <div className="flex items-center space-x-1.5 bg-slate-900 border border-slate-700/80 rounded-xl px-2.5 py-1 text-xs">
-              <Calendar className="w-3.5 h-3.5 text-teal-400" />
-              <span className="text-[11px] text-slate-400 font-bold hidden sm:inline">মাস:</span>
-              <input
-                type="month"
-                value={templateMonth}
-                onChange={(e) => setTemplateMonth(e.target.value)}
-                className="bg-transparent text-white font-mono text-xs focus:outline-none cursor-pointer"
-                title="টেমপ্লেট ডাউনলোডের মাস নির্বাচন"
-              />
+            {/* Month Selection directly in Header - Styled exactly like Bill month option */}
+            <div className="flex items-center bg-slate-850 rounded-xl px-1.5 py-1 border border-slate-700/80 shadow-inner">
+              <button
+                type="button"
+                onClick={handlePrevTemplateMonth}
+                className="w-7 h-7 flex items-center justify-center bg-gradient-to-b from-slate-700 via-slate-800 to-slate-900 hover:from-slate-600 hover:to-slate-750 text-indigo-300 hover:text-white rounded-lg transition-all cursor-pointer border-t border-slate-600/80 border-x border-slate-700/80 border-b-[2.5px] border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.6)]"
+                title="পূর্ববর্তী মাস (Previous Month)"
+              >
+                <ChevronLeft className="w-3.5 h-3.5 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]" />
+              </button>
+              <div className="px-2.5 py-0.5 text-center min-w-[110px] select-none">
+                <span className="text-xs font-black text-white flex items-center justify-center space-x-1">
+                  <Calendar className="w-3 h-3 text-indigo-400 mr-1" />
+                  <span>{formatBengaliMonthYear(templateMonth)}</span>
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleNextTemplateMonth}
+                className="w-7 h-7 flex items-center justify-center bg-gradient-to-b from-slate-700 via-slate-800 to-slate-900 hover:from-slate-600 hover:to-slate-750 text-indigo-300 hover:text-white rounded-lg transition-all cursor-pointer border-t border-slate-600/80 border-x border-slate-700/80 border-b-[2.5px] border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.6)]"
+                title="পরবর্তী মাস (Next Month)"
+              >
+                <ChevronRight className="w-3.5 h-3.5 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]" />
+              </button>
             </div>
 
             {/* Template 1: Member-wise Matrix (31 Date tabs for selected Month) */}
@@ -1969,21 +2137,42 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                       </div>
                       <p className="text-[11px] text-slate-400 leading-relaxed">
                         • <strong>মাসিক ৩১টি ট্যাব:</strong> নির্বাচিত মাসের <strong>১ থেকে ৩১ তারিখের জন্য ৩১টি আলাদা শিট ট্যাব</strong> তৈরি হবে。<br/>
-                        • <strong>বামে সদস্য:</strong> বাম পাশের কলামে সদস্যদের <strong>ক্রমিক, পদবী ও নাম</strong> সাজানো থাকে。<br/>
+                        • <strong>বামে সদস্য:</strong> বাম পাশের কলামে সদস্যদের <strong>ক্রমিক, বিডি নং, পদবী ও নাম</strong> সাজানো থাকে。<br/>
                         • <strong>ডানে খাবার:</strong> পরোটা, ডিম ভাজি, ডিম সিদ্ধ, চা সহ সকল খাবারের কলাম (নতুন মেনু শেষে যুক্ত হবে)।
                       </p>
 
-                      {/* Month Selection preview in Card 1 */}
-                      <div className="pt-1 space-y-1">
+                      {/* Month Selection preview in Card 1 - Bill style */}
+                      <div className="pt-1 space-y-1.5">
                         <label className="text-[10px] text-emerald-300 font-bold flex items-center justify-between">
                           <span className="flex items-center gap-1.5">
                             <Calendar className="w-3.5 h-3.5 text-emerald-400" />
                             <span>নির্বাচিত মাস:</span>
                           </span>
-                          <span className="text-[10px] font-mono text-emerald-300 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/40 font-bold">
-                            {formatBengaliMonthYear(templateMonth)}
-                          </span>
                         </label>
+                        <div className="flex items-center bg-slate-950 rounded-xl px-1.5 py-1 border border-emerald-500/40 shadow-inner justify-between">
+                          <button
+                            type="button"
+                            onClick={handlePrevTemplateMonth}
+                            className="w-7 h-7 flex items-center justify-center bg-gradient-to-b from-slate-700 via-slate-800 to-slate-900 hover:from-slate-600 hover:to-slate-750 text-emerald-300 hover:text-white rounded-lg transition-all cursor-pointer border-t border-slate-600/80 border-x border-slate-700/80 border-b-[2.5px] border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.6)]"
+                            title="পূর্ববর্তী মাস (Previous Month)"
+                          >
+                            <ChevronLeft className="w-3.5 h-3.5 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]" />
+                          </button>
+                          <div className="px-2.5 py-0.5 text-center select-none">
+                            <span className="text-xs font-black text-white flex items-center justify-center space-x-1">
+                              <Calendar className="w-3.5 h-3.5 text-emerald-400 mr-1" />
+                              <span>{formatBengaliMonthYear(templateMonth)}</span>
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleNextTemplateMonth}
+                            className="w-7 h-7 flex items-center justify-center bg-gradient-to-b from-slate-700 via-slate-800 to-slate-900 hover:from-slate-600 hover:to-slate-750 text-emerald-300 hover:text-white rounded-lg transition-all cursor-pointer border-t border-slate-600/80 border-x border-slate-700/80 border-b-[2.5px] border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.6)]"
+                            title="পরবর্তী মাস (Next Month)"
+                          >
+                            <ChevronRight className="w-3.5 h-3.5 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]" />
+                          </button>
+                        </div>
                       </div>
                     </div>
 
@@ -2015,23 +2204,38 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                         • <strong>ডানে খাবার:</strong> পরোটা, ডিম ভাজি, ডিম সিদ্ধ, চা সহ সারা মাসের প্রতিদিনের খাওয়ার সংখ্যা থাকে।
                       </p>
 
-                      {/* Month Selection */}
-                      <div className="pt-1 space-y-1">
+                      {/* Month Selection - Bill Style */}
+                      <div className="pt-1 space-y-1.5">
                         <label className="text-[10px] text-teal-300 font-bold flex items-center justify-between">
                           <span className="flex items-center gap-1.5">
                             <Calendar className="w-3.5 h-3.5 text-teal-400" />
                             <span>টেমপ্লেটের মাস নির্বাচন (Month):</span>
                           </span>
-                          <span className="text-[10px] font-mono text-teal-300 bg-teal-950/80 px-2 py-0.5 rounded border border-teal-500/40 font-bold">
-                            {formatBengaliMonthYear(templateMonth)}
-                          </span>
                         </label>
-                        <input
-                          type="month"
-                          value={templateMonth}
-                          onChange={(e) => setTemplateMonth(e.target.value)}
-                          className="w-full bg-slate-950 border border-teal-500/50 rounded-xl px-2.5 py-1.5 text-xs text-white font-medium focus:outline-none focus:border-teal-400 cursor-pointer shadow-inner"
-                        />
+                        <div className="flex items-center bg-slate-950 rounded-xl px-1.5 py-1 border border-teal-500/40 shadow-inner justify-between">
+                          <button
+                            type="button"
+                            onClick={handlePrevTemplateMonth}
+                            className="w-7 h-7 flex items-center justify-center bg-gradient-to-b from-slate-700 via-slate-800 to-slate-900 hover:from-slate-600 hover:to-slate-750 text-teal-300 hover:text-white rounded-lg transition-all cursor-pointer border-t border-slate-600/80 border-x border-slate-700/80 border-b-[2.5px] border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.6)]"
+                            title="পূর্ববর্তী মাস (Previous Month)"
+                          >
+                            <ChevronLeft className="w-3.5 h-3.5 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]" />
+                          </button>
+                          <div className="px-2.5 py-0.5 text-center select-none">
+                            <span className="text-xs font-black text-white flex items-center justify-center space-x-1">
+                              <Calendar className="w-3.5 h-3.5 text-teal-400 mr-1" />
+                              <span>{formatBengaliMonthYear(templateMonth)}</span>
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleNextTemplateMonth}
+                            className="w-7 h-7 flex items-center justify-center bg-gradient-to-b from-slate-700 via-slate-800 to-slate-900 hover:from-slate-600 hover:to-slate-750 text-teal-300 hover:text-white rounded-lg transition-all cursor-pointer border-t border-slate-600/80 border-x border-slate-700/80 border-b-[2.5px] border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.6)]"
+                            title="পরবর্তী মাস (Next Month)"
+                          >
+                            <ChevronRight className="w-3.5 h-3.5 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]" />
+                          </button>
+                        </div>
                       </div>
 
                       {/* Optional Member Selection Dropdown */}

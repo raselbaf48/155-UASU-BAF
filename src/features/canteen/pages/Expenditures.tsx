@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
-  Search, Plus, Trash2, Banknote, X, Save, Edit2, AlertTriangle, CheckCircle2, 
+  Search, Plus, Minus, Trash2, Banknote, X, Save, Edit2, AlertTriangle, CheckCircle2, 
   Calendar, Tag, FileText, Boxes, UserCheck, Layers, 
   Wallet, ShoppingCart, DollarSign, Store, Utensils,
   Check, PackagePlus, History, Clock, ArrowDownLeft, ArrowUpRight,
   Filter, CheckSquare, Sparkles, ChevronRight, User,
   ArrowLeft, ArrowUpDown, ArrowUp, ArrowDown
 } from 'lucide-react';
-import { formatCanteenDate } from '../utils/dateUtils';
+import { formatCanteenDate, toYMDDate } from '../utils/dateUtils';
+import { DateNavigator } from '../components/DateNavigator';
 import { 
   autoRestockFromExpense, 
   getRawInventoryItems, 
@@ -240,8 +241,8 @@ export const Expenditures: React.FC = () => {
     { id: 'civ-sanwar', name: 'Civ Sanwar', rank: 'Civ', surname: 'Sanwar', role: 'Staff', dp: null }
   ]);
 
-  // Main Page View Mode: 'list' (dashboard with records) | 'add-expense' (dedicated new page for expense entry)
-  const [viewMode, setViewMode] = useState<'list' | 'add-expense'>('list');
+  // Main Page View Mode: 'pos' (POS Sales half screen) | 'list' (dashboard with records)
+  const [viewMode, setViewMode] = useState<'pos' | 'list'>('pos');
 
   // Sorting order for main Expense Records: 'desc' (Latest on top, default) | 'asc' (Oldest on top)
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
@@ -299,22 +300,18 @@ export const Expenditures: React.FC = () => {
   const [historyDateFilter, setHistoryDateFilter] = useState<'ALL' | 'THIS_MONTH' | 'TODAY'>('ALL');
 
   // New Expense Form State
-  const [formDate, setFormDate] = useState(formatCanteenDate(new Date()));
+  const [formDateYMD, setFormDateYMD] = useState<string>(() => toYMDDate(new Date()));
+  const [formDate, setFormDate] = useState(() => formatCanteenDate(new Date()));
+
+  const handleDateChange = (val: string) => {
+    setFormDateYMD(val);
+    setFormDate(formatCanteenDate(val));
+  };
   const [formPerson, setFormPerson] = useState('Civ Tanvir');
   const [formPaymentMethod, setFormPaymentMethod] = useState<'Cash' | 'Due'>('Cash');
   const [formDueShop, setFormDueShop] = useState<DueShopName>('Grocessary Shop');
-  const [formDeductAdvance, setFormDeductAdvance] = useState(true);
-  const [itemRows, setItemRows] = useState<ItemRowInput[]>([
-    {
-      id: 'row-1',
-      desc: '',
-      category: 'Grocery',
-      qty: 1,
-      unit: 'kg',
-      unitPrice: '',
-      amount: ''
-    }
-  ]);
+  const [formDeductAdvance, setFormDeductAdvance] = useState(false);
+  const [itemRows, setItemRows] = useState<ItemRowInput[]>([]);
 
   // Inventory Item Selector in Form (like Member Selection in POS Sales)
   const [inventorySearch, setInventorySearch] = useState('');
@@ -803,61 +800,52 @@ export const Expenditures: React.FC = () => {
     });
   }, [rawItems, inventorySearch, inventoryCategoryFilter]);
 
-  // Select an inventory item into current row or append new row
+  // Select an inventory item into cart or increment quantity
   const handleSelectInventoryItem = (item: RawInventoryItem) => {
     const itemName = item.nameBn || item.name;
     const cat = item.category || 'Grocery';
-    const rate = item.unitCost || '';
+    const rate = Number(item.unitCost) || 0;
     const unit = item.unit || 'kg';
 
-    const isAlreadySelected = itemRows.some(r => r.rawItemId === item.id || r.desc === itemName);
-
-    if (isAlreadySelected) {
-      // 2nd click: deselect and remove from voucher items!
-      setItemRows(prev => {
-        const remaining = prev.filter(r => !(r.rawItemId === item.id || r.desc === itemName));
-        if (remaining.length === 0) {
-          return [{
-            id: `row-${Date.now()}`,
-            desc: '',
-            category: 'Grocery',
-            qty: 1,
-            unit: 'kg',
-            unitPrice: '',
-            amount: ''
-          }];
-        }
-        return remaining;
-      });
-      showToast(`✕ Deselected "${itemName}"`);
-      return;
-    }
-
-    // 1st click: select and add to voucher items!
     setItemRows(prev => {
-      // Find if first row is completely empty, use it
-      const firstEmptyIndex = prev.findIndex(r => !r.desc.trim() && !r.amount);
-      if (firstEmptyIndex !== -1) {
+      const existingIdx = prev.findIndex(r => r.rawItemId === item.id || r.desc === itemName);
+      if (existingIdx !== -1) {
+        // Increment quantity by 1
         return prev.map((r, i) => {
-          if (i !== firstEmptyIndex) return r;
-          const qty = r.qty || 1;
-          const amt = typeof rate === 'number' && rate > 0 ? Number(qty) * rate : r.amount;
+          if (i !== existingIdx) return r;
+          const currentQty = Number(r.qty) || 1;
+          const newQty = currentQty + 1;
+          const uPrice = Number(r.unitPrice) || rate;
+          return {
+            ...r,
+            qty: newQty,
+            unitPrice: uPrice > 0 ? uPrice : '',
+            amount: uPrice > 0 ? Math.round(newQty * uPrice) : r.amount
+          };
+        });
+      }
+
+      // First check if there is an empty placeholder row
+      const emptyIdx = prev.findIndex(r => !r.desc.trim() && !r.amount);
+      if (emptyIdx !== -1) {
+        return prev.map((r, i) => {
+          if (i !== emptyIdx) return r;
           return {
             ...r,
             desc: itemName,
             category: cat,
             rawItemId: item.id,
+            qty: 1,
             unit: unit,
-            unitPrice: rate,
-            qty: qty,
-            amount: amt
+            unitPrice: rate > 0 ? rate : '',
+            amount: rate > 0 ? rate : ''
           };
         });
       }
 
-      // Otherwise append new row
+      // Otherwise append new cart item
       return [
-        ...prev,
+        ...prev.filter(r => r.desc.trim()),
         {
           id: `row-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
           desc: itemName,
@@ -865,19 +853,46 @@ export const Expenditures: React.FC = () => {
           rawItemId: item.id,
           qty: 1,
           unit: unit,
-          unitPrice: rate,
-          amount: typeof rate === 'number' && rate > 0 ? rate : ''
+          unitPrice: rate > 0 ? rate : '',
+          amount: rate > 0 ? rate : ''
         }
       ];
     });
 
-    showToast(`✓ Selected "${itemName}"`);
+    playSuccessSound();
+    showToast(`✓ "${itemName}" কার্টে যুক্ত হয়েছে`);
   };
 
-  // Add another manual row
-  const handleAddRow = () => {
+  // Adjust quantity of item in cart (+ / -)
+  const updateCartItemQty = (id: string, delta: number) => {
+    setItemRows(prev => {
+      return prev
+        .map(r => {
+          if (r.id !== id) return r;
+          const currentQty = Number(r.qty) || 1;
+          const newQty = currentQty + delta;
+          if (newQty <= 0) return null; // Remove item if quantity reaches 0
+          const price = Number(r.unitPrice) || 0;
+          return {
+            ...r,
+            qty: newQty,
+            amount: price > 0 ? Math.round(newQty * price) : r.amount
+          };
+        })
+        .filter((r): r is ItemRowInput => r !== null);
+    });
+  };
+
+  // Remove item from cart
+  const removeCartItem = (id: string) => {
+    setItemRows(prev => prev.filter(r => r.id !== id));
+    showToast(`🗑️ আইটেম কার্ট থেকে সরানো হয়েছে`);
+  };
+
+  // Add custom non-inventory row
+  const handleAddCustomRow = () => {
     setItemRows(prev => [
-      ...prev,
+      ...prev.filter(r => r.desc.trim()),
       {
         id: `row-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
         desc: '',
@@ -891,9 +906,13 @@ export const Expenditures: React.FC = () => {
     ]);
   };
 
+  // Add another manual row (legacy fallback)
+  const handleAddRow = () => {
+    handleAddCustomRow();
+  };
+
   const handleRemoveRow = (id: string) => {
-    if (itemRows.length <= 1) return;
-    setItemRows(prev => prev.filter(r => r.id !== id));
+    removeCartItem(id);
   };
 
   const handleUpdateRow = (id: string, field: keyof ItemRowInput, value: any) => {
@@ -1012,20 +1031,9 @@ export const Expenditures: React.FC = () => {
         }
       }
 
-      // 2. Instant UI feedback & Navigation back to list view
+      // 2. Instant UI feedback & Clear cart for next entry
       setShowAddForm(false);
-      setViewMode('list');
-      setItemRows([
-        {
-          id: 'row-1',
-          desc: '',
-          category: 'Grocery',
-          qty: 1,
-          unit: 'kg',
-          unitPrice: '',
-          amount: ''
-        }
-      ]);
+      setItemRows([]);
 
       if (formPaymentMethod === 'Due') {
         showToast(`✅ Saved ${newRecords.length} item(s) (৳${formTotalAmount.toLocaleString()})! [${formDueShop}] এর বকেয়া হিসেবে সফলভাবে সংরক্ষিত হয়েছে।`);
@@ -1511,505 +1519,616 @@ export const Expenditures: React.FC = () => {
         </div>
       )}
 
-            {/* DEDICATED NEW PAGE: ADD EXPENSE ("Add expence e click korle new page a dekhabe") */}
-      {viewMode === 'add-expense' ? (
-        <div className="space-y-6 animate-in fade-in duration-200">
-          {/* Top Bar with Back Button */}
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900 border border-slate-800 p-5 rounded-3xl shadow-lg">
-            <div className="flex items-center space-x-3">
-              <button
-                type="button"
-                onClick={() => setViewMode('list')}
-                className="px-4 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white transition-all cursor-pointer flex items-center space-x-2 text-xs font-black uppercase border border-slate-700 shadow-sm active:scale-95"
-              >
-                <ArrowLeft className="w-4 h-4 text-indigo-400" />
-                <span>← ফিরে যান (Back to Register)</span>
-              </button>
-              <div>
-                <div className="flex items-center space-x-2">
-                  <h2 className="text-xl font-black text-white uppercase tracking-tight">
-                    NEW EXPENSE VOUCHER ENTRY
-                  </h2>
-                  <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-mono text-[10px] font-black border border-indigo-500/30">
-                    নতুন খরচের ভাউচার
-                  </span>
-                </div>
-                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
-                  ইনভেন্টরি আইটেম নির্বাচন করুন অথবা সরাসরি খরচের ভাউচার তৈরি করুন
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center space-x-3">
-              <span className="text-xs font-mono font-black text-emerald-400 bg-emerald-500/10 px-4 py-2 rounded-2xl border border-emerald-500/20">
-                VOUCHER TOTAL: ৳{formTotalAmount.toLocaleString()}
+      {/* Top Header Strip with Switcher between POS Entry and All Records */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+        <div className="flex items-center space-x-2.5">
+          <div className="p-2.5 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+            <Banknote className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="text-sm sm:text-base font-black text-white uppercase tracking-wider flex items-center gap-2">
+              <span>EXPENSE REGISTER</span>
+              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+                {viewMode === 'pos' ? 'POS ENTRY' : 'RECORDS & HISTORY'}
               </span>
-            </div>
+            </h3>
+            <p className="text-[11px] text-slate-400">
+              {viewMode === 'pos'
+                ? 'Select raw inventory items and confirm voucher checkout'
+                : 'সকল দৈনন্দিন খরচের ভাউচার তালিকা, অনুসন্ধান ও হিসাব ব্যবস্থাপনা'}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between sm:justify-end gap-2.5 w-full sm:w-auto">
+          {/* View Mode Toggle: POS Entry vs All Records */}
+          <div className="flex items-center bg-slate-900 p-1 rounded-xl border border-slate-800">
+            <button
+              type="button"
+              onClick={() => setViewMode('pos')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-black tracking-wider uppercase flex items-center space-x-1.5 transition-all cursor-pointer ${
+                viewMode === 'pos'
+                  ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/30'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <ShoppingCart className="w-3.5 h-3.5" />
+              <span>POS Sales Entry</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('list')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-black tracking-wider uppercase flex items-center space-x-1.5 transition-all cursor-pointer ${
+                viewMode === 'list'
+                  ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/30'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>Records ({expenses.length})</span>
+            </button>
           </div>
 
-          <div className="bg-slate-900 border border-indigo-500/40 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-5">
+          {/* Advance Breakdown Button */}
+          <button
+            type="button"
+            onClick={() => setShowAdvanceBreakdownModal(true)}
+            className="flex items-center justify-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-amber-300 border border-slate-700 rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-sm cursor-pointer shrink-0"
+            title="Civilian Advance Balance"
+          >
+            <Clock className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden sm:inline">Advance</span>
+          </button>
+        </div>
+      </div>
+
+      {viewMode === 'pos' ? (
+        <div className="space-y-6 animate-in fade-in duration-200">
+          
+          {/* Main Layout: 2-Column Grid on Laptop (lg:grid-cols-2), 1-Column on Mobile */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+            
+            {/* ======================================================== */}
+            {/* LEFT COLUMN: Select Raw Inventory (Single Single niche)  */}
+            {/* ======================================================== */}
+            <div className="bg-slate-950/80 rounded-3xl border border-slate-800/80 p-4 sm:p-5 space-y-3.5 shadow-lg flex flex-col">
               
-              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                <div className="flex items-center space-x-3">
-                  <div className="w-9 h-9 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
-                    <PackagePlus className="w-5 h-5" />
+              {/* Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center space-x-2.5">
+                  <div className="p-2 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                    <Boxes className="w-4 h-4" />
                   </div>
                   <div>
-                    <h3 className="text-base font-black text-white uppercase tracking-tight">
-                      NEW EXPENSE VOUCHER ENTRY
-                    </h3>
-                    <p className="text-[11px] text-slate-400 font-bold">
-                      ইনভেন্টরি আইটেম সিলেক্ট করুন অথবা সরাসরি নতুন এন্ট্রি দিন
-                    </p>
+                    <h4 className="text-xs sm:text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                      <span>SELECT RAW INVENTORY</span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
+                        {filteredRawInventory.length} items
+                      </span>
+                    </h4>
+                    <p className="text-[11px] text-slate-400">আইটেমে ক্লিক করলে স্বয়ংক্রিয়ভাবে ডানপাশের কার্টে যুক্ত হবে</p>
                   </div>
                 </div>
 
-                <div className="text-right">
-                  <span className="text-xs font-mono font-black text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/20">
-                    VOUCHER TOTAL: ৳{formTotalAmount.toLocaleString()}
-                  </span>
-                </div>
+                <button
+                  type="button"
+                  onClick={handleAddCustomRow}
+                  className="text-xs text-indigo-400 hover:text-indigo-300 font-black flex items-center space-x-1.5 py-1 px-2.5 rounded-xl bg-indigo-950/50 border border-indigo-500/30 hover:bg-indigo-900/40 transition-colors cursor-pointer self-start sm:self-auto"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Custom Item</span>
+                </button>
               </div>
 
-              {/* Header Fields: Date, Person, Payment Channel */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-950/70 p-4 rounded-2xl border border-slate-800">
-                {/* Date */}
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
-                    VOUCHER DATE (তারিখ)
-                  </label>
-                  <input
+              {/* Search Bar & Category Filter Pills */}
+              <div className="space-y-2">
+                <div className="relative">
+                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input 
                     type="text"
-                    value={formDate}
-                    onChange={(e) => setFormDate(e.target.value)}
-                    placeholder="DD-MM-YYYY"
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    value={inventorySearch}
+                    onChange={(e) => setInventorySearch(e.target.value)}
+                    placeholder="কাঁচামাল খুঁজুন (যেমন: চাল, ডাল, ব্রয়লার, তেল, পিয়াজ...)"
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-9 py-2.5 text-xs font-bold text-white placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
                   />
+                  {inventorySearch && (
+                    <button 
+                      onClick={() => setInventorySearch('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs font-bold p-1"
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
 
-                {/* Person */}
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
-                    DETAILER / PERSON (দায়িত্বপ্রাপ্ত ব্যক্তি)
-                  </label>
-                  <select
-                    value={formPerson}
-                    onChange={(e) => setFormPerson(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-emerald-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  >
-                    {civilians.map(c => (
-                      <option key={c.id} value={c.name}>{c.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Payment Channel */}
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
-                    PAYMENT METHOD (পরিশোধ মাধ্যম)
-                  </label>
-                  <select
-                    value={formPaymentMethod}
-                    onChange={(e) => setFormPaymentMethod(e.target.value as any)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  >
-                    <option value="Cash">Cash (নগদ ক্যাশ)</option>
-                    <option value="Due">Due (বকেয়া দোকান বিল)</option>
-                  </select>
+                {/* Category Pills horizontally scrollable */}
+                <div className="flex items-center space-x-1.5 overflow-x-auto py-1 scrollbar-none">
+                  {availableInventoryCategories.map((cat) => {
+                    const isSel = inventoryCategoryFilter === cat;
+                    return (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => setInventoryCategoryFilter(cat)}
+                        className={`px-3 py-1 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer ${
+                          isSel ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30' : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+                        }`}
+                      >
+                        {cat}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Advance Status & Deduction Banner */}
-              {formPaymentMethod === 'Due' ? (
-                <div className="p-4 rounded-2xl border bg-slate-950/80 border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/30">
-                      <Store className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <div className="flex items-center space-x-2 flex-wrap">
-                        <span className="font-black text-amber-300 uppercase">বকেয়া দোকান বিল ({formDueShop}):</span>
-                        <span className="px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 font-mono font-bold border border-amber-500/20">
-                          ৳{formTotalAmount.toLocaleString()}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-slate-400 mt-0.5">
-                        এই ভাউচারটি <strong className="text-amber-300">[{formDueShop}]</strong> এর বকেয়া রেজিস্টারে যুক্ত হবে। কোনো সিভিলিয়ানের অগ্রিম ব্যালেন্স থেকে টাকা কাটা হবে না।
-                      </p>
-                    </div>
+              {/* Vertical List: Single Single niche niche */}
+              <div className="max-h-[calc(100vh-290px)] min-h-[460px] overflow-y-auto pr-1 space-y-2">
+                {filteredRawInventory.length === 0 ? (
+                  <div className="text-center py-12 text-slate-500 bg-slate-900/40 rounded-2xl border border-slate-800 text-xs">
+                    কোনো ইনভেন্টরি আইটেম পাওয়া যায়নি
                   </div>
+                ) : (
+                  filteredRawInventory.map((item) => {
+                    const cartItem = itemRows.find(r => r.rawItemId === item.id || r.desc === (item.nameBn || item.name));
+                    const inCartQty = cartItem ? Number(cartItem.qty) || 1 : 0;
+                    const isSelected = inCartQty > 0;
 
-                  <div className="shrink-0 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 px-3 py-1.5 rounded-xl text-[11px] font-bold">
-                    ✓ {formPerson} এর অগ্রিম ব্যালেন্স সুরক্ষিত থাকবে
-                  </div>
-                </div>
-              ) : (() => {
-                const advStatus = getPersonAdvanceStatus(formPerson);
-                const afterBal = advStatus.balance - formTotalAmount;
-                return (
-                  <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition-all ${
-                    advStatus.totalAdvance > 0 
-                      ? 'bg-amber-950/30 border-amber-500/40 text-amber-200' 
-                      : 'bg-slate-950/80 border-slate-800 text-slate-300'
-                  }`}>
-                    <div className="flex items-center space-x-3">
-                      <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/30">
-                        <User className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <div className="flex items-center space-x-2 flex-wrap">
-                          <span className="font-black text-white">{formPerson} এর অগ্রিম হিসাব:</span>
-                          <span className="font-mono font-bold text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
-                            প্রদত্ত অগ্রিম: ৳{advStatus.totalAdvance.toLocaleString()}
-                          </span>
-                          <span className="font-mono text-slate-400">
-                            ইতিমধ্যে খরচ: ৳{advStatus.totalSpent.toLocaleString()}
-                          </span>
+                    return (
+                      <div
+                        key={item.id}
+                        onClick={() => handleSelectInventoryItem(item)}
+                        className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 select-none active:scale-[0.99] group ${
+                          isSelected
+                            ? 'bg-indigo-950/60 border-indigo-500 shadow-md ring-1 ring-indigo-500/40'
+                            : 'bg-slate-900/70 border-slate-800 hover:border-indigo-500/50 hover:bg-slate-900'
+                        }`}
+                      >
+                        {/* Item Info */}
+                        <div className="flex items-center space-x-3 min-w-0 flex-1">
+                          <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border transition-all ${
+                            isSelected
+                              ? 'bg-indigo-600 border-indigo-400 text-white shadow-sm'
+                              : 'bg-slate-800/80 border-slate-700/80 text-slate-400 group-hover:text-indigo-400'
+                          }`}>
+                            {isSelected ? <Check className="w-5 h-5 stroke-[2.5]" /> : <Utensils className="w-4 h-4" />}
+                          </div>
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center space-x-2">
+                              <h5 className="text-xs sm:text-sm font-black text-white truncate">
+                                {item.nameBn || item.name}
+                              </h5>
+                              {item.category && (
+                                <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-slate-800 text-slate-400 border border-slate-700 shrink-0">
+                                  {item.category}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center space-x-3 text-[11px] text-slate-400 mt-0.5 font-medium">
+                              <span className="font-mono text-emerald-400 font-bold">
+                                ৳{item.unitCost || 0}/{item.unit || 'kg'}
+                              </span>
+                              <span>•</span>
+                              <span>
+                                স্টক: <strong className="text-slate-300 font-mono">{item.currentStock ?? 0} {item.unit || 'kg'}</strong>
+                              </span>
+                            </div>
+                          </div>
                         </div>
-                        
-                        <div className="flex items-center space-x-2 mt-2">
+
+                        {/* In Cart Indicator or Plus Button */}
+                        <div className="flex items-center space-x-2 shrink-0">
+                          {isSelected && (
+                            <span className="text-[11px] font-mono font-black text-indigo-300 bg-indigo-500/20 px-2 py-1 rounded-lg border border-indigo-500/30">
+                              {inCartQty} {item.unit || 'kg'} কার্টে
+                            </span>
+                          )}
                           <button
                             type="button"
-                            onClick={() => setFormDeductAdvance(!formDeductAdvance)}
-                            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center space-x-2 border cursor-pointer ${
-                              formDeductAdvance
-                                ? 'bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-950/40'
-                                : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white hover:bg-slate-800'
+                            className={`p-2 rounded-xl text-xs font-black transition-all ${
+                              isSelected
+                                ? 'bg-indigo-600 text-white shadow-sm hover:bg-indigo-500'
+                                : 'bg-slate-800 text-slate-300 group-hover:bg-indigo-600 group-hover:text-white'
                             }`}
+                            title="কার্টে যোগ করুন"
                           >
-                            <span className={`w-4 h-4 rounded-md border flex items-center justify-center transition-colors ${
-                              formDeductAdvance ? 'bg-white border-white text-indigo-600' : 'border-slate-500 text-transparent'
-                            }`}>
-                              <Check className="w-3 h-3 stroke-[3]" />
-                            </span>
-                            <span>
-                              Deduct this expense (৳{formTotalAmount.toLocaleString()}) from {formPerson}'s advance
-                            </span>
+                            <Plus className="w-4 h-4" />
                           </button>
                         </div>
                       </div>
-                    </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
 
-                    {formDeductAdvance ? (
-                      <div className="shrink-0 flex items-center space-x-2 bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-800">
-                        <span className="text-[11px] font-bold text-slate-400">ভাউচার পর ব্যালেন্স:</span>
-                        <span className={`px-2.5 py-1 rounded-xl text-xs font-mono font-black border ${
-                          afterBal > 0 
-                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' 
-                            : afterBal < 0 
-                            ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' 
-                            : 'bg-slate-800 text-slate-400 border-slate-700'
-                        }`}>
-                          {afterBal > 0 
-                            ? `+ ৳${afterBal.toLocaleString()} (আমি ব্যাক পাবো)` 
-                            : afterBal < 0 
-                            ? `- ৳${Math.abs(afterBal).toLocaleString()} (আমার কাছে পাবে)` 
-                            : '৳০ (সমান)'}
-                        </span>
-                      </div>
-                    ) : (
-                      <div className="shrink-0 bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800 text-[11px] text-slate-400 font-bold">
-                        সরাসরি ক্যাশ খরচ (অগ্রিম অপরিবর্তিত)
-                      </div>
-                    )}
+            {/* ======================================================== */}
+            {/* RIGHT COLUMN: Date, Cart, Detailed Person, Confirm       */}
+            {/* ======================================================== */}
+            <div className="space-y-4 flex flex-col">
+              
+              {/* 1. Date Box (POS Sales er moto) */}
+              <div className="bg-slate-950/80 rounded-3xl border border-slate-800/80 p-3.5 sm:p-4 shadow-lg flex items-center justify-between gap-3">
+                <div className="flex items-center space-x-2.5">
+                  <div className="p-2 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                    <Calendar className="w-4 h-4" />
                   </div>
-                );
-              })()}
-
-              {/* If Payment Method is DUE: PROMINENT SHOP SELECTOR */}
-              {formPaymentMethod === 'Due' && (
-                <div className="bg-gradient-to-r from-amber-950/40 via-slate-950 to-amber-950/30 border-2 border-amber-500/50 rounded-2xl p-4 animate-in fade-in">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center space-x-2">
-                      <Store className="w-4 h-4 text-amber-400" />
-                      <span className="text-xs font-black text-amber-300 uppercase tracking-widest">
-                        SELECT DUE SHOP (কোন দোকানে বকেয়া হবে):
-                      </span>
-                    </div>
-                    <span className="text-[10px] font-bold text-amber-400/80">
-                      Auto added to Due Register ✓
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
+                      VOUCHER DATE (ভাউচার তারিখ)
+                    </span>
+                    <span className="text-xs font-mono font-bold text-white">
+                      {formDate}
                     </span>
                   </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    {DUE_SHOPS.map(shop => {
-                      const isSelected = formDueShop === shop;
-                      return (
-                        <div
-                          key={shop}
-                          onClick={() => setFormDueShop(shop)}
-                          className={`p-3.5 rounded-xl border text-xs font-black uppercase flex items-center justify-between cursor-pointer transition-all select-none ${
-                            isSelected
-                              ? 'bg-amber-600 text-white border-amber-400 shadow-md shadow-amber-600/30 scale-[1.02]'
-                              : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-amber-500/40'
-                          }`}
-                        >
-                          <div className="flex items-center space-x-2">
-                            {shop === 'Grocessary Shop' && <ShoppingCart className="w-4 h-4 text-emerald-400" />}
-                            {shop === 'Poultry Shop' && <Layers className="w-4 h-4 text-amber-400" />}
-                            {shop === 'Bake & Bite' && <Utensils className="w-4 h-4 text-purple-400" />}
-                            <span>{shop}</span>
-                          </div>
-                          {isSelected && <Check className="w-4 h-4 text-white" />}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* INVENTORY ITEM PICKER (POS SALES MEMBER SELECTION STYLE) */}
-              <div className="bg-slate-950/90 border border-slate-800 rounded-3xl p-4 sm:p-5 shadow-xl space-y-3">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <h4 className="text-sm font-black text-white flex items-center space-x-2 uppercase tracking-wider">
-                      <Boxes className="w-4 h-4 text-indigo-400" />
-                      <span>Select From Raw Inventory (ইনভেন্টরি আইটেম)</span>
-                    </h4>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
-                      আইটেমে ক্লিক করলে স্বয়ংক্রিয়ভাবে নিচে খরচের ভাউচার তালিকায় যুক্ত হবে
-                    </p>
-                  </div>
-
-                  <div className="text-xs font-mono text-slate-400">
-                    <span>Available: </span>
-                    <strong className="text-indigo-400">{filteredRawInventory.length} items</strong>
-                  </div>
                 </div>
 
-                {/* Search & Category Filter Pills */}
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                  <div className="relative flex-1">
-                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                    <input 
-                      type="text"
-                      value={inventorySearch}
-                      onChange={(e) => setInventorySearch(e.target.value)}
-                      placeholder="Search inventory items (Rice, Dal, Oil, Meat...)"
-                      className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-9 py-2 text-xs font-bold text-white placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
-                    />
-                    {inventorySearch && (
-                      <button 
-                        onClick={() => setInventorySearch('')}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs font-bold p-1"
+                {/* DateNavigator just like in POS Sales */}
+                <DateNavigator 
+                  value={formDateYMD} 
+                  onChange={handleDateChange} 
+                  label="Date"
+                  format="dd_mm_yy"
+                />
+              </div>
+
+              {/* 2. Cart Section: Item name, Qty, Total Amount */}
+              <div className="bg-slate-950/80 rounded-3xl border border-slate-800/80 p-4 sm:p-5 shadow-lg space-y-3.5">
+                
+                {/* Cart Header */}
+                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                  <div className="flex items-center space-x-2.5">
+                    <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                      <ShoppingCart className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs sm:text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                        <span>EXPENSE CART</span>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
+                          {itemRows.length} items
+                        </span>
+                      </h4>
+                      <p className="text-[11px] text-slate-400">আইটেমের বিবরণ, পরিমাণ ও মোট খরচ</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    {itemRows.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setItemRows([])}
+                        className="text-[11px] font-bold text-rose-400 hover:text-rose-300 px-2.5 py-1 rounded-xl bg-slate-900 border border-slate-800 hover:bg-rose-950/30 transition-colors cursor-pointer"
                       >
-                        ✕
+                        Clear Cart
                       </button>
                     )}
-                  </div>
-
-                  <div className="flex items-center space-x-1 bg-slate-900 p-1 rounded-xl border border-slate-800 overflow-x-auto scrollbar-none shrink-0">
-                    {availableInventoryCategories.slice(0, 6).map((cat) => {
-                      const isSel = inventoryCategoryFilter === cat;
-                      return (
-                        <button
-                          key={cat}
-                          type="button"
-                          onClick={() => setInventoryCategoryFilter(cat)}
-                          className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer ${
-                            isSel ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
-                          }`}
-                        >
-                          {cat}
-                        </button>
-                      );
-                    })}
+                    <button
+                      type="button"
+                      onClick={handleAddCustomRow}
+                      className="text-[11px] font-bold text-indigo-400 hover:text-indigo-300 px-2.5 py-1 rounded-xl bg-indigo-950/50 border border-indigo-500/30 hover:bg-indigo-900/40 transition-colors cursor-pointer flex items-center space-x-1"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>Add Item</span>
+                    </button>
                   </div>
                 </div>
 
-                {/* Inventory Items Grid */}
-                <div className="max-h-[220px] overflow-y-auto pr-1">
-                  {filteredRawInventory.length === 0 ? (
-                    <div className="text-center py-6 text-slate-500 bg-slate-900/40 rounded-2xl border border-slate-800 text-xs">
-                      No matching raw inventory items found. You can enter item details manually below.
+                {/* Cart Items List */}
+                <div className="max-h-[280px] overflow-y-auto pr-1 space-y-2">
+                  {itemRows.length === 0 ? (
+                    <div className="py-8 text-center text-slate-500 bg-slate-900/40 rounded-2xl border border-slate-800">
+                      <ShoppingCart className="w-7 h-7 mx-auto opacity-25 mb-1.5" />
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Cart is empty (কার্ট খালি)</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">বাম পাশ থেকে ইনভেন্টরি আইটেমে ক্লিক করুন</p>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-                      {filteredRawInventory.map((item) => {
-                        const isSelectedInVoucher = itemRows.some(r => r.rawItemId === item.id || r.desc === (item.nameBn || item.name));
-                        return (
-                          <div
-                            key={item.id}
-                            onClick={() => handleSelectInventoryItem(item)}
-                            className={`p-2.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-2 select-none active:scale-[0.98] ${
-                              isSelectedInVoucher
-                                ? 'bg-indigo-950/60 border-indigo-500 shadow-md ring-1 ring-indigo-500/40'
-                                : 'bg-slate-900/70 border-slate-800 hover:border-indigo-500/50 hover:bg-slate-900'
-                            }`}
-                          >
-                            <div className="flex items-center space-x-2.5 min-w-0">
-                              <div className={`w-5 h-5 rounded-lg flex items-center justify-center shrink-0 border transition-colors ${
-                                isSelectedInVoucher
-                                  ? 'bg-indigo-600 border-indigo-500 text-white' 
-                                  : 'border-slate-700 bg-slate-950 text-transparent'
-                              }`}>
-                                <Check className="w-3.5 h-3.5 stroke-[3]" />
-                              </div>
+                    itemRows.map((row) => {
+                      const qty = Number(row.qty) || 0;
+                      const rate = Number(row.unitPrice) || 0;
+                      const amt = Number(row.amount) || (qty * rate);
 
-                              <div className="min-w-0">
-                                <h5 className="text-xs font-black text-white truncate">
-                                  {item.nameBn || item.name}
-                                </h5>
-                                <div className="flex items-center space-x-2 text-[10px] text-slate-400">
-                                  <span className="font-mono text-emerald-400">৳{item.unitCost}/{item.unit}</span>
-                                  <span>•</span>
-                                  <span>Stock: {item.currentStock} {item.unit}</span>
-                                </div>
-                              </div>
+                      return (
+                        <div 
+                          key={row.id}
+                          className="p-3 bg-slate-900/90 rounded-2xl border border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shadow-xs hover:border-slate-700 transition-all"
+                        >
+                          {/* Item Name (editable) */}
+                          <div className="min-w-0 flex-1">
+                            <input
+                              type="text"
+                              value={row.desc}
+                              onChange={(e) => handleUpdateRow(row.id, 'desc', e.target.value)}
+                              placeholder="Item Name"
+                              className="w-full bg-transparent text-xs font-black text-white focus:outline-none focus:border-b border-indigo-500/50 placeholder:text-slate-500 truncate"
+                            />
+                            <div className="flex items-center space-x-2 text-[10px] text-slate-400 mt-1">
+                              <span>দর: ৳</span>
+                              <input
+                                type="number"
+                                value={row.unitPrice}
+                                onChange={(e) => handleUpdateRow(row.id, 'unitPrice', e.target.value)}
+                                placeholder="Rate"
+                                className="w-14 bg-slate-950 border border-slate-800 rounded px-1.5 py-0.5 text-[10px] font-mono font-bold text-amber-300 text-center focus:outline-none"
+                              />
+                              <span>/</span>
+                              <select
+                                value={row.unit}
+                                onChange={(e) => handleUpdateRow(row.id, 'unit', e.target.value)}
+                                className="bg-slate-950 border border-slate-800 rounded px-1 py-0.5 text-[10px] text-slate-300 focus:outline-none"
+                              >
+                                <option value="kg">kg</option>
+                                <option value="pcs">pcs</option>
+                                <option value="litre">litre</option>
+                                <option value="pkt">pkt</option>
+                                <option value="can">can</option>
+                                <option value="gm">gm</option>
+                                <option value="box">box</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          {/* Qty Controls */}
+                          <div className="flex items-center space-x-1.5 shrink-0 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                            <button
+                              type="button"
+                              onClick={() => updateCartItemQty(row.id, -1)}
+                              className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white cursor-pointer transition-colors"
+                            >
+                              <Minus className="w-3.5 h-3.5" />
+                            </button>
+                            <input
+                              type="number"
+                              step="any"
+                              value={row.qty}
+                              onChange={(e) => handleUpdateRow(row.id, 'qty', e.target.value)}
+                              className="w-12 bg-transparent text-xs font-mono font-black text-white text-center focus:outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => updateCartItemQty(row.id, 1)}
+                              className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white cursor-pointer transition-colors"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          {/* Total Amount & Delete */}
+                          <div className="flex items-center justify-between sm:justify-end space-x-3 shrink-0">
+                            <div className="text-right">
+                              <span className="text-[10px] text-slate-500 font-mono block">মোট</span>
+                              <span className="text-xs font-mono font-black text-emerald-400">
+                                ৳{amt.toLocaleString()}
+                              </span>
                             </div>
 
                             <button
                               type="button"
-                              className={`p-1 rounded-lg text-[10px] font-black uppercase transition-all shrink-0 ${
-                                isSelectedInVoucher
-                                  ? 'bg-indigo-600 text-white'
-                                  : 'bg-slate-800 text-slate-300 hover:bg-indigo-600 hover:text-white'
-                              }`}
+                              onClick={() => removeCartItem(row.id)}
+                              className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-950/30 rounded-xl cursor-pointer transition-colors"
+                              title="Remove from Cart"
                             >
-                              <Plus className="w-3 h-3" />
+                              <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* Voucher Total Banner */}
+                <div className="p-3 bg-slate-900 rounded-2xl border border-slate-800 flex items-center justify-between">
+                  <span className="text-xs font-black uppercase tracking-wider text-slate-300">
+                    VOUCHER TOTAL (সর্বমোট খরচ)
+                  </span>
+                  <span className="text-base font-mono font-black text-emerald-400">
+                    ৳{formTotalAmount.toLocaleString()}
+                  </span>
+                </div>
+              </div>
+
+              {/* 3. Detailed Person & Payment (Niche Detailed Person) */}
+              {/* TANVIR ADVANCE CALCULATION BOX IS REMOVED PER USER INSTRUCTION */}
+              <div className="bg-slate-950/80 rounded-3xl border border-slate-800/80 p-4 sm:p-5 shadow-lg space-y-3.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  
+                  {/* Detailed Person Dropdown */}
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider block mb-1.5 flex items-center space-x-1.5">
+                      <User className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>DETAILED PERSON (দায়িত্বপ্রাপ্ত ব্যক্তি)</span>
+                    </label>
+                    <select
+                      value={formPerson}
+                      onChange={(e) => setFormPerson(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-emerald-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                    >
+                      {civilians.map(c => (
+                        <option key={c.id} value={c.name}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Payment Method (Cash vs Due) */}
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider block mb-1.5 flex items-center space-x-1.5">
+                      <Banknote className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>PAYMENT METHOD (পরিশোধ মাধ্যম)</span>
+                    </label>
+                    <div className="grid grid-cols-2 gap-2 bg-slate-900 p-1 rounded-xl border border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setFormPaymentMethod('Cash')}
+                        className={`py-2 px-3 rounded-lg text-xs font-black tracking-wider uppercase flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+                          formPaymentMethod === 'Cash'
+                            ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-600/30'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        <span>CASH (নগদ)</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFormPaymentMethod('Due')}
+                        className={`py-2 px-3 rounded-lg text-xs font-black tracking-wider uppercase flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+                          formPaymentMethod === 'Due'
+                            ? 'bg-amber-600 text-white shadow-sm shadow-amber-600/30'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        <span>DUE (বকেয়া)</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* If Due selected: shop selector */}
+                {formPaymentMethod === 'Due' && (
+                  <div className="pt-2 border-t border-slate-800/80 space-y-2 animate-in fade-in">
+                    <label className="text-[10px] font-black uppercase text-amber-300 tracking-wider block flex items-center space-x-1.5">
+                      <Store className="w-3.5 h-3.5 text-amber-400" />
+                      <span>SELECT DUE SHOP (দোকান নির্বাচন করুন)</span>
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {DUE_SHOPS.map(shop => {
+                        const isSel = formDueShop === shop;
+                        return (
+                          <button
+                            key={shop}
+                            type="button"
+                            onClick={() => setFormDueShop(shop)}
+                            className={`py-2 px-2 rounded-xl text-[11px] font-black uppercase transition-all border cursor-pointer truncate ${
+                              isSel
+                                ? 'bg-amber-600 border-amber-400 text-white shadow-md'
+                                : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                            }`}
+                          >
+                            {shop}
+                          </button>
                         );
                       })}
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
 
-              {/* Item Rows Table */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-black text-slate-300 uppercase tracking-wider">
-                    VOUCHER ITEMS LIST ({itemRows.length})
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleAddRow}
-                    className="px-3 py-1 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white rounded-lg text-[11px] font-bold uppercase transition-all flex items-center space-x-1 cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Add Custom Row</span>
-                  </button>
-                </div>
-
-                <div className="space-y-2.5">
-                  {itemRows.map((row, idx) => (
-                    <div 
-                      key={row.id}
-                      className="bg-slate-950/80 border border-slate-800 p-3 rounded-2xl flex flex-col md:flex-row items-stretch md:items-center gap-2.5"
-                    >
-                      <div className="w-6 text-center text-slate-500 font-mono text-xs hidden md:block">
-                        {idx + 1}
-                      </div>
-
-                      {/* Item Name */}
-                      <div className="flex-1">
-                        <input
-                          type="text"
-                          placeholder="Item Name (e.g. Broiler, Onion, Bread, Rice...)"
-                          value={row.desc}
-                          onChange={(e) => handleUpdateRow(row.id, 'desc', e.target.value)}
-                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 placeholder-slate-500"
-                        />
-                      </div>
-
-                      {/* Category */}
-                      <div className="w-full md:w-32">
-                        <select
-                          value={row.category}
-                          onChange={(e) => handleUpdateRow(row.id, 'category', e.target.value)}
-                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-2 text-xs font-bold text-slate-300 focus:outline-none"
-                        >
-                          {CATEGORIES.map(c => (
-                            <option key={c} value={c}>{c}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {/* Qty & Unit */}
-                      <div className="flex items-center space-x-1 w-full md:w-32">
-                        <input
-                          type="number"
-                          placeholder="Qty"
-                          value={row.qty}
-                          onChange={(e) => handleUpdateRow(row.id, 'qty', e.target.value)}
-                          className="w-16 bg-slate-900 border border-slate-700 rounded-xl px-2 py-2 text-xs font-bold text-white text-center focus:outline-none font-mono"
-                        />
-                        <select
-                          value={row.unit}
-                          onChange={(e) => handleUpdateRow(row.id, 'unit', e.target.value)}
-                          className="w-16 bg-slate-900 border border-slate-700 rounded-xl px-1.5 py-2 text-xs font-bold text-slate-400 focus:outline-none text-center"
-                        >
-                          <option value="kg">kg</option>
-                          <option value="pcs">pcs</option>
-                          <option value="litre">litre</option>
-                          <option value="pkt">pkt</option>
-                          <option value="can">can</option>
-                          <option value="gm">gm</option>
-                          <option value="box">box</option>
-                        </select>
-                      </div>
-
-                      {/* Unit Price */}
-                      <div className="w-full md:w-24">
-                        <input
-                          type="number"
-                          placeholder="Rate (৳)"
-                          value={row.unitPrice}
-                          onChange={(e) => handleUpdateRow(row.id, 'unitPrice', e.target.value)}
-                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-2 text-xs font-bold text-amber-300 text-center focus:outline-none font-mono"
-                        />
-                      </div>
-
-                      {/* Total Amount */}
-                      <div className="w-full md:w-28">
-                        <input
-                          type="number"
-                          placeholder="Amount (৳)"
-                          value={row.amount}
-                          onChange={(e) => handleUpdateRow(row.id, 'amount', e.target.value)}
-                          className="w-full bg-slate-900 border border-emerald-500/30 rounded-xl px-2.5 py-2 text-xs font-black text-emerald-400 text-right focus:outline-none font-mono"
-                        />
-                      </div>
-
-                      {/* Delete row */}
-                      {itemRows.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveRow(row.id)}
-                          className="p-2 text-slate-500 hover:text-rose-400 rounded-xl hover:bg-slate-900 transition-colors self-end md:self-center"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Form Action */}
-              <div className="pt-2 flex items-center justify-end space-x-3">
-                <button
-                  type="button"
-                  onClick={() => setViewMode('list')}
-                  className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-black uppercase transition-colors"
-                >
-                  Cancel (বাতিল)
-                </button>
-                <button
-                  type="button"
-                  disabled={isSaving}
-                  onClick={handleSaveNewExpenses}
-                  className="px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-emerald-600/30 cursor-pointer active:scale-95 disabled:opacity-50 flex items-center space-x-2"
-                >
-                  <Save className="w-4 h-4" />
-                  <span>
-                    {isSaving ? 'Saving...' : `SAVE TO EXPENCE REGISTER (৳${formTotalAmount.toLocaleString()})`}
-                  </span>
-                </button>
-              </div>
+              {/* 4. SOBER NICHE: CONFIRM BUTTON */}
+              <button
+                type="button"
+                disabled={isSaving || itemRows.length === 0}
+                onClick={handleSaveNewExpenses}
+                className="w-full py-4 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-xs sm:text-sm font-black uppercase tracking-wider flex items-center justify-center space-x-2.5 shadow-xl shadow-emerald-950/60 cursor-pointer active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed border border-emerald-400/30"
+              >
+                <CheckCircle2 className="w-5 h-5 text-emerald-200" />
+                <span>
+                  {isSaving ? 'নিশ্চিত করা হচ্ছে...' : `CONFIRM & SAVE EXPENSE (৳${formTotalAmount.toLocaleString()})`}
+                </span>
+              </button>
 
             </div>
+          </div>
+
+          {/* Quick Recent / Today's Vouchers Table underneath the 2-Column POS */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 shadow-xl space-y-4">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3 border-b border-slate-800">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                  <History className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-xs sm:text-sm font-black text-white uppercase tracking-wider">
+                    TODAY'S RECORDED VOUCHERS (আজকের খরচের ভাউচার)
+                  </h4>
+                  <p className="text-[11px] text-slate-400">
+                    আজকের তারিখে এন্ট্রি করা ভাউচার তালিকা ({expenses.filter(e => e.date === todayStr).length} টি)
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setViewMode('list')}
+                className="text-xs font-black text-indigo-400 hover:text-indigo-300 flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 transition-colors cursor-pointer border border-slate-700"
+              >
+                <span>View All Records ({expenses.length})</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Quick Records Table */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-800 text-[10px] font-black uppercase text-slate-400 tracking-wider">
+                    <th className="py-2.5 px-3">Date</th>
+                    <th className="py-2.5 px-3">Item Name</th>
+                    <th className="py-2.5 px-3">Qty / Rate</th>
+                    <th className="py-2.5 px-3">Channel</th>
+                    <th className="py-2.5 px-3">Detailer</th>
+                    <th className="py-2.5 px-3 text-right">Amount</th>
+                    <th className="py-2.5 px-3 text-center">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 font-medium">
+                  {expenses.filter(e => e.date === todayStr).length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-slate-500 text-xs">
+                        আজকের তারিখে এখনও কোনো খরচ এন্ট্রি করা হয়নি। উপরের ফর্ম থেকে এন্ট্রি করুন।
+                      </td>
+                    </tr>
+                  ) : (
+                    expenses
+                      .filter(e => e.date === todayStr)
+                      .slice(0, 10)
+                      .map((exp) => (
+                        <tr key={exp.id} className="hover:bg-slate-800/40 transition-colors">
+                          <td className="py-2.5 px-3 font-mono text-slate-300 whitespace-nowrap">{exp.date}</td>
+                          <td className="py-2.5 px-3 font-bold text-white max-w-[200px] truncate">{exp.desc}</td>
+                          <td className="py-2.5 px-3 font-mono text-slate-400 whitespace-nowrap">
+                            {exp.qty ? `${exp.qty} ${exp.unit || 'kg'}` : '-'}
+                            {exp.unitPrice ? ` @ ৳${exp.unitPrice}` : ''}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold font-mono ${
+                              exp.paymentMethod === 'Due'
+                                ? 'bg-amber-500/10 text-amber-300 border border-amber-500/20'
+                                : 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20'
+                            }`}>
+                              {exp.paymentMethod === 'Due' ? `DUE (${exp.dueShop || 'Shop'})` : 'CASH'}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-300">{exp.detailedPerson || '-'}</td>
+                          <td className="py-2.5 px-3 text-right font-mono font-black text-emerald-400">
+                            ৳{Number(exp.amount || 0).toLocaleString()}
+                          </td>
+                          <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                            <div className="flex items-center justify-center space-x-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setEditingExpense(exp)}
+                                className="p-1 rounded-lg text-slate-400 hover:text-indigo-400 hover:bg-slate-800 transition-colors cursor-pointer"
+                                title="Edit"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDeleteTargetId(exp.id)}
+                                className="p-1 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition-colors cursor-pointer"
+                                title="Delete"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
         </div>
       ) : (
         <div className="space-y-6 animate-in fade-in duration-200">
@@ -2185,11 +2304,11 @@ export const Expenditures: React.FC = () => {
 
         <button
           type="button"
-          onClick={() => setViewMode('add-expense')}
+          onClick={() => setViewMode('pos')}
           className="w-full sm:w-auto px-6 py-3 bg-gradient-to-r from-indigo-600 via-indigo-500 to-indigo-600 hover:from-indigo-500 hover:to-indigo-400 text-white rounded-2xl text-xs font-black uppercase tracking-wider flex items-center justify-center space-x-2 shadow-lg shadow-indigo-600/30 transition-all cursor-pointer active:scale-95 border border-indigo-400/30 shrink-0"
         >
           <Plus className="w-4 h-4" />
-          <span>+ ADD EXPENSE (নতুন খরচ যুক্ত করুন)</span>
+          <span>+ ADD EXPENSE (POS ENTRY)</span>
         </button>
       </div>
 
