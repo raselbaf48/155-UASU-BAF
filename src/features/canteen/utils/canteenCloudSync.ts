@@ -1,5 +1,5 @@
 import { supabase } from '../../../supabase';
-import { deduplicateRawItems } from './recipeManager';
+import { deduplicateRawItems, getRawItemUserOverrides } from './recipeManager';
 import { resolveImageUrl, getCanteenConfig, isTimestampPastResetThreshold, checkAndEnforceDailyMenuReset } from './canteenSettings';
 import { normalizeCanteenMembersSeniority, sortCanteenMembersByOfficeSeniority } from './canteenSeniority';
 import { 
@@ -10,6 +10,8 @@ import {
   fetchCanteenMenuOnce,
   updateSingleMenuItemInCache,
   setCanteenMenuCache,
+  deduplicateCanteenMenuItems,
+  getUserMenuOverrides,
   DEFAULT_CANTEEN_MENU_ITEMS,
   CanteenMenuItem
 } from './canteenMenuData';
@@ -57,7 +59,9 @@ export const CANTEEN_CLOUD_KEYS = [
   'canteen_purpose_presets',
   'canteen_deleted_purpose_presets',
   'baf_others_fund_categories',
-  'baf_deleted_others_fund_categories'
+  'baf_deleted_others_fund_categories',
+  'canteen_user_menu_overrides',
+  'canteen_raw_items_user_overrides'
 ] as const;
 
 export type CanteenCloudKey = typeof CANTEEN_CLOUD_KEYS[number];
@@ -1450,7 +1454,9 @@ export function initCanteenCloudSync(): () => void {
             }
 
             let mergedVal = parsed;
-            if (Array.isArray(parsed) && Array.isArray(currentLocal)) {
+            if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) && typeof currentLocal === 'object' && currentLocal !== null && !Array.isArray(currentLocal)) {
+              mergedVal = { ...parsed, ...currentLocal };
+            } else if (Array.isArray(parsed) && Array.isArray(currentLocal)) {
               if (key === 'canteen_raw_inventory_items_v2') {
                 const { deduplicated } = deduplicateRawItems([...currentLocal, ...parsed]);
                 mergedVal = deduplicated;

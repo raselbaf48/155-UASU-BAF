@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, fetchDirectImageUrl, getCanteenConfig, getItemDisplayName, CanteenConfig } from '../utils/canteenSettings';
-import { getCanteenMenuCache, setCanteenMenuCache, updateSingleMenuItemInCache, fetchCanteenMenuOnce, normalizeCatalogKey, deduplicateCanteenMenuItems } from '../utils/canteenMenuData';
+import { getCanteenMenuCache, setCanteenMenuCache, updateSingleMenuItemInCache, fetchCanteenMenuOnce, normalizeCatalogKey, deduplicateCanteenMenuItems, saveUserMenuOverride } from '../utils/canteenMenuData';
 import { processGalleryImage } from '../utils/imageUpload';
 import { SaveButton } from '../components/SaveButton';
 import { formatCanteenDate } from '../utils/dateUtils';
@@ -684,12 +684,22 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       }
 
       // Save to local cache & localStorage
+      saveUserMenuOverride({
+        id: targetId,
+        name: newItem.name.trim(),
+        name_en: newItem.name.trim(),
+        name_bn: newItem.nameBn?.trim(),
+        nameBn: newItem.nameBn?.trim(),
+        'Name (BN)': newItem.nameBn?.trim(),
+        price: Number(newItem.price) || 0,
+        DP: newItem.DP?.trim()
+      });
       if (newItem.nameBn?.trim()) {
         saveMenuItemBanglaName({ id: targetId, name: newItem.name.trim() }, newItem.nameBn.trim());
       }
       setCanteenMenuCache(updatedMenu);
       localStorage.setItem('canteen_menu_items_list', JSON.stringify(updatedMenu));
-      queuePushKeyToCloud('canteen_menu_items_catalog_v1', updatedMenu);
+      pushKeyToCloud('canteen_menu_items_catalog_v1', updatedMenu);
 
       // Recalculate past transactions in canteen_txs so statements & history reflect new menu prices
       try {

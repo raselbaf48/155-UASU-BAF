@@ -109,6 +109,49 @@ export const decodeNotesMeta = (notes?: string): Record<string, any> => {
   return {};
 };
 
+export const RAW_ITEMS_USER_OVERRIDES_KEY = 'canteen_raw_items_user_overrides';
+
+export function getRawItemUserOverrides(): Record<string, { packSize?: number; subUnit?: string; hasSubUnits?: boolean; unit?: string; updatedAt?: string }> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(RAW_ITEMS_USER_OVERRIDES_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return {};
+}
+
+export function saveRawItemUserOverride(
+  itemId: string,
+  override: { packSize?: number; subUnit?: string; hasSubUnits?: boolean; unit?: string }
+): void {
+  if (!itemId || typeof window === 'undefined') return;
+  try {
+    const current = getRawItemUserOverrides();
+    const updated = {
+      ...current,
+      [itemId]: {
+        ...(current[itemId] || {}),
+        ...override,
+        updatedAt: new Date().toISOString()
+      }
+    };
+    localStorage.setItem(RAW_ITEMS_USER_OVERRIDES_KEY, JSON.stringify(updated));
+    // Immediately persist to cloud
+    try {
+      Promise.resolve(
+        supabase.from('app_settings').upsert({
+          setting_key: RAW_ITEMS_USER_OVERRIDES_KEY,
+          setting_value: JSON.stringify(updated),
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'setting_key' })
+      ).catch(() => {});
+    } catch {}
+    window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+  } catch (err) {
+    console.warn('Error saving raw item override:', err);
+  }
+}
+
 /**
  * Information about sub-unit / subcategory conversions:
  * Ltr - ml (1 Ltr = 1000 ml)
@@ -127,19 +170,23 @@ export const getRawItemSubUnitInfo = (item?: Partial<RawInventoryItem> | null): 
     return { hasSubUnit: false, subUnit: '', packSize: 1, label: '' };
   }
   const meta = decodeNotesMeta(item.notes);
-  // CRITICAL FIX: If user explicitly disabled hasSubUnits (either on item or in meta), respect it!
-  if (item.hasSubUnits === false || meta.hasSubUnits === false) {
+  const overrides = getRawItemUserOverrides();
+  const userOverride = item.id ? overrides[item.id] : undefined;
+
+  // CRITICAL FIX: If user explicitly disabled hasSubUnits (either on item, meta, or override), respect it!
+  if (userOverride?.hasSubUnits === false || item.hasSubUnits === false || meta.hasSubUnits === false) {
     return { hasSubUnit: false, subUnit: item.unit || 'pcs', packSize: 1, label: '' };
   }
   const u = (item.unit || '').toLowerCase().trim();
   const explicitSub = (
+    userOverride?.subUnit ||
     item.subUnit || 
     (item as any)['Sub Unit'] || 
     (item as any).sub_unit || 
     meta.subUnit || 
     ''
   ).toLowerCase().trim();
-  const packSizeVal = Number(item.packSize) || Number(meta.packSize) || 0;
+  const packSizeVal = Number(userOverride?.packSize) || Number(item.packSize) || Number(meta.packSize) || 0;
 
   // 1. RULE: Pcs / Piece / টি items have NO sub-unit at all
   if (['pcs', 'pc', 'piece', 'pieces', 'টি', 'টা', 'পিস'].includes(u)) {
@@ -184,7 +231,7 @@ export const getRawItemSubUnitInfo = (item?: Partial<RawInventoryItem> | null): 
     const sub = explicitSub && explicitSub !== u ? explicitSub : 'pcs';
     const isWeightSub = ['gm', 'g', 'gram', 'গ্রাম', 'kg', 'কেজি'].includes(sub);
     const isVolumeSub = ['ml', 'milli', 'মিলি', 'liter', 'ltr', 'লিটার'].includes(sub);
-    const defaultSize = isWeightSub ? 1000 : (isVolumeSub ? 1000 : 24);
+    const defaultSize = isWeightSub ? 1000 : (isVolumeSub ? 1000 : 1);
     const size = packSizeVal > 0 ? packSizeVal : defaultSize;
     return { hasSubUnit: true, subUnit: sub, packSize: size, label: `১ ${item.unit || 'প্যাকেট'} = ${size} ${sub}` };
   }
@@ -202,6 +249,7 @@ export const getRawItemSubUnitInfo = (item?: Partial<RawInventoryItem> | null): 
 
   return { hasSubUnit: false, subUnit: item.unit || 'pcs', packSize: 1, label: '' };
 };
+
 
 /**
  * Determines conversion ratio between recipe ingredient unit and inventory stock unit.
@@ -1605,7 +1653,9 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
       meta.subUnit || 
       ''
     ).toLowerCase().trim();
-    const explicitPackSize = Number(item.packSize) || Number(meta.packSize) || 0;
+    const userOverrides = getRawItemUserOverrides();
+    const userOverride = (cleanId && userOverrides[cleanId]) || (idKey && userOverrides[idKey]);
+    const explicitPackSize = Number(userOverride?.packSize) || Number(item.packSize) || Number(meta.packSize) || 0;
 
     const isPcs = u === 'pcs' || u === 'pc' || u === 'piece' || u === 'টি' || u === 'টা';
     const isKg = !isPcs && (['kg', 'kg.', 'কেজি', 'কে.জি.'].includes(u) || explicitSub === 'gm' || subCatLower.includes('kg'));
@@ -1613,12 +1663,14 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
     const isCase = !isPcs && (['case', 'crate', 'কেস', 'ক্রেট'].includes(u) || subCatLower.includes('case') || (key === 'egg' || key === 'canon_egg' || normKey === 'egg'));
     const isPacket = !isPcs && (['packet', 'box', 'pkt', 'bottle', 'cylinder', 'can', 'tin', 'jar', 'pack', 'প্যাকেট', 'বক্স', 'বোতল'].includes(u) || subCatLower.includes('packet'));
 
-    const explicitHasSubUnits = item.hasSubUnits !== undefined 
-      ? item.hasSubUnits 
-      : (meta.hasSubUnits !== undefined ? meta.hasSubUnits : undefined);
+    const explicitHasSubUnits = userOverride?.hasSubUnits !== undefined
+      ? userOverride.hasSubUnits
+      : (item.hasSubUnits !== undefined 
+          ? item.hasSubUnits 
+          : (meta.hasSubUnits !== undefined ? meta.hasSubUnits : undefined));
 
     let subCategory = item.subCategory || meta.subCategory;
-    let subUnit = item.subUnit || explicitSub;
+    let subUnit = userOverride?.subUnit || item.subUnit || explicitSub;
     let packSize = explicitPackSize;
     let hasSubUnits = explicitHasSubUnits !== undefined 
       ? explicitHasSubUnits 
@@ -1631,17 +1683,17 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
       hasSubUnits = false;
     } else if (isKg) {
       subCategory = item.subCategory || 'Kg - gm';
-      subUnit = item.subUnit || explicitSub || 'gm';
+      subUnit = userOverride?.subUnit || item.subUnit || explicitSub || 'gm';
       packSize = explicitPackSize > 1 ? explicitPackSize : 1000;
       hasSubUnits = true;
     } else if (isLtr) {
       subCategory = item.subCategory || 'Ltr - ml';
-      subUnit = item.subUnit || explicitSub || 'ml';
+      subUnit = userOverride?.subUnit || item.subUnit || explicitSub || 'ml';
       packSize = explicitPackSize > 1 ? explicitPackSize : 1000;
       hasSubUnits = true;
     } else if (isCase || key === 'egg' || key === 'canon_egg' || normKey === 'egg') {
       subCategory = item.subCategory || 'Case - Pcs';
-      subUnit = item.subUnit || explicitSub || 'pcs';
+      subUnit = userOverride?.subUnit || item.subUnit || explicitSub || 'pcs';
       packSize = explicitPackSize > 1 ? explicitPackSize : 30;
       hasSubUnits = true;
     } else if (isPacket || (explicitSub && explicitSub !== u)) {
@@ -1649,8 +1701,8 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
       const isVol = ['ml', 'milli', 'মিলি', 'liter', 'ltr', 'লিটার'].includes(explicitSub);
       const isCyl = ['cylinder', 'সিলিন্ডার'].includes(u);
       subCategory = item.subCategory || (isCyl ? 'Gas Cylinder' : (isWeight ? 'Kg - gm' : (isVol ? 'Ltr - ml' : 'Packet - Pcs')));
-      subUnit = item.subUnit || (explicitSub && explicitSub !== u ? explicitSub : (isCyl ? 'kg' : 'pcs'));
-      packSize = explicitPackSize > 0 ? explicitPackSize : (isCyl ? 12 : (isWeight ? 1000 : (isVol ? 1000 : 24)));
+      subUnit = userOverride?.subUnit || item.subUnit || (explicitSub && explicitSub !== u ? explicitSub : (isCyl ? 'kg' : 'pcs'));
+      packSize = explicitPackSize > 0 ? explicitPackSize : (isCyl ? 12 : (isWeight ? 1000 : (isVol ? 1000 : 1)));
       hasSubUnits = true;
     }
 
@@ -1789,9 +1841,9 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
           category: chosenCategory,
           subCategory: chosenSubCategory,
           currentStock: normalizedItem.currentStock !== undefined ? normalizedItem.currentStock : existing.currentStock,
-          packSize: mergedIsPcs ? 1 : ((normalizedItem.packSize && normalizedItem.packSize > 0) ? normalizedItem.packSize : (existing.packSize || 1)),
-          subUnit: mergedIsPcs ? undefined : (normalizedItem.subUnit || existing.subUnit),
-          hasSubUnits: mergedIsPcs ? false : (normalizedItem.hasSubUnits !== undefined ? normalizedItem.hasSubUnits : (existing.hasSubUnits ?? false))
+          packSize: mergedIsPcs ? 1 : (Number(userOverride?.packSize) > 0 ? Number(userOverride?.packSize) : ((normalizedItem.packSize && normalizedItem.packSize > 0) ? normalizedItem.packSize : (existing.packSize || 1))),
+          subUnit: mergedIsPcs ? undefined : (userOverride?.subUnit || normalizedItem.subUnit || existing.subUnit),
+          hasSubUnits: mergedIsPcs ? false : (userOverride?.hasSubUnits !== undefined ? userOverride.hasSubUnits : (normalizedItem.hasSubUnits !== undefined ? normalizedItem.hasSubUnits : (existing.hasSubUnits ?? false)))
         });
       } else {
         if (!isProtectedRawItem(item)) {
@@ -1811,9 +1863,9 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
           currentStock: (normalizedItem.currentStock !== undefined && normalizedItem.currentStock !== null) ? normalizedItem.currentStock : existing.currentStock,
           minStockAlert: (normalizedItem.minStockAlert !== undefined && normalizedItem.minStockAlert !== null) ? normalizedItem.minStockAlert : existing.minStockAlert,
           unitCost: (normalizedItem.unitCost !== undefined && normalizedItem.unitCost !== null) ? normalizedItem.unitCost : existing.unitCost,
-          packSize: mergedIsPcs ? 1 : ((normalizedItem.packSize && normalizedItem.packSize > 0) ? normalizedItem.packSize : (existing.packSize || 1)),
-          subUnit: mergedIsPcs ? undefined : (normalizedItem.subUnit || existing.subUnit),
-          hasSubUnits: mergedIsPcs ? false : (normalizedItem.hasSubUnits !== undefined ? normalizedItem.hasSubUnits : (existing.hasSubUnits ?? false))
+          packSize: mergedIsPcs ? 1 : (Number(userOverride?.packSize) > 0 ? Number(userOverride?.packSize) : ((normalizedItem.packSize && normalizedItem.packSize > 0) ? normalizedItem.packSize : (existing.packSize || 1))),
+          subUnit: mergedIsPcs ? undefined : (userOverride?.subUnit || normalizedItem.subUnit || existing.subUnit),
+          hasSubUnits: mergedIsPcs ? false : (userOverride?.hasSubUnits !== undefined ? userOverride.hasSubUnits : (normalizedItem.hasSubUnits !== undefined ? normalizedItem.hasSubUnits : (existing.hasSubUnits ?? false)))
         });
       }
     }

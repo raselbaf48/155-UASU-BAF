@@ -27,7 +27,9 @@ import {
   markRawItemAsDeleted,
   unmarkRawItemAsDeleted,
   DELETED_RAW_ITEMS_STORAGE_KEY,
-  isProtectedRawItem
+  isProtectedRawItem,
+  saveRawItemUserOverride,
+  getRawItemUserOverrides
 } from '../utils/recipeManager';
 import { queuePushKeyToCloud } from '../utils/canteenCloudSync';
 import { SaveButton } from '../components/SaveButton';
@@ -1468,6 +1470,15 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
             image: effectiveDp
           };
 
+          if (updated.hasSubUnits && updated.packSize > 0) {
+            saveRawItemUserOverride(updated.id, {
+              packSize: updated.packSize,
+              subUnit: updated.subUnit,
+              hasSubUnits: updated.hasSubUnits,
+              unit: updated.unit
+            });
+          }
+
           // Directly sync to Supabase Canteen_Inventory table
           const dbItem = {
             id: updated.id,
@@ -1493,7 +1504,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
               itemType: resolvedItemType
             })
           };
-          supabase.from('Canteen_Inventory').upsert([dbItem], { onConflict: 'id' })
+          Promise.resolve(supabase.from('Canteen_Inventory').upsert([dbItem], { onConflict: 'id' }))
             .then(({ error }) => {
               if (error) {
                 enqueueOfflineInventorySync(dbItem);
@@ -1633,7 +1644,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
           itemType: resolvedItemType
         })
       };
-      supabase.from('Canteen_Inventory').upsert([newDbItem], { onConflict: 'id' })
+      Promise.resolve(supabase.from('Canteen_Inventory').upsert([newDbItem], { onConflict: 'id' }))
         .then(({ error }) => {
           if (error) {
             enqueueOfflineInventorySync(newDbItem);
@@ -1765,10 +1776,14 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
       (isKg || isLtr || isPkt || isCase || isCyl)
     );
 
+    const userOverrides = getRawItemUserOverrides();
+    const itemOverride = item.id ? userOverrides[item.id] : undefined;
     const defaultSubForUnit = isKg ? 'gm' : (isLtr ? 'ml' : (isCase ? 'pcs' : (isCyl ? 'kg' : 'pcs')));
-    const defaultPackSizeForUnit = isKg || isLtr ? 1000 : (isCase ? 30 : (isCyl ? 12 : (isPkt ? 24 : 100)));
-    const activePackSize = item.packSize && item.packSize > 0 ? item.packSize : defaultPackSizeForUnit;
-    const activeSubUnit = (item.subUnit && item.subUnit.toLowerCase().trim() !== u) ? item.subUnit : defaultSubForUnit;
+    const defaultPackSizeForUnit = isKg || isLtr ? 1000 : (isCase ? 30 : (isCyl ? 12 : 1));
+    const activePackSize = (itemOverride?.packSize && itemOverride.packSize > 0)
+      ? itemOverride.packSize
+      : (item.packSize && item.packSize > 0 ? item.packSize : defaultPackSizeForUnit);
+    const activeSubUnit = itemOverride?.subUnit || ((item.subUnit && item.subUnit.toLowerCase().trim() !== u) ? item.subUnit : defaultSubForUnit);
 
     setNewItemData({
       name: item.name,
@@ -2936,7 +2951,7 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                           subUnit: 'pcs'
                         } : isPkt ? {
                           hasSubUnits: true,
-                          packSize: newItemData.packSize && newItemData.packSize > 1 ? newItemData.packSize : 24,
+                          packSize: newItemData.packSize && newItemData.packSize > 1 ? newItemData.packSize : 1,
                           subUnit: (newItemData.subUnit && newItemData.subUnit !== newUnit) ? newItemData.subUnit : 'pcs'
                         } : {
                           hasSubUnits: false,

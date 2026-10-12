@@ -134,6 +134,9 @@ export function deduplicateCanteenMenuItems(items: CanteenMenuItem[]): CanteenMe
       if (normEn) nameToGroup.set(normEn, groupKey);
       if (normBn) bnNameToGroup.set(normBn, groupKey);
 
+      const userOverrides = getUserMenuOverrides();
+      const userOv = findUserMenuOverride(userOverrides, rawItem) || (cleanId && userOverrides[cleanId]) || (rawItem.id && userOverrides[rawItem.id]);
+
       const initialStock = (rawItem.stock !== undefined && rawItem.stock !== null && !isNaN(Number(rawItem.stock)))
         ? Number(rawItem.stock)
         : ((rawItem.max !== undefined && rawItem.max !== null && !isNaN(Number(rawItem.max)))
@@ -144,29 +147,39 @@ export function deduplicateCanteenMenuItems(items: CanteenMenuItem[]): CanteenMe
 
       seen.set(groupKey, {
         ...rawItem,
+        ...userOv,
         id: rawItem.id || `menu-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        name: enName || bnName || 'Item',
-        name_en: enName || rawItem.name_en || rawItem.name || '',
-        name_bn: bnName,
-        nameBn: bnName,
-        'Name (BN)': bnName,
-        price: Number(rawItem.price) || 0,
+        name: userOv?.name || enName || bnName || 'Item',
+        name_en: userOv?.name_en || userOv?.name || enName || rawItem.name_en || rawItem.name || '',
+        name_bn: userOv?.name_bn || userOv?.nameBn || bnName,
+        nameBn: userOv?.name_bn || userOv?.nameBn || bnName,
+        'Name (BN)': userOv?.name_bn || userOv?.nameBn || bnName,
+        price: userOv?.price !== undefined ? Number(userOv.price) : (Number(rawItem.price) || 0),
         stock: initialStock,
         max: initialStock,
         cost: Number(rawItem.cost ?? rawItem.Cost ?? 0),
         Cost: Number(rawItem.Cost ?? rawItem.cost ?? 0),
-        DP: rawItem.DP || rawItem.img || rawItem.image || '',
-        img: rawItem.DP || rawItem.img || rawItem.image || '',
-        image: rawItem.DP || rawItem.img || rawItem.image || '',
+        DP: userOv?.DP || rawItem.DP || rawItem.img || rawItem.image || '',
+        img: userOv?.DP || rawItem.DP || rawItem.img || rawItem.image || '',
+        image: userOv?.DP || rawItem.DP || rawItem.img || rawItem.image || '',
         category: rawItem.category || rawItem.meal || 'SNACKS'
       });
     } else {
       const existing = seen.get(groupKey)!;
-      const mergedPrice = Number(rawItem.price) > 0 ? Number(rawItem.price) : Number(existing.price || 0);
-      const mergedCost = Number(rawItem.cost ?? rawItem.Cost) > 0 ? Number(rawItem.cost ?? rawItem.Cost) : Number(existing.cost ?? existing.Cost ?? 0);
-      const mergedDp = (rawItem.DP || rawItem.img || rawItem.image || existing.DP || existing.img || existing.image || '');
-      const mergedEn = existing.name || enName;
-      const mergedBn = existing.name_bn || existing.nameBn || bnName;
+      const userOverrides = getUserMenuOverrides();
+      const userOv = findUserMenuOverride(userOverrides, rawItem) ||
+        findUserMenuOverride(userOverrides, existing) ||
+        (cleanId && userOverrides[cleanId]) ||
+        (existing.id && userOverrides[existing.id]) ||
+        (rawItem.id && userOverrides[rawItem.id]);
+
+      const mergedPrice = (userOv?.price !== undefined)
+        ? Number(userOv.price)
+        : (Number(existing.price) > 0 ? Number(existing.price) : (Number(rawItem.price) > 0 ? Number(rawItem.price) : 0));
+      const mergedCost = Number(existing.cost ?? existing.Cost) > 0 ? Number(existing.cost ?? existing.Cost) : Number(rawItem.cost ?? rawItem.Cost ?? 0);
+      const mergedDp = (userOv?.DP || existing.DP || existing.img || existing.image || rawItem.DP || rawItem.img || rawItem.image || '');
+      const mergedEn = userOv?.name || userOv?.name_en || existing.name || existing.name_en || enName || rawItem.name;
+      const mergedBn = userOv?.name_bn || userOv?.nameBn || existing.name_bn || existing.nameBn || bnName || rawItem.name_bn || rawItem.nameBn;
       const incomingStock = (rawItem.stock !== undefined && rawItem.stock !== null && !isNaN(Number(rawItem.stock)))
         ? Number(rawItem.stock)
         : ((rawItem.max !== undefined && rawItem.max !== null && !isNaN(Number(rawItem.max)))
@@ -174,13 +187,14 @@ export function deduplicateCanteenMenuItems(items: CanteenMenuItem[]): CanteenMe
           : ((rawItem.Quantity !== undefined && rawItem.Quantity !== null && !isNaN(Number(rawItem.Quantity)))
             ? Number(rawItem.Quantity)
             : undefined));
-      const mergedStock = incomingStock !== undefined 
-        ? incomingStock 
-        : (existing.stock !== undefined ? Number(existing.stock) : (existing.max !== undefined ? Number(existing.max) : undefined));
+      const mergedStock = existing.stock !== undefined 
+        ? Number(existing.stock) 
+        : (incomingStock !== undefined ? incomingStock : (existing.max !== undefined ? Number(existing.max) : undefined));
 
       seen.set(groupKey, {
-        ...existing,
         ...rawItem,
+        ...existing,
+        ...userOv,
         id: existing.id,
         name: mergedEn,
         name_en: mergedEn,
@@ -272,10 +286,98 @@ export function setCanteenMenuCache(items: CanteenMenuItem[]): void {
   }
 }
 
+export const MENU_USER_OVERRIDES_KEY = 'canteen_user_menu_overrides';
+
+export function getUserMenuOverrides(): Record<string, Partial<CanteenMenuItem>> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(MENU_USER_OVERRIDES_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return {};
+}
+
+/**
+ * Robust override lookup: checks raw ID, lowercase ID, and normalized English & Bengali names.
+ * Guarantees that any custom name change by the user is NEVER lost regardless of ID format.
+ */
+export function findUserMenuOverride(
+  overrides: Record<string, Partial<CanteenMenuItem>>,
+  item: any
+): Partial<CanteenMenuItem> | undefined {
+  if (!item || !overrides) return undefined;
+  const rawId = String(item.id || '').trim();
+  const cleanId = rawId.toLowerCase();
+  const en = String(item.name || item.name_en || '').trim();
+  const bn = String(item.name_bn || item.nameBn || item['Name (BN)'] || '').trim();
+  const normEn = normalizeCatalogKey(en);
+  const normBn = normalizeCatalogKey(bn);
+
+  return (rawId && overrides[rawId]) ||
+         (cleanId && overrides[cleanId]) ||
+         (normEn && overrides[`name_${normEn}`]) ||
+         (normBn && overrides[`bn_${normBn}`]) ||
+         (normEn && overrides[normEn]) ||
+         (normBn && overrides[normBn]) ||
+         undefined;
+}
+
+export function saveUserMenuOverride(item: Partial<CanteenMenuItem> & { id: string }): void {
+  if (!item || !item.id || typeof window === 'undefined') return;
+  try {
+    const current = getUserMenuOverrides();
+    const rawId = String(item.id).trim();
+    const cleanId = rawId.toLowerCase();
+    const nameEn = String(item.name || item.name_en || '').trim();
+    const nameBn = String(item.name_bn || item.nameBn || item['Name (BN)'] || '').trim();
+    const normEn = normalizeCatalogKey(nameEn);
+    const normBn = normalizeCatalogKey(nameBn);
+    const oldEn = normalizeCatalogKey(String((item as any).oldNameEn || (item as any).old_name_en || ''));
+    const oldBn = normalizeCatalogKey(String((item as any).oldNameBn || (item as any).old_name_bn || ''));
+
+    const overrideEntry: Partial<CanteenMenuItem> = {
+      ...item,
+      id: rawId,
+      name: nameEn || undefined,
+      name_en: nameEn || undefined,
+      name_bn: nameBn || undefined,
+      nameBn: nameBn || undefined,
+      'Name (BN)': nameBn || undefined,
+      updated_at: new Date().toISOString()
+    };
+
+    const updated: Record<string, Partial<CanteenMenuItem>> = {
+      ...current,
+      [rawId]: { ...(current[rawId] || {}), ...overrideEntry },
+      [cleanId]: { ...(current[cleanId] || {}), ...overrideEntry }
+    };
+
+    if (normEn) updated[`name_${normEn}`] = { ...(current[`name_${normEn}`] || {}), ...overrideEntry };
+    if (normBn) updated[`bn_${normBn}`] = { ...(current[`bn_${normBn}`] || {}), ...overrideEntry };
+    if (oldEn) updated[`name_${oldEn}`] = { ...(current[`name_${oldEn}`] || {}), ...overrideEntry };
+    if (oldBn) updated[`bn_${oldBn}`] = { ...(current[`bn_${oldBn}`] || {}), ...overrideEntry };
+
+    localStorage.setItem(MENU_USER_OVERRIDES_KEY, JSON.stringify(updated));
+    // Immediately persist to cloud app_settings
+    try {
+      Promise.resolve(
+        supabase.from('app_settings').upsert({
+          setting_key: MENU_USER_OVERRIDES_KEY,
+          setting_value: JSON.stringify(updated),
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'setting_key' })
+      ).catch(() => {});
+    } catch {}
+  } catch (err) {
+    console.warn('Error saving menu override:', err);
+  }
+}
+
 /**
  * Updates a single menu item in the cache immediately in 0ms and notifies listeners.
  */
 export function updateSingleMenuItemInCache(updatedItem: Partial<CanteenMenuItem> & { id: string }): CanteenMenuItem[] {
+  saveUserMenuOverride(updatedItem);
   const current = getCanteenMenuCache();
   const next = current.map((it) => {
     if (it.id === updatedItem.id) {
@@ -305,22 +407,48 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
           if (!error && data && data.length > 0) {
             const currentCache = getCanteenMenuCache();
             const currentMap = new Map(currentCache.map((i) => [i.id, i]));
-            const now = Date.now();
+            const overrides = getUserMenuOverrides();
 
             const hydrated = data.map((it: any) => {
-              const local = currentMap.get(it.id);
+              const normItEn = normalizeCatalogKey(it.name || it.name_en || '');
+              const normItBn = normalizeCatalogKey(it.name_bn || it.nameBn || '');
+              const local = currentMap.get(it.id) ||
+                currentCache.find(c => {
+                  const cEn = normalizeCatalogKey(c.name || c.name_en || '');
+                  const cBn = normalizeCatalogKey(c.name_bn || c.nameBn || '');
+                  return (cEn && normItEn && cEn === normItEn) || (cBn && normItBn && cBn === normItBn);
+                });
+              const userOv = findUserMenuOverride(overrides, it) || overrides[it.id] || (local?.id ? overrides[local.id] : undefined);
+
+              if (userOv) {
+                const ovName = userOv.name || userOv.name_en || local?.name || it.name;
+                const ovBn = userOv.name_bn || userOv.nameBn || local?.name_bn || it.name_bn || '';
+                return {
+                  ...it,
+                  ...local,
+                  ...userOv,
+                  name: ovName,
+                  name_en: ovName,
+                  name_bn: ovBn,
+                  nameBn: ovBn,
+                  'Name (BN)': ovBn,
+                  price: userOv.price !== undefined ? userOv.price : (local?.price !== undefined ? local.price : it.price),
+                  stock: userOv.stock !== undefined ? userOv.stock : (local?.stock !== undefined ? local.stock : it.stock)
+                };
+              }
+
               if (local) {
                 const localTime = local.updated_at ? new Date(local.updated_at).getTime() : 0;
                 const serverTime = it.updated_at ? new Date(it.updated_at).getTime() : 0;
-                // Preserve local changes if local timestamp is newer than server
-                if (localTime > serverTime) {
+                // Preserve local changes if local timestamp is newer than server or user modified
+                if (localTime >= serverTime) {
                   return local;
                 }
               }
               const localBn = local?.name_bn || local?.nameBn || local?.['Name (BN)'];
-              const bn = it.name_bn || it.nameBn || it['Name (BN)'] || localBn || getMenuItemBanglaName(it) || '';
               const localName = local?.name || local?.name_en;
-              const name = it.name || it.name_en || localName || '';
+              const bn = localBn || it.name_bn || it.nameBn || it['Name (BN)'] || getMenuItemBanglaName(it) || '';
+              const name = localName || it.name || it.name_en || '';
               return {
                 ...it,
                 name,
@@ -330,6 +458,14 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
                 'Name (BN)': bn
               };
             });
+
+            // Retain any existing local items that are not in the cloud Canteen_Menu table
+            const hydratedIds = new Set(hydrated.map((h: any) => String(h.id).toLowerCase()));
+            for (const c of currentCache) {
+              if (!hydratedIds.has(String(c.id).toLowerCase())) {
+                hydrated.push(c);
+              }
+            }
             const cleanHydrated = deduplicateCanteenMenuItems(hydrated);
             inMemoryMenuCache = cleanHydrated;
             if (typeof window !== 'undefined') {
@@ -367,21 +503,47 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
       if (!error && data && data.length > 0) {
         const currentCache = getCanteenMenuCache();
         const currentMap = new Map(currentCache.map((i) => [i.id, i]));
-        const now = Date.now();
+        const overrides = getUserMenuOverrides();
 
         const hydrated = data.map((it: any) => {
-          const local = currentMap.get(it.id);
+          const normItEn = normalizeCatalogKey(it.name || it.name_en || '');
+          const normItBn = normalizeCatalogKey(it.name_bn || it.nameBn || '');
+          const local = currentMap.get(it.id) ||
+            currentCache.find(c => {
+              const cEn = normalizeCatalogKey(c.name || c.name_en || '');
+              const cBn = normalizeCatalogKey(c.name_bn || c.nameBn || '');
+              return (cEn && normItEn && cEn === normItEn) || (cBn && normItBn && cBn === normItBn);
+            });
+          const userOv = findUserMenuOverride(overrides, it) || overrides[it.id] || (local?.id ? overrides[local.id] : undefined);
+
+          if (userOv) {
+            const ovName = userOv.name || userOv.name_en || local?.name || it.name;
+            const ovBn = userOv.name_bn || userOv.nameBn || local?.name_bn || it.name_bn || '';
+            return {
+              ...it,
+              ...local,
+              ...userOv,
+              name: ovName,
+              name_en: ovName,
+              name_bn: ovBn,
+              nameBn: ovBn,
+              'Name (BN)': ovBn,
+              price: userOv.price !== undefined ? userOv.price : (local?.price !== undefined ? local.price : it.price),
+              stock: userOv.stock !== undefined ? userOv.stock : (local?.stock !== undefined ? local.stock : it.stock)
+            };
+          }
+
           if (local) {
             const localTime = local.updated_at ? new Date(local.updated_at).getTime() : 0;
             const serverTime = it.updated_at ? new Date(it.updated_at).getTime() : 0;
-            if (localTime > serverTime) {
+            if (localTime >= serverTime) {
               return local;
             }
           }
           const localBn = local?.name_bn || local?.nameBn || local?.['Name (BN)'];
-          const bn = it.name_bn || it.nameBn || it['Name (BN)'] || localBn || getMenuItemBanglaName(it) || '';
           const localName = local?.name || local?.name_en;
-          const name = it.name || it.name_en || localName || '';
+          const bn = localBn || it.name_bn || it.nameBn || it['Name (BN)'] || getMenuItemBanglaName(it) || '';
+          const name = localName || it.name || it.name_en || '';
           return {
             ...it,
             name,
@@ -391,6 +553,14 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
             'Name (BN)': bn
           };
         });
+
+        // Retain any existing local items that are not in the cloud Canteen_Menu table
+        const hydratedIds = new Set(hydrated.map((h: any) => String(h.id).toLowerCase()));
+        for (const c of currentCache) {
+          if (!hydratedIds.has(String(c.id).toLowerCase())) {
+            hydrated.push(c);
+          }
+        }
         const cleanHydrated = deduplicateCanteenMenuItems(hydrated);
         inMemoryMenuCache = cleanHydrated;
         if (typeof window !== 'undefined') {

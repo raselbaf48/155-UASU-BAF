@@ -4,7 +4,7 @@ import { Coffee, Plus, Calendar, X, Utensils, Edit2 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, getItemDisplayName } from '../utils/canteenSettings';
 import { queuePushKeyToCloud } from '../utils/canteenCloudSync';
-import { getCanteenMenuCache, fetchCanteenMenuOnce, setCanteenMenuCache, isOneTimeBoxItem, normalizeCatalogKey, deduplicateCanteenMenuItems } from '../utils/canteenMenuData';
+import { getCanteenMenuCache, fetchCanteenMenuOnce, setCanteenMenuCache, isOneTimeBoxItem, normalizeCatalogKey, deduplicateCanteenMenuItems, saveUserMenuOverride } from '../utils/canteenMenuData';
 import { calculateMenuItemStockInfo, getRawInventoryItems, getMenuRecipes } from '../utils/recipeManager';
 import { getMenuItemBanglaName, saveMenuItemBanglaName } from '../utils/menuBanglaNames';
 import { sortCanteenMenuItems } from '../utils/menuOrdering';
@@ -180,6 +180,20 @@ export const MenuManagement: React.FC = () => {
       localStorage.setItem('canteen_menu_items_list', JSON.stringify(updated));
       setCanteenMenuCache(updated);
       saveMenuItemBanglaName({ id: editingItem.id, name: nameEn }, nameBn);
+      saveUserMenuOverride({
+        id: editingItem.id,
+        name: nameEn,
+        name_en: nameEn,
+        name_bn: nameBn,
+        nameBn: nameBn,
+        'Name (BN)': nameBn,
+        price: priceNum,
+        stock: maxNum,
+        max: maxNum,
+        DP: dpTrimmed,
+        oldNameEn,
+        oldNameBn
+      } as any);
 
       // Recalculate and update past transactions in canteen_txs in real-time
       try {
@@ -249,7 +263,8 @@ export const MenuManagement: React.FC = () => {
       // Sync updated menu item to Cloud & Supabase
       queuePushKeyToCloud('canteen_daily_menu');
       queuePushKeyToCloud('canteen_menu_items_catalog_v1', updated);
-      supabase.from('Canteen_Menu').upsert({
+      queuePushKeyToCloud('canteen_user_menu_overrides');
+      Promise.resolve(supabase.from('Canteen_Menu').upsert({
         id: editingItem.id,
         name: nameEn,
         name_bn: nameBn,
@@ -258,7 +273,7 @@ export const MenuManagement: React.FC = () => {
         DP: dpTrimmed,
         category: editingItem.meal || 'SNACKS',
         updated_at: new Date().toISOString()
-      }, { onConflict: 'id' })
+      }, { onConflict: 'id' }))
       .then(({ error }) => {
         if (error) console.warn('Canteen_Menu upsert note:', error.message);
       })
@@ -310,11 +325,23 @@ export const MenuManagement: React.FC = () => {
       localStorage.setItem('canteen_menu_items_list', JSON.stringify(updated));
       setCanteenMenuCache(updated);
       saveMenuItemBanglaName({ id: newItem.id, name: nameEn }, nameBn);
+      saveUserMenuOverride({
+        id: newItem.id,
+        name: nameEn,
+        name_en: nameEn,
+        name_bn: nameBn,
+        nameBn: nameBn,
+        'Name (BN)': nameBn,
+        price: priceNum,
+        stock: maxNum,
+        max: maxNum,
+        DP: dpTrimmed
+      });
 
       // Cloud sync
       queuePushKeyToCloud('canteen_daily_menu');
       queuePushKeyToCloud('canteen_menu_items_catalog_v1', updated);
-      supabase.from('Canteen_Menu').insert({
+      Promise.resolve(supabase.from('Canteen_Menu').insert({
         id: newItem.id,
         name: newItem.name_en,
         name_bn: newItem.name_bn,
@@ -324,7 +351,7 @@ export const MenuManagement: React.FC = () => {
         category: 'SNACKS',
         created_at: newItem.created_at,
         updated_at: new Date().toISOString()
-      })
+      }))
       .then(({ error }) => {
         if (error) console.warn('Canteen_Menu insert note:', error.message);
       })

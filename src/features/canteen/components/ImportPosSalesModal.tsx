@@ -19,6 +19,7 @@ import { getMenuItemBanglaName } from '../utils/menuBanglaNames';
 import { formatItemNameBn } from '../pages/MemberDB';
 import { isSaleTransaction } from '../pages/PosSales';
 import { getCanteenMenuItemOrder } from '../utils/menuOrdering';
+import { toSutonny, fromSutonny } from '../utils/sutonnyConverter';
 
 interface ImportPosSalesModalProps {
   isOpen: boolean;
@@ -188,10 +189,9 @@ function applyExcelTableStyles(
         }
 
         const isEvenDataRow = (R - headerRowIdx) % 2 === 0;
-        const isWhiteCell = (R + C) % 2 === 0;
         const cellBgColor = isHeaderRow 
           ? '64748B' 
-          : (isWhiteCell ? 'FFFFFF' : 'CBD5E1');
+          : (isEvenDataRow ? 'FFFFFF' : 'F1F5F9');
 
         cell.s = {
           font: {
@@ -227,6 +227,39 @@ function applyExcelTableStyles(
       }
     }
   }
+}
+
+/**
+ * Calculates optimal autofit column widths for SutonnyMJ 16pt table sheets.
+ * Guarantees headers and cell values are never clipped or overflowed.
+ */
+function calculateSheetColWidths(
+  rows: any[][],
+  minWidths: Record<number, number> = {},
+  defaultMin = 14
+): Array<{ wch: number }> {
+  const maxLens: number[] = [];
+  rows.forEach(row => {
+    if (!Array.isArray(row)) return;
+    row.forEach((cellVal, cIdx) => {
+      let len = 0;
+      if (cellVal !== null && cellVal !== undefined) {
+        if (typeof cellVal === 'object' && cellVal.v !== undefined) {
+          len = String(cellVal.v).length;
+        } else {
+          len = String(cellVal).length;
+        }
+      }
+      maxLens[cIdx] = Math.max(maxLens[cIdx] || 0, len);
+    });
+  });
+
+  return maxLens.map((len, cIdx) => {
+    if (cIdx === 0) return { wch: 4 }; // Spacer Col A
+    const minW = minWidths[cIdx] || defaultMin;
+    const fitted = Math.max(minW, Math.ceil(len * 1.25) + 3);
+    return { wch: Math.min(fitted, 45) };
+  });
 }
 
 /**
@@ -534,11 +567,11 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
       // Header row (Last column "মোট বিল" removed as requested)
       const headerRow = [
         '',
-        'ক্রমিক নং',
-        'বিডি নং',
-        'পদবী',
-        'নাম',
-        ...allMemberFoodCols.map(c => c.bn)
+        toSutonny('ক্রমিক নং'),
+        toSutonny('বিডি নং'),
+        toSutonny('পদবী'),
+        toSutonny('নাম'),
+        ...allMemberFoodCols.map(c => toSutonny(c.bn))
       ];
 
       // Generate 31 separate tabs (tab name '1'..'31') for the selected month
@@ -553,14 +586,14 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
 
         // Row 2: Title Banner (Col C: মাস, Col D: মাসের নাম)
         const titleRow = new Array(headerRow.length).fill('');
-        titleRow[2] = 'মাস';
-        titleRow[3] = formatBengaliMonthYear(selectedYm);
+        titleRow[2] = toSutonny('মাস');
+        titleRow[3] = toSutonny(formatBengaliMonthYear(selectedYm));
         rows.push(titleRow);
 
         // Row 3: Date Banner (Col C: তারিখ, Col D: তারিখের মান - মাস ও মাসের নামের ঠিক নিচের সেলে)
         const dateRow = new Array(headerRow.length).fill('');
-        dateRow[2] = 'তারিখ';
-        dateRow[3] = dayStrBn;
+        dateRow[2] = toSutonny('তারিখ');
+        dateRow[3] = toSutonny(dayStrBn);
         rows.push(dateRow);
 
         // Row 4: Spacer
@@ -675,10 +708,10 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
 
           const rowData = [
             '',
-            serBn,
+            toSutonny(serBn),
             bdDisplay,
-            rankBn,
-            memberNameBn,
+            toSutonny(rankBn),
+            toSutonny(memberNameBn),
             ...allMemberFoodCols.map((_, cIdx) => {
               const q = foodQtyMap.get(cIdx);
               return q && q > 0 ? q : '';
@@ -691,7 +724,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         const endMemberRowNumber = 5 + sortedMembers.length;
         const totalFooterRow: any[] = [
           '',
-          'সর্বমোট',
+          toSutonny('সর্বমোট'),
           '',
           '',
           '',
@@ -713,15 +746,12 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         worksheet['!views'] = [{ state: 'frozen', ySplit: 5, xSplit: 5, topLeftCell: 'F6', activePane: 'bottomRight' }];
         worksheet['!freeze'] = { xSplit: 5, ySplit: 5, topLeftCell: 'F6' };
 
-        // Set column widths formatted for SutonnyMJ 16
-        worksheet['!cols'] = [
-          { wch: 4 },  // Col A
-          { wch: 12 }, // ক্রমিক নং
-          { wch: 14 }, // বিডি নং
-          { wch: 16 }, // পদবী
-          { wch: 22 }, // নাম
-          ...allMemberFoodCols.map(() => ({ wch: 15 }))
-        ];
+        // Set dynamic autofit column widths formatted for SutonnyMJ 16
+        worksheet['!cols'] = calculateSheetColWidths(
+          rows,
+          { 0: 4, 1: 12, 2: 14, 3: 16, 4: 22 },
+          14
+        );
 
         const officialWsRows: any[] = [];
         officialWsRows[0] = { hpt: 18 };
@@ -791,20 +821,20 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           }
         }
 
-        // Data rows styling: Alternating colors row-wise AND column-wise (White #FFFFFF and Slate #CBD5E1)
+        // Data rows styling: Clean row-wise alternating colors (White #FFFFFF and Slate #F1F5F9), no column alternation
         for (let r = 5; r < totalRows - 1; r++) {
+          const isEvenRow = (r - 5) % 2 === 0;
+          const rowBgColor = isEvenRow ? 'FFFFFF' : 'F1F5F9';
           for (let c = 1; c < totalCols; c++) {
             const addr = XLSX.utils.encode_cell({ r, c });
             if (!worksheet[addr]) {
               worksheet[addr] = { t: 's', v: '' };
             }
-            const isWhiteCell = (r + c) % 2 === 0;
-            const cellBgColor = isWhiteCell ? 'FFFFFF' : 'CBD5E1';
             worksheet[addr].s = {
               font: { name: 'SutonnyMJ', sz: 16, color: { rgb: '000000' } },
               alignment: { horizontal: 'center', vertical: 'center' },
               border: cellBorder,
-              fill: { fgColor: { rgb: cellBgColor } }
+              fill: { fgColor: { rgb: rowBgColor } }
             };
           }
         }
@@ -861,9 +891,9 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
       // Header row for Date-wise matrix (Col 1: Sl, Col 2: Date, Col 3..: Food items; Last Col "মোট বিল" removed as requested)
       const dateHeaderRow = [
         '',
-        'ক্রমিক নং',
-        'তারিখ',
-        ...allFoodColumns.map(c => c.bn)
+        toSutonny('ক্রমিক নং'),
+        toSutonny('তারিখ'),
+        ...allFoodColumns.map(c => toSutonny(c.bn))
       ];
 
       // Existing sales transactions in the system
@@ -908,11 +938,11 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
 
         const rows: any[][] = [];
         // Row 1: B1: 'র‍্যাংক ও নাম', C1: fullRankAndName
-        rows.push(['', 'র‍্যাংক ও নাম', fullRankAndName]);
+        rows.push(['', toSutonny('র‍্যাংক ও নাম'), toSutonny(fullRankAndName)]);
         // Row 2: B2: 'বিডি নং', C2: bdDisplay
-        rows.push(['', 'বিডি নং', bdDisplay]);
+        rows.push(['', toSutonny('বিডি নং'), bdDisplay]);
         // Row 3: B3: 'মাস', C3: formatBengaliMonthYear(selectedYm)
-        rows.push(['', 'মাস', formatBengaliMonthYear(selectedYm)]);
+        rows.push(['', toSutonny('মাস'), toSutonny(formatBengaliMonthYear(selectedYm))]);
         // Row 4: Spacer
         rows.push([]);
         // Row 5: Column Headers (Col B: 'ক্রমিক নং', Col C: 'তারিখ', Col D..: Foods)
@@ -1009,8 +1039,8 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
 
           const rowData: any[] = [
             '',
-            toBengaliNum(d),
-            dStrBn
+            toSutonny(toBengaliNum(d)),
+            toSutonny(dStrBn)
           ];
 
           allFoodColumns.forEach((_, cIdx) => {
@@ -1030,7 +1060,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         const endDayRowNumber = 5 + daysInMonth;
         const totalFooterRow: any[] = [
           '',
-          'সর্বমোট',
+          toSutonny('সর্বমোট'),
           '',
           ...allFoodColumns.map((_, cIdx) => {
             const totalQty = colFoodTotals[cIdx];
@@ -1048,12 +1078,12 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         // Freeze C Column (Columns A..C) and Row 5 (Rows 1..5)
         ws['!views'] = [{ state: 'frozen', ySplit: 5, xSplit: 3, topLeftCell: 'D6', activePane: 'bottomRight' }];
         ws['!freeze'] = { xSplit: 3, ySplit: 5, topLeftCell: 'D6' };
-        ws['!cols'] = [
-          { wch: 4 },  // Col A
-          { wch: 14 }, // ক্রমিক নং
-          { wch: 18 }, // তারিখ
-          ...allFoodColumns.map(() => ({ wch: 15 }))
-        ];
+        // Dynamic autofit column widths formatted for SutonnyMJ 16
+        ws['!cols'] = calculateSheetColWidths(
+          rows,
+          { 0: 4, 1: 12, 2: 24 },
+          14
+        );
 
         // Configure row properties: Holiday date rows (Friday, Saturday & custom holidays) are hidden by default.
         // Users can easily select adjacent rows and manually unhide them in Excel if needed.
@@ -1121,7 +1151,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         }
 
         // Data rows styling (r=5 to totalRows-2):
-        // Alternating colors row-wise AND column-wise (White #FFFFFF and Slate #CBD5E1).
+        // Clean row-wise alternating colors (White #FFFFFF and Slate #F1F5F9), no column alternation.
         // Holiday rows (when manually unhidden in Excel) are styled with soft rose #FEE2E2 / #FECACA and bold text.
         for (let r = 5; r < totalRows - 1; r++) {
           const d = r - 4;
@@ -1129,17 +1159,16 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           const dayYmd = `${selectedYm}-${dayStr}`;
           const dateObj = new Date(selYear, selMonth - 1, d);
           const isHoliday = isCanteenHolidayDate(dayYmd, dateObj);
+          const isEvenRow = (r - 5) % 2 === 0;
+          const rowBgColor = isHoliday 
+            ? (isEvenRow ? 'FEE2E2' : 'FECACA') 
+            : (isEvenRow ? 'FFFFFF' : 'F1F5F9');
 
           for (let c = 1; c < totalCols; c++) {
             const addr = XLSX.utils.encode_cell({ r, c });
             if (!ws[addr]) {
               ws[addr] = { t: 's', v: '' };
             }
-
-            const isWhiteCell = (r + c) % 2 === 0;
-            const cellBgColor = isHoliday 
-              ? (isWhiteCell ? 'FEE2E2' : 'FECACA') 
-              : (isWhiteCell ? 'FFFFFF' : 'CBD5E1');
 
             ws[addr].s = {
               font: { 
@@ -1150,7 +1179,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
               },
               alignment: { horizontal: 'center', vertical: 'center' },
               border: cellBorder,
-              fill: { fgColor: { rgb: cellBgColor } }
+              fill: { fgColor: { rgb: rowBgColor } }
             };
           }
         }
@@ -2271,7 +2300,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                       <p className="text-[11px] text-slate-400 leading-relaxed">
                         • <strong>মাসিক ৩১টি ট্যাব:</strong> নির্বাচিত মাসের <strong>১ থেকে ৩১ তারিখের জন্য ৩১টি আলাদা শিট ট্যাব</strong> তৈরি হবে。<br/>
                         • <strong>ফ্রিজ প্যান:</strong> <strong>E কলাম</strong> (নাম পর্যন্ত) ও <strong>৫ নম্বর সারি</strong> ফিক্সড/লক থাকে。<br/>
-                        • <strong>ফরম্যাট ও কালার:</strong> সব ফন্ট <strong>SutonnyMJ ১৬ সাইজ</strong>, রো ও কলাম উভয় দিকেই <strong>সাদা ও ধূসর অল্টারনেটিং কালার</strong> এবং বিডি নং-এ <strong>শুধু নম্বর (BD/ ছাড়া)</strong>।
+                        • <strong>ফরম্যাট ও কালার:</strong> আসল <strong>SutonnyMJ ১৬ সাইজ</strong> ফন্ট, <strong>সেল অটো-ফিট (Auto-fit)</strong>, সারিভিত্তিক অল্টারনেটিং কালার এবং বিডি নং-এ <strong>শুধু নম্বর (BD/ ছাড়া)</strong>।
                       </p>
 
                       {/* Month Selection preview in Card 1 - Bill style */}
@@ -2335,7 +2364,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                         • <strong>সদস্য ফিক্সড:</strong> ব্যানারে নির্দিষ্ট সদস্যের <strong>পদবী, নাম ও বিডি নং (শুধু নম্বর)</strong> থাকে。<br/>
                         • <strong>ফ্রিজ প্যান:</strong> <strong>C কলাম</strong> (তারিখ পর্যন্ত) ও <strong>৫ নম্বর সারি</strong> ফিক্সড/লক থাকে。<br/>
                         • <strong>ছুটির দিন হাইড:</strong> শুক্র, শনি ও ছুটির দিনের সারি ডিফল্টভাবে হাইড থাকে (প্রয়োজনে আনহাইড করা যাবে)।<br/>
-                        • <strong>ফরম্যাট ও কালার:</strong> সব ফন্ট <strong>SutonnyMJ ১৬ সাইজ</strong>, রো ও কলাম উভয় দিকেই <strong>সাদা ও ধূসর অল্টারনেটিং কালার</strong>।
+                        • <strong>ফরম্যাট ও কালার:</strong> আসল <strong>SutonnyMJ ১৬ সাইজ</strong> ফন্ট, <strong>সেল অটো-ফিট (Auto-fit)</strong> এবং সারিভিত্তিক অল্টারনেটিং কালার (কলামভিত্তিক অল্টারনেটিং কালার ছাড়া)।
                       </p>
 
                       {/* Month Selection - Bill Style */}
