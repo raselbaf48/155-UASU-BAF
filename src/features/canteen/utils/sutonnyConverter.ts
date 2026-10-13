@@ -7,17 +7,28 @@ import { ConvertToASCII, ConvertToUnicode } from 'bijoy-unicode-converter';
  */
 export function toSutonny(text: any): string {
   if (text === null || text === undefined) return '';
-  const str = String(text);
+  let str = String(text);
   if (!str.trim()) return str;
+
+  // Convert Bengali numerals ০-৯ to ASCII 0-9 because in SutonnyMJ font, 0-9 glyphs are Bengali numbers ০-৯
+  const bnDigits = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
+  for (let i = 0; i < 10; i++) {
+    str = str.replace(new RegExp(bnDigits[i], 'g'), String(i));
+  }
 
   // If text contains Bengali Unicode characters (\u0980 to \u09FF)
   if (/[\u0980-\u09FF]/.test(str)) {
     try {
-      return ConvertToASCII('bijoy', str);
+      str = ConvertToASCII('bijoy', str);
     } catch {
-      return str;
+      // fallback
     }
   }
+
+  // Remove invisible formatting characters (Zero-Width Joiner \u200D, Zero-Width Non-Joiner \u200C, BOM \uFEFF)
+  // which prevent Excel font mapping from applying SutonnyMJ
+  str = str.replace(/[\u200c\u200d\ufeff]/g, '');
+
   return str;
 }
 

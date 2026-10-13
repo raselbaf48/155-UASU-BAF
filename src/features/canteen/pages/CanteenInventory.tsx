@@ -157,7 +157,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
           };
         });
         const currentLocal = getRawInventoryItems();
-        const combined = [...INITIAL_RAW_ITEMS, ...currentLocal, ...(Array.isArray(appRaw) ? appRaw : []), ...parsedRaw];
+        const combined = [...parsedRaw, ...currentLocal, ...(Array.isArray(appRaw) ? appRaw : []), ...INITIAL_RAW_ITEMS];
         const { deduplicated } = deduplicateRawItems(combined);
         const sortedRaw = deduplicated.sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
         setAvailableRawItems(sortedRaw);

@@ -1475,7 +1475,9 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
               packSize: updated.packSize,
               subUnit: updated.subUnit,
               hasSubUnits: updated.hasSubUnits,
-              unit: updated.unit
+              unit: updated.unit,
+              name: updated.name,
+              nameBn: updated.nameBn
             });
           }
 

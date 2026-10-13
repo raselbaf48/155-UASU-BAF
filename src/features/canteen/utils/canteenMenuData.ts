@@ -173,13 +173,17 @@ export function deduplicateCanteenMenuItems(items: CanteenMenuItem[]): CanteenMe
         (existing.id && userOverrides[existing.id]) ||
         (rawItem.id && userOverrides[rawItem.id]);
 
+      const rawItemTime = new Date((rawItem as any).updated_at || (rawItem as any).updatedAt || 0).getTime();
+      const existingTime = new Date((existing as any).updated_at || (existing as any).updatedAt || 0).getTime();
+      const preferRaw = rawItemTime > existingTime;
+
       const mergedPrice = (userOv?.price !== undefined)
         ? Number(userOv.price)
-        : (Number(existing.price) > 0 ? Number(existing.price) : (Number(rawItem.price) > 0 ? Number(rawItem.price) : 0));
+        : (preferRaw ? (Number(rawItem.price) > 0 ? Number(rawItem.price) : Number(existing.price)) : (Number(existing.price) > 0 ? Number(existing.price) : Number(rawItem.price) || 0));
       const mergedCost = Number(existing.cost ?? existing.Cost) > 0 ? Number(existing.cost ?? existing.Cost) : Number(rawItem.cost ?? rawItem.Cost ?? 0);
       const mergedDp = (userOv?.DP || existing.DP || existing.img || existing.image || rawItem.DP || rawItem.img || rawItem.image || '');
-      const mergedEn = userOv?.name || userOv?.name_en || existing.name || existing.name_en || enName || rawItem.name;
-      const mergedBn = userOv?.name_bn || userOv?.nameBn || existing.name_bn || existing.nameBn || bnName || rawItem.name_bn || rawItem.nameBn;
+      const mergedEn = userOv?.name || userOv?.name_en || (preferRaw ? (enName || rawItem.name || existing.name) : (existing.name || existing.name_en || enName || rawItem.name));
+      const mergedBn = userOv?.name_bn || userOv?.nameBn || (preferRaw ? (bnName || rawItem.name_bn || existing.name_bn) : (existing.name_bn || existing.nameBn || bnName || rawItem.name_bn || rawItem.nameBn));
       const incomingStock = (rawItem.stock !== undefined && rawItem.stock !== null && !isNaN(Number(rawItem.stock)))
         ? Number(rawItem.stock)
         : ((rawItem.max !== undefined && rawItem.max !== null && !isNaN(Number(rawItem.max)))
@@ -209,7 +213,8 @@ export function deduplicateCanteenMenuItems(items: CanteenMenuItem[]): CanteenMe
         DP: mergedDp,
         img: mergedDp,
         image: mergedDp,
-        category: existing.category || rawItem.category || 'SNACKS'
+        category: existing.category || rawItem.category || 'SNACKS',
+        updated_at: preferRaw ? ((rawItem as any).updated_at || new Date().toISOString()) : (existing.updated_at || new Date().toISOString())
       });
       if (cleanId) idToGroup.set(cleanId, groupKey);
       if (normEn) nameToGroup.set(normEn, groupKey);
@@ -276,6 +281,7 @@ export function setCanteenMenuCache(items: CanteenMenuItem[]): void {
     try {
       localStorage.setItem('canteen_menu_cache', JSON.stringify(cleanItems));
       localStorage.setItem('canteen_menu_items_list', JSON.stringify(cleanItems));
+      localStorage.setItem('canteen_menu_items_catalog_v1', JSON.stringify(cleanItems));
     } catch (e) {
       console.warn('Error persisting canteen_menu_cache:', e);
     }

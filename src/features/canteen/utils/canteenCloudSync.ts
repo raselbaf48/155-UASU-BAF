@@ -53,6 +53,7 @@ export const CANTEEN_CLOUD_KEYS = [
   'canteen_raw_inventory_items_v2',
   'canteen_menu_items_catalog_v1',
   'canteen_bill_import_history',
+  'canteen_pos_import_history',
   'canteen_member_seniority',
   'canteen_menu_bangla_names',
   'canteen_due_shops_v1',
@@ -851,6 +852,9 @@ function dispatchKeyUpdateEvent(key: string) {
       case 'canteen_bill_import_history':
         window.dispatchEvent(new Event('canteen_bill_import_history_updated'));
         break;
+      case 'canteen_pos_import_history':
+        window.dispatchEvent(new Event('canteen_pos_import_history_updated'));
+        break;
       case 'canteen_purpose_presets':
       case 'canteen_deleted_purpose_presets':
         window.dispatchEvent(new Event('canteen_purpose_presets_updated'));
@@ -950,7 +954,9 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
             const { deduplicated } = deduplicateRawItems([...localVal, ...cloudVal]);
             finalVal = deduplicated;
           } else if (key === 'canteen_menu_items_catalog_v1') {
-            const mergedMenu = deduplicateCanteenMenuItems([...(Array.isArray(localVal) ? localVal : []), ...(Array.isArray(cloudVal) ? cloudVal : [])]);
+            const currentCache = getCanteenMenuCache();
+            const effectiveLocal = (Array.isArray(localVal) && localVal.length > 0) ? localVal : currentCache;
+            const mergedMenu = deduplicateCanteenMenuItems([...effectiveLocal, ...(Array.isArray(cloudVal) ? cloudVal : [])]);
             finalVal = mergedMenu;
             setCanteenMenuCache(mergedMenu);
           } else if (key === 'canteen_daily_menu') {
@@ -1036,6 +1042,10 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
           } else {
             const jsonStr = JSON.stringify(finalVal);
             localStorage.setItem(key, jsonStr);
+            if (key === 'canteen_menu_items_catalog_v1') {
+              localStorage.setItem('canteen_menu_items_list', jsonStr);
+              localStorage.setItem('canteen_menu_cache', jsonStr);
+            }
             lastSyncedCloudHashes.set(key, jsonStr);
           }
           dispatchKeyUpdateEvent(key);
@@ -1461,7 +1471,9 @@ export function initCanteenCloudSync(): () => void {
                 const { deduplicated } = deduplicateRawItems([...currentLocal, ...parsed]);
                 mergedVal = deduplicated;
               } else if (key === 'canteen_menu_items_catalog_v1') {
-                const mergedMenu = deduplicateCanteenMenuItems([...(Array.isArray(currentLocal) ? currentLocal : []), ...(Array.isArray(parsed) ? parsed : [])]);
+                const currentCache = getCanteenMenuCache();
+                const effectiveLocal = (Array.isArray(currentLocal) && currentLocal.length > 0) ? currentLocal : currentCache;
+                const mergedMenu = deduplicateCanteenMenuItems([...effectiveLocal, ...(Array.isArray(parsed) ? parsed : [])]);
                 mergedVal = mergedMenu;
                 setCanteenMenuCache(mergedMenu);
               } else if (key === 'canteen_daily_menu') {
@@ -1629,6 +1641,7 @@ export function initCanteenCloudSync(): () => void {
   const handleLocalStockLogs = () => queuePushKeyToCloud('canteen_raw_stock_logs_v2');
   const handleLocalRawInventory = () => queuePushKeyToCloud('canteen_raw_inventory_items_v2');
   const handleLocalBillHistory = () => queuePushKeyToCloud('canteen_bill_import_history');
+  const handleLocalPosImportHistory = () => queuePushKeyToCloud('canteen_pos_import_history');
   const handleLocalMenuCatalog = () => {
     try {
       const raw = localStorage.getItem('canteen_menu_items_list');
@@ -1664,6 +1677,7 @@ export function initCanteenCloudSync(): () => void {
   window.addEventListener('canteen_raw_inventory_updated', handleLocalRawInventory);
   window.addEventListener('canteen_daily_menu_updated', handleLocalDailyMenu);
   window.addEventListener('canteen_bill_import_history_updated', handleLocalBillHistory);
+  window.addEventListener('canteen_pos_import_history_updated', handleLocalPosImportHistory);
   window.addEventListener('canteen_menu_updated', handleLocalMenuCatalog);
   window.addEventListener('canteen_settings_updated', handleLocalSettings);
 
@@ -1703,6 +1717,7 @@ export function initCanteenCloudSync(): () => void {
     window.removeEventListener('canteen_raw_stock_logs_updated', handleLocalStockLogs);
     window.removeEventListener('canteen_raw_inventory_updated', handleLocalRawInventory);
     window.removeEventListener('canteen_bill_import_history_updated', handleLocalBillHistory);
+    window.removeEventListener('canteen_pos_import_history_updated', handleLocalPosImportHistory);
     window.removeEventListener('canteen_settings_updated', handleLocalSettings);
     clearInterval(autoResetTimer);
     clearInterval(tenSecBackupTicker);

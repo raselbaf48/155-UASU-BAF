@@ -1,14 +1,15 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { 
   X, Upload, FileSpreadsheet, Download, CheckCircle2, 
   AlertCircle, AlertTriangle, ArrowRight, Loader2, RefreshCw,
   Search, Check, Trash2, ShoppingCart, UserCheck, DollarSign,
-  Calendar, ChevronDown, ChevronLeft, ChevronRight
+  Calendar, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
+  History, Edit3, Save, Undo2, ArrowUpDown, Filter
 } from 'lucide-react';
 import XLSX from 'xlsx-js-style';
 import JSZip from 'jszip';
 import { supabase } from '../../../supabase';
-import { pushKeyToCloud } from '../utils/canteenCloudSync';
+import { pushKeyToCloud, pullKeyFromCloud, recordDeletedTxId } from '../utils/canteenCloudSync';
 import { deductRawStockForSales } from '../utils/recipeManager';
 import { getCanteenMenuCache, setCanteenMenuCache, setCanteenMembersCache, normalizeCatalogKey, isOneTimeBoxItem } from '../utils/canteenMenuData';
 import { formatCanteenDate, toYMDDate } from '../utils/dateUtils';
@@ -20,6 +21,40 @@ import { formatItemNameBn } from '../pages/MemberDB';
 import { isSaleTransaction } from '../pages/PosSales';
 import { getCanteenMenuItemOrder } from '../utils/menuOrdering';
 import { toSutonny, fromSutonny } from '../utils/sutonnyConverter';
+
+export interface PosImportBatchItem {
+  id: string;
+  date: string;
+  airman_id?: string;
+  bdNo: string;
+  rank?: string;
+  memberName: string;
+  items: string;
+  soldItems: Array<{
+    menuItemId: string;
+    menuItemName: string;
+    price: number;
+    qty: number;
+    totalPrice: number;
+  }>;
+  totalAmount: number;
+  paymentMode: 'DUE' | 'PAID';
+}
+
+export interface PosImportBatch {
+  id: string;
+  createdAt: number;
+  displayDate: string;
+  sourceName: string;
+  templateType: 'MEMBER_WISE_MATRIX' | 'DATE_WISE_MATRIX' | 'LIST' | string;
+  totalTransactions: number;
+  totalAmount: number;
+  dueAmount: number;
+  createdTransactionIds: string[];
+  appliedMemberDue: boolean;
+  deductedStock: boolean;
+  items: PosImportBatchItem[];
+}
 
 interface ImportPosSalesModalProps {
   isOpen: boolean;
@@ -236,7 +271,7 @@ function applyExcelTableStyles(
 function calculateSheetColWidths(
   rows: any[][],
   minWidths: Record<number, number> = {},
-  defaultMin = 14
+  defaultMin = 9
 ): Array<{ wch: number }> {
   const maxLens: number[] = [];
   rows.forEach(row => {
@@ -257,16 +292,15 @@ function calculateSheetColWidths(
   return maxLens.map((len, cIdx) => {
     if (cIdx === 0) return { wch: 4 }; // Spacer Col A
     const minW = minWidths[cIdx] || defaultMin;
-    const fitted = Math.max(minW, Math.ceil(len * 1.25) + 3);
+    const fitted = Math.max(minW, Math.ceil(len * 1.35) + 3);
     return { wch: Math.min(fitted, 45) };
   });
 }
 
 /**
- * Injects OpenXML freeze panes directly into the XLSX package zip before download.
- * Guarantees Microsoft Excel, Google Sheets, Apple Numbers & LibreOffice lock the exact panes:
- * - Member-wise format: E Column & Row 5 (xSplit=5, ySplit=5, topLeftCell='F6')
- * - Date-wise format: C Column & Row 5 (xSplit=3, ySplit=5, topLeftCell='D6')
+ * Injects OpenXML freeze panes, font mappings, and native bestFit attributes directly into the XLSX package zip.
+ * Guarantees Microsoft Excel, Google Sheets, Apple Numbers & LibreOffice render authentic SutonnyMJ
+ * typography with perfect cell auto-fit and locked panes.
  */
 async function downloadExcelWithNativeFreeze(
   workbook: any,
@@ -278,6 +312,28 @@ async function downloadExcelWithNativeFreeze(
   
   const paneXml = `<sheetViews><sheetView workbookViewId="0"><pane xSplit="${freezeOptions.xSplit}" ySplit="${freezeOptions.ySplit}" topLeftCell="${freezeOptions.topLeftCell}" activePane="bottomRight" state="frozen"/><selection pane="bottomRight" activeCell="${freezeOptions.topLeftCell}" sqref="${freezeOptions.topLeftCell}"/></sheetView></sheetViews>`;
 
+  // 1. Patch xl/styles.xml to guarantee SutonnyMJ has Windows ANSI charset=0 and family=3
+  // In Excel DirectWrite / GDI, this prevents fallback to Calibri / Nirmala UI
+  const stylesEntry = zip.file('xl/styles.xml');
+  if (stylesEntry) {
+    let stylesContent = await stylesEntry.async('string');
+    stylesContent = stylesContent.replace(/<font>([\s\S]*?)<\/font>/g, (_m, inner) => {
+      let patched = inner;
+      if (!patched.includes('<name val="SutonnyMJ"')) {
+        patched = patched.replace(/<name val="[^"]*"\/>/, '<name val="SutonnyMJ"/>');
+      }
+      if (!patched.includes('<family')) {
+        patched += '<family val="3"/>';
+      }
+      if (!patched.includes('<charset')) {
+        patched += '<charset val="0"/>';
+      }
+      return '<font>' + patched + '</font>';
+    });
+    zip.file('xl/styles.xml', stylesContent);
+  }
+
+  // 2. Patch worksheets with freeze panes and bestFit="1" customWidth="1" attributes
   for (const fileName of Object.keys(zip.files)) {
     if (fileName.startsWith('xl/worksheets/sheet') && fileName.endsWith('.xml')) {
       const fileEntry = zip.file(fileName);
@@ -288,6 +344,21 @@ async function downloadExcelWithNativeFreeze(
         } else {
           content = content.replace(/(<worksheet[^>]*>)/, `$1${paneXml}`);
         }
+
+        // Add native bestFit="1" and customWidth="1" to col elements for seamless cell autofit in Excel
+        if (content.includes('<col ')) {
+          content = content.replace(/<col ([^>]*?)\/?>/g, (_colTag, attrs) => {
+            let patchedAttrs = attrs;
+            if (!patchedAttrs.includes('bestFit=')) {
+              patchedAttrs += ' bestFit="1"';
+            }
+            if (!patchedAttrs.includes('customWidth=')) {
+              patchedAttrs += ' customWidth="1"';
+            }
+            return `<col ${patchedAttrs}/>`;
+          });
+        }
+
         zip.file(fileName, content);
       }
     }
@@ -369,27 +440,51 @@ function parseBanglaOrEnglishDate(val: any, fallbackDate?: string): string {
   return fallbackDate || new Date().toISOString().split('T')[0];
 }
 
+function cleanFoodString(str: any): string {
+  if (!str) return '';
+  return String(str)
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
 function matchFoodHeaderToCatalog(header: string, catalog: any[]): any {
   if (!header) return null;
-  const cleanHeader = header.trim().toLowerCase();
+  const rawClean = cleanFoodString(header);
+  const decodedClean = cleanFoodString(fromSutonny(header));
+  const candidateTexts = [rawClean, decodedClean].filter(Boolean);
 
+  // 1. Direct match against catalog item names (English, Bangla, normalized)
+  for (const item of catalog) {
+    const enName = cleanFoodString(item.name || item.name_en || '');
+    const bnName = cleanFoodString(item.name_bn || item.nameBn || item['Name (BN)'] || getMenuItemBanglaName(item) || '');
+    
+    for (const cand of candidateTexts) {
+      if (cand === enName || cand === bnName) return item;
+      if (bnName && (cand.includes(bnName) || bnName.includes(cand))) return item;
+      if (enName && (cand.includes(enName) || enName.includes(cand))) return item;
+    }
+  }
+
+  // 2. Comprehensive Aliases covering all Mess / Canteen items (Sutonny, Unicode Bangla & English)
   const aliases: Array<{ match: RegExp | string; catalogKey: string }> = [
-    { match: /পরোটা|porata|paratha|c‡ivUv/i, catalogKey: 'porata' },
+    { match: /পরোটা|porata|paratha|parota|porota|c‡ivUv/i, catalogKey: 'porata' },
+    { match: /স্পেশাল.*ডিম.*পরোটা|ডিম.*পরোটা|egg.*paratha|wWg.*c‡ivUv/i, catalogKey: 'special egg porata' },
     { match: /ডিম ভাজি|ভাজি ডিম|dim vaji|egg fry|omlet|omelet|mumlet|wWg fvwR|wWgfvwR/i, catalogKey: 'egg fry' },
-    { match: /ডিম পোচ|পোচ|poach|wWg †cvP/i, catalogKey: 'egg poach' },
-    { match: /ডিম সিদ্ধ|সিদ্ধ ডিম|boiled egg|wWg wm×/i, catalogKey: 'boiled egg' },
+    { match: /ডিম পোচ|পোচ|poach|egg poach|wWg †cvP|†cvP/i, catalogKey: 'egg poach' },
+    { match: /ডিম সিদ্ধ|সিদ্ধ ডিম|boiled egg|wWg wm×|wm× wWg/i, catalogKey: 'boiled egg' },
     { match: /দুধ চা|milk tea|`ya Pv|`yaPv/i, catalogKey: 'milk tea' },
-    { match: /রং চা|রঙ চা|লিকার চা|liquor tea|raw tea|is Pv|isPv|wjsKvi/i, catalogKey: 'liquor tea' },
+    { match: /রং চা|রঙ চা|লিকার চা|liquor tea|raw tea|is Pv|isPv|wjsKvi Pv/i, catalogKey: 'liquor tea' },
     { match: /ব্ল্যাক কফি|black coffee|eø¨vK Kwd/i, catalogKey: 'black coffee' },
     { match: /দুধ কফি|milk coffee|`ya Kwd/i, catalogKey: 'milk coffee' },
     { match: /গ্রীন টি|গ্রিন টি|green tea|MÖxb wU/i, catalogKey: 'green tea' },
-    { match: /ডিম নুডুলস|ডিম নুডলস|egg noodles|wWg byWjm/i, catalogKey: 'egg noodles' },
+    { match: /ডিম নুডুলস|ডিম নুডলস|egg noodles|wWg byWjm|wWg byWjm/i, catalogKey: 'egg noodles' },
     { match: /নুডুলস|নুডলস|noodles|byWjm/i, catalogKey: 'noodles' },
-    { match: /ড্রাই কেক|কেক|dry cake|WªvB †KK/i, catalogKey: 'dry cake' },
-    { match: /নরমাল বিস্কুট|normal biscuit|bigvj we¯‹zU/i, catalogKey: 'normal biscuit' },
+    { match: /ড্রাই কেক|কেক|dry cake|cake|WªvB †KK|†KK/i, catalogKey: 'dry cake' },
+    { match: /নরমাল বিস্কুট|বিস্কুট|normal biscuit|biscuit|bigvj we¯‹zU|we¯‹zU/i, catalogKey: 'normal biscuit' },
     { match: /এনার্জি বিস্কুট|energy biscuit|GbvwR© we¯‹zU/i, catalogKey: 'energy biscuit' },
-    { match: /লেবুর শরবত|লেবুর জুস|lemon juice|‡jeyi kieZ/i, catalogKey: 'lemon juice' },
-    { match: /পোলাও|বিরিয়ানি|বিরিয়ানি|পোলাও.*বিরিয়ানি|polao|pulaw|biryani|biriyani|‡cvjvI|weBrain|wewiqvwb/i, catalogKey: 'chicken biryani' },
+    { match: /লেবুর শরবত|লেবুর জুস|শরবত|lemon juice|‡jeyi kieZ/i, catalogKey: 'lemon juice' },
+    { match: /পোলাও|বিরিয়ানি|বিরিয়ানি|চিকেন বিরিয়ানি|polao|pulaw|biryani|biriyani|‡cvjvI|weBrain|wewiqvwb/i, catalogKey: 'chicken biryani' },
     { match: /ডিম খিচুড়ি|ডিম খিচুড়ি|egg khichuri|egg khicuri|wWg wLPzwo/i, catalogKey: 'egg khichuri' },
     { match: /খিচুড়ি|খিচুড়ি|khichuri|wLPzwo/i, catalogKey: 'khichuri' },
     { match: /হালিম|halim|nvwjg/i, catalogKey: 'halim' },
@@ -397,27 +492,27 @@ function matchFoodHeaderToCatalog(header: string, catalog: any[]): any {
     { match: /গ্রীল সবজি|সবজি|shobji|vegetable|mewR/i, catalogKey: 'vegetable' },
     { match: /হটডগ|অফলাতুন|hotdog|nUWM|AdjvZzb/i, catalogKey: 'hotdog' },
     { match: /সিংগারা|সিঙ্গারা|singara|wmsMviv/i, catalogKey: 'singara' },
-    { match: /সুইট রোল|চিকেন রোল|রোল|roll|myBU †ivj|†ivj/i, catalogKey: 'chicken roll' },
+    { match: /সমুচা|সোমোসা|সমোসা|somucha|samosa|mgyPv/i, catalogKey: 'somucha' },
+    { match: /সুইট রোল|চিকেন রোল|রোল|roll|chicken roll|myBU †ivj|†ivj/i, catalogKey: 'chicken roll' },
     { match: /স্যান্ডউইচ|sandwich|sanwitch|m¨vÛDBP/i, catalogKey: 'sandwich' },
+    { match: /পেটিস|প্যাটিস|প্যাট্টি|patties|patty|c¨vwUm/i, catalogKey: 'patties' },
     { match: /কলা|banana|Kjv/i, catalogKey: 'banana' },
+    { match: /আপেল|apple|Av‡cj/i, catalogKey: 'apple' },
+    { match: /দই|মিষ্টি দই|curd|yogurt|`B/i, catalogKey: 'curd' },
+    { match: /মিষ্টি|sweet|wgwó/i, catalogKey: 'sweet' },
+    { match: /পানি|mineral water|water|cvwb/i, catalogKey: 'water' },
     { match: /অন্যান্য|other|misc|Ab¨vb¨/i, catalogKey: 'other' },
   ];
 
-  for (const item of catalog) {
-    const enName = (item.name || item.name_en || '').toLowerCase();
-    const bnName = (item.name_bn || item.nameBn || item['Name (BN)'] || getMenuItemBanglaName(item) || '').toLowerCase();
-    if (cleanHeader === enName || cleanHeader === bnName || enName.includes(cleanHeader) || bnName.includes(cleanHeader)) {
-      return item;
-    }
-  }
-
   for (const alias of aliases) {
-    const matches = typeof alias.match === 'string' ? cleanHeader.includes(alias.match) : alias.match.test(cleanHeader);
-    if (matches) {
+    const isMatched = candidateTexts.some(cand => 
+      typeof alias.match === 'string' ? cand.includes(alias.match) : alias.match.test(cand)
+    );
+    if (isMatched) {
       const found = catalog.find((c: any) => {
-        const en = (c.name || c.name_en || '').toLowerCase();
-        const bn = (c.name_bn || c.nameBn || c['Name (BN)'] || getMenuItemBanglaName(c) || '').toLowerCase();
-        return en.includes(alias.catalogKey) || bn.includes(alias.catalogKey);
+        const en = cleanFoodString(c.name || c.name_en || '');
+        const bn = cleanFoodString(c.name_bn || c.nameBn || c['Name (BN)'] || getMenuItemBanglaName(c) || '');
+        return en.includes(alias.catalogKey) || bn.includes(alias.catalogKey) || normalizeCatalogKey(en) === normalizeCatalogKey(alias.catalogKey);
       });
       if (found) return found;
     }
@@ -428,42 +523,47 @@ function matchFoodHeaderToCatalog(header: string, catalog: any[]): any {
 
 function findMemberByRankAndName(rankVal: string, nameVal: string, members: any[]): any {
   if (!nameVal && !rankVal) return null;
-  const cleanName = String(nameVal || '').trim().toLowerCase();
-  const cleanRank = String(rankVal || '').trim().toLowerCase();
+  const rawName = String(nameVal || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+  const rawRank = String(rankVal || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+  const decodedName = fromSutonny(rawName).replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+  const decodedRank = fromSutonny(rawRank).replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
 
-  const bdMatch = cleanName.match(/\b(\d{4,7})\b/) || cleanRank.match(/\b(\d{4,7})\b/);
-  if (bdMatch) {
-    const mem = members.find(m => String(m['BD No'] || m.airman_id || '').replace(/\D/g, '') === bdMatch[1]);
-    if (mem) return mem;
-  }
+  const cleanNames = [rawName.toLowerCase(), decodedName.toLowerCase()].filter(Boolean);
+  const cleanRanks = [rawRank.toLowerCase(), decodedRank.toLowerCase()].filter(Boolean);
 
-  for (const m of members) {
-    const mBn = String(m.name_bn || m.NameBn || formatMemberNameBn(m.Surname || m.Name) || '').trim().toLowerCase();
-    const mEn = String(m.Surname || m.Name || '').trim().toLowerCase();
-    if (cleanName && (cleanName === mBn || mBn.includes(cleanName) || cleanName.includes(mBn))) {
-      return m;
-    }
-    if (cleanName && (cleanName === mEn || mEn.includes(cleanName) || cleanName.includes(mEn))) {
-      return m;
+  // 1. Check BD number embedded in name or rank string
+  for (const str of [...cleanNames, ...cleanRanks]) {
+    const bdMatch = str.match(/\b(\d{4,7})\b/);
+    if (bdMatch) {
+      const mem = members.find(m => String(m['BD No'] || m.airman_id || '').replace(/\D/g, '') === bdMatch[1]);
+      if (mem) return mem;
     }
   }
 
+  // 2. Exact or substring match on Member Bangla / English names
   for (const m of members) {
+    const mBn = cleanFoodString(m.name_bn || m.NameBn || formatMemberNameBn(m.Surname || m.Name) || '');
+    const mEn = cleanFoodString(m.Surname || m.Name || '');
     const bd = String(m['BD No'] || m.airman_id || '').trim();
     const cleanBd = bd.replace(/\D/g, '');
-    const mappedBn = DEFAULT_MEMBER_BANGLA_NAMES[bd] || DEFAULT_MEMBER_BANGLA_NAMES[cleanBd] || DEFAULT_MEMBER_BANGLA_NAMES[`BD/${cleanBd}`];
-    if (mappedBn && cleanName && (mappedBn.toLowerCase() === cleanName || mappedBn.toLowerCase().includes(cleanName) || cleanName.includes(mappedBn.toLowerCase()))) {
-      return m;
+    const mappedBn = cleanFoodString(DEFAULT_MEMBER_BANGLA_NAMES[bd] || DEFAULT_MEMBER_BANGLA_NAMES[cleanBd] || DEFAULT_MEMBER_BANGLA_NAMES[`BD/${cleanBd}`] || '');
+
+    for (const cn of cleanNames) {
+      if (cn && (cn === mBn || cn === mEn || cn === mappedBn)) return m;
+      if (cn && mBn && (cn.includes(mBn) || mBn.includes(cn))) return m;
+      if (cn && mEn && (cn.includes(mEn) || mEn.includes(cn))) return m;
+      if (cn && mappedBn && (cn.includes(mappedBn) || mappedBn.includes(cn))) return m;
     }
   }
 
+  // 3. Match by Rank + Surname combination
   for (const m of members) {
-    const mRank = String(m.Rank || m.rank || '').toLowerCase();
-    const mSurname = String(m.Surname || m.Name || '').toLowerCase();
-    if (cleanRank && mRank && (cleanRank.includes(mRank) || mRank.includes(cleanRank))) {
-      if (cleanName && mSurname && (mSurname.includes(cleanName) || cleanName.includes(mSurname))) {
-        return m;
-      }
+    const mRank = cleanFoodString(m.Rank || m.rank || '');
+    const mSurname = cleanFoodString(m.Surname || m.Name || '');
+    const rankMatches = cleanRanks.some(cr => cr && mRank && (cr.includes(mRank) || mRank.includes(cr)));
+    if (rankMatches) {
+      const nameMatches = cleanNames.some(cn => cn && mSurname && (cn.includes(mSurname) || mSurname.includes(cn)));
+      if (nameMatches) return m;
     }
   }
 
@@ -477,6 +577,25 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
   catalog,
   onImportComplete,
 }) => {
+  // Active Tab: New Import vs Import History
+  const [activeTab, setActiveTab] = useState<'IMPORT' | 'HISTORY'>('IMPORT');
+
+  // Import History States
+  const [posImportHistory, setPosImportHistory] = useState<PosImportBatch[]>(() => {
+    try {
+      const raw = localStorage.getItem('canteen_pos_import_history');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [expandedBatchId, setExpandedBatchId] = useState<string | null>(null);
+  const [historySearchTerm, setHistorySearchTerm] = useState('');
+  const [isRollingBack, setIsRollingBack] = useState(false);
+  const [rollbackBatch, setRollbackBatch] = useState<PosImportBatch | null>(null);
+  const [editingItem, setEditingItem] = useState<{ batchId: string; item: PosImportBatchItem } | null>(null);
+  const [editFormData, setEditFormData] = useState<Partial<PosImportBatchItem>>({});
+
   const [file, setFile] = useState<File | null>(null);
   const [parsedRows, setParsedRows] = useState<ParsedSaleRow[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -493,6 +612,36 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
     const m = String(d.getMonth() + 1).padStart(2, '0');
     return `${y}-${m}`;
   });
+
+  // Load and synchronize POS Import History
+  useEffect(() => {
+    if (!isOpen) return;
+    const loadHistory = async () => {
+      try {
+        const raw = localStorage.getItem('canteen_pos_import_history');
+        if (raw) setPosImportHistory(JSON.parse(raw));
+        const cloudData = await pullKeyFromCloud('canteen_pos_import_history');
+        if (Array.isArray(cloudData) && cloudData.length > 0) {
+          setPosImportHistory(cloudData);
+          localStorage.setItem('canteen_pos_import_history', JSON.stringify(cloudData));
+        }
+      } catch (err) {
+        console.warn('Error fetching POS import history:', err);
+      }
+    };
+    loadHistory();
+
+    const handleHistoryUpdate = () => {
+      try {
+        const raw = localStorage.getItem('canteen_pos_import_history');
+        if (raw) setPosImportHistory(JSON.parse(raw));
+      } catch {}
+    };
+    window.addEventListener('canteen_pos_import_history_updated', handleHistoryUpdate);
+    return () => {
+      window.removeEventListener('canteen_pos_import_history_updated', handleHistoryUpdate);
+    };
+  }, [isOpen]);
 
   const handlePrevTemplateMonth = () => {
     const [y, m] = templateMonth.split('-').map(Number);
@@ -749,8 +898,8 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         // Set dynamic autofit column widths formatted for SutonnyMJ 16
         worksheet['!cols'] = calculateSheetColWidths(
           rows,
-          { 0: 4, 1: 12, 2: 14, 3: 16, 4: 22 },
-          14
+          { 0: 4, 1: 9, 2: 12, 3: 14, 4: 20 },
+          9
         );
 
         const officialWsRows: any[] = [];
@@ -1081,8 +1230,8 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         // Dynamic autofit column widths formatted for SutonnyMJ 16
         ws['!cols'] = calculateSheetColWidths(
           rows,
-          { 0: 4, 1: 12, 2: 24 },
-          14
+          { 0: 4, 1: 9, 2: 16 },
+          9
         );
 
         // Configure row properties: Holiday date rows (Friday, Saturday & custom holidays) are hidden by default.
@@ -1322,17 +1471,34 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           if (!Array.isArray(row)) continue;
 
           for (let cIdx = 0; cIdx < row.length; cIdx++) {
-            const cell = String(row[cIdx] || '').trim();
-            if (cell.includes('পদবী') || cell.toLowerCase() === 'rank' || cell.includes('c`ex') || cell.includes('পদবি')) {
+            const rawCell = String(row[cIdx] || '').trim();
+            const decodedCell = fromSutonny(rawCell).trim();
+            const cell = rawCell.toLowerCase();
+            const dCell = decodedCell.toLowerCase();
+
+            if (
+              cell.includes('পদবী') || cell.includes('পদবি') || cell === 'rank' ||
+              cell.includes('c`ex') || dCell.includes('পদবী') || dCell.includes('পদবি')
+            ) {
               colRankIdx = cIdx;
             }
-            if (cell.includes('নাম') || cell.toLowerCase() === 'name' || cell.includes('bvg')) {
+            if (
+              cell.includes('নাম') || cell === 'name' ||
+              cell.includes('bvg') || dCell.includes('নাম')
+            ) {
               colNameIdx = cIdx;
             }
-            if (cell.includes('ক্রমিক') || cell.includes('ক্র') || cell.toLowerCase().includes('sl') || cell.toLowerCase().includes('ser') || cell.includes('µwgK')) {
+            if (
+              cell.includes('ক্রমিক') || cell.includes('ক্র') || cell.includes('sl') || cell.includes('ser') ||
+              cell.includes('µwgK') || dCell.includes('ক্রমিক') || dCell.includes('µwgK')
+            ) {
               colSerIdx = cIdx;
             }
-            if (cell.includes('বিডি') || cell.toLowerCase().includes('bd') || cell.toLowerCase().includes('service')) {
+            if (
+              cell.includes('বিডি') || cell.includes('bd') || cell.includes('service') ||
+              cell.includes('wewW') || cell.includes('weww') || dCell.includes('বিডি') ||
+              cell.includes('airman')
+            ) {
               colBdIdx = cIdx;
             }
           }
@@ -1358,8 +1524,8 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           if (r2Daily) {
             const c2 = String(r2Daily[2] || '').trim();
             const d2 = String(r2Daily[3] || '').trim();
-            if (c2.includes('মাস') && d2) {
-              const parsedM = parseBanglaOrEnglishDate(d2);
+            if ((c2.includes('মাস') || c2.includes('gvm') || fromSutonny(c2).includes('মাস')) && d2) {
+              const parsedM = parseBanglaOrEnglishDate(d2) || parseBanglaOrEnglishDate(fromSutonny(d2));
               if (parsedM && parsedM.length === 10) {
                 const parts = parsedM.split('-');
                 detectedYear = parseInt(parts[0], 10) || detectedYear;
@@ -1373,8 +1539,10 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           if (r3Daily) {
             const c3 = String(r3Daily[2] || '').trim();
             const d3 = String(r3Daily[3] || '').trim();
-            if (c3.includes('তারিখ') && d3) {
-              const parsedDate = parseDateWiseMatrixDate(d3, detectedYear, parseInt(detectedMonth, 10)) || parseBanglaOrEnglishDate(d3);
+            if ((c3.includes('তারিখ') || c3.includes('ZvwiL') || fromSutonny(c3).includes('তারিখ')) && d3) {
+              const parsedDate = parseDateWiseMatrixDate(d3, detectedYear, parseInt(detectedMonth, 10)) ||
+                parseDateWiseMatrixDate(fromSutonny(d3), detectedYear, parseInt(detectedMonth, 10)) ||
+                parseBanglaOrEnglishDate(d3) || parseBanglaOrEnglishDate(fromSutonny(d3));
               if (parsedDate && parsedDate.length === 10) {
                 sheetDate = parsedDate;
               }
@@ -1386,9 +1554,15 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
               const row = rawMatrix[r] || [];
               for (let c = 0; c < row.length; c++) {
                 const cellText = String(row[c] || '').trim();
-                if (cellText.includes('তারিখ') || cellText.toLowerCase().includes('date') || cellText.includes('ZvwiL')) {
+                const dText = fromSutonny(cellText).trim();
+                if (
+                  cellText.includes('তারিখ') || cellText.toLowerCase().includes('date') || 
+                  cellText.includes('ZvwiL') || dText.includes('তারিখ')
+                ) {
                   const nextCell = String(row[c + 1] || row[c + 2] || '').trim();
-                  sheetDate = parseDateWiseMatrixDate(nextCell, detectedYear, parseInt(detectedMonth, 10)) || parseBanglaOrEnglishDate(nextCell || cellText);
+                  sheetDate = parseDateWiseMatrixDate(nextCell, detectedYear, parseInt(detectedMonth, 10)) || 
+                    parseDateWiseMatrixDate(fromSutonny(nextCell), detectedYear, parseInt(detectedMonth, 10)) ||
+                    parseBanglaOrEnglishDate(nextCell || cellText) || parseBanglaOrEnglishDate(fromSutonny(nextCell || cellText));
                   break;
                 }
               }
@@ -1412,7 +1586,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           for (let c = maxMemberColIdx + 1; c < headerRow.length; c++) {
             const hText = String(headerRow[c] || '').trim();
             if (!hText) continue;
-            if (hText.includes('মোট বিল') || hText.toLowerCase().includes('total')) {
+            if (hText.includes('মোট বিল') || hText.toLowerCase().includes('total') || hText.includes('‡gvU')) {
               continue; // stop at total bill column
             }
             const matchedItem = matchFoodHeaderToCatalog(hText, catalogList);
@@ -1436,17 +1610,16 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
               nameVal.includes('সর্বমোট') || nameVal.includes('মোট') || 
               rankVal.includes('সর্বমোট') || rankVal.includes('মোট') || 
               bdVal.includes('সর্বমোট') || bdVal.includes('মোট') ||
-              slVal.includes('সর্বমোট') || slVal.includes('মোট')
+              slVal.includes('সর্বমোট') || slVal.includes('মোট') ||
+              fromSutonny(nameVal).includes('সর্বমোট') || fromSutonny(nameVal).includes('মোট')
             ) {
               break; // Reached footer total row
             }
 
             let matchedMem = null;
-            if (bdVal) {
-              const cleanDigits = bdVal.replace(/\D/g, '');
-              if (cleanDigits) {
-                matchedMem = members.find(m => String(m['BD No'] || m.airman_id || '').replace(/\D/g, '') === cleanDigits);
-              }
+            const cleanDigits = bdVal.replace(/\D/g, '') || fromSutonny(bdVal).replace(/\D/g, '');
+            if (cleanDigits) {
+              matchedMem = members.find(m => String(m['BD No'] || m.airman_id || '').replace(/\D/g, '') === cleanDigits);
             }
             if (!matchedMem) {
               matchedMem = findMemberByRankAndName(rankVal, nameVal, members);
@@ -1547,15 +1720,19 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             for (let r = 0; r <= dateMatrixHeaderRowIdx; r++) {
               const row = rawMatrix[r] || [];
               for (let c = 0; c < row.length; c++) {
-                const cellText = String(row[c] || '').trim();
-                if (!cellText) continue;
+                const rawCellText = String(row[c] || '').trim();
+                if (!rawCellText) continue;
+                const decodedCellText = fromSutonny(rawCellText).trim();
+                const cellText = (rawCellText + ' ' + decodedCellText).trim();
+
                 const bdMatch = cellText.match(/BD[\s\/\-_:]*(\d{4,7})/i) || cellText.match(/বিডি[\s\/\-_:]*(\d{4,7})/i) || cellText.match(/\b(\d{5,7})\b/);
                 if (bdMatch && !fixedBd) {
                   fixedBd = bdMatch[1];
                 }
                 if (
                   cellText.includes('র‍্যাংক ও নাম') || cellText.includes('পদবী ও নাম') ||
-                  cellText.includes('Rank & Name') || cellText.includes('Rank and Name')
+                  cellText.includes('Rank & Name') || cellText.includes('Rank and Name') ||
+                  cellText.includes('i‍¨vsK I bvg') || cellText.includes('c`ex I bvg')
                 ) {
                   const val = String(row[c + 1] || row[c + 2] || '').trim();
                   if (val) {
@@ -1565,27 +1742,31 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                       if (!fixedRank) fixedRank = matched.Rank || matched.rank || '';
                       if (!fixedBd) fixedBd = String(matched['BD No'] || matched.airman_id || '').replace(/\D/g, '');
                     } else if (!fixedName) {
-                      fixedName = val;
+                      fixedName = fromSutonny(val) || val;
                     }
                   }
                 }
-                if (cellText === 'নাম' || cellText === 'Name' || cellText.includes('সদস্য')) {
+                if (cellText === 'নাম' || cellText.toLowerCase() === 'name' || cellText.includes('সদস্য') || cellText === 'bvg') {
                   const val = String(row[c + 1] || row[c + 2] || '').trim();
-                  if (val && !fixedName) fixedName = val;
+                  if (val && !fixedName) fixedName = fromSutonny(val) || val;
                 }
-                if (cellText === 'র‍্যাংক' || cellText === 'পদবী' || cellText === 'Rank') {
+                if (cellText === 'র‍্যাংক' || cellText === 'পদবী' || cellText.toLowerCase() === 'rank' || cellText === 'c`ex') {
                   const val = String(row[c + 1] || row[c + 2] || '').trim();
-                  if (val && !fixedRank) fixedRank = val;
+                  if (val && !fixedRank) fixedRank = fromSutonny(val) || val;
                 }
-                if (cellText.includes('বিডি নং') || cellText.includes('বিডি') || cellText.toLowerCase().includes('bd no')) {
-                  const val = String(row[c + 1] || row[c + 2] || '').trim();
-                  const m = val.match(/\b(\d{4,7})\b/);
+                if (
+                  cellText.includes('বিডি নং') || cellText.includes('বিডি') || cellText.toLowerCase().includes('bd no') ||
+                  cellText.includes('wewW') || cellText.toLowerCase().includes('weww')
+                ) {
+                  const rawVal = String(row[c + 1] || row[c + 2] || '').trim();
+                  const valStr = rawVal + ' ' + fromSutonny(rawVal);
+                  const m = valStr.match(/\b(\d{4,7})\b/);
                   if (m && !fixedBd) fixedBd = m[1];
                 }
-                if (cellText.includes('মাস') || cellText.toLowerCase().includes('month')) {
+                if (cellText.includes('মাস') || cellText.toLowerCase().includes('month') || cellText.includes('gvm')) {
                   const val = String(row[c + 1] || row[c + 2] || '').trim();
                   if (val) {
-                    const parsedM = parseBanglaOrEnglishDate(val);
+                    const parsedM = parseBanglaOrEnglishDate(val) || parseBanglaOrEnglishDate(fromSutonny(val));
                     if (parsedM && parsedM.length === 10) {
                       const parts = parsedM.split('-');
                       sheetYear = parseInt(parts[0], 10) || sheetYear;
@@ -2107,8 +2288,55 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         }
       }
 
+      // 5B. Record to POS Import History
+      const importBatchId = `batch-pos-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const now = new Date();
+      const displayDate = now.toLocaleDateString('bn-BD', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      });
+      const newBatch: PosImportBatch = {
+        id: importBatchId,
+        createdAt: Date.now(),
+        displayDate,
+        sourceName: file?.name || (detectedFormat === 'MEMBER_WISE_MATRIX' ? 'সদস্য ভিত্তিক ম্যাট্রিক্স' : detectedFormat === 'DATE_WISE_MATRIX' ? 'তারিখ ভিত্তিক ম্যাট্রিক্স' : 'লিস্ট ফাইল'),
+        templateType: detectedFormat || 'MEMBER_WISE_MATRIX',
+        totalTransactions: newTransactions.length,
+        totalAmount: summary.totalAmount,
+        dueAmount: summary.dueAmount,
+        createdTransactionIds: newTransactions.map(t => t.id),
+        appliedMemberDue: updateMemberDue,
+        deductedStock: deductStock,
+        items: newTransactions.map(t => ({
+          id: t.id,
+          date: t.date,
+          airman_id: t.airman_id,
+          bdNo: t.bdNo,
+          rank: t.rank,
+          memberName: t.memberName,
+          items: t.items,
+          soldItems: t.soldItems,
+          totalAmount: t.amount,
+          paymentMode: t.paymentStatus || t.status || 'DUE'
+        }))
+      };
+
+      const updatedHistory = [newBatch, ...posImportHistory];
+      setPosImportHistory(updatedHistory);
+      try {
+        localStorage.setItem('canteen_pos_import_history', JSON.stringify(updatedHistory));
+        await pushKeyToCloud('canteen_pos_import_history', updatedHistory).catch(() => {});
+      } catch (err) {
+        console.warn('Failed saving POS import history:', err);
+      }
+
       // 6. Dispatch global realtime events
       window.dispatchEvent(new Event('canteen_txs_updated'));
+      window.dispatchEvent(new Event('canteen_pos_import_history_updated'));
       window.dispatchEvent(new Event('canteen_state_updated'));
       window.dispatchEvent(new Event('canteen_fund_updated'));
       window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
@@ -2132,6 +2360,298 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
       setIsApplying(false);
     }
   };
+
+  // Revert / Remove an entire Import Batch
+  const handleDeleteBatch = async (batch: PosImportBatch, revertDues: boolean = true) => {
+    setIsRollingBack(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    try {
+      // 1. Revert member dues if they were applied
+      if (revertDues && batch.appliedMemberDue) {
+        const memberDuesToDeduct = new Map<string, number>();
+        batch.items.forEach(it => {
+          if (it.paymentMode === 'DUE') {
+            const key = it.airman_id || it.bdNo || String(it.bdNo).replace(/\D/g, '');
+            memberDuesToDeduct.set(key, (memberDuesToDeduct.get(key) || 0) + Number(it.totalAmount || 0));
+          }
+        });
+
+        for (const [key, dueDeduct] of memberDuesToDeduct.entries()) {
+          const targetMem = members.find(m => 
+            m.airman_id === key || 
+            m['BD No'] === key || 
+            String(m['BD No'] || '').replace(/\D/g, '') === String(key).replace(/\D/g, '')
+          );
+          if (targetMem) {
+            const curDue = Number(targetMem.Due ?? targetMem.due ?? 0);
+            const newDue = Math.max(0, curDue - dueDeduct);
+            targetMem.Due = newDue;
+            targetMem.due = newDue;
+            await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', targetMem.airman_id);
+          }
+        }
+        setCanteenMembersCache(members);
+      }
+
+      // 2. Remove transactions from canteen_txs & record tombstones
+      const rawTxs = localStorage.getItem('canteen_txs');
+      let txs: any[] = rawTxs ? JSON.parse(rawTxs) : [];
+      const txIdSet = new Set((batch.createdTransactionIds || []).map(String));
+
+      txIdSet.forEach(id => recordDeletedTxId(id));
+
+      const updatedTxs = txs.filter(t => !txIdSet.has(String(t.id)));
+      localStorage.setItem('canteen_txs', JSON.stringify(updatedTxs));
+      await pushKeyToCloud('canteen_txs', updatedTxs).catch(() => {});
+
+      // 3. Remove batch from history
+      const nextHistory = posImportHistory.filter(b => b.id !== batch.id);
+      setPosImportHistory(nextHistory);
+      localStorage.setItem('canteen_pos_import_history', JSON.stringify(nextHistory));
+      await pushKeyToCloud('canteen_pos_import_history', nextHistory).catch(() => {});
+
+      // 4. Dispatch events
+      window.dispatchEvent(new Event('canteen_txs_updated'));
+      window.dispatchEvent(new Event('canteen_pos_import_history_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('canteen_fund_updated'));
+      window.dispatchEvent(new Event('storage'));
+
+      setRollbackBatch(null);
+      setSuccessMessage(`ইম্পোর্ট ব্যাচ (${batch.displayDate}) সফলভাবে মুছে ফেলা হয়েছে এবং বকেয়া রিভার্স করা হয়েছে!`);
+    } catch (err: any) {
+      setErrorMessage(`ব্যাচ রিমুভ ব্যর্থ হয়েছে: ${err?.message || 'Unknown error'}`);
+    } finally {
+      setIsRollingBack(false);
+    }
+  };
+
+  // Remove a single item from an Import Batch
+  const handleDeleteBatchItem = async (batchId: string, item: PosImportBatchItem) => {
+    try {
+      // 1. Revert Due if DUE
+      if (item.paymentMode === 'DUE') {
+        const key = item.airman_id || item.bdNo || String(item.bdNo).replace(/\D/g, '');
+        const targetMem = members.find(m => 
+          m.airman_id === key || 
+          m['BD No'] === key || 
+          String(m['BD No'] || '').replace(/\D/g, '') === String(key).replace(/\D/g, '')
+        );
+        if (targetMem) {
+          const curDue = Number(targetMem.Due ?? targetMem.due ?? 0);
+          const newDue = Math.max(0, curDue - item.totalAmount);
+          targetMem.Due = newDue;
+          targetMem.due = newDue;
+          await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', targetMem.airman_id);
+          setCanteenMembersCache(members);
+        }
+      }
+
+      // 2. Remove tx from canteen_txs
+      recordDeletedTxId(item.id);
+      const rawTxs = localStorage.getItem('canteen_txs');
+      let txs: any[] = rawTxs ? JSON.parse(rawTxs) : [];
+      const updatedTxs = txs.filter(t => String(t.id) !== String(item.id));
+      localStorage.setItem('canteen_txs', JSON.stringify(updatedTxs));
+      await pushKeyToCloud('canteen_txs', updatedTxs).catch(() => {});
+
+      // 3. Update history
+      const nextHistory = posImportHistory.map(b => {
+        if (b.id !== batchId) return b;
+        const newItems = b.items.filter(it => it.id !== item.id);
+        const newTotal = newItems.reduce((sum, it) => sum + it.totalAmount, 0);
+        const newDue = newItems.filter(it => it.paymentMode === 'DUE').reduce((sum, it) => sum + it.totalAmount, 0);
+        return {
+          ...b,
+          totalTransactions: newItems.length,
+          totalAmount: newTotal,
+          dueAmount: newDue,
+          createdTransactionIds: b.createdTransactionIds.filter(id => id !== item.id),
+          items: newItems
+        };
+      }).filter(b => b.items.length > 0);
+
+      setPosImportHistory(nextHistory);
+      localStorage.setItem('canteen_pos_import_history', JSON.stringify(nextHistory));
+      await pushKeyToCloud('canteen_pos_import_history', nextHistory).catch(() => {});
+
+      // 4. Dispatch events
+      window.dispatchEvent(new Event('canteen_txs_updated'));
+      window.dispatchEvent(new Event('canteen_pos_import_history_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
+
+      setSuccessMessage('ট্রানজ্যাকশন সফলভাবে মুছে ফেলা হয়েছে!');
+    } catch (err: any) {
+      setErrorMessage(`রিমুভ ব্যর্থ হয়েছে: ${err?.message || 'Unknown error'}`);
+    }
+  };
+
+  // Edit and Save a Transaction from an Import Batch
+  const handleSaveEditBatchItem = async (batchId: string, originalItem: PosImportBatchItem, form: Partial<PosImportBatchItem>) => {
+    try {
+      const newAmount = Number(form.totalAmount !== undefined ? form.totalAmount : originalItem.totalAmount);
+      const newMode = (form.paymentMode || originalItem.paymentMode || 'DUE') as 'DUE' | 'PAID';
+      const newDate = form.date || originalItem.date;
+      const newItemsStr = form.items || originalItem.items;
+
+      // Due Adjustment
+      const oldDue = originalItem.paymentMode === 'DUE' ? originalItem.totalAmount : 0;
+      const nextDue = newMode === 'DUE' ? newAmount : 0;
+      const netDueDiff = nextDue - oldDue;
+
+      if (netDueDiff !== 0) {
+        const key = originalItem.airman_id || originalItem.bdNo || String(originalItem.bdNo).replace(/\D/g, '');
+        const targetMem = members.find(m => 
+          m.airman_id === key || 
+          m['BD No'] === key || 
+          String(m['BD No'] || '').replace(/\D/g, '') === String(key).replace(/\D/g, '')
+        );
+        if (targetMem) {
+          const curDue = Number(targetMem.Due ?? targetMem.due ?? 0);
+          const updatedDue = Math.max(0, curDue + netDueDiff);
+          targetMem.Due = updatedDue;
+          targetMem.due = updatedDue;
+          await supabase.from('Canteen_Member').update({ Due: updatedDue }).eq('airman_id', targetMem.airman_id);
+          setCanteenMembersCache(members);
+        }
+      }
+
+      // Update in canteen_txs
+      const rawTxs = localStorage.getItem('canteen_txs');
+      let txs: any[] = rawTxs ? JSON.parse(rawTxs) : [];
+      const updatedTxs = txs.map(t => {
+        if (String(t.id) === String(originalItem.id)) {
+          return {
+            ...t,
+            date: formatCanteenDate(newDate),
+            amount: newAmount,
+            status: newMode,
+            paymentStatus: newMode,
+            paymentMethod: newMode === 'PAID' ? 'CASH' : 'DUE',
+            gateway: newMode === 'PAID' ? 'CASH' : 'DUE',
+            items: newItemsStr
+          };
+        }
+        return t;
+      });
+      localStorage.setItem('canteen_txs', JSON.stringify(updatedTxs));
+      await pushKeyToCloud('canteen_txs', updatedTxs).catch(() => {});
+
+      // Update in History batch
+      const nextHistory = posImportHistory.map(b => {
+        if (b.id !== batchId) return b;
+        const newItems = b.items.map(it => {
+          if (it.id === originalItem.id) {
+            return {
+              ...it,
+              date: newDate,
+              items: newItemsStr,
+              totalAmount: newAmount,
+              paymentMode: newMode
+            };
+          }
+          return it;
+        });
+        const newTotal = newItems.reduce((sum, it) => sum + it.totalAmount, 0);
+        const newDueTotal = newItems.filter(it => it.paymentMode === 'DUE').reduce((sum, it) => sum + it.totalAmount, 0);
+        return {
+          ...b,
+          totalAmount: newTotal,
+          dueAmount: newDueTotal,
+          items: newItems
+        };
+      });
+
+      setPosImportHistory(nextHistory);
+      localStorage.setItem('canteen_pos_import_history', JSON.stringify(nextHistory));
+      await pushKeyToCloud('canteen_pos_import_history', nextHistory).catch(() => {});
+
+      // Dispatch events
+      window.dispatchEvent(new Event('canteen_txs_updated'));
+      window.dispatchEvent(new Event('canteen_pos_import_history_updated'));
+      window.dispatchEvent(new Event('canteen_state_updated'));
+      window.dispatchEvent(new Event('storage'));
+
+      setEditingItem(null);
+      setSuccessMessage('ট্রানজ্যাকশন সফলভাবে এডিট ও সেভ করা হয়েছে!');
+    } catch (err: any) {
+      setErrorMessage(`এডিট সেভ ব্যর্থ হয়েছে: ${err?.message || 'Unknown error'}`);
+    }
+  };
+
+  // Inline correction handlers in Preview Table
+  const handleAssignMemberToRow = (rowId: string, memberAirmanId: string) => {
+    const target = members.find(m => m.airman_id === memberAirmanId || m['BD No'] === memberAirmanId);
+    if (!target) return;
+    setParsedRows(prev => prev.map(r => {
+      if (r.rowId === rowId) {
+        const rank = target.Rank || target.rank || '';
+        const name = target.Surname || target.Name || target.name || '';
+        const bd = target['BD No'] || target.bdNo || target.airman_id || '';
+        const wasItemWarning = r.warning?.includes('Item');
+        return {
+          ...r,
+          matchedMember: target,
+          bdNo: bd,
+          rank: rank,
+          memberName: name,
+          isValid: !wasItemWarning,
+          warning: wasItemWarning ? r.warning?.split('; ').filter(w => w.includes('Item')).join('; ') : undefined
+        };
+      }
+      return r;
+    }));
+  };
+
+  const handleAssignMenuItemToRow = (rowId: string, menuItemId: string) => {
+    const target = catalog.find(c => c.id === menuItemId || c.name === menuItemId);
+    if (!target) return;
+    setParsedRows(prev => prev.map(r => {
+      if (r.rowId === rowId) {
+        const unitPrice = Number(target.price || 0) || r.unitPrice;
+        const total = r.qty * unitPrice;
+        const wasMemberWarning = r.warning?.includes('Member');
+        return {
+          ...r,
+          matchedMenuItem: target,
+          menuItemName: target.name || target.name_en || r.menuItemName,
+          unitPrice,
+          totalAmount: total,
+          isValid: !wasMemberWarning,
+          warning: wasMemberWarning ? r.warning?.split('; ').filter(w => w.includes('Member')).join('; ') : undefined
+        };
+      }
+      return r;
+    }));
+  };
+
+  const filteredBatches = useMemo(() => {
+    if (!historySearchTerm.trim()) return posImportHistory;
+    const term = historySearchTerm.toLowerCase().trim();
+    return posImportHistory.filter(b => {
+      const matchBatch = 
+        (b.displayDate || '').toLowerCase().includes(term) ||
+        (b.sourceName || '').toLowerCase().includes(term) ||
+        (b.templateType || '').toLowerCase().includes(term);
+      if (matchBatch) return true;
+      return (b.items || []).some(it => 
+        (it.memberName || '').toLowerCase().includes(term) ||
+        (it.bdNo || '').toLowerCase().includes(term) ||
+        (it.items || '').toLowerCase().includes(term) ||
+        (it.date || '').toLowerCase().includes(term)
+      );
+    });
+  }, [posImportHistory, historySearchTerm]);
+
+  const historyTotals = useMemo(() => {
+    const totalBatches = posImportHistory.length;
+    const totalTxs = posImportHistory.reduce((sum, b) => sum + (b.totalTransactions || 0), 0);
+    const totalAmount = posImportHistory.reduce((sum, b) => sum + (b.totalAmount || 0), 0);
+    const dueAmount = posImportHistory.reduce((sum, b) => sum + (b.dueAmount || 0), 0);
+    return { totalBatches, totalTxs, totalAmount, dueAmount };
+  }, [posImportHistory]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
@@ -2221,6 +2741,45 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           </div>
         </div>
 
+        {/* Navigation Tabs */}
+        <div className="flex items-center justify-between px-6 bg-slate-950/40 border-b border-slate-800 shrink-0">
+          <div className="flex items-center space-x-2">
+            <button
+              type="button"
+              onClick={() => setActiveTab('IMPORT')}
+              className={`flex items-center space-x-2 px-4 py-2.5 border-b-2 font-black text-xs uppercase tracking-wider transition-all cursor-pointer ${
+                activeTab === 'IMPORT'
+                  ? 'border-emerald-400 text-emerald-300 bg-emerald-950/30'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Upload className="w-3.5 h-3.5" />
+              <span>১. নতুন ইমপোর্ট (New Import)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('HISTORY')}
+              className={`flex items-center space-x-2 px-4 py-2.5 border-b-2 font-black text-xs uppercase tracking-wider transition-all cursor-pointer ${
+                activeTab === 'HISTORY'
+                  ? 'border-indigo-400 text-indigo-300 bg-indigo-950/30'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <History className="w-3.5 h-3.5" />
+              <span>২. ইমপোর্ট হিস্টোরি (Import History)</span>
+              {posImportHistory.length > 0 && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-indigo-900/80 text-indigo-200 border border-indigo-500/30">
+                  {posImportHistory.length}
+                </span>
+              )}
+            </button>
+          </div>
+
+          <div className="text-[11px] text-slate-400 font-medium hidden sm:block">
+            {activeTab === 'IMPORT' ? 'এক্সেল ফাইল নির্বাচন বা টেমপ্লেট ডাউনলোড করুন' : 'পূর্বে ইমপোর্ট করা ডাটা দেখা, এডিট ও রিমুভ করুন'}
+          </div>
+        </div>
+
         {/* Content Body */}
         <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5">
 
@@ -2239,8 +2798,11 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             </div>
           )}
 
-          {/* Step 1: Upload Box (If no file parsed yet) */}
-          {parsedRows.length === 0 ? (
+          {/* Import Tab vs History Tab */}
+          {activeTab === 'IMPORT' ? (
+            <>
+              {/* Step 1: Upload Box (If no file parsed yet) */}
+              {parsedRows.length === 0 ? (
             <div className="space-y-4">
               <div
                 onDragOver={(e) => e.preventDefault()}
@@ -2559,18 +3121,53 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                             />
                           </td>
                           <td className="px-3 py-2 font-mono text-slate-400">{row.date}</td>
-                          <td className="px-3 py-2 font-bold text-white">{row.bdNo}</td>
+                          <td className="px-3 py-2 font-bold text-white">
+                            {row.bdNo}
+                            {!row.matchedMember && (
+                              <span className="block text-[10px] text-amber-400 font-normal">অপরিচিত</span>
+                            )}
+                          </td>
                           <td className="px-3 py-2">
                             <div className="flex items-center space-x-1.5">
                               {row.rank && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-500/30 font-bold">
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-500/30 font-bold shrink-0">
                                   {row.rank}
                                 </span>
                               )}
                               <span className="font-bold truncate max-w-[140px]">{row.memberName}</span>
                             </div>
+                            {!row.matchedMember && (
+                              <select
+                                value=""
+                                onChange={(e) => handleAssignMemberToRow(row.rowId, e.target.value)}
+                                className="mt-1 block w-full max-w-[160px] bg-amber-950/80 border border-amber-500/60 text-amber-200 text-[10px] rounded px-1.5 py-0.5 focus:outline-none cursor-pointer"
+                              >
+                                <option value="">সদস্য সিলেক্ট করুন...</option>
+                                {members.map(m => (
+                                  <option key={m.airman_id} value={m.airman_id}>
+                                    {m.Rank || ''} {m.Surname || m.Name || ''} ({m['BD No'] || m.airman_id})
+                                  </option>
+                                ))}
+                              </select>
+                            )}
                           </td>
-                          <td className="px-3 py-2 font-bold text-emerald-400">{row.menuItemName}</td>
+                          <td className="px-3 py-2 font-bold text-emerald-400">
+                            <div>{row.menuItemName}</div>
+                            {!row.matchedMenuItem && (
+                              <select
+                                value=""
+                                onChange={(e) => handleAssignMenuItemToRow(row.rowId, e.target.value)}
+                                className="mt-1 block w-full max-w-[160px] bg-amber-950/80 border border-amber-500/60 text-amber-200 text-[10px] rounded px-1.5 py-0.5 focus:outline-none cursor-pointer"
+                              >
+                                <option value="">মেনু আইটেম সিলেক্ট...</option>
+                                {catalog.map(c => (
+                                  <option key={c.id || c.name} value={c.id || c.name}>
+                                    {c.name_bn || c.name} (৳{c.price || 0})
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                          </td>
                           <td className="px-3 py-2 text-center font-bold">{row.qty}</td>
                           <td className="px-3 py-2 text-right font-mono text-slate-400">৳{row.unitPrice}</td>
                           <td className="px-3 py-2 text-right font-mono font-bold text-white">৳{row.totalAmount}</td>
@@ -2647,14 +3244,222 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
               </div>
             </div>
           )}
+          </>
+          ) : (
+            /* Import History Tab Content */
+            <div className="space-y-4">
+              {/* Top Stats Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">মোট ইম্পোর্ট সেশন</span>
+                  <span className="text-lg font-black text-white">{historyTotals.totalBatches} টি</span>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">মোট এন্ট্রি সংখ্যা</span>
+                  <span className="text-lg font-black text-indigo-400">{historyTotals.totalTxs} টি</span>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">মোট বিক্রয়</span>
+                  <span className="text-lg font-black text-emerald-400">৳{historyTotals.totalAmount.toLocaleString()}</span>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">মোট বকেয়া</span>
+                  <span className="text-lg font-black text-amber-400">৳{historyTotals.dueAmount.toLocaleString()}</span>
+                </div>
+              </div>
+
+              {/* History Search Bar */}
+              <div className="flex items-center space-x-3 bg-slate-950/60 p-3 rounded-2xl border border-slate-800">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={historySearchTerm}
+                    onChange={(e) => setHistorySearchTerm(e.target.value)}
+                    placeholder="হিস্টোরি খুঁজুন: সদস্যের নাম, বিডি নম্বর, তারিখ বা আইটেম..."
+                    className="w-full bg-slate-900 border border-slate-700/80 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
+                {historySearchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setHistorySearchTerm('')}
+                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300 cursor-pointer"
+                  >
+                    রিসেট
+                  </button>
+                )}
+              </div>
+
+              {/* Batches List */}
+              {filteredBatches.length === 0 ? (
+                <div className="p-12 text-center bg-slate-950/30 rounded-3xl border border-slate-800/80 space-y-3">
+                  <div className="w-12 h-12 mx-auto rounded-2xl bg-slate-800 text-slate-400 flex items-center justify-center">
+                    <History className="w-6 h-6" />
+                  </div>
+                  <h4 className="text-sm font-bold text-slate-300">কোনো ইম্পোর্ট হিস্টোরি পাওয়া যায়নি</h4>
+                  <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                    {historySearchTerm
+                      ? `"${historySearchTerm}" সম্পর্কিত কোনো রেকর্ড নেই। ফিল্টার মুছে আবার চেষ্টা করুন।`
+                      : 'নতুন এক্সেল ফাইল ইম্পোর্ট করলে এখানে স্বয়ংক্রিয়ভাবে হিস্টোরি রেকর্ড সেভ হবে, যা পরবর্তীতে প্রয়োজনমতো এডিট বা রিমুভ করতে পারবেন।'}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3.5">
+                  {filteredBatches.map((batch) => {
+                    const isExpanded = expandedBatchId === batch.id;
+                    return (
+                      <div
+                        key={batch.id}
+                        className="bg-slate-950/70 border border-slate-800 hover:border-slate-700 rounded-2xl overflow-hidden transition-all shadow-md"
+                      >
+                        {/* Batch Card Header */}
+                        <div className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-900/60">
+                          <div className="flex items-start space-x-3">
+                            <div className="p-2.5 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 shrink-0 mt-0.5">
+                              <History className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-black text-white text-sm">{batch.displayDate}</span>
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 font-mono">
+                                  {batch.templateType === 'MEMBER_WISE_MATRIX' ? 'সদস্য ভিত্তিক' : batch.templateType === 'DATE_WISE_MATRIX' ? 'তারিখ ভিত্তিক' : 'লিস্ট'}
+                                </span>
+                                {batch.appliedMemberDue && (
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-500/30 font-bold">
+                                    বকেয়া সমন্বিত
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-xs text-slate-400 mt-1 flex items-center gap-3 flex-wrap">
+                                <span>উৎস: <strong className="text-slate-200">{batch.sourceName}</strong></span>
+                                <span>•</span>
+                                <span>মোট এন্ট্রি: <strong className="text-indigo-300">{batch.totalTransactions}</strong> টি</span>
+                                <span>•</span>
+                                <span>মোট বিক্রয়: <strong className="text-emerald-400">৳{batch.totalAmount.toLocaleString()}</strong></span>
+                                <span>•</span>
+                                <span>বকেয়া: <strong className="text-amber-400">৳{batch.dueAmount.toLocaleString()}</strong></span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center space-x-2 self-end md:self-center shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => setExpandedBatchId(isExpanded ? null : batch.id)}
+                              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 transition-colors cursor-pointer"
+                            >
+                              {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                              <span>{isExpanded ? 'লুকান' : 'বিস্তারিত ও এডিট'}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setRollbackBatch(batch)}
+                              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-rose-950/80 hover:bg-rose-900 border border-rose-500/40 text-rose-300 text-xs font-bold transition-colors cursor-pointer"
+                              title="এই ব্যাচটি রিমুভ করুন ও বকেয়া রিভার্স করুন"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                              <span>রিমুভ (Remove)</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Expanded Batch Items Table */}
+                        {isExpanded && (
+                          <div className="border-t border-slate-800 p-3 bg-slate-950/90 overflow-x-auto max-h-[380px]">
+                            <table className="w-full text-left text-xs whitespace-nowrap">
+                              <thead className="bg-slate-900 text-slate-400 font-bold border-b border-slate-800 sticky top-0 z-10">
+                                <tr>
+                                  <th className="px-3 py-2">তারিখ (Date)</th>
+                                  <th className="px-3 py-2">বিডি নং (BD)</th>
+                                  <th className="px-3 py-2">সদস্যের নাম (Member)</th>
+                                  <th className="px-3 py-2">আইটেম বিবরণ (Items)</th>
+                                  <th className="px-3 py-2 text-right">টাকা (Amount)</th>
+                                  <th className="px-3 py-2 text-center">পেমেন্ট মোড</th>
+                                  <th className="px-3 py-2 text-center">অ্যাকশন</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-800/60 text-slate-300">
+                                {batch.items.map((item) => (
+                                  <tr key={item.id} className="hover:bg-slate-800/40">
+                                    <td className="px-3 py-2 font-mono text-slate-400">{item.date}</td>
+                                    <td className="px-3 py-2 font-bold text-white">{item.bdNo}</td>
+                                    <td className="px-3 py-2">
+                                      <span className="font-bold">{item.memberName}</span>
+                                      {item.rank && <span className="ml-1 text-[10px] text-indigo-300 font-bold">({item.rank})</span>}
+                                    </td>
+                                    <td className="px-3 py-2 text-emerald-300 truncate max-w-[220px]" title={item.items}>
+                                      {item.items}
+                                    </td>
+                                    <td className="px-3 py-2 text-right font-mono font-bold text-white">
+                                      ৳{item.totalAmount.toLocaleString()}
+                                    </td>
+                                    <td className="px-3 py-2 text-center">
+                                      <span
+                                        className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                                          item.paymentMode === 'PAID'
+                                            ? 'bg-emerald-950 text-emerald-300 border border-emerald-500/30'
+                                            : 'bg-amber-950 text-amber-300 border border-amber-500/30'
+                                        }`}
+                                      >
+                                        {item.paymentMode}
+                                      </span>
+                                    </td>
+                                    <td className="px-3 py-2 text-center">
+                                      <div className="flex items-center justify-center space-x-1.5">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setEditingItem({ batchId: batch.id, item });
+                                            setEditFormData({
+                                              date: item.date,
+                                              items: item.items,
+                                              totalAmount: item.totalAmount,
+                                              paymentMode: item.paymentMode
+                                            });
+                                          }}
+                                          className="p-1 rounded bg-indigo-950/70 hover:bg-indigo-900 text-indigo-300 border border-indigo-500/30 transition-colors cursor-pointer"
+                                          title="এডিট করুন"
+                                        >
+                                          <Edit3 className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteBatchItem(batch.id, item)}
+                                          className="p-1 rounded bg-rose-950/70 hover:bg-rose-900 text-rose-300 border border-rose-500/30 transition-colors cursor-pointer"
+                                          title="এই এন্ট্রিটি মুছে ফেলুন"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Footer */}
         <div className="px-6 py-4 border-t border-slate-800 bg-slate-950/80 flex items-center justify-between shrink-0">
           <div className="text-xs text-slate-400">
-            {parsedRows.length > 0 && (
+            {activeTab === 'IMPORT' ? (
+              parsedRows.length > 0 && (
+                <span>
+                  {summary.count} rows selected • Total: <strong className="text-white">৳{summary.totalAmount.toLocaleString()}</strong>
+                </span>
+              )
+            ) : (
               <span>
-                {summary.count} rows selected • Total: <strong className="text-white">৳{summary.totalAmount.toLocaleString()}</strong>
+                মোট <strong className="text-indigo-300">{posImportHistory.length}</strong> টি ব্যাচে <strong className="text-white">{historyTotals.totalTxs}</strong> টি ট্রানজ্যাকশন সংরক্ষিত
               </span>
             )}
           </div>
@@ -2663,13 +3468,13 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              disabled={isApplying}
+              disabled={isApplying || isRollingBack}
               className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-colors cursor-pointer"
             >
-              Cancel
+              {activeTab === 'HISTORY' ? 'বন্ধ করুন (Close)' : 'Cancel'}
             </button>
 
-            {parsedRows.length > 0 && (
+            {activeTab === 'IMPORT' && parsedRows.length > 0 && (
               <button
                 type="button"
                 onClick={handleExecuteImport}
@@ -2691,6 +3496,151 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             )}
           </div>
         </div>
+
+        {/* Edit Batch Item Modal */}
+        {editingItem && (
+          <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+            <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                  <Edit3 className="w-4 h-4 text-indigo-400" />
+                  <span>ইম্পোর্ট ট্রানজ্যাকশন এডিট</span>
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => setEditingItem(null)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">তারিখ (Date):</label>
+                  <input
+                    type="date"
+                    value={editFormData.date || ''}
+                    onChange={(e) => setEditFormData({ ...editFormData, date: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">সদস্যের নাম ও বিডি:</label>
+                  <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-300 font-bold">
+                    {editingItem.item.memberName} {editingItem.item.rank ? `(${editingItem.item.rank})` : ''} • BD: {editingItem.item.bdNo}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">আইটেম বিবরণ (Items Description):</label>
+                  <input
+                    type="text"
+                    value={editFormData.items || ''}
+                    onChange={(e) => setEditFormData({ ...editFormData, items: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
+                    placeholder="যেমন: পরোটা (2), ডিম ভাজি (1)"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1">মোট টাকা (Amount ৳):</label>
+                    <input
+                      type="number"
+                      value={editFormData.totalAmount || 0}
+                      onChange={(e) => setEditFormData({ ...editFormData, totalAmount: parseFloat(e.target.value) || 0 })}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono font-bold focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 font-bold mb-1">পেমেন্ট মোড:</label>
+                    <select
+                      value={editFormData.paymentMode || 'DUE'}
+                      onChange={(e) => setEditFormData({ ...editFormData, paymentMode: e.target.value as 'DUE' | 'PAID' })}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold focus:outline-none focus:border-indigo-500 cursor-pointer"
+                    >
+                      <option value="DUE">বকেয়া (DUE)</option>
+                      <option value="PAID">নগদ পরিশোধ (PAID)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end space-x-2 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setEditingItem(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300 cursor-pointer"
+                >
+                  বাতিল
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSaveEditBatchItem(editingItem.batchId, editingItem.item, editFormData)}
+                  className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white shadow-md shadow-indigo-600/30 cursor-pointer"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>সংরক্ষণ করুন</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Rollback / Remove Batch Confirmation Modal */}
+        {rollbackBatch && (
+          <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+            <div className="bg-slate-900 border border-rose-500/40 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+              <div className="flex items-center space-x-3 text-rose-400">
+                <div className="p-2.5 rounded-2xl bg-rose-500/20 border border-rose-500/30">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-black text-white uppercase tracking-wider">ইম্পোর্ট ব্যাচ রিমুভ নিশ্চিতকরণ</h4>
+                  <p className="text-[11px] text-slate-400">এই অ্যাকশনটি সাবধানে সম্পন্ন করুন</p>
+                </div>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 text-xs space-y-2 text-slate-300">
+                <div>তারিখ: <strong className="text-white">{rollbackBatch.displayDate}</strong></div>
+                <div>উৎস: <strong className="text-white">{rollbackBatch.sourceName}</strong></div>
+                <div>মোট এন্ট্রি: <strong className="text-indigo-300">{rollbackBatch.totalTransactions}</strong> টি</div>
+                <div>মোট টাকার পরিমাণ: <strong className="text-emerald-400">৳{rollbackBatch.totalAmount.toLocaleString()}</strong></div>
+              </div>
+
+              <div className="text-xs text-rose-300/90 bg-rose-950/40 p-3 rounded-xl border border-rose-500/30">
+                ⚠️ নিশ্চিত করলে এই ব্যাচের সকল সেলস ট্রানজ্যাকশন মুছে ফেলা হবে এবং সংশ্লিষ্ট সদস্যদের ব্যালেন্স থেকে বকেয়া টাকা স্বয়ংক্রিয়ভাবে বাদ (Revert) দেওয়া হবে।
+              </div>
+
+              <div className="flex items-center justify-end space-x-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setRollbackBatch(null)}
+                  disabled={isRollingBack}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300 cursor-pointer"
+                >
+                  না, বাতিল করুন
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteBatch(rollbackBatch, true)}
+                  disabled={isRollingBack}
+                  className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-xs font-bold text-white shadow-md shadow-rose-600/30 disabled:opacity-50 cursor-pointer"
+                >
+                  {isRollingBack ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="w-3.5 h-3.5" />
+                  )}
+                  <span>হ্যাঁ, মুছে ফেলুন</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
       </div>
     </div>

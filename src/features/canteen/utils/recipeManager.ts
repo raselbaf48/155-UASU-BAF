@@ -122,21 +122,35 @@ export function getRawItemUserOverrides(): Record<string, { packSize?: number; s
 
 export function saveRawItemUserOverride(
   itemId: string,
-  override: { packSize?: number; subUnit?: string; hasSubUnits?: boolean; unit?: string }
+  override: { packSize?: number; subUnit?: string; hasSubUnits?: boolean; unit?: string; name?: string; nameBn?: string }
 ): void {
   if (!itemId || typeof window === 'undefined') return;
   try {
     const current = getRawItemUserOverrides();
-    const updated = {
-      ...current,
-      [itemId]: {
-        ...(current[itemId] || {}),
-        ...override,
-        updatedAt: new Date().toISOString()
-      }
+    const rawId = String(itemId).trim();
+    const cleanId = rawId.toLowerCase();
+    const normName = normalizeRawItemName(override.name || '');
+    const normBn = normalizeRawItemName(override.nameBn || '');
+    const entry = {
+      ...(current[rawId] || current[cleanId] || {}),
+      ...override,
+      updatedAt: new Date().toISOString()
     };
+    const updated: Record<string, any> = {
+      ...current,
+      [rawId]: entry,
+      [cleanId]: entry
+    };
+    if (normName) {
+      updated[normName] = entry;
+      updated[`name_${normName}`] = entry;
+    }
+    if (normBn) {
+      updated[normBn] = entry;
+      updated[`bn_${normBn}`] = entry;
+    }
     localStorage.setItem(RAW_ITEMS_USER_OVERRIDES_KEY, JSON.stringify(updated));
-    // Immediately persist to cloud
+    // Immediately persist to cloud app_settings
     try {
       Promise.resolve(
         supabase.from('app_settings').upsert({
@@ -171,7 +185,16 @@ export const getRawItemSubUnitInfo = (item?: Partial<RawInventoryItem> | null): 
   }
   const meta = decodeNotesMeta(item.notes);
   const overrides = getRawItemUserOverrides();
-  const userOverride = item.id ? overrides[item.id] : undefined;
+  const rawId = String(item.id || '').trim();
+  const cleanId = rawId.toLowerCase();
+  const normKey = normalizeRawItemName(item.name || '');
+  const bnKey = normalizeRawItemName(item.nameBn || '');
+  const userOverride = (rawId && overrides[rawId]) ||
+    (cleanId && overrides[cleanId]) ||
+    (normKey && overrides[`name_${normKey}`]) ||
+    (normKey && overrides[normKey]) ||
+    (bnKey && overrides[`bn_${bnKey}`]) ||
+    (bnKey && overrides[bnKey]);
 
   // CRITICAL FIX: If user explicitly disabled hasSubUnits (either on item, meta, or override), respect it!
   if (userOverride?.hasSubUnits === false || item.hasSubUnits === false || meta.hasSubUnits === false) {
@@ -469,7 +492,7 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
     lastRestockedDate: '2026-09-18',
     supplier: 'Olympic / Dan Cake',
     notes: 'Canteen counter biscuits',
-    packSize: 24,
+    packSize: 8,
     subUnit: 'pcs',
     hasSubUnits: true
   },
@@ -1654,7 +1677,12 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
       ''
     ).toLowerCase().trim();
     const userOverrides = getRawItemUserOverrides();
-    const userOverride = (cleanId && userOverrides[cleanId]) || (idKey && userOverrides[idKey]);
+    const userOverride = (cleanId && userOverrides[cleanId]) ||
+      (idKey && userOverrides[idKey]) ||
+      (normKey && userOverrides[`name_${normKey}`]) ||
+      (normKey && userOverrides[normKey]) ||
+      (bnKey && userOverrides[`bn_${bnKey}`]) ||
+      (bnKey && userOverrides[bnKey]);
     const explicitPackSize = Number(userOverride?.packSize) || Number(item.packSize) || Number(meta.packSize) || 0;
 
     const isPcs = u === 'pcs' || u === 'pc' || u === 'piece' || u === 'টি' || u === 'টা';
