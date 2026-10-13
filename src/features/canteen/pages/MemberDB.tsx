@@ -1495,19 +1495,57 @@ export const MemberDB: React.FC<MemberDBProps> = ({
         String(tx.items || '').includes('Changed amount from');
 
       if (!isAmountChangeCorrection) {
-        if (tx.amount !== undefined && tx.amount !== null && !isNaN(Number(tx.amount)) && Number(tx.amount) > 0) {
-          salesTotal += Number(tx.amount);
-        } else if (Array.isArray(tx.soldItems) && tx.soldItems.length > 0) {
+        let computedCharge: number | null = null;
+
+        if (Array.isArray(tx.soldItems) && tx.soldItems.length > 0) {
           const liveGross = tx.soldItems.reduce((sum: number, si: any) => {
-            const name = String(si.menuItemName || si.name || '').trim();
+            const rawName = String(si.menuItemName || si.name || '').trim();
+            const name = formatItemNameBn(rawName) || rawName;
             const qty = Number(si.qty || si.quantity || 1);
+            const idMatch = (si.menuItemId || si.id)
+              ? menuCatalog.find((c: any) => String(c.id) === String(si.menuItemId || si.id))
+              : null;
+            const idRate = idMatch ? Number(idMatch.price ?? idMatch.Price) : 0;
+            const liveCatRate = idRate > 0 ? idRate : (lookupCatalogPrice(name, menuCatalog) || lookupCatalogPrice(si.name || '', menuCatalog));
             const recordedPrice = Number(si.price ?? si.rate ?? 0);
-            const liveRate = lookupCatalogPrice(name, menuCatalog) || lookupCatalogPrice(si.name || '', menuCatalog);
-            const rate = recordedPrice > 0 ? recordedPrice : (liveRate > 0 ? liveRate : 0);
+            const rate = liveCatRate > 0 ? liveCatRate : (recordedPrice > 0 ? recordedPrice : 0);
             return sum + (rate * qty);
           }, 0);
           const discount = Number(tx.discount || 0);
-          salesTotal += Math.max(0, liveGross - discount);
+          computedCharge = Math.max(0, liveGross - discount);
+        } else if (tx.items && typeof tx.items === 'string' && (tx.items.includes('(') || tx.items.includes(','))) {
+          const parts = tx.items.split(',').map((s: string) => s.trim()).filter(Boolean);
+          let liveSum = 0;
+          let hasCatalogMatch = false;
+          for (const part of parts) {
+            const match = part.match(/^(.+?)\s*\(([0-9]+)\)$/);
+            if (match) {
+              const nm = formatItemNameBn(match[1].trim()) || match[1].trim();
+              const q = parseInt(match[2], 10) || 1;
+              const rate = lookupCatalogPrice(nm, menuCatalog);
+              if (rate > 0) {
+                liveSum += rate * q;
+                hasCatalogMatch = true;
+              }
+            } else {
+              const nm = formatItemNameBn(part.trim()) || part.trim();
+              const rate = lookupCatalogPrice(nm, menuCatalog);
+              if (rate > 0) {
+                liveSum += rate;
+                hasCatalogMatch = true;
+              }
+            }
+          }
+          if (hasCatalogMatch && liveSum > 0) {
+            const discount = Number(tx.discount || 0);
+            computedCharge = Math.max(0, liveSum - discount);
+          }
+        }
+
+        if (computedCharge !== null && computedCharge > 0) {
+          salesTotal += computedCharge;
+        } else if (tx.amount !== undefined && tx.amount !== null && !isNaN(Number(tx.amount)) && Number(tx.amount) > 0) {
+          salesTotal += Number(tx.amount);
         } else {
           salesTotal += Number(tx.amount || 0);
         }
@@ -1561,7 +1599,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
       ? Math.max(0, effectiveBilled - paid)
       : Number(profileMember.Due ?? profileMember.due ?? profileMember.baki ?? 0);
     return { totalBilled: effectiveBilled, totalPaid: paid, netDue };
-  }, [profileMember, profileTx]);
+  }, [profileMember, profileTx, menuCatalog]);
 
   // Pay Bill Modal state
   const [payBillMember, setPayBillMember] = useState<any | null>(null);

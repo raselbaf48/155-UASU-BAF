@@ -183,7 +183,7 @@ function parseDateWiseMatrixDate(dateStr: any, fallbackYear = 2026, fallbackMont
     'এপ্রিল': '04', 'april': '04', 'apr': '04',
     'মে': '05', 'may': '05',
     'জুন': '06', 'june': '06', 'jun': '06',
-    'জুলাই': '07', 'jul': '07', 'jul': '07',
+    'জুলাই': '07', 'july': '07', 'jul': '07',
     'আগস্ট': '08', 'আগষ্ট': '08', 'august': '08', 'aug': '08',
     'সেপ্টেম্বর': '09', 'september': '09', 'sep': '09', 'সেপ্টে': '09',
     'অক্টোবর': '10', 'october': '10', 'oct': '10', 'অক্টো': '10',
@@ -300,7 +300,7 @@ function applyExcelTableStyles(
         const isEvenDataRow = (R - headerRowIdx) % 2 === 0;
         const cellBgColor = isHeaderRow 
           ? '64748B' 
-          : (isEvenDataRow ? 'FFFFFF' : 'F1F5F9');
+          : (isEvenDataRow ? 'FFFFFF' : 'CBD5E1');
 
         cell.s = {
           font: {
@@ -340,23 +340,43 @@ function applyExcelTableStyles(
 
 /**
  * Calculates optimal autofit column widths for SutonnyMJ 16pt table sheets.
- * Guarantees headers and cell values are never clipped or overflowed.
+ * Guarantees menu item headers and cell values are never clipped or overflowed,
+ * while ignoring upper banners to keep table columns proportional.
  */
 function calculateSheetColWidths(
   rows: any[][],
   minWidths: Record<number, number> = {},
-  defaultMin = 9
+  defaultMin = 14,
+  tableStartRow = 0
 ): Array<{ wch: number }> {
   const maxLens: number[] = [];
-  rows.forEach(row => {
+  rows.forEach((row, rIdx) => {
     if (!Array.isArray(row)) return;
     row.forEach((cellVal, cIdx) => {
+      // If tableStartRow is specified and column is table column (cIdx >= 1),
+      // ignore banner rows before tableStartRow to avoid inflating column widths
+      if (tableStartRow > 0 && rIdx < tableStartRow && cIdx >= 1) return;
+
       let len = 0;
       if (cellVal !== null && cellVal !== undefined) {
+        let strVal = '';
         if (typeof cellVal === 'object' && cellVal.v !== undefined) {
-          len = String(cellVal.v).length;
+          strVal = String(cellVal.v);
         } else {
-          len = String(cellVal).length;
+          strVal = String(cellVal);
+        }
+        // Account for multiline text wrapped with newlines
+        const lines = strVal.split('\n');
+        for (const line of lines) {
+          const trimmed = line.trim();
+          let effectiveLen = trimmed.length;
+          try {
+            const decoded = fromSutonny(trimmed);
+            if (decoded && decoded.length > effectiveLen) {
+              effectiveLen = decoded.length;
+            }
+          } catch {}
+          if (effectiveLen > len) len = effectiveLen;
         }
       }
       maxLens[cIdx] = Math.max(maxLens[cIdx] || 0, len);
@@ -366,8 +386,8 @@ function calculateSheetColWidths(
   return maxLens.map((len, cIdx) => {
     if (cIdx === 0) return { wch: 4 }; // Spacer Col A
     const minW = minWidths[cIdx] || defaultMin;
-    const fitted = Math.max(minW, Math.ceil(len * 1.35) + 3);
-    return { wch: Math.min(fitted, 45) };
+    const fitted = Math.max(minW, Math.ceil(len * 1.5) + 5);
+    return { wch: Math.min(fitted, 48) };
   });
 }
 
@@ -407,7 +427,7 @@ async function downloadExcelWithNativeFreeze(
     zip.file('xl/styles.xml', stylesContent);
   }
 
-  // 2. Patch worksheets with freeze panes and bestFit="1" customWidth="1" attributes
+  // 2. Patch worksheets with freeze panes, bestFit="1" customWidth="1" attributes, and row autofit
   for (const fileName of Object.keys(zip.files)) {
     if (fileName.startsWith('xl/worksheets/sheet') && fileName.endsWith('.xml')) {
       const fileEntry = zip.file(fileName);
@@ -432,6 +452,10 @@ async function downloadExcelWithNativeFreeze(
             return `<col ${patchedAttrs}/>`;
           });
         }
+
+        // Enable native Row AutoFit in Excel by stripping customHeight="1" lock
+        // This allows Excel to dynamically calculate and auto-fit row height to cell contents
+        content = content.replace(/\s*customHeight=[\"']1[\"']/g, '');
 
         zip.file(fileName, content);
       }
@@ -1071,8 +1095,9 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         // Set dynamic autofit column widths formatted for SutonnyMJ 16
         worksheet['!cols'] = calculateSheetColWidths(
           rows,
-          { 0: 4, 1: 9, 2: 12, 3: 14, 4: 20 },
-          9
+          { 0: 4, 1: 10, 2: 12, 3: 14, 4: 22 },
+          11,
+          4
         );
 
         const officialWsRows: any[] = [];
@@ -1080,11 +1105,11 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         officialWsRows[1] = { hpt: 26 };
         officialWsRows[2] = { hpt: 26 };
         officialWsRows[3] = { hpt: 16 };
-        officialWsRows[4] = { hpt: 30 }; // Header Row 5
+        officialWsRows[4] = { hpt: 38 }; // Header Row 5 (generous height so wrapped text is never clipped)
         for (let r = 5; r < rows.length - 1; r++) {
           officialWsRows[r] = { hpt: 26 };
         }
-        officialWsRows[rows.length - 1] = { hpt: 28 }; // Total footer row
+        officialWsRows[rows.length - 1] = { hpt: 30 }; // Total footer row
         worksheet['!rows'] = officialWsRows;
 
         // Format and style cells (B5 to Last Col / Row)
@@ -1143,10 +1168,10 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           }
         }
 
-        // Data rows styling: Clean row-wise alternating colors (White #FFFFFF and Slate #F1F5F9), no column alternation
+        // Data rows styling: Clean row-wise alternating colors (White #FFFFFF and Slate #CBD5E1), no column alternation
         for (let r = 5; r < totalRows - 1; r++) {
           const isEvenRow = (r - 5) % 2 === 0;
-          const rowBgColor = isEvenRow ? 'FFFFFF' : 'F1F5F9';
+          const rowBgColor = isEvenRow ? 'FFFFFF' : 'CBD5E1';
           for (let c = 1; c < totalCols; c++) {
             const addr = XLSX.utils.encode_cell({ r, c });
             if (!worksheet[addr]) {
@@ -1412,11 +1437,13 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         // Freeze C Column (Columns A..C) and Row 5 (Rows 1..5)
         ws['!views'] = [{ state: 'frozen', ySplit: 5, xSplit: 3, topLeftCell: 'D6', activePane: 'bottomRight' }];
         ws['!freeze'] = { xSplit: 3, ySplit: 5, topLeftCell: 'D6' };
+
         // Dynamic autofit column widths formatted for SutonnyMJ 16
         ws['!cols'] = calculateSheetColWidths(
           rows,
-          { 0: 4, 1: 9, 2: 16 },
-          9
+          { 0: 4, 1: 10, 2: 18 },
+          14,
+          4
         );
 
         // Configure row properties: Holiday date rows (Friday, Saturday & custom holidays) are hidden by default.
@@ -1426,7 +1453,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         wsRows[1] = { hpt: 26 };
         wsRows[2] = { hpt: 26 };
         wsRows[3] = { hpt: 16 };
-        wsRows[4] = { hpt: 30 }; // Header Row 5
+        wsRows[4] = { hpt: 38 }; // Header Row 5 (generous height so wrapped text is never clipped)
 
         for (let d = 1; d <= daysInMonth; d++) {
           const r = 4 + d;
@@ -1441,7 +1468,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             wsRows[r] = { hidden: false, hpt: 26 };
           }
         }
-        wsRows[5 + daysInMonth] = { hpt: 28 }; // Total footer row
+        wsRows[5 + daysInMonth] = { hpt: 30 }; // Total footer row
         ws['!rows'] = wsRows;
 
         // Common black thin border for table cells
@@ -1455,7 +1482,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         const totalCols = dateHeaderRow.length;
         const totalRows = rows.length;
 
-        // Top banner styling (B1..C3)
+        // Top banner styling (B1..C3) - Separate unmerged cells as originally designed
         for (let r = 0; r <= 2; r++) {
           for (let c = 1; c <= 2; c++) {
             const addr = XLSX.utils.encode_cell({ r, c });
@@ -1485,7 +1512,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         }
 
         // Data rows styling (r=5 to totalRows-2):
-        // Clean row-wise alternating colors (White #FFFFFF and Slate #F1F5F9), no column alternation.
+        // Clean row-wise alternating colors (White #FFFFFF and Slate #CBD5E1), no column alternation.
         // Holiday rows (when manually unhidden in Excel) are styled with soft rose #FEE2E2 / #FECACA and bold text.
         for (let r = 5; r < totalRows - 1; r++) {
           const d = r - 4;
@@ -1496,7 +1523,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           const isEvenRow = (r - 5) % 2 === 0;
           const rowBgColor = isHoliday 
             ? (isEvenRow ? 'FEE2E2' : 'FECACA') 
-            : (isEvenRow ? 'FFFFFF' : 'F1F5F9');
+            : (isEvenRow ? 'FFFFFF' : 'CBD5E1');
 
           for (let c = 1; c < totalCols; c++) {
             const addr = XLSX.utils.encode_cell({ r, c });

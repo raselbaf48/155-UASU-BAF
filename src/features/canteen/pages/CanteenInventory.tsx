@@ -1355,7 +1355,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                               </div>
                            </div>
 
-                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                               <div>
                                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Category</label>
                                  <select 
@@ -1377,17 +1377,6 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                                     type="number" 
                                     value={modalFormData.price ?? ""}
                                     onChange={(e) => setModalFormData(prev => ({ ...prev, price: Number(e.target.value) || 0 }))}
-                                    className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
-                                 />
-                              </div>
-
-                              <div>
-                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Daily Stock / লিমিট</label>
-                                 <input 
-                                    type="number"
-                                    min="0"
-                                    value={modalFormData.stock ?? 50}
-                                    onChange={(e) => setModalFormData(prev => ({ ...prev, stock: Number(e.target.value) || 0 }))}
                                     className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
                                  />
                               </div>
@@ -1478,13 +1467,11 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
 
                            {/* Live Stock & Portions Breakdown Box */}
                            {(() => {
-                              const modalLimit = modalFormData.stock !== undefined ? Number(modalFormData.stock) : (selectedItemForModal.stock !== undefined ? Number(selectedItemForModal.stock) : undefined);
                               const stockInfo = calculateMenuItemStockInfo(
                                  selectedItemForModal.id, 
                                  modalFormData.name || selectedItemForModal.name, 
                                  availableRawItems, 
-                                 recipes,
-                                 modalLimit
+                                 recipes
                               );
                               return (
                                  <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 space-y-3">
@@ -1940,7 +1927,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                      </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                      <div>
                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Category</label>
                         <select 
@@ -1964,18 +1951,6 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                            onChange={(e) => setNewItem(prev => ({ ...prev, price: Number(e.target.value) || 0 }))}
                            className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold focus:outline-none"
                            placeholder="0"
-                        />
-                     </div>
-
-                     <div>
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Daily Stock / মজুত</label>
-                        <input 
-                           type="number" 
-                           min="0"
-                           value={(newItem as any).stock ?? 50}
-                           onChange={(e) => setNewItem(prev => ({ ...prev, stock: Number(e.target.value) || 0 } as any))}
-                           className="w-full bg-slate-950 border border-slate-800 text-white rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold focus:outline-none"
-                           placeholder="50"
                         />
                      </div>
                   </div>

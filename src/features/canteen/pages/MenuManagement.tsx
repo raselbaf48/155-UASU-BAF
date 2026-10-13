@@ -248,6 +248,43 @@ export const MenuManagement: React.FC = () => {
                   amount: newAmount
                 };
               }
+            } else if (tx.items && typeof tx.items === 'string') {
+              const normItems = normalizeCatalogKey(tx.items);
+              const isMatch = normItems.includes(normalizeCatalogKey(oldNameEn)) ||
+                normItems.includes(normalizeCatalogKey(nameEn)) ||
+                normItems.includes(normalizeCatalogKey(oldNameBn)) ||
+                normItems.includes(normalizeCatalogKey(nameBn));
+              if (isMatch) {
+                const parts = tx.items.split(',').map((s: string) => s.trim()).filter(Boolean);
+                let liveSum = 0;
+                let matched = false;
+                for (const part of parts) {
+                  const match = part.match(/^(.+?)\s*\(([0-9]+)\)$/);
+                  if (match) {
+                    const nm = match[1].trim();
+                    const q = parseInt(match[2], 10) || 1;
+                    const normPart = normalizeCatalogKey(nm);
+                    if (
+                      normPart === normalizeCatalogKey(oldNameEn) || 
+                      normPart === normalizeCatalogKey(nameEn) || 
+                      normPart === normalizeCatalogKey(oldNameBn) || 
+                      normPart === normalizeCatalogKey(nameBn)
+                    ) {
+                      liveSum += priceNum * q;
+                      matched = true;
+                    }
+                  }
+                }
+                if (matched && liveSum > 0) {
+                  txsChanged = true;
+                  const discount = Number(tx.discount || 0);
+                  return {
+                    ...tx,
+                    originalAmount: liveSum,
+                    amount: Math.max(0, liveSum - discount)
+                  };
+                }
+              }
             }
             return tx;
           });

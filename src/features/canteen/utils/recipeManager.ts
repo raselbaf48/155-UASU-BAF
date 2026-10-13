@@ -2536,20 +2536,10 @@ export const calculateMenuItemStockInfo = (
 
     const rawPossible = minPortions === Infinity ? 0 : Math.max(0, minPortions);
     let finalStock = rawPossible;
-    if (itemLimit !== undefined) {
+    if (itemLimit !== undefined && itemLimit > 0) {
       finalStock = Math.min(itemLimit, rawPossible);
     } else {
-      // For single ready-made / packaged items (e.g., Biscuit, Dry Cake, Butter Ban, Drink/Juice):
-      // Reflect true raw inventory stock (e.g. 95 packets of biscuits = 95 stock)!
-      const isSingleReadyMade = recipe.length === 1 && (
-        ['packet', 'pkt', 'pcs', 'piece', 'pieces', 'bottle', 'can', 'tin', 'box'].includes((recipe[0].unit || '').toLowerCase())
-      );
-      if (isSingleReadyMade) {
-        finalStock = rawPossible;
-      } else {
-        // Sensible canteen batch ceiling if no explicit limit set (prevents 1400/900 anomaly from raw storeroom bulk sacks)
-        finalStock = Math.min(50, rawPossible);
-      }
+      finalStock = rawPossible;
     }
 
     return {
