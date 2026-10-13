@@ -754,18 +754,35 @@ export const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
     notes: 'Soft sesame burger bun'
   },
   {
-    id: 'raw-26',
+    id: 'raw-11',
     name: 'Hotel Porota',
-    nameBn: 'হোটেল পরোটা',
+    nameBn: 'পরোটা হোটেল',
     category: 'Frozen Foods',
     itemType: 'READY_MADE',
     unit: 'pcs',
-    currentStock: 160,
-    minStockAlert: 40,
+    currentStock: 784,
+    minStockAlert: 5,
     unitCost: 10,
-    lastRestockedDate: '2026-09-22',
-    supplier: 'Hotel Paratha Supply',
+    lastRestockedDate: '2026-10-13',
+    supplier: 'Control Mor',
     notes: 'হাতে তৈরি সুস্বাদু হোটেল পরোটা (সরাসরি বিক্রয়যোগ্য)'
+  },
+  {
+    id: 'raw-1791895877958',
+    name: 'Frozen Porota',
+    nameBn: 'পরোটা (ফ্রোজেন)',
+    category: 'Frozen Foods',
+    itemType: 'RAW',
+    unit: 'packet',
+    currentStock: 10,
+    minStockAlert: 5,
+    unitCost: 260,
+    lastRestockedDate: '2026-10-13',
+    supplier: '',
+    notes: 'ফ্রোজেন পরোটা প্যাকেট (১ প্যাকেট = ২০ পিস)',
+    hasSubUnits: true,
+    packSize: 20,
+    subUnit: 'pcs'
   },
   {
     id: 'raw-singara',
@@ -1330,25 +1347,25 @@ const DEFAULT_MENU_RECIPES: Record<string, RecipeIngredient[]> = {
     { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 4, unit: 'gm' }
   ],
   'PORATA (PREMIUM)': [
-    { rawItemId: 'raw-11', rawItemName: 'Frozen Porota', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-1791895877958', rawItemName: 'Frozen Porota', quantity: 1, unit: 'pcs' },
     { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 2, unit: 'ml' },
     { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.002, unit: 'cylinder' },
     { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 1, unit: 'gm' }
   ],
   'PORATA': [
-    { rawItemId: 'raw-26', rawItemName: 'Hotel Porota', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-11', rawItemName: 'Hotel Porota', quantity: 1, unit: 'pcs' },
     { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 10, unit: 'ml' },
     { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.002, unit: 'cylinder' },
     { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 1, unit: 'gm' }
   ],
   'PORATA (HOTEL)': [
-    { rawItemId: 'raw-26', rawItemName: 'Hotel Porota', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-11', rawItemName: 'Hotel Porota', quantity: 1, unit: 'pcs' },
     { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 10, unit: 'ml' },
     { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.002, unit: 'cylinder' },
     { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 1, unit: 'gm' }
   ],
   'PORATA (UNIT)': [
-    { rawItemId: 'raw-26', rawItemName: 'Hotel Porota', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-11', rawItemName: 'Hotel Porota', quantity: 1, unit: 'pcs' },
     { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 10, unit: 'ml' },
     { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.002, unit: 'cylinder' },
     { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 1, unit: 'gm' }
@@ -1568,7 +1585,18 @@ export const normalizeRawItemName = (name: string): string => {
   if (s.includes('swarma') || s.includes('শার্মা') || s.includes('shawarma')) return 'swarma-bread';
   if (s.includes('butter ban') || s.includes('বাটার বন') || s.includes('butter bun')) return 'butter-ban';
   if (s.includes('sandwitch') || s.includes('sandwich') || s.includes('স্যান্ডউইচ')) return 'sandwich-bread';
-  if (s.includes('burger') || s.includes('বার্গার')) return 'burger-bun';
+  if (
+    s.includes('frozen porota') ||
+    s.includes('ফ্রোজেন পরোটা') ||
+    (s.includes('frozen') && (s.includes('porota') || s.includes('পরোটা'))) ||
+    (s.includes('ফ্রোজেন') && s.includes('পরোটা'))
+  ) return 'frozen-porota';
+  if (
+    s.includes('hotel porota') ||
+    s.includes('porota hotel') ||
+    s.includes('হোটেল পরোটা') ||
+    s.includes('পরোটা হোটেল')
+  ) return 'hotel-porota';
   if (s.includes('porota') || s.includes('পরোটা')) return 'porota';
   if (s.includes('lemon') || s.includes('লেবু')) return 'lemon';
   if (s.includes('tea bag') || s.includes('টি ব্যাগ')) return 'tea-bag';
@@ -1649,11 +1677,15 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
 
     // Group items together if they share the exact same ID or normalized name (English or Bengali)
     let key: string | undefined = undefined;
-    // Strict isolation for core essential items: Chicken and Egg MUST NEVER collide
+    // Strict isolation for core essential items: Chicken, Egg, Hotel Porota, Frozen Porota MUST NEVER collide
     if (idKey === 'raw-1' || normKey === 'chicken') {
       key = 'canon_chicken';
     } else if (idKey === 'raw-7' || normKey === 'egg') {
       key = 'canon_egg';
+    } else if (idKey === 'raw-11' || idKey === 'raw-26' || normKey === 'hotel-porota' || bnKey === 'hotel-porota') {
+      key = 'canon_hotel-porota';
+    } else if (idKey === 'raw-1791895877958' || normKey === 'frozen-porota' || bnKey === 'frozen-porota') {
+      key = `canon_frozen-porota_${idKey || 'item'}`;
     } else if (idKey && idToGroupMap.has(idKey)) {
       key = idToGroupMap.get(idKey);
     } else if (normKey && canonicalToGroupMap.has(normKey)) {
@@ -1836,10 +1868,72 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
           subUnit: 'gm',
           hasSubUnits: true
         });
+      } else if (key === 'canon_hotel-porota' || key === 'hotel-porota') {
+        const itemStock = Number(normalizedItem.currentStock);
+        const resolvedStock = (!isNaN(itemStock) && itemStock !== 160 && itemStock !== 120) ? itemStock : 784;
+        const itemMin = Number(normalizedItem.minStockAlert);
+        const resolvedMin = (!isNaN(itemMin) && itemMin !== 40) ? itemMin : 5;
+        const resolvedSupplier = (normalizedItem.supplier && normalizedItem.supplier !== 'Hotel Paratha Supply') ? normalizedItem.supplier : 'Control Mor';
+
+        seenKeys.set('canon_hotel-porota', {
+          ...normalizedItem,
+          id: 'raw-11',
+          name: 'Hotel Porota',
+          nameBn: 'পরোটা হোটেল',
+          category: 'Frozen Foods',
+          subCategory: 'Pcs',
+          unit: 'pcs',
+          itemType: 'READY_MADE',
+          hasSubUnits: false,
+          packSize: 1,
+          currentStock: resolvedStock,
+          minStockAlert: resolvedMin,
+          unitCost: 10,
+          supplier: resolvedSupplier,
+          notes: 'হাতে তৈরি সুস্বাদু হোটেল পরোটা (সরাসরি বিক্রয়যোগ্য)'
+        });
       } else {
         seenKeys.set(key, normalizedItem);
       }
     } else {
+      if (key === 'canon_hotel-porota' || key === 'hotel-porota') {
+        const existing = seenKeys.get('canon_hotel-porota') || seenKeys.get(key)!;
+        const stockCand1 = Number(normalizedItem.currentStock);
+        const stockCand2 = Number(existing.currentStock);
+        const finalStock = (!isNaN(stockCand1) && stockCand1 !== 160 && stockCand1 !== 120) 
+          ? stockCand1 
+          : ((!isNaN(stockCand2) && stockCand2 !== 160 && stockCand2 !== 120) ? stockCand2 : 784);
+        
+        const minCand1 = Number(normalizedItem.minStockAlert);
+        const minCand2 = Number(existing.minStockAlert);
+        const finalMin = (!isNaN(minCand1) && minCand1 !== 40)
+          ? minCand1
+          : ((!isNaN(minCand2) && minCand2 !== 40) ? minCand2 : 5);
+
+        const finalSupplier = (normalizedItem.supplier && normalizedItem.supplier !== 'Hotel Paratha Supply')
+          ? normalizedItem.supplier
+          : (existing.supplier && existing.supplier !== 'Hotel Paratha Supply' ? existing.supplier : 'Control Mor');
+
+        seenKeys.set('canon_hotel-porota', {
+          ...existing,
+          ...normalizedItem,
+          id: 'raw-11',
+          name: 'Hotel Porota',
+          nameBn: 'পরোটা হোটেল',
+          category: 'Frozen Foods',
+          subCategory: 'Pcs',
+          unit: 'pcs',
+          itemType: 'READY_MADE',
+          hasSubUnits: false,
+          packSize: 1,
+          currentStock: finalStock,
+          minStockAlert: finalMin,
+          unitCost: 10,
+          supplier: finalSupplier,
+          notes: 'হাতে তৈরি সুস্বাদু হোটেল পরোটা (সরাসরি বিক্রয়যোগ্য)'
+        });
+        continue;
+      }
       const existing = seenKeys.get(key)!;
       // Prefer standard raw-1 to raw-28 id over auto-generated IDs
       const currentIsStandard = item.id.startsWith('raw-') && !item.id.startsWith('raw-item-') && !item.id.includes(Date.now().toString().slice(0, 4));
@@ -3028,7 +3122,9 @@ export const autoRestockFromExpense = (input: AutoRestockExpenseInput): {
       'raw-8': ['biscuit', 'biscuits', 'cookies', 'cake', 'বিস্কুট', 'টোস্ট'],
       'raw-9': ['box', 'one time', 'cup', 'disposable', 'ওয়ান টাইম', 'বক্স', 'ওয়ানটাইম'],
       'raw-10': ['pasta', 'macaroni', 'পাস্তা'],
-      'raw-11': ['porota', 'paratha', 'parota', 'পরোটা', 'ফ্রোজেন পরোটা'],
+      'raw-11': ['hotel porota', 'porota hotel', 'পরোটা হোটেল', 'হোটেল পরোটা', 'porota', 'paratha', 'পরোটা'],
+      'raw-1791895877958': ['frozen porota', 'ফ্রোজেন পরোটা', 'পরোটা (ফ্রোজেন)', 'frozen paratha'],
+      'raw-26': ['hotel porota', 'porota hotel', 'পরোটা হোটেল', 'হোটেল পরোটা', 'porota', 'paratha'],
       'raw-12': ['oil', 'soyabean', 'soyabin', 'tel', 'তেল', 'রূপচাঁদা', 'সয়াবিন'],
       'raw-13': ['sugar', 'chini', 'cheeni', 'চিনি'],
       'raw-14': ['onion', 'peyaj', 'peaj', 'পেঁয়াজ', 'পেয়াজ'],
@@ -3043,7 +3139,6 @@ export const autoRestockFromExpense = (input: AutoRestockExpenseInput): {
       'raw-23': ['butter ban', 'ban', 'bun', 'বাটার বন', 'বনরুটি'],
       'raw-24': ['sandwitch', 'sandwich', 'bread', 'স্যান্ডউইচ', 'স্যান্ডউইচ ব্রেড'],
       'raw-25': ['burger', 'burger bun', 'বার্গার', 'বার্গার বান'],
-      'raw-26': ['hotel porota', 'porota', 'paratha', 'হোটেল পরোটা'],
       'raw-44': ['black salt', 'bit lobon', 'bit laban', 'beet salt', 'বিট লবণ', 'বিট লবন'],
       'raw-27': ['salt', 'lobon', 'লবণ', 'নুন'],
       'raw-28': ['lemon', 'lebu', 'লেবু', 'কাগজি লেবু'],

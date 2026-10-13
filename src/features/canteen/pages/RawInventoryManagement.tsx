@@ -391,17 +391,33 @@ const INITIAL_RAW_ITEMS: RawInventoryItem[] = [
     notes: 'Soft sesame burger bun'
   },
   {
-    id: 'raw-26',
+    id: 'raw-11',
     name: 'Hotel Porota',
-    nameBn: 'হোটেল পরোটা',
+    nameBn: 'পরোটা হোটেল',
     category: 'Frozen Foods',
     unit: 'pcs',
-    currentStock: 120,
-    minStockAlert: 40,
-    unitCost: 8,
-    lastRestockedDate: '2026-09-22',
-    supplier: 'Hotel Paratha Supply',
+    currentStock: 784,
+    minStockAlert: 5,
+    unitCost: 10,
+    lastRestockedDate: '2026-10-13',
+    supplier: 'Control Mor',
     notes: 'Handmade flaky paratha for breakfast & snacks'
+  },
+  {
+    id: 'raw-1791895877958',
+    name: 'Frozen Porota',
+    nameBn: 'পরোটা (ফ্রোজেন)',
+    category: 'Frozen Foods',
+    unit: 'packet',
+    currentStock: 10,
+    minStockAlert: 5,
+    unitCost: 260,
+    lastRestockedDate: '2026-10-13',
+    supplier: '',
+    notes: 'ফ্রোজেন পরোটা প্যাকেট (১ প্যাকেট = ২০ পিস)',
+    hasSubUnits: true,
+    packSize: 20,
+    subUnit: 'pcs'
   },
   {
     id: 'raw-27',
@@ -2166,17 +2182,6 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
               <span>Table</span>
             </button>
           </div>
-
-          {!readOnly && (
-            <button
-              onClick={handleResetToDefault}
-              className="px-3 py-2 text-xs font-bold text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-750 border border-slate-700 rounded-xl transition-colors flex items-center space-x-1.5"
-              title="Reset default raw ingredients list"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span className="hidden xl:inline">Reset Defaults</span>
-            </button>
-          )}
         </div>
       </div>
 
@@ -4265,40 +4270,6 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                     <span>হ্যাঁ, মুছে ফেলুন</span>
                   </>
                 )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Reset Defaults Confirmation Modal */}
-      {showResetConfirmModal && !readOnly && (
-        <div className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-gradient-to-b from-slate-900 to-slate-950 border border-slate-700/80 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
-            <div className="text-center space-y-2">
-              <div className="w-14 h-14 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center mx-auto">
-                <RotateCcw className="w-7 h-7" />
-              </div>
-              <h3 className="text-lg font-black text-white">রিসেট কনফার্মেশন</h3>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                কাঁচামালের তালিকা কি ডিফল্ট তালিকায় রিসেট করতে চান? (Chicken, Rice, Dal, Milk Powder ইত্যাদি প্রাথমিক আইটেমগুলো পুনরায় সেট হবে)।
-              </p>
-            </div>
-            <div className="grid grid-cols-2 gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowResetConfirmModal(false)}
-                className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-all cursor-pointer"
-              >
-                বাতিল (Cancel)
-              </button>
-              <button
-                type="button"
-                onClick={confirmResetToDefault}
-                className="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 cursor-pointer active:scale-95"
-              >
-                <RotateCcw className="w-4 h-4" />
-                <span>হ্যাঁ, রিসেট করুন</span>
               </button>
             </div>
           </div>
