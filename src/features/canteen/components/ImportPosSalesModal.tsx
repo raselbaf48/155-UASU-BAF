@@ -11,7 +11,7 @@ import JSZip from 'jszip';
 import { supabase } from '../../../supabase';
 import { pushKeyToCloud, pullKeyFromCloud, recordDeletedTxId } from '../utils/canteenCloudSync';
 import { deductRawStockForSales } from '../utils/recipeManager';
-import { getCanteenMenuCache, setCanteenMenuCache, setCanteenMembersCache, normalizeCatalogKey, isOneTimeBoxItem } from '../utils/canteenMenuData';
+import { getCanteenMenuCache, setCanteenMenuCache, getCanteenMembersCache, setCanteenMembersCache, normalizeCatalogKey, isOneTimeBoxItem } from '../utils/canteenMenuData';
 import { formatCanteenDate, toYMDDate } from '../utils/dateUtils';
 import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
 import { formatRankBn, formatMemberNameBn, toBengaliNum, formatBengaliMonthYear } from '../utils/exportCanteenBillExcel';
@@ -140,58 +140,132 @@ function isCanteenHolidayDate(dateYmd: string, dObj?: Date): boolean {
   return isWeekend || customHolidays.includes(dateYmd);
 }
 
+function banglaToEnglishDigits(str: any): string {
+  if (typeof str === 'number') return String(str);
+  if (!str) return '0';
+  let s = String(str).trim();
+  const bn = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
+  for (let i = 0; i < 10; i++) {
+    s = s.replace(new RegExp(bn[i], 'g'), String(i));
+  }
+  return s;
+}
+
+function parseBanglaNumber(val: any): number {
+  if (typeof val === 'number') return isNaN(val) ? 0 : val;
+  if (!val) return 0;
+  const converted = banglaToEnglishDigits(val);
+  const cleaned = converted.replace(/[^0-9.-]/g, '');
+  const n = parseFloat(cleaned);
+  return isNaN(n) ? 0 : n;
+}
+
 function parseDateWiseMatrixDate(dateStr: any, fallbackYear = 2026, fallbackMonth = 10): string {
-  if (!dateStr) return '';
-  const str = banglaToEnglishDigits(String(dateStr)).trim();
-  
-  // Look for: (day) (month_str) (year) e.g. "1 oct 26" or "1 অক্টো 26"
-  const match = str.match(/^(\d{1,2})\s+([^\s\d]+)(?:\s+(\d{2,4}))?/i);
-  if (match) {
-    const d = match[1].padStart(2, '0');
-    const monWord = match[2].toLowerCase();
-    
-    const bnMonthMap: Record<string, string> = {
-      'জানু': '01', 'jan': '01',
-      'ফেব্রু': '02', 'feb': '02',
-      'মার্চ': '03', 'mar': '03',
-      'এপ্রিল': '04', 'apr': '04',
-      'মে': '05', 'may': '05',
-      'জুন': '06', 'jun': '06',
-      'জুলাই': '07', 'jul': '07',
-      'আগস্ট': '08', 'আগষ্ট': '08', 'aug': '08',
-      'সেপ্টে': '09', 'sep': '09',
-      'অক্টো': '10', 'oct': '10',
-      'নভে': '11', 'nov': '11',
-      'ডিসে': '12', 'dec': '12',
-    };
-    
-    let foundMonth = '';
-    for (const [k, v] of Object.entries(bnMonthMap)) {
-      if (monWord.includes(k) || k.includes(monWord)) {
-        foundMonth = v;
-        break;
+  if (dateStr === null || dateStr === undefined) return '';
+
+  // 1. If it's an Excel numeric date serial (e.g. 46270)
+  if (typeof dateStr === 'number') {
+    const dObj = new Date(Math.round((dateStr - 25569) * 86400 * 1000));
+    if (!isNaN(dObj.getTime())) {
+      return dObj.toISOString().split('T')[0];
+    }
+  }
+
+  const raw = String(dateStr).trim();
+  if (!raw) return '';
+  const decoded = fromSutonny(raw).trim();
+  const candidates = [decoded, raw];
+
+  const bnMonthMap: Record<string, string> = {
+    'জানুয়ারি': '01', 'জানুয়ারি': '01', 'january': '01', 'jan': '01', 'জানু': '01',
+    'ফেব্রুয়ারি': '02', 'ফেব্রুয়ারি': '02', 'february': '02', 'feb': '02', 'ফেব্রু': '02',
+    'মার্চ': '03', 'march': '03', 'mar': '03',
+    'এপ্রিল': '04', 'april': '04', 'apr': '04',
+    'মে': '05', 'may': '05',
+    'জুন': '06', 'june': '06', 'jun': '06',
+    'জুলাই': '07', 'jul': '07', 'jul': '07',
+    'আগস্ট': '08', 'আগষ্ট': '08', 'august': '08', 'aug': '08',
+    'সেপ্টেম্বর': '09', 'september': '09', 'sep': '09', 'সেপ্টে': '09',
+    'অক্টোবর': '10', 'october': '10', 'oct': '10', 'অক্টো': '10',
+    'নভেম্বর': '11', 'november': '11', 'nov': '11', 'নভে': '11',
+    'ডিসেম্বর': '12', 'december': '12', 'dec': '12', 'ডিসে': '12',
+  };
+
+  for (const cand of candidates) {
+    const str = banglaToEnglishDigits(cand).trim();
+
+    // Look for: (day) (month_str) (year) e.g. "1 sep 26", "২ সেপ্টে ২৬", "1 ‡m‡Þ 26"
+    const match = str.match(/^(\d{1,2})\s+([^\s\d]+)(?:\s+(\d{2,4}))?/i);
+    if (match) {
+      const d = match[1].padStart(2, '0');
+      const monWord = match[2].toLowerCase();
+
+      let foundMonth = '';
+      for (const [k, v] of Object.entries(bnMonthMap)) {
+        if (monWord.includes(k) || k.includes(monWord)) {
+          foundMonth = v;
+          break;
+        }
+      }
+
+      let yr = match[3];
+      if (yr) {
+        if (yr.length === 2) yr = '20' + yr;
+      } else {
+        yr = String(fallbackYear);
+      }
+
+      if (foundMonth) {
+        return `${yr}-${foundMonth}-${d}`;
       }
     }
-    
-    let yr = match[3];
-    if (yr) {
-      if (yr.length === 2) yr = '20' + yr;
-    } else {
-      yr = String(fallbackYear);
+
+    // Look for ISO: YYYY-MM-DD or YYYY/MM/DD
+    const isoMatch = str.match(/\b(20\d\d)[-_/](0[1-9]|1[0-2])[-_/](0[1-9]|[12]\d|3[01])\b/);
+    if (isoMatch) {
+      return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
     }
-    
-    if (foundMonth) {
-      return `${yr}-${foundMonth}-${d}`;
+
+    // Look for DD-MM-YYYY or DD/MM/YYYY
+    const dmyMatch = str.match(/\b(0[1-9]|[12]\d|3[01])[-_/](0[1-9]|1[0-2])[-_/](20\d\d)\b/);
+    if (dmyMatch) {
+      return `${dmyMatch[3]}-${dmyMatch[2]}-${dmyMatch[1]}`;
+    }
+
+    // Look for Month name inside string and day number
+    for (const [mName, mNum] of Object.entries(bnMonthMap)) {
+      if (str.toLowerCase().includes(mName)) {
+        const yMatch = str.match(/\b(20\d\d)\b/) || str.match(/\b(\d{2})\b/);
+        const withoutY = yMatch ? str.replace(yMatch[0], '') : str;
+        const dMatch = withoutY.match(/\b([1-9]|[12][0-9]|3[01])\b/);
+        let yr = fallbackYear;
+        if (yMatch) {
+          const rawY = yMatch[1];
+          yr = rawY.length === 2 ? 2000 + parseInt(rawY, 10) : parseInt(rawY, 10);
+        }
+        if (dMatch) {
+          return `${yr}-${mNum}-${dMatch[1].padStart(2, '0')}`;
+        }
+      }
+    }
+
+    // If simply day number 1-31 (pure digits or Bangla digits)
+    const cleanNum = str.replace(/[^0-9]/g, '');
+    if (cleanNum && !str.includes('-') && !str.includes('/') && !str.includes('.')) {
+      const numOnly = parseInt(cleanNum, 10);
+      if (numOnly >= 1 && numOnly <= 31) {
+        return `${fallbackYear}-${String(fallbackMonth).padStart(2, '0')}-${String(numOnly).padStart(2, '0')}`;
+      }
     }
   }
 
-  // If simply day number 1-31
-  const numOnly = parseBanglaNumber(str);
-  if (numOnly >= 1 && numOnly <= 31 && !str.includes('-') && !str.includes('/') && !str.includes('.')) {
-    return `${fallbackYear}-${String(fallbackMonth).padStart(2, '0')}-${String(numOnly).padStart(2, '0')}`;
+  // Fallback to parseBanglaOrEnglishDate
+  const parsedOrFallback = parseBanglaOrEnglishDate(decoded || raw, '');
+  if (parsedOrFallback && parsedOrFallback.length === 10) {
+    return parsedOrFallback;
   }
 
-  return parseBanglaOrEnglishDate(dateStr, `${fallbackYear}-${String(fallbackMonth).padStart(2, '0')}-01`);
+  return `${fallbackYear}-${String(fallbackMonth).padStart(2, '0')}-01`;
 }
 
 const thinBlackBorder = {
@@ -378,26 +452,6 @@ async function downloadExcelWithNativeFreeze(
   URL.revokeObjectURL(url);
 }
 
-function banglaToEnglishDigits(str: any): string {
-  if (typeof str === 'number') return String(str);
-  if (!str) return '0';
-  let s = String(str).trim();
-  const bn = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
-  for (let i = 0; i < 10; i++) {
-    s = s.replace(new RegExp(bn[i], 'g'), String(i));
-  }
-  return s;
-}
-
-function parseBanglaNumber(val: any): number {
-  if (typeof val === 'number') return isNaN(val) ? 0 : val;
-  if (!val) return 0;
-  const converted = banglaToEnglishDigits(val);
-  const cleaned = converted.replace(/[^0-9.-]/g, '');
-  const n = parseFloat(cleaned);
-  return isNaN(n) ? 0 : n;
-}
-
 function parseBanglaOrEnglishDate(val: any, fallbackDate?: string): string {
   if (!val) return fallbackDate || new Date().toISOString().split('T')[0];
   if (typeof val === 'number') {
@@ -406,38 +460,150 @@ function parseBanglaOrEnglishDate(val: any, fallbackDate?: string): string {
       return date.toISOString().split('T')[0];
     }
   }
-  let str = String(val).trim();
-  str = banglaToEnglishDigits(str);
+  const rawStr = String(val).trim();
+  const decodedStr = fromSutonny(rawStr).trim();
+  const candidates = [decodedStr, rawStr];
 
   const months: Record<string, string> = {
-    'জানুয়ারি': '01', 'জানুয়ারি': '01', 'january': '01', 'jan': '01',
-    'ফেব্রুয়ারি': '02', 'ফেব্রুয়ারি': '02', 'february': '02', 'feb': '02',
+    'জানুয়ারি': '01', 'জানুয়ারি': '01', 'january': '01', 'jan': '01', 'জানু': '01',
+    'ফেব্রুয়ারি': '02', 'ফেব্রুয়ারি': '02', 'february': '02', 'feb': '02', 'ফেব্রু': '02',
     'মার্চ': '03', 'march': '03', 'mar': '03',
     'এপ্রিল': '04', 'april': '04', 'apr': '04',
     'মে': '05', 'may': '05',
     'জুন': '06', 'june': '06', 'jun': '06',
     'জুলাই': '07', 'july': '07', 'jul': '07',
     'আগস্ট': '08', 'আগষ্ট': '08', 'august': '08', 'aug': '08',
-    'সেপ্টেম্বর': '09', 'september': '09', 'sep': '09',
-    'অক্টোবর': '10', 'october': '10', 'oct': '10',
-    'নভেম্বর': '11', 'november': '11', 'nov': '11',
-    'ডিসেম্বর': '12', 'december': '12', 'dec': '12'
+    'সেপ্টেম্বর': '09', 'september': '09', 'sep': '09', 'সেপ্টে': '09',
+    'অক্টোবর': '10', 'october': '10', 'oct': '10', 'অক্টো': '10',
+    'নভেম্বর': '11', 'november': '11', 'nov': '11', 'নভে': '11',
+    'ডিসেম্বর': '12', 'december': '12', 'dec': '12', 'ডিসে': '12',
   };
 
-  for (const [mName, mNum] of Object.entries(months)) {
-    if (str.toLowerCase().includes(mName)) {
-      const dayMatch = str.match(/\b([1-9]|[12][0-9]|3[01])\b/);
-      const yearMatch = str.match(/\b(20\d\d)\b/);
-      const year = yearMatch ? yearMatch[1] : String(new Date().getFullYear());
-      const day = dayMatch ? dayMatch[1].padStart(2, '0') : '01';
-      return `${year}-${mNum}-${day}`;
+  for (const cand of candidates) {
+    const str = banglaToEnglishDigits(cand).trim();
+
+    // Check ISO YYYY-MM-DD
+    const iso = toYMDDate(str);
+    if (iso) return iso;
+
+    // Check Month names
+    for (const [mName, mNum] of Object.entries(months)) {
+      if (str.toLowerCase().includes(mName)) {
+        const yearMatch = str.match(/\b(20\d\d)\b/) || str.match(/\b(\d{2})\b/);
+        const strWithoutYear = yearMatch ? str.replace(yearMatch[0], '') : str;
+        const dayMatch = strWithoutYear.match(/\b([1-9]|[12][0-9]|3[01])\b/);
+        let year = String(new Date().getFullYear());
+        if (yearMatch) {
+          const rawY = yearMatch[1];
+          year = rawY.length === 2 ? '20' + rawY : rawY;
+        }
+        const day = dayMatch ? dayMatch[1].padStart(2, '0') : '01';
+        return `${year}-${mNum}-${day}`;
+      }
     }
   }
 
-  const ymd = toYMDDate(str);
-  if (ymd) return ymd;
-
   return fallbackDate || new Date().toISOString().split('T')[0];
+}
+
+/**
+ * Extracts month and year from Excel sheet matrices, banner cells, or file name.
+ * Strictly guarantees that whatever month is specified inside the imported file is respected.
+ */
+function extractMonthYearFromText(rawText: any): { year: number; month: string } | null {
+  if (!rawText) return null;
+  const rawStr = String(rawText).trim();
+  if (!rawStr) return null;
+  const decodedStr = fromSutonny(rawStr).trim();
+  const candidates = [rawStr, decodedStr];
+
+  const monthMap: Record<string, string> = {
+    'জানুয়ারি': '01', 'জানুয়ারি': '01', 'january': '01', 'jan': '01', 'জানু': '01',
+    'ফেব্রুয়ারি': '02', 'ফেব্রুয়ারি': '02', 'february': '02', 'feb': '02', 'ফেব্রু': '02',
+    'মার্চ': '03', 'march': '03', 'mar': '03',
+    'এপ্রিল': '04', 'april': '04', 'apr': '04',
+    'মে': '05', 'may': '05',
+    'জুন': '06', 'june': '06', 'jun': '06',
+    'জুলাই': '07', 'july': '07', 'jul': '07',
+    'আগস্ট': '08', 'আগষ্ট': '08', 'august': '08', 'aug': '08',
+    'সেপ্টেম্বর': '09', 'september': '09', 'sep': '09', 'সেপ্টে': '09',
+    'অক্টোবর': '10', 'october': '10', 'oct': '10', 'অক্টো': '10',
+    'নভেম্বর': '11', 'november': '11', 'nov': '11', 'নভে': '11',
+    'ডিসেম্বর': '12', 'december': '12', 'dec': '12', 'ডিসে': '12',
+  };
+
+  for (const cand of candidates) {
+    const s = banglaToEnglishDigits(cand).toLowerCase();
+    
+    // Check ISO YYYY-MM
+    const isoMatch = s.match(/\b(20\d\d)[-_/](0[1-9]|1[0-2])\b/);
+    if (isoMatch) {
+      return { year: parseInt(isoMatch[1], 10), month: isoMatch[2] };
+    }
+
+    // Check Month name + Year
+    for (const [mName, mNum] of Object.entries(monthMap)) {
+      if (s.includes(mName)) {
+        const yMatch = s.match(/\b(20\d\d)\b/) || s.match(/\b(\d{2})\b/);
+        let year = new Date().getFullYear();
+        if (yMatch) {
+          const rawY = yMatch[1];
+          year = rawY.length === 2 ? 2000 + parseInt(rawY, 10) : parseInt(rawY, 10);
+        }
+        return { year, month: mNum };
+      }
+    }
+  }
+
+  return null;
+}
+
+function detectMonthYearFromWorkbook(
+  workbook: any,
+  fileName?: string
+): { year: number; month: string; key: string } | null {
+  if (!workbook || !Array.isArray(workbook.SheetNames)) return null;
+
+  // 1. Check all sheet top banners (rows 0..6, cols 0..8)
+  for (const sName of workbook.SheetNames) {
+    const sNameUpper = sName.toUpperCase();
+    if (sNameUpper.includes('MENU PRICE') || sNameUpper.includes('FINAL CHIT')) continue;
+    const ws = workbook.Sheets[sName];
+    if (!ws) continue;
+    const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    for (let r = 0; r < Math.min(rows.length, 7); r++) {
+      const row = rows[r] || [];
+      for (let c = 0; c < Math.min(row.length, 9); c++) {
+        const cell = row[c];
+        if (!cell) continue;
+        const cellStr = String(cell).trim();
+        const decoded = fromSutonny(cellStr);
+        // If cell is a month label like "মাস", check adjacent cells
+        if (cellStr.includes('মাস') || decoded.includes('মাস') || cellStr.toLowerCase().includes('month') || cellStr.includes('gvm')) {
+          const nextVal = row[c + 1] || row[c + 2];
+          const foundNext = extractMonthYearFromText(nextVal);
+          if (foundNext) {
+            return { ...foundNext, key: `${foundNext.year}-${foundNext.month}` };
+          }
+        }
+        // Direct cell check
+        const directFound = extractMonthYearFromText(cell);
+        if (directFound) {
+          return { ...directFound, key: `${directFound.year}-${directFound.month}` };
+        }
+      }
+    }
+  }
+
+  // 2. Check filename if banner didn't yield a result
+  if (fileName) {
+    const fileFound = extractMonthYearFromText(fileName);
+    if (fileFound) {
+      return { ...fileFound, key: `${fileFound.year}-${fileFound.month}` };
+    }
+  }
+
+  return null;
 }
 
 function cleanFoodString(str: any): string {
@@ -606,12 +772,19 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
   const [searchFilter, setSearchFilter] = useState('');
   const [filterMode, setFilterMode] = useState<'ALL' | 'VALID' | 'WARNING'>('ALL');
   const [dateTemplateMemberId, setDateTemplateMemberId] = useState<string>('ALL');
+  const [fileDetectedMonth, setFileDetectedMonth] = useState<string | null>(null);
   const [templateMonth, setTemplateMonth] = useState<string>(() => {
     const d = new Date();
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, '0');
     return `${y}-${m}`;
   });
+
+  // Strictly sorted members maintaining Member DB serial (1..N order)
+  const sortedUnitMembers = useMemo(() => {
+    const effective = (members && members.length > 0) ? members : getCanteenMembersCache();
+    return sortCanteenMembersByOfficeSeniority(effective);
+  }, [members]);
 
   // Load and synchronize POS Import History
   useEffect(() => {
@@ -684,7 +857,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
   // Generate and download Official 155 UASU BAF Daily Canteen Bill Matrix Template (31 Date tabs for selected Month)
   const handleDownloadOfficialMatrixTemplate = async () => {
     try {
-      const sortedMembers = sortCanteenMembersByOfficeSeniority(members);
+      const sortedMembers = sortedUnitMembers;
       const workbook = XLSX.utils.book_new();
 
       const selectedYm = templateMonth || toYMDDate(new Date()).slice(0, 7);
@@ -1025,7 +1198,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         ? overrideMemberId 
         : dateTemplateMemberId;
       const targetMemberId = String(rawTarget || 'ALL').trim();
-      const sortedMembers = sortCanteenMembersByOfficeSeniority(members);
+      const sortedMembers = sortedUnitMembers;
       const workbook = XLSX.utils.book_new();
 
       const selectedYm = templateMonth || toYMDDate(new Date()).slice(0, 7);
@@ -1054,7 +1227,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         }
       })();
 
-      // If specific member selected, generate single sheet. If ALL, generate for unit members
+      // If specific member selected, generate single sheet. If ALL, generate for ALL members maintaining Member DB serial
       let membersToGenerate: any[] = [];
       if (targetMemberId && targetMemberId !== 'ALL') {
         const targetLower = targetMemberId.toLowerCase();
@@ -1065,16 +1238,28 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           const targetClean = targetLower.replace(/\D/g, '');
           return mId === targetLower || mBd === targetLower || (targetClean && mCleanBd === targetClean);
         });
-        membersToGenerate = found ? [found] : sortedMembers.slice(0, 10);
+        membersToGenerate = found ? [found] : sortedMembers;
       } else {
+        // ALL members: Generate separate tab for EVERY single member in Member DB maintaining Ser
         membersToGenerate = sortedMembers;
       }
 
+      const usedSheetNames = new Set<string>();
+
       membersToGenerate.forEach((m, mIdx) => {
+        const memberSerIndex = sortedMembers.findIndex(sm => {
+          const smBd = String(sm['BD No'] || sm.airman_id || '').replace(/\D/g, '');
+          const mBd = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
+          if (smBd && mBd && smBd === mBd) return true;
+          return sm.airman_id === m.airman_id;
+        });
+        const serNumber = memberSerIndex >= 0 ? memberSerIndex + 1 : mIdx + 1;
+        const serStr = String(serNumber).padStart(2, '0');
+
         const rankBn = formatRankBn(m.Rank || m.rank || '');
         const memberNameBn = m.name_bn || m.NameBn || formatMemberNameBn(m.Surname || m.Name || '') || m.Surname || m.Name || '';
         const bdNo = String(m['BD No'] || m.airman_id || '');
-        const cleanBd = bdNo.replace(/\D/g, '') || String(mIdx + 1);
+        const cleanBd = bdNo.replace(/\D/g, '') || String(serNumber);
 
         const mAirman = String(m.airman_id || '').toLowerCase().trim();
         const mBd = String(m['BD No'] || m.bdNo || '').toLowerCase().trim();
@@ -1086,8 +1271,8 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         const bdDisplay = cleanDigits ? cleanDigits : rawBd.replace(/^BD[\/\-\s]*/i, '').trim();
 
         const rows: any[][] = [];
-        // Row 1: B1: 'র‍্যাংক ও নাম', C1: fullRankAndName
-        rows.push(['', toSutonny('র‍্যাংক ও নাম'), toSutonny(fullRankAndName)]);
+        // Row 1: B1: 'র‍্যাংক ও নাম', C1: Serial + fullRankAndName
+        rows.push(['', toSutonny('র‍্যাংক ও নাম'), toSutonny(`${toBengaliNum(serNumber)}. ${fullRankAndName}`)]);
         // Row 2: B2: 'বিডি নং', C2: bdDisplay
         rows.push(['', toSutonny('বিডি নং'), bdDisplay]);
         // Row 3: B3: 'মাস', C3: formatBengaliMonthYear(selectedYm)
@@ -1348,13 +1533,31 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           };
         }
 
-        const tabTitle = `${memberNameBn.slice(0, 10)} (${cleanBd.slice(-4)})`.replace(/[\\/?*:[\]]/g, '');
-        XLSX.utils.book_append_sheet(workbook, ws, tabTitle || `Member_${mIdx + 1}`);
+        const shortName = (memberNameBn || m.Surname || m.Name || 'Member').trim();
+        // Member DB Ser maintained tab name (strictly within Excel 31 characters limit)
+        // Format: "01. নাজমুল (36746)" or "01. Nazmul (36746)"
+        let rawTabTitle = `${serStr}. ${shortName} (${cleanBd})`.replace(/[\\/?*:[\]]/g, '').trim();
+        if (rawTabTitle.length > 31) {
+          rawTabTitle = `${serStr}. ${shortName.slice(0, 15)} (${cleanBd})`.replace(/[\\/?*:[\]]/g, '').trim();
+        }
+        if (rawTabTitle.length > 31) {
+          rawTabTitle = rawTabTitle.slice(0, 31).trim();
+        }
+
+        let finalTabTitle = rawTabTitle;
+        let dupeCounter = 1;
+        while (usedSheetNames.has(finalTabTitle.toLowerCase())) {
+          const suffix = `_${dupeCounter++}`;
+          finalTabTitle = `${rawTabTitle.slice(0, 31 - suffix.length)}${suffix}`;
+        }
+        usedSheetNames.add(finalTabTitle.toLowerCase());
+
+        XLSX.utils.book_append_sheet(workbook, ws, finalTabTitle);
       });
 
       const memberSuffix = (targetMemberId && targetMemberId !== 'ALL' && membersToGenerate[0])
         ? `_${(membersToGenerate[0].Surname || 'Member').replace(/\s+/g, '_')}`
-        : '_MultiMembers';
+        : '_AllMembers';
 
       await downloadExcelWithNativeFreeze(
         workbook,
@@ -1445,6 +1648,15 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
       let hasMemberWise = false;
       let hasDateWise = false;
 
+      // Pre-detect month and year from the uploaded file (workbook banners & file name)
+      // to strictly guarantee whatever month is in the file is respected
+      const fileMonthInfo = detectMonthYearFromWorkbook(workbook, uploadedFile.name);
+      const defaultFileYear = fileMonthInfo ? fileMonthInfo.year : new Date().getFullYear();
+      const defaultFileMonth = fileMonthInfo ? fileMonthInfo.month : String(new Date().getMonth() + 1).padStart(2, '0');
+      if (fileMonthInfo) {
+        setFileDetectedMonth(fileMonthInfo.key);
+      }
+
       // Scan all sheets in the workbook (supports multi-day sheets like 1, 2, 3...)
       for (const sheetName of workbook.SheetNames) {
         // Skip summary chit or menu price reference sheets
@@ -1514,22 +1726,27 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           hasMemberWise = true;
           const headerRow = rawMatrix[matrixHeaderRowIdx];
 
-          // Detect Sheet / Header Date
+          // Detect Sheet / Header Date (starts with file detected month)
           let sheetDate = '';
-          let detectedYear = new Date().getFullYear();
-          let detectedMonth = String(new Date().getMonth() + 1).padStart(2, '0');
+          let detectedYear = defaultFileYear;
+          let detectedMonth = defaultFileMonth;
 
-          // Check Row 2 (r=1) for C2 'মাস' and D2 month name
-          const r2Daily = rawMatrix[1];
-          if (r2Daily) {
-            const c2 = String(r2Daily[2] || '').trim();
-            const d2 = String(r2Daily[3] || '').trim();
-            if ((c2.includes('মাস') || c2.includes('gvm') || fromSutonny(c2).includes('মাস')) && d2) {
-              const parsedM = parseBanglaOrEnglishDate(d2) || parseBanglaOrEnglishDate(fromSutonny(d2));
-              if (parsedM && parsedM.length === 10) {
-                const parts = parsedM.split('-');
-                detectedYear = parseInt(parts[0], 10) || detectedYear;
-                detectedMonth = parts[1] || detectedMonth;
+          // Check banner rows for sheet-specific month override
+          for (let r = 0; r <= Math.min(rawMatrix.length - 1, 4); r++) {
+            const row = rawMatrix[r] || [];
+            for (let c = 0; c < Math.min(row.length, 6); c++) {
+              const cellVal = row[c];
+              const cellStr = String(cellVal || '').trim();
+              const dStr = fromSutonny(cellStr);
+              if (cellStr.includes('মাস') || dStr.includes('মাস') || cellStr.includes('gvm') || cellStr.toLowerCase().includes('month')) {
+                const targetVal = row[c + 1] || row[c + 2];
+                const found = extractMonthYearFromText(targetVal);
+                if (found) {
+                  detectedYear = found.year;
+                  detectedMonth = found.month;
+                  setFileDetectedMonth(`${found.year}-${found.month}`);
+                  break;
+                }
               }
             }
           }
@@ -1710,8 +1927,8 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             let fixedRank = '';
             let fixedName = '';
             let fixedBd = '';
-            let sheetYear = new Date().getFullYear();
-            let sheetMonth = String(new Date().getMonth() + 1).padStart(2, '0');
+            let sheetYear = defaultFileYear;
+            let sheetMonth = defaultFileMonth;
 
             const sheetBdMatch = sheetName.match(/\b(\d{4,7})\b/);
             if (sheetBdMatch) fixedBd = sheetBdMatch[1];
@@ -1766,11 +1983,11 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                 if (cellText.includes('মাস') || cellText.toLowerCase().includes('month') || cellText.includes('gvm')) {
                   const val = String(row[c + 1] || row[c + 2] || '').trim();
                   if (val) {
-                    const parsedM = parseBanglaOrEnglishDate(val) || parseBanglaOrEnglishDate(fromSutonny(val));
-                    if (parsedM && parsedM.length === 10) {
-                      const parts = parsedM.split('-');
-                      sheetYear = parseInt(parts[0], 10) || sheetYear;
-                      sheetMonth = parts[1] || sheetMonth;
+                    const found = extractMonthYearFromText(val);
+                    if (found) {
+                      sheetYear = found.year;
+                      sheetMonth = found.month;
+                      setFileDetectedMonth(`${found.year}-${found.month}`);
                     }
                   }
                 }
@@ -1796,30 +2013,15 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             // 2. Identify month & year from banner cells (specifically C2/D2) or current
             // (sheetYear and sheetMonth already initialized above)
 
-            // Check Row 2 (r=1) for C2 'মাস' and D2 month name
-            const r2DateWise = rawMatrix[1];
-            if (r2DateWise) {
-              const c2Val = String(r2DateWise[2] || '').trim();
-              const d2Val = String(r2DateWise[3] || '').trim();
-              if (c2Val.includes('মাস') && d2Val) {
-                const parsedM = parseBanglaOrEnglishDate(d2Val);
-                if (parsedM && parsedM.length === 10) {
-                  const parts = parsedM.split('-');
-                  sheetYear = parseInt(parts[0], 10) || sheetYear;
-                  sheetMonth = parts[1] || sheetMonth;
-                }
-              }
-            }
-
+            // Check banner cells for any sheet-specific month override
             for (let r = 0; r <= dateMatrixHeaderRowIdx; r++) {
               const row = rawMatrix[r] || [];
               for (const cell of row) {
-                const cStr = String(cell || '');
-                const parsed = parseBanglaOrEnglishDate(cStr);
-                if (parsed && parsed.length === 10) {
-                  const parts = parsed.split('-');
-                  sheetYear = parseInt(parts[0], 10) || sheetYear;
-                  sheetMonth = parts[1] || sheetMonth;
+                const found = extractMonthYearFromText(cell);
+                if (found) {
+                  sheetYear = found.year;
+                  sheetMonth = found.month;
+                  setFileDetectedMonth(`${found.year}-${found.month}`);
                   break;
                 }
               }
@@ -1940,7 +2142,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           let rawRemarks = row['Remarks'] || row['মন্তব্য'] || '';
 
           const bdStr = String(rawBd).trim();
-          const parsedDate = parseBanglaOrEnglishDate(rawDate);
+          const parsedDate = parseBanglaOrEnglishDate(rawDate, `${defaultFileYear}-${defaultFileMonth}-01`);
           const qtyNum = Math.max(1, parseBanglaNumber(rawQty) || 1);
           const discountNum = Math.max(0, parseBanglaNumber(rawDiscount) || 0);
 
@@ -1985,12 +2187,24 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           };
         });
 
+        if (!fileMonthInfo && parsedList.length > 0 && parsedList[0].date) {
+          const ymd = toYMDDate(parsedList[0].date);
+          if (ymd && ymd.length >= 7) {
+            setFileDetectedMonth(ymd.slice(0, 7));
+          }
+        }
         setParsedRows(parsedList);
       } else {
         if (hasDateWise && !hasMemberWise) {
           setDetectedFormat('DATE_WISE_MATRIX');
         } else {
           setDetectedFormat('MEMBER_WISE_MATRIX');
+        }
+        if (!fileMonthInfo && extractedRows.length > 0 && extractedRows[0].date) {
+          const ymd = toYMDDate(extractedRows[0].date);
+          if (ymd && ymd.length >= 7) {
+            setFileDetectedMonth(ymd.slice(0, 7));
+          }
         }
         setParsedRows(extractedRows);
       }
@@ -2683,30 +2897,35 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           </div>
 
           <div className="flex items-center space-x-2">
-            {/* Month Selection directly in Header - Styled exactly like Bill month option */}
-            <div className="flex items-center bg-slate-850 rounded-xl px-1.5 py-1 border border-slate-700/80 shadow-inner">
-              <button
-                type="button"
-                onClick={handlePrevTemplateMonth}
-                className="w-7 h-7 flex items-center justify-center bg-gradient-to-b from-slate-700 via-slate-800 to-slate-900 hover:from-slate-600 hover:to-slate-750 text-indigo-300 hover:text-white rounded-lg transition-all cursor-pointer border-t border-slate-600/80 border-x border-slate-700/80 border-b-[2.5px] border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.6)]"
-                title="পূর্ববর্তী মাস (Previous Month)"
-              >
-                <ChevronLeft className="w-3.5 h-3.5 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]" />
-              </button>
-              <div className="px-2.5 py-0.5 text-center min-w-[110px] select-none">
-                <span className="text-xs font-black text-white flex items-center justify-center space-x-1">
-                  <Calendar className="w-3 h-3 text-indigo-400 mr-1" />
-                  <span>{formatBengaliMonthYear(templateMonth)}</span>
-                </span>
+            {/* Template Month Selection - Clearly indicated for Template Download ONLY */}
+            <div className="flex flex-col items-end">
+              <div className="flex items-center bg-slate-850 rounded-xl px-1.5 py-1 border border-slate-700/80 shadow-inner">
+                <button
+                  type="button"
+                  onClick={handlePrevTemplateMonth}
+                  className="w-7 h-7 flex items-center justify-center bg-gradient-to-b from-slate-700 via-slate-800 to-slate-900 hover:from-slate-600 hover:to-slate-750 text-indigo-300 hover:text-white rounded-lg transition-all cursor-pointer border-t border-slate-600/80 border-x border-slate-700/80 border-b-[2.5px] border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.6)]"
+                  title="পূর্ববর্তী মাস (Previous Month)"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]" />
+                </button>
+                <div className="px-2.5 py-0.5 text-center min-w-[110px] select-none">
+                  <span className="text-xs font-black text-white flex items-center justify-center space-x-1">
+                    <Calendar className="w-3 h-3 text-indigo-400 mr-1" />
+                    <span>{formatBengaliMonthYear(templateMonth)}</span>
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleNextTemplateMonth}
+                  className="w-7 h-7 flex items-center justify-center bg-gradient-to-b from-slate-700 via-slate-800 to-slate-900 hover:from-slate-600 hover:to-slate-750 text-indigo-300 hover:text-white rounded-lg transition-all cursor-pointer border-t border-slate-600/80 border-x border-slate-700/80 border-b-[2.5px] border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.6)]"
+                  title="পরবর্তী মাস (Next Month)"
+                >
+                  <ChevronRight className="w-3.5 h-3.5 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]" />
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={handleNextTemplateMonth}
-                className="w-7 h-7 flex items-center justify-center bg-gradient-to-b from-slate-700 via-slate-800 to-slate-900 hover:from-slate-600 hover:to-slate-750 text-indigo-300 hover:text-white rounded-lg transition-all cursor-pointer border-t border-slate-600/80 border-x border-slate-700/80 border-b-[2.5px] border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.6)]"
-                title="পরবর্তী মাস (Next Month)"
-              >
-                <ChevronRight className="w-3.5 h-3.5 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]" />
-              </button>
+              <span className="text-[9px] text-slate-400 font-bold tracking-tight select-none mt-0.5">
+                * শুধুমাত্র টেমপ্লেট ডাউনলোডের মাস
+              </span>
             </div>
 
             {/* Template 1: Member-wise Matrix (31 Date tabs for selected Month) */}
@@ -2714,10 +2933,10 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
               type="button"
               onClick={handleDownloadOfficialMatrixTemplate}
               className="flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-900/80 hover:bg-emerald-800 text-emerald-200 border border-emerald-500/50 rounded-xl text-xs font-black tracking-wider transition-all shadow-sm cursor-pointer"
-              title={`Template 1: Member-wise (৩১ দিনের ৩১টি ট্যাব, ${formatBengaliMonthYear(templateMonth)})`}
+              title={`১. সদস্য ভিত্তিক টেমপ্লেট ডাউনলোড (${formatBengaliMonthYear(templateMonth)} - ৩১ দিনের ৩১টি আলাদা ট্যাব)`}
             >
               <Download className="w-3.5 h-3.5 text-emerald-400" />
-              <span>১. সদস্য ভিত্তিক (৩১ দিন)</span>
+              <span>১. সদস্য ভিত্তিক ({formatBengaliMonthYear(templateMonth).split(' ')[0]})</span>
             </button>
 
             {/* Template 2: Date-wise Matrix (Member Fixed, Left: 1-31 Date) */}
@@ -2725,10 +2944,10 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
               type="button"
               onClick={() => handleDownloadDateWiseMatrixTemplate()}
               className="flex items-center space-x-1.5 px-3 py-1.5 bg-teal-900/80 hover:bg-teal-800 text-teal-200 border border-teal-500/50 rounded-xl text-xs font-black tracking-wider transition-all shadow-sm cursor-pointer"
-              title={`Template 2: Date-wise (${formatBengaliMonthYear(templateMonth)})`}
+              title={`২. তারিখ ভিত্তিক টেমপ্লেট ডাউনলোড (${formatBengaliMonthYear(templateMonth)} - মেম্বার ডিবি ক্রমিক নং অনুযায়ী সবার আলাদা ট্যাব)`}
             >
               <Download className="w-3.5 h-3.5 text-teal-400" />
-              <span>২. তারিখ ভিত্তিক</span>
+              <span>২. তারিখ ভিত্তিক ({formatBengaliMonthYear(templateMonth).split(' ')[0]})</span>
             </button>
 
             <button
@@ -2824,12 +3043,15 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                     <Upload className="w-7 h-7" />
                   )}
                 </div>
-                <div className="space-y-1">
+                <div className="space-y-1 text-center">
                   <h4 className="text-sm font-black text-white uppercase tracking-wider">
                     {isProcessing ? 'ফাইল প্রসেস করা হচ্ছে...' : 'ক্লিক করুন বা ড্র্যাগ করে ফেলুন (Drag & Drop)'}
                   </h4>
                   <p className="text-xs text-slate-400">
                     সাপোর্টেড ফরম্যাট: .xlsx, .xls, .csv (১৫৫ ইউএএসইউ দৈনিক শিট ম্যাট্রিক্স অথবা সাধারণ কলাম লিস্ট)
+                  </p>
+                  <p className="text-[11px] text-indigo-300 font-medium bg-indigo-950/60 border border-indigo-500/30 px-3 py-1.5 rounded-xl max-w-xl mx-auto mt-2">
+                    💡 <strong>স্বয়ংক্রিয় মাস সনাক্তকরণ:</strong> আপনার ফাইলে যে মাস উল্লেখ থাকবে, সিস্টেম স্বয়ংক্রিয়ভাবে সেই মাসের হিসেবেই ডাটা ইমপোর্ট করবে। উপরের মাস নির্বাচনটি শুধুমাত্র টেমপ্লেট ডাউনলোডের জন্য।
                   </p>
                 </div>
               </div>
@@ -2923,10 +3145,11 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-400 leading-relaxed">
-                        • <strong>সদস্য ফিক্সড:</strong> ব্যানারে নির্দিষ্ট সদস্যের <strong>পদবী, নাম ও বিডি নং (শুধু নম্বর)</strong> থাকে。<br/>
+                        • <strong>মেম্বার ডিবি ক্রমিক নং (Ser) অনুযায়ী আলাদা আলাদা ট্যাব:</strong> মেম্বার ডিবি-এর ১..N সিরিয়াল বজায় রেখে সব সদস্যের জন্য পৃথক ট্যাব তৈরি হয়।<br/>
+                        • <strong>সদস্য ফিক্সড:</strong> ব্যানারে নির্দিষ্ট সদস্যের ক্রমিক, <strong>পদবী, নাম ও বিডি নং (শুধু নম্বর)</strong> থাকে。<br/>
                         • <strong>ফ্রিজ প্যান:</strong> <strong>C কলাম</strong> (তারিখ পর্যন্ত) ও <strong>৫ নম্বর সারি</strong> ফিক্সড/লক থাকে。<br/>
                         • <strong>ছুটির দিন হাইড:</strong> শুক্র, শনি ও ছুটির দিনের সারি ডিফল্টভাবে হাইড থাকে (প্রয়োজনে আনহাইড করা যাবে)।<br/>
-                        • <strong>ফরম্যাট ও কালার:</strong> আসল <strong>SutonnyMJ ১৬ সাইজ</strong> ফন্ট, <strong>সেল অটো-ফিট (Auto-fit)</strong> এবং সারিভিত্তিক অল্টারনেটিং কালার (কলামভিত্তিক অল্টারনেটিং কালার ছাড়া)।
+                        • <strong>ফরম্যাট ও কালার:</strong> আসল <strong>SutonnyMJ ১৬ সাইজ</strong> ফন্ট, <strong>সেল অটো-ফিট (Auto-fit)</strong> এবং সারিভিত্তিক অল্টারনেটিং কালার।
                       </p>
 
                       {/* Month Selection - Bill Style */}
@@ -2973,14 +3196,15 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                           onChange={(e) => setDateTemplateMemberId(e.target.value)}
                           className="w-full bg-slate-950 border border-teal-500/40 rounded-xl px-2.5 py-1.5 text-xs text-white font-medium focus:outline-none focus:border-teal-400 cursor-pointer"
                         >
-                          <option value="ALL">সকল সদস্য (সদস্য প্রতি আলাদা ট্যাব)</option>
-                          {members.map((m: any, mIdx: number) => {
-                            const rank = m.Rank || m.rank || '';
-                            const name = m.Surname || m.Name || m.name || '';
+                          <option value="ALL">সকল সদস্য ({sortedUnitMembers.length} জন - মেম্বার ডিবি ক্রমিক নং অনুযায়ী সবার আলাদা আলাদা ট্যাব)</option>
+                          {sortedUnitMembers.map((m: any, mIdx: number) => {
+                            const rank = formatRankBn(m.Rank || m.rank || '');
+                            const name = m.name_bn || m.NameBn || formatMemberNameBn(m.Surname || m.Name || '') || m.Surname || m.Name || '';
                             const bd = m['BD No'] || m.airman_id || '';
+                            const cleanBd = String(bd).replace(/\D/g, '');
                             return (
                               <option key={m.airman_id || mIdx} value={m.airman_id || bd}>
-                                {rank} {name} {bd ? `(${bd})` : ''}
+                                {String(mIdx + 1).padStart(2, '0')}. {rank} {name} {cleanBd ? `(${cleanBd})` : ''}
                               </option>
                             );
                           })}
@@ -3004,6 +3228,26 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
             /* Step 2: Parsed Table Review */
             <div className="space-y-4">
               
+              {/* File Detected Month Notice */}
+              {fileDetectedMonth && (
+                <div className="p-3.5 rounded-2xl bg-indigo-950/70 border border-indigo-500/50 text-indigo-200 text-xs font-bold flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md animate-in fade-in">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center shrink-0 border border-indigo-500/30">
+                      <Calendar className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wider text-indigo-300 font-bold">ফাইলের নিজস্ব মাস সনাক্ত হয়েছে</div>
+                      <div className="text-sm font-black text-white">
+                        {formatBengaliMonthYear(fileDetectedMonth)} <span className="text-xs text-indigo-300 font-mono font-normal">({fileDetectedMonth})</span>
+                      </div>
+                    </div>
+                  </div>
+                  <span className="text-[10px] text-indigo-300 font-mono bg-indigo-900/60 px-2.5 py-1 rounded-lg border border-indigo-500/30 self-start sm:self-center">
+                    ফাইলের ভেতরের নির্দিষ্ট মাস অনুযায়ী ডাটা সংরক্ষিত হবে
+                  </span>
+                </div>
+              )}
+
               {/* Summary Cards */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800">
@@ -3646,3 +3890,5 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
     </div>
   );
 };
+
+export default ImportPosSalesModal;
