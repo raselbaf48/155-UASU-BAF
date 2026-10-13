@@ -122,9 +122,9 @@ export function deduplicateCanteenMenuItems(items: CanteenMenuItem[]): CanteenMe
     let groupKey: string | undefined;
     if (cleanId && idToGroup.has(cleanId)) {
       groupKey = idToGroup.get(cleanId);
-    } else if (normEn && nameToGroup.has(normEn)) {
+    } else if (!cleanId && normEn && nameToGroup.has(normEn)) {
       groupKey = nameToGroup.get(normEn);
-    } else if (normBn && bnNameToGroup.has(normBn)) {
+    } else if (!cleanId && normBn && bnNameToGroup.has(normBn)) {
       groupKey = bnNameToGroup.get(normBn);
     }
 
@@ -448,7 +448,10 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
                 const serverTime = it.updated_at ? new Date(it.updated_at).getTime() : 0;
                 // Preserve local changes if local timestamp is newer than server or user modified
                 if (localTime >= serverTime) {
-                  return local;
+                  return {
+                    ...it,
+                    ...local
+                  };
                 }
               }
               const localBn = local?.name_bn || local?.nameBn || local?.['Name (BN)'];
@@ -457,6 +460,7 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
               const name = localName || it.name || it.name_en || '';
               return {
                 ...it,
+                ...local,
                 name,
                 name_en: name,
                 name_bn: bn,
@@ -543,7 +547,10 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
             const localTime = local.updated_at ? new Date(local.updated_at).getTime() : 0;
             const serverTime = it.updated_at ? new Date(it.updated_at).getTime() : 0;
             if (localTime >= serverTime) {
-              return local;
+              return {
+                ...it,
+                ...local
+              };
             }
           }
           const localBn = local?.name_bn || local?.nameBn || local?.['Name (BN)'];
@@ -552,6 +559,7 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
           const name = localName || it.name || it.name_en || '';
           return {
             ...it,
+            ...local,
             name,
             name_en: name,
             name_bn: bn,

@@ -148,11 +148,12 @@ export const calculateMenuPortionCostFrom20Pax = (
 
   const cleanName = (menu.name || '').trim().toUpperCase();
   const key = menu.name ? menu.name.trim().toUpperCase() : (menu.id || '');
-  let ingredients = map[key] || (menu.id ? map[menu.id] : undefined);
+  let ingredients = (menu.id && map[menu.id]) || map[key];
   if (!ingredients || ingredients.length === 0) {
-    for (const [k, ingList] of Object.entries(map)) {
-      if (cleanName && (cleanName.includes(k) || k.includes(cleanName))) {
-        ingredients = ingList;
+    const sortedKeys = Object.keys(map).sort((a, b) => b.length - a.length);
+    for (const k of sortedKeys) {
+      if (cleanName && k.length >= 5 && cleanName.includes(k)) {
+        ingredients = map[k];
         break;
       }
     }
@@ -356,17 +357,22 @@ export const RawDistributionPage: React.FC = () => {
 
   // Get or resolve 20-pax ingredients for a menu item
   const getIngredientsForMenu = (menu: CanteenMenuItem): Recipe20PaxIngredient[] => {
+    if (!menu) return [];
     const key = getRecipeKey(menu);
-    if (recipes20Pax[key] && recipes20Pax[key].length > 0) {
-      return recipes20Pax[key];
-    }
-    if (recipes20Pax[menu.id] && recipes20Pax[menu.id].length > 0) {
+    // 1. Check by ID first (unique identifier)
+    if (menu.id && recipes20Pax[menu.id] && recipes20Pax[menu.id].length > 0) {
       return recipes20Pax[menu.id];
     }
+    // 2. Check exact name key
+    if (key && recipes20Pax[key] && recipes20Pax[key].length > 0) {
+      return recipes20Pax[key];
+    }
+    // 3. Check sorted candidate keys by length descending (longest/most specific first, e.g. PORATA (PREMIUM) before PORATA)
     const cleanName = (menu.name || '').trim().toUpperCase();
-    for (const [k, ingList] of Object.entries(recipes20Pax)) {
-      if (cleanName.includes(k) || k.includes(cleanName)) {
-        return ingList as Recipe20PaxIngredient[];
+    const sortedKeys = Object.keys(recipes20Pax).sort((a, b) => b.length - a.length);
+    for (const k of sortedKeys) {
+      if (cleanName && k.length >= 5 && cleanName.includes(k)) {
+        return recipes20Pax[k] as Recipe20PaxIngredient[];
       }
     }
 

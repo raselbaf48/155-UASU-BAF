@@ -12,6 +12,7 @@ import {
   setCanteenMenuCache,
   deduplicateCanteenMenuItems,
   getUserMenuOverrides,
+  findUserMenuOverride,
   DEFAULT_CANTEEN_MENU_ITEMS,
   CanteenMenuItem
 } from './canteenMenuData';
@@ -826,6 +827,9 @@ function dispatchKeyUpdateEvent(key: string) {
       case 'canteen_member_bangla_names':
         window.dispatchEvent(new Event('canteen_member_bangla_names_updated'));
         break;
+      case 'canteen_menu_bangla_names':
+        window.dispatchEvent(new Event('canteen_menu_bangla_names_updated'));
+        break;
       case 'canteen_fund_transfers':
         window.dispatchEvent(new Event('canteen_transfers_updated'));
         break;
@@ -956,9 +960,33 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
           } else if (key === 'canteen_menu_items_catalog_v1') {
             const currentCache = getCanteenMenuCache();
             const effectiveLocal = (Array.isArray(localVal) && localVal.length > 0) ? localVal : currentCache;
-            const mergedMenu = deduplicateCanteenMenuItems([...effectiveLocal, ...(Array.isArray(cloudVal) ? cloudVal : [])]);
-            finalVal = mergedMenu;
-            setCanteenMenuCache(mergedMenu);
+            const overrides = getUserMenuOverrides();
+
+            // Local modifications and overrides take absolute precedence over stale cloudVal
+            const mergedList: any[] = [];
+            const processedIds = new Set<string>();
+
+            for (const lItem of effectiveLocal) {
+              const lId = String(lItem.id || '').toLowerCase();
+              processedIds.add(lId);
+              const ov = findUserMenuOverride(overrides, lItem);
+              mergedList.push(ov ? { ...lItem, ...ov } : lItem);
+            }
+
+            if (Array.isArray(cloudVal)) {
+              for (const cItem of cloudVal) {
+                const cId = String(cItem.id || '').toLowerCase();
+                if (!processedIds.has(cId)) {
+                  processedIds.add(cId);
+                  const ov = findUserMenuOverride(overrides, cItem);
+                  mergedList.push(ov ? { ...cItem, ...ov } : cItem);
+                }
+              }
+            }
+
+            const finalizedMenu = deduplicateCanteenMenuItems(mergedList);
+            finalVal = finalizedMenu;
+            setCanteenMenuCache(finalizedMenu);
           } else if (key === 'canteen_daily_menu') {
             const localUpdated = typeof window !== 'undefined' ? localStorage.getItem('canteen_daily_menu_updated_at') : null;
             const cloudUpdated = cloudKeyMap.get('canteen_daily_menu_updated_at');
@@ -1474,8 +1502,13 @@ export function initCanteenCloudSync(): () => void {
                 const currentCache = getCanteenMenuCache();
                 const effectiveLocal = (Array.isArray(currentLocal) && currentLocal.length > 0) ? currentLocal : currentCache;
                 const mergedMenu = deduplicateCanteenMenuItems([...effectiveLocal, ...(Array.isArray(parsed) ? parsed : [])]);
-                mergedVal = mergedMenu;
-                setCanteenMenuCache(mergedMenu);
+                const overrides = getUserMenuOverrides();
+                const finalizedMenu = mergedMenu.map((m: any) => {
+                  const ov = findUserMenuOverride(overrides, m);
+                  return ov ? { ...m, ...ov } : m;
+                });
+                mergedVal = finalizedMenu;
+                setCanteenMenuCache(finalizedMenu);
               } else if (key === 'canteen_daily_menu') {
                 const localUpdated = typeof window !== 'undefined' ? localStorage.getItem('canteen_daily_menu_updated_at') : null;
                 const localTime = new Date(localUpdated || 0).getTime();

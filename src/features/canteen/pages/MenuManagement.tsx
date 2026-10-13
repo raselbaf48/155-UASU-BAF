@@ -6,7 +6,7 @@ import { resolveImageUrl, getItemDisplayName } from '../utils/canteenSettings';
 import { queuePushKeyToCloud, pushKeyToCloud } from '../utils/canteenCloudSync';
 import { getCanteenMenuCache, fetchCanteenMenuOnce, setCanteenMenuCache, isOneTimeBoxItem, normalizeCatalogKey, deduplicateCanteenMenuItems, saveUserMenuOverride, getUserMenuOverrides } from '../utils/canteenMenuData';
 import { calculateMenuItemStockInfo, getRawInventoryItems, getMenuRecipes } from '../utils/recipeManager';
-import { getMenuItemBanglaName, saveMenuItemBanglaName } from '../utils/menuBanglaNames';
+import { getMenuItemBanglaName, saveMenuItemBanglaName, getMenuBanglaNamesMap } from '../utils/menuBanglaNames';
 import { sortCanteenMenuItems } from '../utils/menuOrdering';
 
 export const MenuManagement: React.FC = () => {
@@ -20,13 +20,20 @@ export const MenuManagement: React.FC = () => {
           .filter((d: any) => !isOneTimeBoxItem(d))
           .map((d: any) => {
             const bn = d.name_bn || d['Name (BN)'] || d.nameBn || getMenuItemBanglaName(d) || d.name;
+            const en = d.name || d.name_en || '';
             return {
+              ...d,
               id: d.id,
-              meal: d.category || 'Snacks',
+              meal: d.category || d.meal || 'Snacks',
+              category: d.category || d.meal || 'Snacks',
               name_bn: bn,
-              name_en: d.name || d.name_en || '',
+              nameBn: bn,
+              'Name (BN)': bn,
+              name_en: en,
+              name: en,
               price: Number(d.price || 0),
               max: Number(d.stock ?? d.max ?? 50),
+              stock: Number(d.stock ?? d.max ?? 50),
               DP: d.DP || d.img || d.image || ''
             };
           });
@@ -44,13 +51,20 @@ export const MenuManagement: React.FC = () => {
           .filter((d: any) => !isOneTimeBoxItem(d))
           .map((d: any) => {
             const bn = d.name_bn || d['Name (BN)'] || d.nameBn || getMenuItemBanglaName(d) || d.name;
+            const en = d.name || d.name_en || '';
             return {
+              ...d,
               id: d.id,
-              meal: d.category || 'Snacks',
+              meal: d.category || d.meal || 'Snacks',
+              category: d.category || d.meal || 'Snacks',
               name_bn: bn,
-              name_en: d.name || d.name_en || '',
+              nameBn: bn,
+              'Name (BN)': bn,
+              name_en: en,
+              name: en,
               price: Number(d.price || 0),
               max: Number(d.stock ?? d.max ?? 50),
+              stock: Number(d.stock ?? d.max ?? 50),
               DP: d.DP || d.img || d.image || ''
             };
           });
@@ -70,13 +84,20 @@ export const MenuManagement: React.FC = () => {
             .filter((d: any) => !isOneTimeBoxItem(d))
             .map((d: any) => {
               const bn = d.name_bn || d['Name (BN)'] || d.nameBn || getMenuItemBanglaName(d) || d.name;
+              const en = d.name || d.name_en || '';
               return {
+                ...d,
                 id: d.id,
-                meal: d.category || 'Snacks',
+                meal: d.category || d.meal || 'Snacks',
+                category: d.category || d.meal || 'Snacks',
                 name_bn: bn,
-                name_en: d.name || d.name_en || '',
+                nameBn: bn,
+                'Name (BN)': bn,
+                name_en: en,
+                name: en,
                 price: Number(d.price || 0),
                 max: Number(d.stock ?? d.max ?? 50),
+                stock: Number(d.stock ?? d.max ?? 50),
                 DP: d.DP || d.img || d.image || ''
               };
             });
@@ -303,20 +324,39 @@ export const MenuManagement: React.FC = () => {
       queuePushKeyToCloud('canteen_daily_menu');
       pushKeyToCloud('canteen_menu_items_catalog_v1', updated);
       pushKeyToCloud('canteen_user_menu_overrides', getUserMenuOverrides());
-      Promise.resolve(supabase.from('Canteen_Menu').upsert({
-        id: editingItem.id,
-        name: nameEn,
-        name_bn: nameBn,
-        price: priceNum,
-        stock: maxNum,
-        DP: dpTrimmed,
-        category: editingItem.meal || 'SNACKS',
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'id' }))
-      .then(({ error }) => {
-        if (error) console.warn('Canteen_Menu upsert note:', error.message);
-      })
-      .catch(err => console.warn('Canteen_Menu network note:', err));
+      pushKeyToCloud('canteen_menu_bangla_names', getMenuBanglaNamesMap());
+
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(editingItem.id || ''));
+      if (isUuid) {
+        Promise.resolve(supabase.from('Canteen_Menu').upsert({
+          id: editingItem.id,
+          name: nameEn,
+          name_bn: nameBn,
+          price: priceNum,
+          stock: maxNum,
+          DP: dpTrimmed,
+          category: editingItem.meal || editingItem.category || 'SNACKS',
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'id' }))
+        .then(({ error }) => {
+          if (error) console.warn('Canteen_Menu upsert note:', error.message);
+        })
+        .catch(err => console.warn('Canteen_Menu network note:', err));
+      } else {
+        Promise.resolve(supabase.from('Canteen_Menu').update({
+          name: nameEn,
+          name_bn: nameBn,
+          price: priceNum,
+          stock: maxNum,
+          DP: dpTrimmed,
+          category: editingItem.meal || editingItem.category || 'SNACKS',
+          updated_at: new Date().toISOString()
+        }).or(`name.ilike.${nameEn},name.ilike.${oldNameEn}`))
+        .then(({ error }) => {
+          if (error) console.warn('Canteen_Menu update note:', error.message);
+        })
+        .catch(err => console.warn('Canteen_Menu network note:', err));
+      }
 
       // Instant global real-time notifications
       window.dispatchEvent(new CustomEvent('canteen_menu_updated', { detail: updated }));
@@ -340,9 +380,13 @@ export const MenuManagement: React.FC = () => {
         return;
       }
 
-      // Adding New Menu (does NOT touch raw inventory, saves purely to Menu)
+      // Adding New Menu (generates compliant UUID for Supabase and local storage)
+      const newGeneratedId = (typeof crypto !== 'undefined' && crypto.randomUUID) 
+        ? crypto.randomUUID() 
+        : 'item-' + Date.now();
+
       const newItem = {
-        id: Date.now().toString(),
+        id: newGeneratedId,
         meal: 'SNACKS',
         category: 'SNACKS',
         name_bn: nameBn,
@@ -356,7 +400,8 @@ export const MenuManagement: React.FC = () => {
         DP: dpTrimmed,
         img: dpTrimmed,
         image: dpTrimmed,
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
       };
 
       const updated = deduplicateCanteenMenuItems([...items, newItem]);
@@ -383,8 +428,10 @@ export const MenuManagement: React.FC = () => {
       queuePushKeyToCloud('canteen_daily_menu');
       pushKeyToCloud('canteen_menu_items_catalog_v1', updated);
       pushKeyToCloud('canteen_user_menu_overrides', getUserMenuOverrides());
-      Promise.resolve(supabase.from('Canteen_Menu').insert({
-        id: newItem.id,
+      pushKeyToCloud('canteen_menu_bangla_names', getMenuBanglaNamesMap());
+
+      const isNewUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(newItem.id);
+      const insertPayload: any = {
         name: newItem.name_en,
         name_bn: newItem.name_bn,
         price: newItem.price,
@@ -393,9 +440,20 @@ export const MenuManagement: React.FC = () => {
         category: 'SNACKS',
         created_at: newItem.created_at,
         updated_at: new Date().toISOString()
-      }))
-      .then(({ error }) => {
-        if (error) console.warn('Canteen_Menu insert note:', error.message);
+      };
+      if (isNewUuid) insertPayload.id = newItem.id;
+
+      Promise.resolve(supabase.from('Canteen_Menu').insert([insertPayload]).select())
+      .then(({ data, error }) => {
+        if (error) {
+          console.warn('Canteen_Menu insert note:', error.message);
+        } else if (data && data[0] && data[0].id && !isNewUuid) {
+          // If server assigned a UUID, update local record ID
+          const realId = data[0].id;
+          const remapped = updated.map(u => u.id === newItem.id ? { ...u, id: realId } : u);
+          setItems(remapped);
+          setCanteenMenuCache(remapped);
+        }
       })
       .catch(err => console.warn('Canteen_Menu insert network note:', err));
 

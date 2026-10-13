@@ -1329,6 +1329,12 @@ const DEFAULT_MENU_RECIPES: Record<string, RecipeIngredient[]> = {
     { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.004, unit: 'cylinder' },
     { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 4, unit: 'gm' }
   ],
+  'PORATA (PREMIUM)': [
+    { rawItemId: 'raw-11', rawItemName: 'Frozen Porota', quantity: 1, unit: 'pcs' },
+    { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 2, unit: 'ml' },
+    { rawItemId: 'raw-16', rawItemName: 'Gas Cylinder', quantity: 0.002, unit: 'cylinder' },
+    { rawItemId: 'raw-27', rawItemName: 'Salt', quantity: 1, unit: 'gm' }
+  ],
   'PORATA': [
     { rawItemId: 'raw-26', rawItemName: 'Hotel Porota', quantity: 1, unit: 'pcs' },
     { rawItemId: 'raw-12', rawItemName: 'Soyabin Oil', quantity: 10, unit: 'ml' },
@@ -2321,6 +2327,12 @@ export const getRecipeForMenuItem = (menuItemId: string, menuItemName?: string, 
         found = recipes['DRY CAKE'];
       } else if ((lower.includes('বিস্কুট') || lower.includes('biscuit')) && recipes['NORMAL BISCUIT']) {
         found = recipes['NORMAL BISCUIT'];
+      } else if ((lower.includes('পরোটা প্রিমিয়াম') || lower.includes('porata premium') || lower.includes('porota premium')) && (recipes['PORATA (PREMIUM)'] || recipes['PORATA'])) {
+        found = recipes['PORATA (PREMIUM)'] || recipes['PORATA'];
+      } else if ((lower.includes('হোটেল পরোটা') || lower.includes('hotel porota') || lower.includes('porata hotel')) && (recipes['PORATA (HOTEL)'] || recipes['PORATA'])) {
+        found = recipes['PORATA (HOTEL)'] || recipes['PORATA'];
+      } else if ((lower.includes('পরোটা') || lower.includes('porota') || lower.includes('porata')) && (recipes['PORATA (PREMIUM)'] || recipes['PORATA'] || recipes['PORATA (HOTEL)'])) {
+        found = recipes['PORATA (PREMIUM)'] || recipes['PORATA'] || recipes['PORATA (HOTEL)'];
       }
 
       // 2. Strict normalized key match
@@ -2335,12 +2347,13 @@ export const getRecipeForMenuItem = (menuItemId: string, menuItemName?: string, 
         }
       }
 
-      // 3. Substring match only for specific longer words (never let short words like 'egg' match 'egg noodles')
+      // 3. Substring match sorted by length descending so longer/more-specific keys match first!
       if (!found) {
-        for (const [key, ings] of Object.entries(recipes)) {
+        const sortedKeys = Object.keys(recipes).sort((a, b) => b.length - a.length);
+        for (const key of sortedKeys) {
           const kUpper = key.toUpperCase();
           if (kUpper.length >= 6 && normalized.includes(kUpper)) {
-            found = ings;
+            found = recipes[key];
             break;
           }
         }
@@ -2384,6 +2397,65 @@ export const getRecipeForMenuItem = (menuItemId: string, menuItemName?: string, 
   } catch {
     return found;
   }
+};
+
+/**
+ * Normalizes recipe ingredients against actual raw inventory items.
+ * Guarantees that:
+ * 1. rawItemId points to an existing raw item in raw inventory (so dropdowns in recipe formulation never show unselected/blank).
+ * 2. rawItemName matches the inventory item's canonical name (so names in "কাঁচামাল অনুযায়ী প্রাপ্যতা" and "Recipe Formulation" match 100%).
+ * 3. Units are standardized with sub-units if available.
+ */
+export const normalizeRecipeIngredientsWithInventory = (
+  recipe: RecipeIngredient[],
+  rawList?: RawInventoryItem[]
+): RecipeIngredient[] => {
+  if (!recipe || !Array.isArray(recipe)) return [];
+  const rawItems = rawList && rawList.length > 0 ? rawList : getRawInventoryItems();
+
+  return recipe.map(ing => {
+    // 1. Direct ID match
+    let raw = rawItems.find(r => ing.rawItemId && r.id === ing.rawItemId);
+    // 2. Exact or Bengali name match
+    if (!raw && ing.rawItemName) {
+      const lowerName = ing.rawItemName.toLowerCase().trim();
+      raw = rawItems.find(r => 
+        r.name.toLowerCase().trim() === lowerName ||
+        (r.nameBn && r.nameBn.toLowerCase().trim() === lowerName)
+      );
+    }
+    // 3. Robust normalized name match (e.g. Gas Cylinder -> LPG, Porota Hotel -> Hotel Porota, etc.)
+    if (!raw && ing.rawItemName) {
+      const ingNorm = normalizeRawItemName(ing.rawItemName);
+      raw = rawItems.find(r =>
+        normalizeRawItemName(r.name) === ingNorm ||
+        (r.nameBn && normalizeRawItemName(r.nameBn) === ingNorm)
+      );
+    }
+
+    if (raw) {
+      const sub = getRawItemSubUnitInfo(raw);
+      const validUnits = [
+        ...(sub.hasSubUnit && sub.subUnit ? [sub.subUnit.toLowerCase()] : []),
+        ...(raw.unit ? [raw.unit.toLowerCase()] : [])
+      ];
+      let unit = (ing.unit || '').trim();
+      if (sub.hasSubUnit && sub.subUnit) {
+        if (!unit || !validUnits.includes(unit.toLowerCase()) || unit.toLowerCase() === (raw.unit || '').toLowerCase()) {
+          unit = sub.subUnit;
+        }
+      } else if (!unit && raw.unit) {
+        unit = raw.unit;
+      }
+      return {
+        ...ing,
+        rawItemId: raw.id,
+        rawItemName: raw.name,
+        unit: unit || raw.unit || 'pcs'
+      };
+    }
+    return ing;
+  });
 };
 
 /**
@@ -2455,8 +2527,9 @@ export const calculateMenuItemStockInfo = (
     } catch {}
   }
 
-  // 1. Resolve Recipe for this menu item
-  const recipe = getRecipeForMenuItem(menuItemId, menuItemName, recipes);
+  // 1. Resolve Recipe for this menu item and normalize with inventory
+  const rawRecipe = getRecipeForMenuItem(menuItemId, menuItemName, recipes);
+  const recipe = normalizeRecipeIngredientsWithInventory(rawRecipe, rawItems);
 
   if (recipe && recipe.length > 0) {
     let minPortions = Infinity;
@@ -3387,10 +3460,11 @@ export const formatRecipeRawItemsString = (
   rawItemsList: RawInventoryItem[]
 ): string => {
   if (!recipe || recipe.length === 0) return '';
-  return recipe
+  const normalizedRecipe = normalizeRecipeIngredientsWithInventory(recipe, rawItemsList);
+  return normalizedRecipe
     .map(ing => {
-      const raw = rawItemsList.find(r => r.id === ing.rawItemId) || 
-                  rawItemsList.find(r => (r.name || '').toLowerCase() === (ing.rawItemName || '').toLowerCase());
+      const raw = (rawItemsList || []).find(r => r.id === ing.rawItemId) || 
+                  (rawItemsList || []).find(r => (r.name || '').toLowerCase() === (ing.rawItemName || '').toLowerCase());
       
       let name = '';
       if (raw) {

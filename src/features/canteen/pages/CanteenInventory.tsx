@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, fetchDirectImageUrl, getCanteenConfig, getItemDisplayName, CanteenConfig } from '../utils/canteenSettings';
-import { getCanteenMenuCache, setCanteenMenuCache, updateSingleMenuItemInCache, fetchCanteenMenuOnce, normalizeCatalogKey, deduplicateCanteenMenuItems, saveUserMenuOverride } from '../utils/canteenMenuData';
+import { getCanteenMenuCache, setCanteenMenuCache, updateSingleMenuItemInCache, fetchCanteenMenuOnce, normalizeCatalogKey, deduplicateCanteenMenuItems, saveUserMenuOverride, getUserMenuOverrides } from '../utils/canteenMenuData';
 import { processGalleryImage } from '../utils/imageUpload';
 import { SaveButton } from '../components/SaveButton';
 import { formatCanteenDate } from '../utils/dateUtils';
@@ -33,7 +33,9 @@ import {
   calculateMenuItemStockInfo,
   isReadymadeItem,
   saveMenuRecipes,
-  INITIAL_RAW_ITEMS
+  INITIAL_RAW_ITEMS,
+  normalizeRecipeIngredientsWithInventory,
+  normalizeRawItemName
 } from '../utils/recipeManager';
 import {
   get20PaxRecipes,
@@ -295,32 +297,34 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     setModalNotice('');
     setHistorySearchTerm('');
     setHistoryDateFilter(getTodayYMD());
-    const existingRecipe = getRecipeForMenuItem(item.id, item.name);
-    const normalizedRecipe = existingRecipe.map(ing => {
-      const raw = rawList.find(r => r.id === ing.rawItemId || (r.name && ing.rawItemName && r.name.toLowerCase() === ing.rawItemName.toLowerCase()));
-      if (raw) {
-        const sub = getRawItemSubUnitInfo(raw);
-        const validUnits = [
-          ...(sub.hasSubUnit && sub.subUnit ? [sub.subUnit.toLowerCase()] : []),
-          ...(raw.unit ? [raw.unit.toLowerCase()] : [])
-        ];
-        let unit = (ing.unit || '').trim();
-        if (sub.hasSubUnit && sub.subUnit) {
-          if (!unit || !validUnits.includes(unit.toLowerCase()) || unit.toLowerCase() === (raw.unit || '').toLowerCase()) {
-            unit = sub.subUnit;
-          }
-        } else if (!unit && raw.unit) {
-          unit = raw.unit;
+    // 1. Resolve recipe by ID, name, or direct raw item
+    let existingRecipe = getRecipeForMenuItem(item.id, item.name, recipes);
+    if (!existingRecipe || existingRecipe.length === 0) {
+      const searchNames = [item.name, item.name_en, item.nameBn, item.name_bn].filter(Boolean);
+      for (const nameCand of searchNames) {
+        const itemNorm = normalizeRawItemName(nameCand || '');
+        const directRaw = rawList.find(r =>
+          (item.id && r.id === item.id) ||
+          r.name.toLowerCase() === (nameCand || '').toLowerCase() ||
+          normalizeRawItemName(r.name) === itemNorm ||
+          (r.nameBn && (
+            normalizeRawItemName(r.nameBn) === itemNorm ||
+            r.nameBn.toLowerCase().includes((nameCand || '').toLowerCase()) ||
+            (nameCand || '').toLowerCase().includes(r.nameBn.toLowerCase())
+          ))
+        );
+        if (directRaw) {
+          existingRecipe = [{
+            rawItemId: directRaw.id,
+            rawItemName: directRaw.name,
+            quantity: 1,
+            unit: directRaw.unit || 'pcs'
+          }];
+          break;
         }
-        return {
-          ...ing,
-          rawItemId: raw.id,
-          rawItemName: raw.name,
-          unit
-        };
       }
-      return ing;
-    });
+    }
+    const normalizedRecipe = normalizeRecipeIngredientsWithInventory(existingRecipe, rawList);
 
     const recipeCost = calculateMenuItemCost(normalizedRecipe, rawList).totalCost;
     const initialCost = normalizedRecipe.length > 0 ? recipeCost : Number(item.Cost ?? item.cost ?? 0);
@@ -489,8 +493,8 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
 
         // Also migrate 1-Pax recipe
         const r1 = getMenuRecipes();
-        const existing1 = r1[oldName] || r1[selectedItemForModal.id];
-        if (existing1) {
+        const existing1 = r1[oldName] || r1[selectedItemForModal.id] || getRecipeForMenuItem(selectedItemForModal.id, oldName, r1);
+        if (existing1 && existing1.length > 0) {
           const updated1 = {
             ...r1,
             [newName]: existing1,
@@ -528,8 +532,12 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     };
 
     // 0ms INSTANT local update & global cache synchronization across all components!
-    setItems(prev => prev.map(i => i.id === selectedItemForModal.id ? updatedItem : i));
+    const newItems = items.map(i => i.id === selectedItemForModal.id ? updatedItem : i);
+    setItems(newItems);
     updateSingleMenuItemInCache(updatedItem);
+    saveUserMenuOverride({ ...updatedItem, oldNameEn: oldName });
+    pushKeyToCloud('canteen_menu_items_catalog_v1', newItems).catch(() => {});
+    pushKeyToCloud('canteen_user_menu_overrides', getUserMenuOverrides()).catch(() => {});
 
     // Immediate background sync to Supabase (never block the UI!)
     Promise.resolve(
@@ -866,32 +874,49 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     const rawList = getRawInventoryItems();
     setAvailableRawItems(rawList);
     setQuickRecipeItem(item);
-    const existing = getRecipeForMenuItem(item.id, item.name);
-    const normalized = existing.map(ing => {
-      const raw = rawList.find(r => r.id === ing.rawItemId || (r.name && ing.rawItemName && r.name.toLowerCase() === ing.rawItemName.toLowerCase()));
-      if (raw) {
-        const sub = getRawItemSubUnitInfo(raw);
-        const validUnits = [
-          ...(sub.hasSubUnit && sub.subUnit ? [sub.subUnit.toLowerCase()] : []),
-          ...(raw.unit ? [raw.unit.toLowerCase()] : [])
-        ];
-        let unit = (ing.unit || '').trim();
-        if (sub.hasSubUnit && sub.subUnit) {
-          if (!unit || !validUnits.includes(unit.toLowerCase()) || unit.toLowerCase() === (raw.unit || '').toLowerCase()) {
-            unit = sub.subUnit;
-          }
-        } else if (!unit && raw.unit) {
-          unit = raw.unit;
-        }
-        return {
-          ...ing,
-          rawItemId: raw.id,
-          rawItemName: raw.name,
-          unit
-        };
+
+    // 1. Look up recipe by item ID, item name, and selectedItemForModal name
+    let existing = getRecipeForMenuItem(item.id, item.name, recipes);
+    if ((!existing || existing.length === 0) && selectedItemForModal) {
+      if (selectedItemForModal.name && selectedItemForModal.name !== item.name) {
+        existing = getRecipeForMenuItem(selectedItemForModal.id, selectedItemForModal.name, recipes);
       }
-      return ing;
-    });
+    }
+
+    // 2. Fallback to direct raw item if readymade / packaged good
+    if (!existing || existing.length === 0) {
+      const searchNames = [
+        item.name,
+        selectedItemForModal?.name,
+        item.name_en,
+        item.nameBn,
+        item.name_bn
+      ].filter(Boolean);
+      for (const nameCand of searchNames) {
+        const itemNorm = normalizeRawItemName(nameCand || '');
+        const directRaw = rawList.find(r =>
+          (item.id && r.id === item.id) ||
+          r.name.toLowerCase() === (nameCand || '').toLowerCase() ||
+          normalizeRawItemName(r.name) === itemNorm ||
+          (r.nameBn && (
+            normalizeRawItemName(r.nameBn) === itemNorm ||
+            r.nameBn.toLowerCase().includes((nameCand || '').toLowerCase()) ||
+            (nameCand || '').toLowerCase().includes(r.nameBn.toLowerCase())
+          ))
+        );
+        if (directRaw) {
+          existing = [{
+            rawItemId: directRaw.id,
+            rawItemName: directRaw.name,
+            quantity: 1,
+            unit: directRaw.unit || 'pcs'
+          }];
+          break;
+        }
+      }
+    }
+
+    const normalized = normalizeRecipeIngredientsWithInventory(existing, rawList);
     setQuickRecipeIngredients(normalized);
     setRecipeNotice('');
   };
@@ -1489,16 +1514,16 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                                           {stockInfo.availableStock <= 0 && <span className="ml-1 text-[9px] px-1 rounded bg-black/50 text-rose-200">শেষ</span>}
                                        </div>
                                     </div>
-                                    {stockInfo.limitingIngredient && stockInfo.isRecipeBased && (
+                                    {stockInfo.limitingIngredient && (
                                        <div className="p-2.5 rounded-xl bg-amber-950/40 border border-amber-500/30 text-[11px] text-amber-200">
                                           <span className="font-bold">সীমিত কাঁচামাল: </span>
                                           <span className="font-mono font-black">{stockInfo.limitingIngredient.rawItemName}</span>
                                           <span> (Stock: {stockInfo.limitingIngredient.currentStock} {stockInfo.limitingIngredient.stockUnit} দিয়ে সর্বোচ্চ </span>
                                           <span className="font-bold text-amber-300">{stockInfo.limitingIngredient.portions} টি</span>
-                                          <span> তৈরি করা যাবে)</span>
+                                          <span> তৈরি/সরবরাহ করা যাবে)</span>
                                        </div>
                                     )}
-                                    {stockInfo.ingredientsBreakdown.length > 0 && stockInfo.isRecipeBased && (
+                                    {stockInfo.ingredientsBreakdown.length > 0 && (
                                        <div className="space-y-1.5">
                                           <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 block">কাঁচামাল অনুযায়ী প্রাপ্যতা:</span>
                                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto pr-1">

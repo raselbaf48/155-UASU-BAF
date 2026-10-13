@@ -55,12 +55,12 @@ export const DEFAULT_MENU_BANGLA_NAMES: Record<string, string> = {
   "porata hotel": "পরোটা হোটেল",
   "hotel porata": "পরোটা হোটেল",
   "porata (unit)": "পরোটা",
-  "porata (premium)": "পরোটা",
-  "porata premium": "পরোটা",
-  "paratha premium": "পরোটা",
-  "premium porata": "পরোটা",
-  "পরোটা প্রিমিয়াম": "পরোটা",
-  "পরোটা প্রিমিয়াম": "পরোটা",
+  "porata (premium)": "পরোটা প্রিমিয়াম",
+  "porata premium": "পরোটা প্রিমিয়াম",
+  "paratha premium": "পরোটা প্রিমিয়াম",
+  "premium porata": "পরোটা প্রিমিয়াম",
+  "পরোটা প্রিমিয়াম": "পরোটা প্রিমিয়াম",
+  "পরোটা প্রিমিয়াম": "পরোটা প্রিমিয়াম",
   "paratha": "পরোটা",
   "puri": "পুরি",
   "dal puri": "ডাল পুরি",
@@ -252,7 +252,7 @@ export async function fetchMenuBanglaNamesFromCloud(): Promise<Record<string, st
         const raw = localStorage.getItem(MENU_BANGLA_NAMES_KEY);
         if (raw) currentMap = JSON.parse(raw);
       } catch {}
-      const merged = { ...DEFAULT_MENU_BANGLA_NAMES, ...currentMap, ...cloudKv };
+      const merged = { ...DEFAULT_MENU_BANGLA_NAMES, ...cloudKv, ...currentMap };
       localStorage.setItem(MENU_BANGLA_NAMES_KEY, JSON.stringify(merged));
       window.dispatchEvent(new CustomEvent('canteen_menu_bangla_names_updated', { detail: merged }));
       return merged;
