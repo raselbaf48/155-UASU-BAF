@@ -3,181 +3,17 @@ import { saveAs } from 'file-saver';
 import JSZip from 'jszip';
 import { getCanteenConfig } from './canteenSettings';
 import { sortCanteenMembersByOfficeSeniority, isTxBelongingToMember } from './canteenSeniority';
-import { getTxCategory, getTxMonthKey, BillCategory } from '../pages/MemberDB';
+import { getTxCategory, getTxMonthKey, BillCategory } from './canteenTxCategories';
+import { toBengaliNum, formatRankBn, formatMemberNameBn, formatItemNameBn, formatBengaliMonthYear } from './canteenBengaliFormat';
 
-// Convert English numbers to Bengali numerals
-export const toBengaliNum = (num: number | string): string => {
-  const bn = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
-  return String(num).replace(/\d/g, (d) => bn[parseInt(d, 10)]);
-};
+export { toBengaliNum, formatRankBn, formatMemberNameBn, formatItemNameBn, formatBengaliMonthYear };
+export { getTxCategory, getTxMonthKey };
+export type { BillCategory };
 
-// Map BAF military rank to Bengali official abbreviation matching the Excel template
-export const formatRankBn = (rankStr?: string): string => {
-  if (!rankStr) return '';
-  const r = rankStr.toUpperCase().trim();
 
-  // If already Bengali
-  if (r.includes('মাঃ ওঃ অঃ') || r.includes('মাঃওঃঅঃ') || r.includes('মাস্টার ওয়ারেন্ট') || r.includes('মাস্টার ওয়ারেন্ট')) return 'মাঃ ওঃ অঃ';
-  if (r.includes('সিঃ ওঃ অঃ') || r.includes('সিঃওঃঅঃ') || r.includes('সিনিয়র ওয়ারেন্ট') || r.includes('সিনিয়র ওয়ারেন্ট')) return 'সিঃ ওঃ অঃ';
-  if (r.includes('ওঃ অঃ') || r.includes('ওঃঅঃ') || r.includes('ওয়ারেন্ট') || r.includes('ওয়ারেন্ট')) return 'ওঃ অঃ';
-  if (r.includes('সার্জেন্ট') || r.includes('সার্জেণ্ট')) return 'সার্জেন্ট';
-  if (r.includes('কর্পোরাল')) return 'কর্পোরাল';
-  if (r.includes('এলএসি')) return 'এলএসি';
-  if (r.includes('এসি')) return 'এসি';
 
-  // Warrant Officers (JCOs)
-  if (r === 'MWO' || r.includes('MASTER WARRANT')) return 'মাঃ ওঃ অঃ';
-  if (r === 'SWO' || r.includes('SENIOR WARRANT')) return 'সিঃ ওঃ অঃ';
-  if (r === 'WO' || r.includes('WARRANT')) return 'ওঃ অঃ';
 
-  // Airmen NCOs & ORs
-  if (r === 'SGT' || r.includes('SERGEANT')) return 'সার্জেন্ট';
-  if (r === 'CPL' || r.includes('CORPORAL')) return 'কর্পোরাল';
-  if (r === 'LAC' || r.includes('LEADING AIRCRAFTMAN')) return 'এলএসি';
-  if (r === 'AC' || r.includes('AIRCRAFTMAN')) return 'এসি';
 
-  // Commissioned Officers
-  if (r === 'ACM' || r.includes('CHIEF MARSHAL')) return 'এয়ার চিফ মার্শাল';
-  if (r === 'AM' || r === 'AIR MSHL') return 'এয়ার মার্শাল';
-  if (r === 'AVM') return 'এয়ার ভাইস মার্শাল';
-  if (r === 'AIR CDRE' || r.includes('COMMODORE')) return 'এয়ার কমোডর';
-  if (r === 'GP CAPT' || r.includes('GROUP CAPTAIN')) return 'গ্রুপ ক্যাপ্টেন';
-  if (r === 'WG CDR' || r.includes('WING COMMANDER')) return 'উইং কমাঃ';
-  if (r === 'SQN LDR' || r.includes('SQUADRON LEADER')) return 'স্কোঃ লীঃ';
-  if (r === 'FLT LT' || r.includes('FLIGHT LIEUTENANT')) return 'ফ্লাঃ লেঃ';
-  if (r === 'FLG OFFR' || r === 'FG OFFR' || r.includes('FLYING OFFICER')) return 'ফ্লাঃ অঃ';
-  if (r === 'PLT OFFR' || r.includes('PILOT OFFICER')) return 'পাইলট অফিসার';
-  if (r === '-') return '-';
-  if (r === 'CIV' || r.includes('CIVILIAN') || r.includes('বেসামরিক')) return 'সিভিলিয়ান';
-
-  return rankStr;
-};
-
-// Comprehensive English to Bengali name dictionary for members
-export const formatMemberNameBn = (name?: string): string => {
-  if (!name) return '';
-  const trimmed = name.trim();
-
-  // If already contains Bengali characters, return as is
-  if (/[\u0980-\u09FF]/.test(trimmed)) {
-    return trimmed;
-  }
-
-  const nameMap: Record<string, string> = {
-    'Mostafa': 'মোস্তফা',
-    'Mashiur': 'মশিউর',
-    'Jahid': 'জাহিদ',
-    'Mojaffar': 'মোজাফফর',
-    'A. Baten': 'আঃ বাতেন',
-    'Baten': 'বাতেন',
-    'Shahin': 'শাহীন',
-    'Lutfar': 'লুৎফর',
-    'Aminul': 'আমিনুল',
-    'Uzzal': 'উজ্জ্বল',
-    'Riaz': 'রিয়াজ',
-    'Mobarak': 'মোবারক',
-    'Rubel': 'রুবেল',
-    'Absar': 'আবসার',
-    'Mahid': 'মাহিদ',
-    'Asad': 'আসাদ',
-    'Fokrul': 'ফকরুল',
-    'Fakrul': 'ফকরুল',
-    'A. Gafur': 'আঃ গফুর',
-    'Gafur': 'গফুর',
-    'Mehedi': 'মেহেদী',
-    'Mahedi': 'মেহেদী',
-    'Mustakim': 'মুস্তাকিম',
-    'Shishir': 'শিশির',
-    'Sojib': 'সজীব',
-    'Sajib': 'সজীব',
-    'Shohel': 'সোহেল',
-    'Ripon': 'রিপন',
-    'Imran': 'ইমরান',
-    'Omar': 'ওমর',
-    'Nahid': 'নাহিদ',
-    'Rakib': 'রাকিব',
-    'Akash': 'আকাশ',
-    'Saidul': 'সাইদুল',
-    'Nishad': 'নিশাদ',
-    'Zakirul': 'জাকিরুল',
-    'Ahasan': 'আহসান',
-    'Koraishi': 'কোরাইশী',
-    'Maraz': 'মারাজ',
-    'Joy': 'জয়',
-    'Shariful': 'শরিফুল',
-    'Rasel': 'রাসেল',
-    'Ismail': 'ইসমাইল',
-    'Tusar': 'তুষার',
-    'Harun': 'হারুন',
-    'Hridoy': 'হৃদয়',
-    'Zubayer': 'জুবায়ের',
-    'Ashraful': 'আশরাফুল',
-    'Rashed': 'রাশেদ',
-    'Adnan': 'আদনান',
-    'Tanvir': 'তানভীর',
-    'Akramul': 'আকরামুল',
-    'Nur Nabi': 'নূর নবী',
-    'A. Rahman': 'আঃ রহমান',
-    'Rahman': 'রহমান',
-    'Khairul': 'খাইরুল',
-    'Kamrul': 'কামরুল',
-    'Kabir': 'কবির',
-    'Sojol': 'সজল',
-    'Sajal': 'সজল',
-    'Amjad': 'আমজাদ',
-    'Monir': 'মনির',
-    'Habib': 'হাবিব',
-    'Saiful': 'সাইফুল',
-    'Tareq': 'তারেক',
-    'Al Amin': 'আল আমিন',
-    'Arif': 'আরিফ',
-    'Fahim': 'ফাহিম',
-    'Sumon': 'সুমন',
-    'Masud': 'মাসুদ',
-    'Shamim': 'শামীম',
-    'Sabbir': 'সাব্বির',
-    'Shakil': 'শাকিল',
-    'Mahfuz': 'মাহফুজ',
-    'Sharif': 'শরীফ',
-    'Selim': 'সেলিম',
-    'Sultan': 'সুলতান',
-    'Shohana': 'সোহানা',
-    'Sonia': 'সোনিয়া',
-    'Mizan': 'মিজান',
-    'Musabbir': 'মুসাব্বির',
-    'Ashik': 'আশিক',
-    'Nur Nobi': 'নূর নবী',
-    'Irfan': 'ইরফান',
-    'Unit Guest': 'ইউনিট গেস্ট',
-    'Guest': 'গেস্ট'
-  };
-
-  // Direct case-insensitive lookup
-  const lower = trimmed.toLowerCase();
-  for (const [enKey, bnVal] of Object.entries(nameMap)) {
-    if (enKey.toLowerCase() === lower) {
-      return bnVal;
-    }
-  }
-
-  // Compound name lookup (e.g., 'Md. Mostafa', 'A. Baten')
-  const words = trimmed.split(/\s+/);
-  if (words.length > 1) {
-    const translatedWords = words.map(w => {
-      const wClean = w.replace(/[.,]/g, '');
-      const wLower = wClean.toLowerCase();
-      if (wLower === 'md' || wLower === 'mohammed') return 'মোঃ';
-      if (wLower === 'a') return 'আঃ';
-      for (const [enKey, bnVal] of Object.entries(nameMap)) {
-        if (enKey.toLowerCase() === wLower) return bnVal;
-      }
-      return w;
-    });
-    return translatedWords.join(' ');
-  }
-
-  return trimmed;
-};
 
 // Bengali month names and formatting
 export const getMonthNamesBn = (monthKey: string): { currMonthBn: string; prevMonthBn: string; titleMonthBn: string } => {
@@ -214,20 +50,7 @@ export const getMonthNamesBn = (monthKey: string): { currMonthBn: string; prevMo
   };
 };
 
-export const formatBengaliMonthYear = (monthKey: string): string => {
-  if (!monthKey || monthKey === 'ALL') return 'সকল মাস';
-  const parts = String(monthKey).split('-');
-  if (parts.length < 2) return monthKey;
-  const year = parts[0];
-  const month = parseInt(parts[1], 10);
-  const bnMonths = [
-    '', 'জানুয়ারি', 'ফেব্রুয়ারি', 'মার্চ', 'এপ্রিল', 'মে', 'জুন',
-    'জুলাই', 'আগস্ট', 'সেপ্টেম্বর', 'অক্টোবর', 'নভেম্বর', 'ডিসেম্বর'
-  ];
-  const mName = bnMonths[month] || parts[1];
-  const yBn = toBengaliNum(year);
-  return `${mName} ${yBn}`;
-};
+
 
 // Helper to determine if a transaction is a valid non-reverted payment
 export const isPaymentTx = (tx: any): boolean => {

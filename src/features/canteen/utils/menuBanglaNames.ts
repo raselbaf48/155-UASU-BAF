@@ -1,5 +1,3 @@
-import { pushKeyToCloud, pullKeyFromCloud } from './canteenCloudSync';
-
 export const MENU_BANGLA_NAMES_KEY = 'canteen_menu_bangla_names';
 
 /**
@@ -234,6 +232,7 @@ export async function saveMenuItemBanglaName(
   } catch {}
 
   try {
+    const { pushKeyToCloud } = await import('./canteenCloudSync');
     await pushKeyToCloud(MENU_BANGLA_NAMES_KEY, currentMap);
   } catch (err) {
     console.warn('Note pushing canteen_menu_bangla_names to cloud:', err);
@@ -245,6 +244,7 @@ export async function saveMenuItemBanglaName(
  */
 export async function fetchMenuBanglaNamesFromCloud(): Promise<Record<string, string>> {
   try {
+    const { pullKeyFromCloud } = await import('./canteenCloudSync');
     const cloudKv = await pullKeyFromCloud(MENU_BANGLA_NAMES_KEY);
     if (cloudKv && typeof cloudKv === 'object') {
       let currentMap: Record<string, string> = {};

@@ -1,6 +1,5 @@
 import { supabase } from '../../../supabase';
-import { pushKeyToCloud, pullKeyFromCloud } from './canteenCloudSync';
-import { formatRankBn, formatMemberNameBn } from './exportCanteenBillExcel';
+import { formatRankBn, formatMemberNameBn } from './canteenBengaliFormat';
 import { isCivilianMember } from './canteenSeniority';
 
 export const BANGLA_NAMES_STORAGE_KEY = 'canteen_member_bangla_names';
@@ -428,7 +427,10 @@ export async function saveMemberBanglaName(
     }
 
     // Push to Supabase Cloud ('app_settings' table)
-    await pushKeyToCloud(BANGLA_NAMES_STORAGE_KEY, current);
+    try {
+      const { pushKeyToCloud } = await import('./canteenCloudSync');
+      await pushKeyToCloud(BANGLA_NAMES_STORAGE_KEY, current);
+    } catch {}
   } catch (err) {
     console.warn('Error saving Bengali name:', err);
   }
@@ -439,7 +441,11 @@ export async function saveMemberBanglaName(
  */
 export async function syncMemberBanglaNamesFromCloud(): Promise<Record<string, string>> {
   try {
-    const cloudData = await pullKeyFromCloud(BANGLA_NAMES_STORAGE_KEY);
+    let cloudData: any = null;
+    try {
+      const { pullKeyFromCloud } = await import('./canteenCloudSync');
+      cloudData = await pullKeyFromCloud(BANGLA_NAMES_STORAGE_KEY);
+    } catch {}
     
     // Also pull directly from Canteen_Member table so changes in Supabase Studio reflect instantly!
     const dbDict: Record<string, string> = {};
@@ -621,7 +627,10 @@ export async function saveMemberBanglaRank(
       ).catch(() => {});
     }
 
-    await pushKeyToCloud(BANGLA_NAMES_STORAGE_KEY, current);
+    try {
+      const { pushKeyToCloud } = await import('./canteenCloudSync');
+      await pushKeyToCloud(BANGLA_NAMES_STORAGE_KEY, current);
+    } catch {}
   } catch (err) {
     console.warn('Error saving Bengali rank:', err);
   }

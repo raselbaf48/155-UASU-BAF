@@ -30,5 +30,46 @@ export default defineConfig(() => {
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },
+    build: {
+      chunkSizeWarningLimit: 1500,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules')) {
+              if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/') || id.includes('node_modules/scheduler/')) {
+                return 'vendor-react';
+              }
+              if (id.includes('xlsx') || id.includes('xlsx-js-style')) {
+                return 'vendor-excel';
+              }
+              if (id.includes('docx') || id.includes('mammoth') || id.includes('pdf-parse')) {
+                return 'vendor-docs';
+              }
+              if (id.includes('tesseract')) {
+                return 'vendor-ocr';
+              }
+              if (id.includes('html2canvas') || id.includes('html-to-image')) {
+                return 'vendor-canvas';
+              }
+              if (id.includes('recharts')) {
+                return 'vendor-charts';
+              }
+              if (id.includes('@supabase')) {
+                return 'vendor-supabase';
+              }
+              if (id.includes('lucide-react')) {
+                return 'vendor-icons';
+              }
+              if (id.includes('motion')) {
+                return 'vendor-motion';
+              }
+              if (id.includes('papaparse')) {
+                return 'vendor-csv';
+              }
+            }
+          },
+        },
+      },
+    },
   };
 });

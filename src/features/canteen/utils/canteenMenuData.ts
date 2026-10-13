@@ -603,46 +603,7 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
   return menuFetchPromise;
 }
 
-/**
- * Returns cached members synchronously (0ms delay).
- * Checks memory first, then localStorage.
- */
-export function getCanteenMembersCache(): any[] {
-  if (inMemoryMembersCache && inMemoryMembersCache.length > 0) {
-    return deduplicateCanteenMembers(inMemoryMembersCache);
-  }
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = localStorage.getItem('canteen_members_cache');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const clean = deduplicateCanteenMembers(parsed);
-        inMemoryMembersCache = clean;
-        return clean;
-      }
-    }
-  } catch {}
-  return [];
-}
-
-/**
- * Updates in-memory and local storage members cache.
- */
-export function setCanteenMembersCache(members: any[]): void {
-  if (!Array.isArray(members)) return;
-  inMemoryMembersCache = members;
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.setItem('canteen_members_cache', JSON.stringify(members));
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: members }));
-      }, 0);
-    } catch (e) {
-      console.warn('[CanteenMenuData] LocalStorage save warning:', e);
-    }
-  }
-}
+export { getCanteenMembersCache, setCanteenMembersCache, deduplicateCanteenMembers } from './canteenMembersCache';
 
 /**
  * Fetches latest members from Supabase, deduplicating concurrent calls.

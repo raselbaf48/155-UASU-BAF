@@ -1,6 +1,6 @@
 import { pushKeyToCloud, queuePushKeyToCloud, pullKeyFromCloud, getDeletedTxIds } from './canteenCloudSync';
-import { getTxMonthKey } from '../pages/MemberDB';
-import { formatBengaliMonthYear } from './exportCanteenBillExcel';
+import { getTxMonthKey } from './canteenTxCategories';
+import { formatBengaliMonthYear } from './canteenBengaliFormat';
 
 export interface BillImportBatchItem {
   airman_id?: string;

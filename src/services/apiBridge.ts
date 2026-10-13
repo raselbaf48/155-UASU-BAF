@@ -28,7 +28,13 @@ export function installApiInterceptor() {
         return originalFetch(input, init);
       }
       try {
-        const networkResponse = await originalFetch(input, init);
+        // Fast timeout of 1500ms so static hosting or sleeping servers never freeze the UI
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 1500);
+        const reqInit: RequestInit = { ...(init || {}), signal: controller.signal };
+
+        const networkResponse = await originalFetch(input, reqInit);
+        clearTimeout(timeoutId);
         const contentType = networkResponse.headers.get('content-type') || '';
 
         // If the server responded with valid JSON and not 404/500/HTML
@@ -49,7 +55,7 @@ export function installApiInterceptor() {
           return networkResponse;
         }
       } catch (networkErr) {
-        // Backend unavailable (e.g. static hosting) -> handle via local engine
+        // Backend unavailable or timed out -> handle via local engine immediately
       }
 
       // Handle locally

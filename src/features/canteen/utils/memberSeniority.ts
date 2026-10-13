@@ -1,5 +1,4 @@
 import { supabase } from '../../../supabase';
-import { pushKeyToCloud, pullKeyFromCloud } from './canteenCloudSync';
 
 const LOCAL_STORAGE_KEY = 'canteen_member_seniority';
 
@@ -38,6 +37,7 @@ export async function saveMemberSeniority(bdNo: string, seniority: number | null
   setLocalSeniorityMap(currentMap);
 
   try {
+    const { pushKeyToCloud } = await import('./canteenCloudSync');
     await pushKeyToCloud('canteen_member_seniority', currentMap);
   } catch (err) {
     console.warn('Note pushing canteen_member_seniority to cloud:', err);
@@ -86,6 +86,7 @@ export async function saveBatchMemberSeniorities(
   setLocalSeniorityMap(currentMap);
 
   try {
+    const { pushKeyToCloud } = await import('./canteenCloudSync');
     await pushKeyToCloud('canteen_member_seniority', currentMap);
   } catch (err) {
     console.warn('Note pushing canteen_member_seniority to cloud:', err);
@@ -137,6 +138,7 @@ export async function fetchAllMemberSeniorities(): Promise<Record<string, number
 
   // 2. Pull from Canteen Cloud KV as secondary fallback
   try {
+    const { pullKeyFromCloud } = await import('./canteenCloudSync');
     const cloudKv = await pullKeyFromCloud('canteen_member_seniority');
     if (cloudKv && typeof cloudKv === 'object') {
       Object.assign(merged, cloudKv);

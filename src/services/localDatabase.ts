@@ -161,7 +161,7 @@ export class LocalDatabaseEngine {
       if (false) {
         this.saveToFirebase(this.db, true).then(() => this.syncFromFirebase());
       } else {
-        this.syncFromFirebase();
+        setTimeout(() => this.syncFromFirebase(), 1000);
       }
       window.addEventListener("baf_idac_settings_updated", (e: any) => { if (e.detail?.source !== 'firebase') this.saveToFirebase(this.db); });
       window.addEventListener("baf_duty_ratio_updated", (e: any) => { if (e.detail?.source !== 'firebase') this.saveToFirebase(this.db); });

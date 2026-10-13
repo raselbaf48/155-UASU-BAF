@@ -1,20 +1,20 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { CanteenLayout } from '../features/canteen/components/CanteenLayout';
-import { EmployeeDashboard } from '../features/canteen/pages/EmployeeDashboard';
+import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { supabase } from '../supabase';
 import { fetchDirectImageUrl, getCanteenConfig } from '../features/canteen/utils/canteenSettings';
-import { syncCanteenMembersFromCloud, pullAllCanteenDataFromCloud } from '../features/canteen/utils/canteenCloudSync';
-import { getCanteenMembersCache } from '../features/canteen/utils/canteenMenuData';
+import { getCanteenMembersCache } from '../features/canteen/utils/canteenMembersCache';
 
 import { Airman } from '../types';
 import { Logo155UASU } from './Logo155UASU';
 import { X, Shield, ArrowRight, AlertCircle, CheckCircle2, Lock, LogIn, ChevronRight, ChevronUp, ArrowLeft, Eye, EyeOff, Building2, Moon, Coffee, Loader2, Sparkles, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { NightCountStateView } from './NightCountStateView';
 import { getAppConfig, isFeatureActive } from '../utils/appConfig';
 
+// Lazy-loaded portals to ensure instant (<1s) initial Login Portal boot
+const CanteenLayout = React.lazy(() => import('../features/canteen/components/CanteenLayout').then(m => ({ default: m.CanteenLayout })));
+const NightCountStateView = React.lazy(() => import('./NightCountStateView').then(m => ({ default: m.NightCountStateView })));
+const AppUpdateModal = React.lazy(() => import('./AppUpdateModal').then(m => ({ default: m.AppUpdateModal })));
+
 import { setUserSession, validateUserLogin, getDetailedUsers, saveDetailedUsers } from '../utils/authSession';
-import { AppUpdateModal } from './AppUpdateModal';
 import {
   checkForAppUpdate,
   AppVersionRecord,
@@ -149,11 +149,16 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
     window.addEventListener('canteen_settings_updated', handleCfgUpdate);
     window.addEventListener('storage', handleCfgUpdate);
 
-    // Warm up Canteen data and member DPs in the background
-    syncCanteenMembersFromCloud(false);
-    pullAllCanteenDataFromCloud();
+    // Warm up Canteen data in the background after 2.5 seconds (never blocks initial Login UI)
+    const warmupTimer = setTimeout(() => {
+      import('../features/canteen/utils/canteenCloudSync').then((m) => {
+        m.syncCanteenMembersFromCloud(false);
+        m.pullAllCanteenDataFromCloud();
+      }).catch(() => {});
+    }, 2500);
 
     return () => {
+      clearTimeout(warmupTimer);
       window.removeEventListener('baf_portal_preference_changed', handlePortalChanged);
       window.removeEventListener('canteen_settings_updated', handleCfgUpdate);
       window.removeEventListener('storage', handleCfgUpdate);
@@ -177,8 +182,10 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
 
     // When switching to Canteen, immediately ensure everything is downloaded and DPs cached
     if (newPortal === 'Canteen') {
-      syncCanteenMembersFromCloud(true);
-      pullAllCanteenDataFromCloud();
+      import('../features/canteen/utils/canteenCloudSync').then((m) => {
+        m.syncCanteenMembersFromCloud(true);
+        m.pullAllCanteenDataFromCloud();
+      }).catch(() => {});
     }
   };
 
@@ -1076,35 +1083,39 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
               <h2 className="ml-4 text-white font-bold tracking-widest text-sm opacity-50">NIGHT COUNT STATE</h2>
             </div>
             <div className="flex-1 p-4 sm:p-6 w-full max-w-7xl mx-auto print:p-0 print:max-w-none">
-              <NightCountStateView
-                role="USER"
-                airmen={airmen}
-                selectedDate={selectedDate}
-                setSelectedDate={setSelectedDate}
-              />
+              <Suspense fallback={<div className="flex flex-col items-center justify-center p-12 text-slate-400"><Loader2 className="w-8 h-8 animate-spin text-emerald-500 mb-2" /><span className="text-xs font-mono">Loading Night Count...</span></div>}>
+                <NightCountStateView
+                  role="USER"
+                  airmen={airmen}
+                  selectedDate={selectedDate}
+                  setSelectedDate={setSelectedDate}
+                />
+              </Suspense>
             </div>
           </div>
         )}
 
         {activeTab === 'Canteen' && isCanteenAuth && (
-          <CanteenLayout 
-             initialMember={successAirman ? { 
-               name: (successAirman.rank && successAirman.name) ? (successAirman.rank + ' ' + successAirman.name) : (successAirman.name || successAirman.fullName || 'Guest'), 
-               bdNo: successAirman.bdNo, 
-               role: (isCanteenManagerMode || (successAirman as any)?.role === 'manager') ? 'manager' : 'employee', 
-               photoUrl: successAirman.photoUrl,
-               due: (successAirman as any)?.due
-             } : undefined}
-             onBack={() => { 
-               setIsCanteenAuth(false); 
-               setIsCanteenManagerMode(false); 
-               setBdInput((getLastUsedIdForPortal('Canteen') || canteenRecentLogins[0] || '').replace(/[^0-9]/g, '')); 
-               setPasswordInput(''); 
-               setSuccessAirman(null); 
-               setTargetAirman(null); 
-               setLastUsedPortal('Canteen');
-             }} 
-          />
+          <Suspense fallback={<div className="flex flex-col items-center justify-center p-12 text-slate-400"><Loader2 className="w-8 h-8 animate-spin text-indigo-500 mb-2" /><span className="text-xs font-mono">Opening Canteen...</span></div>}>
+            <CanteenLayout 
+               initialMember={successAirman ? { 
+                 name: (successAirman.rank && successAirman.name) ? (successAirman.rank + ' ' + successAirman.name) : (successAirman.name || successAirman.fullName || 'Guest'), 
+                 bdNo: successAirman.bdNo, 
+                 role: (isCanteenManagerMode || (successAirman as any)?.role === 'manager') ? 'manager' : 'employee', 
+                 photoUrl: successAirman.photoUrl,
+                 due: (successAirman as any)?.due
+               } : undefined}
+               onBack={() => { 
+                 setIsCanteenAuth(false); 
+                 setIsCanteenManagerMode(false); 
+                 setBdInput((getLastUsedIdForPortal('Canteen') || canteenRecentLogins[0] || '').replace(/[^0-9]/g, '')); 
+                 setPasswordInput(''); 
+                 setSuccessAirman(null); 
+                 setTargetAirman(null); 
+                 setLastUsedPortal('Canteen');
+               }} 
+            />
+          </Suspense>
         )}
       </div>
 
@@ -1179,13 +1190,15 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
 
       {/* In-App Software Update Modal on Login Screen - ONLY in APK */}
       {isRunningInApk() && (
-        <AppUpdateModal
-          isOpen={isUpdateModalOpen}
-          onClose={() => setIsUpdateModalOpen(false)}
-          latestVersion={updateAvailable}
-          currentVersionCode={appVersionInfo.versionCode}
-          currentVersionName={appVersionInfo.versionName}
-        />
+        <Suspense fallback={null}>
+          <AppUpdateModal
+            isOpen={isUpdateModalOpen}
+            onClose={() => setIsUpdateModalOpen(false)}
+            latestVersion={updateAvailable}
+            currentVersionCode={appVersionInfo.versionCode}
+            currentVersionName={appVersionInfo.versionName}
+          />
+        </Suspense>
       )}
 
     </div>

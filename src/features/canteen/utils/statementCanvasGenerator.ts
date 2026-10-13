@@ -3,9 +3,9 @@ import {
   formatRankBn,
   formatMemberNameBn,
   formatBengaliMonthYear,
-  toBengaliNum
-} from './exportCanteenBillExcel';
-import { formatItemNameBn } from '../pages/MemberDB';
+  toBengaliNum,
+  formatItemNameBn
+} from './canteenBengaliFormat';
 import { sortCanteenMenuItems } from './menuOrdering';
 
 export interface StatementDateWiseCanvasRow {
