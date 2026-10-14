@@ -43,16 +43,21 @@ export const matchesCivilian = (
   civ: { name?: string; surname?: string; id?: string } | string | null | undefined
 ): boolean => {
   if (!personStr || !civ) return false;
+  const pStr = String(personStr).trim();
+  const cName = typeof civ === 'string' ? civ.trim() : String(civ.name || '').trim();
+  if (pStr.toLowerCase() === 'manager' || cName.toLowerCase() === 'manager') {
+    return pStr.toLowerCase() === cName.toLowerCase();
+  }
   const clean = (s: string) => s.toLowerCase().replace(/^(civ|civilian|mr|md|chef|cook|staff)\.?\s+/i, '').trim();
   const target = clean(personStr);
-  const cName = typeof civ === 'string' ? clean(civ) : clean(civ.name || '');
+  const cCleanName = typeof civ === 'string' ? clean(civ) : clean(civ.name || '');
   const cSurname = typeof civ === 'string' ? '' : clean(civ.surname || '');
   
-  if (target && cName && target === cName) return true;
+  if (target && cCleanName && target === cCleanName) return true;
   if (target && cSurname && target === cSurname) return true;
   if (target && cSurname && cSurname.length >= 2 && target.includes(cSurname)) return true;
-  if (target && cName && cName.length >= 2 && target.includes(cName)) return true;
-  if (cName && target.length >= 2 && cName.includes(target)) return true;
+  if (target && cCleanName && cCleanName.length >= 2 && target.includes(cCleanName)) return true;
+  if (cCleanName && target.length >= 2 && cCleanName.includes(target)) return true;
   if (cSurname && target.length >= 2 && cSurname.includes(target)) return true;
   return false;
 };
@@ -234,6 +239,7 @@ export const Expenditures: React.FC = () => {
 
   const [rawItems, setRawItems] = useState<RawInventoryItem[]>([]);
   const [civilians, setCivilians] = useState<CivilianPerson[]>([
+    { id: 'civ-manager', name: 'Manager', rank: 'Manager', surname: 'Manager', role: 'Manager', dp: null },
     { id: 'civ-tanvir', name: 'Civ Tanvir', rank: 'Civ', surname: 'Tanvir', role: 'Staff', dp: null },
     { id: 'civ-nurnabi', name: 'Civ Nur Nabi', rank: 'Civ', surname: 'Nur Nabi', role: 'Cook', dp: null },
     { id: 'civ-akramul', name: 'Civ Akramul', rank: 'Civ', surname: 'Akramul', role: 'Staff', dp: null },
@@ -308,7 +314,7 @@ export const Expenditures: React.FC = () => {
     setFormDateYMD(val);
     setFormDate(formatCanteenDate(val));
   };
-  const [formPerson, setFormPerson] = useState('Civ Tanvir');
+  const [formPerson, setFormPerson] = useState('Manager');
   const [formPaymentMethod, setFormPaymentMethod] = useState<'Cash' | 'Due'>('Cash');
   const [formDueShop, setFormDueShop] = useState<DueShopName>('Grocessary Shop');
   const [formDeductAdvance, setFormDeductAdvance] = useState(false);
@@ -466,6 +472,7 @@ export const Expenditures: React.FC = () => {
             });
 
           const defaultCivs: CivilianPerson[] = [
+            { id: 'civ-manager', name: 'Manager', rank: 'Manager', surname: 'Manager', role: 'Manager', dp: null },
             { id: 'civ-tanvir', name: 'Civ Tanvir', rank: 'Civ', surname: 'Tanvir', role: 'Staff', dp: null },
             { id: 'civ-nurnabi', name: 'Civ Nur Nabi', rank: 'Civ', surname: 'Nur Nabi', role: 'Cook', dp: null },
             { id: 'civ-akramul', name: 'Civ Akramul', rank: 'Civ', surname: 'Akramul', role: 'Staff', dp: null },
@@ -480,7 +487,13 @@ export const Expenditures: React.FC = () => {
             }
           });
 
-          setCivilians(civList);
+          // Ensure Manager is ALWAYS at index 0 (sobar opore)
+          const sortedCivs = [
+            defaultCivs[0],
+            ...civList.filter(c => c.name !== 'Manager' && c.id !== 'civ-manager')
+          ];
+
+          setCivilians(sortedCivs);
         }
       } catch (err) {
         console.warn('Failed to fetch civilians:', err);
@@ -675,8 +688,8 @@ export const Expenditures: React.FC = () => {
       activeItems: BazarAdvance[]; 
     }>();
     
-    // Initialize with known civilians
-    civilians.forEach(c => {
+    // Initialize with known civilians (exclude Manager from staff advances)
+    civilians.filter(c => c.name !== 'Manager').forEach(c => {
       map.set(c.name, { 
         personName: c.name, 
         totalAdvance: 0, 
@@ -975,12 +988,13 @@ export const Expenditures: React.FC = () => {
           amt = (qtyNum && priceNum) ? qtyNum * priceNum : 0;
         }
 
+        const isMgr = formPerson === 'Manager' || formPerson.toLowerCase().includes('manager');
         return {
           id: `exp-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 6)}`,
           date: formDate,
           desc: r.desc.trim(),
           category: r.category || 'Grocery',
-          paymentMethod: formPaymentMethod,
+          paymentMethod: formPaymentMethod === 'Cash' ? (isMgr ? 'Cash (Manager)' : 'Cash') : formPaymentMethod,
           dueShop: formPaymentMethod === 'Due' ? formDueShop : undefined,
           qty: qtyNum,
           unit: r.unit || 'kg',
@@ -998,8 +1012,10 @@ export const Expenditures: React.FC = () => {
 
       // Advance deduction check:
       // "add expence theke Due dileo kno irfan er advance balace theke kno kattese"
-      // If paymentMethod is DUE, NEVER deduct from advance!
-      const shouldDeductFromAdvance = formPaymentMethod !== 'Due' && formDeductAdvance;
+      // If paymentMethod is DUE or person is Manager, NEVER deduct from advance!
+      // When Manager is selected, money is directly deducted from Manager Cash!
+      const isManagerPerson = formPerson === 'Manager' || formPerson.toLowerCase().includes('manager');
+      const shouldDeductFromAdvance = formPaymentMethod !== 'Due' && formDeductAdvance && !isManagerPerson;
       let updatedAdvances = advances;
 
       if (shouldDeductFromAdvance) {
@@ -1084,6 +1100,8 @@ export const Expenditures: React.FC = () => {
 
       if (formPaymentMethod === 'Due') {
         showToast(`✅ Saved ${newRecords.length} item(s) (৳${formTotalAmount.toLocaleString()})! [${formDueShop}] এর বকেয়া হিসেবে সফলভাবে সংরক্ষিত হয়েছে।`);
+      } else if (isManagerPerson) {
+        showToast(`✅ Saved ${newRecords.length} item(s) (৳${formTotalAmount.toLocaleString()})! ম্যানেজার ক্যাশ (Manager Cash) থেকে সরাসরি ৳${formTotalAmount.toLocaleString()} কর্তন করা হয়েছে।`);
       } else if (shouldDeductFromAdvance) {
         const pStatus = getPersonAdvanceStatus(formPerson);
         const postBal = pStatus.balance - formTotalAmount;
@@ -1992,9 +2010,16 @@ export const Expenditures: React.FC = () => {
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-emerald-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
                     >
                       {civilians.map(c => (
-                        <option key={c.id} value={c.name}>{c.name}</option>
+                        <option key={c.id} value={c.name}>
+                          {c.name === 'Manager' ? '★ Manager (ম্যানেজার ক্যাশ থেকে কর্তন)' : c.name}
+                        </option>
                       ))}
                     </select>
+                    {formPerson === 'Manager' && formPaymentMethod === 'Cash' && (
+                      <p className="text-[10px] text-emerald-400 font-bold mt-1.5 flex items-center space-x-1">
+                        <span>💰 Manager Cash থেকে সরাসরি টাকা কেটে নেওয়া হবে</span>
+                      </p>
+                    )}
                   </div>
 
                   {/* Payment Method (Cash vs Due) */}
@@ -2665,7 +2690,7 @@ export const Expenditures: React.FC = () => {
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-800/80">
                   <div className="flex items-center space-x-3 flex-wrap gap-y-2">
                     <span className="text-xs font-black text-slate-300 uppercase tracking-wider">
-                      CIVILIAN MEMBERS ({civilians.length})
+                      CIVILIAN MEMBERS ({civilians.filter(c => c.name !== 'Manager').length})
                     </span>
 
                     {/* COMBINED MONTH SELECTOR ("opore combined akta Month er box thakbe default e Running mont select thakbe , je month select korbo oi month onujayi data filtr korbe") */}
@@ -2733,7 +2758,7 @@ export const Expenditures: React.FC = () => {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {civilians.map(civ => {
+                  {civilians.filter(c => c.name !== 'Manager').map(civ => {
                     // Filter advances by selected month if not ALL
                     const civAdvs = advances.filter(a => {
                       if (!matchesCivilian(a.personName, civ)) return false;

@@ -602,8 +602,8 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
 
   return menuFetchPromise;
 }
-
-export { getCanteenMembersCache, setCanteenMembersCache, deduplicateCanteenMembers } from './canteenMembersCache';
+import { getCanteenMembersCache, setCanteenMembersCache, deduplicateCanteenMembers as dedupeMembersFromCache } from './canteenMembersCache';
+export { getCanteenMembersCache, setCanteenMembersCache };
 
 /**
  * Fetches latest members from Supabase, deduplicating concurrent calls.

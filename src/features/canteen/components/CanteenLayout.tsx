@@ -5,7 +5,7 @@ import { localDb } from '../../../services/localDatabase';
 import { useTranslation } from 'react-i18next';
 import { formatMoney } from '../i18n';
 import { getCanteenConfig, resolveImageUrl, fetchCanteenConfigFromCloud, CanteenConfig } from '../utils/canteenSettings';
-import { getCanteenMenuCache, fetchCanteenMenuOnce } from '../utils/canteenMenuData';
+import { getCanteenMenuCache, fetchCanteenMenuOnce, fetchCanteenMembersOnce } from '../utils/canteenMenuData';
 import { getRawInventoryItems } from '../utils/recipeManager';
 import { autoCheckInitialCleanSlate } from '../utils/resetCanteenData';
 import { initCanteenCloudSync, pullAllCanteenDataFromCloud, getCanteenCloudSyncStatus, CloudSyncStatus, preloadImage } from '../utils/canteenCloudSync';
@@ -144,6 +144,8 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
     getCanteenMenuCache();
     getRawInventoryItems();
     fetchCanteenMenuOnce().catch(() => {});
+    fetchCanteenMembersOnce(true).catch(() => {});
+    pullAllCanteenDataFromCloud().catch(() => {});
 
     fetchCanteenConfigFromCloud().then(cfg => {
       if (cfg) setCanteenConfig(cfg);
