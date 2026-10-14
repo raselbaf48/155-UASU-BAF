@@ -42,6 +42,15 @@ export const DEFAULT_DUE_SHOPS: DueShopConfig[] = [
     color: 'purple',
     location: 'বেকারি কর্নার',
     contactNo: '০১৭০০-০০০০০৩'
+  },
+  {
+    id: 'adjutant',
+    name: 'Adjutant',
+    banglaName: 'অ্যাডজুট্যান্ট',
+    emoji: '🎖️',
+    color: 'blue',
+    location: 'অ্যাডজুট্যান্ট অফিস / তহবিল',
+    contactNo: ''
   }
 ];
 
@@ -58,6 +67,13 @@ export const getDueShops = (): DueShopConfig[] => {
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {
+      // Ensure Adjutant exists in the shop list
+      if (!parsed.some((s: any) => s && String(s.name || '').toLowerCase() === 'adjutant')) {
+        const adjutantShop = DEFAULT_DUE_SHOPS.find(s => s.name === 'Adjutant')!;
+        const updated = [...parsed, adjutantShop];
+        localStorage.setItem(DUE_SHOPS_STORAGE_KEY, JSON.stringify(updated));
+        return updated;
+      }
       return parsed;
     }
     return DEFAULT_DUE_SHOPS;
@@ -263,6 +279,9 @@ export const getShopDisplayNameBn = (shopName: string, shopsList?: DueShopConfig
   if (shopName === 'Bake & Bite' || shopName.toLowerCase().includes('bake') || shopName.toLowerCase().includes('bite')) {
     return 'বেক অ্যান্ড বাইট';
   }
+  if (shopName === 'Adjutant' || shopName.toLowerCase().includes('adjutant') || shopName.toLowerCase().includes('prev manager')) {
+    return 'অ্যাডজুট্যান্ট';
+  }
   return shopName;
 };
 
@@ -281,6 +300,7 @@ export const getShopEmoji = (shopName: string, shopsList?: DueShopConfig[]): str
     return archivedMatch.emoji;
   }
 
+  if (shopName.toLowerCase().includes('adjutant') || shopName.toLowerCase().includes('prev manager')) return '🎖️';
   if (shopName.toLowerCase().includes('poultry') || shopName.toLowerCase().includes('chicken') || shopName.toLowerCase().includes('meat')) return '🍗';
   if (shopName.toLowerCase().includes('bake') || shopName.toLowerCase().includes('bite') || shopName.toLowerCase().includes('tea') || shopName.toLowerCase().includes('coffee')) return '☕';
   if (shopName.toLowerCase().includes('grocessary') || shopName.toLowerCase().includes('grocery') || shopName.toLowerCase().includes('rice')) return '🛒';
@@ -296,6 +316,8 @@ export const getShopColor = (shopName: string, shopsList?: DueShopConfig[]): str
   if (match?.color) return match.color;
   const archived = getArchivedDueShops();
   const archivedMatch = archived.find(s => s.name.toLowerCase() === shopName.toLowerCase() || s.id === shopName);
-  return archivedMatch?.color || 'indigo';
+  if (archivedMatch?.color) return archivedMatch.color;
+  if (shopName.toLowerCase().includes('adjutant') || shopName.toLowerCase().includes('prev manager')) return 'blue';
+  return 'indigo';
 };
 

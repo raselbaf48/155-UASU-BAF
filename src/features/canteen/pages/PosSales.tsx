@@ -2076,19 +2076,6 @@ export const PosSales: React.FC = () => {
                                   <span className="text-slate-600">•</span>
                                   <span className="text-amber-400 font-bold">Due: ৳{m.Due || 0}</span>
                                 </div>
-
-                                {/* Food purchased on selected date: (যেমন: চিকেন বিরিয়ানি x ১ , রং চা x ২) */}
-                                {purchasedItemsText ? (
-                                  <div 
-                                    className="mt-1.5 flex items-start space-x-1.5 text-[11px] font-medium text-amber-300 bg-amber-950/70 border border-amber-500/40 rounded-lg px-2.5 py-1 max-w-full shadow-sm"
-                                    title={`Purchased on selected date: ${purchasedItemsText}`}
-                                  >
-                                    <span className="shrink-0 text-xs mt-0.5">🍽️</span>
-                                    <span className="leading-snug break-words font-sans">
-                                      {purchasedItemsText}
-                                    </span>
-                                  </div>
-                                ) : null}
                               </div>
                             </div>
 
@@ -2252,12 +2239,6 @@ export const PosSales: React.FC = () => {
                                 <span>{fullName}</span>
                                 {bdNo && <span className="ml-1 text-[10px] text-slate-400 font-mono">({bdNo})</span>}
                               </div>
-                              {purchasedItemsText && (
-                                <div className="text-[10px] text-amber-300 font-medium font-sans flex items-center space-x-1 mt-0.5">
-                                  <span>🍽️</span>
-                                  <span className="truncate max-w-[200px]">{purchasedItemsText}</span>
-                                </div>
-                              )}
                             </span>
                           );
                         })}

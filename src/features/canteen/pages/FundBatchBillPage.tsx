@@ -251,8 +251,8 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
     })();
     return () => { isMounted = false; };
   }, []);
-  const [purpose, setPurpose] = useState<string>(() => isUnitFund ? '' : 'Supply Item');
-  const [singleMemberCategories, setSingleMemberCategories] = useState<string[]>(() => isUnitFund ? [] : ['Supply Item']);
+  const [purpose, setPurpose] = useState<string>('');
+  const [singleMemberCategories, setSingleMemberCategories] = useState<string[]>([]);
   const [singleMemberCategoryAmounts, setSingleMemberCategoryAmounts] = useState<Record<string, string>>({});
   const [singleMemberCategoryNotes, setSingleMemberCategoryNotes] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState<string>('');
@@ -886,7 +886,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
       );
 
       const now = Date.now();
-      const finalPurpose = purpose.trim() || (isUnitFund ? 'Unit Fund Bill' : 'Supply Item');
+      const finalPurpose = purpose.trim() || (isUnitFund ? 'Unit Fund Bill' : 'Others Bill');
       const finalNotes = notes.trim();
       const defaultDesc = isUnitFund ? 'Unit Fund Bill' : finalPurpose;
 
@@ -900,7 +900,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
 
       const paymentMethodFormatted = othersFundSource === 'Cash'
         ? (isPrevMgrActive
-            ? 'Cash (Prev Manager)'
+            ? 'Cash (Adjutant)'
             : `Cash (${cashDeductTarget === 'STAFF' ? (selectedStaffName || 'Civ Tanvir') : (managerName || 'Manager')})`)
         : 'UCB';
 
@@ -913,7 +913,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
           const memberAmt = parseFloat(raw || '0') || 0;
           const catNote = (singleMemberCategoryNotes[catName] || '').trim();
           const txNote = catNote || finalNotes || undefined;
-          const effectiveCatName = catName.trim() || 'Supply Item';
+          const effectiveCatName = catName.trim() || 'Others Bill';
 
           return {
             id: `tx-${category.toLowerCase()}-${cleanBdNo}-${targetMonth}-${now + idx}`,
@@ -937,8 +937,8 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
             batchExpenseId,
             paymentMethod: paymentMethodFormatted,
             method: paymentMethodFormatted,
-            source: isPrevMgrActive ? 'Cash (Prev Manager)' : othersFundSource,
-            staffName: isPrevMgrActive ? 'Prev Manager' : (cashDeductTarget === 'STAFF' ? (selectedStaffName || 'Civ Tanvir') : (managerName || 'Manager')),
+            source: isPrevMgrActive ? 'Cash (Adjutant)' : othersFundSource,
+            staffName: isPrevMgrActive ? 'Adjutant' : (cashDeductTarget === 'STAFF' ? (selectedStaffName || 'Civ Tanvir') : (managerName || 'Manager')),
             cashDeductTarget: isPrevMgrActive ? 'PREV_MANAGER' : cashDeductTarget,
             isPrevManager: isPrevMgrActive ? true : undefined
           };
@@ -972,8 +972,8 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
             batchExpenseId: isUnitFund ? undefined : batchExpenseId,
             paymentMethod: isUnitFund ? 'DUE' : paymentMethodFormatted,
             method: isUnitFund ? 'DUE' : paymentMethodFormatted,
-            source: isUnitFund ? 'DUE' : (isPrevMgrActive ? 'Cash (Prev Manager)' : othersFundSource),
-            staffName: isUnitFund ? undefined : (isPrevMgrActive ? 'Prev Manager' : (cashDeductTarget === 'STAFF' ? (selectedStaffName || 'Civ Tanvir') : (managerName || 'Manager'))),
+            source: isUnitFund ? 'DUE' : (isPrevMgrActive ? 'Cash (Adjutant)' : othersFundSource),
+            staffName: isUnitFund ? undefined : (isPrevMgrActive ? 'Adjutant' : (cashDeductTarget === 'STAFF' ? (selectedStaffName || 'Civ Tanvir') : (managerName || 'Manager'))),
             cashDeductTarget: isUnitFund ? undefined : (isPrevMgrActive ? 'PREV_MANAGER' : cashDeductTarget),
             isPrevManager: isPrevMgrActive ? true : undefined
           };
@@ -1049,13 +1049,11 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
         });
       }
 
-      // ONLY for Others Fund: deduct total billed amount from Fund Cash or UCB as an expense so Capital All Logs receives entry
-      // For Unit Fund: Purpose and Payment Method are NOT used, everything goes to Due directly without fund expense deduction.
+      // Add Due bill record to Due Register under "Adjutant" shop for both Unit Fund & Others
       let updatedExpenses: any[] = [];
       let updatedAdvances: any[] = [];
 
-      if (!isUnitFund && !isPrevMgrActive) {
-        const totalBatchDeduction = totalBatchAmount;
+      {
         const existingExpenses = (() => {
           try {
             return JSON.parse(localStorage.getItem('canteen_expenses') || '[]');
@@ -1067,8 +1065,9 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
         const memberBreakdown = selectedMemberList.map((m) => {
           const cleanBdNo = String(m['BD No'] || m.airman_id || '').replace(/\D/g, '');
           const mId = String(m.airman_id || m['BD No']);
-          const raw = memberCustomAmounts[mId] !== undefined ? memberCustomAmounts[mId] : amount;
-          const memberAmt = parseFloat(raw || '0') || 0;
+          const memberAmt = isMultiCatMode
+            ? totalBatchAmount
+            : (parseFloat(memberCustomAmounts[mId] !== undefined ? memberCustomAmounts[mId] : amount) || 0);
           const name = `${m['Rank'] || ''} ${m['Surname'] || ''}`.trim() || `BD-${cleanBdNo}`;
           return {
             airman_id: m.airman_id,
@@ -1084,22 +1083,26 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
           ? memberBreakdown[0].label 
           : `${memberBreakdown.length} Members: ${memberNamesStr}`;
 
-        const fundExpenseRecord = {
+        // Create Due record for Adjutant shop in Due Register
+        const adjutantDueRecord = {
           id: batchExpenseId,
           date: formattedTxDate,
-          desc: `OTHERS BILL: ${finalPurpose}`.toUpperCase(),
-          subdesc: `Kar Jonno: ${memberNamesStr}${finalNotes ? ` • Note: ${finalNotes}` : ''} [${paymentMethodFormatted}]`,
-          category: 'Others Bill',
-          paymentMethod: paymentMethodFormatted,
-          amount: totalBatchDeduction,
+          desc: isUnitFund ? 'UNIT FUND BILL' : `OTHERS BILL: ${finalPurpose}`.toUpperCase(),
+          subdesc: `Kar Jonno: ${memberNamesStr}${finalNotes ? ` • Note: ${finalNotes}` : ''}`,
+          category: isUnitFund ? 'Unit Fund' : 'Others Bill',
+          paymentMethod: 'Due',
+          dueShop: 'Adjutant',
+          amount: totalBatchAmount,
           detailedPerson: detailedPersonDisplay,
           memberBreakdown: memberBreakdown,
+          monthKey: targetMonth,
           isCustom: true
         };
 
-        updatedExpenses = [fundExpenseRecord, ...existingExpenses];
+        updatedExpenses = [adjutantDueRecord, ...existingExpenses];
         localStorage.setItem('canteen_expenses', JSON.stringify(updatedExpenses));
         window.dispatchEvent(new Event('canteen_expenses_updated'));
+      }
 
         // If Cash and Staff is selected: deduct from the staff member's account!
         if (othersFundSource === 'Cash' && cashDeductTarget === 'STAFF' && selectedStaffName) {
@@ -1121,7 +1124,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
               date: formattedTxDate,
               personName: selectedStaffName,
               amount: 0,
-              spentAmount: totalBatchDeduction,
+              spentAmount: totalBatchAmount,
               returnAmount: 0,
               channel: 'CASH',
               purpose: `OTHERS BILL: ${finalPurpose}`.toUpperCase(),
@@ -1138,7 +1141,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                 deducted = true;
                 return {
                   ...a,
-                  spentAmount: (Number(a.spentAmount) || 0) + totalBatchDeduction
+                  spentAmount: (Number(a.spentAmount) || 0) + totalBatchAmount
                 };
               }
               return a;
@@ -1148,12 +1151,11 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
           localStorage.setItem('canteen_bazar_advances', JSON.stringify(updatedAdvances));
           window.dispatchEvent(new Event('canteen_bazar_advances_updated'));
         }
-      }
 
       // Fast background push to Supabase cloud without freezing user UI
       Promise.all([
         pushKeyToCloud('canteen_txs', updatedTxs),
-        ...(!isUnitFund && !isPrevMgrActive && updatedExpenses.length > 0 ? [pushKeyToCloud('canteen_expenses', updatedExpenses)] : []),
+        ...(updatedExpenses.length > 0 ? [pushKeyToCloud('canteen_expenses', updatedExpenses)] : []),
         ...(!isUnitFund && !isPrevMgrActive && othersFundSource === 'Cash' && cashDeductTarget === 'STAFF' && selectedStaffName && updatedAdvances.length > 0 ? [pushKeyToCloud('canteen_bazar_advances', updatedAdvances)] : [])
       ]).catch((err) => console.warn('Background batch sync warning:', err));
 
@@ -1170,13 +1172,14 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
         memberCount: selectedMemberList.length,
         totalAmount: totalBatchAmount,
         category: isUnitFund ? 'Unit Fund' : 'Others Bill',
-        purpose: isUnitFund ? 'Unit Fund Bill' : finalPurpose,
-        source: isPrevMgrActive ? 'Prev Manager' : (isUnitFund ? 'DUE' : othersFundSource),
+        purpose: isUnitFund ? 'Unit Fund Bill' : (finalPurpose || 'Others Bill'),
+        source: isPrevMgrActive ? 'Adjutant' : (isUnitFund ? 'Adjutant (Due)' : othersFundSource),
         targetStaff: (!isUnitFund && !isPrevMgrActive && othersFundSource === 'Cash' && cashDeductTarget === 'STAFF') ? selectedStaffName : undefined
       });
 
       // Reset form fields
       setAmount('');
+      setPurpose('');
       setMemberCustomAmounts({});
       setSingleMemberCategories([]);
       setSingleMemberCategoryAmounts({});
@@ -1446,89 +1449,9 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
     }
   }, [selectedCount, isUnitFund, singleMemberCategories]);
 
-  // Helper to retrieve member's purchases on the active txDate (Pic 2: e.g. "চিকেন বিরিয়ানি x ১ , রং চা x ২")
-  const getMemberPurchasesOnDate = (m: any): string => {
-    if (!m || !txDate) return '';
-    const formattedTargetDate = formatCanteenDate(txDate);
-    const cleanBd = String(m['BD No'] || m.bdNo || m.airman_id || '').replace(/\D/g, '');
-    const cleanBdNoZeros = cleanBd.replace(/^0+/, '');
-    const mAirmanId = String(m.airman_id || '').toLowerCase().trim();
-
-    const localTxs = (() => {
-      try {
-        return JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-      } catch {
-        return [];
-      }
-    })();
-    const sourceTxs = [...(allTxs || []), ...localTxs];
-    if (sourceTxs.length === 0) return '';
-
-    const seenTxIds = new Set<string>();
-    const dayTxs = sourceTxs.filter((tx) => {
-      if (!tx || tx.isReverted || tx.status === 'REVERTED' || tx.type === 'BILL PAYMENT') return false;
-      const txId = String(tx.id || '');
-      if (txId) {
-        if (seenTxIds.has(txId)) return false;
-        seenTxIds.add(txId);
-      }
-      const cat = getTxCategory(tx);
-      if (cat === 'UNIT_FUND' || cat === 'OTHERS' || tx.billType === 'UNIT_FUND' || tx.billType === 'OTHERS') return false;
-
-      const txBd = String(tx.bdNo || tx['BD No'] || tx.airman_id || '').replace(/\D/g, '');
-      const txBdNoZeros = txBd.replace(/^0+/, '');
-      const txAirmanId = String(tx.airman_id || '').toLowerCase().trim();
-
-      const isBdMatch = cleanBd && txBd && (cleanBd === txBd || cleanBdNoZeros === txBdNoZeros);
-      const isAirmanMatch = mAirmanId && txAirmanId && mAirmanId === txAirmanId;
-      if (!isBdMatch && !isAirmanMatch) return false;
-
-      const txD = tx.date || tx.created_at || tx.createdAt || tx.timestamp;
-      return formatCanteenDate(txD) === formattedTargetDate;
-    });
-
-    if (dayTxs.length === 0) return '';
-
-    const itemCounts = new Map<string, number>();
-    dayTxs.forEach((tx) => {
-      if (Array.isArray(tx.soldItems) && tx.soldItems.length > 0) {
-        tx.soldItems.forEach((si: any) => {
-          const rawName = String(si.menuItemName || si.name || 'ক্যান্টিন খাবার').trim();
-          const bnName = getMenuItemBanglaName(rawName) || formatItemNameBn(rawName) || rawName;
-          const qty = Number(si.qty || si.quantity || 1);
-          itemCounts.set(bnName, (itemCounts.get(bnName) || 0) + qty);
-        });
-      } else {
-        const itemsStr = String(tx.items || '').trim();
-        if (!itemsStr || itemsStr.includes('ক্যান্টিন বিল') || itemsStr.includes('বকেয়া')) return;
-        const parts = itemsStr.split(',').map(s => s.trim()).filter(Boolean);
-        parts.forEach((p) => {
-          const parenMatch = p.match(/^(.+?)\s*\(([0-9]+)\)$/);
-          const xMatch = p.match(/^(.+?)\s*[xX*×]\s*([0-9০-৯]+)$/);
-          if (parenMatch) {
-            const nm = parenMatch[1].trim();
-            const bnName = getMenuItemBanglaName(nm) || formatItemNameBn(nm) || nm;
-            const qty = parseInt(parenMatch[2], 10) || 1;
-            itemCounts.set(bnName, (itemCounts.get(bnName) || 0) + qty);
-          } else if (xMatch) {
-            const nm = xMatch[1].trim();
-            const bnName = getMenuItemBanglaName(nm) || formatItemNameBn(nm) || nm;
-            const qtyRaw = xMatch[2].replace(/[০-৯]/g, d => '0123456789'['০১২৩৪৫৬৭৮৯'.indexOf(d)]);
-            const qty = parseInt(qtyRaw, 10) || 1;
-            itemCounts.set(bnName, (itemCounts.get(bnName) || 0) + qty);
-          } else {
-            const bnName = getMenuItemBanglaName(p) || formatItemNameBn(p) || p;
-            itemCounts.set(bnName, (itemCounts.get(bnName) || 0) + 1);
-          }
-        });
-      }
-    });
-
-    if (itemCounts.size === 0) return '';
-    const toBn = (n: number) => String(n).replace(/[0-9]/g, d => '০১২৩৪৫৬৭৮৯'[parseInt(d, 10)]);
-    return Array.from(itemCounts.entries())
-      .map(([name, qty]) => `${name} x ${toBn(qty)}`)
-      .join(' , ');
+  // Member purchase details disabled per user instruction (no item/tea badge under member)
+  const getMemberPurchasesOnDate = (_m: any): string => {
+    return '';
   };
 
   // Selected members list sorted by seniority
@@ -1936,19 +1859,8 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                           )}
                         </div>
                         <div className="text-[11px] font-mono text-slate-400 mt-0.5 truncate">
-                          BD/{m['BD No']} • {m.Role || 'Member'}
+                          BD/{m['BD No']}
                         </div>
-                        {/* Member purchase details on selected date (Pic 2: e.g. চিকেন বিরিয়ানি x ১ , রং চা x ২) */}
-                        {(() => {
-                          const purchases = getMemberPurchasesOnDate(m);
-                          if (!purchases) return null;
-                          return (
-                            <div className="mt-1 text-[10px] text-amber-300 font-bold bg-amber-950/60 border border-amber-500/30 px-2 py-0.5 rounded-lg inline-flex items-center gap-1.5 shadow-xs max-w-full" title={purchases}>
-                              <span className="text-xs shrink-0">🛒</span>
-                              <span className="truncate">{purchases}</span>
-                            </div>
-                          );
-                        })()}
                       </div>
                     </div>
 
@@ -2264,14 +2176,14 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                       Apply to all members:
                     </div>
                     <div className="flex items-center gap-2">
-                      <div className="relative w-28 sm:w-32">
-                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-mono font-bold text-slate-400 text-xs">৳</span>
+                      <div className="relative w-16 sm:w-20">
+                        <span className="absolute left-1.5 top-1/2 -translate-y-1/2 font-mono font-bold text-slate-400 text-xs">৳</span>
                         <input
                           type="number"
                           placeholder="Amount"
                           value={fillAllInput}
                           onChange={(e) => setFillAllInput(e.target.value)}
-                          className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-6 pr-2 py-1.5 text-xs font-mono text-white outline-none focus:border-indigo-500"
+                          className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-4 pr-1 py-1 text-xs font-mono text-white outline-none focus:border-indigo-500"
                         />
                       </div>
                       <button
@@ -2334,16 +2246,6 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                                 <span>•</span>
                                 <span className="text-emerald-400 font-bold">একক সদস্য (Single Member)</span>
                               </div>
-                              {(() => {
-                                const purchases = getMemberPurchasesOnDate(m);
-                                if (!purchases) return null;
-                                return (
-                                  <div className="mt-1.5 text-[11px] text-amber-300 font-bold bg-amber-950/40 border border-amber-500/30 px-2.5 py-0.5 rounded-lg inline-flex items-center gap-1.5 shadow-xs">
-                                    <span className="text-xs">🛒</span>
-                                    <span>{purchases}</span>
-                                  </div>
-                                );
-                              })()}
                             </div>
                           </div>
 
@@ -2426,8 +2328,8 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                                         className="w-full bg-slate-950 border border-slate-700 focus:border-indigo-500 rounded-xl px-2.5 py-1.5 text-xs text-white placeholder-slate-500 outline-none transition-all shadow-inner"
                                       />
                                     </div>
-                                    <div className="relative w-28 sm:w-32">
-                                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-mono font-bold text-slate-400 text-xs">
+                                    <div className="relative w-16 sm:w-20">
+                                      <span className="absolute left-1.5 top-1/2 -translate-y-1/2 font-mono font-bold text-slate-400 text-xs">
                                         ৳
                                       </span>
                                       <input
@@ -2443,7 +2345,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                                             [catName]: val
                                           }));
                                         }}
-                                        className={`w-full bg-slate-950 border rounded-xl pl-6 pr-2 py-1.5 text-xs font-mono font-black text-white outline-none shadow-inner transition-all ${
+                                        className={`w-full bg-slate-950 border rounded-xl pl-4 pr-1 py-1 text-xs font-mono font-black text-white outline-none shadow-inner transition-all ${
                                           isValidVal
                                             ? 'border-slate-700 focus:border-indigo-500'
                                             : 'border-rose-500/50 focus:border-rose-400'
@@ -2542,22 +2444,13 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                               <div className="text-[10px] font-mono text-slate-400 truncate">
                                 BD/{m['BD No']}
                               </div>
-                              {(() => {
-                                const purchases = getMemberPurchasesOnDate(m);
-                                if (!purchases) return null;
-                                return (
-                                  <div className="mt-1 text-[10px] text-amber-300 font-bold bg-amber-950/40 border border-amber-500/20 px-2 py-0.5 rounded-md inline-block max-w-full truncate shadow-2xs" title={purchases}>
-                                    🛒 {purchases}
-                                  </div>
-                                );
-                              })()}
                             </div>
                           </div>
 
                           {/* Amount Box + Quick Remove from Cart Button */}
                           <div className="flex items-center space-x-2 shrink-0">
-                            <div className="relative w-28 sm:w-32">
-                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-mono font-bold text-slate-400 text-xs">
+                            <div className="relative w-16 sm:w-20">
+                              <span className="absolute left-1.5 top-1/2 -translate-y-1/2 font-mono font-bold text-slate-400 text-xs">
                                 ৳
                               </span>
                               <input
@@ -2573,7 +2466,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                                     [mId]: val
                                   }));
                                 }}
-                                className={`w-full bg-slate-950 border rounded-xl pl-6 pr-2 py-1.5 text-xs font-mono font-black text-white outline-none shadow-inner transition-all ${
+                                className={`w-full bg-slate-950 border rounded-xl pl-4 pr-1 py-1 text-xs font-mono font-black text-white outline-none shadow-inner transition-all ${
                                   isValidVal
                                     ? 'border-slate-700 focus:border-indigo-500'
                                     : 'border-rose-500/50 focus:border-rose-400'
@@ -2635,7 +2528,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                 </div>
 
                 <div className="flex items-center space-x-2">
-                  {/* Prev Manager Toggle Button */}
+                  {/* Adjutant Toggle Button */}
                   <button
                     type="button"
                     onClick={() => {
@@ -2652,12 +2545,12 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                         ? 'bg-amber-500/20 text-amber-300 border-amber-500/60 shadow-sm ring-1 ring-amber-500/40'
                         : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
                     }`}
-                    title="Toggle Prev Manager (Bills add to Member Due & Statement, but will NOT deduct from Manager/Staff account)"
+                    title="Toggle Adjutant (Bills add to Member Due & Statement, and will add to Adjutant Shop Due in Due Register)"
                   >
                     <span className={`w-2 h-2 rounded-full ${
                       isPrevManager || cashDeductTarget === 'PREV_MANAGER' ? 'bg-amber-400 animate-pulse' : 'bg-slate-500'
                     }`} />
-                    <span>Prev Manager</span>
+                    <span>Adjutant</span>
                     <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono font-bold ${
                       isPrevManager || cashDeductTarget === 'PREV_MANAGER'
                         ? 'bg-amber-500/30 text-amber-200'
@@ -2684,7 +2577,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                   )}
                 </div>
 
-                {/* Segmented Switch Buttons with Manager Cash, Staff Account, and Prev Manager */}
+                {/* Segmented Switch Buttons with Manager Cash, Staff Account, and Adjutant */}
                 <div className="grid grid-cols-3 gap-2 p-1 bg-slate-900 rounded-xl border border-slate-800">
                   <button
                     type="button"
@@ -2729,7 +2622,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                     }`}
                   >
                     <Sparkles className="w-3.5 h-3.5 text-amber-200 shrink-0" />
-                    <span className="truncate">Prev Manager</span>
+                    <span className="truncate">Adjutant</span>
                   </button>
                 </div>
 
@@ -2739,10 +2632,10 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                     <span className="text-base leading-none">ℹ️</span>
                     <div className="min-w-0 flex-1">
                       <p className="font-bold text-amber-300">
-                        Prev Manager মোড সক্রিয় (No Cash Deduction)
+                        Adjutant মোড সক্রিয় (Due Register-এ Adjutant শপে বকেয়া যোগ হবে)
                       </p>
                       <p className="text-[11px] text-amber-200/80 mt-0.5 leading-relaxed">
-                        বিল মেম্বারের একাউন্ট ও স্টেটমেন্টে যোগ হবে (Due বৃদ্ধি পাবে), কিন্তু বর্তমান ম্যানেজার বা স্টাফ ক্যাশ অ্যাকাউন্ট থেকে কোনো টাকা কাটা হবে না।
+                        বিল মেম্বারের একাউন্ট ও স্টেটমেন্টে যোগ হবে (Due বৃদ্ধি পাবে) এবং ডিউ রেজিস্টারের Adjutant শপে ডিউ যুক্ত হবে। বর্তমান ম্যানেজার বা স্টাফ ক্যাশ অ্যাকাউন্ট থেকে কোনো টাকা কাটা হবে না।
                       </p>
                     </div>
                   </div>
@@ -2860,7 +2753,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                   {isUnitFund
                     ? 'Unit Fund (Member Due)'
                     : (isPrevManager || cashDeductTarget === 'PREV_MANAGER')
-                      ? 'Cash (Prev Manager) • No Account Deduction'
+                      ? 'Cash (Adjutant) • No Account Deduction'
                       : `Cash (${cashDeductTarget === 'STAFF' ? selectedStaffName : 'Manager Cash'})`}
                 </span>
               </div>

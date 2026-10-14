@@ -68,7 +68,7 @@ export const getCivInitials = (civ: { surname?: string; name?: string } | null |
   return str.slice(0, 2).toUpperCase();
 };
 
-export const DUE_SHOPS = ['Grocessary Shop', 'Poultry Shop', 'Bake & Bite'] as const;
+export const DUE_SHOPS = ['Grocessary Shop', 'Poultry Shop', 'Bake & Bite', 'Adjutant'] as const;
 export type DueShopName = typeof DUE_SHOPS[number];
 
 export interface ExpenseRecord {

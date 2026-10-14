@@ -83,13 +83,18 @@ export const CanteenFund: React.FC = () => {
         const activeOtherTxs = txs.filter((t: any) => {
           if (!t) return false;
           if (
+            t.isAdjutant ||
+            t.cashDeductTarget === 'ADJUTANT' ||
+            String(t.paymentMethod || '').toLowerCase().includes('adjutant') ||
+            String(t.source || '').toLowerCase().includes('adjutant') ||
+            String(t.method || '').toLowerCase().includes('adjutant') ||
             t.isPrevManager || 
             t.cashDeductTarget === 'PREV_MANAGER' || 
             String(t.paymentMethod || '').toLowerCase().includes('prev manager') || 
             String(t.source || '').toLowerCase().includes('prev manager') ||
             String(t.method || '').toLowerCase().includes('prev manager')
           ) {
-            return false; // Skip Prev Manager transactions so they NEVER deduct from Manager/Staff capital!
+            return false; // Skip Adjutant / Prev Manager transactions so they NEVER deduct from Manager/Staff capital!
           }
           const bType = String(t.billType || t.category || '').toUpperCase();
           const tId = String(t.id || '').toLowerCase();

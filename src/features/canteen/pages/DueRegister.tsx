@@ -33,9 +33,29 @@ const EXPENSES_STORAGE_KEY = 'canteen_expenses';
 
 export const resolveExpenseDueShop = (expense: Partial<ExpenseRecord>): string => {
   if (expense.dueShop) {
+    if (String(expense.dueShop).toLowerCase().includes('adjutant') || String(expense.dueShop).toLowerCase().includes('prev manager')) {
+      return 'Adjutant';
+    }
     return expense.dueShop;
   }
   const desc = String(expense.desc || '').toLowerCase();
+  const cat = String(expense.category || '').toLowerCase();
+  const subdesc = String(expense.subdesc || '').toLowerCase();
+
+  // Unit Fund, Others Bill, or Adjutant:
+  if (
+    desc.includes('adjutant') || 
+    desc.includes('unit fund') || 
+    desc.includes('others bill') || 
+    desc.includes('others fund') ||
+    cat.includes('unit fund') || 
+    cat.includes('others') ||
+    subdesc.includes('adjutant') ||
+    subdesc.includes('prev manager')
+  ) {
+    return 'Adjutant';
+  }
+
   const currentShops = getDueShops();
   for (const shop of currentShops) {
     const sName = shop.name.toLowerCase();
@@ -118,8 +138,69 @@ export const DueRegister: React.FC = () => {
     try {
       const raw = localStorage.getItem(EXPENSES_STORAGE_KEY);
       const all: ExpenseRecord[] = raw ? JSON.parse(raw) : [];
-      // Only keep records with paymentMethod === 'Due'
-      const dueRecords = all.filter(e => String(e.paymentMethod || '').trim().toLowerCase() === 'due');
+      // Only keep records with paymentMethod === 'Due', or unsettled bills for Adjutant / Unit Fund / Others
+      const dueRecords = all.filter(e => {
+        if (e.settledDate) return false;
+        const method = String(e.paymentMethod || '').trim().toLowerCase();
+        if (method === 'due') return true;
+        const shop = resolveExpenseDueShop(e);
+        if (shop === 'Adjutant') {
+          return method !== 'paid';
+        }
+        return false;
+      });
+
+      // Synthesize any Unit Fund & Others bills from canteen_txs that aren't already represented in dueRecords
+      try {
+        const txsRaw = localStorage.getItem('canteen_txs');
+        if (txsRaw) {
+          const txs: any[] = JSON.parse(txsRaw);
+          if (Array.isArray(txs)) {
+            const seenExpenseIds = new Set(dueRecords.map(e => String(e.id)));
+            const fundGroups = new Map<string, any[]>();
+            txs.forEach((tx) => {
+              if (!tx) return;
+              const isUnitFund = tx.billType === 'UNIT_FUND' || String(tx.category || '').toUpperCase() === 'UNIT_FUND' || String(tx.id || '').includes('unit_fund');
+              const isOthers = tx.billType === 'OTHERS' || String(tx.category || '').toUpperCase().includes('OTHERS') || String(tx.source || '').toLowerCase().includes('prev manager') || String(tx.source || '').toLowerCase().includes('adjutant') || String(tx.id || '').includes('others');
+              if (!isUnitFund && !isOthers) return;
+              if (tx.type === 'BILL PAYMENT' || tx.gateway === 'PAID') return;
+
+              const groupKey = tx.batchExpenseId || `group-${isUnitFund ? 'unit' : 'others'}-${tx.date || tx.monthKey || 'recent'}`;
+              if (seenExpenseIds.has(groupKey)) return;
+
+              if (!fundGroups.has(groupKey)) {
+                fundGroups.set(groupKey, []);
+              }
+              fundGroups.get(groupKey)!.push(tx);
+            });
+
+            fundGroups.forEach((groupTxs, groupKey) => {
+              const first = groupTxs[0];
+              const isUnitFund = first.billType === 'UNIT_FUND' || String(first.category || '').toUpperCase() === 'UNIT_FUND' || String(first.id || '').includes('unit_fund');
+              const totalAmt = groupTxs.reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+              const memberNames = groupTxs.map(t => `${t.memberName || t.name || t.bdNo || ''}${t.amount ? `: ৳${t.amount}` : ''}`).filter(Boolean).join(' • ');
+
+              const synthDueExpense: ExpenseRecord = {
+                id: groupKey,
+                date: first.date || formatCanteenDate(new Date()),
+                desc: isUnitFund ? 'UNIT FUND BILL' : `OTHERS BILL: ${first.purpose || first.items || 'Others'}`.toUpperCase(),
+                subdesc: `Kar Jonno: ${memberNames}`,
+                category: isUnitFund ? 'Unit Fund' : 'Others Bill',
+                paymentMethod: 'Due',
+                dueShop: 'Adjutant',
+                amount: totalAmt,
+                detailedPerson: groupTxs.length === 1 ? (groupTxs[0].memberName || 'Member') : `${groupTxs.length} Members`,
+                monthKey: first.monthKey || getExpenseMonthKey(first.date),
+                isCustom: true
+              };
+              dueRecords.push(synthDueExpense);
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('Error syncing Unit Fund / Others due bills to Adjutant in DueRegister:', err);
+      }
+
       setExpenses(dueRecords);
 
       // Paid / settled shop records
@@ -134,7 +215,8 @@ export const DueRegister: React.FC = () => {
           descLower.includes('grocessary') || 
           descLower.includes('poultry') || 
           descLower.includes('bake & bite') || 
-          descLower.includes('bake and bite')
+          descLower.includes('bake and bite') ||
+          descLower.includes('adjutant')
         );
       });
       setAllShopPayments(paidRecords);
@@ -751,7 +833,7 @@ export const DueRegister: React.FC = () => {
       </div>
 
       {/* DYNAMIC SHOPS CARDS (Modeled exactly like Member Box in Bill - Click to open Statement / History) */}
-      <div className={`grid grid-cols-1 ${dueShopsList.length === 1 ? 'md:grid-cols-1 max-w-md mx-auto' : dueShopsList.length === 2 ? 'md:grid-cols-2' : 'md:grid-cols-3'} gap-4`}>
+      <div className={`grid grid-cols-1 ${dueShopsList.length === 1 ? 'md:grid-cols-1 max-w-md mx-auto' : dueShopsList.length === 2 ? 'md:grid-cols-2' : dueShopsList.length === 3 ? 'md:grid-cols-3' : 'sm:grid-cols-2 lg:grid-cols-4'} gap-4`}>
         {shopCalculations.map(({ shop, expenses: sExpenses, totalDue, monthDue }) => {
           const isSelected = selectedShop === shop.name;
           return (
