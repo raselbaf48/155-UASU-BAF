@@ -513,7 +513,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
     // Save Bengali name to dictionary, cloud sync & localStorage
     if (modalFormData.nameBn !== undefined) {
       saveMenuItemBanglaName(
-        { id: selectedItemForModal.id, name: modalFormData.name.trim() },
+        { id: selectedItemForModal.id, name: modalFormData.name.trim(), oldName },
         modalFormData.nameBn.trim()
       );
     }

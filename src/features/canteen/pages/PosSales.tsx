@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Search, Plus, ShoppingCart, Minus, Trash2, CheckCircle2, X, History, Calendar, 
   Package as PackageIcon, Users, Utensils, CheckSquare, Check, Banknote, Edit2, Edit3,
-  Upload
+  Upload, Lock, Unlock
 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, getItemDisplayName, getCanteenConfig, CanteenConfig } from '../utils/canteenSettings';
@@ -25,7 +25,7 @@ import {
   InventoryItemType,
   restoreRawStockForSaleCancellation
 } from '../utils/recipeManager';
-import { pushKeyToCloud, pullKeyFromCloud, recordDeletedTxId, getDeletedTxIds, recordDeletedTxIdAsync, clearDirtyCanteenKey } from '../utils/canteenCloudSync';
+import { pushKeyToCloud, pullKeyFromCloud, recordDeletedTxId, getDeletedTxIds, recordDeletedTxIdAsync, clearDirtyCanteenKey, queuePushKeyToCloud } from '../utils/canteenCloudSync';
 import { sortCanteenMembersByOfficeSeniority, deduplicateCanteenMembers } from '../utils/canteenSeniority';
 import { playSuccessChime, playTrashPopSound } from '../utils/audioFeedback';
 import { ImportPosSalesModal } from '../components/ImportPosSalesModal';
@@ -160,6 +160,41 @@ export const PosSales: React.FC = () => {
 
   // Sale Date (Default: Today)
   const [saleDate, setSaleDate] = useState(() => getTodayYMD());
+
+  // Lock Options: Date (DT), Menu Selection (MENU), Member Selection (MEMBER)
+  const [isDateLocked, setIsDateLocked] = useState<boolean>(() => {
+    return localStorage.getItem('canteen_pos_lock_dt') === 'true';
+  });
+  const [isMenuLocked, setIsMenuLocked] = useState<boolean>(() => {
+    return localStorage.getItem('canteen_pos_lock_menu') === 'true';
+  });
+  const [isMemberLocked, setIsMemberLocked] = useState<boolean>(() => {
+    return localStorage.getItem('canteen_pos_lock_member') === 'true';
+  });
+
+  const toggleDateLock = () => {
+    setIsDateLocked(prev => {
+      const next = !prev;
+      localStorage.setItem('canteen_pos_lock_dt', String(next));
+      return next;
+    });
+  };
+
+  const toggleMenuLock = () => {
+    setIsMenuLocked(prev => {
+      const next = !prev;
+      localStorage.setItem('canteen_pos_lock_menu', String(next));
+      return next;
+    });
+  };
+
+  const toggleMemberLock = () => {
+    setIsMemberLocked(prev => {
+      const next = !prev;
+      localStorage.setItem('canteen_pos_lock_member', String(next));
+      return next;
+    });
+  };
 
   // Payment Mode (Default: DUE)
   const [paymentMode, setPaymentMode] = useState<'DUE' | 'PAID'>('DUE');
@@ -1300,7 +1335,7 @@ export const PosSales: React.FC = () => {
       return;
     }
 
-    const targetMembersList = selectedMembers;
+    const targetMembersList = [...selectedMembers];
     setIsCheckingOut(true);
     const multiplier = targetMembersList.length;
     const roundedPerMemberAmount = Math.round(perMemberFinalAmount * 100) / 100;
@@ -1309,15 +1344,12 @@ export const PosSales: React.FC = () => {
 
     try {
       const txDateStr = formatCanteenDate(saleDate);
+      const txTimestamp = Date.now();
+      const txIso = new Date().toISOString();
       const newTransactions: any[] = [];
 
-      for (const m of targetMembersList) {
-        if (paymentMode === 'DUE') {
-          const currentDue = Number(m.Due ?? m.due ?? m.baki ?? 0);
-          const newDue = currentDue + roundedPerMemberAmount;
-          await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', m.airman_id);
-        }
-
+      for (let mIdx = 0; mIdx < targetMembersList.length; mIdx++) {
+        const m = targetMembersList[mIdx];
         const txMemberName = [m.Rank || m.rank, m.Surname || m.surname || m.Name || m.name].filter(Boolean).join(' ') || m['BD No'] || m.airman_id;
         
         // Save each purchased menu item as an individual transaction so history shows each menu item separately
@@ -1325,12 +1357,16 @@ export const PosSales: React.FC = () => {
           const itemBase = Number(b.price || 0) * Number(b.qty || 1);
           const proportionalDiscount = basketTotal > 0 ? Math.round((itemBase / basketTotal) * roundedPerMemberDiscount * 100) / 100 : 0;
           const itemFinalAmount = Math.max(0, itemBase - proportionalDiscount);
+          const uniqueTxId = `tx-pos-${txTimestamp}-${mIdx}-${bIdx}-${Math.random().toString(36).substring(2, 7)}`;
 
           const tx = {
-            id: Date.now() + Math.random() + bIdx,
+            id: uniqueTxId,
             date: txDateStr,
-            airman_id: m.airman_id,
-            bdNo: m['BD No'] || m.bdNo || m.airman_id,
+            timestamp: txTimestamp,
+            created_at: txIso,
+            createdAt: txIso,
+            airman_id: m.airman_id || '',
+            bdNo: m['BD No'] || m.bdNo || m.airman_id || '',
             memberName: txMemberName,
             rank: m.Rank || m.rank || '',
             items: `${b.name} (${b.qty})`,
@@ -1338,7 +1374,8 @@ export const PosSales: React.FC = () => {
               menuItemId: b.id,
               menuItemName: b.name,
               price: Number(b.price || 0),
-              qty: b.qty
+              qty: b.qty,
+              totalPrice: itemBase
             }],
             originalAmount: itemBase,
             discount: proportionalDiscount,
@@ -1353,36 +1390,66 @@ export const PosSales: React.FC = () => {
         });
       }
 
-      // Update members in memory if DUE
-      if (paymentMode === 'DUE') {
-        setMembers((prev) => {
-          const updated = prev.map((member) => {
-            const matched = targetMembersList.find((tm) => tm.airman_id === member.airman_id);
-            if (matched) {
-              const currentDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
-              return {
-                ...member,
-                Due: currentDue + roundedPerMemberAmount,
-                due: currentDue + roundedPerMemberAmount,
-                baki: currentDue + roundedPerMemberAmount
-              };
-            }
-            return member;
-          });
-          setCanteenMembersCache(updated);
-          return updated;
-        });
-      }
-
-      // Save transactions to local & cloud
+      // 1. Immediately persist transactions locally
       const existingTx = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
       const mergedTxs = [...newTransactions, ...existingTx];
       localStorage.setItem('canteen_txs', JSON.stringify(mergedTxs));
-      try {
-        await pushKeyToCloud('canteen_txs', mergedTxs);
-      } catch (e) {}
+      setSalesHistory(prev => [...newTransactions, ...prev]);
 
-      // Update recent members
+      // 2. Immediate push to Cloud with guaranteed backup queue
+      clearDirtyCanteenKey('canteen_txs');
+      try {
+        const pushed = await pushKeyToCloud('canteen_txs', mergedTxs);
+        if (!pushed) {
+          queuePushKeyToCloud('canteen_txs', mergedTxs, 500);
+        }
+      } catch (cloudErr) {
+        console.warn('Direct cloud push note, queued fallback:', cloudErr);
+        queuePushKeyToCloud('canteen_txs', mergedTxs, 500);
+      }
+
+      // 3. Update members in memory and localStorage if DUE
+      if (paymentMode === 'DUE') {
+        const updatedMembers = members.map((member) => {
+          const matched = targetMembersList.find((tm) => 
+            (tm.airman_id && tm.airman_id === member.airman_id) ||
+            (String(tm['BD No'] || '').trim() && String(tm['BD No'] || '').trim() === String(member['BD No'] || '').trim())
+          );
+          if (matched) {
+            const currentDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
+            const newDue = currentDue + roundedPerMemberAmount;
+            return {
+              ...member,
+              Due: newDue,
+              due: newDue,
+              baki: newDue
+            };
+          }
+          return member;
+        });
+
+        setMembers(updatedMembers);
+        setCanteenMembersCache(updatedMembers);
+
+        // Update Supabase Canteen_Member table safely in background without blocking checkout
+        Promise.allSettled(
+          targetMembersList.map(async (m) => {
+            const currentDue = Number(m.Due ?? m.due ?? m.baki ?? 0);
+            const newDue = currentDue + roundedPerMemberAmount;
+            if (m.airman_id) {
+              await supabase.from('Canteen_Member').update({ Due: newDue }).eq('airman_id', m.airman_id);
+            }
+            const bd = String(m['BD No'] || m.bdNo || '').trim();
+            if (bd) {
+              await supabase.from('Canteen_Member').update({ Due: newDue }).eq('BD No', bd);
+            }
+          })
+        ).catch(err => console.warn('Supabase member due update note:', err));
+
+        window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: updatedMembers }));
+      }
+
+      // 4. Update recent members
       const newRecents = [...targetMembersList, ...recentMembers].reduce((acc, curr) => {
         if (!acc.find((x: any) => x.airman_id === curr.airman_id)) acc.push(curr);
         return acc;
@@ -1390,7 +1457,7 @@ export const PosSales: React.FC = () => {
       setRecentMembers(newRecents);
       localStorage.setItem('canteen_recent_members', JSON.stringify(newRecents));
 
-      // Deduct raw materials stock according to menu recipes
+      // 5. Deduct raw materials stock according to menu recipes
       const itemsForDeduction = basket.map((b) => ({
         menuItemId: b.id,
         menuItemName: b.name,
@@ -1398,7 +1465,7 @@ export const PosSales: React.FC = () => {
       }));
       deductRawStockForSales(itemsForDeduction);
 
-      // Deduct menu item stock in cache & state so Menu and Inventory remain synchronized
+      // 6. Deduct menu item stock in cache & state so Menu and Inventory remain synchronized
       try {
         const currentCache = getCanteenMenuCache();
         if (currentCache && currentCache.length > 0) {
@@ -1428,6 +1495,8 @@ export const PosSales: React.FC = () => {
       window.dispatchEvent(new Event('canteen_inventory_updated'));
       window.dispatchEvent(new Event('storage'));
 
+      playSuccessChime();
+
       const successMsg = paymentMode === 'PAID'
         ? `✅ Cash sale recorded & added to Manager Cash! (Total ৳${totalSalesAmount.toLocaleString()})`
         : `✅ Due sale recorded for ${multiplier} member(s)! (Total ৳${totalSalesAmount.toLocaleString()})`;
@@ -1435,15 +1504,20 @@ export const PosSales: React.FC = () => {
       setToastMessage(successMsg);
       setTimeout(() => setToastMessage(''), 4000);
 
-      // Clean up for next order
-      setBasket([]);
-      setSelectedMembers([]);
-      setMemberSearchTerm('');
+      // 7. Clean up for next order respecting Lock states:
+      if (!isMenuLocked) {
+        setBasket([]);
+      }
+      if (!isMemberLocked) {
+        setSelectedMembers([]);
+        setMemberSearchTerm('');
+      }
       setDiscountAmount('');
       setPaymentMode('DUE');
       setIsMobileCartOpen(false);
       fetchCatalog();
     } catch (err: any) {
+      console.error('POS Checkout error:', err);
       setToastMessage(`❌ Error: ${err?.message || 'Failed to complete sale'}`);
       setTimeout(() => setToastMessage(''), 4000);
     } finally {
@@ -1500,13 +1574,37 @@ export const PosSales: React.FC = () => {
             </div>
 
             <div className="flex items-center justify-between sm:justify-end gap-2.5 w-full sm:w-auto">
-              {/* Sale Date Picker with Left/Right Arrows, '09 Oct 26' format, Today default */}
-              <DateNavigator 
-                value={saleDate} 
-                onChange={setSaleDate} 
-                label="Date"
-                format="dd_mm_yy"
-              />
+              {/* Sale Date Picker with Lock Button */}
+              <div className="flex items-center gap-1.5">
+                <DateNavigator 
+                  value={saleDate} 
+                  onChange={setSaleDate} 
+                  label="Date"
+                  format="dd_mm_yy"
+                />
+                <button
+                  type="button"
+                  onClick={toggleDateLock}
+                  className={`p-2 rounded-xl border text-xs font-black tracking-wider flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    isDateLocked
+                      ? 'bg-amber-500/25 border-amber-500 text-amber-300 shadow-sm shadow-amber-500/25'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
+                  }`}
+                  title={isDateLocked ? 'Date is Locked (Checked out orders will keep this date)' : 'Lock Date (keep selected after checkout)'}
+                >
+                  {isDateLocked ? (
+                    <>
+                      <Lock className="w-3.5 h-3.5 text-amber-400" />
+                      <span className="hidden sm:inline text-[11px] uppercase">Locked</span>
+                    </>
+                  ) : (
+                    <>
+                      <Unlock className="w-3.5 h-3.5 text-slate-400" />
+                      <span className="hidden sm:inline text-[11px] text-slate-400 uppercase">Lock</span>
+                    </>
+                  )}
+                </button>
+              </div>
 
               {/* POS Import Button */}
               <button 
@@ -1553,6 +1651,30 @@ export const PosSales: React.FC = () => {
                     <p className="text-[11px] text-slate-400">Add food & beverage items to customer basket</p>
                   </div>
                 </div>
+
+                {/* MENU Lock Option */}
+                <button
+                  type="button"
+                  onClick={toggleMenuLock}
+                  className={`px-3 py-1.5 rounded-xl border text-xs font-black tracking-wider flex items-center space-x-1.5 transition-all cursor-pointer self-start sm:self-auto ${
+                    isMenuLocked
+                      ? 'bg-amber-500/25 border-amber-500 text-amber-300 shadow-sm shadow-amber-500/20'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
+                  }`}
+                  title={isMenuLocked ? 'Menu selection is Locked (Items in cart stay selected after checkout)' : 'Lock Menu items in cart'}
+                >
+                  {isMenuLocked ? (
+                    <>
+                      <Lock className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Menu Locked</span>
+                    </>
+                  ) : (
+                    <>
+                      <Unlock className="w-3.5 h-3.5 text-slate-400" />
+                      <span>Lock Menu</span>
+                    </>
+                  )}
+                </button>
               </div>
 
               {/* Search Bar - Full Width & Bigger */}
@@ -1862,8 +1984,23 @@ export const PosSales: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Parcel Toggle & Clear Button */}
+                  {/* Lock, Parcel Toggle & Clear Button */}
                   <div className="flex items-center space-x-2">
+                    {/* Menu Lock Button in Cart */}
+                    <button
+                      type="button"
+                      onClick={toggleMenuLock}
+                      className={`px-2 py-1 rounded-xl text-xs font-black tracking-wide flex items-center space-x-1 border transition-all cursor-pointer ${
+                        isMenuLocked
+                          ? 'bg-amber-500/25 border-amber-500 text-amber-300 shadow-sm shadow-amber-500/20'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
+                      }`}
+                      title={isMenuLocked ? 'Menu is Locked (Items in cart stay selected after checkout)' : 'Lock Menu items in cart'}
+                    >
+                      {isMenuLocked ? <Lock className="w-3.5 h-3.5 text-amber-400" /> : <Unlock className="w-3.5 h-3.5" />}
+                      <span className="hidden sm:inline">{isMenuLocked ? 'Locked' : 'Lock'}</span>
+                    </button>
+
                     <button
                       type="button"
                       onClick={toggleParcel}
@@ -1960,6 +2097,21 @@ export const PosSales: React.FC = () => {
                         <strong className="text-white font-black">{selectedMembers.length}</strong>
                       </span>
                     )}
+
+                    {/* Member Lock Button */}
+                    <button
+                      type="button"
+                      onClick={toggleMemberLock}
+                      className={`px-3 py-1.5 rounded-xl border text-xs font-black tracking-wider flex items-center space-x-1.5 transition-all cursor-pointer ${
+                        isMemberLocked
+                          ? 'bg-amber-500/25 border-amber-500 text-amber-300 shadow-sm shadow-amber-500/20'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
+                      }`}
+                      title={isMemberLocked ? 'Member Selection is Locked (Selected members stay selected after checkout)' : 'Lock Selected Members'}
+                    >
+                      {isMemberLocked ? <Lock className="w-3.5 h-3.5 text-amber-400" /> : <Unlock className="w-3.5 h-3.5 text-slate-400" />}
+                      <span>{isMemberLocked ? 'Member Locked' : 'Lock Member'}</span>
+                    </button>
 
                     <button
                       type="button"

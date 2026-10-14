@@ -4,7 +4,7 @@ import { Coffee, Plus, Calendar, X, Utensils, Edit2 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, getItemDisplayName } from '../utils/canteenSettings';
 import { queuePushKeyToCloud, pushKeyToCloud } from '../utils/canteenCloudSync';
-import { getCanteenMenuCache, fetchCanteenMenuOnce, setCanteenMenuCache, isOneTimeBoxItem, normalizeCatalogKey, deduplicateCanteenMenuItems, saveUserMenuOverride, getUserMenuOverrides } from '../utils/canteenMenuData';
+import { getCanteenMenuCache, fetchCanteenMenuOnce, setCanteenMenuCache, updateSingleMenuItemInCache, isOneTimeBoxItem, normalizeCatalogKey, deduplicateCanteenMenuItems, saveUserMenuOverride, getUserMenuOverrides } from '../utils/canteenMenuData';
 import { calculateMenuItemStockInfo, getRawInventoryItems, getMenuRecipes } from '../utils/recipeManager';
 import { getMenuItemBanglaName, saveMenuItemBanglaName, getMenuBanglaNamesMap } from '../utils/menuBanglaNames';
 import { sortCanteenMenuItems } from '../utils/menuOrdering';
@@ -162,7 +162,7 @@ export const MenuManagement: React.FC = () => {
     setShowAdd(true);
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     const priceNum = Number(formData.price || 0);
     const maxNum = Number(formData.max || 50);
@@ -175,48 +175,40 @@ export const MenuManagement: React.FC = () => {
       const oldPrice = Number(editingItem.price || 0);
       const oldNameEn = String(editingItem.name_en || editingItem.name || '').trim();
       const oldNameBn = String(editingItem.name_bn || '').trim();
+      const nowIso = new Date().toISOString();
 
-      const updated = items.map(item => {
-        if (item.id === editingItem.id) {
-          return {
-            ...item,
-            name_bn: nameBn,
-            nameBn: nameBn,
-            'Name (BN)': nameBn,
-            name_en: nameEn,
-            name: nameEn,
-            price: priceNum,
-            max: maxNum,
-            stock: maxNum,
-            DP: dpTrimmed,
-            img: dpTrimmed,
-            image: dpTrimmed,
-            updated_at: new Date().toISOString()
-          };
-        }
-        return item;
-      });
+      const updatedItem = {
+        ...editingItem,
+        name_bn: nameBn,
+        nameBn: nameBn,
+        'Name (BN)': nameBn,
+        name_en: nameEn,
+        name: nameEn,
+        price: priceNum,
+        max: maxNum,
+        stock: maxNum,
+        DP: dpTrimmed,
+        img: dpTrimmed,
+        image: dpTrimmed,
+        updated_at: nowIso
+      };
 
+      // 1. Immediately persist user override & Bangla name FIRST so cache deduplication respects them
+      saveMenuItemBanglaName({ id: editingItem.id, name: nameEn, oldName: oldNameEn }, nameBn);
+      saveUserMenuOverride({
+        ...updatedItem,
+        oldNameEn,
+        oldNameBn
+      } as any);
+
+      // 2. Synchronize item array and caches
+      const updated = items.map(item => item.id === editingItem.id ? updatedItem : item);
       setItems(updated);
+      updateSingleMenuItemInCache(updatedItem);
       localStorage.setItem('canteen_menu_items_list', JSON.stringify(updated));
       localStorage.setItem('canteen_menu_cache', JSON.stringify(updated));
       localStorage.setItem('canteen_menu_items_catalog_v1', JSON.stringify(updated));
       setCanteenMenuCache(updated);
-      saveMenuItemBanglaName({ id: editingItem.id, name: nameEn }, nameBn);
-      saveUserMenuOverride({
-        id: editingItem.id,
-        name: nameEn,
-        name_en: nameEn,
-        name_bn: nameBn,
-        nameBn: nameBn,
-        'Name (BN)': nameBn,
-        price: priceNum,
-        stock: maxNum,
-        max: maxNum,
-        DP: dpTrimmed,
-        oldNameEn,
-        oldNameBn
-      } as any);
 
       // Recalculate and update past transactions in canteen_txs in real-time
       try {
@@ -322,40 +314,61 @@ export const MenuManagement: React.FC = () => {
 
       // Sync updated menu item to Cloud & Supabase immediately (0ms)
       queuePushKeyToCloud('canteen_daily_menu');
-      pushKeyToCloud('canteen_menu_items_catalog_v1', updated);
-      pushKeyToCloud('canteen_user_menu_overrides', getUserMenuOverrides());
-      pushKeyToCloud('canteen_menu_bangla_names', getMenuBanglaNamesMap());
+      pushKeyToCloud('canteen_user_menu_overrides', getUserMenuOverrides()).catch(() => {});
+      pushKeyToCloud('canteen_menu_bangla_names', getMenuBanglaNamesMap()).catch(() => {});
+      pushKeyToCloud('canteen_menu_items_catalog_v1', updated).catch(() => {});
 
-      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(editingItem.id || ''));
-      if (isUuid) {
-        Promise.resolve(supabase.from('Canteen_Menu').upsert({
-          id: editingItem.id,
-          name: nameEn,
-          name_bn: nameBn,
-          price: priceNum,
-          stock: maxNum,
-          DP: dpTrimmed,
-          category: editingItem.meal || editingItem.category || 'SNACKS',
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'id' }))
-        .then(({ error }) => {
-          if (error) console.warn('Canteen_Menu upsert note:', error.message);
-        })
-        .catch(err => console.warn('Canteen_Menu network note:', err));
-      } else {
-        Promise.resolve(supabase.from('Canteen_Menu').update({
-          name: nameEn,
-          name_bn: nameBn,
-          price: priceNum,
-          stock: maxNum,
-          DP: dpTrimmed,
-          category: editingItem.meal || editingItem.category || 'SNACKS',
-          updated_at: new Date().toISOString()
-        }).or(`name.ilike.${nameEn},name.ilike.${oldNameEn}`))
-        .then(({ error }) => {
-          if (error) console.warn('Canteen_Menu update note:', error.message);
-        })
-        .catch(err => console.warn('Canteen_Menu network note:', err));
+      // Direct update in Supabase Canteen_Menu table by ID and name fallback
+      const dbPayload: any = {
+        name: nameEn,
+        name_bn: nameBn,
+        price: priceNum,
+        stock: maxNum,
+        DP: dpTrimmed || null,
+        category: editingItem.meal || editingItem.category || 'SNACKS',
+        updated_at: nowIso
+      };
+
+      try {
+        let rowUpdated = false;
+        // 1. Try update by exact ID
+        const { data: idUpd, error: updateErr } = await supabase
+          .from('Canteen_Menu')
+          .update(dbPayload)
+          .eq('id', editingItem.id)
+          .select();
+
+        if (!updateErr && idUpd && idUpd.length > 0) {
+          rowUpdated = true;
+        } else if (oldNameEn || oldNameBn) {
+          // 2. Fallback update by old English or Bengali name
+          if (oldNameEn) {
+            const { data: nameUpd } = await supabase
+              .from('Canteen_Menu')
+              .update(dbPayload)
+              .ilike('name', oldNameEn)
+              .select();
+            if (nameUpd && nameUpd.length > 0) rowUpdated = true;
+          }
+          if (!rowUpdated && oldNameBn) {
+            const { data: bnUpd } = await supabase
+              .from('Canteen_Menu')
+              .update(dbPayload)
+              .eq('name_bn', oldNameBn)
+              .select();
+            if (bnUpd && bnUpd.length > 0) rowUpdated = true;
+          }
+        }
+
+        // 3. If no row updated, perform upsert to guarantee persistence
+        if (!rowUpdated) {
+          await supabase.from('Canteen_Menu').upsert({ id: editingItem.id, ...dbPayload }, { onConflict: 'id' });
+        }
+      } catch (err) {
+        console.warn('Canteen_Menu update note, fallback to upsert:', err);
+        try {
+          await supabase.from('Canteen_Menu').upsert({ id: editingItem.id, ...dbPayload }, { onConflict: 'id' });
+        } catch {}
       }
 
       // Instant global real-time notifications
@@ -517,28 +530,28 @@ export const MenuManagement: React.FC = () => {
             </button>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm whitespace-nowrap">
+          <table className="w-full text-left text-sm table-fixed sm:table-auto">
             <thead className="bg-slate-800 dark:bg-slate-800/50 text-slate-400 font-medium border-b border-slate-800 dark:border-slate-800">
               <tr>
-                <th className="px-6 py-4">DP</th>
-                <th className="px-6 py-4">Meal Type</th>
-                <th className="px-6 py-4">{t('item')}</th>
-                <th className="px-6 py-4 text-right">{t('price')}</th>
-                <th className="px-6 py-4 text-center">Live Stock</th>
-                <th className="px-6 py-4 text-right">{t('action')}</th>
+                <th className="w-16 px-3 py-3.5 text-center shrink-0">DP</th>
+                <th className="w-28 px-3 py-3.5 text-left shrink-0">Meal Type</th>
+                <th className="w-auto px-4 py-3.5">{t('item')}</th>
+                <th className="w-24 px-3 py-3.5 text-right shrink-0">{t('price')}</th>
+                <th className="w-32 px-3 py-3.5 text-center shrink-0">Live Stock</th>
+                <th className="w-28 px-3 py-3.5 text-right shrink-0">{t('action')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50 text-slate-200 dark:text-slate-300">
               {items.map((row) => {
                   const itemDp = resolveImageUrl(row.DP || row.img || row.image);
-                  const itemName = getItemDisplayName(row, 'menu').primary || (i18n.language === 'bn' ? (row.name_bn || row.name_en) : (row.name_en || row.name_bn));
+                  const banglaName = row.name_bn || row['Name (BN)'] || row.nameBn || getItemDisplayName(row, 'menu').primary;
                   const englishName = row.name_en || row.name || '';
                   const itemLimit = row.stock !== undefined ? Number(row.stock) : (row.max !== undefined ? Number(row.max) : undefined);
-                  const stockInfo = calculateMenuItemStockInfo(row.id, englishName || itemName, rawInventory, recipesMap, itemLimit);
+                  const stockInfo = calculateMenuItemStockInfo(row.id, englishName || banglaName, rawInventory, recipesMap, itemLimit);
                   return (
                   <tr key={row.id} className="hover:bg-slate-800 dark:hover:bg-slate-800/20 transition-colors">
-                     <td className="px-6 py-3">
-                        <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 overflow-hidden flex items-center justify-center">
+                     <td className="w-16 px-3 py-2.5 text-center shrink-0">
+                        <div className="w-10 h-10 mx-auto rounded-xl bg-slate-800 border border-slate-700 overflow-hidden flex items-center justify-center">
                           {itemDp ? (
                             <img src={itemDp} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
                           ) : (
@@ -546,10 +559,15 @@ export const MenuManagement: React.FC = () => {
                           )}
                         </div>
                      </td>
-                     <td className="px-6 py-4 font-bold text-slate-400 text-xs uppercase tracking-wider">{row.meal || 'Snacks'}</td>
-                     <td className="px-6 py-4 font-bold">{itemName}</td>
-                     <td className="px-6 py-4 text-right font-bold text-emerald-400 font-mono">৳{row.price}</td>
-                     <td className="px-6 py-4 text-center">
+                     <td className="w-28 px-3 py-3 font-bold text-slate-400 text-xs uppercase tracking-wider shrink-0 whitespace-nowrap">{row.meal || 'Snacks'}</td>
+                     <td className="w-auto px-4 py-3">
+                        <div className="font-bold text-slate-100 text-sm">{banglaName}</div>
+                        {englishName && englishName.trim().toLowerCase() !== banglaName.trim().toLowerCase() && (
+                          <div className="text-[11px] text-slate-400 font-mono tracking-tight">{englishName}</div>
+                        )}
+                     </td>
+                     <td className="w-24 px-3 py-3 text-right font-bold text-emerald-400 font-mono shrink-0 whitespace-nowrap">৳{row.price}</td>
+                     <td className="w-32 px-3 py-3 text-center shrink-0 whitespace-nowrap">
                         <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-black font-mono tracking-wider shadow-[inset_0_1px_1px_rgba(255,255,255,0.4),0_3px_5px_-1px_rgba(0,0,0,0.6)] border-b-2 ${
                             stockInfo.availableStock < 5 
                               ? 'bg-gradient-to-b from-rose-500 to-rose-800 text-white border-rose-400 border-b-rose-950 shadow-[0_3px_10px_rgba(244,63,94,0.45)]' 
@@ -564,7 +582,7 @@ export const MenuManagement: React.FC = () => {
                            )}
                         </div>
                      </td>
-                     <td className="px-6 py-4 text-right">
+                     <td className="w-28 px-3 py-3 text-right shrink-0 whitespace-nowrap">
                         <div className="flex items-center justify-end space-x-2">
                           <button 
                             type="button"

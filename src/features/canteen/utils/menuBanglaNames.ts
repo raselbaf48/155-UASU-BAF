@@ -203,7 +203,7 @@ export function getMenuItemBanglaName(itemOrName: any): string {
  * persists to localStorage, dispatches update event, and pushes to Cloud.
  */
 export async function saveMenuItemBanglaName(
-  identifier: string | { id?: string; name: string },
+  identifier: string | { id?: string; name: string; oldName?: string },
   nameBn: string
 ): Promise<void> {
   const trimmedBn = String(nameBn || '').trim();
@@ -214,8 +214,14 @@ export async function saveMenuItemBanglaName(
   } catch {}
 
   const rawName = typeof identifier === 'string' ? identifier : (identifier?.name || '');
+  const oldName = typeof identifier === 'object' && identifier ? identifier.oldName : undefined;
   const rawId = typeof identifier === 'object' && identifier ? identifier.id : undefined;
   const normName = normalizeKey(rawName);
+
+  if (oldName && oldName.trim() && normalizeKey(oldName) !== normName) {
+    delete currentMap[normalizeKey(oldName)];
+    delete currentMap[oldName.trim()];
+  }
 
   if (trimmedBn) {
     if (rawId) currentMap[String(rawId)] = trimmedBn;

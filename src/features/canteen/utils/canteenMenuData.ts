@@ -314,17 +314,9 @@ export function findUserMenuOverride(
   if (!item || !overrides) return undefined;
   const rawId = String(item.id || '').trim();
   const cleanId = rawId.toLowerCase();
-  const en = String(item.name || item.name_en || '').trim();
-  const bn = String(item.name_bn || item.nameBn || item['Name (BN)'] || '').trim();
-  const normEn = normalizeCatalogKey(en);
-  const normBn = normalizeCatalogKey(bn);
-
+  // Strictly lookup by unique Item ID so renaming items never matches obsolete previous names!
   return (rawId && overrides[rawId]) ||
          (cleanId && overrides[cleanId]) ||
-         (normEn && overrides[`name_${normEn}`]) ||
-         (normBn && overrides[`bn_${normBn}`]) ||
-         (normEn && overrides[normEn]) ||
-         (normBn && overrides[normBn]) ||
          undefined;
 }
 
@@ -334,12 +326,8 @@ export function saveUserMenuOverride(item: Partial<CanteenMenuItem> & { id: stri
     const current = getUserMenuOverrides();
     const rawId = String(item.id).trim();
     const cleanId = rawId.toLowerCase();
-    const nameEn = String(item.name || item.name_en || '').trim();
-    const nameBn = String(item.name_bn || item.nameBn || item['Name (BN)'] || '').trim();
-    const normEn = normalizeCatalogKey(nameEn);
-    const normBn = normalizeCatalogKey(nameBn);
-    const oldEn = normalizeCatalogKey(String((item as any).oldNameEn || (item as any).old_name_en || ''));
-    const oldBn = normalizeCatalogKey(String((item as any).oldNameBn || (item as any).old_name_bn || ''));
+    const nameEn = String(item.name_en || item.name || '').trim();
+    const nameBn = String(item.name_bn || item.nameBn || item['Name (BN)'] || (item as any).Name_BN || '').trim();
 
     const overrideEntry: Partial<CanteenMenuItem> = {
       ...item,
@@ -352,16 +340,15 @@ export function saveUserMenuOverride(item: Partial<CanteenMenuItem> & { id: stri
       updated_at: new Date().toISOString()
     };
 
-    const updated: Record<string, Partial<CanteenMenuItem>> = {
-      ...current,
-      [rawId]: { ...(current[rawId] || {}), ...overrideEntry },
-      [cleanId]: { ...(current[cleanId] || {}), ...overrideEntry }
-    };
-
-    if (normEn) updated[`name_${normEn}`] = { ...(current[`name_${normEn}`] || {}), ...overrideEntry };
-    if (normBn) updated[`bn_${normBn}`] = { ...(current[`bn_${normBn}`] || {}), ...overrideEntry };
-    if (oldEn) updated[`name_${oldEn}`] = { ...(current[`name_${oldEn}`] || {}), ...overrideEntry };
-    if (oldBn) updated[`bn_${oldBn}`] = { ...(current[`bn_${oldBn}`] || {}), ...overrideEntry };
+    // Clean any old obsolete name-based keys from overrides
+    const updated: Record<string, Partial<CanteenMenuItem>> = {};
+    for (const [k, v] of Object.entries(current)) {
+      if (!k.startsWith('name_') && !k.startsWith('bn_')) {
+        updated[k] = v;
+      }
+    }
+    updated[rawId] = overrideEntry;
+    if (cleanId) updated[cleanId] = overrideEntry;
 
     localStorage.setItem(MENU_USER_OVERRIDES_KEY, JSON.stringify(updated));
     // Immediately persist to cloud app_settings
@@ -383,11 +370,31 @@ export function saveUserMenuOverride(item: Partial<CanteenMenuItem> & { id: stri
  * Updates a single menu item in the cache immediately in 0ms and notifies listeners.
  */
 export function updateSingleMenuItemInCache(updatedItem: Partial<CanteenMenuItem> & { id: string }): CanteenMenuItem[] {
-  saveUserMenuOverride(updatedItem);
+  const normBn = updatedItem.name_bn || (updatedItem as any).nameBn || (updatedItem as any)['Name (BN)'] || (updatedItem as any).Name_BN;
+  const normEn = updatedItem.name_en || updatedItem.name;
+  const cleanItem = {
+    ...updatedItem,
+    name: normEn || updatedItem.name,
+    name_en: normEn || updatedItem.name_en,
+    name_bn: normBn || updatedItem.name_bn,
+    nameBn: normBn || (updatedItem as any).nameBn,
+    'Name (BN)': normBn || (updatedItem as any)['Name (BN)'],
+    'Name_BN': normBn || (updatedItem as any).Name_BN,
+  };
+  saveUserMenuOverride(cleanItem);
   const current = getCanteenMenuCache();
   const next = current.map((it) => {
-    if (it.id === updatedItem.id) {
-      return { ...it, ...updatedItem, updated_at: updatedItem.updated_at || new Date().toISOString() };
+    if (String(it.id).toLowerCase() === String(updatedItem.id).toLowerCase()) {
+      return { 
+        ...it, 
+        ...cleanItem, 
+        name: normEn || it.name,
+        name_en: normEn || it.name_en,
+        name_bn: normBn || it.name_bn,
+        nameBn: normBn || it.nameBn,
+        'Name (BN)': normBn || it['Name (BN)'],
+        updated_at: updatedItem.updated_at || new Date().toISOString() 
+      };
     }
     return it;
   });
@@ -416,14 +423,8 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
             const overrides = getUserMenuOverrides();
 
             const hydrated = data.map((it: any) => {
-              const normItEn = normalizeCatalogKey(it.name || it.name_en || '');
-              const normItBn = normalizeCatalogKey(it.name_bn || it.nameBn || '');
               const local = currentMap.get(it.id) ||
-                currentCache.find(c => {
-                  const cEn = normalizeCatalogKey(c.name || c.name_en || '');
-                  const cBn = normalizeCatalogKey(c.name_bn || c.nameBn || '');
-                  return (cEn && normItEn && cEn === normItEn) || (cBn && normItBn && cBn === normItBn);
-                });
+                currentCache.find(c => String(c.id).toLowerCase() === String(it.id).toLowerCase());
               const userOv = findUserMenuOverride(overrides, it) || overrides[it.id] || (local?.id ? overrides[local.id] : undefined);
 
               if (userOv) {
@@ -446,7 +447,7 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
               if (local) {
                 const localTime = local.updated_at ? new Date(local.updated_at).getTime() : 0;
                 const serverTime = it.updated_at ? new Date(it.updated_at).getTime() : 0;
-                // Preserve local changes if local timestamp is newer than server or user modified
+                // Preserve local changes if local timestamp is newer or equal to server, or if local has custom name
                 if (localTime >= serverTime) {
                   return {
                     ...it,
@@ -454,18 +455,16 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
                   };
                 }
               }
-              const localBn = local?.name_bn || local?.nameBn || local?.['Name (BN)'];
-              const localName = local?.name || local?.name_en;
-              const bn = localBn || it.name_bn || it.nameBn || it['Name (BN)'] || getMenuItemBanglaName(it) || '';
-              const name = localName || it.name || it.name_en || '';
+              const resolvedBn = it.name_bn || it.nameBn || it['Name (BN)'] || local?.name_bn || local?.nameBn || getMenuItemBanglaName(it) || '';
+              const resolvedEn = it.name || it.name_en || local?.name_en || local?.name || '';
               return {
                 ...it,
                 ...local,
-                name,
-                name_en: name,
-                name_bn: bn,
-                nameBn: bn,
-                'Name (BN)': bn
+                name: resolvedEn,
+                name_en: resolvedEn,
+                name_bn: resolvedBn,
+                nameBn: resolvedBn,
+                'Name (BN)': resolvedBn
               };
             });
 
@@ -516,14 +515,8 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
         const overrides = getUserMenuOverrides();
 
         const hydrated = data.map((it: any) => {
-          const normItEn = normalizeCatalogKey(it.name || it.name_en || '');
-          const normItBn = normalizeCatalogKey(it.name_bn || it.nameBn || '');
           const local = currentMap.get(it.id) ||
-            currentCache.find(c => {
-              const cEn = normalizeCatalogKey(c.name || c.name_en || '');
-              const cBn = normalizeCatalogKey(c.name_bn || c.nameBn || '');
-              return (cEn && normItEn && cEn === normItEn) || (cBn && normItBn && cBn === normItBn);
-            });
+            currentCache.find(c => String(c.id).toLowerCase() === String(it.id).toLowerCase());
           const userOv = findUserMenuOverride(overrides, it) || overrides[it.id] || (local?.id ? overrides[local.id] : undefined);
 
           if (userOv) {
@@ -553,18 +546,16 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
               };
             }
           }
-          const localBn = local?.name_bn || local?.nameBn || local?.['Name (BN)'];
-          const localName = local?.name || local?.name_en;
-          const bn = localBn || it.name_bn || it.nameBn || it['Name (BN)'] || getMenuItemBanglaName(it) || '';
-          const name = localName || it.name || it.name_en || '';
+          const resolvedBn = it.name_bn || it.nameBn || it['Name (BN)'] || local?.name_bn || local?.nameBn || getMenuItemBanglaName(it) || '';
+          const resolvedEn = it.name || it.name_en || local?.name_en || local?.name || '';
           return {
             ...it,
             ...local,
-            name,
-            name_en: name,
-            name_bn: bn,
-            nameBn: bn,
-            'Name (BN)': bn
+            name: resolvedEn,
+            name_en: resolvedEn,
+            name_bn: resolvedBn,
+            nameBn: resolvedBn,
+            'Name (BN)': resolvedBn
           };
         });
 

@@ -499,7 +499,10 @@ async function startServer() {
 
   // 8. AI PDF / Image / Document Duty Data Import Analyzer (Gemini Powered)
   let aiClient: GoogleGenAI | null = null;
-  function getGeminiAI(): GoogleGenAI {
+  function getGeminiAI(): GoogleGenAI | null {
+    if (!process.env.GEMINI_API_KEY) {
+      return null;
+    }
     if (!aiClient) {
       aiClient = new GoogleGenAI({
         apiKey: process.env.GEMINI_API_KEY,

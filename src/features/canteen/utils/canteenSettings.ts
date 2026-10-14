@@ -63,8 +63,8 @@ export function getItemDisplayName(
     || cfg.itemDisplayLanguage 
     || 'bn';
 
-  const enName = String(item.name || item.name_en || '').trim();
-  let bnName = String(item.nameBn || item.name_bn || item['Name (BN)'] || '').trim();
+  const enName = String(item.name_en || item.name || '').trim();
+  let bnName = String(item.name_bn || item.nameBn || item['Name (BN)'] || (item as any).Name_BN || '').trim();
   
   if (!bnName && type === 'menu') {
     bnName = getMenuItemBanglaName(item);
