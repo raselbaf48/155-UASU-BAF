@@ -115,16 +115,25 @@ export function deduplicateCanteenMenuItems(items: CanteenMenuItem[]): CanteenMe
     const cleanId = String(rawItem.id || '').trim().toLowerCase();
     const enName = String(rawItem.name || rawItem.name_en || '').trim();
     const bnName = String(rawItem.name_bn || rawItem.nameBn || rawItem['Name (BN)'] || getMenuItemBanglaName(rawItem) || '').trim();
+    let cleanEnName = enName;
+    let cleanBnName = bnName;
+    const lowerEn = enName.toLowerCase();
+    const lowerBn = bnName.toLowerCase();
+    const isHotelPorota = lowerEn.includes('hotel') || lowerBn.includes('হোটেল');
+    if (!isHotelPorota && (lowerEn.includes('porata') || lowerEn.includes('porota') || lowerEn.includes('paratha') || lowerBn.includes('পরোটা'))) {
+      cleanEnName = 'PORATA';
+      cleanBnName = 'পরোটা';
+    }
 
-    const normEn = normalizeCatalogKey(enName);
-    const normBn = normalizeCatalogKey(bnName);
+    const normEn = normalizeCatalogKey(cleanEnName);
+    const normBn = normalizeCatalogKey(cleanBnName);
 
     let groupKey: string | undefined;
     if (cleanId && idToGroup.has(cleanId)) {
       groupKey = idToGroup.get(cleanId);
-    } else if (!cleanId && normEn && nameToGroup.has(normEn)) {
+    } else if (normEn && nameToGroup.has(normEn)) {
       groupKey = nameToGroup.get(normEn);
-    } else if (!cleanId && normBn && bnNameToGroup.has(normBn)) {
+    } else if (normBn && bnNameToGroup.has(normBn)) {
       groupKey = bnNameToGroup.get(normBn);
     }
 

@@ -880,8 +880,9 @@ export const MemberDB: React.FC<MemberDBProps> = ({
   const [editingBanglaNameVal, setEditingBanglaNameVal] = useState('');
   const [isSavingBanglaName, setIsSavingBanglaName] = useState(false);
 
-  // Add Member Modal state
+  // Add / Edit Member Modal state
   const [isAddMemberModalOpen, setIsAddMemberModalOpen] = useState(false);
+  const [memberToEdit, setMemberToEdit] = useState<any | null>(null);
 
   // Initial Bill Modals state
   const [isImportBillsModalOpen, setIsImportBillsModalOpen] = useState(false);
@@ -5204,16 +5205,6 @@ export const MemberDB: React.FC<MemberDBProps> = ({
             <>
               <button
                 type="button"
-                onClick={() => setIsAddMemberModalOpen(true)}
-                className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-2xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 shadow-md shadow-indigo-500/25 border-t border-indigo-300/40 active:translate-y-0.5 transition-all cursor-pointer"
-                title="Add New Member (নতুন সদস্য যুক্ত করুন)"
-              >
-                <UserPlus className="w-4 h-4" />
-                <span>+ ADD MEMBER</span>
-              </button>
-
-              <button
-                type="button"
                 onClick={() => {
                   setImportModalInitialTab('FILE');
                   setIsImportBillsModalOpen(true);
@@ -7383,14 +7374,30 @@ export const MemberDB: React.FC<MemberDBProps> = ({
         </div>
       )}
 
-      {/* Add New Member Modal */}
+      {/* Add / Edit Member Modal */}
       {isAddMemberModalOpen && (
         <AddMemberModal
           isOpen={isAddMemberModalOpen}
-          onClose={() => setIsAddMemberModalOpen(false)}
+          memberToEdit={memberToEdit}
+          onClose={() => {
+            setIsAddMemberModalOpen(false);
+            setMemberToEdit(null);
+          }}
           existingMembers={members}
           onMemberAdded={(newM) => {
             setMembers((prev) => formatAndSortMembers([newM, ...prev]));
+            fetchMembers(true);
+          }}
+          onMemberUpdated={(updatedM) => {
+            setMembers((prev) => formatAndSortMembers(prev.map(m => {
+              const isMatch = 
+                (m.airman_id && (m.airman_id === memberToEdit?.airman_id || m.airman_id === updatedM.airman_id)) ||
+                (String(m['BD No'] || '').replace(/\D/g, '') === String(memberToEdit?.['BD No'] || '').replace(/\D/g, ''));
+              return isMatch ? updatedM : m;
+            })));
+            if (profileMember) {
+              setProfileMember(updatedM);
+            }
             fetchMembers(true);
           }}
         />

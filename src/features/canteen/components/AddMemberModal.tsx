@@ -1,23 +1,30 @@
-import React, { useState } from 'react';
-import { X, UserPlus, Check, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, UserPlus, Check, AlertCircle, Edit3 } from 'lucide-react';
 import { BAF_RANKS_WITH_BN, getMemberBanglaRank, getMemberBanglaName } from '../utils/memberBanglaNames';
 import { supabase } from '../../../supabase';
-import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
+import { sortCanteenMembersByOfficeSeniority, isAirmanMember } from '../utils/canteenSeniority';
 import { setCanteenMembersCache, fetchCanteenMembersOnce } from '../utils/canteenMenuData';
+import { pushKeyToCloud } from '../utils/canteenCloudSync';
 
 interface AddMemberModalProps {
   isOpen: boolean;
   onClose: () => void;
   onMemberAdded?: (newMember: any) => void;
+  onMemberUpdated?: (updatedMember: any) => void;
   existingMembers: any[];
+  memberToEdit?: any | null;
 }
 
 export const AddMemberModal: React.FC<AddMemberModalProps> = ({
   isOpen,
   onClose,
   onMemberAdded,
-  existingMembers
+  onMemberUpdated,
+  existingMembers,
+  memberToEdit = null
 }) => {
+  const isEditMode = Boolean(memberToEdit);
+
   const [bdNo, setBdNo] = useState('');
   const [rank, setRank] = useState('LAC');
   const [rankBn, setRankBn] = useState('এলএসি');
@@ -29,16 +36,60 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
+  // Pre-fill fields when memberToEdit changes or modal opens
+  useEffect(() => {
+    if (memberToEdit) {
+      const rawBd = String(memberToEdit['BD No'] || memberToEdit.bdNo || memberToEdit.airman_id || '').replace(/\D/g, '').trim();
+      const currentRank = memberToEdit.Rank || memberToEdit.rank || 'LAC';
+      const currentSurname = memberToEdit.Surname || memberToEdit.surname || memberToEdit.Name || '';
+      const currentContact = String(memberToEdit.Contact || memberToEdit.contact || memberToEdit['Mobile No'] || '').replace(/\D/g, '');
+      const currentDp = memberToEdit.DP || memberToEdit.dp || '';
+      const currentNameBn = memberToEdit.Name_BN || memberToEdit.name_bn || memberToEdit.nameBn || getMemberBanglaName(memberToEdit) || '';
+      const currentRankBn = memberToEdit.Rank_BN || memberToEdit.rank_bn || memberToEdit.rankBn || getMemberBanglaRank(memberToEdit) || '';
+
+      setBdNo(rawBd);
+      setRank(currentRank);
+      setRankBn(currentRankBn);
+      setSurname(currentSurname);
+      setNameBn(currentNameBn);
+      setContact(currentContact);
+      setDp(currentDp);
+    } else {
+      setBdNo('');
+      setRank('LAC');
+      setRankBn('এলএসি');
+      setSurname('');
+      setNameBn('');
+      setContact('');
+      setDp('');
+    }
+    setErrorMsg('');
+    setSuccessMsg('');
+  }, [memberToEdit, isOpen]);
+
   if (!isOpen) return null;
 
   const cleanBd = bdNo.replace(/\D/g, '').trim();
   const cleanBdNoZero = cleanBd.replace(/^0+/, '');
+
+  const oldCleanBd = memberToEdit
+    ? String(memberToEdit['BD No'] || memberToEdit.bdNo || memberToEdit.airman_id || '').replace(/\D/g, '').trim()
+    : '';
+
+  // Duplicate check: In edit mode, ignore the member being edited!
   const existingDuplicateMember = cleanBd ? existingMembers.find(m => {
+    if (isEditMode && memberToEdit) {
+      const isSameMember = 
+        (m.airman_id && memberToEdit.airman_id && m.airman_id === memberToEdit.airman_id) ||
+        (oldCleanBd && String(m['BD No'] || m.bdNo || '').replace(/\D/g, '') === oldCleanBd);
+      if (isSameMember) return false;
+    }
     const mBd = String(m['BD No'] || m.bdNo || '').replace(/\D/g, '');
     const mBdNoZero = mBd.replace(/^0+/, '');
     if (!mBd) return false;
     return mBd === cleanBd || (cleanBdNoZero && mBdNoZero === cleanBdNoZero);
   }) : null;
+
   const isDuplicateBd = Boolean(existingDuplicateMember);
 
   const handleRankChange = (newRank: string) => {
@@ -84,16 +135,28 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
     setIsSaving(true);
 
     try {
-      const newLocalMember: any = {
-        airman_id: `airman-${cleanBd}`,
+      const oldAirmanId = memberToEdit?.airman_id || (oldCleanBd ? `airman-${oldCleanBd}` : `airman-${cleanBd}`);
+      const newAirmanId = (memberToEdit?.airman_id && !memberToEdit.airman_id.startsWith('airman-') && cleanBd === oldCleanBd)
+        ? memberToEdit.airman_id
+        : `airman-${cleanBd}`;
+
+      const isBdChanged = isEditMode && (cleanBd !== oldCleanBd || oldAirmanId !== newAirmanId);
+
+      const targetMemberPayload: any = {
+        ...(memberToEdit || {}),
+        airman_id: newAirmanId,
         "BD No": cleanBd,
+        bdNo: cleanBd,
         "Rank": rank === '-' ? '-' : (rank.trim() || 'LAC'),
         "Surname": surname.trim(),
         "Contact": cleanContact || '',
-        "Role": 'Member',
-        DP: dp.trim() || null,
-        Due: 0,
-        baki: 0,
+        "Role": memberToEdit?.Role || 'Member',
+        DP: dp.trim() || memberToEdit?.DP || null,
+        Due: memberToEdit?.Due ?? memberToEdit?.due ?? 0,
+        due: memberToEdit?.Due ?? memberToEdit?.due ?? 0,
+        baki: memberToEdit?.baki ?? memberToEdit?.Due ?? 0,
+        Seniority: memberToEdit?.Seniority ?? memberToEdit?.seniority ?? 999,
+        seniority: memberToEdit?.Seniority ?? memberToEdit?.seniority ?? 999,
         Name_BN: nameBn.trim() || null,
         name_bn: nameBn.trim() || null,
         nameBn: nameBn.trim() || null,
@@ -103,61 +166,154 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
         active: true
       };
 
-      // 1. Immediate Local Save
-      const updated = sortCanteenMembersByOfficeSeniority([
-        newLocalMember,
-        ...existingMembers.filter(m => {
-          const mBd = String(m['BD No'] || '').replace(/\D/g, '');
-          const mAid = String(m.airman_id || '').trim().toLowerCase();
-          return mAid !== newLocalMember.airman_id.toLowerCase() && (!cleanBd || mBd !== cleanBd);
-        })
-      ]);
+      // 1. Transaction migration if BD changed or editing member
+      if (isEditMode) {
+        try {
+          const rawLocalTxs = localStorage.getItem('canteen_txs');
+          if (rawLocalTxs) {
+            let txs = JSON.parse(rawLocalTxs);
+            let hasTxModified = false;
+            txs = txs.map((t: any) => {
+              const isMatch = 
+                (t.airman_id && (t.airman_id === oldAirmanId || t.airman_id === newAirmanId)) ||
+                (oldCleanBd && String(t.bdNo || '').replace(/\D/g, '') === oldCleanBd);
+              if (isMatch) {
+                hasTxModified = true;
+                return {
+                  ...t,
+                  airman_id: newAirmanId,
+                  bdNo: cleanBd,
+                  memberName: (targetMemberPayload.Rank !== '-' ? `${targetMemberPayload.Rank} ` : '') + targetMemberPayload.Surname,
+                  rank: targetMemberPayload.Rank
+                };
+              }
+              return t;
+            });
 
-      setCanteenMembersCache(updated);
+            if (hasTxModified) {
+              localStorage.setItem('canteen_txs', JSON.stringify(txs));
+              pushKeyToCloud('canteen_txs', txs).catch(() => {});
+              window.dispatchEvent(new CustomEvent('canteen_txs_updated', { detail: txs }));
+            }
+          }
+        } catch (txErr) {
+          console.warn('Transaction migration warning:', txErr);
+        }
+      }
+
+      // 2. Immediate Local Save & Caching
+      let updatedMembers: any[];
+      if (isEditMode) {
+        // Replace existing member in-place
+        updatedMembers = existingMembers.map(m => {
+          const isTarget = 
+            (m.airman_id && (m.airman_id === oldAirmanId || m.airman_id === newAirmanId)) ||
+            (oldCleanBd && String(m['BD No'] || m.bdNo || '').replace(/\D/g, '') === oldCleanBd);
+          if (isTarget) {
+            return targetMemberPayload;
+          }
+          return m;
+        });
+
+        // Filter out any accidental remaining duplicates of the old member
+        if (isBdChanged) {
+          updatedMembers = updatedMembers.filter(m => {
+            if (m.airman_id === newAirmanId) return true;
+            if (m.airman_id === oldAirmanId) return false;
+            const mBd = String(m['BD No'] || m.bdNo || '').replace(/\D/g, '');
+            if (oldCleanBd && mBd === oldCleanBd) return false;
+            return true;
+          });
+        }
+      } else {
+        // Add new member
+        updatedMembers = [
+          targetMemberPayload,
+          ...existingMembers.filter(m => {
+            const mBd = String(m['BD No'] || '').replace(/\D/g, '');
+            const mAid = String(m.airman_id || '').trim().toLowerCase();
+            return mAid !== targetMemberPayload.airman_id.toLowerCase() && (!cleanBd || mBd !== cleanBd);
+          })
+        ];
+      }
+
+      const sorted = sortCanteenMembersByOfficeSeniority(updatedMembers);
+      setCanteenMembersCache(sorted);
+
       try {
-        localStorage.setItem('canteen_members_cache', JSON.stringify(updated));
+        localStorage.setItem('canteen_members_cache', JSON.stringify(sorted));
+        if (oldCleanBd && oldCleanBd !== cleanBd) {
+          localStorage.removeItem(`canteen_member_${oldCleanBd}`);
+        }
         localStorage.setItem(`canteen_member_${cleanBd}`, JSON.stringify({
-          dp: newLocalMember.DP || '',
-          due: 0,
-          rank: newLocalMember.Rank,
-          surname: newLocalMember.Surname,
-          contact: newLocalMember.Contact,
+          dp: targetMemberPayload.DP || '',
+          due: targetMemberPayload.Due || 0,
+          rank: targetMemberPayload.Rank,
+          surname: targetMemberPayload.Surname,
+          contact: targetMemberPayload.Contact,
           bdNo: cleanBd
         }));
       } catch {}
 
-      // 2. Dispatch events so all pages (POS Sales, Member DB, etc.) update instantly
-      window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: updated }));
+      // 3. Dispatch events so all pages (POS Sales, Member DB, Due Register, etc.) update instantly
+      window.dispatchEvent(new CustomEvent('canteen_members_updated', { detail: sorted }));
       window.dispatchEvent(new Event('canteen_state_updated'));
       window.dispatchEvent(new Event('storage'));
 
-      // 3. Direct Cloud Sync to Supabase Canteen_Member
+      // 4. Direct Cloud Sync to Supabase Canteen_Member
       try {
         const supabaseRecord = {
-          airman_id: newLocalMember.airman_id,
+          airman_id: targetMemberPayload.airman_id,
           "BD No": cleanBd,
-          Rank: newLocalMember.Rank,
-          Surname: newLocalMember.Surname,
-          Contact: newLocalMember.Contact || '',
-          Role: newLocalMember.Role,
-          DP: newLocalMember.DP,
-          Due: 0,
-          Name_BN: newLocalMember.Name_BN,
-          Rank_BN: newLocalMember.Rank_BN,
-          active: true
+          Rank: targetMemberPayload.Rank,
+          Surname: targetMemberPayload.Surname,
+          Contact: targetMemberPayload.Contact || '',
+          Role: targetMemberPayload.Role,
+          DP: targetMemberPayload.DP,
+          Due: targetMemberPayload.Due ?? 0,
+          Seniority: targetMemberPayload.Seniority,
+          Name_BN: targetMemberPayload.Name_BN,
+          Rank_BN: targetMemberPayload.Rank_BN,
+          active: true,
+          updated_at: new Date().toISOString()
         };
-        const { error: upsertErr } = await supabase.from('Canteen_Member').upsert([supabaseRecord], { onConflict: 'airman_id' });
+
+        // If BD was changed, remove old record from database first to guarantee no duplicate
+        if (isBdChanged) {
+          if (oldAirmanId) {
+            await supabase.from('Canteen_Member').delete().eq('airman_id', oldAirmanId);
+            await supabase.from('Canteen').delete().eq('airman_id', oldAirmanId);
+          }
+          if (oldCleanBd) {
+            await supabase.from('Canteen_Member').delete().eq('BD No', oldCleanBd);
+            await supabase.from('Canteen_Member').delete().eq('airman_id', `airman-${oldCleanBd}`);
+            await supabase.from('Canteen').delete().eq('BD No', oldCleanBd);
+            await supabase.from('Canteen').delete().eq('airman_id', `airman-${oldCleanBd}`);
+          }
+        }
+
+        const { error: upsertErr } = await supabase
+          .from('Canteen_Member')
+          .upsert([supabaseRecord], { onConflict: 'airman_id' });
+
         if (upsertErr) {
           console.warn('Supabase Canteen_Member upsert warning:', upsertErr);
         }
         await fetchCanteenMembersOnce(true);
       } catch (cloudErr) {
-        console.warn('Cloud save warning for new member:', cloudErr);
+        console.warn('Cloud save warning for member:', cloudErr);
       }
 
-      setSuccessMsg(`Member #${cleanBd} (${newLocalMember.Surname}) successfully added!`);
-      if (onMemberAdded) {
-        onMemberAdded(newLocalMember);
+      setSuccessMsg(
+        isEditMode
+          ? `সদস্য #${cleanBd} (${targetMemberPayload.Surname}) এর তথ্য সফলভাবে আপডেট করা হয়েছে!`
+          : `Member #${cleanBd} (${targetMemberPayload.Surname}) successfully added!`
+      );
+
+      if (isEditMode && onMemberUpdated) {
+        onMemberUpdated(targetMemberPayload);
+      } else if (!isEditMode && onMemberAdded) {
+        onMemberAdded(targetMemberPayload);
       }
 
       setTimeout(() => {
@@ -166,7 +322,7 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
       }, 700);
 
     } catch (err: any) {
-      setErrorMsg(err.message || 'Error adding member');
+      setErrorMsg(err.message || 'Error saving member');
       setIsSaving(false);
     }
   };
@@ -177,11 +333,15 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
         <div className="flex items-center justify-between pb-4 border-b border-slate-800 mb-4">
           <div className="flex items-center space-x-2.5">
             <div className="p-2 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
-              <UserPlus className="w-5 h-5" />
+              {isEditMode ? <Edit3 className="w-5 h-5" /> : <UserPlus className="w-5 h-5" />}
             </div>
             <div>
-              <h3 className="text-base sm:text-lg font-black text-white">Add New Member</h3>
-              <p className="text-xs text-slate-400">ক্যান্টিনে নতুন সদস্য যুক্ত করুন</p>
+              <h3 className="text-base sm:text-lg font-black text-white">
+                {isEditMode ? 'Edit Member Profile' : 'Add New Member'}
+              </h3>
+              <p className="text-xs text-slate-400">
+                {isEditMode ? 'সদস্যের তথ্য পরিবর্তন ও আপডেট করুন' : 'ক্যান্টিনে নতুন সদস্য যুক্ত করুন'}
+              </p>
             </div>
           </div>
           <button
@@ -351,7 +511,7 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({
               ) : (
                 <>
                   <Check className="w-3.5 h-3.5 stroke-[3]" />
-                  <span>Save Member</span>
+                  <span>{isEditMode ? 'Update Member' : 'Save Member'}</span>
                 </>
               )}
             </button>

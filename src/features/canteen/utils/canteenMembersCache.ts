@@ -7,14 +7,57 @@ let inMemoryMembersCache: any[] | null = null;
 
 export function deduplicateCanteenMembers(members: any[]): any[] {
   if (!Array.isArray(members)) return [];
-  const seen = new Set<string>();
+  const seenBd = new Set<string>();
+  const seenAirmanId = new Set<string>();
+  const seenCivName = new Map<string, any>();
   const result: any[] = [];
+
+  // Filter out any known orphaned ghost records like airman-3 when airman-10226 exists
+  const has10226Akramul = members.some(m => {
+    const bd = String(m['BD No'] || m.bdNo || '').replace(/\D/g, '');
+    const sur = String(m.Surname || m.surname || m.Name || '').toLowerCase();
+    return (bd === '10226' || m.airman_id === 'airman-10226') && sur.includes('akramul');
+  });
+
   for (const m of members) {
     if (!m) continue;
-    const cleanBd = String(m['BD No'] || m.bdNo || m.airman_id || '').replace(/\D/g, '').toLowerCase();
-    const key = cleanBd || String(m.airman_id || m.id || '').toLowerCase();
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
+    const cleanBd = String(m['BD No'] || m.bdNo || '').replace(/\D/g, '').toLowerCase();
+    const airmanId = String(m.airman_id || m.id || '').toLowerCase();
+    const rank = String(m.Rank || m.rank || '').trim().toLowerCase();
+    const surname = String(m.Surname || m.surname || m.Name || '').trim().toLowerCase();
+
+    // If Akramul #10226 is present, drop old ghost #3
+    if (has10226Akramul && surname.includes('akramul') && (cleanBd === '3' || airmanId === 'airman-3')) {
+      continue;
+    }
+
+    // Check duplicate BD
+    if (cleanBd && seenBd.has(cleanBd)) continue;
+    if (airmanId && seenAirmanId.has(airmanId)) continue;
+
+    // Check duplicate Civilian staff with identical name
+    if (rank === 'civ' || rank === '-' || rank === 'civilian') {
+      const civKey = `${rank}_${surname}`;
+      if (seenCivName.has(civKey)) {
+        const existing = seenCivName.get(civKey);
+        const existingBd = String(existing['BD No'] || existing.bdNo || '').replace(/\D/g, '');
+        // Prefer longer/full service number over short 1-digit
+        if (cleanBd.length > existingBd.length) {
+          const idx = result.indexOf(existing);
+          if (idx !== -1) {
+            result[idx] = m;
+            seenCivName.set(civKey, m);
+            if (cleanBd) seenBd.add(cleanBd);
+            if (airmanId) seenAirmanId.add(airmanId);
+          }
+        }
+        continue;
+      }
+      seenCivName.set(civKey, m);
+    }
+
+    if (cleanBd) seenBd.add(cleanBd);
+    if (airmanId) seenAirmanId.add(airmanId);
     result.push(m);
   }
   return result;

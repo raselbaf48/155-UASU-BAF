@@ -120,6 +120,14 @@ export function deduplicateCanteenMembers(members: any[]): any[] {
       if (cleanBd && iBd && cleanBd === iBd) return true;
       if (cleanAid && iAid && cleanAid === iAid) return true;
 
+      // Also merge civilian members with the same name to prevent duplicates on BD No change
+      const mRank = String(m.Rank || m.rank || '').toUpperCase();
+      const iRank = String(item.Rank || item.rank || '').toUpperCase();
+      const isCivilian = mRank.includes('CIV') || mRank.includes('বেসামরিক') || iRank.includes('CIV') || iRank.includes('বেসামরিক');
+      const mName = String(m.Surname || m.Name || '').toLowerCase().trim();
+      const iName = String(item.Surname || item.Name || '').toLowerCase().trim();
+      if (isCivilian && mName && iName && mName === iName) return true;
+
       return false;
     });
 

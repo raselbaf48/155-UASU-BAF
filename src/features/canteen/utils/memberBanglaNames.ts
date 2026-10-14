@@ -514,14 +514,14 @@ export function getMemberBanglaRank(rankOrMember: any): string {
     const bdClean = bdNo.replace(/\D/g, '');
 
     // 1. Check user-saved dictionary overrides
-    if (airmanId && names[`rank_${airmanId}`]) return names[`rank_${airmanId}`];
-    if (bdNo && names[`rank_${bdNo}`]) return names[`rank_${bdNo}`];
-    if (bdClean && names[`rank_${bdClean}`]) return names[`rank_${bdClean}`];
+    if (airmanId && names[`rank_${airmanId}`]) return formatRankBn(names[`rank_${airmanId}`]);
+    if (bdNo && names[`rank_${bdNo}`]) return formatRankBn(names[`rank_${bdNo}`]);
+    if (bdClean && names[`rank_${bdClean}`]) return formatRankBn(names[`rank_${bdClean}`]);
 
     // 2. Check explicit Rank_BN / rank_bn from cloud or object
     const explicitRankBn = rankOrMember.Rank_BN || rankOrMember['Rank_BN'] || rankOrMember.Rank_bn || rankOrMember.rankBn || rankOrMember.rank_bn;
     if (explicitRankBn && String(explicitRankBn).trim()) {
-      return String(explicitRankBn).trim();
+      return formatRankBn(String(explicitRankBn).trim());
     }
 
     return formatRankBn(rankOrMember['Rank'] || rankOrMember.rank || '');
@@ -529,8 +529,8 @@ export function getMemberBanglaRank(rankOrMember: any): string {
 
   const str = String(rankOrMember).trim();
   if (str === '-') return '-';
-  if (str.toUpperCase().includes('CIV') || str.includes('বেসামরিক') || str.includes('সিভিলিয়ান')) return 'সিভিলিয়ান';
-  if (names[`rank_${str}`]) return names[`rank_${str}`];
+  if (str.toUpperCase().includes('CIV') || str.includes('বেসামরিক') || str.includes('সিভিলিয়ান')) return 'বেসামরিক';
+  if (names[`rank_${str}`]) return formatRankBn(names[`rank_${str}`]);
   return formatRankBn(str);
 }
 

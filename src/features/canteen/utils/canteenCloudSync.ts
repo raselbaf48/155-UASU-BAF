@@ -707,6 +707,7 @@ function mergeArrayData(localArr: any[], cloudArr: any[], keyField = 'id', keyNa
     // Deduplicate only truly identical transaction copies (same member, month, billType, amount, and items)
     // Preserving all historical initial bills and amount change entries intact!
     const seenExactInitial = new Set<string>();
+    const seenImportSale = new Set<string>();
     const deduped: any[] = [];
     for (const t of sortedList) {
       if (!t) continue;
@@ -730,6 +731,20 @@ function mergeArrayData(localArr: any[], cloudArr: any[], keyField = 'id', keyNa
           seenExactInitial.add(exactKey);
         }
       }
+
+      // Deduplicate POS sales import transactions on the same (member, date): keep only the newest!
+      if (String(t.id || '').startsWith('tx-sale-import-')) {
+        const cleanBd = String(t.bdNo || t.airman_id || '').replace(/\D/g, '') || String(t.memberName || '').toLowerCase().trim();
+        const tDate = String(t.date || '').trim();
+        const importKey = `${cleanBd}__${tDate}`;
+        if (cleanBd && tDate && seenImportSale.has(importKey)) {
+          continue; // Newer import already kept, drop older import!
+        }
+        if (cleanBd && tDate) {
+          seenImportSale.add(importKey);
+        }
+      }
+
       deduped.push(t);
     }
     return deduped;

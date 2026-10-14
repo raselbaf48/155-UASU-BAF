@@ -15,7 +15,7 @@ import { getCanteenMenuCache, setCanteenMenuCache, getCanteenMembersCache, setCa
 import { formatCanteenDate, toYMDDate } from '../utils/dateUtils';
 import { sortCanteenMembersByOfficeSeniority } from '../utils/canteenSeniority';
 import { formatRankBn, formatMemberNameBn, toBengaliNum, formatBengaliMonthYear } from '../utils/exportCanteenBillExcel';
-import { DEFAULT_MEMBER_BANGLA_NAMES } from '../utils/memberBanglaNames';
+import { DEFAULT_MEMBER_BANGLA_NAMES, getMemberBanglaRank, getMemberBanglaName } from '../utils/memberBanglaNames';
 import { getMenuItemBanglaName } from '../utils/menuBanglaNames';
 import { formatItemNameBn } from '../pages/MemberDB';
 import { isSaleTransaction } from '../pages/PosSales';
@@ -83,6 +83,7 @@ interface ParsedSaleRow {
   warning?: string;
   selected: boolean;
   sourceSheet?: string;
+  isNilDate?: boolean;
 }
 
 /**
@@ -409,15 +410,66 @@ function calculateSheetColWidths(
 
 /**
  * Fast, instant Excel download with native freeze panes and custom formatting.
- * Generates the .xlsx blob in-memory directly and triggers instant browser download with 0ms delay.
+ * Generates the .xlsx blob in-memory directly and injects OpenXML freeze pane definitions.
  */
 async function downloadExcelWithNativeFreeze(
   workbook: any,
   filename: string,
-  _freezeOptions?: { xSplit: number; ySplit: number; topLeftCell: string }
+  freezeOptions?: { xSplit: number; ySplit: number; topLeftCell: string }
 ) {
-  // Use XLSX.write directly to generate binary blob — starts download INSTANTLY (<100ms) with zero freeze
+  const xSplit = freezeOptions?.xSplit ?? 3;
+  const ySplit = freezeOptions?.ySplit ?? 5;
+  const topLeft = freezeOptions?.topLeftCell ?? 'D6';
+
   const rawArray = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+
+  try {
+    const zip = await JSZip.loadAsync(rawArray);
+    const sheetFiles = Object.keys(zip.files).filter(f => f.startsWith('xl/worksheets/sheet') && f.endsWith('.xml'));
+    for (const sheetPath of sheetFiles) {
+      let sheetXml = await zip.file(sheetPath)?.async('string');
+      if (sheetXml) {
+        const paneTag = `<pane xSplit="${xSplit}" ySplit="${ySplit}" topLeftCell="${topLeft}" activePane="bottomRight" state="frozen"/>`;
+        if (sheetXml.includes('<sheetView')) {
+          sheetXml = sheetXml.replace(
+            /<sheetView\b([^>]*)\/>/g,
+            `<sheetView$1>${paneTag}</sheetView>`
+          );
+          sheetXml = sheetXml.replace(
+            /<sheetView\b([^>]*)>([\s\S]*?)<\/sheetView>/g,
+            (match, p1, p2) => {
+              if (p2.includes('<pane')) {
+                return `<sheetView${p1}>${p2.replace(/<pane[^>]*\/>/g, paneTag)}</sheetView>`;
+              }
+              return `<sheetView${p1}>${paneTag}${p2}</sheetView>`;
+            }
+          );
+        } else if (sheetXml.includes('<sheetViews>')) {
+          sheetXml = sheetXml.replace(
+            '<sheetViews>',
+            `<sheetViews><sheetView workbookViewId="0">${paneTag}</sheetView>`
+          );
+        }
+        zip.file(sheetPath, sheetXml);
+      }
+    }
+    const finalBlob = await zip.generateAsync({
+      type: 'blob',
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    const url = URL.createObjectURL(finalBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    return;
+  } catch (err) {
+    console.warn('Zip freeze pane injection warning:', err);
+  }
+
   const blob = new Blob([rawArray], { 
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
   });
@@ -828,6 +880,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
   // Options
   const [updateMemberDue, setUpdateMemberDue] = useState(true);
   const [deductStock, setDeductStock] = useState(true);
+  const [downloadingTemplate, setDownloadingTemplate] = useState<'OFFICIAL' | 'DATEWISE' | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1020,8 +1073,8 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         // Rows 6+: Member data rows in official seniority order
         sortedMembers.forEach((m, idx) => {
           const serBn = toBengaliNum(idx + 1);
-          const rankBn = formatRankBn(m.Rank || m.rank || '');
-          const memberNameBn = m.name_bn || m.NameBn || formatMemberNameBn(m.Surname || m.Name || '') || m.Surname || m.Name || '';
+          const rankBn = formatRankBn(getMemberBanglaRank(m) || m.Rank || m.rank || '');
+          const memberNameBn = getMemberBanglaName(m) || m.name_bn || m.NameBn || formatMemberNameBn(m.Surname || m.Name || '') || m.Surname || m.Name || '';
 
           const mAirman = String(m.airman_id || '').toLowerCase().trim();
           const mBd = String(m['BD No'] || m.bdNo || '').toLowerCase().trim();
@@ -1130,14 +1183,22 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
 
         const worksheet = XLSX.utils.aoa_to_sheet(rows);
 
-        // Freeze E Column (Columns A..E) and Row 5 (Rows 1..5)
-        worksheet['!views'] = [{ state: 'frozen', ySplit: 5, xSplit: 5, topLeftCell: 'F6', activePane: 'bottomRight' }];
-        worksheet['!freeze'] = { xSplit: 5, ySplit: 5, topLeftCell: 'F6' };
+        // Merge Col B (c=1) and Col C (c=2) on the bottom 'সর্বমোট' row
+        const totalRowIdx = rows.length - 1;
+        worksheet['!merges'] = worksheet['!merges'] || [];
+        worksheet['!merges'].push({
+          s: { r: totalRowIdx, c: 1 },
+          e: { r: totalRowIdx, c: 2 }
+        });
+
+        // Freeze C Column (Columns A..C) and Row 5 (Rows 1..5)
+        worksheet['!views'] = [{ state: 'frozen', ySplit: 5, xSplit: 3, topLeftCell: 'D6', activePane: 'bottomRight' }];
+        worksheet['!freeze'] = { xSplit: 3, ySplit: 5, topLeftCell: 'D6' };
 
         // Set dynamic autofit column widths formatted for SutonnyMJ 16
         worksheet['!cols'] = calculateSheetColWidths(
           rows,
-          { 0: 4, 1: 6, 2: 10, 3: 12, 4: 18 },
+          { 0: 4, 1: 18, 2: 12, 3: 14, 4: 18 },
           8,
           4,
           5
@@ -1177,7 +1238,6 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         }
 
         // Total footer row styling
-        const totalRowIdx = totalRows - 1;
         for (let c = 1; c < totalCols; c++) {
           const addr = XLSX.utils.encode_cell({ r: totalRowIdx, c });
           if (!worksheet[addr]) {
@@ -1390,8 +1450,8 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         const serNumber = memberSerIndex >= 0 ? memberSerIndex + 1 : mIdx + 1;
         const serStr = String(serNumber).padStart(2, '0');
 
-        const rankBn = formatRankBn(m.Rank || m.rank || '');
-        const memberNameBn = m.name_bn || m.NameBn || formatMemberNameBn(m.Surname || m.Name || '') || m.Surname || m.Name || '';
+        const rankBn = formatRankBn(getMemberBanglaRank(m) || m.Rank || m.rank || '');
+        const memberNameBn = getMemberBanglaName(m) || m.name_bn || m.NameBn || formatMemberNameBn(m.Surname || m.Name || '') || m.Surname || m.Name || '';
         const bdNo = String(m['BD No'] || m.airman_id || '');
         const cleanBd = bdNo.replace(/\D/g, '') || String(serNumber);
 
@@ -1405,8 +1465,8 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         const bdDisplay = cleanDigits ? cleanDigits : rawBd.replace(/^BD[\/\-\s]*/i, '').trim();
 
         const rows: any[][] = [];
-        // Row 1: B1: 'র‍্যাংক ও নাম', C1: Serial + fullRankAndName
-        rows.push(['', toSutonny('র‍্যাংক ও নাম'), toSutonny(`${toBengaliNum(serNumber)}. ${fullRankAndName}`)]);
+        // Row 1: B1: 'র‌্যাংক ও নাম', C1: fullRankAndName (No serial number)
+        rows.push(['', toSutonny('র‌্যাংক ও নাম'), toSutonny(fullRankAndName)]);
         // Row 2: B2: 'বিডি নং', C2: bdDisplay
         rows.push(['', toSutonny('বিডি নং'), bdDisplay]);
         // Row 3: B3: 'মাস', C3: formatBengaliMonthYear(selectedYm)
@@ -1517,14 +1577,26 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         rows.push(totalFooterRow);
 
         const ws = XLSX.utils.aoa_to_sheet(rows);
+
+        // Merge Col B (c=1) and Col C (c=2) on the bottom 'সর্বমোট' row
+        const totalRowIdx = rows.length - 1;
+        ws['!merges'] = ws['!merges'] || [];
+        ws['!merges'].push({
+          s: { r: totalRowIdx, c: 1 },
+          e: { r: totalRowIdx, c: 2 }
+        });
+
         // Freeze C Column (Columns A..C) and Row 5 (Rows 1..5)
         ws['!views'] = [{ state: 'frozen', ySplit: 5, xSplit: 3, topLeftCell: 'D6', activePane: 'bottomRight' }];
         ws['!freeze'] = { xSplit: 3, ySplit: 5, topLeftCell: 'D6' };
 
         // Dynamic autofit column widths formatted for SutonnyMJ 16
+        // Col B (width 18) fully shows 'র‌্যাংক ও নাম' without clipping
+        // Col C autofits to fullRankAndName (e.g. 'উইং কমাঃ আফতাব') with generous padding so it is 100% visible
+        const colCWidth = Math.max(34, Math.ceil(fullRankAndName.length * 1.8) + 12);
         ws['!cols'] = calculateSheetColWidths(
           rows,
-          { 0: 4, 1: 6, 2: 12 },
+          { 0: 4, 1: 18, 2: colCWidth },
           8,
           4,
           3
@@ -1567,7 +1639,6 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         }
 
         // Total footer row styling
-        const totalRowIdx = totalRows - 1;
         for (let c = 1; c < totalCols; c++) {
           const addr = XLSX.utils.encode_cell({ r: totalRowIdx, c });
           if (!ws[addr]) {
@@ -1576,10 +1647,12 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           ws[addr].s = footerCellStyle;
         }
 
+        // Tab Title: Short Rank + Name + BD No without serial number prefix (e.g. 'উইং কমাঃ আফতাব (9241)')
         const shortName = (memberNameBn || m.Surname || m.Name || 'Member').trim();
-        let rawTabTitle = `${serStr}. ${shortName} (${cleanBd})`.replace(/[\\/?*:[\]]/g, '').trim();
+        const rankPrefix = rankBn ? `${rankBn} ` : '';
+        let rawTabTitle = `${rankPrefix}${shortName} (${cleanBd})`.replace(/[\\/?*:[\]]/g, '').trim();
         if (rawTabTitle.length > 31) {
-          rawTabTitle = `${serStr}. ${shortName.slice(0, 15)} (${cleanBd})`.replace(/[\\/?*:[\]]/g, '').trim();
+          rawTabTitle = `${rankPrefix}${shortName.slice(0, 12)} (${cleanBd})`.replace(/[\\/?*:[\]]/g, '').trim();
         }
         if (rawTabTitle.length > 31) {
           rawTabTitle = rawTabTitle.slice(0, 31).trim();
@@ -1990,9 +2063,9 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                   fixedBd = bdMatch[1];
                 }
                 if (
-                  cellText.includes('র‍্যাংক ও নাম') || cellText.includes('পদবী ও নাম') ||
+                  cellText.includes('র‌্যাংক ও নাম') || cellText.includes('র‍্যাংক ও নাম') || cellText.includes('পদবী ও নাম') ||
                   cellText.includes('Rank & Name') || cellText.includes('Rank and Name') ||
-                  cellText.includes('i‍¨vsK I bvg') || cellText.includes('c`ex I bvg')
+                  cellText.includes('i¨vsK I bvg') || cellText.includes('i‍¨vsK I bvg') || cellText.includes('c`ex I bvg')
                 ) {
                   const val = String(row[c + 1] || row[c + 2] || '').trim();
                   if (val) {
@@ -2115,11 +2188,13 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                 }
               }
 
+              let hasAnyQtyOnDate = false;
               foodCols.forEach((fc) => {
                 const cellVal = row[fc.colIdx];
                 const qty = parseBanglaNumber(cellVal);
 
                 if (qty > 0) {
+                  hasAnyQtyOnDate = true;
                   const unitPrice = fc.catalogItem ? Number(fc.catalogItem.price || 0) : 10;
                   const totalAmount = qty * unitPrice;
                   const warnings: string[] = [];
@@ -2153,6 +2228,31 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
                   });
                 }
               });
+
+              // If all food columns on this date are blank or 0, record a nil row so that
+              // any previous sales for this member on this date are replaced with nil (0)!
+              if (!hasAnyQtyOnDate && rowDate && (matchedMem || finalName || finalBd)) {
+                extractedRows.push({
+                  rowId: `pos_dt_matrix_${sheetName}_r${r}_nil_${Date.now()}_${Math.random()}`,
+                  date: rowDate,
+                  bdNo: finalBd,
+                  rank: finalRank,
+                  memberName: finalName,
+                  matchedMember: matchedMem || null,
+                  menuItemName: '',
+                  matchedMenuItem: null,
+                  qty: 0,
+                  unitPrice: 0,
+                  discount: 0,
+                  totalAmount: 0,
+                  paymentMode: 'DUE',
+                  remarks: `Date-wise Matrix (Blank/Nil): Sheet "${sheetName}"`,
+                  isValid: true,
+                  selected: true,
+                  sourceSheet: sheetName,
+                  isNilDate: true
+                });
+              }
             }
           }
         }
@@ -2371,7 +2471,22 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
       });
 
       // Filter existing transactions: Keep transactions that are NOT on the replaced (member, date)
-      const existingTxs: any[] = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+      let existingTxs: any[] = [];
+      try {
+        const local = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+        const cloud = await pullKeyFromCloud('canteen_txs');
+        if (Array.isArray(cloud) && cloud.length > 0) {
+          const map = new Map<string, any>();
+          cloud.forEach((t: any) => { if (t?.id) map.set(String(t.id), t); });
+          local.forEach((t: any) => { if (t?.id) map.set(String(t.id), t); });
+          existingTxs = Array.from(map.values());
+        } else {
+          existingTxs = local;
+        }
+      } catch {
+        existingTxs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+      }
+
       const keptTransactions: any[] = [];
       const memberDueDeductions = new Map<string, number>();
 
@@ -2398,6 +2513,10 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
 
         if (isMatch) {
           // This old sale is being REPLACED by the new import entry!
+          if (tx.id) {
+            recordDeletedTxId(tx.id);
+            recordDeletedTxId(String(tx.id).trim());
+          }
           const txStatus = String(tx.status || tx.paymentStatus || tx.paymentMethod || 'DUE').toUpperCase();
           if (txStatus === 'DUE') {
             const memberKey = tx.airman_id || tx.bdNo || txDigits;
@@ -2430,6 +2549,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
         // Aggregate food items on that day so each unique food item has one clean line
         const itemAggMap = new Map<string, { menuItemId: string; menuItemName: string; price: number; qty: number; totalPrice: number }>();
         rowsGroup.forEach(r => {
+          if (!r.qty || r.qty <= 0 || r.isNilDate) return;
           const normName = getMenuItemBanglaName(r.menuItemName) || formatItemNameBn(r.menuItemName) || r.menuItemName;
           const existing = itemAggMap.get(normName);
           if (existing) {
@@ -2446,6 +2566,12 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
           }
         });
         const soldItems = Array.from(itemAggMap.values());
+
+        // If no food items bought on this date (blank/0 in excel), previous transactions were cleared above, so this date remains nil!
+        if (dayTotal <= 0 || soldItems.length === 0) {
+          return;
+        }
+
         const itemsSummary = soldItems.map(s => `${s.menuItemName} (${s.qty})`).join(', ');
 
         const tx = {

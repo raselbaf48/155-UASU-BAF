@@ -14,33 +14,50 @@ export const formatRankBn = (rankStr?: string): string => {
   if (!rankStr) return '';
   const r = rankStr.toUpperCase().trim();
 
-  // If already Bengali
+  // If already Bengali or containing Bengali phrases (Short form enforcement)
+  // Commissioned Officers
+  if (r.includes('উইং কমা') || r.includes('উইং কমান্ডার') || r.includes('উইং') || r.includes('উয়িং')) return 'উইং কমাঃ';
+  if (r.includes('স্কোঃ লীঃ') || r.includes('স্কোয়াড্রন') || r.includes('স্কোয়াড্রন')) return 'স্কোঃ লীঃ';
+  if (r.includes('ফাঃ লেঃ') || r.includes('ফাঃলেঃ') || r.includes('ফ্লাইট')) return 'ফাঃ লেঃ';
+  if (r.includes('ফ্লাঃ অঃ') || r.includes('ফ্লাঃঅঃ') || r.includes('ফ্লাইং')) return 'ফ্লাঃ অঃ';
+  if (r.includes('পাঃ অঃ') || r.includes('পাঃঅঃ') || r.includes('প্লাঃ অঃ') || r.includes('পাইলট')) return 'পাঃ অঃ';
+  if (r.includes('গ্রুপ ক্যাপ') || r.includes('গ্রুপ ক্যাপ্টেন')) return 'গ্রুপ ক্যাপঃ';
+
+  // Warrant Officers (JCOs) Bengali
   if (r.includes('মাঃ ওঃ অঃ') || r.includes('মাঃওঃঅঃ') || r.includes('মাস্টার ওয়ারেন্ট') || r.includes('মাস্টার ওয়ারেন্ট')) return 'মাঃ ওঃ অঃ';
   if (r.includes('সিঃ ওঃ অঃ') || r.includes('সিঃওঃঅঃ') || r.includes('সিনিয়র ওয়ারেন্ট') || r.includes('সিনিয়র ওয়ারেন্ট')) return 'সিঃ ওঃ অঃ';
   if (r.includes('ওঃ অঃ') || r.includes('ওঃঅঃ') || r.includes('ওয়ারেন্ট') || r.includes('ওয়ারেন্ট')) return 'ওঃ অঃ';
+
+  // Airmen Bengali
   if (r.includes('সার্জেন্ট') || r.includes('সার্জেণ্ট')) return 'সার্জেন্ট';
   if (r.includes('কর্পোরাল')) return 'কর্পোরাল';
-  if (r.includes('এলএসি')) return 'এলএসি';
+  if (r.includes('এলএসি') || r.includes('এল এ সি')) return 'এলএসি';
+  if (r.includes('এসি-১') || r.includes('এসি ১')) return 'এসি-১';
+  if (r.includes('এসি-২') || r.includes('এসি ২')) return 'এসি-২';
   if (r.includes('এসি')) return 'এসি';
 
-  // Warrant Officers (JCOs)
+  // Non-Combatant & Civilians Bengali
+  if (r.includes('এনসি(ই)') || r.includes('এনসিই')) return 'এনসি(ই)';
+  if (r.includes('বেসামরিক') || r.includes('সিভিলিয়ান')) return 'বেসামরিক';
+
+  // Warrant Officers (JCOs) English
   if (r === 'MWO' || r.includes('MASTER WARRANT')) return 'মাঃ ওঃ অঃ';
   if (r === 'SWO' || r.includes('SENIOR WARRANT')) return 'সিঃ ওঃ অঃ';
   if (r === 'WO' || r.includes('WARRANT OFFICER')) return 'ওঃ অঃ';
 
-  // Commissioned Officers
+  // Commissioned Officers English (Short form / সংক্ষিপ্ত রূপ)
   if (r.includes('AIR CHIEF') || r === 'ACM') return 'এসিএম';
   if (r.includes('AIR MSHL') || r === 'AM') return 'এয়ার মার্শাল';
   if (r.includes('AVM') || r.includes('AIR VICE')) return 'এভিএম';
   if (r.includes('AIR CDRE') || r.includes('AIR COMMODORE')) return 'এয়ার কমোডর';
-  if (r.includes('GP CAPT') || r.includes('GROUP CAPTAIN')) return 'গ্রুপ ক্যাপ্টেন';
-  if (r.includes('WG CDR') || r.includes('WING COMMANDER')) return 'উইং কমান্ডার';
-  if (r.includes('SQN LDR') || r.includes('SQUADRON LEADER')) return 'স্কোয়াড্রন লিডার';
-  if (r.includes('FLT LT') || r.includes('FLIGHT LIEUTENANT')) return 'ফ্লাইট লেফটেন্যান্ট';
-  if (r.includes('FLG OFFR') || r.includes('FLYING OFFICER')) return 'ফ্লাইং অফিসার';
-  if (r.includes('PLT OFFR') || r.includes('PILOT OFFICER')) return 'পাইলট অফিসার';
+  if (r.includes('GP CAPT') || r.includes('GROUP CAPTAIN') || r === 'GPCAPT') return 'গ্রুপ ক্যাপঃ';
+  if (r.includes('WG CDR') || r.includes('WING COMMANDER') || r.includes('WING CDR') || r === 'WGCDR' || r.includes('WG CRD')) return 'উইং কমাঃ';
+  if (r.includes('SQN LDR') || r.includes('SQUADRON LEADER') || r === 'SQNLDR') return 'স্কোঃ লীঃ';
+  if (r.includes('FLT LT') || r.includes('FLIGHT LIEUTENANT') || r.includes('FLIGHT LT') || r === 'FLTLT') return 'ফাঃ লেঃ';
+  if (r.includes('FLG OFFR') || r.includes('FLYING OFFICER') || r.includes('FLG OFF') || r.includes('FLYING OFFR') || r === 'FLGOFFR') return 'ফ্লাঃ অঃ';
+  if (r.includes('PLT OFFR') || r.includes('PILOT OFFICER') || r === 'PLTOFFR') return 'পাঃ অঃ';
 
-  // Airmen NCOs and ORs
+  // Airmen NCOs and ORs English
   if (r.includes('SGT') || r.includes('SERGEANT')) return 'সার্জেন্ট';
   if (r.includes('CPL') || r.includes('CORPORAL')) return 'কর্পোরাল';
   if (r.includes('LAC') || r.includes('LEADING AIRCRAFTMAN')) return 'এলএসি';
@@ -48,7 +65,7 @@ export const formatRankBn = (rankStr?: string): string => {
   if (r.includes('AC-2') || r.includes('AC 2') || r.includes('AC2')) return 'এসি-২';
   if (r.includes('AC') || r.includes('AIRCRAFTMAN')) return 'এসি';
 
-  // Non-Combatant & Civilians
+  // Non-Combatant & Civilians English
   if (r.includes('NC(E)') || r.includes('NCE')) return 'এনসি(ই)';
   if (r.includes('CIV') || r.includes('CIVILIAN')) return 'বেসামরিক';
 
