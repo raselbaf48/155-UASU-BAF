@@ -269,6 +269,48 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
     }
   };
 
+  // Computed historical purposes combining presets, default presets, and transaction items
+  const historicalPurposes = useMemo(() => {
+    const set = new Set<string>();
+    ['Supply Item', 'বাজার', 'ফরম-৭৯৩', 'অন্য ক্যান্টিন বিল'].forEach(p => set.add(p));
+    try {
+      const raw = localStorage.getItem('canteen_purpose_presets');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) parsed.forEach(p => typeof p === 'string' && p.trim() && set.add(p.trim()));
+      }
+    } catch {}
+    (allTxs || []).forEach(tx => {
+      const it = (tx.items || tx.purpose || '').trim();
+      if (it && it !== 'Unit Fund Bill') set.add(it);
+    });
+    return Array.from(set);
+  }, [allTxs]);
+
+  // Civilian staff list
+  const civilianStaffList = useMemo(() => {
+    const list: Array<{ id: string; name: string }> = [
+      { id: 'civ-tanvir', name: 'Civ Tanvir' },
+      { id: 'civ-nurnabi', name: 'Civ Nur Nabi' },
+      { id: 'civ-akramul', name: 'Civ Akramul' },
+      { id: 'civ-sharif', name: 'Civ Sharif' },
+      { id: 'civ-irfan', name: 'Civ Irfan' },
+      { id: 'civ-sanwar', name: 'Civ Sanwar' }
+    ];
+    const seen = new Set(list.map(c => c.name.toLowerCase()));
+    (members || []).forEach(m => {
+      const rank = String(m.Rank || m.rank || '').toLowerCase();
+      if (rank.includes('civ') || rank.includes('civilian') || rank.includes('বেসামরিক')) {
+        const name = `${m.Rank || ''} ${m.Surname || m.name || ''}`.trim();
+        if (name && !seen.has(name.toLowerCase())) {
+          seen.add(name.toLowerCase());
+          list.push({ id: String(m.airman_id || m['BD No'] || name), name });
+        }
+      }
+    });
+    return list;
+  }, [members]);
+
   // Edit handler
   const handleSaveEditTx = async (updatedData: {
     amount: number;
@@ -276,6 +318,12 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
     items: string;
     note?: string;
     monthKey: string;
+    paymentMethod?: string;
+    method?: string;
+    source?: string;
+    staffName?: string;
+    cashDeductTarget?: 'MANAGER' | 'STAFF' | 'PREV_MANAGER';
+    isPrevManager?: boolean;
   }) => {
     if (!txToEdit) return;
     setIsSavingEdit(true);
@@ -301,8 +349,17 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
             amount: newAmount,
             date: updatedData.date,
             items: updatedData.items,
+            purpose: updatedData.items,
             note: updatedData.note || '',
             monthKey: updatedData.monthKey,
+            ...(updatedData.paymentMethod ? { 
+              paymentMethod: updatedData.paymentMethod, 
+              method: updatedData.paymentMethod 
+            } : {}),
+            ...(updatedData.source ? { source: updatedData.source } : {}),
+            ...(updatedData.staffName !== undefined ? { staffName: updatedData.staffName } : {}),
+            ...(updatedData.cashDeductTarget !== undefined ? { cashDeductTarget: updatedData.cashDeductTarget } : {}),
+            ...(updatedData.isPrevManager !== undefined ? { isPrevManager: updatedData.isPrevManager } : {}),
             updatedAt: new Date().toISOString()
           };
         }
@@ -311,6 +368,30 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
 
       localStorage.setItem('canteen_txs', JSON.stringify(updatedTxs));
       await pushKeyToCloud('canteen_txs', updatedTxs);
+
+      // Sync corresponding batchExpenseId in canteen_expenses if present
+      if (txToEdit.batchExpenseId) {
+        try {
+          const rawExp = localStorage.getItem('canteen_expenses');
+          if (rawExp) {
+            const exps = JSON.parse(rawExp);
+            const updatedExp = exps.map((e: any) => {
+              if (e && (e.id === txToEdit.batchExpenseId || String(e.id) === String(txToEdit.batchExpenseId))) {
+                return {
+                  ...e,
+                  amount: newAmount,
+                  desc: (e.desc && String(e.desc).startsWith('OTHERS BILL')) ? `OTHERS BILL: ${updatedData.items}`.toUpperCase() : e.desc,
+                  paymentMethod: updatedData.paymentMethod || e.paymentMethod,
+                  dueShop: updatedData.isPrevManager ? 'Adjutant' : e.dueShop,
+                };
+              }
+              return e;
+            });
+            localStorage.setItem('canteen_expenses', JSON.stringify(updatedExp));
+            pushKeyToCloud('canteen_expenses', updatedExp).catch(() => {});
+          }
+        } catch {}
+      }
 
       if (amountDiff !== 0) {
         const targetMember = members.find((m: any) => {
@@ -843,9 +924,14 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
                             </span>
                           </td>
                           <td className="py-3 px-3 text-slate-300">
-                            <div className="flex flex-col">
-                              <span className="font-semibold text-slate-200">
-                                {isUnit ? 'Unit Fund Bill' : (tx.items || tx.purpose || 'Others Bill')}
+                            <div 
+                              onClick={() => !isUnit && setTxToEdit(tx)}
+                              className={`flex flex-col ${!isUnit ? 'cursor-pointer group' : ''}`}
+                              title={!isUnit ? 'Click to change purpose' : undefined}
+                            >
+                              <span className={`font-semibold text-slate-200 ${!isUnit ? 'group-hover:text-indigo-300 transition-colors flex items-center space-x-1' : ''}`}>
+                                <span>{isUnit ? 'Unit Fund Bill' : (tx.items || tx.purpose || 'Others Bill')}</span>
+                                {!isUnit && <span className="opacity-0 group-hover:opacity-100 text-[10px] text-indigo-400 font-mono">✎</span>}
                               </span>
                               {tx.note && (
                                 <span className="text-[10px] text-slate-400 italic">
@@ -861,13 +947,18 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
                                   DUE BILL
                                 </span>
                               ) : (
-                                <span className={`px-2 py-0.5 rounded-lg text-[11px] font-semibold border ${
-                                  txMethod.startsWith('Cash')
-                                    ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/30'
-                                    : 'bg-blue-950/60 text-blue-300 border-blue-500/30'
-                                }`}>
-                                  {txMethod}
-                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setTxToEdit(tx)}
+                                  className={`px-2 py-0.5 rounded-lg text-[11px] font-semibold border cursor-pointer hover:ring-1 hover:ring-indigo-400 transition-all ${
+                                    txMethod.startsWith('Cash')
+                                      ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/30'
+                                      : 'bg-blue-950/60 text-blue-300 border-blue-500/30'
+                                  }`}
+                                  title="Click to change Cash Channel"
+                                >
+                                  {txMethod} <span className="text-[9px] opacity-70">✎</span>
+                                </button>
                               )}
                             </td>
                           )}
@@ -928,7 +1019,8 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
           tx={txToEdit}
           onSave={handleSaveEditTx}
           isSaving={isSavingEdit}
-          purposePresets={DEFAULT_PURPOSE_PRESETS}
+          purposePresets={historicalPurposes}
+          civilianStaffList={civilianStaffList}
         />
       )}
 

@@ -1196,13 +1196,18 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
     }
   };
 
-  // Save edited transaction
   const handleSaveEditTx = async (updatedData: {
     amount: number;
     date: string;
     items: string;
     note?: string;
     monthKey: string;
+    paymentMethod?: string;
+    method?: string;
+    source?: string;
+    staffName?: string;
+    cashDeductTarget?: 'MANAGER' | 'STAFF' | 'PREV_MANAGER';
+    isPrevManager?: boolean;
   }) => {
     if (!txToEdit) return;
     setIsSavingEdit(true);
@@ -1229,8 +1234,18 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
             amount: newAmount,
             date: formattedDate,
             items: updatedData.items,
+            purpose: updatedData.items,
             note: updatedData.note || undefined,
-            monthKey: updatedData.monthKey
+            monthKey: updatedData.monthKey,
+            ...(updatedData.paymentMethod ? { 
+              paymentMethod: updatedData.paymentMethod, 
+              method: updatedData.paymentMethod 
+            } : {}),
+            ...(updatedData.source ? { source: updatedData.source } : {}),
+            ...(updatedData.staffName !== undefined ? { staffName: updatedData.staffName } : {}),
+            ...(updatedData.cashDeductTarget !== undefined ? { cashDeductTarget: updatedData.cashDeductTarget } : {}),
+            ...(updatedData.isPrevManager !== undefined ? { isPrevManager: updatedData.isPrevManager } : {}),
+            updatedAt: new Date().toISOString()
           };
         }
         return t;
@@ -1238,6 +1253,30 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
 
       localStorage.setItem('canteen_txs', JSON.stringify(updatedTxs));
       await pushKeyToCloud('canteen_txs', updatedTxs);
+
+      // Sync corresponding batchExpenseId in canteen_expenses if present
+      if (txToEdit.batchExpenseId) {
+        try {
+          const rawExp = localStorage.getItem('canteen_expenses');
+          if (rawExp) {
+            const exps = JSON.parse(rawExp);
+            const updatedExp = exps.map((e: any) => {
+              if (e && (e.id === txToEdit.batchExpenseId || String(e.id) === String(txToEdit.batchExpenseId))) {
+                return {
+                  ...e,
+                  amount: newAmount,
+                  desc: (e.desc && String(e.desc).startsWith('OTHERS BILL')) ? `OTHERS BILL: ${updatedData.items}`.toUpperCase() : e.desc,
+                  paymentMethod: updatedData.paymentMethod || e.paymentMethod,
+                  dueShop: updatedData.isPrevManager ? 'Adjutant' : e.dueShop,
+                };
+              }
+              return e;
+            });
+            localStorage.setItem('canteen_expenses', JSON.stringify(updatedExp));
+            pushKeyToCloud('canteen_expenses', updatedExp).catch(() => {});
+          }
+        } catch {}
+      }
 
       // Adjust member Due if amount changed
       if (amountDiff !== 0) {
@@ -2796,6 +2835,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
           onSave={handleSaveEditTx}
           isSaving={isSavingEdit}
           purposePresets={purposePresets}
+          civilianStaffList={civilianStaffList}
         />
       )}
 
@@ -3015,9 +3055,16 @@ interface EditFundTxModalProps {
     items: string;
     note?: string;
     monthKey: string;
+    paymentMethod?: string;
+    method?: string;
+    source?: string;
+    staffName?: string;
+    cashDeductTarget?: 'MANAGER' | 'STAFF' | 'PREV_MANAGER';
+    isPrevManager?: boolean;
   }) => Promise<void>;
   isSaving: boolean;
   purposePresets: string[];
+  civilianStaffList?: Array<{ id: string; name: string }>;
 }
 
 export const EditFundTxModal: React.FC<EditFundTxModalProps> = ({
@@ -3026,7 +3073,8 @@ export const EditFundTxModal: React.FC<EditFundTxModalProps> = ({
   tx,
   onSave,
   isSaving,
-  purposePresets
+  purposePresets = [],
+  civilianStaffList = []
 }) => {
   if (!isOpen || !tx) return null;
 
@@ -3057,23 +3105,79 @@ export const EditFundTxModal: React.FC<EditFundTxModalProps> = ({
     return getTodayYMD();
   };
 
+  const getInitialChannel = (t: any): {
+    mode: 'MANAGER' | 'STAFF' | 'ADJUTANT' | 'UCB';
+    staff: string;
+  } => {
+    if (!t) return { mode: 'MANAGER', staff: 'Civ Tanvir' };
+    const pm = String(t.paymentMethod || t.method || t.source || '').trim();
+    if (t.isPrevManager || t.cashDeductTarget === 'PREV_MANAGER' || pm.toLowerCase().includes('adjutant')) {
+      return { mode: 'ADJUTANT', staff: 'Civ Tanvir' };
+    }
+    if (pm.toUpperCase() === 'UCB' || String(t.source || '').toUpperCase() === 'UCB') {
+      return { mode: 'UCB', staff: 'Civ Tanvir' };
+    }
+    if (t.cashDeductTarget === 'STAFF' || pm.includes('Cash (Civ') || t.staffName) {
+      let staff = t.staffName || 'Civ Tanvir';
+      const m = pm.match(/Cash \(([^)]+)\)/);
+      if (m && m[1]) staff = m[1].trim();
+      return { mode: 'STAFF', staff };
+    }
+    return { mode: 'MANAGER', staff: 'Civ Tanvir' };
+  };
+
   const [editAmount, setEditAmount] = useState<string>(String(tx.amount || ''));
   const [editDate, setEditDate] = useState<string>(() => parseTxDateToYMD(tx.date || tx.created_at || tx.timestamp));
-  const [editItems, setEditItems] = useState<string>(tx.items || '');
+  const [editItems, setEditItems] = useState<string>(tx.items || tx.purpose || '');
   const [editNote, setEditNote] = useState<string>(tx.note || '');
+  const [channelMode, setChannelMode] = useState<'MANAGER' | 'STAFF' | 'ADJUTANT' | 'UCB'>(() => getInitialChannel(tx).mode);
+  const [selectedStaff, setSelectedStaff] = useState<string>(() => getInitialChannel(tx).staff);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (tx) {
       setEditAmount(String(tx.amount || ''));
       setEditDate(parseTxDateToYMD(tx.date || tx.created_at || tx.timestamp));
-      setEditItems(tx.items || '');
+      setEditItems(tx.items || tx.purpose || '');
       setEditNote(tx.note || '');
+      const initCh = getInitialChannel(tx);
+      setChannelMode(initCh.mode);
+      setSelectedStaff(initCh.staff);
       setErrorMsg(null);
     }
   }, [tx]);
 
   const isUnit = tx ? getTxCategory(tx) === 'UNIT_FUND' : false;
+
+  const staffOptions = useMemo(() => {
+    const list = [
+      'Civ Tanvir',
+      'Civ Nur Nabi',
+      'Civ Akramul',
+      'Civ Sharif',
+      'Civ Irfan',
+      'Civ Sanwar'
+    ];
+    if (civilianStaffList && civilianStaffList.length > 0) {
+      civilianStaffList.forEach(s => {
+        if (s.name && !list.includes(s.name)) list.push(s.name);
+      });
+    }
+    if (selectedStaff && !list.includes(selectedStaff)) {
+      list.push(selectedStaff);
+    }
+    return list;
+  }, [civilianStaffList, selectedStaff]);
+
+  const combinedPurposes = useMemo(() => {
+    const defaultList = ['Supply Item', 'বাজার', 'ফরম-৭৯৩', 'অন্য ক্যান্টিন বিল'];
+    const merged = Array.from(new Set([
+      ...defaultList,
+      ...purposePresets,
+      tx?.items || tx?.purpose || ''
+    ])).filter(Boolean);
+    return merged;
+  }, [purposePresets, tx]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -3098,13 +3202,31 @@ export const EditFundTxModal: React.FC<EditFundTxModalProps> = ({
       return tx.monthKey || getRunningMonthKey();
     })();
 
+    const paymentMethodFormatted = (() => {
+      if (channelMode === 'ADJUTANT') return 'Cash (Adjutant)';
+      if (channelMode === 'UCB') return 'UCB';
+      if (channelMode === 'STAFF') return `Cash (${selectedStaff || 'Civ Tanvir'})`;
+      return 'Cash (Manager)';
+    })();
+
+    const sourceFormatted = channelMode === 'ADJUTANT' ? 'Cash (Adjutant)' : (channelMode === 'UCB' ? 'UCB' : 'Cash');
+    const isPrevMgrActive = channelMode === 'ADJUTANT';
+    const cashTarget = channelMode === 'ADJUTANT' ? 'PREV_MANAGER' : (channelMode === 'STAFF' ? 'STAFF' : 'MANAGER');
+    const staffNameVal = channelMode === 'STAFF' ? (selectedStaff || 'Civ Tanvir') : (channelMode === 'ADJUTANT' ? 'Adjutant' : 'Manager');
+
     try {
       await onSave({
         amount: num,
         date: editDate,
         items: derivedItems,
         note: editNote.trim() || undefined,
-        monthKey: derivedMonthKey
+        monthKey: derivedMonthKey,
+        paymentMethod: paymentMethodFormatted,
+        method: paymentMethodFormatted,
+        source: sourceFormatted,
+        staffName: staffNameVal,
+        cashDeductTarget: cashTarget,
+        isPrevManager: isPrevMgrActive
       });
     } catch (err: any) {
       setErrorMsg(err?.message || 'Failed to save changes');
@@ -3195,11 +3317,41 @@ export const EditFundTxModal: React.FC<EditFundTxModalProps> = ({
           {/* Purpose / Items (Only for Others Fund; Unit Fund has fixed bill type) */}
           {!isUnit ? (
             <div>
-              <label className="block text-xs font-black uppercase text-slate-300 mb-1">
-                Purpose / Description <span className="text-rose-400">*</span>
+              <label className="block text-xs font-black uppercase text-slate-300 mb-1 flex items-center justify-between">
+                <span>Purpose / Description <span className="text-rose-400">*</span></span>
+                <span className="text-[10px] text-indigo-400 font-mono font-bold">List ও Custom Select</span>
               </label>
-              <div className="flex flex-wrap gap-1 mb-1.5">
-                {purposePresets.map((preset) => (
+
+              {/* Purpose Select Dropdown List */}
+              <select
+                value={combinedPurposes.includes(editItems) ? editItems : (editItems ? '__CUSTOM__' : '')}
+                onChange={(e) => {
+                  if (e.target.value !== '__CUSTOM__' && e.target.value !== '') {
+                    setEditItems(e.target.value);
+                  }
+                }}
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-indigo-500 cursor-pointer mb-2"
+              >
+                <option value="">-- Select Purpose from List --</option>
+                {combinedPurposes.map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+                <option value="__CUSTOM__">✏️ Custom Purpose (Type Below)...</option>
+              </select>
+
+              {/* Direct Edit / Input Field */}
+              <input
+                type="text"
+                value={editItems}
+                onChange={(e) => setEditItems(e.target.value)}
+                placeholder="Enter or edit purpose / description..."
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-indigo-500 mb-1.5"
+                required
+              />
+
+              {/* Quick Preset Badges */}
+              <div className="flex flex-wrap gap-1">
+                {combinedPurposes.slice(0, 6).map((preset) => (
                   <button
                     key={preset}
                     type="button"
@@ -3214,14 +3366,6 @@ export const EditFundTxModal: React.FC<EditFundTxModalProps> = ({
                   </button>
                 ))}
               </div>
-              <input
-                type="text"
-                value={editItems}
-                onChange={(e) => setEditItems(e.target.value)}
-                placeholder="Enter purpose or description..."
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-indigo-500"
-                required
-              />
             </div>
           ) : (
             <div className="p-3 rounded-2xl bg-slate-950/80 border border-slate-800 text-xs flex justify-between items-center">
@@ -3229,6 +3373,127 @@ export const EditFundTxModal: React.FC<EditFundTxModalProps> = ({
               <span className="font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/20 font-mono">
                 Unit Fund Bill (Due)
               </span>
+            </div>
+          )}
+
+          {/* Cash Channel (Only for Others Fund) */}
+          {!isUnit && (
+            <div>
+              <label className="block text-xs font-black uppercase text-slate-300 mb-1 flex items-center justify-between">
+                <span>Cash Channel / Source <span className="text-rose-400">*</span></span>
+                <span className="text-[10px] font-mono font-bold text-emerald-400">
+                  {channelMode === 'ADJUTANT' 
+                    ? 'Adjutant (Due Register)' 
+                    : channelMode === 'UCB' 
+                    ? 'UCB Bank' 
+                    : channelMode === 'STAFF' 
+                    ? `Staff: ${selectedStaff}` 
+                    : 'Manager Cash'}
+                </span>
+              </label>
+
+              {/* List Dropdown for Cash Channel */}
+              <select
+                value={
+                  channelMode === 'ADJUTANT'
+                    ? 'ADJUTANT'
+                    : channelMode === 'UCB'
+                    ? 'UCB'
+                    : channelMode === 'MANAGER'
+                    ? 'MANAGER'
+                    : `STAFF:${selectedStaff}`
+                }
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === 'ADJUTANT') {
+                    setChannelMode('ADJUTANT');
+                  } else if (val === 'UCB') {
+                    setChannelMode('UCB');
+                  } else if (val === 'MANAGER') {
+                    setChannelMode('MANAGER');
+                  } else if (val.startsWith('STAFF:')) {
+                    setChannelMode('STAFF');
+                    setSelectedStaff(val.replace('STAFF:', ''));
+                  }
+                }}
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-indigo-500 cursor-pointer mb-2"
+              >
+                <option value="MANAGER">Manager Cash — Cash (Manager)</option>
+                <optgroup label="Staff Accounts (Cash Channels)">
+                  {staffOptions.map((st) => (
+                    <option key={st} value={`STAFF:${st}`}>
+                      Staff: {st} — Cash ({st})
+                    </option>
+                  ))}
+                </optgroup>
+                <option value="ADJUTANT">Adjutant — Cash (Adjutant)</option>
+                <option value="UCB">UCB — Bank (Online)</option>
+              </select>
+
+              {/* Quick 4-pill segmented buttons */}
+              <div className="grid grid-cols-4 gap-1 p-1 bg-slate-950 rounded-xl border border-slate-800 text-[10px] font-bold">
+                <button
+                  type="button"
+                  onClick={() => setChannelMode('MANAGER')}
+                  className={`py-1.5 px-1 rounded-lg text-center transition-all cursor-pointer ${
+                    channelMode === 'MANAGER' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Manager
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setChannelMode('STAFF')}
+                  className={`py-1.5 px-1 rounded-lg text-center transition-all cursor-pointer ${
+                    channelMode === 'STAFF' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Staff
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setChannelMode('ADJUTANT')}
+                  className={`py-1.5 px-1 rounded-lg text-center transition-all cursor-pointer ${
+                    channelMode === 'ADJUTANT' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Adjutant
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setChannelMode('UCB')}
+                  className={`py-1.5 px-1 rounded-lg text-center transition-all cursor-pointer ${
+                    channelMode === 'UCB' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  UCB
+                </button>
+              </div>
+
+              {/* If Staff selected, show staff picker */}
+              {channelMode === 'STAFF' && (
+                <div className="mt-2 p-2.5 rounded-xl bg-slate-950 border border-emerald-500/30 space-y-1.5">
+                  <span className="text-[10px] font-bold text-emerald-400 block uppercase">
+                    Select Staff Member:
+                  </span>
+                  <div className="grid grid-cols-3 gap-1">
+                    {staffOptions.map((st) => (
+                      <button
+                        key={st}
+                        type="button"
+                        onClick={() => setSelectedStaff(st)}
+                        className={`p-1.5 rounded-lg text-[10px] font-bold truncate transition-all cursor-pointer border ${
+                          selectedStaff === st
+                            ? 'bg-emerald-700 text-white border-emerald-400 shadow-sm'
+                            : 'bg-slate-900 border-slate-800 text-slate-300 hover:text-white'
+                        }`}
+                      >
+                        {st}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

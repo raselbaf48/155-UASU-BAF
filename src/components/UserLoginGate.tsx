@@ -9,7 +9,7 @@ import { X, Shield, ArrowRight, AlertCircle, CheckCircle2, Lock, LogIn, ChevronR
 import { motion, AnimatePresence } from 'motion/react';
 import { getAppConfig, isFeatureActive } from '../utils/appConfig';
 
-import { CanteenLayout } from '../features/canteen/components/CanteenLayout';
+const CanteenLayout = React.lazy(() => import('../features/canteen/components/CanteenLayout').then(m => ({ default: m.CanteenLayout })));
 const NightCountStateView = React.lazy(() => import('./NightCountStateView').then(m => ({ default: m.NightCountStateView })));
 const AppUpdateModal = React.lazy(() => import('./AppUpdateModal').then(m => ({ default: m.AppUpdateModal })));
 
@@ -1095,24 +1095,31 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
         )}
 
         {activeTab === 'Canteen' && isCanteenAuth && (
-          <CanteenLayout 
-             initialMember={successAirman ? { 
-               name: (successAirman.rank && successAirman.name) ? (successAirman.rank + ' ' + successAirman.name) : (successAirman.name || successAirman.fullName || 'Guest'), 
-               bdNo: successAirman.bdNo, 
-               role: (isCanteenManagerMode || (successAirman as any)?.role === 'manager') ? 'manager' : 'employee', 
-               photoUrl: successAirman.photoUrl,
-               due: (successAirman as any)?.due
-             } : undefined}
-             onBack={() => { 
-               setIsCanteenAuth(false); 
-               setIsCanteenManagerMode(false); 
-               setBdInput((getLastUsedIdForPortal('Canteen') || canteenRecentLogins[0] || '').replace(/[^0-9]/g, '')); 
-               setPasswordInput(''); 
-               setSuccessAirman(null); 
-               setTargetAirman(null); 
-               setLastUsedPortal('Canteen');
-             }} 
-          />
+          <Suspense fallback={
+            <div className="flex-1 flex flex-col items-center justify-center min-h-[400px] text-slate-400">
+              <Loader2 className="w-8 h-8 text-emerald-500 animate-spin mb-3" />
+              <span className="text-xs font-mono font-bold text-slate-300">Loading Canteen Portal...</span>
+            </div>
+          }>
+            <CanteenLayout 
+               initialMember={successAirman ? { 
+                 name: (successAirman.rank && successAirman.name) ? (successAirman.rank + ' ' + successAirman.name) : (successAirman.name || successAirman.fullName || 'Guest'), 
+                 bdNo: successAirman.bdNo, 
+                 role: (isCanteenManagerMode || (successAirman as any)?.role === 'manager') ? 'manager' : 'employee', 
+                 photoUrl: successAirman.photoUrl,
+                 due: (successAirman as any)?.due
+               } : undefined}
+               onBack={() => { 
+                 setIsCanteenAuth(false); 
+                 setIsCanteenManagerMode(false); 
+                 setBdInput((getLastUsedIdForPortal('Canteen') || canteenRecentLogins[0] || '').replace(/[^0-9]/g, '')); 
+                 setPasswordInput(''); 
+                 setSuccessAirman(null); 
+                 setTargetAirman(null); 
+                 setLastUsedPortal('Canteen');
+               }} 
+            />
+          </Suspense>
         )}
       </div>
 

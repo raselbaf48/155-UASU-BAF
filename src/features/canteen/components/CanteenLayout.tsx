@@ -646,7 +646,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
           <div
             key={tabId}
             style={{ display: activeTab === tabId ? 'block' : 'none' }}
-            className="w-full"
+            className={`w-full ${activeTab === tabId ? 'animate-fadeIn will-change-transform' : ''}`}
           >
             {renderManagerTab(tabId)}
           </div>
@@ -658,7 +658,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
   const isSettingsActive = activeTab === 'settings';
 
   return (
-    <div className={`fixed inset-0 z-[100] bg-slate-800 dark:bg-slate-950 overflow-hidden flex flex-col md:flex-row transition-all duration-300 ${i18n.language === 'bn' ? 'font-hind-siliguri text-[105%] leading-relaxed' : 'font-sans'}`}>
+    <div className={`fixed inset-0 z-[100] bg-slate-800 dark:bg-slate-950 overflow-hidden flex flex-col md:flex-row ${i18n.language === 'bn' ? 'font-hind-siliguri text-[105%] leading-relaxed' : 'font-sans'}`}>
       
       {/* Dynamic Font Style Injection for the module */}
       <style>{`

@@ -861,7 +861,7 @@ return () => mediaQuery.removeEventListener('change', listener);
       />
 
       {/* Right Content Wrapper */}
-      <div className={`flex flex-col min-h-screen transition-all duration-300 print:min-h-0 print:pl-0 print:p-0 print:bg-white ${sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-64'}`}>
+      <div className={`flex flex-col min-h-screen transition-[padding] duration-200 ease-out print:min-h-0 print:pl-0 print:p-0 print:bg-white ${sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-64'}`}>
         {/* Top Header Bar */}
         <TopHeader
           activeTab={activeTab}
@@ -883,15 +883,14 @@ return () => mediaQuery.removeEventListener('change', listener);
 
         {/* Main View Area (Opens on Right Side based on clicked tab) */}
         <main className={`flex-1 ${activeTab === 'duty-ratio' ? 'px-1 sm:px-2 md:px-3 py-3 max-w-none' : activeTab === 'register' ? 'px-2 sm:px-4 lg:px-6 max-w-none' : 'px-4 sm:px-6 lg:px-8 max-w-[1600px]'} py-6 w-full mx-auto print:p-0 print:m-0 print:max-w-none print:w-full`}>
-          <div className="grid grid-cols-1 grid-rows-1 w-full relative items-start">
-            <AnimatePresence initial={false}>
+          <div className="w-full relative">
+            <AnimatePresence mode="wait" initial={false}>
               <motion.div
                 key={activeTab}
-                style={{ gridArea: '1 / 1 / 2 / 2' }}
-                initial={{ opacity: 0.6, y: 3 }}
-                animate={{ opacity: 1, y: 0, zIndex: 2 }}
-                exit={{ opacity: 0, zIndex: 1, pointerEvents: 'none', transition: { duration: 0.12, delay: 0.1 } }}
-                transition={{ duration: 0.18, ease: "easeOut" }}
+                initial={{ opacity: 0.85 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.12, ease: "easeOut" }}
                 className="w-full print:filter-none print:opacity-100 print:transform-none"
               >
                 <Suspense fallback={<div className="flex flex-col items-center justify-center p-16 text-slate-400"><div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mb-3" /><span className="text-xs font-mono">Loading Section...</span></div>}>
