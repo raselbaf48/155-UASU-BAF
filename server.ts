@@ -16,6 +16,33 @@ import { Airman, DutyAssignment, FlightName, ParadeShift, ActivityHistoryItem, D
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'baf_unit_data.json');
+const SETTINGS_FILE = path.join(DATA_DIR, 'app_settings.json');
+
+function loadAppSettings(): Record<string, { setting_key: string; setting_value: string; updated_at: string }> {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    if (fs.existsSync(SETTINGS_FILE)) {
+      const raw = fs.readFileSync(SETTINGS_FILE, 'utf-8');
+      return JSON.parse(raw);
+    }
+  } catch (err) {
+    console.error('Error reading app_settings.json:', err);
+  }
+  return {};
+}
+
+function saveAppSettings(settings: Record<string, { setting_key: string; setting_value: string; updated_at: string }>) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Failed to save app_settings.json:', err);
+  }
+}
 
 interface LocalDB {
   airmen: Airman[];
@@ -217,6 +244,8 @@ async function startServer() {
   const supabaseUrl = cleanSupabaseUrl(resolvedUrl);
   const supabaseAnonKey = cleanSupabaseAnonKey(resolvedKey);
   
+  let db = loadDatabase();
+
   app.all('/api/supabase/*', express.raw({ type: '*/*', limit: '50mb' }), async (req, res) => {
     let targetUrl = '';
     try {
@@ -295,18 +324,146 @@ async function startServer() {
         'content-length',
       ]);
 
+      const arrayBuffer = await supabaseRes.arrayBuffer();
+      const bodyText = Buffer.from(arrayBuffer).toString('utf-8');
+      const isRestrictedOrOffline = 
+        supabaseRes.status === 402 || 
+        supabaseRes.status === 403 || 
+        supabaseRes.status >= 500 || 
+        bodyText.includes('exceed_egress_quota') || 
+        bodyText.includes('restricted due to the following violations');
+
+      if (isRestrictedOrOffline) {
+        const urlObj = new URL(targetUrl);
+        const pathname = urlObj.pathname;
+
+        // Fallback for app_settings table
+        if (pathname.includes('/rest/v1/app_settings')) {
+          const settings = loadAppSettings();
+          if (req.method === 'GET') {
+            let rows = Object.values(settings);
+            const settingKeyParam = urlObj.searchParams.get('setting_key');
+            if (settingKeyParam) {
+              if (settingKeyParam.startsWith('like.')) {
+                const prefix = settingKeyParam.slice(5).replace(/[%_]/g, '');
+                rows = rows.filter(r => r.setting_key.startsWith(prefix));
+              } else if (settingKeyParam.startsWith('eq.')) {
+                const targetKey = settingKeyParam.slice(3);
+                rows = rows.filter(r => r.setting_key === targetKey);
+              }
+            }
+            res.setHeader('content-type', 'application/json');
+            res.status(200);
+            const accept = String(req.headers['accept'] || '');
+            if (accept.includes('application/vnd.pgrst.object+json')) {
+              return res.send(JSON.stringify(rows[0] || null));
+            }
+            return res.send(JSON.stringify(rows));
+          } else if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
+            try {
+              let parsedBody: any = null;
+              if (reqOptions.body) {
+                parsedBody = typeof reqOptions.body === 'string' ? JSON.parse(reqOptions.body) : reqOptions.body;
+              }
+              const items = Array.isArray(parsedBody) ? parsedBody : (parsedBody ? [parsedBody] : []);
+              for (const it of items) {
+                if (it && it.setting_key) {
+                  settings[it.setting_key] = {
+                    setting_key: it.setting_key,
+                    setting_value: typeof it.setting_value === 'string' ? it.setting_value : JSON.stringify(it.setting_value),
+                    updated_at: it.updated_at || new Date().toISOString()
+                  };
+                }
+              }
+              saveAppSettings(settings);
+              res.setHeader('content-type', 'application/json');
+              return res.status(201).send(JSON.stringify(items));
+            } catch (pErr) {
+              console.warn('[Proxy Fallback] Could not parse upsert body:', pErr);
+            }
+          }
+        }
+
+        // Fallback for Canteen_Member
+        if (pathname.includes('/rest/v1/Canteen_Member') && req.method === 'GET') {
+          const members = (db.airmen || []).map(a => ({
+            "BD No": a.bdNo,
+            airman_id: a.id,
+            Rank: a.rank,
+            Surname: a.name,
+            DP: a.photoUrl || '',
+            Due: 0,
+            Contact: a.mobileNo,
+            Flight: a.flightName,
+            Trade: a.trade
+          }));
+          res.setHeader('content-type', 'application/json');
+          return res.status(200).send(JSON.stringify(members));
+        }
+
+        // Fallback for Canteen_Menu
+        if (pathname.includes('/rest/v1/Canteen_Menu') && req.method === 'GET') {
+          const settings = loadAppSettings();
+          let menuStr = settings['canteen_menu_items_catalog_v1']?.setting_value;
+          let menuList: any[] = [];
+          if (menuStr) {
+            try { menuList = JSON.parse(menuStr); } catch {}
+          }
+          res.setHeader('content-type', 'application/json');
+          return res.status(200).send(JSON.stringify(menuList));
+        }
+      }
+
       supabaseRes.headers.forEach((val, key) => {
         if (!hopByHopHeaders.has(key.toLowerCase())) {
           res.setHeader(key, val);
         }
       });
       res.status(supabaseRes.status);
-      
-      const arrayBuffer = await supabaseRes.arrayBuffer();
       res.send(Buffer.from(arrayBuffer));
     } catch (e: any) {
-      // Gracefully handle timeout/upstream disconnection without throwing unhandled exceptions
-      console.warn('[Proxy Notice] Upstream database temporarily unavailable:', e?.message || e);
+      console.warn('[Proxy Notice] Upstream database temporarily unavailable, checking local fallback:', e?.message || e);
+      try {
+        const urlObj = new URL(targetUrl || req.originalUrl, 'http://localhost');
+        const pathname = urlObj.pathname;
+        if (pathname.includes('/rest/v1/app_settings')) {
+          const settings = loadAppSettings();
+          if (req.method === 'GET') {
+            let rows = Object.values(settings);
+            const settingKeyParam = urlObj.searchParams.get('setting_key');
+            if (settingKeyParam) {
+              if (settingKeyParam.startsWith('like.')) {
+                const prefix = settingKeyParam.slice(5).replace(/[%_]/g, '');
+                rows = rows.filter(r => r.setting_key.startsWith(prefix));
+              } else if (settingKeyParam.startsWith('eq.')) {
+                const targetKey = settingKeyParam.slice(3);
+                rows = rows.filter(r => r.setting_key === targetKey);
+              }
+            }
+            res.setHeader('content-type', 'application/json');
+            return res.status(200).send(JSON.stringify(rows));
+          } else if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
+            let parsedBody: any = null;
+            if (req.body) {
+              parsedBody = typeof req.body === 'string' ? JSON.parse(req.body) : Buffer.isBuffer(req.body) ? JSON.parse(req.body.toString()) : req.body;
+            }
+            const items = Array.isArray(parsedBody) ? parsedBody : (parsedBody ? [parsedBody] : []);
+            for (const it of items) {
+              if (it && it.setting_key) {
+                settings[it.setting_key] = {
+                  setting_key: it.setting_key,
+                  setting_value: typeof it.setting_value === 'string' ? it.setting_value : JSON.stringify(it.setting_value),
+                  updated_at: it.updated_at || new Date().toISOString()
+                };
+              }
+            }
+            saveAppSettings(settings);
+            res.setHeader('content-type', 'application/json');
+            return res.status(201).send(JSON.stringify(items));
+          }
+        }
+      } catch (errFallback) {}
+
       res.status(503).json({
         message: 'Upstream database temporarily unavailable. Falling back to local state.',
         code: 'PGRST_UPSTREAM_TIMEOUT',
@@ -315,10 +472,26 @@ async function startServer() {
     }
   });
 
-  app.use(express.json({ limit: '50mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+  // Dedicated Canteen Settings Backup Endpoints
+  app.get('/api/canteen/all-settings', (req, res) => {
+    const settings = loadAppSettings();
+    res.json(Object.values(settings));
+  });
 
-  let db = loadDatabase();
+  app.post('/api/canteen/save-setting', express.json({ limit: '50mb' }), (req, res) => {
+    const { setting_key, setting_value } = req.body || {};
+    if (!setting_key) {
+      return res.status(400).json({ error: 'Missing setting_key' });
+    }
+    const settings = loadAppSettings();
+    settings[setting_key] = {
+      setting_key,
+      setting_value: typeof setting_value === 'string' ? setting_value : JSON.stringify(setting_value),
+      updated_at: new Date().toISOString()
+    };
+    saveAppSettings(settings);
+    res.json({ success: true, setting_key });
+  });
 
   // --- API ENDPOINTS ---
 

@@ -137,21 +137,22 @@ const smartFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise
     if (!isDirectFetchBlocked) {
       try {
         const directRes = await fetchWithTimeout(input, modifiedInit, 18000);
-        if (directRes.ok || (directRes.status >= 200 && directRes.status < 500)) {
+        if (directRes.ok) {
           return directRes;
         }
+        // If direct fetch returns 402/403 (e.g. exceed_egress_quota) or failure, fall back to proxy
+        isDirectFetchBlocked = true;
       } catch (err: any) {
-        // Only mark direct fetch as blocked if it is a true TypeError (CORS/Adblocker), not an AbortError timeout
         if (err?.name !== 'AbortError') {
           isDirectFetchBlocked = true;
         }
       }
     }
 
-    // 2. Try proxy fetch
+    // 2. Try proxy fetch (which connects to server-side local persistent storage fallback)
     try {
       const proxyRes = await fetchWithTimeout(proxyUrl, modifiedInit, 20000);
-      if (proxyRes.ok || (proxyRes.status >= 200 && proxyRes.status < 500)) {
+      if (proxyRes.ok) {
         return proxyRes;
       }
     } catch {
