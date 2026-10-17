@@ -1,4 +1,5 @@
-import { supabase, isSupabaseConfigured } from '../supabase';
+import { db, isFirebaseConfigured, handleFirestoreError, OperationType } from '../firebase';
+import { collection, doc, getDoc, getDocs, setDoc, writeBatch } from 'firebase/firestore';
 import { DutyRatioTable, getStoredDutyMatrix, saveDutyMatrix, INITIAL_OFFICIAL_DUTY_MATRIX } from '../data/officialDutyRatioMatrix';
 import { FlightName, Rank } from '../types';
 import { isFixedEqualDuty } from './dutyDistribution';
@@ -203,8 +204,8 @@ let pendingMatrixToSync: DutyRatioTable[] | null = null;
  * Strictly updates existing rows in-place and only inserts when a new duty is added
  */
 export async function pushDutyListToCloud(matrixInput?: DutyRatioTable[]): Promise<DutySyncResult> {
-  if (!isSupabaseConfigured) {
-    return { success: false, message: 'Supabase is not configured in .env' };
+  if (!isFirebaseConfigured || !db) {
+    return { success: false, message: 'Firebase is not configured' };
   }
 
   if (isSyncInProgress) {
@@ -218,139 +219,32 @@ export async function pushDutyListToCloud(matrixInput?: DutyRatioTable[]): Promi
     const matrix = matrixInput && matrixInput.length > 0 ? matrixInput : getStoredDutyMatrix();
     const rows = matrix.map((t, idx) => formatTableToCloudRow(t, idx));
 
-    // Ensure Halishahar taskforce duty (total: 7) is included if not present
-    const hasHalishahar = rows.some(r => r.duty_name.toLowerCase().includes('halishahar'));
-    if (!hasHalishahar) {
-      const hlRow: DutyCloudRow = {
-        ser_no: 9,
-        duty_name: 'HALISHAHAR TASKFORCE DUTY',
-        eligible_flt: 'Mechanics, Avionics, GCS, Admin',
-        eligible_rank: 'Sgt, Cpl, LAC, AC-1, AC-2',
-        total: 7,
-        Status: 'Active',
-      };
-      for (let i = 1; i <= 31; i++) {
-        hlRow[`day_${i}`] = i <= 7 ? 1 : 0;
-      }
-      rows.push(hlRow);
-    }
+    // Save full matrix JSON to app_settings document in Firestore
+    await setDoc(doc(db, 'app_settings', 'baf_official_duty_matrix_v4'), {
+      setting_key: 'baf_official_duty_matrix_v4',
+      setting_value: JSON.stringify(matrix),
+      updated_at: new Date().toISOString()
+    }, { merge: true });
 
-    // 1. Fetch current rows from database
-    const { data: existing, error: selectErr } = await supabase
-      .from(TABLE_NAME)
-      .select('*')
-      .order('id', { ascending: true });
-
-    if (selectErr) {
-      console.warn('[DutyCloudSync] Select error:', selectErr);
-      if (selectErr.message?.includes('violates row-level security') || selectErr.message?.includes('RLS')) {
-        return {
-          success: false,
-          isRlsBlocked: true,
-          message: 'Row Level Security (RLS) is blocking Cloud Sync. Please disable RLS in Supabase.',
-        };
-      }
-      return { success: false, message: selectErr.message };
-    }
-
-    const normTitle = (t?: string): string => {
-      if (!t) return '';
-      return t.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
-    };
-
-    const existingRows = existing || [];
-
-    // Deduplicate existing rows if duplicates exist in database (keep first row per duty name)
-    const seenTitles = new Map<string, any>();
-    const duplicateIdsToDelete: (number | string)[] = [];
-    existingRows.forEach(er => {
-      const key = normTitle(er.duty_name);
-      if (seenTitles.has(key)) {
-        duplicateIdsToDelete.push(er.id);
-      } else {
-        seenTitles.set(key, er);
-      }
+    // Save individual duty rows in duty_ratio_matrix collection in Firestore
+    const batch = writeBatch(db);
+    rows.forEach((r, idx) => {
+      const docId = `duty_${r.ser_no || idx + 1}`;
+      batch.set(doc(db, 'duty_ratio_matrix', docId), {
+        ...r,
+        updated_at: new Date().toISOString()
+      }, { merge: true });
     });
-
-    if (duplicateIdsToDelete.length > 0) {
-      await supabase.from(TABLE_NAME).delete().in('id', duplicateIdsToDelete);
-    }
-
-    // 2. In-place Update or Insert:
-    // Match by duty name identity so changing ser_no correctly updates ser_no on that duty
-    for (const row of rows) {
-      const key = normTitle(row.duty_name);
-      const existingMatch = seenTitles.get(key) || 
-        existingRows.find(er => normTitle(er.duty_name) === key);
-
-      const dayFields: Record<string, number> = {};
-      for (let i = 1; i <= 31; i++) {
-        dayFields[`day_${i}`] = row[`day_${i}`] ?? 0;
-      }
-
-      const updatePayload: any = {
-        ser_no: row.ser_no,
-        duty_name: row.duty_name,
-        eligible_flt: row.eligible_flt,
-        eligible_rank: row.eligible_rank,
-        total: row.total,
-        Status: row.Status || 'Active',
-        'Allotment Type': row['Allotment Type'],
-        ...dayFields,
-      };
-
-      if (existingMatch) {
-        // UPDATE: Replaces the previous values with the new data in place
-        const { error: updateErr } = await supabase
-          .from(TABLE_NAME)
-          .update(updatePayload)
-          .eq('id', existingMatch.id);
-
-        if (updateErr) {
-          console.warn('[DutyCloudSync] Error updating row in place:', updateErr);
-        }
-      } else {
-        // INSERT: Only runs when a brand new duty was added in the app!
-        const { error: insertErr } = await supabase
-          .from(TABLE_NAME)
-          .insert([row]);
-
-        if (insertErr) {
-          console.warn('[DutyCloudSync] Error inserting new duty row:', insertErr);
-        }
-      }
-    }
-
-    // 3. If a duty was removed from the app, delete only that duty's row
-    const currentTitles = new Set(rows.map(r => normTitle(r.duty_name)));
-    const dutiesToDelete = existingRows.filter(er => !duplicateIdsToDelete.includes(er.id) && !currentTitles.has(normTitle(er.duty_name)));
-    if (dutiesToDelete.length > 0) {
-      const idsToDelete = dutiesToDelete.map(d => d.id);
-      await supabase.from(TABLE_NAME).delete().in('id', idsToDelete);
-    }
-
-    // Also backup to app_settings
-    try {
-      await supabase.from('app_settings').upsert({
-        setting_key: 'baf_all_duties_cloud_sync',
-        setting_value: JSON.stringify(matrix),
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'setting_key' });
-
-      await supabase.from('app_settings').upsert({
-        setting_key: 'baf_official_duty_matrix_v4',
-        setting_value: JSON.stringify(matrix),
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'setting_key' });
-    } catch (e) {}
+    await batch.commit();
 
     return {
       success: true,
       count: rows.length,
-      message: `Successfully updated ${rows.length} duties in Cloud Table!`,
+      matrix,
+      message: `Successfully updated ${rows.length} duties in Firebase Firestore!`,
     };
   } catch (err: any) {
-    console.error('[DutyCloudSync] Unexpected error pushing to cloud:', err);
+    console.error('[DutyCloudSync] Unexpected error pushing to Firebase:', err);
     return { success: false, message: err.message || 'Unknown network error' };
   } finally {
     isSyncInProgress = false;
@@ -366,26 +260,33 @@ export async function pushDutyListToCloud(matrixInput?: DutyRatioTable[]): Promi
  * Fetch Duty List from Cloud and update the app's matrix
  */
 export async function pullDutyListFromCloud(): Promise<DutySyncResult> {
-  if (!isSupabaseConfigured) {
-    return { success: false, message: 'Supabase is not configured in .env' };
+  if (!isFirebaseConfigured || !db) {
+    return { success: false, message: 'Firebase is not configured' };
   }
 
   try {
-    const { data, error } = await supabase
-      .from(TABLE_NAME)
-      .select('*')
-      .order('ser_no', { ascending: true });
+    // 1. Try reading whole matrix document first
+    const matrixDoc = await getDoc(doc(db, 'app_settings', 'baf_official_duty_matrix_v4'));
+    if (matrixDoc.exists() && matrixDoc.data()?.setting_value) {
+      try {
+        const parsed = JSON.parse(matrixDoc.data().setting_value);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          saveDutyMatrix(parsed);
+          return {
+            success: true,
+            count: parsed.length,
+            matrix: parsed,
+            message: `Loaded ${parsed.length} duties from Firebase Firestore.`,
+          };
+        }
+      } catch {}
+    }
 
-    if (error) {
-      console.warn('[DutyCloudSync] Pull error:', error);
-      if (error.message?.includes('violates row-level security') || error.message?.includes('RLS')) {
-        return {
-          success: false,
-          isRlsBlocked: true,
-          message: 'Row Level Security (RLS) is blocking Cloud Sync. Please disable RLS in Supabase.',
-        };
-      }
-      return { success: false, message: error.message };
+    // 2. Try collection duty_ratio_matrix
+    const snap = await getDocs(collection(db, 'duty_ratio_matrix'));
+    let data: any[] = [];
+    if (!snap.empty) {
+      snap.forEach(d => data.push(d.data()));
     }
 
     // If cloud table is empty, auto-push our current app duties to initialize the cloud table!

@@ -1,7 +1,9 @@
 import { App } from '@capacitor/app';
 import { Browser } from '@capacitor/browser';
 import { Capacitor } from '@capacitor/core';
+import { db, isFirebaseConfigured } from '../firebase';
 import { supabase } from '../supabase';
+import { collection, query, orderBy, limit, getDocs, doc, getDoc } from 'firebase/firestore';
 
 export interface AppVersionRecord {
   id?: number;
@@ -103,25 +105,34 @@ export async function getCurrentAppVersion(): Promise<{ versionCode: number; ver
 }
 
 /**
- * Fetches the latest version record from the Supabase `app_versions` table.
+ * Fetches the latest version record from the Firebase Firestore `app_versions` collection or `app_settings`.
  */
 export async function fetchLatestAppVersion(): Promise<AppVersionRecord | null> {
+  if (!isFirebaseConfigured || !db) return null;
   try {
-    const { data, error } = await supabase
-      .from('app_versions')
-      .select('*')
-      .order('version_code', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (error) {
-      console.error('[AppUpdate] Error fetching from app_versions:', error);
-      return null;
+    // 1. Try dedicated app_versions collection
+    const q = query(collection(db, 'app_versions'), orderBy('version_code', 'desc'), limit(1));
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      const docData = snap.docs[0].data();
+      return docData as AppVersionRecord;
     }
 
-    return data as AppVersionRecord | null;
+    // 2. Fallback to app_settings document
+    const settingSnap = await getDoc(doc(db, 'app_settings', 'latest_app_version'));
+    if (settingSnap.exists()) {
+      const sData = settingSnap.data();
+      if (sData?.setting_value) {
+        try {
+          return JSON.parse(sData.setting_value) as AppVersionRecord;
+        } catch {
+          return sData as any;
+        }
+      }
+    }
+    return null;
   } catch (err) {
-    console.error('[AppUpdate] Failed to query app_versions table:', err);
+    console.warn('[AppUpdate] Failed to query latest version from Firebase:', err);
     return null;
   }
 }

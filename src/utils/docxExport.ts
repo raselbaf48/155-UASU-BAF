@@ -536,7 +536,7 @@ export async function exportDutyRatioDocx(
 
 // 5. SINGLE-DAY PARADE STATE EXPORT
 export interface SingleParadeExportParams {
-  documentType?: 'PARADE' | 'PT';
+  documentType?: 'PARADE' | 'PT' | 'OTHERS';
   documentTitle?: string;
   dateStr: string;
   flight: string;

@@ -1,4 +1,6 @@
+import { db, isFirebaseConfigured, handleFirestoreError, OperationType } from '../../../firebase';
 import { supabase } from '../../../supabase';
+import { doc, getDoc, getDocs, setDoc, collection } from 'firebase/firestore';
 import { deduplicateRawItems, getRawItemUserOverrides } from './recipeManager';
 import { resolveImageUrl, getCanteenConfig, isTimestampPastResetThreshold, checkAndEnforceDailyMenuReset } from './canteenSettings';
 import { normalizeCanteenMembersSeniority, sortCanteenMembersByOfficeSeniority } from './canteenSeniority';
@@ -754,7 +756,7 @@ function mergeArrayData(localArr: any[], cloudArr: any[], keyField = 'id', keyNa
 }
 
 /**
- * Push a specific key directly to Supabase app_settings Cloud table
+ * Push a specific key directly to Firebase Firestore app_settings collection
  */
 export async function pushKeyToCloud(key: string, data: any, retryCount = 1): Promise<boolean> {
   const strVal = typeof data === 'string' ? data : JSON.stringify(data);
@@ -769,59 +771,50 @@ export async function pushKeyToCloud(key: string, data: any, retryCount = 1): Pr
   }
 
   try {
-    const payload = {
-      setting_key: key,
-      setting_value: strVal,
-      updated_at: new Date().toISOString()
-    };
-
-    const { error } = await supabase
-      .from('app_settings')
-      .upsert(payload, { onConflict: 'setting_key' });
-
-    if (error) {
-      if (retryCount > 0) {
-        await new Promise(r => setTimeout(r, 600));
-        return pushKeyToCloud(key, data, retryCount - 1);
-      }
-      console.warn(`[CanteenCloudSync] Supabase push notice for ${key}:`, error.message);
-      // Even if Supabase cloud is quota-restricted, local server persistence already succeeded
+    if (key === 'baf_155_uasu_v2_db' || key.endsWith('_db') || strVal.length > 700000) {
+      console.warn(`[CanteenCloudSync] Skipping Firestore push for '${key}' (${strVal.length} bytes) to protect document size limit`);
       lastSyncedCloudHashes.set(key, strVal);
       return true;
     }
+
+    if (isFirebaseConfigured && db) {
+      const docRef = doc(db, 'app_settings', key);
+      await setDoc(docRef, {
+        setting_key: key,
+        setting_value: strVal,
+        updated_at: new Date().toISOString()
+      }, { merge: true });
+    }
     lastSyncedCloudHashes.set(key, strVal);
     return true;
-  } catch (err) {
+  } catch (err: any) {
     if (retryCount > 0) {
       await new Promise(r => setTimeout(r, 600));
       return pushKeyToCloud(key, data, retryCount - 1);
     }
-    console.warn(`[CanteenCloudSync] Network notice pushing ${key}:`, err);
+    console.warn(`[CanteenCloudSync] Firebase push notice for ${key}:`, err?.message || err);
     lastSyncedCloudHashes.set(key, strVal);
     return true;
   }
 }
 
 /**
- * Pull a specific key from Supabase app_settings or local server backup
+ * Pull a specific key from Firebase Firestore app_settings or local server backup
  */
 export async function pullKeyFromCloud(key: string): Promise<any | null> {
-  try {
-    const { data, error } = await supabase
-      .from('app_settings')
-      .select('setting_value')
-      .eq('setting_key', key)
-      .maybeSingle();
-
-    if (!error && data?.setting_value) {
-      try {
-        return JSON.parse(data.setting_value);
-      } catch {
-        return data.setting_value;
+  if (isFirebaseConfigured && db) {
+    try {
+      const snap = await getDoc(doc(db, 'app_settings', key));
+      if (snap.exists() && snap.data()?.setting_value) {
+        try {
+          return JSON.parse(snap.data().setting_value);
+        } catch {
+          return snap.data().setting_value;
+        }
       }
+    } catch (err) {
+      console.warn(`[CanteenCloudSync] Firebase pull notice for ${key}:`, err);
     }
-  } catch (err) {
-    console.warn(`[CanteenCloudSync] Supabase pull notice for ${key}:`, err);
   }
 
   // Fallback to local server backup
@@ -933,15 +926,26 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
     let data: any[] | null = null;
     let fetchError: any = null;
 
-    try {
-      const res = await supabase
-        .from('app_settings')
-        .select('setting_key, setting_value, updated_at')
-        .like('setting_key', 'canteen_%');
-      data = res.data;
-      fetchError = res.error;
-    } catch (err: any) {
-      fetchError = err;
+    if (isFirebaseConfigured && db) {
+      try {
+        const snap = await getDocs(collection(db, 'app_settings'));
+        if (!snap.empty) {
+          const list: any[] = [];
+          snap.forEach(d => {
+            const row = d.data();
+            if (row.setting_key && (row.setting_key.startsWith('canteen_') || row.setting_key.startsWith('baf_'))) {
+              list.push(row);
+            }
+          });
+          if (list.length > 0) {
+            data = list;
+            fetchError = null;
+          }
+        }
+      } catch (fbErr: any) {
+        console.warn('[CanteenCloudSync] Firebase pull notice:', fbErr);
+        fetchError = fbErr;
+      }
     }
 
     // If Supabase returned error or was restricted by egress quota, seamlessly fall back to local server storage
@@ -1370,12 +1374,32 @@ export async function syncCanteenMembersFromCloud(forceFull = false): Promise<vo
       return;
     }
 
-    // Smart Delta-Sync: Fetch cloud members and ONLY apply the changed records
-    const { data: cloudData, error } = await supabase
-      .from('Canteen_Member')
-      .select('airman_id, "BD No", DP, Due, Rank, Surname, Contact, Role');
+    // Smart Delta-Sync: Fetch cloud members from Firestore and ONLY apply the changed records
+    let cloudData: any[] = [];
+    if (isFirebaseConfigured && db) {
+      try {
+        const memSnap = await getDocs(collection(db, 'canteen_members'));
+        if (!memSnap.empty) {
+          memSnap.forEach(d => {
+            const m = d.data();
+            cloudData.push({
+              airman_id: m.airman_id || d.id,
+              'BD No': m.service_number || m['BD No'] || '',
+              DP: m.avatar || m.DP || '',
+              Due: Number(m.total_due ?? m.Due ?? 0),
+              Rank: m.rank || m.Rank || '',
+              Surname: m.name || m.Surname || '',
+              Contact: m.phone || m.Contact || '',
+              Role: m.role || m.Role || 'Member'
+            });
+          });
+        }
+      } catch (err) {
+        console.warn('[CanteenCloudSync] Firebase members fetch notice:', err);
+      }
+    }
 
-    if (error || !cloudData) return;
+    if (!cloudData || cloudData.length === 0) return;
 
     let localMembers: any[] = [];
     try {

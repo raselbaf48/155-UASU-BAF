@@ -469,18 +469,9 @@ return () => mediaQuery.removeEventListener('change', listener);
 
     connectSSE();
 
-    // Re-fetch only when tab becomes visible after being hidden
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        fetchAirmen();
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
     return () => {
       if (eventSource) eventSource.close();
       clearTimeout(reconnectTimeout);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
 

@@ -1284,7 +1284,7 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
                           setTimeout(() => {
                             setSyncStatusText('');
                             setSyncProgress(0);
-                            window.location.reload();
+                            window.dispatchEvent(new CustomEvent('canteen_settings_updated'));
                           }, 2500);
                         } else {
                           alert('মাইগ্রেশন ত্রুটি: ' + res.errors.join(', '));

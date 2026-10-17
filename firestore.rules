@@ -28,7 +28,16 @@ service cloud.firestore {
     match /canteen_expenses/{expenseId} {
       allow read, write: if true;
     }
+    match /canteen_inventory/{itemId} {
+      allow read, write: if true;
+    }
+    match /canteen_menu/{menuId} {
+      allow read, write: if true;
+    }
     match /test/{docId} {
+      allow read, write: if true;
+    }
+    match /app_versions/{versionId} {
       allow read, write: if true;
     }
     match /{document=**} {

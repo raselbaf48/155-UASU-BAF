@@ -71,7 +71,7 @@ export function DateNavigator({
     : '';
 
   return (
-    <div className="flex items-center space-x-1">
+    <div className="inline-flex items-center space-x-1 w-auto">
       {!hideArrows && (
         <button
           type="button"
@@ -85,7 +85,7 @@ export function DateNavigator({
       
       <div 
         onClick={openCalendarPicker}
-        className="relative flex-1 flex items-center justify-center cursor-pointer group"
+        className="relative inline-flex items-center justify-center cursor-pointer group shrink-0"
       >
         <div className={`flex flex-row items-center justify-center gap-1.5 whitespace-nowrap flex-nowrap ${className || "px-3 py-1.5 font-bold text-slate-800 dark:text-slate-100 text-xs sm:text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-center shadow-xs"}`}>
           <span className="whitespace-nowrap">{displayDate || 'Select Date'}</span>

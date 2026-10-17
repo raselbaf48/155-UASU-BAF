@@ -1,4 +1,5 @@
-import { supabase } from '../../../supabase';
+import { db, isFirebaseConfigured } from '../../../firebase';
+import { doc, getDoc, getDocs, setDoc, collection } from 'firebase/firestore';
 
 export interface CanteenMenuItem {
   id: string;
@@ -360,16 +361,14 @@ export function saveUserMenuOverride(item: Partial<CanteenMenuItem> & { id: stri
     if (cleanId) updated[cleanId] = overrideEntry;
 
     localStorage.setItem(MENU_USER_OVERRIDES_KEY, JSON.stringify(updated));
-    // Immediately persist to cloud app_settings
-    try {
-      Promise.resolve(
-        supabase.from('app_settings').upsert({
-          setting_key: MENU_USER_OVERRIDES_KEY,
-          setting_value: JSON.stringify(updated),
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'setting_key' })
-      ).catch(() => {});
-    } catch {}
+    // Immediately persist to cloud app_settings in Firestore
+    if (isFirebaseConfigured && db) {
+      setDoc(doc(db, 'app_settings', MENU_USER_OVERRIDES_KEY), {
+        setting_key: MENU_USER_OVERRIDES_KEY,
+        setting_value: JSON.stringify(updated),
+        updated_at: new Date().toISOString()
+      }, { merge: true }).catch(() => {});
+    }
   } catch (err) {
     console.warn('Error saving menu override:', err);
   }
@@ -425,8 +424,17 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
     if (!menuFetchPromise) {
       menuFetchPromise = (async () => {
         try {
-          const { data, error } = await supabase.from('Canteen_Menu').select('*');
-          if (!error && data && data.length > 0) {
+          let data: any[] | null = null;
+          if (isFirebaseConfigured && db) {
+            try {
+              const menuSnap = await getDoc(doc(db, 'app_settings', 'canteen_menu_items_catalog_v1'));
+              if (menuSnap.exists() && menuSnap.data()?.setting_value) {
+                const parsed = JSON.parse(menuSnap.data().setting_value);
+                if (Array.isArray(parsed) && parsed.length > 0) data = parsed;
+              }
+            } catch {}
+          }
+          if (data && data.length > 0) {
             const currentCache = getCanteenMenuCache();
             const currentMap = new Map(currentCache.map((i) => [i.id, i]));
             const overrides = getUserMenuOverrides();
@@ -517,8 +525,17 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
 
   menuFetchPromise = (async () => {
     try {
-      const { data, error } = await supabase.from('Canteen_Menu').select('*');
-      if (!error && data && data.length > 0) {
+      let data: any[] | null = null;
+      if (isFirebaseConfigured && db) {
+        try {
+          const menuSnap = await getDoc(doc(db, 'app_settings', 'canteen_menu_items_catalog_v1'));
+          if (menuSnap.exists() && menuSnap.data()?.setting_value) {
+            const parsed = JSON.parse(menuSnap.data().setting_value);
+            if (Array.isArray(parsed) && parsed.length > 0) data = parsed;
+          }
+        } catch {}
+      }
+      if (data && data.length > 0) {
         const currentCache = getCanteenMenuCache();
         const currentMap = new Map(currentCache.map((i) => [i.id, i]));
         const overrides = getUserMenuOverrides();
@@ -620,10 +637,50 @@ export async function fetchCanteenMembersOnce(force = false): Promise<any[]> {
 
   memberFetchPromise = (async () => {
     try {
-      const { data, error } = await supabase
-        .from('Canteen_Member')
-        .select('*');
-      if (!error && data && data.length > 0) {
+      let data: any[] = [];
+      if (isFirebaseConfigured && db) {
+        try {
+          const memSnap = await getDocs(collection(db, 'canteen_members'));
+          if (!memSnap.empty) {
+            memSnap.forEach(d => {
+              const m = d.data();
+              data.push({
+                airman_id: m.airman_id || d.id,
+                id: m.airman_id || d.id,
+                'BD No': m.service_number || m['BD No'] || '',
+                service_number: m.service_number || m['BD No'] || '',
+                Name: m.name || m.Name || m.Surname || '',
+                Surname: m.name || m.Surname || '',
+                Rank: m.rank || m.Rank || '',
+                Section: m.section || m.Section || '',
+                Contact: m.phone || m.Contact || '',
+                DP: m.avatar || m.DP || '',
+                Due: Number(m.total_due ?? m.Due ?? 0),
+                Role: m.role || m.Role || 'Member',
+                Seniority: m.Seniority ?? m.seniority,
+                ...m
+              });
+            });
+          }
+        } catch (fbErr) {
+          console.warn('[CanteenMenuData] Firebase members fetch warning:', fbErr);
+        }
+      }
+
+      // Fallback to local server if cloud was not yet populated
+      if (data.length === 0) {
+        try {
+          const res = await fetch('/api/canteen/export-full-backup');
+          if (res.ok) {
+            const srv = await res.json();
+            if (Array.isArray(srv.members) && srv.members.length > 0) {
+              data = srv.members;
+            }
+          }
+        } catch {}
+      }
+
+      if (data && data.length > 0) {
         const cleanedData = data;
 
         const localSeniorityMap = getLocalSeniorityMap();

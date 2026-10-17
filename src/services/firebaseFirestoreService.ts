@@ -428,19 +428,39 @@ export async function pushAppSettingsToFirebase(settings: Array<{ setting_key: s
   if (!db || !settings.length) return 0;
   let count = 0;
   const path = 'app_settings';
-  try {
-    const batch = writeBatch(db);
-    for (const s of settings) {
-      const key = String(s.setting_key).replace(/\//g, '_');
-      const docRef = doc(db, path, key);
-      batch.set(docRef, {
-        setting_key: s.setting_key,
-        setting_value: s.setting_value,
-        updated_at: new Date().toISOString()
-      }, { merge: true });
-      count++;
+  const FORBIDDEN_KEYS = ['baf_155_uasu_v2_db', 'baf_database_v2', 'baf_sync_logs', 'baf_pending_sync'];
+
+  // Filter out forbidden keys and oversized payloads exceeding Firestore 1MB limit
+  const validSettings = settings.filter(s => {
+    if (!s || !s.setting_key) return false;
+    const cleanKey = String(s.setting_key).trim();
+    if (FORBIDDEN_KEYS.includes(cleanKey) || cleanKey.endsWith('_db')) return false;
+    if (s.setting_value && typeof s.setting_value === 'string' && s.setting_value.length > 600000) {
+      console.warn(`[pushAppSettingsToFirebase] Skipping oversized setting '${cleanKey}' (${s.setting_value.length} bytes) to protect Firestore document size limit`);
+      return false;
     }
-    await batch.commit();
+    return true;
+  });
+
+  if (validSettings.length === 0) return 0;
+
+  try {
+    const CHUNK_SIZE = 250;
+    for (let i = 0; i < validSettings.length; i += CHUNK_SIZE) {
+      const chunk = validSettings.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const s of chunk) {
+        const key = String(s.setting_key).replace(/\//g, '_');
+        const docRef = doc(db, path, key);
+        batch.set(docRef, {
+          setting_key: s.setting_key,
+          setting_value: s.setting_value,
+          updated_at: new Date().toISOString()
+        }, { merge: true });
+        count++;
+      }
+      await batch.commit();
+    }
     return count;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
@@ -867,13 +887,31 @@ export async function executeFullMigrationToFirebase(localDb: any): Promise<Fire
   try {
     const settingsPayload: Array<{ setting_key: string; setting_value: string }> = [];
     const SETTING_PREFIXES = ['baf_', 'savedDisposalKeys', 'parade_historical', 'flg_wg_', 'canteen_'];
+    const IGNORED_KEYS = [
+      'baf_155_uasu_v2_db',
+      'baf_database_v2',
+      'baf_official_duty_matrix_v4',
+      'baf_sync_logs',
+      'baf_pending_sync',
+      'baf_presence',
+      'baf_user_login_history',
+      'baf_recent_logins',
+      'baf_canteen_recent_logins',
+      'baf_theme_pref',
+      'baf_last_used_id',
+      'baf_canteen_last_used_id',
+      'baf_office_last_used_id',
+      'baf_last_used_login_portal',
+      'baf_dismissed_notice_sig',
+      'baf_cleared_notices_v4'
+    ];
     if (typeof window !== 'undefined') {
       for (let i = 0; i < window.localStorage.length; i++) {
         const key = window.localStorage.key(i);
-        if (!key) continue;
+        if (!key || IGNORED_KEYS.includes(key) || key.endsWith('_db')) continue;
         if (SETTING_PREFIXES.some(prefix => key.startsWith(prefix))) {
           const val = window.localStorage.getItem(key);
-          if (val) settingsPayload.push({ setting_key: key, setting_value: val });
+          if (val && val.length < 500000) settingsPayload.push({ setting_key: key, setting_value: val });
         }
       }
     }

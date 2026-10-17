@@ -1246,7 +1246,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                    setRestoreStatus('');
                                    setSyncProgress(0);
                                    if (onRosterUpdated) onRosterUpdated();
-                                   window.location.reload();
+                                   window.dispatchEvent(new CustomEvent('baf_state_updated'));
                                 }, 1500);
                               } else {
                                 const logs = getSyncLogs();

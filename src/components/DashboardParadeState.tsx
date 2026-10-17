@@ -173,19 +173,19 @@ export const DashboardParadeState: React.FC<DashboardParadeStateProps> = ({
             </span>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            {dayName}, {dateDisplay} {yearDisplay} • Unit Strength: {data?.summary?.totalStrength || 48} Airmen
+            {dayName}, {dateDisplay} {yearDisplay} • Unit Strength: {data?.summary?.totalStrength ?? 47} Airmen
           </p>
         </div>
 
         {/* Filters bar */}
         <div className="flex flex-wrap items-center gap-3">
           {/* Date Picker */}
-          <div className="flex items-center bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200">
+          <div className="inline-flex items-center w-fit bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-1.5 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 shadow-xs">
             <DateNavigator
               value={selectedDate || ''}
               onChange={(e) => setSelectedDate(e.target.value)}
               format="dd_mm_yy"
-              className="bg-transparent border-none outline-none font-bold cursor-pointer text-slate-900 dark:text-slate-100 px-1"
+              className="bg-transparent border-none outline-none font-bold cursor-pointer text-slate-900 dark:text-slate-100 px-1.5"
             />
           </div>
 

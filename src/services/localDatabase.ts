@@ -217,8 +217,8 @@ export class LocalDatabaseEngine {
               if (typeof window !== 'undefined') window.localStorage.removeItem('baf_pending_sync');
               return;
             }
-            this.saveToFirebase(this.db, true).then((success) => {
-               if (success !== false) this.syncFromFirebase();
+            this.saveToFirebase(this.db, true).then(() => {
+              if (typeof window !== 'undefined') window.localStorage.removeItem('baf_pending_sync');
             });
           }
         }
@@ -607,6 +607,9 @@ export class LocalDatabaseEngine {
          if (typeof window !== 'undefined') {
             let settingsChanged = false;
             const DEVICE_SPECIFIC_LOCAL_KEYS = [
+               STORAGE_KEY,
+               'baf_155_uasu_v2_db',
+               'baf_database_v2',
                'baf_official_duty_matrix_v4',
                'baf_recent_logins',
                'baf_canteen_recent_logins',
@@ -990,14 +993,32 @@ export class LocalDatabaseEngine {
            try {
              const settingsPayload: any[] = [];
              const SETTING_PREFIXES = ['baf_', 'savedDisposalKeys', 'parade_historical', 'flg_wg_'];
-             const IGNORED_KEYS = ['baf_official_duty_matrix_v4', 'baf_database_v2', 'baf_sync_logs', 'baf_pending_sync', 'baf_presence', 'baf_user_login_history', 'baf_recent_logins', 'baf_canteen_recent_logins', 'baf_theme_pref', 'baf_last_used_id', 'baf_canteen_last_used_id', 'baf_office_last_used_id', 'baf_last_used_login_portal', 'baf_dismissed_notice_sig', 'baf_cleared_notices_v4'];
+             const IGNORED_KEYS = [
+               STORAGE_KEY,
+               'baf_155_uasu_v2_db',
+               'baf_official_duty_matrix_v4',
+               'baf_database_v2',
+               'baf_sync_logs',
+               'baf_pending_sync',
+               'baf_presence',
+               'baf_user_login_history',
+               'baf_recent_logins',
+               'baf_canteen_recent_logins',
+               'baf_theme_pref',
+               'baf_last_used_id',
+               'baf_canteen_last_used_id',
+               'baf_office_last_used_id',
+               'baf_last_used_login_portal',
+               'baf_dismissed_notice_sig',
+               'baf_cleared_notices_v4'
+             ];
              if (typeof window !== 'undefined') {
                for (let i = 0; i < window.localStorage.length; i++) {
                  const key = window.localStorage.key(i);
-                 if (!key || IGNORED_KEYS.includes(key)) continue;
+                 if (!key || IGNORED_KEYS.includes(key) || key === STORAGE_KEY || key.endsWith('_db')) continue;
                  if (SETTING_PREFIXES.some(prefix => key.startsWith(prefix))) {
                    const val = window.localStorage.getItem(key);
-                   if (val) settingsPayload.push({ setting_key: key, setting_value: val, updated_at: new Date().toISOString() });
+                   if (val && val.length < 500000) settingsPayload.push({ setting_key: key, setting_value: val, updated_at: new Date().toISOString() });
                  }
                }
                if (settingsPayload.length > 0) {
@@ -1430,6 +1451,8 @@ export class LocalDatabaseEngine {
         const settingsPayload: any[] = [];
         const SETTING_PREFIXES = ['baf_', 'savedDisposalKeys', 'parade_historical', 'flg_wg_'];
         const IGNORED_KEYS = [
+          STORAGE_KEY,
+          'baf_155_uasu_v2_db',
           'baf_official_duty_matrix_v4',
           'baf_database_v2',
           'baf_sync_logs',
@@ -1452,13 +1475,13 @@ export class LocalDatabaseEngine {
             const key = window.localStorage.key(i);
             if (!key) continue;
             
-            if (IGNORED_KEYS.includes(key)) continue;
+            if (IGNORED_KEYS.includes(key) || key === STORAGE_KEY || key.endsWith('_db')) continue;
             
             const isMatch = SETTING_PREFIXES.some(prefix => key.startsWith(prefix));
             
             if (isMatch) {
               const val = window.localStorage.getItem(key);
-              if (val) {
+              if (val && val.length < 500000) {
                 settingsPayload.push({
                   setting_key: key,
                   setting_value: val,
@@ -2533,8 +2556,9 @@ export class LocalDatabaseEngine {
     // Target airmen filter
     const allAirmen = this.db.airmen || [];
     
-    // Filter out airmen who haven't joined yet or have left before this date
+    // Filter out airmen who haven't joined yet, have left before this date, or are inactive
     const dateActiveAirmen = allAirmen.filter(a => {
+      if (a.active === false) return false;
       if (a.dateJoined && a.dateJoined > date) return false;
       if (a.dateLeft && a.dateLeft < date) return false;
       return true;
@@ -2863,7 +2887,7 @@ export class LocalDatabaseEngine {
     const flightBreakdown = {} as Record<FlightName, any>;
 
     flights.forEach((fl) => {
-      const flAirmen = (this.db.airmen || []).filter((a) => a.flightName === fl);
+      const flAirmen = dateActiveAirmen.filter((a) => a.flightName === fl);
       let flParade = 0;
       let flDuty = 0;
       let flLeave = 0;
