@@ -222,7 +222,7 @@ export class LocalDatabaseEngine {
             });
           }
         }
-      }, 15000);
+      }, 60000);
     }
   }
 
@@ -253,36 +253,61 @@ export class LocalDatabaseEngine {
           const fbAirmen = await fetchAirmenFromFirebase();
           if (fbAirmen && fbAirmen.length > 0) {
             emitSyncProgress(40, `Fetched ${fbAirmen.length} airmen from Firebase Firestore`);
-            newDb.airmen = fbAirmen;
-            dataChanged = true;
+            const airmenChanged = JSON.stringify(fbAirmen) !== JSON.stringify(this.db.airmen);
+            if (airmenChanged) {
+              newDb.airmen = fbAirmen;
+              dataChanged = true;
+            }
 
             try {
               const fbAssignments = await fetchDutyAssignmentsFromFirebase();
               if (fbAssignments && fbAssignments.length > 0) {
-                const assignmentsByMonth: Record<string, DutyAssignment[]> = {};
+                const assignmentsByMonth: Record<string, DutyAssignment[]> = { ...(newDb.assignments || {}) };
+                let dutiesChanged = false;
                 fbAssignments.forEach(a => {
-                  const ym = a.date ? a.date.slice(0, 7) : '2026-10';
-                  if (!assignmentsByMonth[ym]) assignmentsByMonth[ym] = [];
-                  assignmentsByMonth[ym].push(a);
+                  if (a.date && a.date.length >= 7) {
+                    const ym = a.date.slice(0, 7);
+                    if (!assignmentsByMonth[ym]) assignmentsByMonth[ym] = [];
+                    const existsIndex = assignmentsByMonth[ym].findIndex(existing => 
+                      ((existing as any).id && (a as any).id && (existing as any).id === (a as any).id) ||
+                      (existing.airmanId === a.airmanId && existing.date === a.date && (existing.dutyCode === a.dutyCode || (existing as any).dutyType === (a as any).dutyType))
+                    );
+                    if (existsIndex >= 0) {
+                      const prev = assignmentsByMonth[ym][existsIndex];
+                      if (JSON.stringify(prev) !== JSON.stringify({ ...prev, ...a })) {
+                        assignmentsByMonth[ym][existsIndex] = { ...prev, ...a };
+                        dutiesChanged = true;
+                      }
+                    } else {
+                      assignmentsByMonth[ym].push(a);
+                      dutiesChanged = true;
+                    }
+                  }
                 });
-                newDb.assignments = assignmentsByMonth;
-                dataChanged = true;
+                if (dutiesChanged) {
+                  newDb.assignments = assignmentsByMonth;
+                  dataChanged = true;
+                }
               }
             } catch (aErr) {}
 
             try {
               const fbHistory = await fetchParadeStatesFromFirebase();
               if (fbHistory && fbHistory.length > 0) {
-                newDb.activityHistory = fbHistory;
-                dataChanged = true;
+                if (JSON.stringify(fbHistory) !== JSON.stringify(this.db.activityHistory)) {
+                  newDb.activityHistory = fbHistory;
+                  dataChanged = true;
+                }
               }
             } catch (hErr) {}
 
             try {
               const fbUsers = await fetchUserProfilesFromFirebase();
               if (fbUsers && fbUsers.length > 0) {
-                newDb.detailedUsers = fbUsers;
-                dataChanged = true;
+                if (JSON.stringify(fbUsers) !== JSON.stringify(this.db.detailedUsers)) {
+                  newDb.detailedUsers = fbUsers;
+                  dataChanged = true;
+                }
               }
             } catch (uErr) {}
 
@@ -295,24 +320,60 @@ export class LocalDatabaseEngine {
               }
             } catch (sErr) {}
 
-            newDb.lastUpdated = new Date().toISOString();
-            this.db = newDb;
-            this.saveToStorage(newDb, true, false, false);
-            if (typeof window !== 'undefined') {
-              window.localStorage.removeItem('baf_pending_sync');
-              window.localStorage.setItem(STORAGE_KEY, JSON.stringify(newDb));
+            if (dataChanged) {
+              newDb.lastUpdated = new Date().toISOString();
+              this.db = newDb;
+              this.saveToStorage(newDb, false, false, false);
+              if (typeof window !== 'undefined') {
+                window.localStorage.removeItem('baf_pending_sync');
+                window.localStorage.setItem(STORAGE_KEY, JSON.stringify(newDb));
+              }
+              window.dispatchEvent(new CustomEvent('baf_db_updated', { detail: { source: 'firebase' } }));
+            } else {
+              if (typeof window !== 'undefined') {
+                window.localStorage.removeItem('baf_pending_sync');
+              }
             }
+
             firebaseConnected = true;
             firebaseLastSyncTime = new Date().toISOString();
-            window.dispatchEvent(new CustomEvent('baf_db_updated', { detail: { source: 'firebase' } }));
             addSyncLog({ timestamp: new Date().toISOString(), type: "PULL", status: "SUCCESS", message: `Data synced from Firebase Firestore successfully (${fbAirmen.length} airmen).` });
             this.lastSyncedDbStr = JSON.stringify(this.db);
             this.isFirebaseSyncing = false;
             emitSyncProgress(100, "Firebase sync complete!");
             return true;
-          } else if (this.db.airmen.length > 0) {
-            // Firebase Firestore is newly provisioned: auto-seed from local database!
-            emitSyncProgress(30, "Seeding Firebase Firestore from local records...");
+          } else {
+            // Firebase Firestore is newly provisioned: auto-seed from local database or server records!
+            if (!this.db.airmen || this.db.airmen.length === 0) {
+              try {
+                const srvRes = await fetch('/api/airmen');
+                if (srvRes.ok) {
+                  const srvAirmen = await srvRes.json();
+                  if (Array.isArray(srvAirmen) && srvAirmen.length > 0) {
+                    this.db.airmen = normalizeAirmenSeniority(srvAirmen);
+                  }
+                }
+              } catch {}
+            }
+            if (!this.db.airmen || this.db.airmen.length === 0) {
+              this.db.airmen = normalizeAirmenSeniority([...INITIAL_AIRMEN]);
+            }
+            if (!this.db.assignments || Object.keys(this.db.assignments).length === 0) {
+              try {
+                const srvDutyRes = await fetch('/api/duty-assignments');
+                if (srvDutyRes.ok) {
+                  this.db.assignments = await srvDutyRes.json();
+                }
+              } catch {}
+              if (!this.db.assignments || Object.keys(this.db.assignments).length === 0) {
+                this.db.assignments = {
+                  '2026-07': generateOfficialMonthAssignments(2026, 7),
+                  '2026-08': generateOfficialMonthAssignments(2026, 8),
+                };
+              }
+            }
+
+            emitSyncProgress(30, "Seeding Firebase Firestore from official unit records...");
             await pushAirmenToFirebase(this.db.airmen);
             const allAssignments: DutyAssignment[] = [];
             Object.values(this.db.assignments || {}).forEach((arr: any) => {
@@ -321,6 +382,15 @@ export class LocalDatabaseEngine {
             if (allAssignments.length > 0) await pushDutyAssignmentsToFirebase(allAssignments);
             if (this.db.activityHistory?.length) await pushParadeStatesToFirebase(this.db.activityHistory);
             if (this.db.detailedUsers?.length) await pushUserProfilesToFirebase(this.db.detailedUsers);
+
+            this.saveToStorage(this.db, true, false, false);
+            firebaseConnected = true;
+            firebaseLastSyncTime = new Date().toISOString();
+            window.dispatchEvent(new CustomEvent('baf_db_updated', { detail: { source: 'firebase' } }));
+            addSyncLog({ timestamp: new Date().toISOString(), type: "PULL", status: "SUCCESS", message: `Auto-seeded Firebase Firestore (${this.db.airmen.length} airmen, ${allAssignments.length} duty records).` });
+            this.isFirebaseSyncing = false;
+            emitSyncProgress(100, "Firebase initialization complete!");
+            return true;
           }
         } catch (fbErr: any) {
           console.warn("Firebase sync attempt error, fallback to Supabase if configured:", fbErr);
@@ -387,36 +457,49 @@ export class LocalDatabaseEngine {
         });
 
         const parsedAirmen = staffData.map((s: any, idx: number) => {
-          const generatedId = (s.airman_id && s.airman_id !== "airman-undefined") ? s.airman_id : 'airman-' + (s['BD No'] && String(s['BD No']) !== "undefined" ? s['BD No'] : Math.random().toString(36).slice(2, 10));
-          const localMatch = this.db.airmen.find(a => a.id === generatedId);
-          const rawSeniority = s['Seniority'];
-          const bdClean = String(s['BD No'] || '').replace(/\D/g, '');
+          const generatedId = (s.airman_id && s.airman_id !== "airman-undefined") 
+            ? s.airman_id 
+            : (s.id || ('airman-' + (s['BD No'] || s.bdNo || Math.random().toString(36).slice(2, 10))));
+          const localMatch = this.db.airmen.find(a => a.id === generatedId || (a.bdNo && a.bdNo === (s['BD No'] || s.bdNo)));
+          const rawSeniority = s['Seniority'] ?? s.seniority;
+          const bdClean = String(s['BD No'] || s.bdNo || '').replace(/\D/g, '');
           const parsedSeniority = (rawSeniority !== null && rawSeniority !== undefined && !isNaN(Number(rawSeniority)))
             ? Number(rawSeniority)
             : (cloudSeniorityMap[generatedId] ?? (bdClean ? cloudSeniorityMap[bdClean] : undefined) ?? (localMatch?.seniority !== undefined ? localMatch.seniority : undefined));
+          const rankVal = s['Rank'] || s.rank || 'LAC';
+          const nameVal = s['Surname'] || s.name || s['Full Name'] || s.fullName || '';
+          const fullNameVal = s['Full Name'] || s.fullName || s['Surname'] || s.name || '';
+          const flightVal = s['Flight'] || s.flightName || s.flight || 'Admin';
+          const tradeVal = s['Trade'] || s.trade || 'General';
+          const mobileVal = s['Mobile No'] || s.mobileNo || s['Contact Number'] || s.contactNumber || '';
+          const bloodVal = s['Blood Group'] || s.bloodGroup || '';
+          const permAddress = s['Parmanet Address'] || s['Permanent Address'] || s.permanentAddress || '';
+          const presAddress = s['Present Address'] || s['Address'] || s.addressBlock || 'L/O';
+          const isActive = s.active !== undefined 
+            ? Boolean(s.active) 
+            : (s['Status'] ? s['Status'] === 'ACTIVE' : true);
+
           return {
             id: generatedId,
             serNo: (localMatch && localMatch.serNo !== undefined) ? localMatch.serNo : idx + 1,
             seniority: parsedSeniority,
-            code: `${s['Rank'] || ''}-${(s['Surname'] || '').slice(0, 3).toUpperCase()}`,
-            bdNo: String(s['BD No'] || ''),
-            rank: s['Rank'] || '',
-            name: s['Surname'] || '',
-            fullName: s['Full Name'] || s['Surname'] || '',
-            flightName: s['Flight'] || '',
-            trade: s['Trade'] || '',
-            mobileNo: s['Mobile No'] || '',
-            bloodGroup: s['Blood Group'] || '',
-            permanentAddress: s['Parmanet Address'] || s['Permanent Address'] || '',
-            dateJoined: s['Dt of Posting'] || undefined,
-            addressBlock: s['Present Address'] || s['Address'] || 'L/O',
-            active: s['Status'] === 'ACTIVE' || s['Status'] === null || s['Status'] === undefined,
-            status: s['Status'] || 'ACTIVE',
-            dateLeft: s['Unit Left date'] || undefined,
-            
-            // Preserve local-only fields that are not in Supabase schema
-            remarks: localMatch ? localMatch.remarks : '',
-            leaveReason: localMatch ? localMatch.leaveReason : undefined
+            code: `${rankVal}-${nameVal.slice(0, 3).toUpperCase()}`,
+            bdNo: String(s['BD No'] || s.bdNo || ''),
+            rank: rankVal,
+            name: nameVal,
+            fullName: fullNameVal,
+            flightName: flightVal,
+            trade: tradeVal,
+            mobileNo: mobileVal,
+            bloodGroup: bloodVal,
+            permanentAddress: permAddress,
+            dateJoined: s['Dt of Posting'] || s.dateJoined || undefined,
+            addressBlock: presAddress,
+            active: isActive,
+            status: isActive ? 'ACTIVE' : 'INACTIVE',
+            dateLeft: s['Unit Left date'] || s.dateLeft || undefined,
+            remarks: localMatch ? localMatch.remarks : (s.remarks || ''),
+            leaveReason: localMatch ? localMatch.leaveReason : s.leaveReason
           };
         });
         
@@ -1622,6 +1705,13 @@ export class LocalDatabaseEngine {
                 }
             }
 
+            if (!migratedAssignments['2026-07'] || migratedAssignments['2026-07'].length < 50) {
+              migratedAssignments['2026-07'] = generateOfficialMonthAssignments(2026, 7);
+            }
+            if (!migratedAssignments['2026-08'] || migratedAssignments['2026-08'].length < 50) {
+              migratedAssignments['2026-08'] = generateOfficialMonthAssignments(2026, 8);
+            }
+
             const db: LocalStorageDB = {
               airmen: normalizeAirmenSeniority(migratedAirmen),
               assignments: migratedAssignments,
@@ -1633,7 +1723,6 @@ export class LocalDatabaseEngine {
               lastUpdated: parsed.lastUpdated || new Date().toISOString(),
             };
 
-
             return db;
           }
         }
@@ -1642,16 +1731,17 @@ export class LocalDatabaseEngine {
       console.warn('Could not read from localStorage, using initial state:', err);
     }
 
-    // Default fresh DB
+    // Default fresh DB with full official airmen and roster data
     const initialPasscode = DEFAULT_ADMIN_PASSCODE;
     const initialDb: LocalStorageDB = {
-      airmen: [],
+      airmen: normalizeAirmenSeniority([...INITIAL_AIRMEN]),
       assignments: {
-        
-        
+        '2026-07': generateOfficialMonthAssignments(2026, 7),
+        '2026-08': generateOfficialMonthAssignments(2026, 8),
       },
       activityHistory: [],
       adminPasscode: initialPasscode,
+      detailedUsers: [],
       importHistory: [],
       lastUpdated: new Date().toISOString(),
     };

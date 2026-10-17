@@ -498,7 +498,7 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
           fetchMenu();
       };
       refreshStatus();
-      const timer = setInterval(refreshStatus, 5000);
+      const timer = setInterval(refreshStatus, 60000);
       const handleConfigUpdate = (e: any) => {
           const cfg = e.detail || getCanteenConfig();
           setCanteenConfig(cfg);

@@ -123,7 +123,7 @@ export const ManagerDashboard: React.FC = () => {
       if (!isMounted) return;
       loadDailyMenu();
       loadPreOrders();
-    }, 5000);
+    }, 60000);
 
     const handleSync = () => {
       setTimeout(() => {

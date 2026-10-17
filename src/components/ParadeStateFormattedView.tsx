@@ -64,7 +64,7 @@ interface ParadeStateFormattedViewProps {
  selectedDate: string;
  setSelectedDate: (date: string) => void;
  airmen: Airman[];
- initialDocumentType?: 'PARADE' | 'PT';
+ initialDocumentType?: 'PARADE' | 'PT' | 'OTHERS';
  onOpenPrintModal?: () => void;
  onViewAirmanProfile?: (airman: Airman) => void;
  onOpenImportModal?: () => void;
@@ -82,6 +82,9 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
 }) => {
  const todayStr = new Date().toISOString().split('T')[0];
  const isPtDocument = initialDocumentType === 'PT';
+  const isOthersDocument = initialDocumentType === 'OTHERS';
+  const documentTitle = isPtDocument ? 'PT State' : isOthersDocument ? 'Others State' : 'Parade State';
+  const documentHeader = isPtDocument ? 'PT STATE : AIRMEN' : isOthersDocument ? 'OTHERS STATE : AIRMEN' : 'PARADE STATE : AIRMEN';
  const [fromDate, setFromDate] = useState<string>(selectedDate);
  const [toDate, setToDate] = useState<string>(selectedDate);
 
@@ -345,63 +348,68 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  const isMultiDay = datesInRange.length > 1;
 
  // Single Day Fetch
- const fetchSingle = async () => {
- setLoading(true);
- try {
- const stateType = isPtDocument ? 'PT' : 'PARADE';
- const res = await fetch(`/api/parade-state?date=${fromDate}&shift=Morning&flight=Overall&stateType=${stateType}`);
- if (res.ok) {
- const d = await res.json();
- setSingleParadeData(d);
- }
- } catch (err) {
- console.error('Failed to fetch single parade state:', err);
- } finally {
- setLoading(false);
- }
- };
+  const fetchSingle = async (showLoader = false) => {
+    if (showLoader || !singleParadeData) {
+      setLoading(true);
+    }
+    try {
+      const stateType = isPtDocument ? 'PT' : isOthersDocument ? 'OTHERS' : 'PARADE';
+      const res = await fetch(`/api/parade-state?date=${fromDate}&shift=Morning&flight=Overall&stateType=${stateType}`);
+      if (res.ok) {
+        const d = await res.json();
+        setSingleParadeData(d);
+      }
+    } catch (err) {
+      console.error('Failed to fetch single parade state:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
- // Multi Day Fetch
- const fetchMulti = async () => {
- setLoading(true);
- try {
- const stateType = isPtDocument ? 'PT' : 'PARADE';
- const results = await Promise.all(
- datesInRange.map((dStr) =>
- fetch(`/api/parade-state?date=${dStr}&shift=Morning&flight=Overall&stateType=${stateType}`)
- .then((res) => (res.ok ? res.json() : null))
- .catch(() => null)
- )
- );
- const newMap: Record<string, ParadeStateResponse> = {};
- datesInRange.forEach((dStr, idx) => {
- if (results[idx]) {
- newMap[dStr] = results[idx];
- }
- });
- setMultiDayStates(newMap);
- } catch (err) {
- console.error('Failed to fetch multi-day parade state:', err);
- } finally {
- setLoading(false);
- }
- };
+  // Multi Day Fetch
+  const fetchMulti = async (showLoader = false) => {
+    if (showLoader || Object.keys(multiDayStates).length === 0) {
+      setLoading(true);
+    }
+    try {
+      const stateType = isPtDocument ? 'PT' : isOthersDocument ? 'OTHERS' : 'PARADE';
+      const results = await Promise.all(
+        datesInRange.map((dStr) =>
+          fetch(`/api/parade-state?date=${dStr}&shift=Morning&flight=Overall&stateType=${stateType}`)
+            .then((res) => (res.ok ? res.json() : null))
+            .catch(() => null)
+        )
+      );
+      const newMap = {};
+      datesInRange.forEach((dStr, idx) => {
+        if (results[idx]) {
+          newMap[dStr] = results[idx];
+        }
+      });
+      setMultiDayStates(newMap);
+    } catch (err) {
+      console.error('Failed to fetch multi-day parade state:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
- useEffect(() => {
- if (isMultiDay) {
- fetchMulti();
- } else {
- fetchSingle();
- }
- const handleGlobalUpdate = () => {
- if (isMultiDay) fetchMulti();
- else fetchSingle();
- };
- window.addEventListener('baf_state_updated', handleGlobalUpdate);
- return () => {
- window.removeEventListener('baf_state_updated', handleGlobalUpdate);
- };
- }, [fromDate, toDate, isPtDocument]);
+  useEffect(() => {
+    if (isMultiDay) {
+      fetchMulti(true);
+    } else {
+      fetchSingle(true);
+    }
+    const handleGlobalUpdate = () => {
+      // Silent background update - does not trigger full page loader
+      if (isMultiDay) fetchMulti(false);
+      else fetchSingle(false);
+    };
+    window.addEventListener('baf_state_updated', handleGlobalUpdate);
+    return () => {
+      window.removeEventListener('baf_state_updated', handleGlobalUpdate);
+    };
+  }, [fromDate, toDate, isPtDocument]);
 
  // Quick Preset Handlers (Calculated relative to selected fromDate)
  const handleSetPreset = (type: 'today' | '7days' | '15days' | 'month') => {
@@ -792,7 +800,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  unitHeader,
  dateRangeHeader,
  rows,
- `${isPtDocument ? 'PT' : 'Parade'} State - ${selectedFlight === 'Overall' ? '155 UASU' : selectedFlight + ' Flt'} (${fromDate === toDate ? formatDateShort(fromDate).replace(/ \d{2}$/, '') : formatDateShort(fromDate).replace(/ \d{2}$/, '') + '-' + formatDateShort(toDate).replace(/ \d{2}$/, '')}).docx`,
+ `${documentTitle} - ${selectedFlight === 'Overall' ? '155 UASU' : selectedFlight + ' Flt'} (${fromDate === toDate ? formatDateShort(fromDate).replace(/ \d{2}$/, '') : formatDateShort(fromDate).replace(/ \d{2}$/, '') + '-' + formatDateShort(toDate).replace(/ \d{2}$/, '')}).docx`,
  { name: p.name, rank: p.rank, desig: p.designation },
  { name: a.name, rank: a.rank, desig: a.designation }
  );
@@ -803,7 +811,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  await exportParadeStateSingleDocx({
  dateStr: formatDateShort(fromDate),
  flight: selectedFlight,
- documentType: isPtDocument ? 'PT' : 'PARADE',
+ documentType: isPtDocument ? 'PT' : isOthersDocument ? 'OTHERS' : 'PARADE',
  stats,
  onParade: onPtList.map((i) => i.airman),
  leave: leaveList.map((i) => i.airman),
@@ -824,7 +832,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  otherDisposals,
  leftSig: { name: p.name, rank: p.rank, desig: p.designation },
  rightSig: { name: a.name, rank: a.rank, desig: a.designation },
-    }, `${isPtDocument ? 'PT' : 'Parade'} State - ${selectedFlight === 'Overall' ? '155 UASU' : selectedFlight + ' Flt'} (${fromDate === toDate ? formatDateShort(fromDate).replace(/ \d{2}$/, '') : formatDateShort(fromDate).replace(/ \d{2}$/, '') + '-' + formatDateShort(toDate).replace(/ \d{2}$/, '')}).docx`);
+    }, `${documentTitle} - ${selectedFlight === 'Overall' ? '155 UASU' : selectedFlight + ' Flt'} (${fromDate === toDate ? formatDateShort(fromDate).replace(/ \d{2}$/, '') : formatDateShort(fromDate).replace(/ \d{2}$/, '') + '-' + formatDateShort(toDate).replace(/ \d{2}$/, '')}).docx`);
  }
  };
 
@@ -1194,13 +1202,13 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  <div>
           <div className="flex items-center space-x-2 text-emerald-700 dark:text-emerald-400 text-xs font-black uppercase tracking-wider">
             <Shield className="w-4 h-4" />
-            <span>155 UASU BAF • Daily {isPtDocument ? 'PT' : 'Parade'} State</span>
+            <span>155 UASU BAF • Daily {documentTitle}</span>
           </div>
           <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white print:text-black mt-1">
-            {isPtDocument ? 'PT State Controls' : 'Parade State Controls'}
+            {documentTitle} Controls
           </h1>
           <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium mt-1">
-            Manage {isPtDocument ? 'PT' : 'parade'} date, flight and display settings
+            Manage {isPtDocument ? 'PT' : isOthersDocument ? 'others' : 'parade'} date, flight and display settings
           </p>
         </div>
 
@@ -1305,17 +1313,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
 
  
  
- {/* Add Disposal Button */}
- {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') && (
- <button
- onClick={() => setShowAddDisposalModal(true)}
- className="flex items-center space-x-1.5 px-6 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-black text-sm shadow-lg shadow-rose-900/20 transition-all cursor-pointer ml-4"
- title="Add Disposal"
- >
- <UserMinus className="w-5 h-5" />
- <span>Add Disposal</span>
- </button>
- )}
+ 
  {/* Signature Settings Button */}
         {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') && !isMultiDay && (
  <button
@@ -1352,6 +1350,16 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  <Printer className="w-5 h-5" />
  <span>Official Export / Print</span>
  </button>
+
+          {/* Add Disposal Button - Right next to Official Export */}
+          <button
+            onClick={() => setShowAddDisposalModal(true)}
+            className="flex items-center space-x-1.5 px-6 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-black text-sm shadow-lg shadow-rose-900/20 transition-all cursor-pointer ml-3"
+            title={isPtDocument ? "Add PT Disposal" : (isOthersDocument ? "Add Others Disposal" : "Add Disposal")}
+          >
+            <UserMinus className="w-5 h-5" />
+            <span>{isPtDocument ? "Add PT Disposal" : "Add Disposal"}</span>
+          </button>
  </div>
  </div>
 
@@ -1374,7 +1382,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  <div className="relative mb-3 text-center" style={{ fontFamily: 'Arial, sans-serif' }}>
  <div className="text-center">
  <h1 className="font-bold tracking-wide text-slate-900 dark:text-white print:text-black underline inline-block text-base uppercase">
- {isPtDocument ? 'PT STATE : AIRMEN' : 'PARADE STATE : AIRMEN'}
+ {documentHeader}
  </h1>
  <br />
  <h2 className="font-bold tracking-wide text-slate-900 dark:text-white print:text-black mt-0.5 underline inline-block text-sm uppercase">
@@ -1614,7 +1622,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  <div className="relative mb-3 text-center" style={{ fontFamily: 'Arial, sans-serif' }}>
  <div className="text-center">
  <h1 className="font-bold tracking-wide text-slate-900 dark:text-white print:text-black underline inline-block text-base uppercase">
- {isPtDocument ? 'PT STATE : AIRMEN' : 'PARADE STATE : AIRMEN'}
+ {documentHeader}
  </h1>
  <br />
  <h2 className="font-bold tracking-wide text-slate-900 dark:text-white print:text-black mt-0.5 underline inline-block text-sm uppercase">

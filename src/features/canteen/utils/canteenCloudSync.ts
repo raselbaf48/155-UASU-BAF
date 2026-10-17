@@ -1802,13 +1802,13 @@ export function initCanteenCloudSync(): () => void {
   window.addEventListener('canteen_menu_updated', handleLocalMenuCatalog);
   window.addEventListener('canteen_settings_updated', handleLocalSettings);
 
-  // 10-Second interval:
+  // 30-Second interval:
   // Backs up ONLY if something changed! If dirtyCanteenKeys is empty, does nothing!
   const tenSecBackupTicker = setInterval(() => {
     if (dirtyCanteenKeys.size > 0 && !isCanteenBackingUp && isInitialCanteenPullDone) {
       performCanteenBackup(false);
     }
-  }, 10000);
+  }, 30000);
 
   const handleVisibilityChange = () => {
     if (document.visibilityState === 'hidden' && dirtyCanteenKeys.size > 0) {

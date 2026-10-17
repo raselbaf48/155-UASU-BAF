@@ -733,7 +733,9 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                 )}
               </div>
               <h2 className="text-lg font-black mt-1 text-white">
-                {canteenOnly ? `${canteenMemberData?.Rank || airman.rank} ${canteenMemberData?.Surname || airman.fullName || airman.name}` : airman.name}
+                {canteenOnly 
+                  ? `${canteenMemberData?.Rank || airman.rank} ${canteenMemberData?.Surname || airman.fullName || airman.name}` 
+                  : `${airman.rank} ${airman.fullName || airman.name}`}
               </h2>
               <p className="text-xs text-slate-400 font-semibold">
                 {canteenOnly ? (

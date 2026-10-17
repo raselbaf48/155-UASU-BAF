@@ -44,6 +44,7 @@ export type SidebarTab =
   | 'flights'
   | 'parade-state'
   | 'pt-state'
+  | 'others-state'
   | 'night-count-state'
   | 'biodata-register'
   | 'leave-register'
@@ -225,6 +226,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 {renderNavButton('overview', <LayoutDashboard className="w-4 h-4 shrink-0" />, 'Dashboard', 'Dashboard & Strength Overview', undefined, isMobileDrawer)}
                 {renderNavButton('parade-state', <ClipboardList className="w-4 h-4 shrink-0" />, 'Parade State', 'Daily Parade State (Official BAF Format)', undefined, isMobileDrawer)}
                 {renderNavButton('pt-state', <Activity className="w-4 h-4 shrink-0" />, 'PT State', 'Daily PT State', undefined, isMobileDrawer)}
+                {renderNavButton('others-state', <FileText className="w-4 h-4 shrink-0" />, 'Others State', 'Daily Others State (Official BAF Format)', undefined, isMobileDrawer)}
               </div>
             )}
           </div>

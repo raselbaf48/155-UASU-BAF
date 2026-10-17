@@ -77,7 +77,7 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ onManagerP
 
       const interval = setInterval(() => {
           fetchMenu();
-      }, 5000);
+      }, 60000);
 
       const handleSettingsUpdated = (e: any) => {
           if (e.detail) {

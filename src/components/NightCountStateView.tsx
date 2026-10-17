@@ -390,8 +390,10 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
   const isMultiDay = datesInRange.length > 1;
 
   // Single Day Fetch
-  const fetchSingle = async () => {
-    setLoading(true);
+  const fetchSingle = async (showLoader = false) => {
+    if (showLoader || !singleParadeData) {
+      setLoading(true);
+    }
     try {
       const stateType = 'NIGHT_COUNT';
       const res = await fetch(`/api/parade-state?date=${fromDate}&shift=Morning&flight=Overall&stateType=${stateType}`);
@@ -407,8 +409,10 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
   };
 
   // Multi Day Fetch
-  const fetchMulti = async () => {
-    setLoading(true);
+  const fetchMulti = async (showLoader = false) => {
+    if (showLoader || Object.keys(multiDayStates).length === 0) {
+      setLoading(true);
+    }
     try {
       const stateType = 'NIGHT_COUNT';
       const results = await Promise.all(
@@ -418,7 +422,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
             .catch(() => null)
         )
       );
-      const newMap: Record<string, ParadeStateResponse> = {};
+      const newMap = {};
       datesInRange.forEach((dStr, idx) => {
         if (results[idx]) {
           newMap[dStr] = results[idx];
@@ -434,13 +438,14 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
 
   useEffect(() => {
     if (isMultiDay) {
-      fetchMulti();
+      fetchMulti(true);
     } else {
-      fetchSingle();
+      fetchSingle(true);
     }
     const handleGlobalUpdate = () => {
-      if (isMultiDay) fetchMulti();
-      else fetchSingle();
+      // Silent background update
+      if (isMultiDay) fetchMulti(false);
+      else fetchSingle(false);
     };
     window.addEventListener('baf_state_updated', handleGlobalUpdate);
     return () => {

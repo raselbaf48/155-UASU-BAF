@@ -264,6 +264,7 @@ export interface DetailedUserLogin {
   bdNo: string;
   rank: string;
   name: string;
+  fullName?: string;
   flightName: FlightName | string;
   trade: string;
   mobileNo?: string;

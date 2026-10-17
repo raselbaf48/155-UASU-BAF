@@ -364,6 +364,30 @@ return () => mediaQuery.removeEventListener('change', listener);
   }, []);
 
   useEffect(() => {
+    const handleDbUpdated = () => {
+      const currentAirmen = (localDb as any)?.getAirmen ? (localDb as any).getAirmen() : [];
+      if (Array.isArray(currentAirmen) && currentAirmen.length > 0) {
+        setAirmen(prev => {
+          if (
+            prev.length === currentAirmen.length &&
+            prev[0]?.fullName === currentAirmen[0]?.fullName &&
+            prev[0]?.id === currentAirmen[0]?.id &&
+            prev[prev.length - 1]?.fullName === currentAirmen[currentAirmen.length - 1]?.fullName &&
+            prev[prev.length - 1]?.id === currentAirmen[currentAirmen.length - 1]?.id
+          ) {
+            return prev;
+          }
+          return currentAirmen;
+        });
+      } else {
+        fetchAirmen();
+      }
+    };
+    window.addEventListener('baf_db_updated', handleDbUpdated);
+    return () => window.removeEventListener('baf_db_updated', handleDbUpdated);
+  }, []);
+
+  useEffect(() => {
     const handleQuota = () => setShowQuotaBanner(true);
     window.addEventListener('baf_quota_exceeded', handleQuota);
     return () => window.removeEventListener('baf_quota_exceeded', handleQuota);
@@ -445,27 +469,18 @@ return () => mediaQuery.removeEventListener('change', listener);
 
     connectSSE();
 
-    // Re-fetch when tab becomes visible or focused
+    // Re-fetch only when tab becomes visible after being hidden
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         fetchAirmen();
-        window.dispatchEvent(new CustomEvent('baf_state_updated'));
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('focus', handleVisibilityChange);
-
-    // 30-second background sync fallback
-    const interval = setInterval(() => {
-      window.dispatchEvent(new CustomEvent('baf_state_updated'));
-    }, 30000);
 
     return () => {
       if (eventSource) eventSource.close();
       clearTimeout(reconnectTimeout);
-      clearInterval(interval);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('focus', handleVisibilityChange);
     };
   }, []);
 
@@ -693,6 +708,20 @@ return () => mediaQuery.removeEventListener('change', listener);
             onOpenImportModal={() => setIsPdfImportModalOpen(true)}
           />
         );
+      case "others-state":
+        return (
+          <ParadeStateFormattedView
+            role={role}
+            userFlight={userSession?.flightName}
+            airmen={airmen}
+            selectedDate={selectedDate}
+            setSelectedDate={setSelectedDate}
+            initialDocumentType="OTHERS"
+            onOpenPrintModal={() => setIsPrintModalOpen(true)}
+            onViewAirmanProfile={(a, config) => setSelectedAirmanProfile({ airman: a, ...config })}
+            onOpenImportModal={() => setIsPdfImportModalOpen(true)}
+          />
+        );
       case "night-count-state":
         return (
           <NightCountStateView
@@ -835,7 +864,7 @@ return () => mediaQuery.removeEventListener('change', listener);
         setCollapsed={setSidebarCollapsed}
         mobileOpen={mobileSidebarOpen}
         setMobileOpen={setMobileSidebarOpen}
-        airmenCount={airmen.filter(a => a.active).length}
+        airmenCount={airmen.filter(a => a.active !== false).length}
         userSession={userSession}
         onOpenImportModal={() => {
           setMobileSidebarOpen(false);

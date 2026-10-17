@@ -12,6 +12,7 @@ import {
 } from 'firebase/firestore';
 import { db, isFirebaseConfigured, handleFirestoreError, OperationType } from '../firebase';
 import { Airman, DutyAssignment, ActivityHistoryItem } from '../types';
+import { INITIAL_AIRMEN } from '../data/initialAirmen';
 
 export interface FirebaseMigrationResult {
   success: boolean;
@@ -65,28 +66,62 @@ export async function pushAirmenToFirebase(airmen: any[]): Promise<number> {
           photoPayload = ''; // prevent exceeding Firestore 1MB doc limit
         }
 
+        const rankVal = a.rank || a.Rank || 'LAC';
+        const nameVal = a.name || a.Name || a["Surname"] || '';
+        const flightVal = a.flightName || a.flight || a.Section || a.Flight || 'Admin';
+        const bdNoVal = String(a.bdNo || a["BD No"] || a["Service Number"] || '');
+        const cleanBdDigits = bdNoVal.replace(/\D/g, '');
+        const isActive = a.active !== false;
+
+        let fullNameVal = a.fullName || a["Full Name"] || '';
+        if (!fullNameVal || fullNameVal.trim() === '' || fullNameVal === nameVal) {
+          const initMatch = INITIAL_AIRMEN.find((init: any) => 
+            String(init.bdNo).replace(/\D/g, '') === cleanBdDigits || init.id === docId
+          );
+          fullNameVal = (initMatch && initMatch.fullName) ? initMatch.fullName : (nameVal || 'Airman');
+        }
+
         const data: any = {
           airman_id: docId,
-          "Service Number": a.bdNo || a["Service Number"] || '',
-          Rank: a.rank || a.Rank || '',
-          Trade: a.trade || a.Trade || '',
-          Name: a.name || a.Name || '',
-          Section: a.section || a.Section || a.flightName || '',
+          id: docId,
+          bdNo: bdNoVal,
+          "BD No": bdNoVal,
+          "Service Number": bdNoVal,
+          rank: rankVal,
+          Rank: rankVal,
+          name: nameVal || fullNameVal,
+          Name: nameVal || fullNameVal,
+          Surname: nameVal || fullNameVal,
+          fullName: fullNameVal,
+          "Full Name": fullNameVal,
+          flightName: flightVal,
+          Flight: flightVal,
+          Section: flightVal,
+          trade: a.trade || a.Trade || 'General',
+          Trade: a.trade || a.Trade || 'General',
+          bloodGroup: a.bloodGroup || a["Blood Group"] || '',
           "Blood Group": a.bloodGroup || a["Blood Group"] || '',
-          "Contact Number": a.contactNumber || a["Contact Number"] || a.mobileNo || '',
-          "Medical Category": a.medicalCategory || a["Medical Category"] || '',
-          "Living Status": a.livingStatus || a["Living Status"] || '',
-          "Present Address": a.presentAddress || a["Present Address"] || '',
+          mobileNo: a.mobileNo || a.contactNumber || a["Contact Number"] || '',
+          contactNumber: a.mobileNo || a.contactNumber || a["Contact Number"] || '',
+          "Contact Number": a.mobileNo || a.contactNumber || a["Contact Number"] || '',
+          addressBlock: a.addressBlock || a.presentAddress || a["Present Address"] || 'L/O',
+          presentAddress: a.addressBlock || a.presentAddress || a["Present Address"] || 'L/O',
+          "Present Address": a.addressBlock || a.presentAddress || a["Present Address"] || 'L/O',
+          permanentAddress: a.permanentAddress || a["Permanent Address"] || '',
           "Permanent Address": a.permanentAddress || a["Permanent Address"] || '',
-          "Date of Birth": a.dateOfBirth || a["Date of Birth"] || '',
-          "Date of Enrolment": a.dateOfEnrolment || a["Date of Enrolment"] || '',
-          "Date of Present Rank": a.dateOfPresentRank || a["Date of Present Rank"] || '',
-          "Driver License": a.driverLicense || a["Driver License"] || '',
-          "Service Status": a.serviceStatus || a["Service Status"] || 'Effective',
-          Status: a.status || a.Status || 'Active',
+          dateOfBirth: a.dateOfBirth || a["Date of Birth"] || '',
+          dateJoined: a.dateJoined || a["Dt of Posting"] || '',
+          active: isActive,
+          status: isActive ? 'ACTIVE' : 'INACTIVE',
+          Status: isActive ? 'ACTIVE' : 'INACTIVE',
           Photo: photoPayload,
+          photoUrl: a.photoUrl || a.avatarUrl || '',
           avatarUrl: a.avatarUrl || a.photoUrl || '',
-          Seniority: Number(a.seniority ?? a.Seniority ?? 0),
+          seniority: Number(a.seniority ?? a.Seniority ?? a.serNo ?? 0),
+          Seniority: Number(a.seniority ?? a.Seniority ?? a.serNo ?? 0),
+          serNo: Number(a.serNo ?? a.seniority ?? 1),
+          code: a.code || `${rankVal}-${(nameVal || fullNameVal).slice(0, 3).toUpperCase()}`,
+          remarks: a.remarks || '',
           updatedAt: new Date().toISOString()
         };
         batch.set(docRef, data, { merge: true });
@@ -111,47 +146,51 @@ export async function fetchAirmenFromFirebase(): Promise<Airman[]> {
     const list: Airman[] = [];
     snap.forEach((d) => {
       const data = d.data();
+      const rankVal = data.rank || data.Rank || 'LAC';
+      const nameVal = data.name || data.Name || data.fullName || data["Full Name"] || data["Surname"] || '';
+      const bdNoVal = String(data.bdNo || data["BD No"] || data["Service Number"] || '');
+      const cleanBdDigits = bdNoVal.replace(/\D/g, '');
+      const flightVal = data.flightName || data.Flight || data.flight || data.Section || 'Admin';
+      const tradeVal = data.trade || data.Trade || 'General';
+      const activeVal = data.active !== undefined 
+        ? Boolean(data.active) 
+        : (data.Status ? data.Status === 'ACTIVE' || data.Status === 'Active' : true);
+
+      // Canonical ID in app is BD/XXXXX
+      const rawId = data.airman_id || data.id || d.id;
+      const canonicalId = cleanBdDigits ? `BD/${cleanBdDigits}` : String(rawId).replace(/_/g, '/');
+
+      // Recover full name if missing or same as short surname
+      let fullNameVal = data.fullName || data["Full Name"] || '';
+      if (!fullNameVal || fullNameVal.trim() === '' || fullNameVal === nameVal) {
+        const initMatch = INITIAL_AIRMEN.find((init: any) => 
+          String(init.bdNo).replace(/\D/g, '') === cleanBdDigits || init.id === canonicalId
+        );
+        fullNameVal = (initMatch && initMatch.fullName) ? initMatch.fullName : (nameVal || 'Airman');
+      }
+
       list.push({
-        id: data.airman_id || d.id,
-        airman_id: data.airman_id || d.id,
-        bdNo: data["Service Number"] || data.bdNo || '',
-        "Service Number": data["Service Number"] || data.bdNo || '',
-        rank: data.Rank || '',
-        Rank: data.Rank || '',
-        trade: data.Trade || '',
-        Trade: data.Trade || '',
-        name: data.Name || '',
-        Name: data.Name || '',
-        section: data.Section || '',
-        Section: data.Section || '',
-        bloodGroup: data["Blood Group"] || '',
-        "Blood Group": data["Blood Group"] || '',
-        contactNumber: data["Contact Number"] || '',
-        "Contact Number": data["Contact Number"] || '',
-        medicalCategory: data["Medical Category"] || '',
-        "Medical Category": data["Medical Category"] || '',
-        livingStatus: data["Living Status"] || '',
-        "Living Status": data["Living Status"] || '',
-        presentAddress: data["Present Address"] || '',
-        "Present Address": data["Present Address"] || '',
-        permanentAddress: data["Permanent Address"] || '',
-        "Permanent Address": data["Permanent Address"] || '',
-        dateOfBirth: data["Date of Birth"] || '',
-        "Date of Birth": data["Date of Birth"] || '',
-        dateOfEnrolment: data["Date of Enrolment"] || '',
-        "Date of Enrolment": data["Date of Enrolment"] || '',
-        dateOfPresentRank: data["Date of Present Rank"] || '',
-        "Date of Present Rank": data["Date of Present Rank"] || '',
-        driverLicense: data["Driver License"] || '',
-        "Driver License": data["Driver License"] || '',
-        serviceStatus: data["Service Status"] || 'Effective',
-        "Service Status": data["Service Status"] || 'Effective',
-        status: data.Status || 'Active',
-        Status: data.Status || 'Active',
-        photo: data.Photo || '',
-        avatarUrl: data.avatarUrl || '',
-        seniority: Number(data.Seniority ?? 0),
-        Seniority: Number(data.Seniority ?? 0)
+        id: canonicalId,
+        airman_id: canonicalId,
+        serNo: Number(data.serNo || data.seniority || data.Seniority || 1),
+        seniority: Number(data.seniority ?? data.Seniority ?? 0),
+        code: data.code || `${rankVal}-${(nameVal || fullNameVal).slice(0, 3).toUpperCase()}`,
+        bdNo: cleanBdDigits || bdNoVal,
+        rank: rankVal,
+        name: nameVal || fullNameVal,
+        fullName: fullNameVal,
+        flightName: flightVal,
+        trade: tradeVal,
+        mobileNo: data.mobileNo || data.contactNumber || data["Contact Number"] || '',
+        bloodGroup: data.bloodGroup || data["Blood Group"] || '',
+        permanentAddress: data.permanentAddress || data["Permanent Address"] || '',
+        addressBlock: data.addressBlock || data.presentAddress || data["Present Address"] || 'L/O',
+        active: activeVal,
+        status: activeVal ? 'ACTIVE' : 'INACTIVE',
+        remarks: data.remarks || '',
+        photoUrl: data.photoUrl || data.avatarUrl || data.Photo || '',
+        dateJoined: data.dateJoined || data["Dt of Posting"] || undefined,
+        dateLeft: data.dateLeft || data["Unit Left date"] || undefined
       } as any);
     });
     return list;
@@ -174,18 +213,30 @@ export async function pushDutyAssignmentsToFirebase(assignments: DutyAssignment[
       const batch = writeBatch(db);
       for (const a of chunk) {
         const anyA = a as any;
-        const dutyVal = anyA.dutyCode || anyA.dutyType || anyA.dutyName || anyA.duty_name || '';
-        const docId = String(anyA.id || anyA.assignment_id || `${a.airmanId}_${a.date}_${dutyVal}`).replace(/\//g, '_');
+        const dutyVal = String(anyA.dutyCode || anyA.dutyType || anyA.dutyName || anyA.duty_name || anyA.duty_type || '').trim();
+        const dateVal = String(a.date || anyA.duty_date || anyA.date || '').trim();
+        const rawAirman = a.airmanId || anyA.airman_id || anyA.airmanId || '';
+        const airmanIdVal = rawAirman ? String(rawAirman).replace(/_/g, '/') : '';
+        
+        let docId = String(anyA.id || anyA.assignment_id || '').replace(/\//g, '_');
+        if (!docId || docId === 'test') {
+          const safeAir = airmanIdVal.replace(/[^a-zA-Z0-9_-]/g, '_');
+          const safeDuty = String(dutyVal).replace(/[^a-zA-Z0-9_-]/g, '_');
+          const shiftVal = anyA.shift || anyA.idaShift || 'n';
+          const scopeVal = anyA.disposalScope || 'ALL';
+          docId = `asn_${safeAir}_${dateVal}_${safeDuty}_${shiftVal}_${scopeVal}`;
+        }
+
         const docRef = doc(db, path, docId);
         const data = {
           assignment_id: docId,
           duty_name: dutyVal,
-          date: a.date || '',
-          airman_id: a.airmanId || anyA.airman_id || '',
-          notes: a.notes || '',
+          date: dateVal,
+          airman_id: airmanIdVal,
+          notes: a.notes || anyA.notes || anyA.remarks || '',
           shift: anyA.shift || anyA.idaShift || '',
           category: anyA.category || '',
-          created_at: anyA.created_at || new Date().toISOString()
+          created_at: anyA.created_at || anyA.updatedAt || new Date().toISOString()
         };
         batch.set(docRef, data, { merge: true });
         count++;
@@ -208,18 +259,37 @@ export async function fetchDutyAssignmentsFromFirebase(): Promise<DutyAssignment
     const snap = await getDocs(collection(db, path));
     const list: DutyAssignment[] = [];
     snap.forEach((d) => {
+      if (d.id === 'test') return;
       const data = d.data();
+      // Extract from document ID if fields were saved empty or need recovery
+      const m = String(data.assignment_id || d.id || '').match(/^asn_(.+)_(\d{4}-\d{2}-\d{2})_(.+)_(.+?)_(.+?)$/);
+      const parsedAirmanId = m ? m[1].replace(/_/g, '/') : '';
+      const parsedDate = m ? m[2] : '';
+      const parsedDuty = m ? m[3] : '';
+      const parsedShift = m && m[4] !== 'n' ? m[4] : '';
+      const parsedScope = m ? m[5] : undefined;
+
+      const rawAirmanId = data.airman_id || data.airmanId || parsedAirmanId;
+      const cleanAirmanId = rawAirmanId ? String(rawAirmanId).replace(/_/g, '/') : '';
+      const cleanDate = (data.date && data.date.length >= 10) ? data.date : (data.duty_date || parsedDate || '');
+      const cleanDuty = data.duty_name || data.duty_type || data.dutyType || data.dutyCode || parsedDuty || '';
+
+      if (!cleanDate || cleanDate.length < 10) return; // Skip invalid or non-date items
+
       list.push({
         id: data.assignment_id || d.id,
         assignment_id: data.assignment_id || d.id,
-        airmanId: data.airman_id,
-        airman_id: data.airman_id,
-        date: data.date,
-        dutyType: data.duty_name,
-        dutyName: data.duty_name,
-        shift: data.shift || undefined,
+        airmanId: cleanAirmanId,
+        airman_id: cleanAirmanId,
+        date: cleanDate,
+        dutyCode: cleanDuty,
+        dutyType: cleanDuty,
+        dutyName: cleanDuty,
+        shift: data.shift || parsedShift || undefined,
+        disposalScope: parsedScope,
         category: data.category || undefined,
-        notes: data.notes || ''
+        notes: data.notes || '',
+        updatedAt: data.created_at || new Date().toISOString()
       } as any);
     });
     return list;
@@ -629,10 +699,21 @@ export async function executeFullMigrationToFirebase(localDb: any): Promise<Fire
 
   // 2. Duty Assignments (All months)
   try {
-    const allAssignments: DutyAssignment[] = [];
+    let allAssignments: DutyAssignment[] = [];
     Object.values(localDb?.assignments || {}).forEach((arr: any) => {
       if (Array.isArray(arr)) allAssignments.push(...arr);
     });
+    if (allAssignments.length === 0) {
+      try {
+        const res = await fetch('/api/duty-assignments');
+        if (res.ok) {
+          const srvObj = await res.json();
+          Object.values(srvObj || {}).forEach((arr: any) => {
+            if (Array.isArray(arr)) allAssignments.push(...arr);
+          });
+        }
+      } catch {}
+    }
     if (allAssignments.length > 0) {
       result.dutyCount = await pushDutyAssignmentsToFirebase(allAssignments);
     }

@@ -186,6 +186,12 @@ function loadDatabase(): LocalDB {
         if (!parsed.importHistory || !Array.isArray(parsed.importHistory)) {
           parsed.importHistory = [];
         }
+        if (!parsed.assignments['2026-07'] || parsed.assignments['2026-07'].length < 50) {
+          parsed.assignments['2026-07'] = generateOfficialMonthAssignments(2026, 7);
+        }
+        if (!parsed.assignments['2026-08'] || parsed.assignments['2026-08'].length < 50) {
+          parsed.assignments['2026-08'] = generateOfficialMonthAssignments(2026, 8);
+        }
         // Clean any placeholder notes in assignments
         Object.keys(parsed.assignments || {}).forEach((k) => {
           if (Array.isArray(parsed.assignments[k])) {
@@ -204,10 +210,13 @@ function loadDatabase(): LocalDB {
     }
   }
 
-  // Generate clean initial database
+  // Generate clean initial database with official July and August rosters
   const db: LocalDB = {
     airmen: [...INITIAL_AIRMEN],
-    assignments: {},
+    assignments: {
+      '2026-07': generateOfficialMonthAssignments(2026, 7),
+      '2026-08': generateOfficialMonthAssignments(2026, 8),
+    },
     activityHistory: [],
     adminPasscode: '1124',
     importHistory: [],
@@ -573,7 +582,10 @@ async function startServer() {
             return {
               'User ID': cleanBd,
               airman_id: a.id || `airman-${cleanBd}`,
-              Name: a.name || a.fullName || 'Airman',
+              Name: a.fullName || a.name || 'Airman',
+              'Full Name': a.fullName || a.name || 'Airman',
+              fullName: a.fullName || a.name || 'Airman',
+              Surname: a.name || a.fullName || 'Airman',
               Rank: a.rank || 'LAC',
               Flight: a.flightName || 'Admin',
               Trade: a.trade || 'General',
@@ -630,8 +642,30 @@ async function startServer() {
         if (pathname.includes('/rest/v1/airmen') || pathname.includes('/rest/v1/Biodata')) {
           const dbData = loadDatabase();
           if (req.method === 'GET') {
+            const formatted = (dbData.airmen || []).map((a: any) => ({
+              ...a,
+              airman_id: a.id || a.airman_id,
+              "BD No": a.bdNo || a["BD No"] || '',
+              "Rank": a.rank || a.Rank || '',
+              "Surname": a.name || a.Surname || '',
+              "Full Name": a.fullName || a.name || '',
+              "Flight": a.flightName || a.Flight || 'Admin',
+              "Trade": a.trade || a.Trade || 'General',
+              "Mobile No": a.mobileNo || a["Mobile No"] || '',
+              "Present Address": a.addressBlock || a["Present Address"] || '',
+              "Permanent Address": a.permanentAddress || a["Permanent Address"] || '',
+              "Status": (a.active !== false) ? 'ACTIVE' : 'INACTIVE',
+              "Seniority": a.seniority !== undefined ? a.seniority : (a.serNo || 1),
+              active: a.active !== false,
+              status: (a.active !== false) ? 'ACTIVE' : 'INACTIVE',
+              flightName: a.flightName || a.Flight || 'Admin',
+              name: a.name || a.Surname || '',
+              rank: a.rank || a.Rank || '',
+              trade: a.trade || a.Trade || 'General',
+              bdNo: a.bdNo || a["BD No"] || ''
+            }));
             res.setHeader('content-type', 'application/json');
-            res.status(200).send(JSON.stringify(dbData.airmen || []));
+            res.status(200).send(JSON.stringify(formatted));
             return true;
           }
         }
