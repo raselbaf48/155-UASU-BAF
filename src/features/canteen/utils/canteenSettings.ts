@@ -29,7 +29,7 @@ export interface CanteenConfig {
 
 export const DEFAULT_CANTEEN_CONFIG: CanteenConfig = {
   name: 'CAFE UAV',
-  logoUrl: '',
+  logoUrl: '/155-uasu-baf-logo.png',
   managerName: '',
   adminImage: '',
   phone: '',
@@ -645,8 +645,8 @@ export function getCanteenConfig(): CanteenConfig {
     if (cfg.adminImage && cfg.adminImage.includes('AP1GczPXDD5Dohq')) {
       cfg.adminImage = '';
     }
-    if (cfg.logoUrl && (cfg.logoUrl.includes('gcqqCXCL') || cfg.logoUrl.includes('Logo-(1).png'))) {
-      cfg.logoUrl = '';
+    if (!cfg.logoUrl || cfg.logoUrl.includes('gcqqCXCL') || cfg.logoUrl.includes('Logo-(1).png')) {
+      cfg.logoUrl = '/155-uasu-baf-logo.png';
     }
     if (cfg.managerName === 'LAC Nishad' && !cfg.managerBdNo) {
       cfg.managerName = '';
@@ -676,8 +676,8 @@ export async function fetchCanteenConfigFromCloud(): Promise<CanteenConfig> {
       if (updated.adminImage && updated.adminImage.includes('AP1GczPXDD5Dohq')) {
         updated.adminImage = '';
       }
-      if (updated.logoUrl && (updated.logoUrl.includes('gcqqCXCL') || updated.logoUrl.includes('Logo-(1).png'))) {
-        updated.logoUrl = '';
+      if (!updated.logoUrl || updated.logoUrl.includes('gcqqCXCL') || updated.logoUrl.includes('Logo-(1).png')) {
+        updated.logoUrl = '/155-uasu-baf-logo.png';
       }
       if (updated.managerName === 'LAC Nishad' && !updated.managerBdNo) {
         updated.managerName = '';

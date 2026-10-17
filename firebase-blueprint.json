@@ -1,0 +1,188 @@
+{
+  "entities": {
+    "Airman": {
+      "title": "Airman",
+      "description": "Nominal Roll biodata of airmen personnel",
+      "type": "object",
+      "properties": {
+        "airman_id": { "type": "string", "maxLength": 100, "description": "Unique Airman ID" },
+        "Service Number": { "type": "string", "maxLength": 50, "description": "Service or BD number" },
+        "Rank": { "type": "string", "maxLength": 50, "description": "Air force rank" },
+        "Trade": { "type": "string", "maxLength": 50, "description": "Air force trade" },
+        "Name": { "type": "string", "maxLength": 150, "description": "Full name" },
+        "Section": { "type": "string", "maxLength": 100, "description": "Assigned unit or section" },
+        "Blood Group": { "type": "string", "maxLength": 10, "description": "Blood group" },
+        "Contact Number": { "type": "string", "maxLength": 30, "description": "Phone number" },
+        "Medical Category": { "type": "string", "maxLength": 50, "description": "Medical classification" },
+        "Living Status": { "type": "string", "maxLength": 50, "description": "Living inside or out of camp" },
+        "Present Address": { "type": "string", "maxLength": 300, "description": "Present address" },
+        "Permanent Address": { "type": "string", "maxLength": 300, "description": "Permanent address" },
+        "Date of Birth": { "type": "string", "maxLength": 30, "description": "DOB" },
+        "Date of Enrolment": { "type": "string", "maxLength": 30, "description": "DOE" },
+        "Date of Present Rank": { "type": "string", "maxLength": 30, "description": "DOPR" },
+        "Driver License": { "type": "string", "maxLength": 100, "description": "Driver license info" },
+        "Service Status": { "type": "string", "maxLength": 50, "description": "Current status" },
+        "Status": { "type": "string", "maxLength": 50, "description": "Active or inactive" },
+        "Photo": { "type": "string", "maxLength": 500000, "description": "Base64 or photo URL" },
+        "avatarUrl": { "type": "string", "maxLength": 500, "description": "Image URL" },
+        "Seniority": { "type": "number", "description": "Order of seniority" }
+      },
+      "required": ["airman_id", "Service Number", "Name"]
+    },
+    "DutyAssignment": {
+      "title": "DutyAssignment",
+      "description": "Duty roster assignment record",
+      "type": "object",
+      "properties": {
+        "assignment_id": { "type": "string", "maxLength": 100, "description": "Assignment unique ID" },
+        "duty_name": { "type": "string", "maxLength": 100, "description": "Name of the duty" },
+        "date": { "type": "string", "maxLength": 30, "description": "Date of duty" },
+        "airman_id": { "type": "string", "maxLength": 100, "description": "Airman ID" },
+        "notes": { "type": "string", "maxLength": 500, "description": "Duty notes" },
+        "created_at": { "type": "string", "maxLength": 50, "description": "Created timestamp" }
+      },
+      "required": ["assignment_id", "duty_name", "date", "airman_id"]
+    },
+    "ParadeState": {
+      "title": "ParadeState",
+      "description": "Parade state historical record",
+      "type": "object",
+      "properties": {
+        "log_id": { "type": "string", "maxLength": 100, "description": "Log ID" },
+        "date": { "type": "string", "maxLength": 30, "description": "Date" },
+        "type": { "type": "string", "maxLength": 50, "description": "Type of state" },
+        "count": { "type": "number", "description": "Personnel count" },
+        "notes": { "type": "string", "maxLength": 1000, "description": "Notes" },
+        "details": { "type": "string", "maxLength": 100000, "description": "JSON serialized details" }
+      },
+      "required": ["log_id", "date"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User login account and profile",
+      "type": "object",
+      "properties": {
+        "User ID": { "type": "string", "maxLength": 100, "description": "User BD number or ID" },
+        "Password": { "type": "string", "maxLength": 100, "description": "Account password or hash" },
+        "Full Name": { "type": "string", "maxLength": 150, "description": "Full name" },
+        "Rank": { "type": "string", "maxLength": 50, "description": "Rank" },
+        "Role": { "type": "string", "maxLength": 50, "description": "User role: Admin, Operator, Viewer" },
+        "Section": { "type": "string", "maxLength": 100, "description": "Section" },
+        "Status": { "type": "string", "maxLength": 50, "description": "Active status" },
+        "Last Active": { "type": "string", "maxLength": 50, "description": "Last active timestamp" }
+      },
+      "required": ["User ID", "Full Name", "Role"]
+    },
+    "AppSetting": {
+      "title": "AppSetting",
+      "description": "Key-value persistent application settings",
+      "type": "object",
+      "properties": {
+        "setting_key": { "type": "string", "maxLength": 150, "description": "Configuration key" },
+        "setting_value": { "type": "string", "maxLength": 500000, "description": "Configuration JSON or string value" },
+        "updated_at": { "type": "string", "maxLength": 50, "description": "Timestamp" }
+      },
+      "required": ["setting_key", "setting_value"]
+    },
+    "DutyMatrix": {
+      "title": "DutyMatrix",
+      "description": "Duty ratio matrix rules",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 100, "description": "Matrix ID" },
+        "rank_trade_key": { "type": "string", "maxLength": 150, "description": "Rank and trade combination" },
+        "matrix_data": { "type": "string", "maxLength": 100000, "description": "Serialized matrix values" },
+        "updated_at": { "type": "string", "maxLength": 50, "description": "Timestamp" }
+      },
+      "required": ["id"]
+    },
+    "CanteenMember": {
+      "title": "CanteenMember",
+      "description": "Canteen member profile, balance and dues",
+      "type": "object",
+      "properties": {
+        "airman_id": { "type": "string", "maxLength": 100, "description": "Member airman ID" },
+        "service_number": { "type": "string", "maxLength": 50, "description": "BD number" },
+        "name": { "type": "string", "maxLength": 150, "description": "Member name" },
+        "rank": { "type": "string", "maxLength": 50, "description": "Rank" },
+        "section": { "type": "string", "maxLength": 100, "description": "Section" },
+        "phone": { "type": "string", "maxLength": 30, "description": "Phone number" },
+        "avatar": { "type": "string", "maxLength": 500000, "description": "Avatar image" },
+        "canteen_balance": { "type": "number", "description": "Current balance" },
+        "current_month_due": { "type": "number", "description": "Current month dues" },
+        "total_due": { "type": "number", "description": "Total outstanding dues" },
+        "status": { "type": "string", "maxLength": 30, "description": "Active or inactive" },
+        "updated_at": { "type": "string", "maxLength": 50, "description": "Updated timestamp" }
+      },
+      "required": ["airman_id", "service_number", "name"]
+    },
+    "CanteenTransaction": {
+      "title": "CanteenTransaction",
+      "description": "Canteen purchase or payment transaction",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 100, "description": "Transaction ID" },
+        "member_id": { "type": "string", "maxLength": 100, "description": "Canteen Member ID" },
+        "type": { "type": "string", "maxLength": 30, "description": "DEPOSIT, PURCHASE, or PAYMENT" },
+        "amount": { "type": "number", "description": "Transaction amount" },
+        "date": { "type": "string", "maxLength": 50, "description": "Date of transaction" },
+        "items": { "type": "string", "maxLength": 50000, "description": "JSON items list" },
+        "notes": { "type": "string", "maxLength": 500, "description": "Remarks or notes" },
+        "operator_id": { "type": "string", "maxLength": 100, "description": "Operator user ID" }
+      },
+      "required": ["id", "member_id", "type", "amount"]
+    },
+    "CanteenExpense": {
+      "title": "CanteenExpense",
+      "description": "Canteen daily expense or procurement record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 100, "description": "Expense ID" },
+        "title": { "type": "string", "maxLength": 200, "description": "Expense title or item" },
+        "amount": { "type": "number", "description": "Expense amount" },
+        "category": { "type": "string", "maxLength": 100, "description": "Category" },
+        "date": { "type": "string", "maxLength": 50, "description": "Date" },
+        "notes": { "type": "string", "maxLength": 500, "description": "Expense remarks" }
+      },
+      "required": ["id", "title", "amount"]
+    }
+  },
+  "firestore": {
+    "/airmen/{airmanId}": {
+      "schema": "Airman",
+      "description": "Collection of airmen nominal roll biodata"
+    },
+    "/duty_rosters/{assignmentId}": {
+      "schema": "DutyAssignment",
+      "description": "Collection of duty assignments"
+    },
+    "/parade_states/{logId}": {
+      "schema": "ParadeState",
+      "description": "Collection of parade state records"
+    },
+    "/user_profiles/{userId}": {
+      "schema": "UserProfile",
+      "description": "Collection of user credentials and profiles"
+    },
+    "/app_settings/{settingKey}": {
+      "schema": "AppSetting",
+      "description": "Collection of application configurations and state"
+    },
+    "/duty_ratio_matrix/{matrixId}": {
+      "schema": "DutyMatrix",
+      "description": "Collection of duty ratio matrix records"
+    },
+    "/canteen_members/{memberId}": {
+      "schema": "CanteenMember",
+      "description": "Collection of canteen members"
+    },
+    "/canteen_transactions/{transactionId}": {
+      "schema": "CanteenTransaction",
+      "description": "Collection of canteen purchase and payment transactions"
+    },
+    "/canteen_expenses/{expenseId}": {
+      "schema": "CanteenExpense",
+      "description": "Collection of canteen daily expenses"
+    }
+  }
+}

@@ -61,6 +61,7 @@ import { DateNavigator, getTodayYMD } from '../components/DateNavigator';
 import { SaveButton } from '../components/SaveButton';
 import { BulkImportInitialBillsModal } from '../components/BulkImportInitialBillsModal';
 import { SetInitialBillModal } from '../components/SetInitialBillModal';
+import { DataRestoreModal } from '../components/DataRestoreModal';
 import { PrintableCanteenBillModal } from '../components/PrintableCanteenBillModal';
 import { EditMemberSeniorityModal } from '../components/EditMemberSeniorityModal';
 import { EditPaymentModal } from '../components/EditPaymentModal';
@@ -883,6 +884,14 @@ export const MemberDB: React.FC<MemberDBProps> = ({
   // Add / Edit Member Modal state
   const [isAddMemberModalOpen, setIsAddMemberModalOpen] = useState(false);
   const [memberToEdit, setMemberToEdit] = useState<any | null>(null);
+  const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
+  const [isNoticeDismissed, setIsNoticeDismissed] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem('canteen_notice_dismissed') === 'true';
+    } catch {
+      return false;
+    }
+  });
 
   // Initial Bill Modals state
   const [isImportBillsModalOpen, setIsImportBillsModalOpen] = useState(false);
@@ -5048,6 +5057,48 @@ export const MemberDB: React.FC<MemberDBProps> = ({
         </div>
       )}
 
+      {/* Cloud Quota and Data Recovery Alert Banner */}
+      {!isNoticeDismissed && members.length < 75 && (
+        <div className="p-3.5 bg-gradient-to-r from-amber-950/90 via-slate-900 to-amber-950/90 border border-amber-500/50 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg animate-fadeIn relative">
+          <div className="flex items-start sm:items-center space-x-3 pr-6 sm:pr-0">
+            <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0 mt-0.5 sm:mt-0">
+              <AlertCircle className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-amber-200">
+                ক্লাউড ডাটাবেজ নোটিশ: আপনার ৭৮-৭৯ জন মেম্বার, ছবি (DP) ও সকল বিল Supabase ক্লাউডে সম্পূর্ণ সংরক্ষিত আছে।
+              </p>
+              <p className="text-[11px] text-amber-300/80 mt-0.5">
+                Supabase Egress Quota (HTTP 402) শেষ হওয়ায় সরাসরি সংযোগ সাময়িক স্থগিত। আপনি এক ক্লিকেই আনব্লক বা ডাটা রিকভার করতে পারেন।
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center space-x-2 w-full sm:w-auto justify-between sm:justify-end shrink-0">
+            <button
+              type="button"
+              onClick={() => setIsRestoreModalOpen(true)}
+              className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-md cursor-pointer shrink-0 flex items-center space-x-1.5 active:scale-95 transition-all"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-slate-950" />
+              <span>ডাটা আনব্লক / রিকভার করুন</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsNoticeDismissed(true);
+                try {
+                  sessionStorage.setItem('canteen_notice_dismissed', 'true');
+                } catch {}
+              }}
+              className="p-1.5 text-amber-400/80 hover:text-white hover:bg-amber-900/50 rounded-lg transition-colors cursor-pointer"
+              title="নোটিশ বন্ধ করুন (Dismiss Notice)"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* KPI Summary Banner (Compact 2-Column Row: Monthly Total Due & Overall Total Due Side-by-Side) */}
       <div className="grid grid-cols-2 gap-2 sm:gap-2.5">
         {/* Card 1: Monthly Total Due */}
@@ -5203,6 +5254,29 @@ export const MemberDB: React.FC<MemberDBProps> = ({
         <div className="flex items-center space-x-2 self-end sm:self-auto shrink-0 flex-wrap gap-y-2">
           {selectedCategory === 'ALL' && (
             <>
+              <button
+                type="button"
+                onClick={() => setIsRestoreModalOpen(true)}
+                className="px-3.5 py-2.5 bg-gradient-to-r from-amber-600 via-amber-500 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white rounded-2xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 shadow-md shadow-amber-500/25 border-t border-amber-300/40 active:translate-y-0.5 transition-all cursor-pointer"
+                title="মেম্বার ও বকেয়া বিল ডাটা রিকভারি ও ক্লাউড আনব্লক সেন্টার"
+              >
+                <Sparkles className="w-4 h-4 text-amber-200" />
+                <span>RESTORE / CLOUD</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setMemberToEdit(null);
+                  setIsAddMemberModalOpen(true);
+                }}
+                className="px-3.5 py-2.5 bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white rounded-2xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 shadow-md shadow-indigo-500/25 border-t border-indigo-300/40 active:translate-y-0.5 transition-all cursor-pointer"
+                title="নতুন মেম্বার যুক্ত করুন (Officer / Airmen / Civilian)"
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>ADD MEMBER</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => {
@@ -7399,6 +7473,21 @@ export const MemberDB: React.FC<MemberDBProps> = ({
               setProfileMember(updatedM);
             }
             fetchMembers(true);
+          }}
+        />
+      )}
+
+      {/* Data Restore and Cloud Status Modal */}
+      {isRestoreModalOpen && (
+        <DataRestoreModal
+          isOpen={isRestoreModalOpen}
+          onClose={() => setIsRestoreModalOpen(false)}
+          onDataRestored={() => {
+            fetchMembers(true);
+            try {
+              const freshTxs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+              setAllTxs(freshTxs);
+            } catch {}
           }}
         />
       )}

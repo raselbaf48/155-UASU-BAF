@@ -134,7 +134,25 @@ export const isSaleTransaction = (tx: any): boolean => {
   return false;
 };
 
-export const PosSales: React.FC = () => {
+export interface PosSalesProps {
+  initialView?: 'POS' | 'HISTORY';
+  onNavigateToHistory?: () => void;
+  onNavigateToPos?: () => void;
+}
+
+export const PosSales: React.FC<PosSalesProps> = ({
+  initialView = 'POS',
+  onNavigateToHistory,
+  onNavigateToPos
+}) => {
+  const [currentView, setCurrentView] = useState<'POS' | 'HISTORY'>(initialView);
+
+  useEffect(() => {
+    if (initialView) {
+      setCurrentView(initialView);
+    }
+  }, [initialView]);
+
   const [searchTerm, setSearchTerm] = useState('');
   const menuSearchInputRef = useRef<HTMLInputElement>(null);
   const memberSearchInputRef = useRef<HTMLInputElement>(null);
@@ -532,13 +550,20 @@ export const PosSales: React.FC = () => {
     }
   };
 
+  const openSalesHistoryView = () => {
+    try {
+      const history = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+      const deletedIds = getDeletedTxIds();
+      const onlySales = history.filter((tx: any) => isSaleTransaction(tx) && !deletedIds.has(String(tx?.id)));
+      setSalesHistory(onlySales);
+      setHistoryDateFilter(saleDate || getTodayYMD());
+    } catch {}
+    setCurrentView('HISTORY');
+    if (onNavigateToHistory) onNavigateToHistory();
+  };
+
   const loadHistory = () => {
-    const history = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-    const deletedIds = getDeletedTxIds();
-    const onlySales = history.filter((tx: any) => isSaleTransaction(tx) && !deletedIds.has(String(tx?.id)));
-    setSalesHistory(onlySales);
-    setHistoryDateFilter(saleDate || getTodayYMD());
-    setShowHistoryModal(true);
+    openSalesHistoryView();
   };
 
   const filteredSalesHistory = useMemo(() => {
@@ -1559,75 +1584,263 @@ export const PosSales: React.FC = () => {
     <>
       <div className="w-full space-y-3.5 animate-in fade-in duration-300 pb-24 lg:pb-6 px-1 sm:px-2">
         
-        {/* Header Strip with Date Navigator, History button, and Per-Member Info */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
-            <div className="flex items-center space-x-2.5">
-              <div className="p-2.5 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
-                <ShoppingCart className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-sm sm:text-base font-black text-white uppercase tracking-wider">
-                  CANTEEN POS & CHECKOUT
-                </h3>
-                <p className="text-[11px] text-slate-400">Select order items and choose members to charge</p>
-              </div>
-            </div>
+        {/* Top View Switcher Tabs: POS Counter vs Sales History */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/90 p-2 sm:p-2.5 rounded-2xl border border-slate-800 shadow-lg">
+          <div className="flex items-center gap-1.5 p-1 bg-slate-950/90 rounded-xl border border-slate-800">
+            <button
+              type="button"
+              onClick={() => {
+                setCurrentView('POS');
+                if (onNavigateToPos) onNavigateToPos();
+              }}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider flex items-center space-x-2 transition-all cursor-pointer ${
+                currentView === 'POS'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <ShoppingCart className="w-3.5 h-3.5" />
+              <span>POS Sale কাউন্টার</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                loadHistory();
+                setCurrentView('HISTORY');
+                if (onNavigateToHistory) onNavigateToHistory();
+              }}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider flex items-center space-x-2 transition-all cursor-pointer ${
+                currentView === 'HISTORY'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <History className="w-3.5 h-3.5" />
+              <span>বিক্রয় ইতিহাস (Sales History)</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-slate-800 text-slate-300">
+                {expandedSalesHistoryRows.length}
+              </span>
+            </button>
+          </div>
 
-            <div className="flex items-center justify-between sm:justify-end gap-2.5 w-full sm:w-auto">
-              {/* Sale Date Picker with Lock Button */}
-              <div className="flex items-center gap-1.5">
-                <DateNavigator 
-                  value={saleDate} 
-                  onChange={setSaleDate} 
-                  label="Date"
-                  format="dd_mm_yy"
-                />
+          <div className="flex items-center gap-2">
+            <button 
+              type="button"
+              onClick={() => setShowImportSalesModal(true)}
+              className="flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-950/70 hover:bg-emerald-900/60 active:bg-emerald-950 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-sm cursor-pointer"
+            >
+              <Upload className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Import Sales</span>
+            </button>
+          </div>
+        </div>
+
+        {/* When currentView is HISTORY, render Dedicated Sales History Page right here (No Scrolling Down Needed) */}
+        {currentView === 'HISTORY' ? (
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-6 space-y-4 shadow-xl">
+            {/* Header & Filters */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-800">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2.5 bg-indigo-500/15 border border-indigo-500/30 text-indigo-400 rounded-2xl">
+                  <History className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-black text-white uppercase tracking-wider flex items-center gap-2">
+                    <span>বিক্রয় ইতিহাস (Sales History)</span>
+                    <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300">
+                      {expandedSalesHistoryRows.length} টি রেকর্ড
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400">ক্যান্টিনের সমস্ত বিক্রয় ট্রানজ্যাকশন এবং ভাউচার হিস্ট্রি</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={toggleDateLock}
-                  className={`p-2 rounded-xl border text-xs font-black tracking-wider flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                    isDateLocked
-                      ? 'bg-amber-500/25 border-amber-500 text-amber-300 shadow-sm shadow-amber-500/25'
-                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
-                  }`}
-                  title={isDateLocked ? 'Date is Locked (Checked out orders will keep this date)' : 'Lock Date (keep selected after checkout)'}
+                  onClick={() => {
+                    setCurrentView('POS');
+                    if (onNavigateToPos) onNavigateToPos();
+                  }}
+                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-black transition-colors flex items-center space-x-1.5 cursor-pointer"
                 >
-                  {isDateLocked ? (
-                    <>
-                      <Lock className="w-3.5 h-3.5 text-amber-400" />
-                      <span className="hidden sm:inline text-[11px] uppercase">Locked</span>
-                    </>
-                  ) : (
-                    <>
-                      <Unlock className="w-3.5 h-3.5 text-slate-400" />
-                      <span className="hidden sm:inline text-[11px] text-slate-400 uppercase">Lock</span>
-                    </>
-                  )}
+                  <ShoppingCart className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>← ফিরে যান POS কাউন্টারে</span>
                 </button>
               </div>
+            </div>
 
-              {/* POS Import Button */}
-              <button 
-                type="button"
-                onClick={() => setShowImportSalesModal(true)}
-                className="flex items-center justify-center space-x-1.5 px-3 py-1.5 bg-emerald-950/70 hover:bg-emerald-900/60 active:bg-emerald-950 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-sm cursor-pointer shrink-0 ml-auto sm:ml-0"
-                title="Bulk Import via Excel / CSV"
-              >
-                <Upload className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Import</span>
-              </button>
+            {/* Filter and Date Search Bar */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input 
+                  type="text" 
+                  value={historySearchTerm}
+                  onChange={(e) => setHistorySearchTerm(e.target.value)}
+                  placeholder="গ্রাহকের নাম, BD নম্বর, পণ্যের নাম বা তারিখ দিয়ে খুঁজুন..."
+                  className="w-full pl-9 pr-3 py-2.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl text-xs font-semibold text-white placeholder:text-slate-500 outline-none"
+                />
+                {historySearchTerm && (
+                  <button 
+                    type="button"
+                    onClick={() => setHistorySearchTerm('')} 
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs font-bold p-1 cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
 
-              {/* History Button pushed to Right Corner */}
-              <button 
-                type="button"
-                onClick={loadHistory}
-                className="flex items-center justify-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-slate-200 border border-slate-700 rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-sm cursor-pointer shrink-0"
-              >
-                <History className="w-3.5 h-3.5 text-indigo-400" />
-                <span>History</span>
-              </button>
+              {/* Date Filter */}
+              <div className="shrink-0 flex items-center">
+                <DateNavigator 
+                  value={historyDateFilter} 
+                  onChange={setHistoryDateFilter} 
+                  allowAll={true} 
+                  format="dd_mm_yy"
+                />
+              </div>
+            </div>
+
+            {/* Full Sales History Table */}
+            <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-950/60 shadow-inner">
+              {expandedSalesHistoryRows.length === 0 ? (
+                <div className="flex flex-col items-center justify-center text-center py-12 text-slate-400 p-6 min-h-[250px]">
+                  <History className="w-12 h-12 mx-auto opacity-20 mb-3" />
+                  <p className="text-xs font-bold uppercase tracking-widest text-slate-300">কোনো রেকর্ড পাওয়া যায়নি</p>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    {historySearchTerm ? 'অনুসন্ধানের সাথে মিলে এমন কোনো ট্রানজ্যাকশন নেই।' : 'সম্পন্ন হওয়া বিক্রয়সমূহ এখানে প্রদর্শিত হবে।'}
+                  </p>
+                </div>
+              ) : (
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-900/90 text-slate-400 font-mono text-[11px] uppercase tracking-wider border-b border-slate-800">
+                      <th className="py-3 px-3 font-black text-center w-14">Ser No</th>
+                      <th className="py-3 px-3 font-black text-center w-24">Date</th>
+                      <th className="py-3 px-3 font-black min-w-[150px]">Customer Name</th>
+                      <th className="py-3 px-3 font-black min-w-[180px]">Item Name</th>
+                      <th className="py-3 px-3 font-black text-center w-16">Qty</th>
+                      <th className="py-3 px-3 font-black text-right w-24">Total</th>
+                      <th className="py-3 px-3 font-black text-center w-28">Status (DUE/Paid)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/70">
+                    {expandedSalesHistoryRows.map((row, idx) => (
+                      <tr 
+                        key={row.rowKey} 
+                        onClick={() => openEditTxModal(row.tx, row.itemName)}
+                        title="Click row to Edit or Remove record"
+                        className="hover:bg-indigo-950/30 hover:border-indigo-500/30 transition-colors cursor-pointer group"
+                      >
+                        <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-400 group-hover:text-indigo-300">
+                          {idx + 1}
+                        </td>
+                        <td className="py-2.5 px-3 text-center font-mono font-bold text-indigo-300 text-xs whitespace-nowrap">
+                          {row.date}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <div className="font-black text-white text-xs group-hover:text-indigo-200">
+                            {row.customerName}
+                          </div>
+                          {row.bdNo && (
+                            <div className="text-[10px] font-mono text-slate-400 mt-0.5">
+                              BD: {row.bdNo}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700/80 text-emerald-300 text-xs font-semibold">
+                            <span className="truncate max-w-[220px]">{row.itemName}</span>
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-center">
+                          <span className="inline-flex items-center justify-center min-w-[26px] px-2 py-0.5 rounded-md bg-indigo-950/60 border border-indigo-500/30 text-indigo-300 font-mono font-black text-xs">
+                            {row.qty}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-right">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-emerald-950/40 border border-emerald-500/20 text-emerald-400 font-mono font-black text-xs">
+                            ৳{row.itemTotal.toLocaleString()}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-center">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border ${
+                            row.isPaid 
+                              ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' 
+                              : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                          }`}>
+                            {row.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
+        ) : (
+          <>
+            {/* Header Strip with Date Navigator, History button, and Per-Member Info */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2.5 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                  <ShoppingCart className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-black text-white uppercase tracking-wider">
+                    CANTEEN POS & CHECKOUT
+                  </h3>
+                  <p className="text-[11px] text-slate-400">Select order items and choose members to charge</p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between sm:justify-end gap-2.5 w-full sm:w-auto">
+                {/* Sale Date Picker with Lock Button */}
+                <div className="flex items-center gap-1.5">
+                  <DateNavigator 
+                    value={saleDate} 
+                    onChange={setSaleDate} 
+                    label="Date"
+                    format="dd_mm_yy"
+                  />
+                  <button
+                    type="button"
+                    onClick={toggleDateLock}
+                    className={`p-2 rounded-xl border text-xs font-black tracking-wider flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      isDateLocked
+                        ? 'bg-amber-500/25 border-amber-500 text-amber-300 shadow-sm shadow-amber-500/25'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
+                    }`}
+                    title={isDateLocked ? 'Date is Locked (Checked out orders will keep this date)' : 'Lock Date (keep selected after checkout)'}
+                  >
+                    {isDateLocked ? (
+                      <>
+                        <Lock className="w-3.5 h-3.5 text-amber-400" />
+                        <span className="hidden sm:inline text-[11px] uppercase">Locked</span>
+                      </>
+                    ) : (
+                      <>
+                        <Unlock className="w-3.5 h-3.5 text-slate-400" />
+                        <span className="hidden sm:inline text-[11px] text-slate-400 uppercase">Lock</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* History Button pushed to Right Corner */}
+                <button 
+                  type="button"
+                  onClick={loadHistory}
+                  className="flex items-center justify-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-900 text-slate-200 border border-slate-700 rounded-xl text-xs font-black tracking-wider uppercase transition-all shadow-sm cursor-pointer shrink-0"
+                >
+                  <History className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>History</span>
+                </button>
+              </div>
+            </div>
 
           {/* Main Layout: 2-Column Grid on Laptop View (lg:grid-cols-2), 1-Column on Mobile */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
@@ -2678,6 +2891,8 @@ export const PosSales: React.FC = () => {
             </motion.div>
           )}
         </AnimatePresence>
+        </>
+      )}
 
       </div>
 

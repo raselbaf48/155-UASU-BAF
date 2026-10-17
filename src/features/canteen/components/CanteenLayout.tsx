@@ -32,8 +32,9 @@ import { CanteenFund } from '../pages/CanteenFund';
 import { DueRegister } from '../pages/DueRegister';
 import { RawDistributionPage } from '../pages/RawDistributionPage';
 import { AirmanProfileModal } from '../../../components/AirmanProfileModal';
+import { DataRestoreModal } from './DataRestoreModal';
 
-import { Wallet, LayoutDashboard, Coffee, Search, List, CreditCard, ArrowLeft, Utensils, Wifi, HelpCircle, LogIn, Grid, Package as Pkg, ShoppingCart, Users, Banknote, BarChart2, Settings as SettingsIcon, PieChart, Package, UserCircle, X, Menu, User, Eye, EyeOff, Lock, Phone, UtensilsCrossed, Boxes, ClipboardList, Cloud, RefreshCw, Receipt, KeyRound, ChefHat, Landmark, Layers } from 'lucide-react';
+import { Wallet, LayoutDashboard, Coffee, Search, List, CreditCard, ArrowLeft, Utensils, Wifi, HelpCircle, LogIn, Grid, Package as Pkg, ShoppingCart, Users, Banknote, BarChart2, Settings as SettingsIcon, PieChart, Package, UserCircle, X, Menu, User, Eye, EyeOff, Lock, Phone, UtensilsCrossed, Boxes, ClipboardList, Cloud, RefreshCw, Receipt, KeyRound, ChefHat, Landmark, Layers, History } from 'lucide-react';
 
 interface CanteenLayoutProps {
   initialMember?: { name: string, bdNo: string, role?: 'employee'|'manager', photoUrl?: string, due?: number };
@@ -134,6 +135,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showCustomerProfile, setShowCustomerProfile] = useState(false);
   const [currentCustomerAirman, setCurrentCustomerAirman] = useState<any>(null);
+  const [showRestoreModal, setShowRestoreModal] = useState(false);
 
   // Cloud config synchronization on mount & event listeners
   useEffect(() => {
@@ -574,6 +576,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
   const navItems = currentUser.role === 'manager' ? [
     { id: 'manager_dashboard', name: 'Dashboard', icon: Grid },
     { id: 'pos_sales', name: 'POS Sales', icon: ShoppingCart },
+    { id: 'pos_history', name: 'Sales History', icon: History },
     { id: 'unit_fund', name: 'Unit Fund', icon: Landmark },
     { id: 'others', name: 'Others', icon: Layers },
     { id: 'member_db', name: 'Bill', icon: Receipt },
@@ -594,7 +597,8 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
   const renderManagerTab = (tabId: string) => {
     switch (tabId) {
       case 'manager_dashboard': return <ManagerDashboard />;
-      case 'pos_sales': return <PosSales />;
+      case 'pos_sales': return <PosSales initialView="POS" onNavigateToHistory={() => setActiveTab('pos_history')} />;
+      case 'pos_history': return <PosSales initialView="HISTORY" onNavigateToPos={() => setActiveTab('pos_sales')} />;
       case 'unit_fund': return <MemberDB forcedCategory="UNIT_FUND" onNavigateToTab={(tab) => setActiveTab(tab)} />;
       case 'others': return <MemberDB forcedCategory="OTHERS" onNavigateToTab={(tab) => setActiveTab(tab)} />;
       case 'member_db': return <MemberDB initialCategory="ALL" hideFundTabs={true} onNavigateToTab={(tab) => setActiveTab(tab)} />;
@@ -612,7 +616,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
 
   const renderContent = () => {
     // If not a manager, prevent access to any manager tabs
-    const managerTabs = ['manager_dashboard', 'pos_sales', 'unit_fund', 'others', 'member_db', 'due_register', 'expenditures', 'reports', 'fund', 'raw_distribution', 'settings'];
+    const managerTabs = ['manager_dashboard', 'pos_sales', 'pos_history', 'unit_fund', 'others', 'member_db', 'due_register', 'expenditures', 'reports', 'fund', 'raw_distribution', 'settings'];
     if (currentUser.role !== 'manager' && managerTabs.includes(activeTab)) {
       return (
         <PersonalPortal 
@@ -673,17 +677,18 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
         <div className="p-6 pb-4">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-700/80 flex items-center justify-center p-1 overflow-hidden shadow-sm shrink-0">
-              {canteenConfig.logoUrl ? (
-                <img 
-                  src={resolveImageUrl(canteenConfig.logoUrl)} 
-                  alt="Logo" 
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-contain"
-                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                />
-              ) : (
-                <Utensils className="w-5 h-5 text-[#4f46e5]" />
-              )}
+              <img 
+                src={canteenConfig.logoUrl ? resolveImageUrl(canteenConfig.logoUrl) : '/155-uasu-baf-logo.png'} 
+                alt="Logo" 
+                referrerPolicy="no-referrer"
+                className="w-full h-full object-contain"
+                onError={(e) => {
+                  const target = e.currentTarget as HTMLImageElement;
+                  if (!target.src.includes('155-uasu-baf-logo.png')) {
+                    target.src = '/155-uasu-baf-logo.png';
+                  }
+                }}
+              />
             </div>
             <h1 className="font-black text-lg tracking-wider truncate text-white dark:text-white">
               {canteenConfig.name.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'CAFEUAV'}
@@ -691,7 +696,12 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
           </div>
 
           <div className="mt-3 flex items-center justify-between gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800">
-            <div className="flex items-center space-x-2 min-w-0">
+            <button
+              type="button"
+              onClick={() => setShowRestoreModal(true)}
+              className="flex items-center space-x-2 min-w-0 text-left cursor-pointer hover:opacity-80 transition-opacity"
+              title="Supabase কোটা স্ট্যাটাস ও ডাটা রিকভারি সেন্টার খুলুন"
+            >
               <Cloud className={`w-3.5 h-3.5 shrink-0 ${
                 cloudSyncStatus.status === 'syncing' 
                   ? 'text-amber-400 animate-pulse' 
@@ -713,11 +723,11 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
                   </span>
                 )}
               </div>
-            </div>
+            </button>
             <button
               onClick={() => pullAllCanteenDataFromCloud()}
               title="Sync now from Cloud"
-              className="text-slate-400 hover:text-white p-1 rounded-md hover:bg-slate-800 transition-colors shrink-0"
+              className="text-slate-400 hover:text-white p-1 rounded-md hover:bg-slate-800 transition-colors shrink-0 cursor-pointer"
             >
               <RefreshCw className={`w-3 h-3 ${cloudSyncStatus.status === 'syncing' ? 'animate-spin text-amber-400' : ''}`} />
             </button>
@@ -880,17 +890,18 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
             <div className="p-6 pb-4 flex justify-between items-center border-b border-slate-800 shrink-0">
                 <div className="flex items-center space-x-2.5 min-w-0">
                     <div className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center p-1 overflow-hidden shrink-0">
-                      {canteenConfig.logoUrl ? (
-                        <img 
-                          src={resolveImageUrl(canteenConfig.logoUrl)} 
-                          alt="Logo" 
-                          referrerPolicy="no-referrer"
-                          className="w-full h-full object-contain"
-                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                        />
-                      ) : (
-                        <Utensils className="w-4 h-4 text-[#4f46e5]" />
-                      )}
+                      <img 
+                        src={canteenConfig.logoUrl ? resolveImageUrl(canteenConfig.logoUrl) : '/155-uasu-baf-logo.png'} 
+                        alt="Logo" 
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-contain"
+                        onError={(e) => {
+                          const target = e.currentTarget as HTMLImageElement;
+                          if (!target.src.includes('155-uasu-baf-logo.png')) {
+                            target.src = '/155-uasu-baf-logo.png';
+                          }
+                        }}
+                      />
                     </div>
                     <h1 className="font-black text-base tracking-wider truncate text-white">
                         {canteenConfig.name.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'CAFEUAV'}
@@ -1043,15 +1054,18 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
                 <Menu className="w-5 h-5" />
               </button>
               <div className="flex items-center space-x-2">
-                {canteenConfig.logoUrl && (
-                  <img 
-                    src={resolveImageUrl(canteenConfig.logoUrl)} 
-                    alt="Logo" 
-                    referrerPolicy="no-referrer"
-                    className="w-6 h-6 object-contain"
-                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                  />
-                )}
+                <img 
+                  src={canteenConfig.logoUrl ? resolveImageUrl(canteenConfig.logoUrl) : '/155-uasu-baf-logo.png'} 
+                  alt="Logo" 
+                  referrerPolicy="no-referrer"
+                  className="w-7 h-7 object-contain shrink-0"
+                  onError={(e) => {
+                    const target = e.currentTarget as HTMLImageElement;
+                    if (!target.src.includes('155-uasu-baf-logo.png')) {
+                      target.src = '/155-uasu-baf-logo.png';
+                    }
+                  }}
+                />
                 <span className="font-bold text-base text-white truncate max-w-[150px]">
                   {canteenConfig.name.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'CAFEUAV'}
                 </span>
@@ -1059,11 +1073,11 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
             </div>
             <div className="flex items-center space-x-2">
               <button
-                onClick={() => pullAllCanteenDataFromCloud()}
-                title="Sync from cloud"
-                className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 active:scale-95 transition-transform"
+                onClick={() => setShowRestoreModal(true)}
+                title="Cloud Status & Data Recovery"
+                className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 active:scale-95 transition-transform cursor-pointer"
               >
-                <Cloud className={`w-4 h-4 ${cloudSyncStatus.status === 'syncing' ? 'text-amber-400 animate-pulse' : 'text-emerald-400'}`} />
+                <Cloud className={`w-4 h-4 ${cloudSyncStatus.status === 'syncing' ? 'text-amber-400 animate-pulse' : cloudSyncStatus.status === 'error' ? 'text-rose-400' : 'text-emerald-400'}`} />
               </button>
               <div 
                 onClick={handleCustomerProfileClick}
@@ -1230,6 +1244,17 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
           role="USER"
           allowEditDelete={false}
           canteenOnly={true}
+        />
+      )}
+
+      {/* Cloud Quota & Data Recovery Center Modal */}
+      {showRestoreModal && (
+        <DataRestoreModal
+          isOpen={showRestoreModal}
+          onClose={() => setShowRestoreModal(false)}
+          onDataRestored={() => {
+            pullAllCanteenDataFromCloud().catch(() => {});
+          }}
         />
       )}
       </div>

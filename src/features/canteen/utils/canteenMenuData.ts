@@ -653,7 +653,7 @@ export async function fetchCanteenMembersOnce(force = false): Promise<any[]> {
           };
         });
         const currentLocal = getCanteenMembersCache();
-        const mergedWithLocal = deduplicateCanteenMembers([...merged, ...currentLocal]);
+        const mergedWithLocal = deduplicateCanteenMembers([...currentLocal, ...merged]);
         const sorted = normalizeCanteenMembersSeniority(sortCanteenMembersByOfficeSeniority(mergedWithLocal));
         setCanteenMembersCache(sorted);
         return sorted;

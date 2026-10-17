@@ -179,19 +179,18 @@ export const EmployeeDashboard: React.FC<EmployeeDashboardProps> = ({ onManagerP
             
             <div className="flex flex-col items-center space-y-2 z-10 text-center">
                <div className="w-14 h-14 bg-slate-800/90 rounded-2xl flex items-center justify-center p-1.5 border border-slate-700 shadow-inner overflow-hidden mb-1">
-                 {canteenConfig.logoUrl ? (
-                   <img 
-                     src={resolveImageUrl(canteenConfig.logoUrl)} 
-                     alt="Canteen Logo" 
-                     referrerPolicy="no-referrer"
-                     className="w-full h-full object-contain"
-                     onError={(e) => {
-                       e.currentTarget.style.display = 'none';
-                     }}
-                   />
-                 ) : (
-                   <Utensils className="w-6 h-6 text-[#4f46e5]" />
-                 )}
+                 <img 
+                   src={canteenConfig.logoUrl ? resolveImageUrl(canteenConfig.logoUrl) : '/155-uasu-baf-logo.png'} 
+                   alt="Canteen Logo" 
+                   referrerPolicy="no-referrer"
+                   className="w-full h-full object-contain"
+                   onError={(e) => {
+                     const target = e.currentTarget as HTMLImageElement;
+                     if (!target.src.includes('155-uasu-baf-logo.png')) {
+                       target.src = '/155-uasu-baf-logo.png';
+                     }
+                   }}
+                 />
                </div>
                <h2 className="text-3xl md:text-4xl font-black tracking-widest flex items-center justify-center space-x-2">
                  <span>{canteenConfig.name || '🍽️ CAFE UAV 🍽️'}</span>

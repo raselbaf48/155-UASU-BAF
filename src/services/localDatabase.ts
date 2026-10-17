@@ -19,7 +19,22 @@ import { calculateDutyStats, detectConflicts, getDaysInMonth } from '../data/ros
 import { DutyRatioTable, INITIAL_OFFICIAL_DUTY_MATRIX, getStoredDutyMatrix, saveDutyMatrix } from '../data/officialDutyRatioMatrix';
 import { findBestAirmanMatch as matchAirmanRankFirst, parseRosterTextHeuristically } from '../utils/airmanMatcher';
 import { sortAirmenBySeniority, normalizeAirmenSeniority, reorderAirmanSeniority } from '../utils/seniority';
-// import { saveDbToFirebase, getDbFromFirebase } from '../firebase';
+import { isFirebaseConfigured } from '../firebase';
+import {
+  fetchAirmenFromFirebase,
+  pushAirmenToFirebase,
+  fetchDutyAssignmentsFromFirebase,
+  pushDutyAssignmentsToFirebase,
+  fetchParadeStatesFromFirebase,
+  pushParadeStatesToFirebase,
+  fetchUserProfilesFromFirebase,
+  pushUserProfilesToFirebase,
+  fetchAppSettingsFromFirebase,
+  pushAppSettingsToFirebase,
+  pushCanteenMembersToFirebase,
+  executeFullMigrationToFirebase,
+  FirebaseMigrationResult
+} from './firebaseFirestoreService';
 
 export interface LocalStorageDB {
   airmen: Airman[];
@@ -217,18 +232,100 @@ export class LocalDatabaseEngine {
   public async syncFromFirebase(): Promise<boolean> {
     if (typeof window === 'undefined') return false;
     
-    if (!isSupabaseConfigured) {
+    if (!isFirebaseConfigured && !isSupabaseConfigured) {
       return false;
     }
     
     if (this.isFirebaseSyncing) return false;
     
     this.isFirebaseSyncing = true;
-    addSyncLog({ timestamp: new Date().toISOString(), type: "PULL", status: "SUCCESS", message: "Fetching data from Supabase..." });
+    const providerName = isFirebaseConfigured ? "Firebase Firestore" : "Supabase";
+    addSyncLog({ timestamp: new Date().toISOString(), type: "PULL", status: "SUCCESS", message: `Fetching data from ${providerName}...` });
     
     try {
       let dataChanged = false;
       const newDb = { ...this.db };
+
+      // 0. Primary Provider: Firebase Firestore
+      if (isFirebaseConfigured) {
+        emitSyncProgress(15, "Connecting to Firebase Firestore...");
+        try {
+          const fbAirmen = await fetchAirmenFromFirebase();
+          if (fbAirmen && fbAirmen.length > 0) {
+            emitSyncProgress(40, `Fetched ${fbAirmen.length} airmen from Firebase Firestore`);
+            newDb.airmen = fbAirmen;
+            dataChanged = true;
+
+            try {
+              const fbAssignments = await fetchDutyAssignmentsFromFirebase();
+              if (fbAssignments && fbAssignments.length > 0) {
+                const assignmentsByMonth: Record<string, DutyAssignment[]> = {};
+                fbAssignments.forEach(a => {
+                  const ym = a.date ? a.date.slice(0, 7) : '2026-10';
+                  if (!assignmentsByMonth[ym]) assignmentsByMonth[ym] = [];
+                  assignmentsByMonth[ym].push(a);
+                });
+                newDb.assignments = assignmentsByMonth;
+                dataChanged = true;
+              }
+            } catch (aErr) {}
+
+            try {
+              const fbHistory = await fetchParadeStatesFromFirebase();
+              if (fbHistory && fbHistory.length > 0) {
+                newDb.activityHistory = fbHistory;
+                dataChanged = true;
+              }
+            } catch (hErr) {}
+
+            try {
+              const fbUsers = await fetchUserProfilesFromFirebase();
+              if (fbUsers && fbUsers.length > 0) {
+                newDb.detailedUsers = fbUsers;
+                dataChanged = true;
+              }
+            } catch (uErr) {}
+
+            try {
+              const fbSettings = await fetchAppSettingsFromFirebase();
+              if (fbSettings && Object.keys(fbSettings).length > 0) {
+                Object.entries(fbSettings).forEach(([k, v]) => {
+                  if (typeof window !== 'undefined') window.localStorage.setItem(k, v);
+                });
+              }
+            } catch (sErr) {}
+
+            newDb.lastUpdated = new Date().toISOString();
+            this.db = newDb;
+            this.saveToStorage(newDb, true, false, false);
+            if (typeof window !== 'undefined') {
+              window.localStorage.removeItem('baf_pending_sync');
+              window.localStorage.setItem(STORAGE_KEY, JSON.stringify(newDb));
+            }
+            firebaseConnected = true;
+            firebaseLastSyncTime = new Date().toISOString();
+            window.dispatchEvent(new CustomEvent('baf_db_updated', { detail: { source: 'firebase' } }));
+            addSyncLog({ timestamp: new Date().toISOString(), type: "PULL", status: "SUCCESS", message: `Data synced from Firebase Firestore successfully (${fbAirmen.length} airmen).` });
+            this.lastSyncedDbStr = JSON.stringify(this.db);
+            this.isFirebaseSyncing = false;
+            emitSyncProgress(100, "Firebase sync complete!");
+            return true;
+          } else if (this.db.airmen.length > 0) {
+            // Firebase Firestore is newly provisioned: auto-seed from local database!
+            emitSyncProgress(30, "Seeding Firebase Firestore from local records...");
+            await pushAirmenToFirebase(this.db.airmen);
+            const allAssignments: DutyAssignment[] = [];
+            Object.values(this.db.assignments || {}).forEach((arr: any) => {
+              if (Array.isArray(arr)) allAssignments.push(...arr);
+            });
+            if (allAssignments.length > 0) await pushDutyAssignmentsToFirebase(allAssignments);
+            if (this.db.activityHistory?.length) await pushParadeStatesToFirebase(this.db.activityHistory);
+            if (this.db.detailedUsers?.length) await pushUserProfilesToFirebase(this.db.detailedUsers);
+          }
+        } catch (fbErr: any) {
+          console.warn("Firebase sync attempt error, fallback to Supabase if configured:", fbErr);
+        }
+      }
       
       // Helper to fetch all rows with pagination and timeout resilience
       const fetchAll = async (table: string) => {
@@ -1337,6 +1434,26 @@ export class LocalDatabaseEngine {
            }
         }
 
+        // Direct Push to Firebase Firestore
+        if (isFirebaseConfigured) {
+          try {
+            if (changedAirmen.length > 0) {
+              await pushAirmenToFirebase(changedAirmen);
+            }
+            if (changedAssignments.length > 0) {
+              await pushDutyAssignmentsToFirebase(changedAssignments);
+            }
+            if (changedHistory.length > 0) {
+              await pushParadeStatesToFirebase(changedHistory);
+            }
+            if (changedUsers.length > 0) {
+              await pushUserProfilesToFirebase(changedUsers);
+            }
+          } catch (fbPushErr) {
+            console.warn("Direct Firebase Firestore push warning:", fbPushErr);
+          }
+        }
+
         if (hasError) {
            emitSyncProgress(0, "Sync Failed!");
            addSyncLog({ timestamp: new Date().toISOString(), type: "PUSH", status: "ERROR", message: "Sync Failed: " + errorMessage });
@@ -1373,6 +1490,12 @@ export class LocalDatabaseEngine {
     }
   }
 
+  /**
+   * Migrate all local and cloud data to Firebase Firestore
+   */
+  public async migrateToFirebase(): Promise<FirebaseMigrationResult> {
+    return await executeFullMigrationToFirebase(this.db);
+  }
 
   public async syncDutyMatrixToCloud(providedMatrix?: any[]): Promise<boolean> {
     if (typeof window === 'undefined') return false;

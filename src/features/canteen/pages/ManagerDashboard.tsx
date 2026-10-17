@@ -826,17 +826,18 @@ export const ManagerDashboard: React.FC = () => {
 
            <div className="z-10 flex flex-col items-center space-y-4">
               <div className="w-16 h-16 bg-slate-800 rounded-2xl flex items-center justify-center p-2 border border-slate-700 shadow-inner overflow-hidden">
-                 {canteenConfig.logoUrl ? (
-                    <img 
-                      src={resolveImageUrl(canteenConfig.logoUrl)} 
-                      alt="Logo" 
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full object-contain opacity-90" 
-                      onError={(e) => { e.currentTarget.style.display = 'none'; }} 
-                    />
-                 ) : (
-                    <Utensils className="w-8 h-8 text-[#4f46e5]" />
-                 )}
+                <img 
+                  src={canteenConfig.logoUrl ? resolveImageUrl(canteenConfig.logoUrl) : '/155-uasu-baf-logo.png'} 
+                  alt="Logo" 
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-contain opacity-90" 
+                  onError={(e) => { 
+                    const target = e.currentTarget as HTMLImageElement;
+                    if (!target.src.includes('155-uasu-baf-logo.png')) {
+                      target.src = '/155-uasu-baf-logo.png';
+                    }
+                  }} 
+                />
               </div>
               
               <h2 className="text-2xl sm:text-3xl md:text-4xl font-black text-white tracking-wider sm:tracking-widest flex items-center justify-center whitespace-nowrap text-center px-2">

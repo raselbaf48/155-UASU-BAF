@@ -449,7 +449,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
 
     setIsLoading(true);
 
-    const validation = await validateUserLogin(cleanInput, passwordInput, airmen);
+    const validation = await validateUserLogin(cleanInput, passwordInput || cleanInput, airmen);
 
 
 
@@ -864,7 +864,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                                   : 'top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400 tracking-wider bg-transparent'
                               }`}
                             >
-                              PIN
+                              PIN (Default: User ID)
                             </label>
                             <button
                               type="button"
@@ -875,6 +875,9 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                               {showPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                             </button>
                           </div>
+                          <p className="text-[10px] text-slate-400 mt-1 pl-1">
+                            ডিফল্ট PIN হলো আপনার User ID (PIN খালি রাখলেও লগইন হবে)
+                          </p>
                         </div>
                       )}
                     </>

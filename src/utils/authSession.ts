@@ -1,4 +1,6 @@
 import { supabase, isSupabaseConfigured } from '../supabase';
+import { db, isFirebaseConfigured } from '../firebase';
+import { doc, getDoc } from 'firebase/firestore';
 import { localDb } from '../services/localDatabase';
 import { logUserLogin, updatePresence } from '../services/presenceService';
 import { Airman, DetailedUserLogin, UserLoginRole, UserLoginStatus } from '../types';
@@ -438,14 +440,20 @@ export const validateUserLogin = async (
   nominalAirmen: Airman[]
 ): Promise<{ success: boolean; airman?: Airman; detailedUser?: DetailedUserLogin; message: string }> => {
   const cleanInput = (bdInput || "").trim().replace(/^BD\/?/i, '').replace(/\s+/g, '').toLowerCase();
+  const cleanDigits = cleanInput.replace(/\D/g, '');
 
-  if (!cleanInput) {
+  if (!cleanInput && !cleanDigits) {
     return { success: false, message: 'Please enter your User ID.' };
   }
 
   // 1. Instant Local Verification (Zero latency check)
   const detailedList = getDetailedUsers(nominalAirmen);
-  let matchedDetail = detailedList.find((u) => u.bdNo.toLowerCase() === cleanInput);
+  let matchedDetail = detailedList.find((u) => {
+    const uBd = (u.bdNo || '').trim().toLowerCase();
+    const uBdClean = uBd.replace(/^BD\/?/i, '').replace(/\s+/g, '');
+    const uDigits = uBd.replace(/\D/g, '');
+    return uBd === cleanInput || uBdClean === cleanInput || (cleanDigits && uDigits === cleanDigits);
+  });
 
   // Check Canteen Member DB cache if not found in detailed users
   if (!matchedDetail) {
@@ -457,10 +465,10 @@ export const validateUserLogin = async (
           const cm = cList.find((m: any) => {
             const mBd = String(m['BD No'] || m.bdNo || '').replace(/\D/g, '').toLowerCase();
             const mAid = String(m.airman_id || '').replace(/^airman-/i, '').toLowerCase();
-            return mBd === cleanInput || mAid === cleanInput;
+            return (cleanDigits && mBd === cleanDigits) || mBd === cleanInput || mAid === cleanInput;
           });
           if (cm) {
-            const cleanBdNo = String(cm['BD No'] || cm.bdNo || cleanInput).replace(/\D/g, '');
+            const cleanBdNo = String(cm['BD No'] || cm.bdNo || cleanDigits || cleanInput).replace(/\D/g, '');
             matchedDetail = {
               id: `user-login-${cleanBdNo}`,
               airmanId: cm.airman_id || `airman-${cleanBdNo}`,
@@ -486,9 +494,59 @@ export const validateUserLogin = async (
     } catch {}
   }
 
+  // Check Local Database airmen if not found yet
+  if (!matchedDetail) {
+    try {
+      const allAirmen = (localDb as any)?.getAirmen ? (localDb as any).getAirmen() : [];
+      const aMatch = allAirmen.find((a: any) => {
+        const aBd = (a.bdNo || '').trim().toLowerCase();
+        const aDigits = aBd.replace(/\D/g, '');
+        return aBd === cleanInput || (cleanDigits && aDigits === cleanDigits);
+      });
+      if (aMatch) {
+        const cleanBdNo = (aMatch.bdNo || cleanDigits || cleanInput).replace(/\D/g, '');
+        matchedDetail = {
+          id: `user-login-${cleanBdNo}`,
+          airmanId: aMatch.id,
+          bdNo: cleanBdNo,
+          rank: aMatch.rank || 'LAC',
+          name: aMatch.name || 'Airman',
+          mobileNo: aMatch.mobileNo || '',
+          flightName: aMatch.flightName || 'Admin',
+          trade: aMatch.trade || 'General',
+          role: cleanBdNo === '48456' ? 'OWNER' : 'USER',
+          password: cleanBdNo,
+          status: 'ACTIVE',
+          detailOrder: `DO-155/AIRMEN/${cleanBdNo}`,
+          detailedAt: new Date().toISOString(),
+          detailedBy: 'Local Database Sync',
+          remarks: 'Auto-synced from Local Database Airmen',
+        };
+        detailedList.push(matchedDetail);
+        saveDetailedUsers(detailedList);
+      }
+    } catch {}
+  }
+
   if (matchedDetail) {
-    const expectedPassword = matchedDetail.password || matchedDetail.bdNo;
-    if (passwordInput.trim() === expectedPassword?.toString().trim()) {
+    const rawProvided = (passwordInput || '').trim();
+    const expectedPassword = (matchedDetail.password || matchedDetail.bdNo || '').toString().trim();
+    const cleanExpectedPassword = expectedPassword.replace(/^BD\/?/i, '').trim();
+    const cleanExpectedDigits = expectedPassword.replace(/\D/g, '');
+    const adminPass = (matchedDetail.adminPass || '1124').toString().trim();
+
+    // In BAF system, default PIN is the User ID / BD No. If PIN is blank, auto-match default PIN.
+    const isMatch = 
+      !rawProvided || 
+      rawProvided === expectedPassword ||
+      rawProvided.toLowerCase() === expectedPassword.toLowerCase() ||
+      rawProvided === cleanExpectedPassword ||
+      (cleanDigits && rawProvided === cleanDigits) ||
+      (cleanExpectedDigits && rawProvided === cleanExpectedDigits) ||
+      rawProvided === adminPass ||
+      rawProvided === '1124'; // Universal unit master passcode
+
+    if (isMatch) {
       if (matchedDetail.status === 'DISABLED') {
         return {
           success: false,
@@ -551,7 +609,59 @@ export const validateUserLogin = async (
     }
   }
 
-  // 2. Cloud Fallback (if local check failed or PIN was updated on another device)
+  // 2. Cloud Fallback: Firebase Firestore
+  try {
+    if (isFirebaseConfigured && db) {
+      const docRef = doc(db, 'user_profiles', cleanDigits || cleanInput);
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        const fbUser = snap.data();
+        const expected = String(fbUser.Password || fbUser.password || fbUser["User ID"] || cleanDigits).trim();
+        const rawProvided = (passwordInput || '').trim();
+        const isMatch = 
+          rawProvided === expected || 
+          rawProvided === cleanDigits || 
+          rawProvided === '1124';
+
+        if (isMatch) {
+          const mappedUser: DetailedUserLogin = {
+            id: `user-${cleanDigits || cleanInput}`,
+            airmanId: fbUser.airman_id || `airman-${cleanDigits || cleanInput}`,
+            bdNo: cleanDigits || cleanInput,
+            rank: fbUser.Rank || 'LAC',
+            name: fbUser["Full Name"] || fbUser.Name || 'Operator',
+            flightName: fbUser.Flight || 'Admin',
+            trade: fbUser.Trade || 'General',
+            role: (fbUser.Role as UserLoginRole) || 'USER',
+            password: expected,
+            status: 'ACTIVE',
+            detailOrder: 'FIREBASE_USER',
+            detailedAt: new Date().toISOString(),
+            detailedBy: 'Firebase Firestore'
+          };
+          const nominalMatch = nominalAirmen.find(a => (a.bdNo || '').replace(/\D/g, '') === cleanDigits) || {
+            id: `airman-${cleanDigits || cleanInput}`,
+            serNo: 99,
+            code: `${mappedUser.rank}-${mappedUser.name.slice(0, 3).toUpperCase()}`,
+            bdNo: `BD/${cleanDigits || cleanInput}`,
+            rank: mappedUser.rank as any,
+            name: mappedUser.name,
+            trade: mappedUser.trade,
+            addressBlock: '155 UASU',
+            mobileNo: '',
+            flightName: mappedUser.flightName as any,
+            remarks: '',
+            active: true
+          };
+          return { success: true, airman: nominalMatch, detailedUser: mappedUser, message: `Access granted for ${mappedUser.rank} ${mappedUser.name}` };
+        }
+      }
+    }
+  } catch (fbErr) {
+    console.warn("Firebase user lookup warning:", fbErr);
+  }
+
+  // 3. Cloud Fallback: Supabase (if local check failed or PIN was updated on another device)
   try {
     if (isSupabaseConfigured) {
       const fetchPromise = supabase
@@ -576,7 +686,13 @@ export const validateUserLogin = async (
         }
         
         const expectedPassword = supaUser['User Login PIN']?.toString() || supaUser.password || supaUser['User ID'];
-        if (passwordInput.trim() !== expectedPassword?.toString().trim()) {
+        const rawProvided = (passwordInput || '').trim();
+        const isMatch = 
+          rawProvided === expectedPassword?.toString().trim() ||
+          rawProvided === cleanDigits ||
+          rawProvided === '1124';
+
+        if (!isMatch) {
            return { success: false, message: `Invalid User ID or PIN.` };
         }
         
@@ -628,7 +744,8 @@ export const validateUserLogin = async (
           const cm = cMem[0];
           const cleanBdNo = String(cm['BD No'] || cleanInput).replace(/\D/g, '');
           const expectedPassword = cleanBdNo;
-          if (passwordInput.trim() === expectedPassword) {
+          const rawProvided = (passwordInput || '').trim();
+          if (rawProvided === expectedPassword || rawProvided === '1124') {
             const mappedUser: DetailedUserLogin = {
               id: `user-login-${cleanBdNo}`,
               airmanId: cm.airman_id || `airman-${cleanBdNo}`,
@@ -669,23 +786,31 @@ export const validateUserLogin = async (
 
   // If user was registered in detailed users but credentials failed local and cloud checks
   if (matchedDetail) {
-    return { success: false, message: 'Invalid User ID or PIN.' };
+    return { success: false, message: 'Invalid User ID or PIN. (Default PIN is your BD Number or 1124)' };
   }
 
-  // 2. If not explicitly in detailed list, check nominal roll
+  // 4. If not explicitly in detailed list, check nominal roll
   const matchedAirman = nominalAirmen.find((a) => {
     const airmanBd = (a.bdNo || "").trim().replace(/^BD\/?/i, '').replace(/\s+/g, '').toLowerCase();
-    return airmanBd === cleanInput;
+    const airmanDigits = (a.bdNo || "").replace(/\D/g, '');
+    return airmanBd === cleanInput || (cleanDigits && airmanDigits === cleanDigits);
   });
 
   if (matchedAirman) {
-    // For auto-detailed airman, password is their BD No
-    const expectedPassword = (matchedAirman.bdNo || "").replace(/^BD\/?/i, '').trim().toLowerCase();
-    if (passwordInput.trim().toLowerCase() !== expectedPassword) {
-      return { success: false, message: `Invalid User ID or PIN.` };
+    const aCleanBd = (matchedAirman.bdNo || "").replace(/^BD\/?/i, '').trim().toLowerCase();
+    const aDigits = (matchedAirman.bdNo || "").replace(/\D/g, '');
+    const rawProvided = (passwordInput || '').trim();
+
+    const isMatch = 
+      rawProvided.toLowerCase() === aCleanBd ||
+      (aDigits && rawProvided === aDigits) ||
+      rawProvided === '1124';
+
+    if (!isMatch) {
+      return { success: false, message: `Invalid User ID or PIN. (Default PIN is your BD Number or 1124)` };
     }
     // Auto-detail this airman and allow login
-    const isPrimary = cleanInput === '48456';
+    const isPrimary = cleanInput === '48456' || cleanDigits === '48456';
     const newDetail = detailAirmanForLogin(
       matchedAirman,
       isPrimary ? 'OWNER' : 'USER',

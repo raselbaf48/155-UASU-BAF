@@ -31,9 +31,35 @@ export function deduplicateCanteenMembers(members: any[]): any[] {
       continue;
     }
 
-    // Check duplicate BD
-    if (cleanBd && seenBd.has(cleanBd)) continue;
-    if (airmanId && seenAirmanId.has(airmanId)) continue;
+    // Check duplicate BD or airmanId and merge non-empty values
+    if (cleanBd && seenBd.has(cleanBd)) {
+      const existing = result.find(r => String(r['BD No'] || r.bdNo || '').replace(/\D/g, '').toLowerCase() === cleanBd);
+      if (existing) {
+        if (!existing.DP && m.DP) existing.DP = m.DP;
+        if ((existing.Due === undefined || Number(existing.Due) === 0) && m.Due !== undefined && Number(m.Due) !== 0) {
+          existing.Due = Number(m.Due);
+          existing.baki = Number(m.Due);
+        }
+        if (!existing.Contact && (m.Contact || m['Mobile No'])) existing.Contact = m.Contact || m['Mobile No'];
+        if (!existing.Name_BN && (m.Name_BN || m.name_bn)) existing.Name_BN = m.Name_BN || m.name_bn;
+        if (!existing.Rank_BN && (m.Rank_BN || m.rank_bn)) existing.Rank_BN = m.Rank_BN || m.rank_bn;
+      }
+      continue;
+    }
+    if (airmanId && seenAirmanId.has(airmanId)) {
+      const existing = result.find(r => String(r.airman_id || r.id || '').toLowerCase() === airmanId);
+      if (existing) {
+        if (!existing.DP && m.DP) existing.DP = m.DP;
+        if ((existing.Due === undefined || Number(existing.Due) === 0) && m.Due !== undefined && Number(m.Due) !== 0) {
+          existing.Due = Number(m.Due);
+          existing.baki = Number(m.Due);
+        }
+        if (!existing.Contact && (m.Contact || m['Mobile No'])) existing.Contact = m.Contact || m['Mobile No'];
+        if (!existing.Name_BN && (m.Name_BN || m.name_bn)) existing.Name_BN = m.Name_BN || m.name_bn;
+        if (!existing.Rank_BN && (m.Rank_BN || m.rank_bn)) existing.Rank_BN = m.Rank_BN || m.rank_bn;
+      }
+      continue;
+    }
 
     // Check duplicate Civilian staff with identical name
     if (rank === 'civ' || rank === '-' || rank === 'civilian') {
@@ -45,8 +71,12 @@ export function deduplicateCanteenMembers(members: any[]): any[] {
         if (cleanBd.length > existingBd.length) {
           const idx = result.indexOf(existing);
           if (idx !== -1) {
-            result[idx] = m;
-            seenCivName.set(civKey, m);
+            result[idx] = {
+              ...m,
+              DP: m.DP || existing.DP || '',
+              Due: (m.Due !== undefined && Number(m.Due) !== 0) ? m.Due : (existing.Due || 0)
+            };
+            seenCivName.set(civKey, result[idx]);
             if (cleanBd) seenBd.add(cleanBd);
             if (airmanId) seenAirmanId.add(airmanId);
           }
@@ -58,7 +88,7 @@ export function deduplicateCanteenMembers(members: any[]): any[] {
 
     if (cleanBd) seenBd.add(cleanBd);
     if (airmanId) seenAirmanId.add(airmanId);
-    result.push(m);
+    result.push({ ...m });
   }
   return result;
 }

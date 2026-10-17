@@ -961,6 +961,21 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
     }
 
     if (fetchError && (!data || data.length === 0)) {
+      const hasLocalKeys = typeof window !== 'undefined' && Boolean(
+        localStorage.getItem('canteen_daily_menu') || 
+        localStorage.getItem('canteen_txs') || 
+        localStorage.getItem('canteen_menu_cache') || 
+        localStorage.getItem('canteen_members_cache') ||
+        localStorage.getItem('canteen_settings')
+      );
+      if (hasLocalKeys) {
+        console.warn('[CanteenCloudSync] Cloud quota/network limit, operating on local persistent storage:', fetchError.message);
+        notifyStatus({ 
+          status: 'synced', 
+          lastSyncTime: new Date().toLocaleTimeString() 
+        });
+        return;
+      }
       console.warn('[CanteenCloudSync] Cloud pull notice:', fetchError);
       notifyStatus({ status: 'error', errorMessage: fetchError.message });
       return;

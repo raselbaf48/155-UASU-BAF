@@ -406,6 +406,35 @@ async function handleLocalApiRequest(urlStr: string, init?: RequestInit): Promis
       });
     }
 
+    // 13. Canteen Settings Local Bridge (Supports static Cloudflare Pages hosting)
+    if (pathname === '/api/canteen/all-settings') {
+      const items: any[] = [];
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && (k.startsWith('canteen_') || k.startsWith('baf_'))) {
+            items.push({
+              setting_key: k,
+              setting_value: localStorage.getItem(k) || '',
+              updated_at: new Date().toISOString()
+            });
+          }
+        }
+      } catch {}
+      return jsonResponse(items);
+    }
+
+    if (pathname === '/api/canteen/save-setting') {
+      const { setting_key, setting_value } = body || {};
+      if (setting_key && typeof window !== 'undefined') {
+        try {
+          const str = typeof setting_value === 'string' ? setting_value : JSON.stringify(setting_value);
+          localStorage.setItem(setting_key, str);
+        } catch {}
+      }
+      return jsonResponse({ success: true, setting_key });
+    }
+
     // Default fallback: return empty object or success
     return jsonResponse({ success: true, message: 'Handled by Local Bridge' });
   } catch (err: any) {

@@ -44,6 +44,80 @@ function saveAppSettings(settings: Record<string, { setting_key: string; setting
   }
 }
 
+const CANTEEN_MEMBERS_FILE = path.join(DATA_DIR, 'canteen_members.json');
+const CANTEEN_TXS_FILE = path.join(DATA_DIR, 'canteen_transactions.json');
+const CANTEEN_EXPENSES_FILE = path.join(DATA_DIR, 'canteen_expenses.json');
+
+function loadCanteenMembers(): any[] {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (fs.existsSync(CANTEEN_MEMBERS_FILE)) {
+      const raw = fs.readFileSync(CANTEEN_MEMBERS_FILE, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (err) {
+    console.error('Error reading canteen_members.json:', err);
+  }
+  return [];
+}
+
+function saveCanteenMembers(members: any[]) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(CANTEEN_MEMBERS_FILE, JSON.stringify(members, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Failed to save canteen_members.json:', err);
+  }
+}
+
+function loadCanteenTransactions(): any[] {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (fs.existsSync(CANTEEN_TXS_FILE)) {
+      const raw = fs.readFileSync(CANTEEN_TXS_FILE, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (err) {
+    console.error('Error reading canteen_transactions.json:', err);
+  }
+  return [];
+}
+
+function saveCanteenTransactions(txs: any[]) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(CANTEEN_TXS_FILE, JSON.stringify(txs, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Failed to save canteen_transactions.json:', err);
+  }
+}
+
+function loadCanteenExpenses(): any[] {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (fs.existsSync(CANTEEN_EXPENSES_FILE)) {
+      const raw = fs.readFileSync(CANTEEN_EXPENSES_FILE, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (err) {
+    console.error('Error reading canteen_expenses.json:', err);
+  }
+  return [];
+}
+
+function saveCanteenExpenses(exp: any[]) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(CANTEEN_EXPENSES_FILE, JSON.stringify(exp, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Failed to save canteen_expenses.json:', err);
+  }
+}
+
+
 interface LocalDB {
   airmen: Airman[];
   assignments: Record<string, DutyAssignment[]>; // monthKey YYYY-MM -> DutyAssignment[]
@@ -248,6 +322,384 @@ async function startServer() {
 
   app.all('/api/supabase/*', express.raw({ type: '*/*', limit: '50mb' }), async (req, res) => {
     let targetUrl = '';
+    function handleCanteenFallback(urlString: string, bodyData: any): boolean {
+      try {
+        const urlObj = new URL(urlString, 'http://localhost');
+        const pathname = urlObj.pathname;
+
+        // 1. APP_SETTINGS
+        if (pathname.includes('/rest/v1/app_settings')) {
+          const settings = loadAppSettings();
+          if (req.method === 'GET') {
+            let rows = Object.values(settings);
+            const settingKeyParam = urlObj.searchParams.get('setting_key');
+            if (settingKeyParam) {
+              if (settingKeyParam.startsWith('like.')) {
+                const prefix = settingKeyParam.slice(5).replace(/[%_]/g, '');
+                rows = rows.filter(r => r.setting_key.startsWith(prefix));
+              } else if (settingKeyParam.startsWith('eq.')) {
+                const targetKey = settingKeyParam.slice(3);
+                rows = rows.filter(r => r.setting_key === targetKey);
+              }
+            }
+            res.setHeader('content-type', 'application/json');
+            const accept = String(req.headers['accept'] || '');
+            if (accept.includes('application/vnd.pgrst.object+json')) {
+              res.status(200).send(JSON.stringify(rows[0] || null));
+              return true;
+            }
+            res.status(200).send(JSON.stringify(rows));
+            return true;
+          } else if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
+            try {
+              let parsedBody = bodyData;
+              if (typeof parsedBody === 'string') {
+                try { parsedBody = JSON.parse(parsedBody); } catch {}
+              } else if (Buffer.isBuffer(parsedBody)) {
+                try { parsedBody = JSON.parse(parsedBody.toString()); } catch {}
+              }
+              const items = Array.isArray(parsedBody) ? parsedBody : (parsedBody ? [parsedBody] : []);
+              for (const it of items) {
+                if (it && it.setting_key) {
+                  settings[it.setting_key] = {
+                    setting_key: it.setting_key,
+                    setting_value: typeof it.setting_value === 'string' ? it.setting_value : JSON.stringify(it.setting_value),
+                    updated_at: it.updated_at || new Date().toISOString()
+                  };
+                }
+              }
+              saveAppSettings(settings);
+              res.setHeader('content-type', 'application/json');
+              res.status(201).send(JSON.stringify(items));
+              return true;
+            } catch (pErr) {
+              console.warn('[Proxy Fallback] Could not parse app_settings body:', pErr);
+            }
+          }
+        }
+
+        // 2. CANTEEN_MEMBER
+        if (pathname.includes('/rest/v1/Canteen_Member')) {
+          let members = loadCanteenMembers();
+          if (req.method === 'GET') {
+            const airmanIdParam = urlObj.searchParams.get('airman_id');
+            const bdNoParam = urlObj.searchParams.get('BD No');
+            if (airmanIdParam && airmanIdParam.startsWith('eq.')) {
+              const target = airmanIdParam.slice(3).toLowerCase();
+              members = members.filter(m => String(m.airman_id || '').toLowerCase() === target || String(m['BD No'] || '').toLowerCase() === target);
+            } else if (bdNoParam && bdNoParam.startsWith('eq.')) {
+              const target = bdNoParam.slice(3).toLowerCase();
+              members = members.filter(m => String(m['BD No'] || '').toLowerCase() === target);
+            }
+            res.setHeader('content-type', 'application/json');
+            const accept = String(req.headers['accept'] || '');
+            if (accept.includes('application/vnd.pgrst.object+json')) {
+              res.status(200).send(JSON.stringify(members[0] || null));
+              return true;
+            }
+            res.status(200).send(JSON.stringify(members));
+            return true;
+          } else if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
+            try {
+              let parsedBody = bodyData;
+              if (typeof parsedBody === 'string') {
+                try { parsedBody = JSON.parse(parsedBody); } catch {}
+              } else if (Buffer.isBuffer(parsedBody)) {
+                try { parsedBody = JSON.parse(parsedBody.toString()); } catch {}
+              }
+              const incoming = Array.isArray(parsedBody) ? parsedBody : (parsedBody ? [parsedBody] : []);
+              for (const inc of incoming) {
+                if (!inc) continue;
+                const incAid = String(inc.airman_id || inc.id || '').trim().toLowerCase();
+                const incBd = String(inc['BD No'] || inc.bdNo || '').replace(/\D/g, '');
+                const idx = members.findIndex(m => {
+                  const mAid = String(m.airman_id || m.id || '').trim().toLowerCase();
+                  const mBd = String(m['BD No'] || m.bdNo || '').replace(/\D/g, '');
+                  return (incAid && mAid === incAid) || (incBd && mBd === incBd);
+                });
+                if (idx !== -1) {
+                  members[idx] = {
+                    ...members[idx],
+                    ...inc,
+                    DP: inc.DP !== undefined && inc.DP !== '' ? inc.DP : members[idx].DP,
+                    Due: inc.Due !== undefined ? Number(inc.Due) : members[idx].Due,
+                    Contact: inc.Contact || members[idx].Contact
+                  };
+                } else {
+                  members.push({
+                    airman_id: inc.airman_id || (incBd ? `airman-${incBd}` : `airman-${Date.now()}`),
+                    "BD No": inc['BD No'] || incBd || '',
+                    Rank: inc.Rank || 'LAC',
+                    Surname: inc.Surname || inc.name || '',
+                    DP: inc.DP || '',
+                    Due: Number(inc.Due) || 0,
+                    Contact: inc.Contact || '',
+                    Role: inc.Role || 'Member',
+                    Flight: inc.Flight || 'Admin',
+                    Trade: inc.Trade || '',
+                    active: true,
+                    ...inc
+                  });
+                }
+              }
+              saveCanteenMembers(members);
+              res.setHeader('content-type', 'application/json');
+              res.status(201).send(JSON.stringify(incoming));
+              return true;
+            } catch (err) {
+              console.warn('[Proxy Fallback] Error saving Canteen_Member:', err);
+            }
+          } else if (req.method === 'DELETE') {
+            const airmanIdParam = urlObj.searchParams.get('airman_id');
+            const bdNoParam = urlObj.searchParams.get('BD No');
+            if (airmanIdParam && airmanIdParam.startsWith('eq.')) {
+              const target = airmanIdParam.slice(3).toLowerCase();
+              members = members.filter(m => String(m.airman_id || '').toLowerCase() !== target);
+            }
+            if (bdNoParam && bdNoParam.startsWith('eq.')) {
+              const target = bdNoParam.slice(3).toLowerCase();
+              members = members.filter(m => String(m['BD No'] || '').toLowerCase() !== target);
+            }
+            saveCanteenMembers(members);
+            res.setHeader('content-type', 'application/json');
+            res.status(200).send(JSON.stringify({ success: true }));
+            return true;
+          }
+        }
+
+        // 3. CANTEEN_TRANSACTIONS
+        if (pathname.includes('/rest/v1/Canteen_Transactions')) {
+          let txs = loadCanteenTransactions();
+          if (req.method === 'GET') {
+            const airmanIdParam = urlObj.searchParams.get('airman_id');
+            const monthKeyParam = urlObj.searchParams.get('month_key');
+            if (airmanIdParam && airmanIdParam.startsWith('eq.')) {
+              const target = airmanIdParam.slice(3).toLowerCase();
+              txs = txs.filter(t => String(t.airman_id || '').toLowerCase() === target || String(t.bd_no || '').toLowerCase() === target);
+            }
+            if (monthKeyParam && monthKeyParam.startsWith('eq.')) {
+              const target = monthKeyParam.slice(3);
+              txs = txs.filter(t => String(t.month_key) === target);
+            }
+            res.setHeader('content-type', 'application/json');
+            res.status(200).send(JSON.stringify(txs));
+            return true;
+          } else if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
+            try {
+              let parsedBody = bodyData;
+              if (typeof parsedBody === 'string') {
+                try { parsedBody = JSON.parse(parsedBody); } catch {}
+              } else if (Buffer.isBuffer(parsedBody)) {
+                try { parsedBody = JSON.parse(parsedBody.toString()); } catch {}
+              }
+              const incoming = Array.isArray(parsedBody) ? parsedBody : (parsedBody ? [parsedBody] : []);
+              for (const inc of incoming) {
+                if (!inc) continue;
+                const id = inc.id || `tx-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+                const idx = txs.findIndex(t => t.id === id);
+                if (idx !== -1) {
+                  txs[idx] = { ...txs[idx], ...inc };
+                } else {
+                  txs.push({ ...inc, id });
+                }
+              }
+              saveCanteenTransactions(txs);
+              res.setHeader('content-type', 'application/json');
+              res.status(201).send(JSON.stringify(incoming));
+              return true;
+            } catch (err) {
+              console.warn('[Proxy Fallback] Error saving Canteen_Transactions:', err);
+            }
+          }
+        }
+
+        // 4. CANTEEN_EXPENSES
+        if (pathname.includes('/rest/v1/Canteen_Expenses')) {
+          let exp = loadCanteenExpenses();
+          if (req.method === 'GET') {
+            res.setHeader('content-type', 'application/json');
+            res.status(200).send(JSON.stringify(exp));
+            return true;
+          } else if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
+            try {
+              let parsedBody = bodyData;
+              if (typeof parsedBody === 'string') {
+                try { parsedBody = JSON.parse(parsedBody); } catch {}
+              } else if (Buffer.isBuffer(parsedBody)) {
+                try { parsedBody = JSON.parse(parsedBody.toString()); } catch {}
+              }
+              const incoming = Array.isArray(parsedBody) ? parsedBody : (parsedBody ? [parsedBody] : []);
+              for (const inc of incoming) {
+                if (!inc) continue;
+                const id = inc.id || `exp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+                const idx = exp.findIndex(e => e.id === id);
+                if (idx !== -1) {
+                  exp[idx] = { ...exp[idx], ...inc };
+                } else {
+                  exp.push({ ...inc, id });
+                }
+              }
+              saveCanteenExpenses(exp);
+              res.setHeader('content-type', 'application/json');
+              res.status(201).send(JSON.stringify(incoming));
+              return true;
+            } catch (err) {
+              console.warn('[Proxy Fallback] Error saving Canteen_Expenses:', err);
+            }
+          }
+        }
+
+        // 5. CANTEEN_MENU
+        if (pathname.includes('/rest/v1/Canteen_Menu')) {
+          const settings = loadAppSettings();
+          let menuStr = settings['canteen_menu_items_catalog_v1']?.setting_value;
+          let menuList: any[] = [];
+          if (menuStr) {
+            try { menuList = JSON.parse(menuStr); } catch {}
+          }
+          if (req.method === 'GET') {
+            res.setHeader('content-type', 'application/json');
+            res.status(200).send(JSON.stringify(menuList));
+            return true;
+          }
+        }
+
+        // 6. USER_PROFILES (Office App User Logins)
+        if (pathname.includes('/rest/v1/user_profiles')) {
+          const dbData = loadDatabase();
+          let users: any[] = (dbData.airmen || []).map((a: any) => {
+            const cleanBd = String(a.bdNo || '').replace(/^BD\/?/i, '').trim();
+            const isOwner = cleanBd === '48456';
+            return {
+              'User ID': cleanBd,
+              airman_id: a.id || `airman-${cleanBd}`,
+              Name: a.name || a.fullName || 'Airman',
+              Rank: a.rank || 'LAC',
+              Flight: a.flightName || 'Admin',
+              Trade: a.trade || 'General',
+              Role: isOwner ? 'OWNER' : 'USER',
+              'User Login PIN': Number(cleanBd) || null,
+              'Admin Login PIN': isOwner ? 1124 : null,
+              Status: 'ACTIVE',
+              password: cleanBd
+            };
+          });
+
+          const cMems = loadCanteenMembers();
+          cMems.forEach((cm: any) => {
+            const cleanBd = String(cm['BD No'] || cm.bdNo || '').replace(/\D/g, '');
+            if (cleanBd && !users.some(u => u['User ID'] === cleanBd)) {
+              users.push({
+                'User ID': cleanBd,
+                airman_id: cm.airman_id || `airman-${cleanBd}`,
+                Name: cm.Surname || cm.name || 'Member',
+                Rank: cm.Rank || 'LAC',
+                Flight: cm.Flight || 'Admin',
+                Trade: cm.Trade || 'General',
+                Role: cleanBd === '48456' ? 'OWNER' : 'USER',
+                'User Login PIN': Number(cleanBd) || null,
+                'Admin Login PIN': cleanBd === '48456' ? 1124 : null,
+                Status: 'ACTIVE',
+                password: cleanBd
+              });
+            }
+          });
+
+          if (req.method === 'GET') {
+            const userIdParam = urlObj.searchParams.get('User ID');
+            if (userIdParam && userIdParam.startsWith('eq.')) {
+              const target = userIdParam.slice(3).replace(/^BD\/?/i, '').trim().toLowerCase();
+              users = users.filter(u => String(u['User ID']).toLowerCase() === target);
+            }
+            res.setHeader('content-type', 'application/json');
+            const accept = String(req.headers['accept'] || '');
+            if (accept.includes('application/vnd.pgrst.object+json')) {
+              res.status(200).send(JSON.stringify(users[0] || null));
+              return true;
+            }
+            res.status(200).send(JSON.stringify(users));
+            return true;
+          } else if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
+            res.setHeader('content-type', 'application/json');
+            res.status(200).send(JSON.stringify({ success: true }));
+            return true;
+          }
+        }
+
+        // 7. AIRMEN / BIODATA REGISTER
+        if (pathname.includes('/rest/v1/airmen') || pathname.includes('/rest/v1/Biodata')) {
+          const dbData = loadDatabase();
+          if (req.method === 'GET') {
+            res.setHeader('content-type', 'application/json');
+            res.status(200).send(JSON.stringify(dbData.airmen || []));
+            return true;
+          }
+        }
+
+        // 8. DUTY_ROSTERS (Duty Assignments)
+        if (pathname.includes('/rest/v1/duty_rosters')) {
+          const dbData = loadDatabase();
+          if (req.method === 'GET') {
+            const allAssignments: any[] = [];
+            Object.values(dbData.assignments || {}).forEach((arr: any) => {
+              if (Array.isArray(arr)) {
+                arr.forEach((a: any) => {
+                  allAssignments.push({
+                    id: a.id || `${a.airmanId}_${a.date}_${a.dutyCode}`,
+                    airman_id: a.airmanId,
+                    duty_date: a.date,
+                    duty_type: a.dutyCode,
+                    shift: a.idaShift || null,
+                    notes: a.notes || null,
+                    created_at: a.updatedAt || new Date().toISOString()
+                  });
+                });
+              }
+            });
+            res.setHeader('content-type', 'application/json');
+            res.status(200).send(JSON.stringify(allAssignments));
+            return true;
+          } else if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
+            res.setHeader('content-type', 'application/json');
+            res.status(200).send(JSON.stringify({ success: true }));
+            return true;
+          }
+        }
+
+        // 9. PARADE_STATES
+        if (pathname.includes('/rest/v1/parade_states')) {
+          const dbData = loadDatabase();
+          if (req.method === 'GET') {
+            const history = (dbData.activityHistory || []).map((h: any, idx: number) => ({
+              id: h.id || `parade_${idx}`,
+              date: h.timestamp || h.date || new Date().toISOString(),
+              type: h.actionType || h.type || 'PARADE_STATE',
+              count: h.count || 0,
+              notes: h.details || h.notes || '',
+              details: typeof h.details === 'string' ? h.details : JSON.stringify(h.details || {})
+            }));
+            res.setHeader('content-type', 'application/json');
+            res.status(200).send(JSON.stringify(history));
+            return true;
+          }
+        }
+
+        // 10. APP_SETTINGS
+        if (pathname.includes('/rest/v1/app_settings')) {
+          const settings = loadAppSettings();
+          if (req.method === 'GET') {
+            const list = Object.values(settings);
+            res.setHeader('content-type', 'application/json');
+            res.status(200).send(JSON.stringify(list));
+            return true;
+          }
+        }
+      } catch (fErr) {
+        console.warn('[Proxy Fallback] Exception handling canteen fallback:', fErr);
+      }
+      return false;
+    }
+
     try {
       targetUrl = `${supabaseUrl}${req.originalUrl.replace('/api/supabase', '')}`;
       const headers = { ...req.headers };
@@ -334,83 +786,8 @@ async function startServer() {
         bodyText.includes('restricted due to the following violations');
 
       if (isRestrictedOrOffline) {
-        const urlObj = new URL(targetUrl);
-        const pathname = urlObj.pathname;
-
-        // Fallback for app_settings table
-        if (pathname.includes('/rest/v1/app_settings')) {
-          const settings = loadAppSettings();
-          if (req.method === 'GET') {
-            let rows = Object.values(settings);
-            const settingKeyParam = urlObj.searchParams.get('setting_key');
-            if (settingKeyParam) {
-              if (settingKeyParam.startsWith('like.')) {
-                const prefix = settingKeyParam.slice(5).replace(/[%_]/g, '');
-                rows = rows.filter(r => r.setting_key.startsWith(prefix));
-              } else if (settingKeyParam.startsWith('eq.')) {
-                const targetKey = settingKeyParam.slice(3);
-                rows = rows.filter(r => r.setting_key === targetKey);
-              }
-            }
-            res.setHeader('content-type', 'application/json');
-            res.status(200);
-            const accept = String(req.headers['accept'] || '');
-            if (accept.includes('application/vnd.pgrst.object+json')) {
-              return res.send(JSON.stringify(rows[0] || null));
-            }
-            return res.send(JSON.stringify(rows));
-          } else if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
-            try {
-              let parsedBody: any = null;
-              if (reqOptions.body) {
-                parsedBody = typeof reqOptions.body === 'string' ? JSON.parse(reqOptions.body) : reqOptions.body;
-              }
-              const items = Array.isArray(parsedBody) ? parsedBody : (parsedBody ? [parsedBody] : []);
-              for (const it of items) {
-                if (it && it.setting_key) {
-                  settings[it.setting_key] = {
-                    setting_key: it.setting_key,
-                    setting_value: typeof it.setting_value === 'string' ? it.setting_value : JSON.stringify(it.setting_value),
-                    updated_at: it.updated_at || new Date().toISOString()
-                  };
-                }
-              }
-              saveAppSettings(settings);
-              res.setHeader('content-type', 'application/json');
-              return res.status(201).send(JSON.stringify(items));
-            } catch (pErr) {
-              console.warn('[Proxy Fallback] Could not parse upsert body:', pErr);
-            }
-          }
-        }
-
-        // Fallback for Canteen_Member
-        if (pathname.includes('/rest/v1/Canteen_Member') && req.method === 'GET') {
-          const members = (db.airmen || []).map(a => ({
-            "BD No": a.bdNo,
-            airman_id: a.id,
-            Rank: a.rank,
-            Surname: a.name,
-            DP: a.photoUrl || '',
-            Due: 0,
-            Contact: a.mobileNo,
-            Flight: a.flightName,
-            Trade: a.trade
-          }));
-          res.setHeader('content-type', 'application/json');
-          return res.status(200).send(JSON.stringify(members));
-        }
-
-        // Fallback for Canteen_Menu
-        if (pathname.includes('/rest/v1/Canteen_Menu') && req.method === 'GET') {
-          const settings = loadAppSettings();
-          let menuStr = settings['canteen_menu_items_catalog_v1']?.setting_value;
-          let menuList: any[] = [];
-          if (menuStr) {
-            try { menuList = JSON.parse(menuStr); } catch {}
-          }
-          res.setHeader('content-type', 'application/json');
-          return res.status(200).send(JSON.stringify(menuList));
+        if (handleCanteenFallback(targetUrl, reqOptions.body || req.body)) {
+          return;
         }
       }
 
@@ -423,46 +800,9 @@ async function startServer() {
       res.send(Buffer.from(arrayBuffer));
     } catch (e: any) {
       console.warn('[Proxy Notice] Upstream database temporarily unavailable, checking local fallback:', e?.message || e);
-      try {
-        const urlObj = new URL(targetUrl || req.originalUrl, 'http://localhost');
-        const pathname = urlObj.pathname;
-        if (pathname.includes('/rest/v1/app_settings')) {
-          const settings = loadAppSettings();
-          if (req.method === 'GET') {
-            let rows = Object.values(settings);
-            const settingKeyParam = urlObj.searchParams.get('setting_key');
-            if (settingKeyParam) {
-              if (settingKeyParam.startsWith('like.')) {
-                const prefix = settingKeyParam.slice(5).replace(/[%_]/g, '');
-                rows = rows.filter(r => r.setting_key.startsWith(prefix));
-              } else if (settingKeyParam.startsWith('eq.')) {
-                const targetKey = settingKeyParam.slice(3);
-                rows = rows.filter(r => r.setting_key === targetKey);
-              }
-            }
-            res.setHeader('content-type', 'application/json');
-            return res.status(200).send(JSON.stringify(rows));
-          } else if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
-            let parsedBody: any = null;
-            if (req.body) {
-              parsedBody = typeof req.body === 'string' ? JSON.parse(req.body) : Buffer.isBuffer(req.body) ? JSON.parse(req.body.toString()) : req.body;
-            }
-            const items = Array.isArray(parsedBody) ? parsedBody : (parsedBody ? [parsedBody] : []);
-            for (const it of items) {
-              if (it && it.setting_key) {
-                settings[it.setting_key] = {
-                  setting_key: it.setting_key,
-                  setting_value: typeof it.setting_value === 'string' ? it.setting_value : JSON.stringify(it.setting_value),
-                  updated_at: it.updated_at || new Date().toISOString()
-                };
-              }
-            }
-            saveAppSettings(settings);
-            res.setHeader('content-type', 'application/json');
-            return res.status(201).send(JSON.stringify(items));
-          }
-        }
-      } catch (errFallback) {}
+      if (handleCanteenFallback(targetUrl || req.originalUrl, req.body)) {
+        return;
+      }
 
       res.status(503).json({
         message: 'Upstream database temporarily unavailable. Falling back to local state.',
@@ -472,7 +812,23 @@ async function startServer() {
     }
   });
 
-  // Dedicated Canteen Settings Backup Endpoints
+  // Dedicated Office App Unit Data Endpoints
+  app.get('/api/airmen', (req, res) => {
+    const db = loadDatabase();
+    res.json(db.airmen || []);
+  });
+
+  app.get('/api/database', (req, res) => {
+    const db = loadDatabase();
+    res.json(db);
+  });
+
+  app.get('/api/duty-assignments', (req, res) => {
+    const db = loadDatabase();
+    res.json(db.assignments || {});
+  });
+
+  // Dedicated Canteen Settings & Full Backup Endpoints
   app.get('/api/canteen/all-settings', (req, res) => {
     const settings = loadAppSettings();
     res.json(Object.values(settings));
@@ -491,6 +847,128 @@ async function startServer() {
     };
     saveAppSettings(settings);
     res.json({ success: true, setting_key });
+  });
+
+  app.get('/api/canteen/export-full-backup', (req, res) => {
+    res.json({
+      members: loadCanteenMembers(),
+      transactions: loadCanteenTransactions(),
+      expenses: loadCanteenExpenses(),
+      settings: Object.values(loadAppSettings())
+    });
+  });
+
+  app.post('/api/canteen/restore-full-backup', express.json({ limit: '50mb' }), (req, res) => {
+    try {
+      const { members, transactions, expenses, settings } = req.body || {};
+      let restoredMembersCount = 0;
+      let restoredTxsCount = 0;
+      let restoredExpCount = 0;
+
+      let targetMembers = members;
+      if (Array.isArray(targetMembers) && targetMembers.length === 1 && targetMembers[0]?.json_agg) {
+        targetMembers = targetMembers[0].json_agg;
+      } else if (targetMembers && targetMembers.json_agg) {
+        targetMembers = targetMembers.json_agg;
+      }
+
+      let targetTxs = transactions;
+      if (Array.isArray(targetTxs) && targetTxs.length === 1 && targetTxs[0]?.json_agg) {
+        targetTxs = targetTxs[0].json_agg;
+      } else if (targetTxs && targetTxs.json_agg) {
+        targetTxs = targetTxs.json_agg;
+      }
+
+      if (Array.isArray(targetMembers) && targetMembers.length > 0) {
+        const existingMembers = loadCanteenMembers();
+        const mergedMembers = [...existingMembers];
+        for (const m of targetMembers) {
+          if (!m) continue;
+          const mAid = String(m.airman_id || m.id || '').trim().toLowerCase();
+          const mBd = String(m['BD No'] || m.bdNo || '').replace(/\D/g, '');
+          const idx = mergedMembers.findIndex(x => {
+            const xAid = String(x.airman_id || x.id || '').trim().toLowerCase();
+            const xBd = String(x['BD No'] || x.bdNo || '').replace(/\D/g, '');
+            return (mAid && xAid === mAid) || (mBd && xBd === mBd);
+          });
+          if (idx !== -1) {
+            mergedMembers[idx] = { ...mergedMembers[idx], ...m };
+          } else {
+            mergedMembers.push(m);
+          }
+        }
+        saveCanteenMembers(mergedMembers);
+        restoredMembersCount = mergedMembers.length;
+      }
+
+      if (Array.isArray(targetTxs) && targetTxs.length > 0) {
+        const existingTxs = loadCanteenTransactions();
+        const txMap = new Map(existingTxs.map(t => [String(t.id), t]));
+        targetTxs.forEach(t => {
+          if (t && t.id) txMap.set(String(t.id), t);
+        });
+        const finalTxs = Array.from(txMap.values());
+        saveCanteenTransactions(finalTxs);
+        restoredTxsCount = finalTxs.length;
+      }
+
+      if (Array.isArray(expenses) && expenses.length > 0) {
+        const existingExp = loadCanteenExpenses();
+        const expMap = new Map(existingExp.map(e => [String(e.id), e]));
+        expenses.forEach(e => {
+          if (e && e.id) expMap.set(String(e.id), e);
+        });
+        const finalExp = Array.from(expMap.values());
+        saveCanteenExpenses(finalExp);
+        restoredExpCount = finalExp.length;
+      }
+
+      if (Array.isArray(settings) && settings.length > 0) {
+        const currentSettings = loadAppSettings();
+        for (const s of settings) {
+          if (s && s.setting_key) {
+            currentSettings[s.setting_key] = {
+              setting_key: s.setting_key,
+              setting_value: typeof s.setting_value === 'string' ? s.setting_value : JSON.stringify(s.setting_value),
+              updated_at: s.updated_at || new Date().toISOString()
+            };
+          }
+        }
+        saveAppSettings(currentSettings);
+      }
+
+      res.json({
+        success: true,
+        restoredMembersCount,
+        restoredTxsCount,
+        restoredExpCount
+      });
+    } catch (e: any) {
+      console.error('Error restoring full backup:', e);
+      res.status(500).json({ success: false, error: e?.message || 'Restore error' });
+    }
+  });
+
+  app.get('/api/canteen/cloud-status', async (req, res) => {
+    try {
+      const testRes = await fetch(`${supabaseUrl}/rest/v1/Canteen_Member?select=airman_id&limit=1`, {
+        headers: {
+          'apikey': supabaseAnonKey,
+          'Authorization': `Bearer ${supabaseAnonKey}`
+        }
+      });
+      if (testRes.status === 402 || testRes.status === 403) {
+        return res.json({
+          status: 'restricted',
+          code: testRes.status,
+          reason: 'exceed_egress_quota',
+          message: 'Supabase Egress Quota Exceeded (HTTP 402). Direct queries restricted.'
+        });
+      }
+      res.json({ status: testRes.ok ? 'online' : 'error', code: testRes.status });
+    } catch (e: any) {
+      res.json({ status: 'offline', error: e?.message });
+    }
   });
 
   // --- API ENDPOINTS ---
