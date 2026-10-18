@@ -1,5 +1,5 @@
 import { DateNavigator } from './DateNavigator';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
  Airman,
  FlightName,
@@ -100,7 +100,9 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  
 
  const [singleParadeData, setSingleParadeData] = useState<ParadeStateResponse | null>(null);
+ const singleParadeDataRef = useRef<ParadeStateResponse | null>(null);
  const [multiDayStates, setMultiDayStates] = useState<Record<string, ParadeStateResponse>>({});
+ const multiDayStatesRef = useRef<Record<string, ParadeStateResponse>>({});
  const [loading, setLoading] = useState<boolean>(false);
 
  // Internal Print Modal state
@@ -347,9 +349,9 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  const datesInRange = getDatesInRange(fromDate, toDate);
  const isMultiDay = datesInRange.length > 1;
 
- // Single Day Fetch
+  // Single Day Fetch
   const fetchSingle = async (showLoader = false) => {
-    if (showLoader || !singleParadeData) {
+    if (showLoader && !singleParadeDataRef.current) {
       setLoading(true);
     }
     try {
@@ -358,6 +360,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
       if (res.ok) {
         const d = await res.json();
         setSingleParadeData(d);
+        singleParadeDataRef.current = d;
       }
     } catch (err) {
       console.error('Failed to fetch single parade state:', err);
@@ -368,7 +371,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
 
   // Multi Day Fetch
   const fetchMulti = async (showLoader = false) => {
-    if (showLoader || Object.keys(multiDayStates).length === 0) {
+    if (showLoader && Object.keys(multiDayStatesRef.current).length === 0) {
       setLoading(true);
     }
     try {
@@ -380,13 +383,14 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
             .catch(() => null)
         )
       );
-      const newMap = {};
+      const newMap: Record<string, ParadeStateResponse> = {};
       datesInRange.forEach((dStr, idx) => {
         if (results[idx]) {
           newMap[dStr] = results[idx];
         }
       });
       setMultiDayStates(newMap);
+      multiDayStatesRef.current = newMap;
     } catch (err) {
       console.error('Failed to fetch multi-day parade state:', err);
     } finally {
@@ -396,9 +400,9 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
 
   useEffect(() => {
     if (isMultiDay) {
-      fetchMulti(true);
+      fetchMulti(Object.keys(multiDayStatesRef.current).length === 0);
     } else {
-      fetchSingle(true);
+      fetchSingle(!singleParadeDataRef.current);
     }
     const handleGlobalUpdate = () => {
       // Silent background update - does not trigger full page loader
@@ -836,11 +840,12 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  }
  };
 
- // Compute Flight Stats for Single-Day Summary Matrix
+  // Compute Flight Stats for Single-Day Summary Matrix
  const getFlightStats = (fl: FlightName | 'Overall') => {
  const activeAirmen = airmen.filter((a) => {
- if (a.dateJoined && a.dateJoined > selectedDate) return false;
- if (a.dateLeft && a.dateLeft < selectedDate) return false;
+ if (a.active === false) return false;
+ if (a.dateJoined && a.dateJoined > fromDate) return false;
+ if (a.dateLeft && a.dateLeft < fromDate) return false;
  return true;
  });
  const flightAirmen = fl === 'Overall' ? activeAirmen : activeAirmen.filter((a) => a.flightName === fl);
@@ -973,7 +978,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  };
 
  // Single-Day Categorization for Bottom Lists
- const targetAirmen = selectedFlight === 'Overall' ? airmen : airmen.filter((a) => a.flightName === selectedFlight);
+ const targetAirmen = (selectedFlight === 'Overall' ? airmen : airmen.filter((a) => a.flightName === selectedFlight)).filter(a => a.active !== false);
 
  const onPtList: { airman: Airman; note?: string }[] = [];
  const leaveList: { airman: Airman; note?: string }[] = [];
@@ -1249,8 +1254,8 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  <div className="flex items-center gap-2">
 
  {dateMode === 'single' ? (
- <div className="flex items-center bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold">
- <span className="text-slate-500 font-semibold mr-2">Dt:</span>
+ <div className="inline-flex items-center w-fit shrink-0 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold gap-1">
+ <span className="text-slate-500 font-semibold mr-0.5 shrink-0">Dt:</span>
  <DateNavigator
  value={fromDate}
  onChange={(e) => {
@@ -1263,7 +1268,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  />
  </div>
  ) : (
- <div className="flex items-center bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold space-x-2">
+ <div className="inline-flex items-center w-fit shrink-0 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold space-x-2">
  <span className="text-slate-500 font-semibold">From:</span>
  <DateNavigator 
   value={fromDate} 
@@ -1368,7 +1373,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  id="official-parade-document"
  className="bg-white dark:bg-slate-900 text-black dark:text-slate-100 border border-slate-300 dark:border-slate-700 rounded-2xl shadow-lg p-6 overflow-x-auto print:bg-white print:text-black print:border-none print:shadow-none"
  >
- {loading ? (
+ {loading && (isMultiDay ? Object.keys(multiDayStates).length === 0 : !singleParadeData) ? (
  <div className="py-20 text-center text-slate-400">
  <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-3 text-emerald-500" />
  <p className="text-sm font-bold">Loading Official Parade State...</p>
@@ -2147,6 +2152,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  {/* Multi-Select Airmen List */}
  {(() => {
  const flightAirmen = airmen.filter((a) => {
+ if (a.active === false) return false;
  if (a.dateJoined && a.dateJoined > disposalFromDate) return false;
  if (a.dateLeft && a.dateLeft < disposalFromDate) return false;
  return a.flightName === disposalFlight;

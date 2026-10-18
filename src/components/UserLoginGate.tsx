@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, Suspense } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../supabase';
 import { fetchDirectImageUrl, getCanteenConfig } from '../features/canteen/utils/canteenSettings';
 import { getCanteenMembersCache } from '../features/canteen/utils/canteenMembersCache';
@@ -10,8 +10,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { getAppConfig, isFeatureActive } from '../utils/appConfig';
 
 import { CanteenLayout } from '../features/canteen/components/CanteenLayout';
-const NightCountStateView = React.lazy(() => import('./NightCountStateView').then(m => ({ default: m.NightCountStateView })));
-const AppUpdateModal = React.lazy(() => import('./AppUpdateModal').then(m => ({ default: m.AppUpdateModal })));
+import { NightCountStateView } from './NightCountStateView';
+import { AppUpdateModal } from './AppUpdateModal';
 
 import { setUserSession, validateUserLogin, getDetailedUsers, saveDetailedUsers } from '../utils/authSession';
 import {
@@ -1085,14 +1085,12 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
               <h2 className="ml-4 text-white font-bold tracking-widest text-sm opacity-50">NIGHT COUNT STATE</h2>
             </div>
             <div className="flex-1 p-4 sm:p-6 w-full max-w-7xl mx-auto print:p-0 print:max-w-none">
-              <Suspense fallback={<div className="flex flex-col items-center justify-center p-12 text-slate-400"><Loader2 className="w-8 h-8 animate-spin text-emerald-500 mb-2" /><span className="text-xs font-mono">Loading Night Count...</span></div>}>
                 <NightCountStateView
                   role="USER"
                   airmen={airmen}
                   selectedDate={selectedDate}
                   setSelectedDate={setSelectedDate}
                 />
-              </Suspense>
             </div>
           </div>
         )}

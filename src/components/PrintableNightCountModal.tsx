@@ -659,6 +659,7 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
   // Compute Flight Stats for Single-Day Summary Matrix
   const getFlightStats = (fl: FlightName | 'Overall') => {
     const flightAirmen = (fl === 'Overall' ? airmen : airmen.filter((a) => a.flightName === fl)).filter(a => {
+      if (a.active === false) return false;
       if (!['CPL', 'Cpl', 'LAC', 'AC'].includes(a.rank)) return false;
       const block = (a.addressBlock || '').toLowerCase();
       if (block.includes('qtr') || block.includes('quarter') || block.includes('outside') || block.includes('maizpara') || block.includes('dhaka') || block.includes('mirpur') || block.includes('cantt') || block.includes('ghat') || block.includes('l/o') || block.includes('l/out') || block.includes('living out') || block === 'lo' || block === 'l o') return false;
@@ -1736,6 +1737,7 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  {/* Multi-Select Airmen List */}
  {(() => {
  const flightAirmen = airmen.filter((a) => a.flightName === disposalFlight).filter(a => {
+ if (a.active === false) return false;
  if (!['CPL', 'Cpl', 'LAC', 'AC'].includes(a.rank)) return false;
  const block = (a.addressBlock || '').toLowerCase();
  const isLOut = block.includes('qtr') || 

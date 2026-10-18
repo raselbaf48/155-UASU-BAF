@@ -3,35 +3,35 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Sidebar, SidebarTab } from './components/Sidebar';
 import { TopHeader } from './components/TopHeader';
 import { updatePresence } from './services/presenceService';
 import { getAppConfig, saveAppConfig, isFeatureActive, AppConfig } from './utils/appConfig';
 import { UserLoginGate } from './components/UserLoginGate';
 
-// Lazy-loaded authenticated views & modals so the initial Login Gate loads instantly (<1s)
-const DashboardParadeState = React.lazy(() => import('./components/DashboardParadeState').then(m => ({ default: m.DashboardParadeState })));
-const ParadeStateFormattedView = React.lazy(() => import('./components/ParadeStateFormattedView').then(m => ({ default: m.ParadeStateFormattedView })));
-const NightCountStateView = React.lazy(() => import('./components/NightCountStateView').then(m => ({ default: m.NightCountStateView })));
-const NominalRoll = React.lazy(() => import('./components/NominalRoll').then(m => ({ default: m.NominalRoll })));
-const FlightsMiniView = React.lazy(() => import('./components/FlightsMiniView').then(m => ({ default: m.FlightsMiniView })));
-const LeaveRegisterView = React.lazy(() => import('./components/LeaveRegisterView').then(m => ({ default: m.LeaveRegisterView })));
-const TdyRegisterView = React.lazy(() => import('./components/TdyRegisterView').then(m => ({ default: m.TdyRegisterView })));
-const DeploymentRegisterView = React.lazy(() => import('./components/DeploymentRegisterView').then(m => ({ default: m.DeploymentRegisterView })));
-const IdaCenterDutyView = React.lazy(() => import('./components/IdaCenterDutyView').then(m => ({ default: m.IdaCenterDutyView })));
-const MonthlyDutyRegister = React.lazy(() => import('./components/MonthlyDutyRegister').then(m => ({ default: m.MonthlyDutyRegister })));
-const DutyRosterPeriodView = React.lazy(() => import('./components/DutyRosterPeriodView').then(m => ({ default: m.DutyRosterPeriodView })));
-const DutyRatioMatrixView = React.lazy(() => import('./components/DutyRatioMatrixViewV2').then(m => ({ default: m.DutyRatioMatrixView })));
-const DutyAnalytics = React.lazy(() => import('./components/DutyAnalytics').then(m => ({ default: m.DutyAnalytics })));
-const DutyConflictMonitor = React.lazy(() => import('./components/DutyConflictMonitor').then(m => ({ default: m.DutyConflictMonitor })));
-const AirmanProfileModal = React.lazy(() => import('./components/AirmanProfileModal').then(m => ({ default: m.AirmanProfileModal })));
-const AddEditAirmanModal = React.lazy(() => import('./components/AddEditAirmanModal').then(m => ({ default: m.AddEditAirmanModal })));
-const PrintableParadeStateModal = React.lazy(() => import('./components/PrintableParadeStateModal').then(m => ({ default: m.PrintableParadeStateModal })));
-const PdfDutyImportModal = React.lazy(() => import('./components/PdfDutyImportModal').then(m => ({ default: m.PdfDutyImportModal })));
-const SettingsModal = React.lazy(() => import('./components/SettingsModal').then(m => ({ default: m.SettingsModal })));
-const AdminPasscodeModal = React.lazy(() => import('./components/AdminPasscodeModal').then(m => ({ default: m.AdminPasscodeModal })));
-const AppUpdateModal = React.lazy(() => import('./components/AppUpdateModal').then(m => ({ default: m.AppUpdateModal })));
+// Statically loaded views & modals so all tabs and options render instantly (0ms) without any loading spinners
+import { DashboardParadeState } from './components/DashboardParadeState';
+import { ParadeStateFormattedView } from './components/ParadeStateFormattedView';
+import { NightCountStateView } from './components/NightCountStateView';
+import { NominalRoll } from './components/NominalRoll';
+import { FlightsMiniView } from './components/FlightsMiniView';
+import { LeaveRegisterView } from './components/LeaveRegisterView';
+import { TdyRegisterView } from './components/TdyRegisterView';
+import { DeploymentRegisterView } from './components/DeploymentRegisterView';
+import { IdaCenterDutyView } from './components/IdaCenterDutyView';
+import { MonthlyDutyRegister } from './components/MonthlyDutyRegister';
+import { DutyRosterPeriodView } from './components/DutyRosterPeriodView';
+import { DutyRatioMatrixView } from './components/DutyRatioMatrixViewV2';
+import { DutyAnalytics } from './components/DutyAnalytics';
+import { DutyConflictMonitor } from './components/DutyConflictMonitor';
+import { AirmanProfileModal } from './components/AirmanProfileModal';
+import { AddEditAirmanModal } from './components/AddEditAirmanModal';
+import { PrintableParadeStateModal } from './components/PrintableParadeStateModal';
+import { PdfDutyImportModal } from './components/PdfDutyImportModal';
+import { SettingsModal } from './components/SettingsModal';
+import { AdminPasscodeModal } from './components/AdminPasscodeModal';
+import { AppUpdateModal } from './components/AppUpdateModal';
 import {
   checkForAppUpdate,
   AppVersionRecord,
@@ -913,9 +913,7 @@ return () => mediaQuery.removeEventListener('change', listener);
                 transition={{ duration: 0.12, ease: "easeOut" }}
                 className="w-full print:filter-none print:opacity-100 print:transform-none"
               >
-                <Suspense fallback={<div className="flex flex-col items-center justify-center p-16 text-slate-400"><div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mb-3" /><span className="text-xs font-mono">Loading Section...</span></div>}>
-                  {renderActiveTabContent(activeTab)}
-                </Suspense>
+                {renderActiveTabContent(activeTab)}
               </motion.div>
             </AnimatePresence>
           </div>
@@ -937,7 +935,6 @@ return () => mediaQuery.removeEventListener('change', listener);
       </div>
 
       {/* Modals */}
-      <Suspense fallback={null}>
         {selectedAirmanProfile && (
           <AirmanProfileModal
             airman={selectedAirmanProfile.airman}
@@ -1032,7 +1029,6 @@ return () => mediaQuery.removeEventListener('change', listener);
             currentVersionName={appVersionInfo.versionName}
           />
         )}
-      </Suspense>
     </div>
   );
 }

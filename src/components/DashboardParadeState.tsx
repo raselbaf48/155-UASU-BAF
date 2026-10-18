@@ -80,7 +80,8 @@ export const DashboardParadeState: React.FC<DashboardParadeStateProps> = ({
   onOpenImportModal,
 }) => {
   const [data, setData] = useState<ParadeData | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const dataRef = React.useRef<ParadeData | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
   const [showHistoryModal, setShowHistoryModal] = useState<boolean>(false);
   const [showSignatureModal, setShowSignatureModal] = useState<boolean>(false);
 
@@ -112,8 +113,8 @@ export const DashboardParadeState: React.FC<DashboardParadeStateProps> = ({
     };
   }, []);
 
-  const fetchParadeData = async (targetDate?: string) => {
-    setLoading(true);
+  const fetchParadeData = async (targetDate?: string, showLoader: boolean = false) => {
+    if (showLoader && !dataRef.current) setLoading(true);
     try {
       const activeDate = targetDate || selectedDate;
       const params = new URLSearchParams({
@@ -125,6 +126,7 @@ export const DashboardParadeState: React.FC<DashboardParadeStateProps> = ({
       if (res.ok) {
         const result = await res.json();
         setData(result);
+        dataRef.current = result;
       }
     } catch (err) {
       console.error('Failed to fetch parade state:', err);
@@ -134,10 +136,10 @@ export const DashboardParadeState: React.FC<DashboardParadeStateProps> = ({
   };
 
   useEffect(() => {
-    fetchParadeData();
+    fetchParadeData(undefined, !dataRef.current);
     const handleGlobalUpdate = (e: any) => {
       const newDate = e.detail?.date;
-      fetchParadeData(newDate);
+      fetchParadeData(newDate, false);
     };
     window.addEventListener('baf_state_updated', handleGlobalUpdate);
     return () => {
@@ -647,7 +649,24 @@ export const DashboardParadeState: React.FC<DashboardParadeStateProps> = ({
                                       if (item.dutyCode === 'IDAC' || item.dutyCode === 'IDA') return `📌 IDAC Duty (${item.idaShift || 'Morning'})`;
                                       return `📌 ${item.dutyName || item.dutyCode}`;
                                     }
-                                    if (item.statusCategory === 'LEAVE') return `🏖️ ${item.dutyName || 'Leave'}`;
+                                    if (item.statusCategory === 'LEAVE') {
+                                      const notesLower = (item.notes || '').toLowerCase();
+                                      const dutyLower = (item.dutyName || '').toLowerCase();
+                                      const comb = `${notesLower} ${dutyLower}`;
+                                      if (comb.includes('recreation') || comb.includes('(rl)') || comb.includes(' rl') || comb.includes('rec leave') || comb.includes('rec.')) {
+                                        return '🏖️ Recreation Leave (RL)';
+                                      }
+                                      if (comb.includes('annual') || comb.includes('(al)') || comb.includes(' al')) {
+                                        return '🏖️ Annual Leave (AL)';
+                                      }
+                                      if (comb.includes('sick') || comb.includes('(sl)') || comb.includes(' sl')) {
+                                        return '🏖️ Sick Leave (SL)';
+                                      }
+                                      if (comb.includes('casual') || comb.includes('(cl)') || comb.includes(' cl')) {
+                                        return '🏖️ Casual Leave (CL)';
+                                      }
+                                      return `🏖️ ${item.dutyName || 'Casual Leave (CL)'}`;
+                                    }
                                     if (item.statusCategory === 'TDY') {
                                       const label = item.dutyCode === 'ATT' ? 'Attachment' : item.dutyCode === 'DETT' ? 'Detachment' : 'TDY';
                                       return `✈️ ${item.notes ? `${label} (${item.notes})` : label}`;

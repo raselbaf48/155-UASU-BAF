@@ -1735,8 +1735,16 @@ export class LocalDatabaseEngine {
               migratedAssignments['2026-08'] = generateOfficialMonthAssignments(2026, 8);
             }
 
+            const defaultInactiveIds = new Set(INITIAL_AIRMEN.filter(a => a.active === false).map(a => a.id));
+            const syncedAirmen = (migratedAirmen || []).map((a: any) => {
+              if (defaultInactiveIds.has(a.id) && a.active !== false) {
+                return { ...a, active: false };
+              }
+              return a;
+            });
+
             const db: LocalStorageDB = {
-              airmen: normalizeAirmenSeniority(migratedAirmen),
+              airmen: normalizeAirmenSeniority(syncedAirmen),
               assignments: migratedAssignments,
 
               activityHistory: parsed.activityHistory || [],
@@ -2671,7 +2679,26 @@ export class LocalDatabaseEngine {
           statusCategory = 'BAKE_N_BITE';
         }
         else if (codeStr === 'LEAVE') {
-          dutyName = ass.notes?.includes('Annual') || ass.notes?.includes('AL') ? 'Annual Leave (AL)' : 'Casual Leave (CL)';
+          const notesRaw = ass.notes || '';
+          const notesLower = notesRaw.toLowerCase();
+          const dutyNameRaw = (((ass as any)?.dutyName || '') as string);
+          const combined = `${notesLower} ${dutyNameRaw.toLowerCase()}`;
+
+          if (combined.includes('recreation') || combined.includes('(rl)') || combined.includes(' rl') || combined.includes('rec leave') || combined.includes('rec.')) {
+            dutyName = 'Recreation Leave (RL)';
+          } else if (combined.includes('annual') || combined.includes('(al)') || combined.includes(' al')) {
+            dutyName = 'Annual Leave (AL)';
+          } else if (combined.includes('sick') || combined.includes('(sl)') || combined.includes(' sl')) {
+            dutyName = 'Sick Leave (SL)';
+          } else if (combined.includes('casual') || combined.includes('(cl)') || combined.includes(' cl')) {
+            dutyName = 'Casual Leave (CL)';
+          } else if (dutyNameRaw && dutyNameRaw !== 'LEAVE') {
+            dutyName = dutyNameRaw;
+          } else if (notesRaw && !notesLower.includes('imported')) {
+            dutyName = notesRaw;
+          } else {
+            dutyName = 'Casual Leave (CL)';
+          }
           statusCategory = 'LEAVE';
         }
         else if (codeStr === 'TDY') {

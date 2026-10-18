@@ -3,7 +3,6 @@
 /* Universal calendar picker trigger: clicking anywhere in any date input opens the calendar */
 input[type="date"] {
   cursor: pointer;
-  position: relative;
 }
 
 input[type="date"]::-webkit-calendar-picker-indicator {

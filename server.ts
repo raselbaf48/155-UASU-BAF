@@ -862,6 +862,95 @@ async function startServer() {
     res.json(db.assignments || {});
   });
 
+  app.get('/api/parade-state', (req, res) => {
+    const date = (req.query.date as string) || new Date().toISOString().split('T')[0];
+    const shift = (req.query.shift as string) || 'Morning';
+    const flight = (req.query.flight as string) || 'Overall';
+    const db = loadDatabase();
+    const allAirmen = (db.airmen || []).filter((a: any) => a.active !== false);
+    const targetAirmen = flight === 'Overall' ? allAirmen : allAirmen.filter((a: any) => a.flightName === flight);
+    const monthKey = date.slice(0, 7);
+    const dateAssignments = (db.assignments?.[monthKey] || []).filter((a: any) => a.date === date);
+
+    let onParade = 0;
+    let onDuty = 0;
+    let onLeave = 0;
+    let tdy = 0;
+    let otherOff = 0;
+
+    const personnelStatusList = targetAirmen.map((airman: any) => {
+      const match = dateAssignments.find((a: any) => a.airmanId === airman.id);
+      const dutyCode = match?.dutyCode || 'ON_PARADE';
+      let statusCategory = 'PARADE';
+      if (dutyCode === 'ON_PARADE') { onParade++; statusCategory = 'PARADE'; }
+      else if (dutyCode === 'LEAVE') { onLeave++; statusCategory = 'LEAVE'; }
+      else if (['TDY', 'ATT', 'DETT'].includes(dutyCode)) { tdy++; statusCategory = 'TDY'; }
+      else if (dutyCode === 'DUTY_OFF') { otherOff++; statusCategory = 'OFF'; }
+      else { onDuty++; statusCategory = 'DUTY'; }
+
+      let dutyName = dutyCode === 'ON_PARADE' ? 'On Parade' : dutyCode;
+      if (dutyCode === 'LEAVE') {
+        const notesLower = (match?.notes || '').toLowerCase();
+        const rawDuty = (((match as any)?.dutyName || '') as string).toLowerCase();
+        const comb = `${notesLower} ${rawDuty}`;
+        if (comb.includes('recreation') || comb.includes('(rl)') || comb.includes(' rl') || comb.includes('rec leave') || comb.includes('rec.')) {
+          dutyName = 'Recreation Leave (RL)';
+        } else if (comb.includes('annual') || comb.includes('(al)') || comb.includes(' al')) {
+          dutyName = 'Annual Leave (AL)';
+        } else if (comb.includes('sick') || comb.includes('(sl)') || comb.includes(' sl')) {
+          dutyName = 'Sick Leave (SL)';
+        } else if (comb.includes('casual') || comb.includes('(cl)') || comb.includes(' cl')) {
+          dutyName = 'Casual Leave (CL)';
+        } else if ((match as any)?.dutyName && (match as any).dutyName !== 'LEAVE') {
+          dutyName = (match as any).dutyName;
+        } else if (match?.notes && !notesLower.includes('imported')) {
+          dutyName = match.notes;
+        } else {
+          dutyName = 'Casual Leave (CL)';
+        }
+      }
+
+      return {
+        airman,
+        dutyCode,
+        dutyName,
+        statusCategory,
+        notes: match?.notes || ''
+      };
+    });
+
+    res.json({
+      date,
+      shift,
+      flight,
+      summary: {
+        totalStrength: targetAirmen.length,
+        onParade,
+        onDuty,
+        onLeave,
+        tdy,
+        otherOff,
+        bakeNBite: 0
+      },
+      flightBreakdown: {},
+      personnelStatusList
+    });
+  });
+
+  app.get('/api/analytics', (req, res) => {
+    const db = loadDatabase();
+    res.json({
+      totalPersonnel: (db.airmen || []).filter((a: any) => a.active !== false).length,
+      assignments: [],
+      conflictAlerts: []
+    });
+  });
+
+  app.get('/api/roster/history', (req, res) => {
+    const db = loadDatabase();
+    res.json({ history: db.activityHistory || [] });
+  });
+
   // Dedicated Canteen Settings & Full Backup Endpoints
   app.get('/api/canteen/all-settings', (req, res) => {
     const settings = loadAppSettings();
@@ -1986,6 +2075,9 @@ ${combinedText.substring(0, 30000)}
       server: {
         middlewareMode: true,
         hmr: false,
+        watch: {
+          ignored: ['**/data/**', '**/*.json', '**/*.db', '**/dist/**'],
+        },
       },
       appType: 'spa',
     });

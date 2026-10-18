@@ -27,6 +27,16 @@ export function installApiInterceptor() {
       if (urlStr.includes('/api/supabase')) {
         return originalFetch(input, init);
       }
+
+      const urlObj = new URL(urlStr, window.location.origin);
+      // Immediately handle client-side local routes with 0ms latency so the UI never hangs
+      if (
+        urlObj.pathname === '/api/parade-state' ||
+        urlObj.pathname === '/api/analytics' ||
+        urlObj.pathname === '/api/roster/history'
+      ) {
+        return handleLocalApiRequest(urlStr, init);
+      }
       try {
         // Fast timeout of 1500ms so static hosting or sleeping servers never freeze the UI
         const controller = new AbortController();

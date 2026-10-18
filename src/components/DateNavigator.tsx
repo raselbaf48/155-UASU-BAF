@@ -71,7 +71,7 @@ export function DateNavigator({
     : '';
 
   return (
-    <div className="inline-flex items-center space-x-1 w-auto">
+    <div className="inline-flex items-center gap-0.5 w-fit shrink-0">
       {!hideArrows && (
         <button
           type="button"
@@ -87,10 +87,10 @@ export function DateNavigator({
         onClick={openCalendarPicker}
         className="relative inline-flex items-center justify-center cursor-pointer group shrink-0"
       >
-        <div className={`flex flex-row items-center justify-center gap-1.5 whitespace-nowrap flex-nowrap ${className || "px-3 py-1.5 font-bold text-slate-800 dark:text-slate-100 text-xs sm:text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-center shadow-xs"}`}>
+        <div className={`flex flex-row items-center justify-center gap-1 whitespace-nowrap flex-nowrap ${className || "px-2.5 py-1.5 font-bold text-slate-800 dark:text-slate-100 text-xs sm:text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-center shadow-xs"}`}>
           <span className="whitespace-nowrap">{displayDate || 'Select Date'}</span>
           {showCalendarIcon && (
-            <Calendar className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400 shrink-0 pointer-events-none group-hover:scale-110 transition-transform" />
+            <Calendar className="w-3 h-3 text-indigo-500 dark:text-indigo-400 shrink-0 pointer-events-none group-hover:scale-110 transition-transform -ml-0.5 mr-0" />
           )}
         </div>
         <input
@@ -104,7 +104,8 @@ export function DateNavigator({
             e.stopPropagation();
             openCalendarPicker();
           }}
-          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+          style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0, margin: 0, padding: 0, pointerEvents: 'none' }}
+          className="opacity-0 pointer-events-none"
           {...props}
         />
       </div>
@@ -114,7 +115,8 @@ export function DateNavigator({
           type="button"
           disabled={disabled}
           onClick={(e) => { e.preventDefault(); addDays(1); }}
-          className="w-7 h-7 flex items-center justify-center bg-gradient-to-b from-slate-100 via-slate-200 to-slate-300 dark:from-slate-700 dark:via-slate-800 dark:to-slate-900 hover:from-white hover:to-slate-250 dark:hover:from-slate-600 dark:hover:to-slate-750 text-slate-700 dark:text-indigo-300 hover:text-slate-900 dark:hover:text-white rounded-lg transition-all cursor-pointer disabled:opacity-50 shrink-0 border-t border-white/60 dark:border-t-slate-600/80 border-x border-slate-300 dark:border-slate-700/80 border-b-[2.5px] border-b-slate-400 dark:border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.1),inset_0_1px_0_rgba(255,255,255,0.7)] dark:shadow-[0_2px_4px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.5)]"
+          className="w-7 h-7 flex items-center justify-center bg-gradient-to-b from-slate-100 via-slate-200 to-slate-300 dark:from-slate-700 dark:via-slate-800 dark:to-slate-900 hover:from-white hover:to-slate-250 dark:hover:from-slate-600 dark:hover:to-slate-750 text-slate-700 dark:text-indigo-300 hover:text-slate-900 dark:hover:text-white rounded-lg transition-all cursor-pointer disabled:opacity-50 shrink-0 border-t border-white/60 dark:border-t-slate-600/80 border-x border-slate-300 dark:border-slate-700/80 border-b-[2.5px] border-b-slate-400 dark:border-b-slate-950 shadow-[0_2px_4px_rgba(0,0,0,0.1),inset_0_1px_0_rgba(255,255,255,0.7)] dark:shadow-[0_2px_4px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.2)] active:translate-y-[1.5px] active:border-b active:shadow-[0_0_1px_rgba(0,0,0,0.8),inset_0_1px_2px_rgba(0,0,0,0.5)] -ml-1.5"
+          title="Next Day"
         >
           <ChevronRight className="w-3.5 h-3.5 stroke-[2.5] drop-shadow-[0_1px_1px_rgba(0,0,0,0.4)]" />
         </button>

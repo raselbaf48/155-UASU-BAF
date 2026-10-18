@@ -1,6 +1,6 @@
 import { FlyingWingStateView } from './FlyingWingStateView';
 import { DateNavigator } from './DateNavigator';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Airman,
   FlightName,
@@ -93,7 +93,9 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
   const [selectedFlight, setSelectedFlight] = useState<FlightName | 'Overall'>('Overall');
 
   const [singleParadeData, setSingleParadeData] = useState<ParadeStateResponse | null>(null);
+  const singleParadeDataRef = useRef<ParadeStateResponse | null>(null);
   const [multiDayStates, setMultiDayStates] = useState<Record<string, ParadeStateResponse>>({});
+  const multiDayStatesRef = useRef<Record<string, ParadeStateResponse>>({});
   const [loading, setLoading] = useState<boolean>(false);
 
   // Internal Print Modal state
@@ -391,7 +393,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
 
   // Single Day Fetch
   const fetchSingle = async (showLoader = false) => {
-    if (showLoader || !singleParadeData) {
+    if (showLoader && !singleParadeDataRef.current) {
       setLoading(true);
     }
     try {
@@ -400,6 +402,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
       if (res.ok) {
         const d = await res.json();
         setSingleParadeData(d);
+        singleParadeDataRef.current = d;
       }
     } catch (err) {
       console.error('Failed to fetch single parade state:', err);
@@ -410,7 +413,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
 
   // Multi Day Fetch
   const fetchMulti = async (showLoader = false) => {
-    if (showLoader || Object.keys(multiDayStates).length === 0) {
+    if (showLoader && Object.keys(multiDayStatesRef.current).length === 0) {
       setLoading(true);
     }
     try {
@@ -422,13 +425,14 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
             .catch(() => null)
         )
       );
-      const newMap = {};
+      const newMap: Record<string, ParadeStateResponse> = {};
       datesInRange.forEach((dStr, idx) => {
         if (results[idx]) {
           newMap[dStr] = results[idx];
         }
       });
       setMultiDayStates(newMap);
+      multiDayStatesRef.current = newMap;
     } catch (err) {
       console.error('Failed to fetch multi-day parade state:', err);
     } finally {
@@ -438,9 +442,9 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
 
   useEffect(() => {
     if (isMultiDay) {
-      fetchMulti(true);
+      fetchMulti(Object.keys(multiDayStatesRef.current).length === 0);
     } else {
-      fetchSingle(true);
+      fetchSingle(!singleParadeDataRef.current);
     }
     const handleGlobalUpdate = () => {
       // Silent background update
@@ -762,6 +766,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
   // Compute Flight Stats for Single-Day Summary Matrix
   const getFlightStats = (fl: FlightName | 'Overall') => {
     const flightAirmen = (fl === 'Overall' ? airmen : airmen.filter((a) => a.flightName === fl)).filter(a => {
+      if (a.active === false) return false;
       if (!['CPL', 'Cpl', 'LAC', 'AC'].includes(a.rank)) return false;
       const block = (a.addressBlock || '').toLowerCase();
       if (block.includes('qtr') || block.includes('quarter') || block.includes('outside') || block.includes('maizpara') || block.includes('dhaka') || block.includes('mirpur') || block.includes('cantt') || block.includes('ghat') || block.includes('l/o') || block.includes('l/out') || block.includes('living out') || block === 'lo' || block === 'l o') return false;
@@ -1110,8 +1115,8 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
         <div className="flex flex-wrap items-center gap-2.5">
           {/* SINGLE DATE PICKER */}
           <div className="flex items-center space-x-2">
-            <div className="flex items-center bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold space-x-2">
-              <span className="text-slate-500 font-semibold">Dt:</span>
+            <div className="flex items-center bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold gap-1">
+              <span className="text-slate-500 font-semibold mr-0.5">Dt:</span>
               <DateNavigator                  
                 value={fromDate}
                 onChange={(e) => {
@@ -1232,7 +1237,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
       <>
       {/* OFFICIAL PARADE DOCUMENT SHEET (DISPLAYED ON SCREEN & IN PRINT) */}
       <div id="official-parade-document" className={`bg-white dark:bg-slate-900 text-black dark:text-white print:text-black border border-slate-300 dark:border-slate-700 rounded-2xl shadow-lg p-6 overflow-x-auto print:bg-white print:text-black print:border-none print:shadow-none ${(isFlgWgPrintOpen || isInternalPrintOpen) ? 'print:hidden' : ''}`}>
-        {loading ? (
+        {loading && (isMultiDay ? Object.keys(multiDayStates).length === 0 : !singleParadeData) ? (
           <div className="py-20 text-center text-slate-400">
             <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-3 text-emerald-500" />
             <p className="text-sm font-bold">Loading Official Parade State...</p>

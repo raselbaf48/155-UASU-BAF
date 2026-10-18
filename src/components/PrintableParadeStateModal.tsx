@@ -359,8 +359,8 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  const isMultiDay = datesInRange.length > 1;
 
  // Single Day Fetch
- const fetchSingle = async () => {
- setLoading(true);
+ const fetchSingle = async (showLoader = false) => {
+ if (showLoader) setLoading(true);
  try {
  const stateType = isPtDocument ? 'PT' : 'PARADE';
  const res = await fetch(`/api/parade-state?date=${fromDate}&shift=Morning&flight=Overall&stateType=${stateType}`);
@@ -376,8 +376,8 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  };
 
  // Multi Day Fetch
- const fetchMulti = async () => {
- setLoading(true);
+ const fetchMulti = async (showLoader = false) => {
+ if (showLoader) setLoading(true);
  try {
  const stateType = isPtDocument ? 'PT' : 'PARADE';
  const results = await Promise.all(
@@ -403,13 +403,13 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
 
  useEffect(() => {
  if (isMultiDay) {
- fetchMulti();
+ fetchMulti(true);
  } else {
- fetchSingle();
+ fetchSingle(true);
  }
  const handleGlobalUpdate = () => {
- if (isMultiDay) fetchMulti();
- else fetchSingle();
+ if (isMultiDay) fetchMulti(false);
+ else fetchSingle(false);
  };
  window.addEventListener('baf_state_updated', handleGlobalUpdate);
  return () => {
@@ -696,6 +696,7 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  // Compute Flight Stats for Single-Day Summary Matrix
  const getFlightStats = (fl: FlightName | 'Overall') => {
     const activeAirmen = airmen.filter((a) => {
+      if (a.active === false) return false;
       if (a.dateJoined && a.dateJoined > fromDate) return false;
       if (a.dateLeft && a.dateLeft < fromDate) return false;
       return true;
