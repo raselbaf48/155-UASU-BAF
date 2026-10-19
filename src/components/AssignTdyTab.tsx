@@ -1,10 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Airman, FlightName } from '../types';
+import { Airman, FlightName, DutyAssignment } from '../types';
 import { getCurrentUserSession } from '../utils/authSession';
 import { sortAirmenBySeniority } from '../utils/seniority';
 import { DateNavigator } from './DateNavigator';
-import { RefreshCw, Check } from 'lucide-react';
-
+import { RefreshCw, Check, AlertCircle } from 'lucide-react';
+import { localDb } from '../services/localDatabase';
+import { getAirmanDisposalForRange, AirmanDisposalStatus } from '../utils/airmanDisposalHelper';
 
 const formatAirmanName = (name: string) => {
   if (!name) return '';
@@ -16,23 +17,35 @@ const formatAirmanName = (name: string) => {
 };
 interface AssignTdyTabProps {
   airmen: Airman[];
+  initialFromDate?: string;
+  initialToDate?: string;
+  initialFlight?: FlightName;
   onClose: () => void;
   onSuccess: () => void;
 }
 
-export const AssignTdyTab: React.FC<AssignTdyTabProps> = ({ airmen, onClose, onSuccess }) => {
+export const AssignTdyTab: React.FC<AssignTdyTabProps> = ({
+  airmen,
+  initialFromDate,
+  initialToDate,
+  initialFlight,
+  onClose,
+  onSuccess,
+}) => {
   const session = getCurrentUserSession();
   const isAdmin = session?.assignedRole === 'ADMIN';
   const adminFlight = session?.flightName;
   const isSuperAdmin = ((session?.assignedRole === 'SUPER_ADMIN' || session?.assignedRole === 'OWNER') || session?.assignedRole === 'OWNER');
   const todayStr = new Date().toISOString().split('T')[0];
 
-  const [tdyFlight, setTdyFlight] = useState<FlightName>('Avionics');
+  const [tdyFlight, setTdyFlight] = useState<FlightName>(
+    initialFlight || (isAdmin && adminFlight ? adminFlight : 'Avionics')
+  );
   const [tdyAirmanId, setTdyAirmanId] = useState<string>('');
   
   // Date selection states
-  const [tdyFromDate, setTdyFromDate] = useState<string>(todayStr);
-  const [tdyToDate, setTdyToDate] = useState<string>(todayStr);
+  const [tdyFromDate, setTdyFromDate] = useState<string>(initialFromDate || todayStr);
+  const [tdyToDate, setTdyToDate] = useState<string>(initialToDate || initialFromDate || todayStr);
   
   const [tdyDestination, setTdyDestination] = useState<string>('');
   const [tdyCustomDestination, setTdyCustomDestination] = useState<string>('');
@@ -51,6 +64,58 @@ export const AssignTdyTab: React.FC<AssignTdyTabProps> = ({ airmen, onClose, onS
   const tdyAirmenList = useMemo(() => {
     return sortAirmenBySeniority(airmen.filter((a) => a.flightName === tdyFlight));
   }, [airmen, tdyFlight]);
+
+  const [assignmentsMap, setAssignmentsMap] = useState<Record<string, DutyAssignment[]>>(() => {
+    return localDb.getDb()?.assignments || {};
+  });
+
+  useEffect(() => {
+    const fetchAssignments = async () => {
+      try {
+        const res = await fetch('/api/duty-assignments');
+        if (res.ok) {
+          const data = await res.json();
+          if (data && typeof data === 'object') {
+            setAssignmentsMap(data);
+          }
+        }
+      } catch {
+        setAssignmentsMap(localDb.getDb()?.assignments || {});
+      }
+    };
+    fetchAssignments();
+
+    const handleUpdate = () => {
+      setAssignmentsMap({ ...(localDb.getDb()?.assignments || {}) });
+    };
+    window.addEventListener('baf_state_updated', handleUpdate);
+    return () => window.removeEventListener('baf_state_updated', handleUpdate);
+  }, []);
+
+  const airmenDisposalMap = useMemo(() => {
+    const map = new Map<string, AirmanDisposalStatus>();
+    for (const a of tdyAirmenList) {
+      const status = getAirmanDisposalForRange(
+        a.id,
+        tdyFromDate,
+        tdyToDate,
+        assignmentsMap,
+        'TDY'
+      );
+      map.set(a.id, status);
+    }
+    return map;
+  }, [tdyAirmenList, tdyFromDate, tdyToDate, assignmentsMap]);
+
+  // If selected airman becomes disabled because date changed, deselect them
+  useEffect(() => {
+    if (tdyAirmanId) {
+      const status = airmenDisposalMap.get(tdyAirmanId);
+      if (status?.disabled) {
+        setTdyAirmanId('');
+      }
+    }
+  }, [airmenDisposalMap, tdyAirmanId]);
 
   const handlePresetToggle = (days: number) => {
     if (days === 1) {
@@ -84,6 +149,12 @@ export const AssignTdyTab: React.FC<AssignTdyTabProps> = ({ airmen, onClose, onS
     const finalDest = tdyDestination === 'Custom' ? tdyCustomDestination : tdyDestination;
     if (tdyDestination === 'Custom' && !finalDest) {
       alert('Please enter custom destination');
+      return;
+    }
+
+    const status = airmenDisposalMap.get(tdyAirmanId);
+    if (status?.disabled) {
+      alert(`Cannot assign TDY: ${status.disabledReason || 'Selected airman has an active conflict during this date range.'}`);
       return;
     }
 
@@ -184,10 +255,48 @@ export const AssignTdyTab: React.FC<AssignTdyTabProps> = ({ airmen, onClose, onS
               required
             >
               <option value="" disabled>— Select an Airman —</option>
-              {tdyAirmenList.map((a) => (
-                <option key={a.id} value={a.id}>{formatAirmanName(a.rank)} {a.name}</option>
-              ))}
+              {tdyAirmenList.map((a) => {
+                const status = airmenDisposalMap.get(a.id);
+                const disposalTag = status?.dropdownLabel ? ` — ${status.dropdownLabel}` : '';
+                return (
+                  <option
+                    key={a.id}
+                    value={a.id}
+                    disabled={status?.disabled}
+                    className={status?.disabled ? 'text-rose-500 font-bold bg-slate-100 dark:bg-slate-900' : ''}
+                  >
+                    {formatAirmanName(a.rank)} {a.name}{disposalTag}
+                  </option>
+                );
+              })}
             </select>
+            {tdyAirmanId && airmenDisposalMap.get(tdyAirmanId) && (
+              <div className="mt-2 space-y-1.5">
+                {airmenDisposalMap.get(tdyAirmanId)?.disabled ? (
+                  <div className="flex items-start space-x-2 p-2.5 bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-800 rounded-xl text-xs text-rose-800 dark:text-rose-200">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 mt-0.5" />
+                    <div>
+                      <p className="font-bold">Cannot Assign TDY (Active Conflict):</p>
+                      <p className="text-[11px] mt-0.5">{airmenDisposalMap.get(tdyAirmanId)?.disabledReason}</p>
+                    </div>
+                  </div>
+                ) : airmenDisposalMap.get(tdyAirmanId)?.dropdownLabel ? (
+                  <div className="flex items-center justify-between text-[11px] px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                    <span className="text-slate-500 dark:text-slate-400">
+                      Disposal on Selected Date:
+                    </span>
+                    <span className="font-bold text-amber-600 dark:text-amber-400">
+                      {airmenDisposalMap.get(tdyAirmanId)?.disposalSummary}
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+            )}
+            {!tdyAirmanId && (
+              <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 font-semibold">
+                * Please select an eligible airman (personnel on TDY, Leave, or Deployment are marked unavailable)
+              </p>
+            )}
           </div>
 
           {/* Destination */}

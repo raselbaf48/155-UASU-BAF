@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { Sidebar, SidebarTab } from './components/Sidebar';
 import { TopHeader } from './components/TopHeader';
 import { updatePresence } from './services/presenceService';

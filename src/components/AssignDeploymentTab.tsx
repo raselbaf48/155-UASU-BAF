@@ -1,10 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Airman, FlightName } from '../types';
+import { Airman, FlightName, DutyAssignment } from '../types';
 import { getCurrentUserSession } from '../utils/authSession';
 import { sortAirmenBySeniority } from '../utils/seniority';
 import { DateNavigator } from './DateNavigator';
-import { RefreshCw, Check } from 'lucide-react';
-
+import { RefreshCw, Check, AlertCircle } from 'lucide-react';
+import { localDb } from '../services/localDatabase';
+import { getAirmanDisposalForRange, AirmanDisposalStatus } from '../utils/airmanDisposalHelper';
 
 const formatAirmanName = (name: string) => {
   if (!name) return '';
@@ -14,23 +15,36 @@ const formatAirmanName = (name: string) => {
   if (['mwo', 'swo', 'wo', 'lac', 'ac', 'mw'].includes(lower)) return lower.toUpperCase();
   return name.toLowerCase().split(' ').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 };
+
 interface AssignDeploymentTabProps {
   airmen: Airman[];
+  initialFromDate?: string;
+  initialToDate?: string;
+  initialFlight?: FlightName;
   onClose: () => void;
   onSuccess: () => void;
 }
 
-export const AssignDeploymentTab: React.FC<AssignDeploymentTabProps> = ({ airmen, onClose, onSuccess }) => {
+export const AssignDeploymentTab: React.FC<AssignDeploymentTabProps> = ({
+  airmen,
+  initialFromDate,
+  initialToDate,
+  initialFlight,
+  onClose,
+  onSuccess,
+}) => {
   const session = getCurrentUserSession();
   const isAdmin = session?.assignedRole === 'ADMIN';
   const adminFlight = session?.flightName;
   const isSuperAdmin = ((session?.assignedRole === 'SUPER_ADMIN' || session?.assignedRole === 'OWNER') || session?.assignedRole === 'OWNER');
   const todayStr = new Date().toISOString().split('T')[0];
 
-  const [deploymentFlight, setDeploymentFlight] = useState<FlightName>('Avionics');
+  const [deploymentFlight, setDeploymentFlight] = useState<FlightName>(
+    initialFlight || (isAdmin && adminFlight ? adminFlight : 'Avionics')
+  );
   const [deploymentAirmanId, setDeploymentAirmanId] = useState<string>('');
-  const [deploymentFromDate, setDeploymentFromDate] = useState<string>(todayStr);
-  const [deploymentToDate, setDeploymentToDate] = useState<string>(todayStr);
+  const [deploymentFromDate, setDeploymentFromDate] = useState<string>(initialFromDate || todayStr);
+  const [deploymentToDate, setDeploymentToDate] = useState<string>(initialToDate || initialFromDate || todayStr);
   const [deploymentLocation, setDeploymentLocation] = useState<string>('');
   const [deploymentCustomDestination, setDeploymentCustomDestination] = useState<string>('');
   const [deploymentRemarks, setDeploymentRemarks] = useState<string>('');
@@ -48,6 +62,58 @@ export const AssignDeploymentTab: React.FC<AssignDeploymentTabProps> = ({ airmen
   const deploymentAirmenList = useMemo(() => {
     return sortAirmenBySeniority(airmen.filter((a) => a.flightName === deploymentFlight));
   }, [airmen, deploymentFlight]);
+
+  const [assignmentsMap, setAssignmentsMap] = useState<Record<string, DutyAssignment[]>>(() => {
+    return localDb.getDb()?.assignments || {};
+  });
+
+  useEffect(() => {
+    const fetchAssignments = async () => {
+      try {
+        const res = await fetch('/api/duty-assignments');
+        if (res.ok) {
+          const data = await res.json();
+          if (data && typeof data === 'object') {
+            setAssignmentsMap(data);
+          }
+        }
+      } catch {
+        setAssignmentsMap(localDb.getDb()?.assignments || {});
+      }
+    };
+    fetchAssignments();
+
+    const handleUpdate = () => {
+      setAssignmentsMap({ ...(localDb.getDb()?.assignments || {}) });
+    };
+    window.addEventListener('baf_state_updated', handleUpdate);
+    return () => window.removeEventListener('baf_state_updated', handleUpdate);
+  }, []);
+
+  const airmenDisposalMap = useMemo(() => {
+    const map = new Map<string, AirmanDisposalStatus>();
+    for (const a of deploymentAirmenList) {
+      const status = getAirmanDisposalForRange(
+        a.id,
+        deploymentFromDate,
+        deploymentToDate,
+        assignmentsMap,
+        'DEPLOYMENT'
+      );
+      map.set(a.id, status);
+    }
+    return map;
+  }, [deploymentAirmenList, deploymentFromDate, deploymentToDate, assignmentsMap]);
+
+  // If selected airman becomes disabled because date changed, deselect them
+  useEffect(() => {
+    if (deploymentAirmanId) {
+      const status = airmenDisposalMap.get(deploymentAirmanId);
+      if (status?.disabled) {
+        setDeploymentAirmanId('');
+      }
+    }
+  }, [airmenDisposalMap, deploymentAirmanId]);
 
   const handlePresetToggle = (days: number) => {
     if (selectedPresetDays === days) {
@@ -79,6 +145,12 @@ export const AssignDeploymentTab: React.FC<AssignDeploymentTabProps> = ({ airmen
     const finalDest = deploymentLocation === 'Custom' ? deploymentCustomDestination : deploymentLocation;
     if (deploymentLocation === 'Custom' && !finalDest) {
       alert('Please enter custom destination');
+      return;
+    }
+
+    const status = airmenDisposalMap.get(deploymentAirmanId);
+    if (status?.disabled) {
+      alert(`Cannot assign Deployment: ${status.disabledReason || 'Selected airman has an active conflict during this date range.'}`);
       return;
     }
 
@@ -181,10 +253,48 @@ export const AssignDeploymentTab: React.FC<AssignDeploymentTabProps> = ({ airmen
               required
             >
               <option value="" disabled>— Select an Airman —</option>
-              {deploymentAirmenList.map((a) => (
-                <option key={a.id} value={a.id}>{formatAirmanName(a.rank)} {a.name}</option>
-              ))}
+              {deploymentAirmenList.map((a) => {
+                const status = airmenDisposalMap.get(a.id);
+                const disposalTag = status?.dropdownLabel ? ` — ${status.dropdownLabel}` : '';
+                return (
+                  <option
+                    key={a.id}
+                    value={a.id}
+                    disabled={status?.disabled}
+                    className={status?.disabled ? 'text-rose-500 font-bold bg-slate-100 dark:bg-slate-900' : ''}
+                  >
+                    {formatAirmanName(a.rank)} {a.name}{disposalTag}
+                  </option>
+                );
+              })}
             </select>
+            {deploymentAirmanId && airmenDisposalMap.get(deploymentAirmanId) && (
+              <div className="mt-2 space-y-1.5">
+                {airmenDisposalMap.get(deploymentAirmanId)?.disabled ? (
+                  <div className="flex items-start space-x-2 p-2.5 bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-800 rounded-xl text-xs text-rose-800 dark:text-rose-200">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 mt-0.5" />
+                    <div>
+                      <p className="font-bold">Cannot Assign Deployment (Active Conflict):</p>
+                      <p className="text-[11px] mt-0.5">{airmenDisposalMap.get(deploymentAirmanId)?.disabledReason}</p>
+                    </div>
+                  </div>
+                ) : airmenDisposalMap.get(deploymentAirmanId)?.dropdownLabel ? (
+                  <div className="flex items-center justify-between text-[11px] px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                    <span className="text-slate-500 dark:text-slate-400">
+                      Disposal on Selected Date:
+                    </span>
+                    <span className="font-bold text-amber-600 dark:text-amber-400">
+                      {airmenDisposalMap.get(deploymentAirmanId)?.disposalSummary}
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+            )}
+            {!deploymentAirmanId && (
+              <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 font-semibold">
+                * Please select an eligible airman (personnel on Deployment, Leave, or TDY are marked unavailable)
+              </p>
+            )}
           </div>
 
           {/* Destination */}
@@ -218,26 +328,22 @@ export const AssignDeploymentTab: React.FC<AssignDeploymentTabProps> = ({ airmen
                       ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
                       : 'bg-slate-50 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
                   }`}
-                >
-                  Custom
-                </button>
+               >
+                 Custom
+               </button>
             </div>
-            
+
             {deploymentLocation === 'Custom' && (
               <input
                 type="text"
                 value={deploymentCustomDestination}
                 onChange={(e) => setDeploymentCustomDestination(e.target.value)}
-                placeholder="Enter custom deployment location..."
-                className={`w-full bg-slate-50 dark:bg-slate-800 border rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white outline-none cursor-pointer ${
-                  !deploymentCustomDestination ? 'border-amber-400 dark:border-amber-600' : 'border-slate-200 dark:border-slate-700 focus:border-emerald-500'
-                }`}
+                placeholder="Enter deployment base/location (e.g. Barishal, Bogura)"
+                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-medium text-slate-900 dark:text-white outline-none focus:border-emerald-500"
                 required
               />
             )}
           </div>
-
-
 
           {/* Date Range */}
           <div className="grid grid-cols-2 gap-3">
@@ -248,20 +354,11 @@ export const AssignDeploymentTab: React.FC<AssignDeploymentTabProps> = ({ airmen
               <DateNavigator
                 value={deploymentFromDate}
                 onChange={(e) => {
-                  const val = e.target.value;
-                  setDeploymentFromDate(val);
-                  
-                  if (!deploymentToDate || deploymentToDate < val) {
-                    setDeploymentToDate(val);
-                  }
-                  
-                  if (selectedPresetDays !== null) {
-                    const d = new Date(val);
-                    d.setDate(d.getDate() + selectedPresetDays - 1);
-                    setDeploymentToDate(d.toISOString().split('T')[0]);
-                  }
+                  const newFrom = e.target.value;
+                  setDeploymentFromDate(newFrom);
+                  if (deploymentToDate < newFrom) setDeploymentToDate(newFrom);
                 }}
-                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white outline-none cursor-pointer"
+                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-medium text-slate-900 dark:text-white outline-none cursor-pointer"
               />
             </div>
             <div>
@@ -271,56 +368,48 @@ export const AssignDeploymentTab: React.FC<AssignDeploymentTabProps> = ({ airmen
               <DateNavigator
                 value={deploymentToDate}
                 min={deploymentFromDate}
-                onChange={(e) => {
-                  setDeploymentToDate(e.target.value);
-                  setSelectedPresetDays(null);
-                }}
-                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white outline-none cursor-pointer"
+                onChange={(e) => setDeploymentToDate(e.target.value)}
+                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-medium text-slate-900 dark:text-white outline-none cursor-pointer"
               />
             </div>
           </div>
 
-          {/* Quick Presets & Real-time Duration */}
-          <div className="bg-slate-50 dark:bg-slate-800/60 p-3 rounded-2xl border border-slate-200/80 dark:border-slate-700 space-y-3">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-bold text-slate-700 dark:text-slate-300">Quick Deployment Duration Presets:</span>
-              <span className="text-[11px] text-slate-400">Sets 'To Date' automatically</span>
-            </div>
-            
-            <div className="grid grid-cols-5 gap-2">
-              {[3, 7, 14, 30, 60].map((days) => {
-                const isSelected = selectedPresetDays === days;
-                return (
-                  <button
-                    key={days}
-                    type="button"
-                    onClick={() => handlePresetToggle(days)}
-                    className={`py-2 px-1 rounded-xl text-xs font-black transition-all cursor-pointer shadow-2xs text-center border ${
-                      isSelected
-                        ? 'bg-teal-600 text-white border-teal-600 ring-2 ring-teal-500/50 shadow-sm'
-                        : 'bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-600 hover:bg-teal-50 dark:hover:bg-teal-950/50 hover:text-teal-700 dark:hover:text-teal-300 hover:border-teal-300'
-                    }`}
-                  >
-                    {days} Days
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="flex items-center justify-between border-t border-slate-200 dark:border-slate-700/80 pt-3 mt-1">
-              <span className="text-xs font-bold text-slate-600 dark:text-slate-400">Total Deployment Span:</span>
-              <span className="text-sm font-black text-teal-700 dark:text-teal-400">
-                {deploymentDurationDays} Calendar Day{deploymentDurationDays > 1 ? 's' : ''}
-              </span>
+          {/* Preset Duration Buttons */}
+          <div>
+            <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+              Preset Durations
+            </label>
+            <div className="grid grid-cols-5 gap-1.5">
+              {[1, 3, 7, 15, 30].map((days) => (
+                <button
+                  key={days}
+                  type="button"
+                  onClick={() => handlePresetToggle(days)}
+                  className={`py-1.5 px-2 text-xs font-black rounded-lg border transition-all cursor-pointer ${
+                    selectedPresetDays === days
+                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs ring-1 ring-emerald-500'
+                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  {days === 1 ? '1 Day' : `${days} Days`}
+                </button>
+              ))}
             </div>
           </div>
 
-          {/* Modal Buttons */}
-          <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+          {/* Form Actions */}
+          <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-all cursor-pointer"
+            >
+              Cancel
+            </button>
             <button
               type="submit"
-              disabled={savingDeployment}
-              className="px-5 py-2 text-xs font-black text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs transition-colors disabled:opacity-50 flex items-center space-x-1.5 cursor-pointer"
+              disabled={savingDeployment || !deploymentAirmanId || !deploymentLocation || airmenDisposalMap.get(deploymentAirmanId)?.disabled}
+              className="px-5 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-md transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-1.5"
             >
               {savingDeployment ? (
                 <>
@@ -330,7 +419,7 @@ export const AssignDeploymentTab: React.FC<AssignDeploymentTabProps> = ({ airmen
               ) : (
                 <>
                   <Check className="w-3.5 h-3.5" />
-                  <span>Confirm & Record Deployment</span>
+                  <span>Assign Deployment</span>
                 </>
               )}
             </button>

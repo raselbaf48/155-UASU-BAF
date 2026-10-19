@@ -1,9 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Airman, FlightName } from '../types';
+import { Airman, FlightName, DutyAssignment } from '../types';
 import { getCurrentUserSession } from '../utils/authSession';
 import { sortAirmenBySeniority } from '../utils/seniority';
 import { DateNavigator } from './DateNavigator';
-import { Calendar, RefreshCw, Check } from 'lucide-react';
+import { Calendar, RefreshCw, Check, AlertCircle, ShieldAlert } from 'lucide-react';
+import { localDb } from '../services/localDatabase';
+import { getAirmanDisposalForRange, AirmanDisposalStatus } from '../utils/airmanDisposalHelper';
 
 
 const formatAirmanName = (name: string) => {
@@ -16,21 +18,33 @@ const formatAirmanName = (name: string) => {
 };
 interface AssignLeaveTabProps {
   airmen: Airman[];
+  initialFromDate?: string;
+  initialToDate?: string;
+  initialFlight?: FlightName;
   onClose: () => void;
   onSuccess: () => void;
 }
 
-export const AssignLeaveTab: React.FC<AssignLeaveTabProps> = ({ airmen, onClose, onSuccess }) => {
+export const AssignLeaveTab: React.FC<AssignLeaveTabProps> = ({
+  airmen,
+  initialFromDate,
+  initialToDate,
+  initialFlight,
+  onClose,
+  onSuccess,
+}) => {
   const session = getCurrentUserSession();
   const isAdmin = session?.assignedRole === 'ADMIN';
   const adminFlight = session?.flightName;
   const isSuperAdmin = ((session?.assignedRole === 'SUPER_ADMIN' || session?.assignedRole === 'OWNER') || session?.assignedRole === 'OWNER');
   const todayStr = new Date().toISOString().split('T')[0];
 
-  const [grantLeaveFlight, setGrantLeaveFlight] = useState<FlightName>('Avionics');
+  const [grantLeaveFlight, setGrantLeaveFlight] = useState<FlightName>(
+    initialFlight || (isAdmin && adminFlight ? adminFlight : 'Avionics')
+  );
   const [leaveAirmanId, setLeaveAirmanId] = useState<string>('');
-  const [leaveFromDate, setLeaveFromDate] = useState<string>(todayStr);
-  const [leaveToDate, setLeaveToDate] = useState<string>(todayStr);
+  const [leaveFromDate, setLeaveFromDate] = useState<string>(initialFromDate || todayStr);
+  const [leaveToDate, setLeaveToDate] = useState<string>(initialToDate || initialFromDate || todayStr);
   const [leaveType, setLeaveType] = useState<'Casual' | 'Annual' | 'Recreation' | 'Sick' | ''>('');
   
   // F-295 and custom days logic
@@ -53,6 +67,58 @@ export const AssignLeaveTab: React.FC<AssignLeaveTabProps> = ({ airmen, onClose,
   const grantAirmenList = useMemo(() => {
     return sortAirmenBySeniority(airmen.filter((a) => a.flightName === grantLeaveFlight));
   }, [airmen, grantLeaveFlight]);
+
+  const [assignmentsMap, setAssignmentsMap] = useState<Record<string, DutyAssignment[]>>(() => {
+    return localDb.getDb()?.assignments || {};
+  });
+
+  useEffect(() => {
+    const fetchAssignments = async () => {
+      try {
+        const res = await fetch('/api/duty-assignments');
+        if (res.ok) {
+          const data = await res.json();
+          if (data && typeof data === 'object') {
+            setAssignmentsMap(data);
+          }
+        }
+      } catch {
+        setAssignmentsMap(localDb.getDb()?.assignments || {});
+      }
+    };
+    fetchAssignments();
+
+    const handleUpdate = () => {
+      setAssignmentsMap({ ...(localDb.getDb()?.assignments || {}) });
+    };
+    window.addEventListener('baf_state_updated', handleUpdate);
+    return () => window.removeEventListener('baf_state_updated', handleUpdate);
+  }, []);
+
+  const airmenDisposalMap = useMemo(() => {
+    const map = new Map<string, AirmanDisposalStatus>();
+    for (const a of grantAirmenList) {
+      const status = getAirmanDisposalForRange(
+        a.id,
+        leaveFromDate,
+        leaveToDate,
+        assignmentsMap,
+        'LEAVE'
+      );
+      map.set(a.id, status);
+    }
+    return map;
+  }, [grantAirmenList, leaveFromDate, leaveToDate, assignmentsMap]);
+
+  // If selected airman becomes disabled because date changed, deselect them
+  useEffect(() => {
+    if (leaveAirmanId) {
+      const status = airmenDisposalMap.get(leaveAirmanId);
+      if (status?.disabled) {
+        setLeaveAirmanId('');
+      }
+    }
+  }, [airmenDisposalMap, leaveAirmanId]);
 
   // Derived Values & Handlers
   const leaveDurationDays = useMemo(() => {
@@ -159,6 +225,12 @@ export const AssignLeaveTab: React.FC<AssignLeaveTabProps> = ({ airmen, onClose,
       return;
     }
 
+    const status = airmenDisposalMap.get(leaveAirmanId);
+    if (status?.disabled) {
+      alert(`Cannot grant leave: ${status.disabledReason || 'Selected airman has an active conflict during this date range.'}`);
+      return;
+    }
+
     setSavingLeave(true);
     setLeaveSuccessMsg('');
 
@@ -256,13 +328,46 @@ export const AssignLeaveTab: React.FC<AssignLeaveTabProps> = ({ airmen, onClose,
               required
             >
               <option value="" disabled>— Select an Airman —</option>
-              {grantAirmenList.map((a) => (
-                <option key={a.id} value={a.id}>{formatAirmanName(a.rank)} {a.name}</option>
-              ))}
+              {grantAirmenList.map((a) => {
+                const status = airmenDisposalMap.get(a.id);
+                const disposalTag = status?.dropdownLabel ? ` — ${status.dropdownLabel}` : '';
+                return (
+                  <option
+                    key={a.id}
+                    value={a.id}
+                    disabled={status?.disabled}
+                    className={status?.disabled ? 'text-rose-500 font-bold bg-slate-100 dark:bg-slate-900' : ''}
+                  >
+                    {formatAirmanName(a.rank)} {a.name}{disposalTag}
+                  </option>
+                );
+              })}
             </select>
+            {leaveAirmanId && airmenDisposalMap.get(leaveAirmanId) && (
+              <div className="mt-2 space-y-1.5">
+                {airmenDisposalMap.get(leaveAirmanId)?.disabled ? (
+                  <div className="flex items-start space-x-2 p-2.5 bg-rose-50 dark:bg-rose-950/50 border border-rose-300 dark:border-rose-800 rounded-xl text-xs text-rose-800 dark:text-rose-200">
+                    <ShieldAlert className="w-4 h-4 shrink-0 text-rose-600 mt-0.5" />
+                    <div>
+                      <p className="font-bold">Cannot Assign Leave (Active Conflict):</p>
+                      <p className="text-[11px] mt-0.5">{airmenDisposalMap.get(leaveAirmanId)?.disabledReason}</p>
+                    </div>
+                  </div>
+                ) : airmenDisposalMap.get(leaveAirmanId)?.dropdownLabel ? (
+                  <div className="flex items-center justify-between text-[11px] px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                    <span className="text-slate-500 dark:text-slate-400">
+                      Disposal on Selected Date:
+                    </span>
+                    <span className="font-bold text-amber-600 dark:text-amber-400">
+                      {airmenDisposalMap.get(leaveAirmanId)?.disposalSummary}
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+            )}
             {!leaveAirmanId && (
               <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 font-semibold">
-                * Please select an airman from the list above
+                * Please select an eligible airman (personnel on Leave, TDY, or Deployment are marked unavailable)
               </p>
             )}
           </div>

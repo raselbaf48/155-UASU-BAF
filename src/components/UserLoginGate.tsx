@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { supabase } from '../supabase';
 import { fetchDirectImageUrl, getCanteenConfig } from '../features/canteen/utils/canteenSettings';
 import { getCanteenMembersCache } from '../features/canteen/utils/canteenMembersCache';

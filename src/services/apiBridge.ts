@@ -196,6 +196,10 @@ async function handleLocalApiRequest(urlStr: string, init?: RequestInit): Promis
       return jsonResponse(data);
     }
 
+    if (pathname === '/api/duty-assignments') {
+      return jsonResponse(localDb.getDb()?.assignments || {});
+    }
+
     // Helper to verify duty write permissions
     const verifyDutyWritePermission = (targetAirmanId?: string, targetDate?: string, targetFlight?: string) => {
       const session = getCurrentUserSession();

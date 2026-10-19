@@ -7,6 +7,7 @@ import { sortAirmenBySeniority } from '../utils/seniority';
 import { exportTableToCSV } from '../utils/csvExport';
 import { getOptimalMinColumnWidth } from '../utils/tableUtils';
 import { EntryHistoryModal } from './EntryHistoryModal';
+import { getAirmanDisposalForRange } from '../utils/airmanDisposalHelper';
 
 
 const formatAirmanName = (name: string) => {
@@ -257,6 +258,12 @@ export const DeploymentRegisterView: React.FC<DeploymentRegisterViewProps> = ({
 
     if (!attFromDate || !attToDate || attFromDate > attToDate) {
       alert('Invalid date range');
+      return;
+    }
+
+    const depConflict = getAirmanDisposalForRange(attAirmanId, attFromDate, attToDate, undefined, 'DEPLOYMENT');
+    if (depConflict.disabled) {
+      alert(`Cannot assign Deployment: ${depConflict.disabledReason || 'Selected airman has an active conflict during this date range.'}`);
       return;
     }
 
@@ -665,11 +672,20 @@ export const DeploymentRegisterView: React.FC<DeploymentRegisterViewProps> = ({
                   <option value="" disabled={false}>
                     — Select an Airman —
                   </option>
-                  {grantAirmenList.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {formatAirmanName(a.rank)} {a.name}
-                    </option>
-                  ))}
+                  {grantAirmenList.map((a) => {
+                    const status = getAirmanDisposalForRange(a.id, attFromDate, attToDate, undefined, 'DEPLOYMENT');
+                    const disposalTag = status.dropdownLabel ? ` — ${status.dropdownLabel}` : '';
+                    return (
+                      <option
+                        key={a.id}
+                        value={a.id}
+                        disabled={status.disabled}
+                        className={status.disabled ? 'text-rose-500 font-bold bg-slate-100 dark:bg-slate-900' : ''}
+                      >
+                        {formatAirmanName(a.rank)} {a.name}{disposalTag}
+                      </option>
+                    );
+                  })}
                 </select>
                 )}
               </div>

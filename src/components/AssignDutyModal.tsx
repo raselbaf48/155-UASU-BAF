@@ -892,9 +892,36 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
           ))}
         </div>
         
-        {activeModalTab === 'Leave' && <AssignLeaveTab airmen={airmen} onClose={onClose} onSuccess={() => { if(onSuccess) onSuccess(); else if (onRefreshParadeData) onRefreshParadeData(); onClose(); }} />}
-        {activeModalTab === 'TDY' && <AssignTdyTab airmen={airmen} onClose={onClose} onSuccess={() => { if(onSuccess) onSuccess(); else if (onRefreshParadeData) onRefreshParadeData(); onClose(); }} />}
-        {activeModalTab === 'Deployment' && <AssignDeploymentTab airmen={airmen} onClose={onClose} onSuccess={() => { if(onSuccess) onSuccess(); else if (onRefreshParadeData) onRefreshParadeData(); onClose(); }} />}
+        {activeModalTab === 'Leave' && (
+          <AssignLeaveTab
+            airmen={airmen}
+            initialFromDate={fromDate}
+            initialToDate={toDate}
+            initialFlight={activeFlight !== 'All' ? activeFlight : undefined}
+            onClose={onClose}
+            onSuccess={() => { if(onSuccess) onSuccess(); else if (onRefreshParadeData) onRefreshParadeData(); onClose(); }}
+          />
+        )}
+        {activeModalTab === 'TDY' && (
+          <AssignTdyTab
+            airmen={airmen}
+            initialFromDate={fromDate}
+            initialToDate={toDate}
+            initialFlight={activeFlight !== 'All' ? activeFlight : undefined}
+            onClose={onClose}
+            onSuccess={() => { if(onSuccess) onSuccess(); else if (onRefreshParadeData) onRefreshParadeData(); onClose(); }}
+          />
+        )}
+        {activeModalTab === 'Deployment' && (
+          <AssignDeploymentTab
+            airmen={airmen}
+            initialFromDate={fromDate}
+            initialToDate={toDate}
+            initialFlight={activeFlight !== 'All' ? activeFlight : undefined}
+            onClose={onClose}
+            onSuccess={() => { if(onSuccess) onSuccess(); else if (onRefreshParadeData) onRefreshParadeData(); onClose(); }}
+          />
+        )}
         
         <div style={{ display: activeModalTab === 'Duty' ? 'flex' : 'none', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
 
@@ -1508,11 +1535,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
                           <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
                             - {statusInfo.label}
                           </span>
-                        ) : (
-                          <span className="text-[10px] text-slate-400 font-medium">
-                            - On Parade
-                          </span>
-                        )}
+                        ) : null}
                       </div>
                     </button>
                   );

@@ -310,8 +310,8 @@ async function startServer() {
     return cleaned;
   }
 
-  const rawEnvUrl = process.env.VITE_SUPABASE_URL;
-  const rawEnvKey = process.env.VITE_SUPABASE_ANON_KEY;
+  const rawEnvUrl = process.env.VITE_SUPABASE_URL || FALLBACK_SUPABASE_URL;
+  const rawEnvKey = process.env.VITE_SUPABASE_ANON_KEY || FALLBACK_SUPABASE_ANON_KEY;
 
   let resolvedUrl = rawEnvUrl;
   let resolvedKey = rawEnvKey;

@@ -6,6 +6,7 @@ import { Calendar, Search, Filter, Printer, Download, Eye, ShieldCheck, Sun, Moo
 import { sortAirmenBySeniority } from '../utils/seniority';
 import { getOptimalMinColumnWidth } from '../utils/tableUtils';
 import { EntryHistoryModal } from './EntryHistoryModal';
+import { getAirmanDisposalForRange } from '../utils/airmanDisposalHelper';
 
 
 const formatAirmanName = (name: string) => {
@@ -464,6 +465,12 @@ export const LeaveRegisterView: React.FC<LeaveRegisterViewProps> = ({
     }
     if (!leaveFromDate || !leaveToDate || leaveFromDate > leaveToDate) {
       alert('Invalid date range');
+      return;
+    }
+
+    const leaveConflict = getAirmanDisposalForRange(leaveAirmanId, leaveFromDate, leaveToDate, undefined, 'LEAVE');
+    if (leaveConflict.disabled) {
+      alert(`Cannot grant leave: ${leaveConflict.disabledReason || 'Selected airman has an active conflict during this date range.'}`);
       return;
     }
 
@@ -973,11 +980,20 @@ export const LeaveRegisterView: React.FC<LeaveRegisterViewProps> = ({
                   <option value="" disabled={false}>
                     — Select an Airman —
                   </option>
-                  {grantAirmenList.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {formatAirmanName(a.rank)} {a.name}
-                    </option>
-                  ))}
+                  {grantAirmenList.map((a) => {
+                    const status = getAirmanDisposalForRange(a.id, leaveFromDate, leaveToDate, undefined, 'LEAVE');
+                    const disposalTag = status.dropdownLabel ? ` — ${status.dropdownLabel}` : '';
+                    return (
+                      <option
+                        key={a.id}
+                        value={a.id}
+                        disabled={status.disabled}
+                        className={status.disabled ? 'text-rose-500 font-bold bg-slate-100 dark:bg-slate-900' : ''}
+                      >
+                        {formatAirmanName(a.rank)} {a.name}{disposalTag}
+                      </option>
+                    );
+                  })}
                 </select>
                 )}
                 {!leaveAirmanId && (
