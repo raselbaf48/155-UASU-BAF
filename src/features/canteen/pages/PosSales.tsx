@@ -25,7 +25,7 @@ import {
   InventoryItemType,
   restoreRawStockForSaleCancellation
 } from '../utils/recipeManager';
-import { pushKeyToCloud, pullKeyFromCloud, recordDeletedTxId, getDeletedTxIds, recordDeletedTxIdAsync, clearDirtyCanteenKey, queuePushKeyToCloud } from '../utils/canteenCloudSync';
+import { pushKeyToCloud, pullKeyFromCloud, recordDeletedTxId, getDeletedTxIds, recordDeletedTxIdAsync, clearDirtyCanteenKey, queuePushKeyToCloud, getSafeCanteenTransactions } from '../utils/canteenCloudSync';
 import { sortCanteenMembersByOfficeSeniority, deduplicateCanteenMembers } from '../utils/canteenSeniority';
 import { playSuccessChime, playTrashPopSound } from '../utils/audioFeedback';
 import { ImportPosSalesModal } from '../components/ImportPosSalesModal';
@@ -228,9 +228,9 @@ export const PosSales: React.FC<PosSalesProps> = ({
   const [toastMessage, setToastMessage] = useState('');
   const [salesHistory, setSalesHistory] = useState<any[]>(() => {
     try {
-      const history = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+      const history = getSafeCanteenTransactions();
       const deletedIds = getDeletedTxIds();
-      return history.filter((tx: any) => isSaleTransaction(tx) && !deletedIds.has(String(tx?.id)));
+      return (Array.isArray(history) ? history : []).filter((tx: any) => isSaleTransaction(tx) && !deletedIds.has(String(tx?.id)));
     } catch {
       return [];
     }
@@ -335,9 +335,9 @@ export const PosSales: React.FC<PosSalesProps> = ({
         }
         fetchCatalog();
       }
-      const history = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+      const history = getSafeCanteenTransactions();
       const deletedIds = getDeletedTxIds();
-      setSalesHistory(history.filter((tx: any) => isSaleTransaction(tx) && !deletedIds.has(String(tx?.id))));
+      setSalesHistory((Array.isArray(history) ? history : []).filter((tx: any) => isSaleTransaction(tx) && !deletedIds.has(String(tx?.id))));
     };
 
     const handleSyncStock = () => {
@@ -387,9 +387,9 @@ export const PosSales: React.FC<PosSalesProps> = ({
     // Initial cloud fetch for canteen_txs to ensure POS sales history is 100% updated
     pullKeyFromCloud('canteen_txs').then((cloudTxs) => {
       if (Array.isArray(cloudTxs) && cloudTxs.length > 0) {
-        const local = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+        const local = getSafeCanteenTransactions();
         const merged = [...cloudTxs];
-        local.forEach((ltx: any) => {
+        (Array.isArray(local) ? local : []).forEach((ltx: any) => {
           if (!merged.some((ctx: any) => String(ctx.id) === String(ltx.id))) {
             merged.push(ltx);
           }
@@ -552,9 +552,9 @@ export const PosSales: React.FC<PosSalesProps> = ({
 
   const openSalesHistoryView = () => {
     try {
-      const history = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+      const history = getSafeCanteenTransactions();
       const deletedIds = getDeletedTxIds();
-      const onlySales = history.filter((tx: any) => isSaleTransaction(tx) && !deletedIds.has(String(tx?.id)));
+      const onlySales = (Array.isArray(history) ? history : []).filter((tx: any) => isSaleTransaction(tx) && !deletedIds.has(String(tx?.id)));
       setSalesHistory(onlySales);
       setHistoryDateFilter(saleDate || getTodayYMD());
     } catch {}
@@ -719,7 +719,7 @@ export const PosSales: React.FC<PosSalesProps> = ({
   const removeHistoryItem = async (txId: string) => {
     const txIdStr = String(txId);
     const txToRemove = salesHistory.find(tx => String(tx.id) === txIdStr || Number(tx.id) === Number(txId)) ||
-      (JSON.parse(localStorage.getItem('canteen_txs') || '[]')).find((tx: any) => String(tx.id) === txIdStr || Number(tx.id) === Number(txId));
+      (getSafeCanteenTransactions()).find((tx: any) => String(tx?.id) === txIdStr || Number(tx?.id) === Number(txId));
     if (!txToRemove) return;
 
     // 1. Tombstone in local & cloud so it NEVER returns on any device or refresh
@@ -798,8 +798,8 @@ export const PosSales: React.FC<PosSalesProps> = ({
       }
     }
 
-    const currentHistory = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-    const updatedHistory = currentHistory.filter((tx: any) => 
+    const currentHistory = getSafeCanteenTransactions();
+    const updatedHistory = (Array.isArray(currentHistory) ? currentHistory : []).filter((tx: any) => 
       String(tx.id).trim() !== txIdStr && 
       Number(tx.id) !== Number(txId) &&
       (txToRemove.id ? (String(tx.id).trim() !== String(txToRemove.id).trim() && Number(tx.id) !== Number(txToRemove.id)) : true)
@@ -1044,8 +1044,8 @@ export const PosSales: React.FC<PosSalesProps> = ({
       }
 
       // Update transaction in storage
-      const currentHistory = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-      const updatedHistory = currentHistory.map((tx: any) => {
+      const currentHistory = getSafeCanteenTransactions();
+      const updatedHistory = (Array.isArray(currentHistory) ? currentHistory : []).map((tx: any) => {
         if (String(tx.id) === String(editingTx.id)) {
           return {
             ...tx,
@@ -1183,13 +1183,9 @@ export const PosSales: React.FC<PosSalesProps> = ({
     if (!targetYMD) return map;
 
     // Use salesHistory or direct fallback to localStorage if salesHistory is empty
-    let allTxs: any[] = Array.isArray(salesHistory) && salesHistory.length > 0 ? salesHistory : [];
-    if (allTxs.length === 0) {
-      try {
-        allTxs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-      } catch {
-        allTxs = [];
-      }
+    let allTxs: any[] = Array.isArray(salesHistory) && salesHistory.length > 0 ? salesHistory : getSafeCanteenTransactions();
+    if (!Array.isArray(allTxs)) {
+      allTxs = [];
     }
 
     const deletedIds = getDeletedTxIds();
@@ -1416,8 +1412,8 @@ export const PosSales: React.FC<PosSalesProps> = ({
       }
 
       // 1. Immediately persist transactions locally
-      const existingTx = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-      const mergedTxs = [...newTransactions, ...existingTx];
+      const existingTx = getSafeCanteenTransactions();
+      const mergedTxs = [...newTransactions, ...(Array.isArray(existingTx) ? existingTx : [])];
       localStorage.setItem('canteen_txs', JSON.stringify(mergedTxs));
       setSalesHistory(prev => [...newTransactions, ...prev]);
 
@@ -3498,8 +3494,8 @@ export const PosSales: React.FC<PosSalesProps> = ({
           members={members}
           catalog={catalog}
           onImportComplete={() => {
-            const history = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-            setSalesHistory(history.filter((tx: any) => isSaleTransaction(tx)));
+            const history = getSafeCanteenTransactions();
+            setSalesHistory((Array.isArray(history) ? history : []).filter((tx: any) => isSaleTransaction(tx)));
             setToastMessage('POS sales imported successfully!');
             setTimeout(() => setToastMessage(''), 3000);
           }}

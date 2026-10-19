@@ -422,6 +422,32 @@ export async function recordDeletedTxIdAsync(txId: string | number): Promise<voi
   } catch {}
 }
 
+/**
+ * Safely retrieves canteen transactions from localStorage.
+ * Guarantees that an Array is ALWAYS returned, protecting callers against
+ * non-array structures, numeric-keyed objects, corrupted JSON, or nulls.
+ */
+export function getSafeCanteenTransactions(): any[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem('canteen_txs');
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && typeof parsed === 'object') {
+      if (Array.isArray((parsed as any).txs)) return (parsed as any).txs;
+      if (Array.isArray((parsed as any).transactions)) return (parsed as any).transactions;
+      const values = Object.values(parsed);
+      if (Array.isArray(values) && values.length > 0 && typeof values[0] === 'object') {
+        return values;
+      }
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
 export function clearDirtyCanteenKey(key: string) {
   dirtyCanteenKeys.delete(key);
   dirtyCanteenValues.delete(key);
@@ -507,13 +533,7 @@ export function reconcileExpenseOnFundTxDelete(deletedTx: any, remainingTxs?: an
     if (!isOthers && !isUnitFund && !deletedTx.batchExpenseId) return;
 
     // Get current remaining transactions from param or localStorage
-    const allRemainingTxs = remainingTxs || (() => {
-      try {
-        return JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-      } catch {
-        return [];
-      }
-    })();
+    const allRemainingTxs = remainingTxs || getSafeCanteenTransactions();
 
     let expModified = false;
 

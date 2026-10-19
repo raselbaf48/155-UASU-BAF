@@ -44,7 +44,7 @@ import {
   Recipe20PaxMap,
   RECIPES_20PAX_STORAGE_KEY
 } from './RawDistributionPage';
-import { pushKeyToCloud } from '../utils/canteenCloudSync';
+import { pushKeyToCloud, getSafeCanteenTransactions } from '../utils/canteenCloudSync';
 import {
   getMenuItemBanglaName,
   saveMenuItemBanglaName,
@@ -347,7 +347,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
 
     // Load matching transaction records from canteen_txs
     try {
-      const allTxs: any[] = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+      const allTxs: any[] = getSafeCanteenTransactions();
       const itemNameLower = (item.name || '').trim().toLowerCase();
       const filtered = allTxs.filter(tx => {
         if (Array.isArray(tx.soldItems) && tx.soldItems.length > 0) {

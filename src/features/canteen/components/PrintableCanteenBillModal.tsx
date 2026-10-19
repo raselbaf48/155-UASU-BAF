@@ -141,11 +141,11 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
   const [whatsAppShareSuccess, setWhatsAppShareSuccess] = useState<string | null>(null);
 
   // Live state synchronized with storage and cloud events for true realtime updates
-  const [liveTxs, setLiveTxs] = useState<any[]>(allTxs);
+  const [liveTxs, setLiveTxs] = useState<any[]>(() => Array.isArray(allTxs) ? allTxs : []);
   const [liveMembers, setLiveMembers] = useState<any[]>(members);
 
   const loadFreshState = useCallback(() => {
-    let txsToUse = allTxs;
+    let txsToUse = Array.isArray(allTxs) ? allTxs : [];
     try {
       const rawTxs = localStorage.getItem('canteen_txs');
       if (rawTxs) {
@@ -155,9 +155,7 @@ export const PrintableCanteenBillModal: React.FC<PrintableCanteenBillModalProps>
         }
       }
     } catch {}
-    if (Array.isArray(txsToUse)) {
-      setLiveTxs(txsToUse);
-    }
+    setLiveTxs(Array.isArray(txsToUse) ? txsToUse : []);
 
     let membersToUse = members;
     try {

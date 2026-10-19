@@ -10,6 +10,7 @@ import { getCanteenMenuCache, fetchCanteenMenuOnce } from '../utils/canteenMenuD
 import { sortCanteenMenuItems } from '../utils/menuOrdering';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { calculateMenuItemStockInfo, getRawInventoryItems, getMenuRecipes } from '../utils/recipeManager';
+import { getSafeCanteenTransactions } from '../utils/canteenCloudSync';
 
 interface EmployeeDashboardProps { 
   onManagerPortalClick?: () => void; 
@@ -181,8 +182,7 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
   // Realtime Ledger Due (Total Charges - Total Payments)
   const [liveLedgerDue, setLiveLedgerDue] = useState<number | undefined>(() => {
     try {
-      const txsStr = localStorage.getItem('canteen_txs') || '[]';
-      const txs = JSON.parse(txsStr);
+      const txs = getSafeCanteenTransactions();
       if (Array.isArray(txs) && cleanBd) {
         const cleanBdLower = cleanBd.toLowerCase();
         const cleanBdDigits = cleanBd.replace(/\D/g, '');
@@ -367,12 +367,10 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
           }
       } catch(e) {}
       
-      const txsStr = localStorage.getItem('canteen_txs') || '[]';
-      let txs: any[] = [];
-      try { txs = JSON.parse(txsStr); } catch(e) {}
+      const txs: any[] = getSafeCanteenTransactions();
 
       // 1. Transactions (Purchases and Payments)
-      const userTxs = txs.filter((tx: any) => isMemberMatch(tx.airman_id, tx.bdNo));
+      const userTxs = (Array.isArray(txs) ? txs : []).filter((tx: any) => isMemberMatch(tx.airman_id, tx.bdNo));
 
       if (userTxs.length > 0) {
         const charges = userTxs
@@ -522,9 +520,9 @@ export const PersonalPortal: React.FC<EmployeeDashboardProps> = ({
           if (data?.setting_value) {
             const cloudTxs = typeof data.setting_value === 'string' ? JSON.parse(data.setting_value) : data.setting_value;
             if (Array.isArray(cloudTxs)) {
-              const local = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+              const local = getSafeCanteenTransactions();
               const txMap = new Map();
-              [...local, ...cloudTxs].forEach(t => { if (t?.id) txMap.set(String(t.id), t); });
+              [...(Array.isArray(local) ? local : []), ...cloudTxs].forEach(t => { if (t?.id) txMap.set(String(t.id), t); });
               const merged = Array.from(txMap.values());
               localStorage.setItem('canteen_txs', JSON.stringify(merged));
               fetchActivities();

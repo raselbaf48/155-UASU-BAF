@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { resolveImageUrl } from '../utils/canteenSettings';
 import { formatCanteenDate, toYMDDate } from '../utils/dateUtils';
+import { getSafeCanteenTransactions } from '../utils/canteenCloudSync';
 
 interface CafePerformanceViewProps {
   members: any[];
@@ -36,7 +37,8 @@ export const CafePerformanceView: React.FC<CafePerformanceViewProps> = ({ member
   // Raw transactions state
   const [allTxs, setAllTxs] = useState<any[]>(() => {
     try {
-      return JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+      const data = getSafeCanteenTransactions();
+      return Array.isArray(data) ? data : [];
     } catch {
       return [];
     }
@@ -44,7 +46,7 @@ export const CafePerformanceView: React.FC<CafePerformanceViewProps> = ({ member
 
   const loadTransactions = () => {
     try {
-      const data = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+      const data = getSafeCanteenTransactions();
       setAllTxs(Array.isArray(data) ? data : []);
     } catch {
       setAllTxs([]);
@@ -66,7 +68,7 @@ export const CafePerformanceView: React.FC<CafePerformanceViewProps> = ({ member
 
   // Filter raw transactions to only real SALE transactions
   const rawSales = useMemo(() => {
-    return allTxs.filter((tx: any) => {
+    return (Array.isArray(allTxs) ? allTxs : []).filter((tx: any) => {
       if (!tx) return false;
       const type = String(tx.type || '').toUpperCase();
       if (type === 'INITIAL_BILL' || type === 'BILL PAYMENT' || type === 'ADVANCE_RETURN') {

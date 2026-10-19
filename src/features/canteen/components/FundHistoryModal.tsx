@@ -160,7 +160,7 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
   // Available months list computed from transactions
   const availableMonths = useMemo(() => {
     const set = new Set<string>();
-    (allTxs || []).forEach((tx) => {
+    (Array.isArray(allTxs) ? allTxs : []).forEach((tx) => {
       const cat = getTxCategory(tx);
       if (cat === 'UNIT_FUND' || cat === 'OTHERS') {
         const m = tx.monthKey || getTxMonthKey(tx);
@@ -172,7 +172,7 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
 
   // All Fund Transactions (Unit Fund & Others) excluding deleted
   const fundTransactions = useMemo(() => {
-    return (allTxs || [])
+    return (Array.isArray(allTxs) ? allTxs : [])
       .filter((tx) => {
         if (deletedTxIds.has(String(tx.id))) return false;
         const cat = getTxCategory(tx);
@@ -280,7 +280,7 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
         if (Array.isArray(parsed)) parsed.forEach(p => typeof p === 'string' && p.trim() && set.add(p.trim()));
       }
     } catch {}
-    (allTxs || []).forEach(tx => {
+    (Array.isArray(allTxs) ? allTxs : []).forEach(tx => {
       const it = (tx.items || tx.purpose || '').trim();
       if (it && it !== 'Unit Fund Bill') set.add(it);
     });

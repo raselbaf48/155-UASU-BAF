@@ -401,12 +401,13 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
 
     const localTxs = (() => {
       try {
-        return JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+        const parsed = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+        return Array.isArray(parsed) ? parsed : [];
       } catch {
         return [];
       }
     })();
-    const combinedTxs = [...(allTxs || []), ...localTxs];
+    const combinedTxs = [...(Array.isArray(allTxs) ? allTxs : []), ...(Array.isArray(localTxs) ? localTxs : [])];
 
     combinedTxs.forEach((tx: any) => {
       if (!tx) return;
@@ -717,7 +718,7 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
 
   // Filter category transactions for recent log
   const categoryTransactions = useMemo(() => {
-    return (allTxs || [])
+    return (Array.isArray(allTxs) ? allTxs : [])
       .filter((tx) => getTxCategory(tx) === category && !deletedTxIds.has(String(tx.id)))
       .sort((a, b) => {
         const timeA = new Date(a.date || a.created_at || 0).getTime() || a.timestamp || 0;

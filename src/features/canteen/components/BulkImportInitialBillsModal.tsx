@@ -185,9 +185,10 @@ export const BulkImportInitialBillsModal: React.FC<BulkImportInitialBillsModalPr
   const lastMonth = useMemo(() => formatPrevMonthKey(targetMonth), [targetMonth]);
 
   const effectiveTxs = useMemo(() => {
-    if (allTxs && allTxs.length > 0) return allTxs;
+    if (Array.isArray(allTxs) && allTxs.length > 0) return allTxs;
     try {
-      return JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+      const parsed = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+      return Array.isArray(parsed) ? parsed : [];
     } catch {
       return [];
     }

@@ -9,7 +9,7 @@ import {
 import XLSX from 'xlsx-js-style';
 import JSZip from 'jszip';
 import { supabase } from '../../../supabase';
-import { pushKeyToCloud, pullKeyFromCloud, recordDeletedTxId } from '../utils/canteenCloudSync';
+import { pushKeyToCloud, pullKeyFromCloud, recordDeletedTxId, getSafeCanteenTransactions } from '../utils/canteenCloudSync';
 import { deductRawStockForSales } from '../utils/recipeManager';
 import { getCanteenMenuCache, setCanteenMenuCache, getCanteenMembersCache, setCanteenMembersCache, normalizeCatalogKey, isOneTimeBoxItem } from '../utils/canteenMenuData';
 import { formatCanteenDate, toYMDDate } from '../utils/dateUtils';
@@ -933,13 +933,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
       };
 
       // Existing sales transactions in the system
-      const existingTxs: any[] = (() => {
-        try {
-          return JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-        } catch {
-          return [];
-        }
-      })();
+      const existingTxs: any[] = getSafeCanteenTransactions();
 
       // Pre-index existing sale transactions for this selected month into a quick lookup Map
       const txMapByDayAndMember = new Map<string, any[]>();
@@ -1320,13 +1314,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
       ];
 
       // Existing sales transactions in the system
-      const existingTxs: any[] = (() => {
-        try {
-          return JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-        } catch {
-          return [];
-        }
-      })();
+      const existingTxs: any[] = getSafeCanteenTransactions();
 
       // Pre-index existing sale transactions for this selected month into a quick lookup Map
       const txMapByDayAndMember = new Map<string, any[]>();
@@ -2473,18 +2461,18 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
       // Filter existing transactions: Keep transactions that are NOT on the replaced (member, date)
       let existingTxs: any[] = [];
       try {
-        const local = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+        const local = getSafeCanteenTransactions();
         const cloud = await pullKeyFromCloud('canteen_txs');
         if (Array.isArray(cloud) && cloud.length > 0) {
           const map = new Map<string, any>();
           cloud.forEach((t: any) => { if (t?.id) map.set(String(t.id), t); });
-          local.forEach((t: any) => { if (t?.id) map.set(String(t.id), t); });
+          (Array.isArray(local) ? local : []).forEach((t: any) => { if (t?.id) map.set(String(t.id), t); });
           existingTxs = Array.from(map.values());
         } else {
-          existingTxs = local;
+          existingTxs = Array.isArray(local) ? local : [];
         }
       } catch {
-        existingTxs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+        existingTxs = getSafeCanteenTransactions();
       }
 
       const keptTransactions: any[] = [];
@@ -2778,8 +2766,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
       }
 
       // 2. Remove transactions from canteen_txs & record tombstones
-      const rawTxs = localStorage.getItem('canteen_txs');
-      let txs: any[] = rawTxs ? JSON.parse(rawTxs) : [];
+      const txs: any[] = getSafeCanteenTransactions();
       const txIdSet = new Set((batch.createdTransactionIds || []).map(String));
 
       txIdSet.forEach(id => recordDeletedTxId(id));
@@ -2833,8 +2820,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
 
       // 2. Remove tx from canteen_txs
       recordDeletedTxId(item.id);
-      const rawTxs = localStorage.getItem('canteen_txs');
-      let txs: any[] = rawTxs ? JSON.parse(rawTxs) : [];
+      const txs: any[] = getSafeCanteenTransactions();
       const updatedTxs = txs.filter(t => String(t.id) !== String(item.id));
       localStorage.setItem('canteen_txs', JSON.stringify(updatedTxs));
       await pushKeyToCloud('canteen_txs', updatedTxs).catch(() => {});
@@ -2902,8 +2888,7 @@ export const ImportPosSalesModal: React.FC<ImportPosSalesModalProps> = ({
       }
 
       // Update in canteen_txs
-      const rawTxs = localStorage.getItem('canteen_txs');
-      let txs: any[] = rawTxs ? JSON.parse(rawTxs) : [];
+      const txs: any[] = getSafeCanteenTransactions();
       const updatedTxs = txs.map(t => {
         if (String(t.id) === String(originalItem.id)) {
           return {

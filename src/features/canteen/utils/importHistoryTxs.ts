@@ -1,4 +1,4 @@
-import { pushKeyToCloud, queuePushKeyToCloud, pullKeyFromCloud, getDeletedTxIds } from './canteenCloudSync';
+import { pushKeyToCloud, queuePushKeyToCloud, pullKeyFromCloud, getDeletedTxIds, getSafeCanteenTransactions } from './canteenCloudSync';
 import { getTxMonthKey } from './canteenTxCategories';
 import { formatBengaliMonthYear } from './canteenBengaliFormat';
 
@@ -142,32 +142,49 @@ export async function syncImportHistoryToTransactions(): Promise<any[]> {
     let localBatches: BillImportBatch[] = [];
     try {
       const raw = localStorage.getItem('canteen_bill_import_history');
-      if (raw) localBatches = JSON.parse(raw);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) localBatches = parsed;
+        else if (parsed && Array.isArray((parsed as any).batches)) localBatches = (parsed as any).batches;
+        else if (parsed && Array.isArray((parsed as any).items)) localBatches = (parsed as any).items;
+        else if (parsed && typeof parsed === 'object') {
+          const vals = Object.values(parsed);
+          if (Array.isArray(vals) && vals.length > 0 && typeof vals[0] === 'object') localBatches = vals as any;
+        }
+      }
     } catch {}
 
     let cloudBatches: BillImportBatch[] = [];
     try {
       const pulled = await pullKeyFromCloud('canteen_bill_import_history');
       if (Array.isArray(pulled)) cloudBatches = pulled;
+      else if (pulled && Array.isArray((pulled as any).batches)) cloudBatches = (pulled as any).batches;
+      else if (pulled && Array.isArray((pulled as any).items)) cloudBatches = (pulled as any).items;
+      else if (pulled && typeof pulled === 'object') {
+        const vals = Object.values(pulled);
+        if (Array.isArray(vals) && vals.length > 0 && typeof vals[0] === 'object') cloudBatches = vals as any;
+      }
     } catch {}
 
     const batchMap = new Map<string, BillImportBatch>();
-    [...cloudBatches, ...localBatches].forEach(b => {
+    [...(Array.isArray(cloudBatches) ? cloudBatches : []), ...(Array.isArray(localBatches) ? localBatches : [])].forEach(b => {
       if (b && b.id) batchMap.set(b.id, b);
     });
     const allBatches = Array.from(batchMap.values());
 
     // 2. Load transactions from localStorage & cloud
-    let localTxs: any[] = [];
-    try {
-      const raw = localStorage.getItem('canteen_txs');
-      if (raw) localTxs = JSON.parse(raw);
-    } catch {}
+    const localTxs: any[] = getSafeCanteenTransactions();
 
     let cloudTxs: any[] = [];
     try {
       const pulled = await pullKeyFromCloud('canteen_txs');
       if (Array.isArray(pulled)) cloudTxs = pulled;
+      else if (pulled && Array.isArray((pulled as any).txs)) cloudTxs = (pulled as any).txs;
+      else if (pulled && Array.isArray((pulled as any).transactions)) cloudTxs = (pulled as any).transactions;
+      else if (pulled && typeof pulled === 'object') {
+        const vals = Object.values(pulled);
+        if (Array.isArray(vals) && vals.length > 0 && typeof vals[0] === 'object') cloudTxs = vals as any;
+      }
     } catch {}
 
     const deletedIds = getDeletedTxIds();
@@ -179,7 +196,7 @@ export async function syncImportHistoryToTransactions(): Promise<any[]> {
     } catch {}
 
     const txMap = new Map<string, any>();
-    [...localTxs, ...cloudTxs].forEach(t => {
+    [...(Array.isArray(localTxs) ? localTxs : []), ...(Array.isArray(cloudTxs) ? cloudTxs : [])].forEach(t => {
       if (t && t.id && !deletedIds.has(String(t.id))) txMap.set(String(t.id), t);
     });
 
@@ -367,10 +384,6 @@ export async function syncImportHistoryToTransactions(): Promise<any[]> {
     return cleaned;
   } catch (err) {
     console.error('[importHistoryTxs] syncImportHistoryToTransactions error:', err);
-    try {
-      return JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-    } catch {
-      return [];
-    }
+    return getSafeCanteenTransactions();
   }
 }

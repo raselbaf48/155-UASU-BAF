@@ -66,7 +66,7 @@ import { PrintableCanteenBillModal } from '../components/PrintableCanteenBillMod
 import { EditMemberSeniorityModal } from '../components/EditMemberSeniorityModal';
 import { EditPaymentModal } from '../components/EditPaymentModal';
 import { restoreRawStockForSaleCancellation } from '../utils/recipeManager';
-import { pushKeyToCloud, pullKeyFromCloud, recordDeletedTxId, getDeletedTxIds, reconcileExpenseOnFundTxDelete } from '../utils/canteenCloudSync';
+import { pushKeyToCloud, pullKeyFromCloud, recordDeletedTxId, getDeletedTxIds, reconcileExpenseOnFundTxDelete, getSafeCanteenTransactions } from '../utils/canteenCloudSync';
 import { syncImportHistoryToTransactions, deduplicateCanteenTransactions } from '../utils/importHistoryTxs';
 import {
   exportCanteenBillToExcel,
@@ -828,8 +828,8 @@ export const MemberDB: React.FC<MemberDBProps> = ({
 
   const [allTxs, setAllTxs] = useState<any[]>(() => {
     try {
-      const parsed = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-      const filtered = parsed.filter((t: any) => !String(t.id).startsWith('1791043520536'));
+      const parsed = getSafeCanteenTransactions();
+      const filtered = (Array.isArray(parsed) ? parsed : []).filter((t: any) => !String(t?.id).startsWith('1791043520536'));
       if (filtered.length !== parsed.length) {
         localStorage.setItem('canteen_txs', JSON.stringify(filtered));
       }
@@ -900,7 +900,11 @@ export const MemberDB: React.FC<MemberDBProps> = ({
   const [importHistoryCount, setImportHistoryCount] = useState<number>(() => {
     try {
       const raw = localStorage.getItem('canteen_bill_import_history');
-      if (raw) return JSON.parse(raw).length;
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed.length;
+        if (parsed && Array.isArray(parsed.batches)) return parsed.batches.length;
+      }
     } catch {}
     return 0;
   });
@@ -1883,9 +1887,9 @@ export const MemberDB: React.FC<MemberDBProps> = ({
         const cloudTxs = await pullKeyFromCloud('canteen_txs');
         if (isMounted && Array.isArray(cloudTxs) && cloudTxs.length > 0) {
           const deletedIds = getDeletedTxIds();
-          const localTxs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+          const localTxs: any[] = getSafeCanteenTransactions();
           const txMap = new Map();
-          [...localTxs, ...cloudTxs, ...(reconciled || [])].forEach((t) => {
+          [...localTxs, ...(Array.isArray(cloudTxs) ? cloudTxs : []), ...(Array.isArray(reconciled) ? reconciled : [])].forEach((t) => {
             if (t && t.id && !deletedIds.has(String(t.id)) && !t.isReverted && t.status !== 'REVERTED') {
               txMap.set(String(t.id), t);
             }
@@ -1909,7 +1913,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
       debounceTimer = setTimeout(() => {
         try {
           const deletedIds = getDeletedTxIds();
-          const raw = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+          const raw: any[] = getSafeCanteenTransactions();
           const clean = raw.filter((t: any) => t && !deletedIds.has(String(t.id).trim()) && !deletedIds.has(String(Number(t.id))) && !t.isReverted && t.status !== 'REVERTED');
           setAllTxs(clean);
 
@@ -2053,7 +2057,11 @@ export const MemberDB: React.FC<MemberDBProps> = ({
     const updateImportBatchCount = () => {
       try {
         const raw = localStorage.getItem('canteen_bill_import_history');
-        if (raw) setImportHistoryCount(JSON.parse(raw).length);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) setImportHistoryCount(parsed.length);
+          else if (parsed && Array.isArray(parsed.batches)) setImportHistoryCount(parsed.batches.length);
+        }
       } catch {}
     };
     pullKeyFromCloud('canteen_bill_import_history').then(data => {
@@ -2074,12 +2082,10 @@ export const MemberDB: React.FC<MemberDBProps> = ({
   useEffect(() => {
     if (profileMember) {
       const deletedIds = getDeletedTxIds();
-      const local = (() => {
-        try { return JSON.parse(localStorage.getItem('canteen_txs') || '[]'); } catch { return []; }
-      })();
+      const local = getSafeCanteenTransactions();
       const txMap = new Map<string, any>();
       (allTxs || []).forEach(t => { if (t?.id && !deletedIds.has(String(t.id))) txMap.set(String(t.id), t); });
-      local.forEach((t: any) => { if (t?.id && !deletedIds.has(String(t.id))) txMap.set(String(t.id), t); });
+      (Array.isArray(local) ? local : []).forEach((t: any) => { if (t?.id && !deletedIds.has(String(t.id))) txMap.set(String(t.id), t); });
       const mergedTxs = deduplicateCanteenTransactions(Array.from(txMap.values()));
       setProfileTx(filterMemberTxs(profileMember, mergedTxs));
     }
@@ -2088,12 +2094,10 @@ export const MemberDB: React.FC<MemberDBProps> = ({
   useEffect(() => {
     if (statementMember) {
       const deletedIds = getDeletedTxIds();
-      const local = (() => {
-        try { return JSON.parse(localStorage.getItem('canteen_txs') || '[]'); } catch { return []; }
-      })();
+      const local = getSafeCanteenTransactions();
       const txMap = new Map<string, any>();
       (allTxs || []).forEach(t => { if (t?.id && !deletedIds.has(String(t.id))) txMap.set(String(t.id), t); });
-      local.forEach((t: any) => { if (t?.id && !deletedIds.has(String(t.id))) txMap.set(String(t.id), t); });
+      (Array.isArray(local) ? local : []).forEach((t: any) => { if (t?.id && !deletedIds.has(String(t.id))) txMap.set(String(t.id), t); });
       const mergedTxs = deduplicateCanteenTransactions(Array.from(txMap.values()));
       setStatementTx(filterMemberTxs(statementMember, mergedTxs));
     }
@@ -2120,7 +2124,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
       set.add(`${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`);
     }
 
-    allTxs.forEach((tx) => {
+    (Array.isArray(allTxs) ? allTxs : []).forEach((tx) => {
       const m = tx?.monthKey || getTxMonthKey(tx?.date);
       if (m) set.add(m);
     });
@@ -2652,9 +2656,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
   const openStatement = (member: any) => {
     const effDp = getMemberEffectiveDp(member);
     const deletedIds = getDeletedTxIds();
-    const rawLocal = (() => {
-      try { return JSON.parse(localStorage.getItem('canteen_txs') || '[]'); } catch { return []; }
-    })();
+    const rawLocal: any[] = getSafeCanteenTransactions();
     const cleanLocal = rawLocal.filter((t: any) => t && t.id && !deletedIds.has(String(t.id).trim()) && !deletedIds.has(String(Number(t.id))) && !t.isReverted && t.status !== 'REVERTED');
 
     setAllTxs(cleanLocal);
@@ -2685,9 +2687,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
     setProfileMember(fullMember);
     try {
       const deletedIds = getDeletedTxIds();
-      const rawLocal = (() => {
-        try { return JSON.parse(localStorage.getItem('canteen_txs') || '[]'); } catch { return []; }
-      })();
+      const rawLocal: any[] = getSafeCanteenTransactions();
       const cleanLocal = rawLocal.filter((t: any) => t && t.id && !deletedIds.has(String(t.id).trim()) && !deletedIds.has(String(Number(t.id))) && !t.isReverted && t.status !== 'REVERTED');
 
       setAllTxs(cleanLocal);
@@ -3346,10 +3346,8 @@ export const MemberDB: React.FC<MemberDBProps> = ({
         gateway: isCash ? 'CASH' : 'UCB'
       };
 
-      const rawStored = localStorage.getItem('canteen_txs');
-      let txs = rawStored ? JSON.parse(rawStored) : [];
-
-      const updatedTxs = [tx, ...txs];
+      const txs = getSafeCanteenTransactions();
+      const updatedTxs = [tx, ...(Array.isArray(txs) ? txs : [])];
       localStorage.setItem('canteen_txs', JSON.stringify(updatedTxs));
       setAllTxs(updatedTxs);
       pushKeyToCloud('canteen_txs', updatedTxs).catch(e => console.warn('Push key error:', e));
@@ -3548,10 +3546,9 @@ export const MemberDB: React.FC<MemberDBProps> = ({
       // Record deleted ID permanently so cloud sync never resurrects it
       recordDeletedTxId(txIdStr);
 
-      const rawTxs = localStorage.getItem('canteen_txs');
-      const txs = rawTxs ? JSON.parse(rawTxs) : [];
+      const txs = getSafeCanteenTransactions();
       // Completely remove the transaction from list and cloud
-      newTxs = txs.filter((t: any) => String(t.id) !== txIdStr);
+      newTxs = (Array.isArray(txs) ? txs : []).filter((t: any) => String(t.id) !== txIdStr);
       localStorage.setItem('canteen_txs', JSON.stringify(newTxs));
       await pushKeyToCloud('canteen_txs', newTxs);
 
@@ -3690,10 +3687,9 @@ export const MemberDB: React.FC<MemberDBProps> = ({
     setIsSavingPaymentEdit(true);
 
     try {
-      const rawStored = localStorage.getItem('canteen_txs');
-      let txs = rawStored ? JSON.parse(rawStored) : [];
+      const txs = getSafeCanteenTransactions();
 
-      const oldTx = txs.find((t: any) => t.id === paymentToEdit.id);
+      const oldTx = (Array.isArray(txs) ? txs : []).find((t: any) => t.id === paymentToEdit.id);
       const oldAmount = Number(oldTx?.amount ?? paymentToEdit.amount ?? 0);
       const newAmount = Number(updatedPaymentData.amount || 0);
       const diff = newAmount - oldAmount;
@@ -7485,8 +7481,8 @@ export const MemberDB: React.FC<MemberDBProps> = ({
           onDataRestored={() => {
             fetchMembers(true);
             try {
-              const freshTxs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-              setAllTxs(freshTxs);
+              const parsed = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+              setAllTxs(Array.isArray(parsed) ? parsed : []);
             } catch {}
           }}
         />
@@ -7504,8 +7500,8 @@ export const MemberDB: React.FC<MemberDBProps> = ({
           onSuccess={(updatedList) => {
             setMembers(formatAndSortMembers(updatedList));
             try {
-              const freshTxs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
-              setAllTxs(freshTxs);
+              const parsed = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+              setAllTxs(Array.isArray(parsed) ? parsed : []);
             } catch {}
           }}
         />
@@ -7535,7 +7531,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
               );
             }
             try {
-              const freshTxs = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+              const freshTxs = getSafeCanteenTransactions();
               setAllTxs(freshTxs);
               if (profileMember && (profileMember.airman_id === updatedMember.airman_id || profileMember['BD No'] === updatedMember['BD No'])) {
                 setProfileMember(updatedMember);

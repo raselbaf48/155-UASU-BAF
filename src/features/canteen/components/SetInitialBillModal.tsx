@@ -79,11 +79,15 @@ export const SetInitialBillModal: React.FC<SetInitialBillModalProps> = ({
   const findPreviousAmountForMonth = (targetM: string): number => {
     if (!member) return 0;
     try {
-      const txs = allTxs && allTxs.length > 0 
+      const rawTxs = Array.isArray(allTxs) && allTxs.length > 0 
         ? allTxs 
         : (() => {
-            try { return JSON.parse(localStorage.getItem('canteen_txs') || '[]'); } catch { return []; }
+            try { 
+              const parsed = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+              return Array.isArray(parsed) ? parsed : [];
+            } catch { return []; }
           })();
+      const txs = Array.isArray(rawTxs) ? rawTxs : [];
 
       const cleanBdNo = String(member?.['BD No'] || member?.bdNo || member?.airman_id || '').replace(/\D/g, '');
       const mAirman = String(member?.airman_id || '').trim().toLowerCase();
@@ -200,7 +204,10 @@ export const SetInitialBillModal: React.FC<SetInitialBillModalProps> = ({
       }
 
       const existingTxs = (() => {
-        try { return JSON.parse(localStorage.getItem('canteen_txs') || '[]'); } catch { return []; }
+        try { 
+          const parsed = JSON.parse(localStorage.getItem('canteen_txs') || '[]');
+          return Array.isArray(parsed) ? parsed : [];
+        } catch { return []; }
       })();
 
       // Helper to match initial / imported bills belonging to this member for this specific target month

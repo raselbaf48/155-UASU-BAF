@@ -286,6 +286,7 @@ export async function exportCanteenBillToExcel({
   getBanglaName,
   getBanglaRank,
 }: ExportCanteenBillParams) {
+  const safeAllTxs = Array.isArray(allTxs) ? allTxs : [];
   const cfg = getCanteenConfig();
   const unitName = '১৫৫ ইউএএসইউ বিএএফ';
   const { currMonthBn, prevMonthBn, titleMonthBn } = getMonthNamesBn(selectedMonth);
@@ -430,7 +431,7 @@ export async function exportCanteenBillToExcel({
 
   // 3. Process each member row
   sortedMembers.forEach((member, index) => {
-    const memberTxs = allTxs.filter((tx) => isTxBelongingToMember(member, tx));
+    const memberTxs = safeAllTxs.filter((tx) => isTxBelongingToMember(member, tx));
     const memberCategoryTxs = memberTxs.filter((tx) => isCategoryMatch(tx, selectedCategory));
 
     const rankFormatted = (getBanglaRank ? getBanglaRank(member) : null) || formatRankBn(member['Rank'] || member.rank || '');
