@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Check, Save, Loader2, Calendar, Banknote, CreditCard, Tag, FileText, User } from 'lucide-react';
 import { formatBengaliMonthYear, formatRankBn, formatMemberNameBn } from '../utils/exportCanteenBillExcel';
@@ -98,8 +99,10 @@ export const EditPaymentModal: React.FC<EditPaymentModalProps> = ({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-[230] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 overflow-y-auto animate-fadeIn">
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
+    <div className="fixed inset-0 z-[1100] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 overflow-y-auto animate-fadeIn">
       <div className="bg-slate-900 border border-slate-700/80 rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
         {/* Modal Header */}
         <div className="p-4 sm:p-5 border-b border-slate-800 bg-slate-950/70 flex items-center justify-between shrink-0">
@@ -319,6 +322,7 @@ export const EditPaymentModal: React.FC<EditPaymentModalProps> = ({
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

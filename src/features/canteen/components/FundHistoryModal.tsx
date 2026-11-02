@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   History, 
   Search, 
@@ -576,9 +577,9 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
     }
   };
 
-  if (!isOpen) return null;
+  if (!isOpen || typeof document === 'undefined') return null;
 
-  return (
+  return createPortal(
     <>
       {/* Toast Notification */}
       {toastMessage && (
@@ -1108,6 +1109,7 @@ export const FundHistoryModal: React.FC<FundHistoryModalProps> = ({
           </div>
         </div>
       )}
-    </>
+    </>,
+    document.body
   );
 };

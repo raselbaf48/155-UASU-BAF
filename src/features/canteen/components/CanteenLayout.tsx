@@ -650,7 +650,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
           <div
             key={tabId}
             style={{ display: activeTab === tabId ? 'block' : 'none' }}
-            className={`w-full ${activeTab === tabId ? 'animate-fadeIn will-change-transform' : ''}`}
+            className={`w-full ${activeTab === tabId ? 'animate-fadeIn' : ''}`}
           >
             {renderManagerTab(tabId)}
           </div>

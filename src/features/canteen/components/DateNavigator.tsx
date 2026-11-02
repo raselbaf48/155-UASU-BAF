@@ -98,7 +98,7 @@ export const DateNavigator: React.FC<DateNavigatorProps> = ({
   };
 
   const activeDateYMD = value || todayYMD;
-  const displayFormatted = formatDisplayDate(activeDateYMD, format);
+  const displayFormatted = isAll ? 'All' : formatDisplayDate(activeDateYMD, format);
 
   return (
     <div className={`inline-flex items-center gap-1.5 ${className}`}>

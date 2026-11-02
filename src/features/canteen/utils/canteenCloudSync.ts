@@ -616,10 +616,33 @@ export function reconcileExpenseOnFundTxDelete(deletedTx: any, remainingTxs?: an
 }
 
 /**
+ * Robustly unwraps nested setting values (protects against double JSON encoding or { setting_key, setting_value } wrappers)
+ */
+export function unwrapSettingValue(val: any): any {
+  if (val === undefined || val === null) return val;
+  let parsed = val;
+  if (typeof parsed === 'string') {
+    try { parsed = JSON.parse(parsed); } catch {}
+  }
+  let iterations = 0;
+  while (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed.setting_value !== undefined && iterations < 5) {
+    iterations++;
+    let next = parsed.setting_value;
+    if (typeof next === 'string') {
+      try { next = JSON.parse(next); } catch {}
+    }
+    parsed = next;
+  }
+  return parsed;
+}
+
+/**
  * Merge two arrays of objects by unique identifier (id or orderId or key)
  * Also safely supports arrays of string IDs (such as canteen_daily_menu).
  */
 function mergeArrayData(localArr: any[], cloudArr: any[], keyField = 'id', keyName = ''): any[] {
+  localArr = unwrapSettingValue(localArr);
+  cloudArr = unwrapSettingValue(cloudArr);
   if (!Array.isArray(localArr)) localArr = [];
   if (!Array.isArray(cloudArr)) cloudArr = [];
 
@@ -826,11 +849,7 @@ export async function pullKeyFromCloud(key: string): Promise<any | null> {
     try {
       const snap = await getDoc(doc(db, 'app_settings', key));
       if (snap.exists() && snap.data()?.setting_value) {
-        try {
-          return JSON.parse(snap.data().setting_value);
-        } catch {
-          return snap.data().setting_value;
-        }
+        return unwrapSettingValue(snap.data().setting_value);
       }
     } catch (err) {
       console.warn(`[CanteenCloudSync] Firebase pull notice for ${key}:`, err);
@@ -845,11 +864,7 @@ export async function pullKeyFromCloud(key: string): Promise<any | null> {
       if (Array.isArray(list)) {
         const found = list.find((it: any) => it && it.setting_key === key);
         if (found && found.setting_value) {
-          try {
-            return JSON.parse(found.setting_value);
-          } catch {
-            return found.setting_value;
-          }
+          return unwrapSettingValue(found.setting_value);
         }
       }
     }
@@ -1015,11 +1030,7 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
     const cloudKeyMap = new Map<string, any>();
     for (const row of data) {
       if (!row.setting_key) continue;
-      try {
-        cloudKeyMap.set(row.setting_key, JSON.parse(row.setting_value));
-      } catch {
-        cloudKeyMap.set(row.setting_key, row.setting_value);
-      }
+      cloudKeyMap.set(row.setting_key, unwrapSettingValue(row.setting_value));
     }
 
     // Merge deleted transaction IDs first so any incoming txs are filtered accurately
@@ -1215,6 +1226,14 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
       status: 'SUCCESS',
       message: `Downloaded latest canteen dataset (${cloudKeyMap.size} records) from Supabase.`
     });
+
+    // Reconcile transactions from import history to guarantee 100% history preservation
+    try {
+      const { syncImportHistoryToTransactions } = await import('./importHistoryTxs');
+      await syncImportHistoryToTransactions();
+    } catch (recErr) {
+      console.warn('[CanteenCloudSync] syncImportHistoryToTransactions notice:', recErr);
+    }
   } catch (err: any) {
     console.warn('[CanteenCloudSync] Pull exception:', err);
     notifyStatus({ status: 'error', errorMessage: err?.message || 'Network error' });

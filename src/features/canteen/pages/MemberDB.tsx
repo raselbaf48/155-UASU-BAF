@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Search, 
@@ -16,6 +17,7 @@ import {
   ArrowLeft,
   Upload,
   RefreshCw,
+  RotateCcw,
   Calendar,
   CalendarDays,
   Plus,
@@ -819,7 +821,20 @@ export const MemberDB: React.FC<MemberDBProps> = ({
       setSelectedCategory(forcedCategory);
     }
   }, [forcedCategory]);
-  const [selectedMonth, setSelectedMonth] = useState<string>(() => getRunningMonthKey());
+
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => {
+    try {
+      const txs = getSafeCanteenTransactions();
+      const running = getRunningMonthKey();
+      const hasRunning = txs.some((t: any) => (t.monthKey || getTxMonthKey(t.date)) === running);
+      if (hasRunning) return running;
+      const validMonths = txs.map((t: any) => t.monthKey || getTxMonthKey(t.date)).filter(Boolean);
+      const sorted = Array.from(new Set(validMonths)).sort().reverse();
+      return (sorted[0] as string) || running;
+    } catch {
+      return getRunningMonthKey();
+    }
+  });
   const [filterMode, setFilterMode] = useState<'AUTO' | 'ALL' | 'DUE'>(hideFundTabs ? 'ALL' : 'AUTO');
   const [rankTypeFilter, setRankTypeFilter] = useState<'OVERALL' | 'OFFICER' | 'AIRMEN' | 'CIVILIAN'>('OVERALL');
   const [viewMode, setViewMode] = useState<'BOX' | 'TABLE'>('BOX');
@@ -913,7 +928,19 @@ export const MemberDB: React.FC<MemberDBProps> = ({
   const [statementMember, setStatementMember] = useState<any | null>(null);
   const [statementTx, setStatementTx] = useState<any[]>([]);
   const [statementCategory, setStatementCategory] = useState<BillCategory>('ALL');
-  const [statementMonth, setStatementMonth] = useState<string>(() => getRunningMonthKey());
+  const [statementMonth, setStatementMonth] = useState<string>(() => {
+    try {
+      const txs = getSafeCanteenTransactions();
+      const running = getRunningMonthKey();
+      const hasRunning = txs.some((t: any) => (t.monthKey || getTxMonthKey(t.date)) === running);
+      if (hasRunning) return running;
+      const validMonths = txs.map((t: any) => t.monthKey || getTxMonthKey(t.date)).filter(Boolean);
+      const sorted = Array.from(new Set(validMonths)).sort().reverse();
+      return (sorted[0] as string) || running;
+    } catch {
+      return getRunningMonthKey();
+    }
+  });
   const [statementViewMode, setStatementViewMode] = useState<'ITEM' | 'DATE'>('ITEM');
 
   // Live refs to guarantee real-time updates for open modals on background events
@@ -1453,30 +1480,6 @@ export const MemberDB: React.FC<MemberDBProps> = ({
       r.ser = idx + 1;
     });
 
-    // If no transactions found yet but member has an existing ledger Due, show Opening Balance row
-    if (rows.length === 0 && profileMember) {
-      const rawDue = Number(profileMember.Due ?? profileMember.due ?? profileMember.baki ?? 0);
-      if (rawDue > 0) {
-        rows.push({
-          rowId: `synthetic-due-${profileMember.airman_id || profileMember['BD No'] || 'init'}`,
-          ser: 1,
-          tx: {
-            id: `synthetic-due-${profileMember.airman_id || profileMember['BD No'] || 'init'}`,
-            date: 'প্রারম্ভিক বকেয়া',
-            amount: rawDue,
-            type: 'INITIAL_BILL',
-            items: 'প্রারম্ভিক বকেয়া বিল (Opening Balance)'
-          },
-          txId: `synthetic-due-${profileMember.airman_id || profileMember['BD No'] || 'init'}`,
-          date: 'প্রারম্ভিক বকেয়া',
-          description: 'প্রারম্ভিক বকেয়া বিল (Opening Balance)',
-          qty: '-',
-          amount: rawDue,
-          type: 'INITIAL_BILL'
-        });
-      }
-    }
-
     return rows;
   }, [profileTx, menuCatalog, profileMember]);
 
@@ -1609,9 +1612,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
       }
     });
     // Live ledger net due: Total Billed - Total Paid
-    const netDue = (profileTx && profileTx.length > 0)
-      ? Math.max(0, effectiveBilled - paid)
-      : Number(profileMember.Due ?? profileMember.due ?? profileMember.baki ?? 0);
+    const netDue = Math.max(0, effectiveBilled - paid);
     return { totalBilled: effectiveBilled, totalPaid: paid, netDue };
   }, [profileMember, profileTx, menuCatalog]);
 
@@ -1647,7 +1648,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
   const [isPaymentHistoryOpen, setIsPaymentHistoryOpen] = useState(false);
   const [paymentSearch, setPaymentSearch] = useState('');
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<'ALL' | 'CASH' | 'UCB'>('ALL');
-  const [paymentMonthFilter, setPaymentMonthFilter] = useState<string>(() => getRunningMonthKey());
+  const [paymentMonthFilter, setPaymentMonthFilter] = useState<string>('ALL');
   const [paymentDateFilter, setPaymentDateFilter] = useState<string>(''); // Default All dates selected
   const paymentDateInputRef = useRef<HTMLInputElement | null>(null);
   const [paymentToDelete, setPaymentToDelete] = useState<any | null>(null);
@@ -1658,6 +1659,18 @@ export const MemberDB: React.FC<MemberDBProps> = ({
   const [paymentDeleteSuccessMsg, setPaymentDeleteSuccessMsg] = useState<string | null>(null);
   const [paymentDeleteSuccessData, setPaymentDeleteSuccessData] = useState<{ amount: number; memberName: string; bdNo: string; successMsg: string } | null>(null);
   const [txDeleteSuccessData, setTxDeleteSuccessData] = useState<{ description: string; amount: number; type: string } | null>(null);
+
+  // Lock body scroll while Payment History modal is open to ensure clean viewport presentation
+  useEffect(() => {
+    if (isPaymentHistoryOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isPaymentHistoryOpen]);
 
   // Soft harmonic celebration chime via Web Audio API
   const playPaymentSuccessSound = () => {
@@ -1740,7 +1753,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
   const paymentCountsByMethod = useMemo(() => {
     const monthFiltered = allPaymentTxs.filter((tx: any) => {
       if (paymentMonthFilter !== 'ALL') {
-        const txMonth = getPaymentCycleMonthKey(tx?.paymentDate || tx?.date || tx?.timestamp || tx?.created_at || tx?.createdAt) || getTxMonthKey(tx?.date);
+        const txMonth = tx?.monthKey || getPaymentCycleMonthKey(tx?.paymentDate || tx?.date || tx?.timestamp || tx?.created_at || tx?.createdAt) || getTxMonthKey(tx?.date);
         if (txMonth !== paymentMonthFilter) return false;
       }
       if (paymentDateFilter) {
@@ -1776,8 +1789,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
 
     monthFiltered.forEach((tx: any) => {
       const gw = String(tx.gateway || tx.items || '').toUpperCase();
-      if (gw.includes('CASH')) cashCount++;
-      else if (gw.includes('UCB')) ucbCount++;
+      if (gw.includes('UCB')) ucbCount++;
       else cashCount++;
     });
 
@@ -1787,7 +1799,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
   const filteredPaymentTxs = useMemo(() => {
     return allPaymentTxs.filter((tx: any) => {
       if (paymentMonthFilter !== 'ALL') {
-        const txMonth = getPaymentCycleMonthKey(tx?.paymentDate || tx?.date || tx?.timestamp || tx?.created_at || tx?.createdAt) || getTxMonthKey(tx?.date);
+        const txMonth = tx?.monthKey || getPaymentCycleMonthKey(tx?.paymentDate || tx?.date || tx?.timestamp || tx?.created_at || tx?.createdAt) || getTxMonthKey(tx?.date);
         if (txMonth !== paymentMonthFilter) return false;
       }
       if (paymentDateFilter) {
@@ -1816,7 +1828,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
       }
       if (paymentMethodFilter !== 'ALL') {
         const gateway = String(tx.gateway || tx.items || '').toUpperCase();
-        if (paymentMethodFilter === 'CASH' && !gateway.includes('CASH')) return false;
+        if (paymentMethodFilter === 'CASH' && gateway.includes('UCB')) return false;
         if (paymentMethodFilter === 'UCB' && !gateway.includes('UCB')) return false;
       }
       if (paymentSearch.trim()) {
@@ -2239,7 +2251,9 @@ export const MemberDB: React.FC<MemberDBProps> = ({
   const handlePaymentPrevMonth = () => {
     let nextMonthKey = '';
     if (paymentMonthFilter === 'ALL') {
-      nextMonthKey = getRunningMonthKey();
+      const running = getRunningMonthKey();
+      const nonCurrentMonths = availableMonths.filter((m) => m !== running);
+      nextMonthKey = nonCurrentMonths[0] || formatPrevMonthKey(running);
     } else {
       const idx = availableMonths.indexOf(paymentMonthFilter);
       if (idx !== -1 && idx < availableMonths.length - 1) {
@@ -2266,13 +2280,13 @@ export const MemberDB: React.FC<MemberDBProps> = ({
       if (idx > 0) {
         nextMonthKey = availableMonths[idx - 1];
       } else {
-        const [y, m] = paymentMonthFilter.split('-').map(Number);
-        const d = new Date(y, m, 1);
-        nextMonthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        nextMonthKey = 'ALL';
       }
     }
     setPaymentMonthFilter(nextMonthKey);
-    if (paymentDateFilter) {
+    if (nextMonthKey === 'ALL') {
+      setPaymentDateFilter('');
+    } else if (paymentDateFilter) {
       const curDay = paymentDateFilter.split('-')[2] || '01';
       setPaymentDateFilter(`${nextMonthKey}-${curDay}`);
     }
@@ -2454,18 +2468,12 @@ export const MemberDB: React.FC<MemberDBProps> = ({
       return Math.min(totalDue, Math.max(0, charges - paymentsAvailableForThisMonth));
     }
 
-    // Only if the member has NO transactions at all, fallback to initial profile due if viewing the current running month
-    if (memberTxs.length === 0 && (month === getRunningMonthKey() || month === '2026-10') && totalDue > 0) {
-      return totalDue;
-    }
-
     return 0;
   };
 
   // Helper to calculate Member's Total Due (পূর্ববর্তী সব বকেয়া + চলতি মাসের বিল - মোট পরিশোধ)
   const getMemberTotalDue = (member: any, category: BillCategory = 'ALL', overrideTxs?: any[]): number => {
     if (!member) return 0;
-    const profileDue = Number(member.Due ?? member.due ?? member.baki ?? 0);
     const txSource = overrideTxs || allTxs;
     const memberTxs = filterMemberTxs(member, txSource);
 
@@ -2474,13 +2482,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
       const allPayments = memberTxs
         .filter((tx) => tx.type === 'BILL PAYMENT' && !tx.isReverted && tx.status !== 'REVERTED')
         .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-      const netTxDue = Math.max(0, allCharges - allPayments);
-
-      // If transactions exist for this member, netTxDue is the accurate ledger balance
-      if (memberTxs.length > 0) {
-        return netTxDue;
-      }
-      return profileDue;
+      return Math.max(0, allCharges - allPayments);
     }
 
     // Sub-category filters (CANTEEN, UNIT_FUND, OTHERS)
@@ -2512,16 +2514,10 @@ export const MemberDB: React.FC<MemberDBProps> = ({
       const canteenPayments = memberTxs
         .filter((tx) => (tx.billType === 'CANTEEN' || tx.billType === 'ALL' || (!tx.billType && getTxCategory(tx) === 'CANTEEN')) && tx.type === 'BILL PAYMENT' && !tx.isReverted && tx.status !== 'REVERTED')
         .reduce((sum, tx) => sum + Number(tx.amount || 0), 0);
-      const netCanteenTx = Math.max(0, canteenCharges - canteenPayments);
-
-      if (memberTxs.length > 0) {
-        return netCanteenTx;
-      }
-      const baseCanteenDue = Math.max(0, profileDue - unitFundDue - othersDue);
-      return Math.max(baseCanteenDue, netCanteenTx);
+      return Math.max(0, canteenCharges - canteenPayments);
     }
 
-    return profileDue;
+    return 0;
   };
 
   // Helper to determine the last calendar date of a given month key (e.g. '2026-09' -> 30 Sep 2026)
@@ -4991,11 +4987,10 @@ export const MemberDB: React.FC<MemberDBProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  const d = new Date();
-                  const y = d.getFullYear();
-                  const m = String(d.getMonth() + 1).padStart(2, '0');
-                  setPaymentMonthFilter(`${y}-${m}`);
-                  setPaymentDateFilter(''); // default all dt select thakbe
+                  setPaymentMonthFilter('ALL');
+                  setPaymentDateFilter('');
+                  setPaymentSearch('');
+                  setPaymentMethodFilter('ALL');
                   setIsPaymentHistoryOpen(true);
                 }}
                 className="w-full sm:w-auto flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-indigo-900/40 transition-all cursor-pointer active:scale-95 border border-indigo-400/30 group"
@@ -7561,9 +7556,9 @@ export const MemberDB: React.FC<MemberDBProps> = ({
 
 
       {/* Payment History Modal */}
-      {isPaymentHistoryOpen && (
-        <div className="fixed inset-0 z-[200] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 overflow-y-auto animate-fadeIn">
-          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl w-full max-w-4xl shadow-2xl flex flex-col h-[85vh] min-h-[550px] max-h-[90vh] overflow-hidden">
+      {isPaymentHistoryOpen && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[1000] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 overflow-y-auto animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl w-full max-w-4xl shadow-2xl flex flex-col h-[85vh] min-h-[550px] max-h-[90vh] overflow-hidden my-auto">
             {/* Modal Header */}
             <div className="p-5 border-b border-slate-800 bg-slate-950/60 flex items-center justify-between shrink-0">
               <div className="flex items-center space-x-3">
@@ -7661,7 +7656,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
                     <div className="relative px-2 py-0.5 text-center flex items-center space-x-1 cursor-pointer group">
                       <Calendar className="w-3.5 h-3.5 text-indigo-400 shrink-0 pointer-events-none" />
                       <span className="text-xs font-mono font-bold text-white tracking-tight pointer-events-none">
-                        {formatPaymentHistoryMonth(paymentMonthFilter)}
+                        {paymentMonthFilter === 'ALL' ? 'All Months' : formatPaymentHistoryMonth(paymentMonthFilter)}
                       </span>
                       <select
                         value={paymentMonthFilter}
@@ -7678,7 +7673,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
                         className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10"
                         title="মাস নির্বাচন করুন"
                       >
-                        <option value="ALL" className="bg-slate-900 text-white">All Months</option>
+                        <option value="ALL" className="bg-slate-900 text-white">All Months (সব মাস)</option>
                         {availableMonths.map((m) => (
                           <option key={m} value={m} className="bg-slate-900 text-white">
                             {formatPaymentHistoryMonth(m)} {m === getRunningMonthKey() ? '(Current)' : ''}
@@ -7749,6 +7744,21 @@ export const MemberDB: React.FC<MemberDBProps> = ({
                   <p className="text-xs text-slate-500">
                     {paymentSearch ? 'No records match search.' : 'No bill payments recorded for this date filter.'}
                   </p>
+                  {(paymentMonthFilter !== 'ALL' || paymentDateFilter || paymentMethodFilter !== 'ALL' || paymentSearch) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPaymentMonthFilter('ALL');
+                        setPaymentDateFilter('');
+                        setPaymentSearch('');
+                        setPaymentMethodFilter('ALL');
+                      }}
+                      className="mt-3 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shadow-md transition-all cursor-pointer flex items-center space-x-1.5"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>সকল মাসের পেমেন্ট দেখুন (Show All Payments)</span>
+                    </button>
+                  )}
                 </div>
               ) : (
                 filteredPaymentTxs.map((tx: any, idx: number) => {
@@ -7889,17 +7899,18 @@ export const MemberDB: React.FC<MemberDBProps> = ({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Payment Delete Confirmation Dialog */}
       <AnimatePresence>
-        {paymentToDelete && (
+        {paymentToDelete && typeof document !== 'undefined' && createPortal(
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[220] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4"
+            className="fixed inset-0 z-[1100] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4"
           >
             <motion.div 
               initial={{ scale: 0.88, y: 24, opacity: 0 }}
@@ -8046,7 +8057,8 @@ export const MemberDB: React.FC<MemberDBProps> = ({
                 </>
               )}
             </motion.div>
-          </motion.div>
+          </motion.div>,
+          document.body
         )}
 
         {/* Edit Payment Modal */}

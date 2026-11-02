@@ -365,6 +365,49 @@ export async function syncImportHistoryToTransactions(): Promise<any[]> {
       });
     }
 
+    // 3.1. Reconcile all POS sales import history batches into transactions
+    try {
+      let posBatches: any[] = [];
+      const localPosRaw = localStorage.getItem('canteen_pos_import_history');
+      if (localPosRaw) {
+        try {
+          const parsed = JSON.parse(localPosRaw);
+          if (Array.isArray(parsed)) posBatches = parsed;
+        } catch {}
+      }
+      if (posBatches.length === 0) {
+        const pulled = await pullKeyFromCloud('canteen_pos_import_history');
+        if (Array.isArray(pulled)) posBatches = pulled;
+      }
+      for (const b of posBatches) {
+        for (const it of (b.items || [])) {
+          if (!it || !it.id || deletedIds.has(String(it.id))) continue;
+          if (!txMap.has(String(it.id))) {
+            txMap.set(String(it.id), {
+              id: it.id,
+              date: it.date,
+              monthKey: it.date ? getTxMonthKey(it.date) : '2026-09',
+              airman_id: it.airman_id,
+              bdNo: it.bdNo,
+              rank: it.rank,
+              memberName: it.memberName,
+              items: it.items,
+              soldItems: it.soldItems,
+              amount: it.totalAmount || it.amount,
+              totalAmount: it.totalAmount || it.amount,
+              paymentMode: it.paymentMode || 'DUE',
+              type: 'PURCHASE',
+              status: 'APPROVED',
+              isImported: true,
+              source: 'POS_IMPORT'
+            });
+          }
+        }
+      }
+    } catch (posErr) {
+      console.warn('[importHistoryTxs] POS import reconciliation notice:', posErr);
+    }
+
     // 4. Run deduplication
     const allTxsList = Array.from(txMap.values());
     const cleaned = deduplicateCanteenTransactions(allTxsList);
