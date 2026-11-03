@@ -887,61 +887,64 @@ function dispatchKeyUpdateEvent(key: string) {
   if (typeof window === 'undefined') return;
 
   setTimeout(() => {
+    const cloudEvent = (eventName: string) =>
+      new CustomEvent(eventName, { detail: { source: 'cloud_sync' } });
+
     switch (key) {
       case 'canteen_txs':
-        window.dispatchEvent(new Event('canteen_txs_updated'));
+        window.dispatchEvent(cloudEvent('canteen_txs_updated'));
         break;
       case 'canteen_pre_orders':
-        window.dispatchEvent(new Event('canteen_pre_orders_updated'));
+        window.dispatchEvent(cloudEvent('canteen_pre_orders_updated'));
         break;
       case 'canteen_expenses':
-        window.dispatchEvent(new Event('canteen_expenses_updated'));
+        window.dispatchEvent(cloudEvent('canteen_expenses_updated'));
         break;
       case 'canteen_bazar_advances':
-        window.dispatchEvent(new Event('canteen_bazar_advances_updated'));
+        window.dispatchEvent(cloudEvent('canteen_bazar_advances_updated'));
         break;
       case 'canteen_member_bangla_names':
-        window.dispatchEvent(new Event('canteen_member_bangla_names_updated'));
+        window.dispatchEvent(cloudEvent('canteen_member_bangla_names_updated'));
         break;
       case 'canteen_menu_bangla_names':
-        window.dispatchEvent(new Event('canteen_menu_bangla_names_updated'));
+        window.dispatchEvent(cloudEvent('canteen_menu_bangla_names_updated'));
         break;
       case 'canteen_fund_transfers':
-        window.dispatchEvent(new Event('canteen_transfers_updated'));
+        window.dispatchEvent(cloudEvent('canteen_transfers_updated'));
         break;
       case 'canteen_menu_recipes_v3':
       case 'canteen_menu_recipes_v2':
-        window.dispatchEvent(new Event('canteen_menu_recipes_updated'));
+        window.dispatchEvent(cloudEvent('canteen_menu_recipes_updated'));
         break;
       case 'canteen_menu_recipes_20pax_v1':
-        window.dispatchEvent(new Event('canteen_recipes_20pax_updated'));
+        window.dispatchEvent(cloudEvent('canteen_recipes_20pax_updated'));
         break;
       case 'canteen_raw_stock_logs_v2':
-        window.dispatchEvent(new Event('canteen_raw_stock_logs_updated'));
+        window.dispatchEvent(cloudEvent('canteen_raw_stock_logs_updated'));
         break;
       case 'canteen_raw_inventory_items_v2':
-        window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
+        window.dispatchEvent(cloudEvent('canteen_raw_inventory_updated'));
         break;
       case 'canteen_menu_items_catalog_v1':
-        window.dispatchEvent(new Event('canteen_menu_updated'));
+        window.dispatchEvent(cloudEvent('canteen_menu_updated'));
         break;
       case 'canteen_daily_menu':
       case 'canteen_daily_menu_updated_at':
-        window.dispatchEvent(new Event('canteen_daily_menu_updated'));
+        window.dispatchEvent(cloudEvent('canteen_daily_menu_updated'));
         break;
       case 'canteen_bill_import_history':
-        window.dispatchEvent(new Event('canteen_bill_import_history_updated'));
+        window.dispatchEvent(cloudEvent('canteen_bill_import_history_updated'));
         break;
       case 'canteen_pos_import_history':
-        window.dispatchEvent(new Event('canteen_pos_import_history_updated'));
+        window.dispatchEvent(cloudEvent('canteen_pos_import_history_updated'));
         break;
       case 'canteen_purpose_presets':
       case 'canteen_deleted_purpose_presets':
-        window.dispatchEvent(new Event('canteen_purpose_presets_updated'));
+        window.dispatchEvent(cloudEvent('canteen_purpose_presets_updated'));
         break;
       case 'baf_others_fund_categories':
       case 'baf_deleted_others_fund_categories':
-        window.dispatchEvent(new Event('others_fund_updated'));
+        window.dispatchEvent(cloudEvent('others_fund_updated'));
         break;
     }
     window.dispatchEvent(new Event('canteen_state_updated'));
@@ -1635,11 +1638,22 @@ export function initCanteenCloudSync(): () => void {
         const key = newRecord.setting_key;
         if (typeof key === 'string' && key.startsWith('canteen_')) {
           try {
-            const parsed = JSON.parse(newRecord.setting_value);
+            let parsed: any = newRecord.setting_value;
+            if (typeof parsed === 'string') {
+              try {
+                parsed = JSON.parse(parsed);
+              } catch {
+                // Keep raw string if not JSON (e.g. ISO date for canteen_daily_menu_updated_at)
+              }
+            }
             const currentLocalRaw = localStorage.getItem(key);
-            let currentLocal: any = null;
-            if (currentLocalRaw) {
-              try { currentLocal = JSON.parse(currentLocalRaw); } catch {}
+            let currentLocal: any = currentLocalRaw;
+            if (typeof currentLocal === 'string') {
+              try {
+                currentLocal = JSON.parse(currentLocal);
+              } catch {
+                // Keep raw string if not JSON
+              }
             }
 
             let mergedVal = parsed;
@@ -1811,25 +1825,61 @@ export function initCanteenCloudSync(): () => void {
     .subscribe();
 
   // 5. Listen to local DOM events to mark dirty and auto-backup to cloud after 10s
-  const handleLocalTxs = () => queuePushKeyToCloud('canteen_txs');
-  const handleLocalOrders = () => queuePushKeyToCloud('canteen_pre_orders');
-  const handleLocalExpenses = () => queuePushKeyToCloud('canteen_expenses');
-  const handleLocalAdvances = () => queuePushKeyToCloud('canteen_bazar_advances');
-  const handleLocalBanglaNames = () => queuePushKeyToCloud('canteen_member_bangla_names');
-  const handleLocalTransfers = () => queuePushKeyToCloud('canteen_fund_transfers');
-  const handleLocalRecipes = () => {
+  const handleLocalTxs = (e?: any) => {
+    if ((e as any)?.detail?.source === 'cloud_sync') return;
+    queuePushKeyToCloud('canteen_txs');
+  };
+  const handleLocalOrders = (e?: any) => {
+    if ((e as any)?.detail?.source === 'cloud_sync') return;
+    queuePushKeyToCloud('canteen_pre_orders');
+  };
+  const handleLocalExpenses = (e?: any) => {
+    if ((e as any)?.detail?.source === 'cloud_sync') return;
+    queuePushKeyToCloud('canteen_expenses');
+  };
+  const handleLocalAdvances = (e?: any) => {
+    if ((e as any)?.detail?.source === 'cloud_sync') return;
+    queuePushKeyToCloud('canteen_bazar_advances');
+  };
+  const handleLocalBanglaNames = (e?: any) => {
+    if ((e as any)?.detail?.source === 'cloud_sync') return;
+    queuePushKeyToCloud('canteen_member_bangla_names');
+  };
+  const handleLocalTransfers = (e?: any) => {
+    if ((e as any)?.detail?.source === 'cloud_sync') return;
+    queuePushKeyToCloud('canteen_fund_transfers');
+  };
+  const handleLocalRecipes = (e?: any) => {
+    if ((e as any)?.detail?.source === 'cloud_sync') return;
     queuePushKeyToCloud('canteen_menu_recipes_v3');
     queuePushKeyToCloud('canteen_menu_recipes_20pax_v1');
     queuePushKeyToCloud('canteen_menu_recipes_v2');
   };
-  const handleLocalStockLogs = () => queuePushKeyToCloud('canteen_raw_stock_logs_v2');
-  const handleLocalRawInventory = () => queuePushKeyToCloud('canteen_raw_inventory_items_v2');
-  const handleLocalBillHistory = () => queuePushKeyToCloud('canteen_bill_import_history');
-  const handleLocalPosImportHistory = () => queuePushKeyToCloud('canteen_pos_import_history');
-  const handleLocalMenuCatalog = () => {
+  const handleLocalStockLogs = (e?: any) => {
+    if ((e as any)?.detail?.source === 'cloud_sync') return;
+    queuePushKeyToCloud('canteen_raw_stock_logs_v2');
+  };
+  const handleLocalRawInventory = (e?: any) => {
+    if ((e as any)?.detail?.source === 'cloud_sync') return;
+    queuePushKeyToCloud('canteen_raw_inventory_items_v2');
+  };
+  const handleLocalBillHistory = (e?: any) => {
+    if ((e as any)?.detail?.source === 'cloud_sync') return;
+    queuePushKeyToCloud('canteen_bill_import_history');
+  };
+  const handleLocalPosImportHistory = (e?: any) => {
+    if ((e as any)?.detail?.source === 'cloud_sync') return;
+    queuePushKeyToCloud('canteen_pos_import_history');
+  };
+  const handleLocalMenuCatalog = (e?: any) => {
+    if ((e as any)?.detail?.source === 'cloud_sync') return;
     try {
-      const raw = localStorage.getItem('canteen_menu_items_list');
-      if (raw) queuePushKeyToCloud('canteen_menu_items_catalog_v1', JSON.parse(raw));
+      const raw = localStorage.getItem('canteen_menu_items_list') || localStorage.getItem('canteen_menu_cache');
+      if (raw) {
+        const lastSynced = lastSyncedCloudHashes.get('canteen_menu_items_catalog_v1');
+        if (lastSynced && lastSynced === raw) return;
+        queuePushKeyToCloud('canteen_menu_items_catalog_v1', JSON.parse(raw));
+      }
     } catch {}
   };
   const handleLocalSettings = (e: any) => {
@@ -1837,7 +1887,8 @@ export function initCanteenCloudSync(): () => void {
       queuePushKeyToCloud('baf_canteen_settings_v1', e.detail);
     }
   };
-  const handleLocalDailyMenu = () => {
+  const handleLocalDailyMenu = (e?: any) => {
+    if ((e as any)?.detail?.source === 'cloud_sync') return;
     try {
       const rawMenu = localStorage.getItem('canteen_daily_menu');
       const parsedMenu = rawMenu ? JSON.parse(rawMenu) : [];

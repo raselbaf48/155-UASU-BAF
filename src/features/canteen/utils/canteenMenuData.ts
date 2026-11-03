@@ -237,6 +237,23 @@ export function deduplicateCanteenMenuItems(items: CanteenMenuItem[]): CanteenMe
 
 /**
  * Returns cached menu catalog synchronously (0ms delay).
+ */
+export function stripImagesForStorage(items: any[]): any[] {
+  if (!Array.isArray(items)) return [];
+  return items.map((it) => {
+    if (!it || typeof it !== 'object') return it;
+    const copy = { ...it };
+    const dp = copy.DP || copy.img || copy.image;
+    if (typeof dp === 'string' && (dp.startsWith('data:') || dp.length > 200)) {
+      delete copy.DP;
+      delete copy.img;
+      delete copy.image;
+    }
+    return copy;
+  });
+}
+
+/**
  * Checks memory first, then localStorage, then defaults.
  */
 export function getCanteenMenuCache(): CanteenMenuItem[] {
@@ -245,33 +262,26 @@ export function getCanteenMenuCache(): CanteenMenuItem[] {
   }
   if (typeof window === 'undefined') return DEFAULT_CANTEEN_MENU_ITEMS;
   try {
-    const raw = localStorage.getItem('canteen_menu_cache');
+    const raw = localStorage.getItem('canteen_menu_cache') || localStorage.getItem('canteen_menu_items_list');
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
         const hydrated = parsed
           .filter((p: any) => !isOneTimeBoxItem(p))
           .map((p: any) => {
-          if (!p.DP && !p.img && !p.image) {
             const def = DEFAULT_CANTEEN_MENU_ITEMS.find((d) => d.id === p.id || d.name?.toLowerCase() === p.name?.toLowerCase());
-            if (def?.DP) {
-              return { ...p, DP: def.DP, img: def.DP, image: def.DP };
-            }
-          }
-          return p;
-        });
+            const dp = p.DP || p.img || p.image || def?.DP || def?.img || def?.image || '';
+            return {
+              ...def,
+              ...p,
+              DP: dp,
+              img: dp,
+              image: dp
+            };
+          });
         const clean = deduplicateCanteenMenuItems(hydrated);
         inMemoryMenuCache = clean;
         return clean;
-      }
-    }
-    const rawList = localStorage.getItem('canteen_menu_items_list');
-    if (rawList) {
-      const parsed = JSON.parse(rawList);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const cleanList = deduplicateCanteenMenuItems(parsed.filter((p: any) => !isOneTimeBoxItem(p)));
-        inMemoryMenuCache = cleanList;
-        return cleanList;
       }
     }
   } catch {}
@@ -289,16 +299,16 @@ export function setCanteenMenuCache(items: CanteenMenuItem[]): void {
   inMemoryMenuCache = cleanItems;
   if (typeof window !== 'undefined') {
     try {
-      localStorage.setItem('canteen_menu_cache', JSON.stringify(cleanItems));
-      localStorage.setItem('canteen_menu_items_list', JSON.stringify(cleanItems));
-      localStorage.setItem('canteen_menu_items_catalog_v1', JSON.stringify(cleanItems));
+      const sanitized = stripImagesForStorage(cleanItems);
+      const str = JSON.stringify(sanitized);
+      localStorage.setItem('canteen_menu_cache', str);
+      localStorage.setItem('canteen_menu_items_list', str);
     } catch (e) {
       console.warn('Error persisting canteen_menu_cache:', e);
     }
     // Instant event dispatch (0ms)
     window.dispatchEvent(new CustomEvent('canteen_menu_updated', { detail: cleanItems }));
     window.dispatchEvent(new Event('canteen_state_updated'));
-    window.dispatchEvent(new Event('storage'));
   }
 }
 
@@ -493,11 +503,18 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
               }
             }
             const cleanHydrated = deduplicateCanteenMenuItems(hydrated);
+            const prevHash = inMemoryMenuCache
+              ? inMemoryMenuCache.map((i) => `${i.id}_${i.price}_${i.stock}_${i.name}`).join('|')
+              : '';
+            const newHash = cleanHydrated.map((i) => `${i.id}_${i.price}_${i.stock}_${i.name}`).join('|');
+
             inMemoryMenuCache = cleanHydrated;
-            if (typeof window !== 'undefined') {
+            if (typeof window !== 'undefined' && prevHash !== newHash) {
               try {
-                localStorage.setItem('canteen_menu_cache', JSON.stringify(cleanHydrated));
-                localStorage.setItem('canteen_menu_items_list', JSON.stringify(cleanHydrated));
+                const sanitized = stripImagesForStorage(cleanHydrated);
+                const str = JSON.stringify(sanitized);
+                localStorage.setItem('canteen_menu_cache', str);
+                localStorage.setItem('canteen_menu_items_list', str);
               } catch {}
               setTimeout(() => {
                 window.dispatchEvent(new CustomEvent('canteen_menu_updated', { detail: cleanHydrated }));
@@ -593,11 +610,18 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
           }
         }
         const cleanHydrated = deduplicateCanteenMenuItems(hydrated);
+        const prevHash = inMemoryMenuCache
+          ? inMemoryMenuCache.map((i) => `${i.id}_${i.price}_${i.stock}_${i.name}`).join('|')
+          : '';
+        const newHash = cleanHydrated.map((i) => `${i.id}_${i.price}_${i.stock}_${i.name}`).join('|');
+
         inMemoryMenuCache = cleanHydrated;
-        if (typeof window !== 'undefined') {
+        if (typeof window !== 'undefined' && prevHash !== newHash) {
           try {
-            localStorage.setItem('canteen_menu_cache', JSON.stringify(cleanHydrated));
-            localStorage.setItem('canteen_menu_items_list', JSON.stringify(cleanHydrated));
+            const sanitized = stripImagesForStorage(cleanHydrated);
+            const str = JSON.stringify(sanitized);
+            localStorage.setItem('canteen_menu_cache', str);
+            localStorage.setItem('canteen_menu_items_list', str);
           } catch {}
           setTimeout(() => {
             window.dispatchEvent(new CustomEvent('canteen_menu_updated', { detail: cleanHydrated }));

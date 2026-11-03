@@ -2,6 +2,7 @@ import React, { Component, ReactNode, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
+import './features/canteen/i18n';
 import { installApiInterceptor } from './services/apiBridge';
 import { installSafeStorageProtection } from './utils/safeStorage';
 
@@ -9,6 +10,22 @@ import { installSafeStorageProtection } from './utils/safeStorage';
 try {
   installSafeStorageProtection();
   installApiInterceptor();
+
+  // Suppress false-positive Vite HMR WebSocket connection notices in iframe preview
+  if (typeof window !== 'undefined') {
+    window.addEventListener('unhandledrejection', (event) => {
+      const reason = event?.reason;
+      const msg = String(reason?.message || reason || '');
+      if (
+        msg.includes('WebSocket closed without opened') ||
+        msg.includes('failed to connect to websocket') ||
+        msg.includes('@vite/client')
+      ) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    });
+  }
 } catch (err) {
   console.warn('Initialization skipped:', err);
 }

@@ -377,6 +377,50 @@ export class FirestoreQueryBuilder implements PromiseLike<{ data: any; error: an
         }
       }
 
+      // Special bridging: canteen_inventory is persistently stored in app_settings.canteen_raw_inventory_items_v2
+      if (this.collectionName === 'canteen_inventory') {
+        let items: any[] = [];
+        try {
+          const snap = await getDoc(doc(db, 'app_settings', 'canteen_raw_inventory_items_v2'));
+          if (snap.exists()) {
+            const val = snap.data()?.setting_value;
+            items = typeof val === 'string' ? JSON.parse(val) : (Array.isArray(val) ? val : []);
+          }
+        } catch {}
+        if (items.length === 0 && typeof window !== 'undefined') {
+          try {
+            const raw = localStorage.getItem('canteen_raw_inventory_items_v2');
+            if (raw) items = JSON.parse(raw);
+          } catch {}
+        }
+        let results = items;
+        for (const f of this.filters) {
+          if (f.op === '==') {
+            results = results.filter(item => item[f.field] === f.value || String(item[f.field]).toLowerCase() === String(f.value).toLowerCase());
+          }
+        }
+        return { data: this.isSingle ? (results[0] || null) : results, error: null };
+      }
+
+      // Special bridging: canteen_menu is persistently stored in app_settings.canteen_menu_items_catalog_v1
+      if (this.collectionName === 'canteen_menu') {
+        let items: any[] = [];
+        try {
+          const snap = await getDoc(doc(db, 'app_settings', 'canteen_menu_items_catalog_v1'));
+          if (snap.exists()) {
+            const val = snap.data()?.setting_value;
+            items = typeof val === 'string' ? JSON.parse(val) : (Array.isArray(val) ? val : []);
+          }
+        } catch {}
+        if (items.length === 0 && typeof window !== 'undefined') {
+          try {
+            const raw = localStorage.getItem('canteen_menu_items_list') || localStorage.getItem('canteen_menu_cache');
+            if (raw) items = JSON.parse(raw);
+          } catch {}
+        }
+        return { data: this.isSingle ? (items[0] || null) : items, error: null };
+      }
+
       // 2. Fetch full collection
       const colRef = collection(db, this.collectionName);
       const snap = await getDocs(colRef);
@@ -449,6 +493,9 @@ export class FirestoreQueryBuilder implements PromiseLike<{ data: any; error: an
       }
       return { data: results, error: null };
     } catch (err: any) {
+      if (err?.code === 'permission-denied') {
+        return { data: this.isSingle ? null : [], error: null };
+      }
       console.warn(`[FirestoreSupabaseBridge] Query error on ${this.collectionName}:`, err);
       return { data: this.isSingle ? null : [], error: err };
     }
@@ -460,6 +507,29 @@ export class FirestoreQueryBuilder implements PromiseLike<{ data: any; error: an
     }
 
     try {
+      if (this.collectionName === 'canteen_inventory') {
+        const items = Array.isArray(this.mutateData) ? this.mutateData : [this.mutateData];
+        if (typeof window !== 'undefined') {
+          try {
+            const currentRaw = localStorage.getItem('canteen_raw_inventory_items_v2');
+            let currentList: any[] = currentRaw ? JSON.parse(currentRaw) : [];
+            for (const it of items) {
+              if (!it) continue;
+              const idx = currentList.findIndex(c => String(c.id).toLowerCase() === String(it.id).toLowerCase());
+              if (idx !== -1) currentList[idx] = { ...currentList[idx], ...it };
+              else currentList.push(it);
+            }
+            localStorage.setItem('canteen_raw_inventory_items_v2', JSON.stringify(currentList));
+            setDoc(doc(db, 'app_settings', 'canteen_raw_inventory_items_v2'), {
+              setting_key: 'canteen_raw_inventory_items_v2',
+              setting_value: JSON.stringify(currentList),
+              updated_at: new Date().toISOString()
+            }, { merge: true }).catch(() => {});
+          } catch {}
+        }
+        return { data: items, error: null };
+      }
+
       if (this.operation === 'insert' || this.operation === 'upsert') {
         const items = Array.isArray(this.mutateData) ? this.mutateData : [this.mutateData];
         if (items.length === 0) return { data: [], error: null };
@@ -550,6 +620,9 @@ export class FirestoreQueryBuilder implements PromiseLike<{ data: any; error: an
 
       return { data: null, error: null };
     } catch (err: any) {
+      if (err?.code === 'permission-denied') {
+        return { data: null, error: null };
+      }
       console.warn(`[FirestoreSupabaseBridge] Mutate error on ${this.collectionName}:`, err);
       return { data: null, error: err };
     }
@@ -604,12 +677,15 @@ export class FirestoreRealtimeChannel {
             table: filter.table
           });
         });
-      }, (err) => {
+      }, (err: any) => {
+        // Silently ignore collections managed via app_settings or not yet provisioned
+        if (err?.code === 'permission-denied' || colName === 'canteen_menu') return;
         console.warn(`[FirestoreRealtime] Snapshot warning for ${colName}:`, err);
       });
 
       this.unsubs.push(unsub);
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.code === 'permission-denied' || colName === 'canteen_menu') return this;
       console.warn(`[FirestoreRealtime] Channel subscription warning for ${colName}:`, err);
     }
 
