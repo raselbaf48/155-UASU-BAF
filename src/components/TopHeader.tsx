@@ -3,15 +3,16 @@ import { Menu, KeyRound, ShieldCheck, LogOut, User, Cloud, CloudOff, RefreshCw }
 import { SidebarTab } from './Sidebar';
 import { UserRole } from '../types';
 import { UserSession } from '../utils/authSession';
-import { getFirebaseSyncState, FirebaseSyncStatusState, getSyncLogs } from '../services/localDatabase';
+import { getFirebaseSyncState, FirebaseSyncStatusState, getSyncLogs, localDb } from '../services/localDatabase';
 
 const CloudSyncIndicator = () => {
   const [syncState, setSyncState] = useState<FirebaseSyncStatusState>(getFirebaseSyncState());
   const [hasError, setHasError] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
     const handleSyncUpdate = (e: any) => {
-      setSyncState(e.detail);
+      setSyncState(e.detail || getFirebaseSyncState());
     };
     
     const handleLogsUpdate = (e: any) => {
@@ -36,26 +37,59 @@ const CloudSyncIndicator = () => {
     };
   }, []);
 
+  const handleManualSync = async () => {
+    if (isRefreshing || syncState.status === 'syncing') return;
+    setIsRefreshing(true);
+    try {
+      await localDb.syncFromFirebase();
+    } catch (err) {
+      console.warn("Manual sync error:", err);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const isSyncing = syncState.status === 'syncing' || isRefreshing;
+  const isOnline = syncState.isConfigured || syncState.status === 'connected';
+
   return (
-    <div className="hidden sm:flex items-center justify-center p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm relative group cursor-pointer">
-      {syncState.status === 'syncing' ? (
+    <button
+      type="button"
+      onClick={handleManualSync}
+      title="Click to sync with Cloud Firestore"
+      className="hidden sm:flex items-center justify-center p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/60 shadow-sm relative group cursor-pointer transition-colors"
+    >
+      {isSyncing ? (
         <RefreshCw className="w-4 h-4 text-blue-500 animate-spin" />
       ) : hasError ? (
         <CloudOff className="w-4 h-4 text-red-500" />
-      ) : syncState.isConfigured ? (
+      ) : isOnline ? (
         <Cloud className="w-4 h-4 text-emerald-500" />
       ) : (
         <CloudOff className="w-4 h-4 text-slate-400" />
       )}
       
       {/* Tooltip */}
-      <div className="absolute right-0 top-full mt-2 w-48 p-2 bg-slate-900 text-white text-xs rounded-lg shadow-xl opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
-        <p className="font-bold mb-1">Cloud Sync Status</p>
-        <p className="text-slate-300">
-          {syncState.status === 'syncing' ? 'Syncing with cloud...' : hasError ? 'Error in last sync. Check settings.' : syncState.isConfigured ? 'Connected & up to date.' : 'Cloud sync not configured.'}
+      <div className="absolute right-0 top-full mt-2 w-56 p-2.5 bg-slate-900 text-white text-xs rounded-lg shadow-xl opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+        <div className="flex items-center justify-between font-bold mb-1 border-b border-slate-800 pb-1">
+          <span>Cloud Sync Status</span>
+          <span className="text-[10px] text-emerald-400 font-normal">Firestore Active</span>
+        </div>
+        <p className="text-slate-300 text-[11px] leading-tight">
+          {isSyncing
+            ? 'Syncing with cloud...'
+            : hasError
+            ? 'Error in last sync. Click to retry.'
+            : isOnline
+            ? 'Connected & up to date (Firestore).'
+            : 'Cloud sync not configured.'}
+        </p>
+        <p className="text-[10px] text-emerald-300/80 mt-1.5 flex items-center justify-between">
+          <span>{syncState.lastSyncTime ? `Last sync: ${new Date(syncState.lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : 'Ready to sync'}</span>
+          <span className="text-slate-400 font-mono">(Click to sync)</span>
         </p>
       </div>
-    </div>
+    </button>
   );
 };
 

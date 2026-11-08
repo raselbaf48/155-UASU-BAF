@@ -61,8 +61,20 @@ export interface FirebaseSyncStatusState {
   d1Active: boolean;
 }
 
-let firebaseConnected: boolean = false;
-let firebaseLastSyncTime: string | null = null;
+let isSyncingActive: boolean = false;
+let firebaseConnected: boolean = (() => {
+  if (isFirebaseConfigured || isSupabaseConfigured) return true;
+  if (typeof window !== 'undefined') {
+    return window.localStorage.getItem('baf_cloud_connected') === 'true';
+  }
+  return false;
+})();
+let firebaseLastSyncTime: string | null = (() => {
+  if (typeof window !== 'undefined') {
+    return window.localStorage.getItem('baf_cloud_last_sync') || null;
+  }
+  return null;
+})();
 let syncLogs: SyncLog[] = (() => {
   if (typeof window === "undefined") return [];
   try {
@@ -102,15 +114,27 @@ export const addSyncLog = (log: Omit<SyncLog, "id">) => {
 
 
 export const getFirebaseSyncState = (): FirebaseSyncStatusState => {
+  const configured = Boolean(isFirebaseConfigured || isSupabaseConfigured);
+  let status: 'idle' | 'syncing' | 'connected' | 'error' | 'unconfigured' = 'idle';
+  if (!configured) {
+    status = 'unconfigured';
+  } else if (isSyncingActive) {
+    status = 'syncing';
+  } else if (firebaseConnected) {
+    status = 'connected';
+  } else {
+    status = 'connected';
+  }
+
   return {
-    isConfigured: firebaseConnected,
-    status: firebaseConnected ? 'connected' : 'idle',
+    isConfigured: configured,
+    status,
     lastSyncTime: firebaseLastSyncTime,
-    d1Active: firebaseConnected,
+    d1Active: configured || firebaseConnected,
   };
 };
 
-function broadcastSyncState(): void {
+export function broadcastSyncState(): void {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(
       new CustomEvent('d1_sync_update', {
@@ -239,6 +263,8 @@ export class LocalDatabaseEngine {
     if (this.isFirebaseSyncing) return false;
     
     this.isFirebaseSyncing = true;
+    isSyncingActive = true;
+    broadcastSyncState();
     const providerName = isFirebaseConfigured ? "Firebase Firestore" : "Supabase";
     addSyncLog({ timestamp: new Date().toISOString(), type: "PULL", status: "SUCCESS", message: `Fetching data from ${providerName}...` });
     
@@ -337,9 +363,16 @@ export class LocalDatabaseEngine {
 
             firebaseConnected = true;
             firebaseLastSyncTime = new Date().toISOString();
+            if (typeof window !== 'undefined') {
+              window.localStorage.setItem('baf_cloud_connected', 'true');
+              window.localStorage.setItem('baf_cloud_last_sync', firebaseLastSyncTime);
+            }
+            this.isInitialPullDone = true;
             addSyncLog({ timestamp: new Date().toISOString(), type: "PULL", status: "SUCCESS", message: `Data synced from Firebase Firestore successfully (${fbAirmen.length} airmen).` });
             this.lastSyncedDbStr = JSON.stringify(this.db);
             this.isFirebaseSyncing = false;
+            isSyncingActive = false;
+            broadcastSyncState();
             emitSyncProgress(100, "Firebase sync complete!");
             return true;
           } else {
@@ -386,9 +419,16 @@ export class LocalDatabaseEngine {
             this.saveToStorage(this.db, true, false, false);
             firebaseConnected = true;
             firebaseLastSyncTime = new Date().toISOString();
+            if (typeof window !== 'undefined') {
+              window.localStorage.setItem('baf_cloud_connected', 'true');
+              window.localStorage.setItem('baf_cloud_last_sync', firebaseLastSyncTime);
+            }
+            this.isInitialPullDone = true;
             window.dispatchEvent(new CustomEvent('baf_db_updated', { detail: { source: 'firebase' } }));
             addSyncLog({ timestamp: new Date().toISOString(), type: "PULL", status: "SUCCESS", message: `Auto-seeded Firebase Firestore (${this.db.airmen.length} airmen, ${allAssignments.length} duty records).` });
             this.isFirebaseSyncing = false;
+            isSyncingActive = false;
+            broadcastSyncState();
             emitSyncProgress(100, "Firebase initialization complete!");
             return true;
           }
@@ -773,7 +813,16 @@ export class LocalDatabaseEngine {
       } else {
         addSyncLog({ timestamp: new Date().toISOString(), type: "PULL", status: "SUCCESS", message: "Supabase data is up to date." });
       }
+      firebaseConnected = true;
+      firebaseLastSyncTime = new Date().toISOString();
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('baf_cloud_connected', 'true');
+        window.localStorage.setItem('baf_cloud_last_sync', firebaseLastSyncTime);
+      }
       this.lastSyncedDbStr = JSON.stringify(this.db);
+      this.isFirebaseSyncing = false;
+      isSyncingActive = false;
+      broadcastSyncState();
       
       return true;
     } catch (err: any) {
@@ -788,7 +837,9 @@ export class LocalDatabaseEngine {
       return false;
     } finally {
       this.isFirebaseSyncing = false;
+      isSyncingActive = false;
       this.isInitialPullDone = true;
+      broadcastSyncState();
     }
   }
 
@@ -820,8 +871,8 @@ export class LocalDatabaseEngine {
   public async saveToFirebase(dbToSave: LocalStorageDB, immediate = false): Promise<boolean> {
     if (typeof window === 'undefined') return false;
     
-    if (!isSupabaseConfigured) {
-      // Don't attempt to sync if Supabase isn't configured
+    if (!isFirebaseConfigured && !isSupabaseConfigured) {
+      // Don't attempt to sync if neither Firebase nor Supabase is configured
       if (typeof window !== 'undefined') window.localStorage.removeItem('baf_pending_sync');
       return false;
     }
@@ -1565,11 +1616,16 @@ export class LocalDatabaseEngine {
            addSyncLog({ timestamp: new Date().toISOString(), type: "PUSH", status: "ERROR", message: "Sync Failed: " + errorMessage });
            return false;
         } else {
+           firebaseConnected = true;
+           firebaseLastSyncTime = new Date().toISOString();
            emitSyncProgress(100, "Successfully synced to Cloud!");
            addSyncLog({ timestamp: new Date().toISOString(), type: "PUSH", status: "SUCCESS", message: "Successfully synced to Cloud!" });
            if (typeof window !== 'undefined') {
               window.localStorage.removeItem('baf_pending_sync');
+              window.localStorage.setItem('baf_cloud_connected', 'true');
+              window.localStorage.setItem('baf_cloud_last_sync', firebaseLastSyncTime);
            }
+           broadcastSyncState();
            this.lastSyncedDbStr = JSON.stringify(dbToSave);
            return true;
         }
