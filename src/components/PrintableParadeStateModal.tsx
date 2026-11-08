@@ -57,12 +57,14 @@ import {
 } from '../utils/docxExport';
 import { DisposalCategoryDropdown } from './DisposalCategoryDropdown';
 import { saveCustomDisposal, getSavedCustomDisposals } from '../utils/customDisposalStore';
+import { formatRank, formatAirmanName } from '../utils/rankFormatter';
 
 interface PrintableParadeStateModalProps {
  isOpen?: boolean;
  date?: Date;
  onClose?: () => void;
- documentType?: 'Parade' | 'PT' | 'PARADE';
+ documentType?: 'Parade' | 'PT' | 'PARADE' | 'OTHERS';
+ customDocumentHeader?: string;
  initialFlight?: FlightName | 'Overall';
  flight?: FlightName | 'Overall';
  shift?: string;
@@ -102,10 +104,12 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
   onDownloadDocx,
  initialHideEmptyColumns = false,
   onOpenImportModal = () => {},
+  customDocumentHeader,
 }) => {
  const currentFlight = flight || initialFlight || 'Overall';
  const onEditCell = undefined;
  const isPtDocument = initialDocumentType === 'PT' || documentType === 'PT';
+ const isOthersDocument = initialDocumentType === ('OTHERS' as any) || documentType === 'OTHERS';
  const [fromDate, setFromDate] = useState<string>(initialFromDate || selectedDate || (date ? date.toISOString().split('T')[0] : new Date().toISOString().split('T')[0]));
  const [toDate, setToDate] = useState<string>(initialToDate || selectedDate || (date ? date.toISOString().split('T')[0] : new Date().toISOString().split('T')[0]));
  const [selectedFlight, setSelectedFlight] = useState<FlightName | 'Overall'>(flight || initialFlight || 'Overall');
@@ -224,10 +228,17 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
     const formattedDate = formatDateShort(fromDate).replace(/ \d{2}$/, '');
     const toFormattedDate = formatDateShort(toDate).replace(/ \d{2}$/, '');
     const flightText = selectedFlight === 'Overall' ? '155 UASU' : `${selectedFlight} Flt`;
+    const docName = customDocumentHeader
+      ? customDocumentHeader.replace(/ STATE$/i, ' State')
+      : isOthersDocument
+      ? 'Others State'
+      : isPtDocument
+      ? 'PT State'
+      : 'Parade State';
     if (fromDate === toDate) {
-       return `${isPtDocument ? 'PT' : 'Parade'} State - ${flightText} (${formattedDate})`;
+       return `${docName} - ${flightText} (${formattedDate})`;
     } else {
-       return `${isPtDocument ? 'PT' : 'Parade'} State - ${flightText} (${formattedDate}-${toFormattedDate})`;
+       return `${docName} - ${flightText} (${formattedDate}-${toFormattedDate})`;
     }
   };
 
@@ -321,15 +332,6 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  if (flName.toLowerCase().includes('admin')) return 'Adm';
  return flName.slice(0, 4);
  };
-
- const formatAirmanName = (name: string) => {
-  if (!name) return '';
-  const lower = name.toLowerCase().trim();
-  if (lower === 'sgt') return 'Sgt';
-  if (lower === 'cpl') return 'Cpl';
-  if (['mwo', 'swo', 'wo', 'lac', 'ac', 'mw'].includes(lower)) return lower.toUpperCase();
-  return name.toLowerCase().split(' ').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-};
 
  // Calculate list of dates in range
  const getDatesInRange = (startStr: string, endStr: string) => {
@@ -968,7 +970,7 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
       <ol className="space-y-0.5 text-[11px] leading-snug font-normal text-left">
         {list.map((item, idx) => (
           <li key={idx} className="whitespace-nowrap">
-            {idx + 1}. {formatAirmanName(item.airman.rank)} {formatAirmanName(item.airman.name)}
+            {idx + 1}. {formatRank(item.airman.rank)} {formatAirmanName(item.airman.name)}
             {showNotes && item.notes && item.notes !== 'None' ? ' - ' + item.notes : ''}
           </li>
         ))}
@@ -1005,7 +1007,7 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  title={(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') ? 'Click to edit, change or remove disposal' : undefined}
  >
  <span className="truncate">
- {i + 1}. {formatAirmanName(item.airman.rank)} {formatAirmanName(item.airman.name)}
+ {i + 1}. {formatRank(item.airman.rank)} {formatAirmanName(item.airman.name)}
  {(isDutyOn || isDutyOff) && noteText ? (
  <span className="text-slate-800 dark:text-slate-200 font-medium"> - {noteText}</span>
  ) : noteText && noteText !== dutyName && noteText !== dutyCode ? (
@@ -1109,7 +1111,7 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  <div className="relative mb-3 text-center" style={{ fontFamily: 'Arial, sans-serif' }}>
  <div className="text-center">
  <h1 className="font-bold tracking-wide text-slate-900 dark:text-white underline inline-block text-base uppercase">
- {isPtDocument ? 'PT STATE : AIRMEN' : 'PARADE STATE : AIRMEN'}
+ {customDocumentHeader || (isPtDocument ? 'PT STATE : AIRMEN' : isOthersDocument ? 'OTHERS STATE : AIRMEN' : 'PARADE STATE : AIRMEN')}
  </h1>
  <br />
  <h2 className="font-bold tracking-wide text-slate-900 dark:text-white mt-0.5 underline inline-block text-sm uppercase">
@@ -1349,7 +1351,7 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  <div className="relative mb-3 text-center" style={{ fontFamily: 'Arial, sans-serif' }}>
  <div className="text-center">
  <h1 className="font-bold tracking-wide text-slate-900 dark:text-white underline inline-block text-base uppercase">
- {isPtDocument ? 'PT STATE : AIRMEN' : 'PARADE STATE : AIRMEN'}
+ {customDocumentHeader || (isPtDocument ? 'PT STATE : AIRMEN' : isOthersDocument ? 'OTHERS STATE : AIRMEN' : 'PARADE STATE : AIRMEN')}
  </h1>
  <br />
  <h2 className="font-bold tracking-wide text-slate-900 dark:text-white mt-0.5 underline inline-block text-sm uppercase">
@@ -1492,7 +1494,7 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  <ol className="space-y-0.5 font-normal leading-tight">
  {onPtList.slice(0, 15).map((item, idx) => (
  <li key={item.airman.id} className="whitespace-nowrap">
- {idx + 1}. {formatAirmanName(item.airman.rank)} {formatAirmanName(item.airman.name)}
+ {idx + 1}. {formatRank(item.airman.rank)} {formatAirmanName(item.airman.name)}
  </li>
  ))}
  </ol>
@@ -1502,7 +1504,7 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  <ol className="space-y-0.5 font-normal leading-tight">
  {onPtList.slice(15, 30).map((item, idx) => (
  <li key={item.airman.id} className="whitespace-nowrap">
- {16 + idx}. {formatAirmanName(item.airman.rank)} {formatAirmanName(item.airman.name)}
+ {16 + idx}. {formatRank(item.airman.rank)} {formatAirmanName(item.airman.name)}
  </li>
  ))}
  </ol>
@@ -1513,7 +1515,7 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  <ol className="space-y-0.5 font-normal leading-tight">
  {onPtList.slice(30).map((item, idx) => (
  <li key={item.airman.id} className="whitespace-nowrap">
- {31 + idx}. {formatAirmanName(item.airman.rank)} {formatAirmanName(item.airman.name)}
+ {31 + idx}. {formatRank(item.airman.rank)} {formatAirmanName(item.airman.name)}
  </li>
  ))}
  </ol>

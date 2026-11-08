@@ -8,16 +8,7 @@ import { exportTableToCSV } from '../utils/csvExport';
 import { getOptimalMinColumnWidth } from '../utils/tableUtils';
 import { EntryHistoryModal } from './EntryHistoryModal';
 import { getAirmanDisposalForRange } from '../utils/airmanDisposalHelper';
-
-
-const formatAirmanName = (name: string) => {
-  if (!name) return '';
-  const lower = name.toLowerCase().trim();
-  if (lower === 'sgt') return 'Sgt';
-  if (lower === 'cpl') return 'Cpl';
-  if (['mwo', 'swo', 'wo', 'lac', 'ac', 'mw'].includes(lower)) return lower.toUpperCase();
-  return name.toLowerCase().split(' ').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-};
+import { formatRank, formatAirmanName } from '../utils/rankFormatter';
 interface TdyRegisterViewProps {
   role?: UserRole;
   airmen: Airman[];

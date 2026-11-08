@@ -38,6 +38,7 @@ import {
  UserPlus,
  CheckSquare,
 Settings,
+ Tag,
 } from 'lucide-react';
 import { DutyCellPopover } from './DutyCellPopover';
 import { getStoredDutyRatiosForDate } from '../data/dutyRatios';
@@ -57,6 +58,7 @@ import {
 } from '../utils/docxExport';
 import { DisposalCategoryDropdown } from './DisposalCategoryDropdown';
 import { saveCustomDisposal, getSavedCustomDisposals, removeSavedCustomDisposal } from '../utils/customDisposalStore';
+import { formatRank, formatAirmanName } from '../utils/rankFormatter';
 
 interface ParadeStateFormattedViewProps {
  role?: UserRole;
@@ -83,8 +85,35 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  const todayStr = new Date().toISOString().split('T')[0];
  const isPtDocument = initialDocumentType === 'PT';
   const isOthersDocument = initialDocumentType === 'OTHERS';
-  const documentTitle = isPtDocument ? 'PT State' : isOthersDocument ? 'Others State' : 'Parade State';
-  const documentHeader = isPtDocument ? 'PT STATE : AIRMEN' : isOthersDocument ? 'OTHERS STATE : AIRMEN' : 'PARADE STATE : AIRMEN';
+
+  const [othersStateName, setOthersStateName] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('baf_others_state_name') || 'Auditorium';
+    }
+    return 'Auditorium';
+  });
+
+  const formatCustomOthersHeader = (name: string): string => {
+    const trimmed = (name || '').trim();
+    if (!trimmed) return 'OTHERS STATE';
+    const upper = trimmed.toUpperCase();
+    if (upper.endsWith('STATE')) {
+      return upper;
+    }
+    return `${upper} STATE`;
+  };
+
+  const documentHeader = isPtDocument
+    ? 'PT STATE : AIRMEN'
+    : isOthersDocument
+    ? formatCustomOthersHeader(othersStateName)
+    : 'PARADE STATE : AIRMEN';
+
+  const documentTitle = isPtDocument
+    ? 'PT State'
+    : isOthersDocument
+    ? (othersStateName.trim() ? `${othersStateName.trim()} State` : 'Others State')
+    : 'Parade State';
  const [fromDate, setFromDate] = useState<string>(selectedDate);
  const [toDate, setToDate] = useState<string>(selectedDate);
 
@@ -312,15 +341,6 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  if (flName.toLowerCase().includes('admin')) return 'Adm';
  return flName.slice(0, 4);
  };
-
- const formatAirmanName = (name: string) => {
-  if (!name) return '';
-  const lower = name.toLowerCase().trim();
-  if (lower === 'sgt') return 'Sgt';
-  if (lower === 'cpl') return 'Cpl';
-  if (['mwo', 'swo', 'wo', 'lac', 'ac', 'mw'].includes(lower)) return lower.toUpperCase();
-  return name.toLowerCase().split(' ').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-};
 
  // Calculate list of dates in range
  const getDatesInRange = (startStr: string, endStr: string) => {
@@ -769,7 +789,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
                if (isDutyOff) {
                  noteStr = ' - ' + formatDutyOffShortName(it.previousDutyCode, it.previousDutyName, it.dutyName || it.notes);
                }
-               return `${idx + 1}. ${formatAirmanName(it.airman.rank)} ${formatAirmanName(it.airman.name)}${noteStr}`;
+               return `${idx + 1}. ${formatRank(it.airman.rank)} ${formatAirmanName(it.airman.name)}${noteStr}`;
             })
             .join('\n')
         : '-';
@@ -806,7 +826,8 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  rows,
  `${documentTitle} - ${selectedFlight === 'Overall' ? '155 UASU' : selectedFlight + ' Flt'} (${fromDate === toDate ? formatDateShort(fromDate).replace(/ \d{2}$/, '') : formatDateShort(fromDate).replace(/ \d{2}$/, '') + '-' + formatDateShort(toDate).replace(/ \d{2}$/, '')}).docx`,
  { name: p.name, rank: p.rank, desig: p.designation },
- { name: a.name, rank: a.rank, desig: a.designation }
+ { name: a.name, rank: a.rank, desig: a.designation },
+ documentHeader
  );
  } else {
  const stats = getFlightStats(selectedFlight);
@@ -816,6 +837,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  dateStr: formatDateShort(fromDate),
  flight: selectedFlight,
  documentType: isPtDocument ? 'PT' : isOthersDocument ? 'OTHERS' : 'PARADE',
+ documentTitle: documentHeader,
  stats,
  onParade: onPtList.map((i) => i.airman),
  leave: leaveList.map((i) => i.airman),
@@ -1115,7 +1137,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
       <ol className="space-y-0.5 text-[11px] leading-snug font-normal text-left">
         {list.map((item, idx) => (
           <li key={idx} className="whitespace-nowrap">
-            {idx + 1}. {formatAirmanName(item.airman.rank)} {formatAirmanName(item.airman.name)}
+            {idx + 1}. {formatRank(item.airman.rank)} {formatAirmanName(item.airman.name)}
             {showNotes && item.notes && item.notes !== 'None' ? ' - ' + item.notes : ''}
           </li>
         ))}
@@ -1152,7 +1174,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  title={(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') ? 'Click to edit, change or remove disposal' : undefined}
  >
  <span className="truncate">
- {i + 1}. {formatAirmanName(item.airman.rank)} {formatAirmanName(item.airman.name)}
+ {i + 1}. {formatRank(item.airman.rank)} {formatAirmanName(item.airman.name)}
  {(isDutyOn || isDutyOff) && noteText ? (
  <span className="text-slate-800 dark:text-slate-200 font-medium"> - {noteText}</span>
  ) : noteText && noteText !== dutyName && noteText !== dutyCode ? (
@@ -1220,7 +1242,8 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  <div className="flex flex-wrap items-center xl:justify-end gap-2.5">
  {isPtDocument ? null : (
  <>
- {/* Quick Date Presets */}
+ {/* Quick Date Presets (Hidden on Others State as requested) */}
+ {!isOthersDocument && (
  <div className="flex items-center bg-slate-100 dark:bg-slate-800 print:bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700 text-xs">
  <button
  onClick={() => handleSetPreset('today')}
@@ -1249,6 +1272,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  Month
  </button>
  </div>
+ )}
 
  {/* Date Mode Toggle & Pickers */}
  <div className="flex items-center gap-2">
@@ -1299,7 +1323,8 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  )}
  </div>
 
- {/* Flight Selector */}
+ {/* Flight Selector (Hidden on Others State as requested) */}
+ {!isOthersDocument && (
  <div className="flex items-center space-x-1.5 bg-slate-100 dark:bg-slate-800 print:bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold">
  <Filter className="w-3.5 h-3.5 text-slate-400" />
  <select
@@ -1314,16 +1339,33 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  <option value="Admin">Admin</option>
  </select>
  </div>
- 
+ )}
 
- 
- 
- 
+ {/* State Name Input (To the LEFT of Signatures button on Others State) */}
+ {isOthersDocument && (
+ <div className="flex items-center space-x-2 bg-slate-100 dark:bg-slate-800 print:bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold shadow-xs">
+ <Tag className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+ <span className="text-slate-500 dark:text-slate-400 font-bold whitespace-nowrap">State Name:</span>
+ <input
+ type="text"
+ value={othersStateName}
+ onChange={(e) => {
+   const val = e.target.value;
+   setOthersStateName(val);
+   localStorage.setItem('baf_others_state_name', val);
+ }}
+ placeholder="e.g. Auditorium"
+ className="bg-transparent text-slate-900 dark:text-white print:text-black font-black outline-none placeholder:text-slate-400 w-32 sm:w-44 text-xs uppercase"
+ title="State Name (যেমন: Auditorium, Briefing ইত্যাদি)"
+ />
+ </div>
+ )}
+
  {/* Signature Settings Button */}
         {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') && !isMultiDay && (
  <button
  onClick={() => setShowSignatureModal(true)}
- className="flex items-center space-x-1.5 px-6 py-2 bg-slate-100 dark:bg-slate-800 print:bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl font-black text-sm shadow-lg transition-all cursor-pointer ml-4"
+ className="flex items-center space-x-1.5 px-6 py-2 bg-slate-100 dark:bg-slate-800 print:bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl font-black text-sm shadow-lg transition-all cursor-pointer ml-1"
  title="Signatures"
  >
  <PenTool className="w-5 h-5" />
@@ -1770,7 +1812,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  <ol className="space-y-0.5 font-normal leading-tight">
  {onPtList.slice(0, 15).map((item, idx) => (
  <li key={item.airman.id} className="whitespace-nowrap cursor-pointer hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40 px-1 rounded transition-colors" onClick={() => openEditDisposal(item.airman, 'ON_PARADE', 'On Parade')} title="Click to edit, change or remove disposal">
- {idx + 1}. {formatAirmanName(item.airman.rank)} {formatAirmanName(item.airman.name)}
+ {idx + 1}. {formatRank(item.airman.rank)} {formatAirmanName(item.airman.name)}
  </li>
  ))}
  </ol>
@@ -1780,7 +1822,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  <ol className="space-y-0.5 font-normal leading-tight">
  {onPtList.slice(15, 30).map((item, idx) => (
  <li key={item.airman.id} className="whitespace-nowrap cursor-pointer hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40 px-1 rounded transition-colors" onClick={() => openEditDisposal(item.airman, 'ON_PARADE', 'On Parade')} title="Click to edit, change or remove disposal">
- {16 + idx}. {formatAirmanName(item.airman.rank)} {formatAirmanName(item.airman.name)}
+ {16 + idx}. {formatRank(item.airman.rank)} {formatAirmanName(item.airman.name)}
  </li>
  ))}
  </ol>
@@ -1791,7 +1833,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  <ol className="space-y-0.5 font-normal leading-tight">
  {onPtList.slice(30).map((item, idx) => (
  <li key={item.airman.id} className="whitespace-nowrap cursor-pointer hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40 px-1 rounded transition-colors" onClick={() => openEditDisposal(item.airman, 'ON_PARADE', 'On Parade')} title="Click to edit, change or remove disposal">
- {31 + idx}. {formatAirmanName(item.airman.rank)} {formatAirmanName(item.airman.name)}
+ {31 + idx}. {formatRank(item.airman.rank)} {formatAirmanName(item.airman.name)}
  </li>
  ))}
  </ol>
@@ -2575,7 +2617,8 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  shift="Morning"
  flight={selectedFlight}
  airmen={airmen}
- documentType={isPtDocument ? 'PT' : 'PARADE'}
+ documentType={isPtDocument ? 'PT' : isOthersDocument ? 'OTHERS' : 'PARADE'}
+ customDocumentHeader={documentHeader}
  onClose={() => setIsInternalPrintOpen(false)}
  />
  )}

@@ -22,14 +22,8 @@ import { DutyRatioTable } from '../data/officialDutyRatioMatrix';
 
 
 
-export const formatRank = (rank: string) => {
-  if (!rank) return '';
-  const upper = rank.toUpperCase();
-  if (upper === 'SGT' || upper === 'CPL') {
-    return upper.charAt(0) + upper.slice(1).toLowerCase();
-  }
-  return upper;
-};
+import { formatRank } from './rankFormatter';
+export { formatRank };
 
 const formatRunningLetter = (text: string) => {
   if (!text) return '';
@@ -1187,7 +1181,8 @@ export async function exportParadeStateMultiDocx(
   rows: MultiParadeDayItem[],
   fileName: string = 'Multi_Day_Parade_State_155_UASU.docx',
   leftSig?: { rank: string; name: string; desig: string },
-  rightSig?: { rank: string; name: string; desig: string }
+  rightSig?: { rank: string; name: string; desig: string },
+  docTitle?: string
 ) {
   const docChildren: any[] = [
     new Paragraph({
@@ -1195,7 +1190,7 @@ export async function exportParadeStateMultiDocx(
       spacing: { after: 40 },
       children: [
         new TextRun({
-          text: 'PARADE STATE : AIRMEN',
+          text: docTitle || 'PARADE STATE : AIRMEN',
           font: 'Arial',
           bold: true,
           size: 20,

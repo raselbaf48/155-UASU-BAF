@@ -61,6 +61,7 @@ import { DisposalCategoryDropdown } from './DisposalCategoryDropdown';
 import { saveCustomDisposal, getSavedCustomDisposals, removeSavedCustomDisposal } from '../utils/customDisposalStore';
 
 import { exportHtmlToWord } from '../utils/htmlExport';
+import { formatRank, formatAirmanName } from '../utils/rankFormatter';
 
 interface NightCountStateViewProps {
   role?: UserRole;
@@ -354,15 +355,6 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
     if (flName.toLowerCase().includes('admin')) return 'Adm';
     return flName.slice(0, 4);
   };
-
-  const formatAirmanName = (name: string) => {
-  if (!name) return '';
-  const lower = name.toLowerCase().trim();
-  if (lower === 'sgt') return 'Sgt';
-  if (lower === 'cpl') return 'Cpl';
-  if (['mwo', 'swo', 'wo', 'lac', 'ac', 'mw'].includes(lower)) return lower.toUpperCase();
-  return name.toLowerCase().split(' ').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-};
 
   // Calculate list of dates in range
   const getDatesInRange = (startStr: string, endStr: string) => {

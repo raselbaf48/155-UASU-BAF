@@ -100,23 +100,126 @@ export function generateStatementCanvas(data: StatementCanvasData): HTMLCanvasEl
   const isDateWise = data.viewMode === 'DATE';
   const dateWiseRows = data.dateWiseRows || [];
 
-  // Calculate table rows count
-  let summaryRowsCount = 1; // সর্বমোট প্রদেয় বিল
-  if (totalMonthBill > 0) summaryRowsCount++;
-  if (totalDiscount && totalDiscount > 0) summaryRowsCount++;
-  if (previousDue > 0) summaryRowsCount++;
-  if (previousAdvance > 0) summaryRowsCount++;
-  if (unitFundBill > 0) summaryRowsCount++;
-  if (othersFundBill > 0) summaryRowsCount++;
-  if (effectivePayments > 0) summaryRowsCount++;
-  if (remainingAdvance > 0) summaryRowsCount++;
+  // Assemble the exact summary rows first so the canvas height calculation is 100% mathematically exact
+  interface CanvasSummaryRowDef {
+    label: string;
+    valText: string;
+    color: string;
+    fontSize?: number;
+  }
 
+  const summaryRows: CanvasSummaryRowDef[] = [];
+
+  if (isDateWise) {
+    // In DATE mode: Only সর্বমোট প্রদেয় বিল is shown at the bottom
+    summaryRows.push({
+      label: 'সর্বমোট প্রদেয় বিল',
+      valText: `৳${toBengaliNum(netPayable)}`,
+      color: '#e11d48',
+      fontSize: 16
+    });
+  } else {
+    // 1. মোট ক্যান্টিন বিল (only in ITEM mode if > 0)
+    if (totalMonthBill > 0) {
+      summaryRows.push({
+        label: 'মোট ক্যান্টিন বিল',
+        valText: `৳${toBengaliNum(totalMonthBill)}`,
+        color: '#000000'
+      });
+    }
+
+    // 1.1 ডিসকাউন্ট (only in ITEM mode if > 0, right below মোট ক্যান্টিন বিল)
+    if (totalDiscount && totalDiscount > 0) {
+      summaryRows.push({
+        label: 'ডিসকাউন্ট',
+        valText: `-৳${toBengaliNum(totalDiscount)}`,
+        color: '#059669'
+      });
+    }
+
+    // 2. বকেয়া বিল (if > 0)
+    if (previousDue > 0) {
+      summaryRows.push({
+        label: 'বকেয়া বিল',
+        valText: `৳${toBengaliNum(previousDue)}`,
+        color: '#000000'
+      });
+    }
+
+    // 2.1 পূর্বের অগ্রিম (if > 0, displayed in green amount)
+    if (previousAdvance > 0) {
+      summaryRows.push({
+        label: 'পূর্বের অগ্রিম',
+        valText: `৳${toBengaliNum(previousAdvance)}`,
+        color: '#059669'
+      });
+    }
+
+    // 3. ইউনিট ফান্ড
+    if (unitFundBill > 0) {
+      summaryRows.push({
+        label: 'ইউনিট ফান্ড',
+        valText: `৳${toBengaliNum(unitFundBill)}`,
+        color: '#000000'
+      });
+    }
+
+    // 4. Category-wise Breakdown (e.g. Patch, Supply Item, Towel, T-Shirt, etc.)
+    if (data.othersBreakdown && data.othersBreakdown.length > 0) {
+      data.othersBreakdown.forEach((b) => {
+        if (b.amount > 0) {
+          const rawCat = String(b.category || '').trim();
+          const isSupply = rawCat.toLowerCase().includes('supply') || rawCat.toLowerCase().includes('others') || rawCat.includes('অন্যান্য') || rawCat.includes('সাপ্লাই');
+          const displayCat = isSupply ? 'Supply Item' : rawCat;
+          summaryRows.push({
+            label: displayCat,
+            valText: `৳${toBengaliNum(b.amount)}`,
+            color: '#000000'
+          });
+        }
+      });
+    } else if (othersFundBill > 0) {
+      summaryRows.push({
+        label: 'Supply Item',
+        valText: `৳${toBengaliNum(othersFundBill)}`,
+        color: '#000000'
+      });
+    }
+
+    // 5. পরিশোধিত বিল (if > 0)
+    if (effectivePayments > 0) {
+      summaryRows.push({
+        label: 'পরিশোধিত বিল',
+        valText: `৳${toBengaliNum(effectivePayments)}`,
+        color: '#059669'
+      });
+    }
+
+    // 6. সর্বমোট প্রদেয় বিল (Bold Red Text on normal white background)
+    summaryRows.push({
+      label: 'সর্বমোট প্রদেয় বিল',
+      valText: `৳${toBengaliNum(netPayable)}`,
+      color: '#e11d48',
+      fontSize: 16
+    });
+
+    // 7. অবশিষ্ট অগ্রিম (if > 0, displayed in green)
+    if (remainingAdvance > 0) {
+      summaryRows.push({
+        label: 'অবশিষ্ট অগ্রিম',
+        valText: `৳${toBengaliNum(remainingAdvance)}`,
+        color: '#059669'
+      });
+    }
+  }
+
+  // Calculate table rows count
   const itemsCount = isDateWise 
     ? (dateWiseRows.length > 0 ? dateWiseRows.length : 1)
     : (items && items.length > 0 ? items.length : 1);
-  const totalTableRows = 3 + itemsCount + summaryRowsCount;
+  const totalTableRows = 3 + itemsCount + summaryRows.length;
   const tableHeight = totalTableRows * rowHeight;
-  const footerHeight = 24; // Clean padding below table (signatures removed as requested)
+  const footerHeight = 32; // Clean comfortable padding below table
   const cardHeight = headerHeight + tableHeight + footerHeight;
 
   // Retina Scale for razor sharp text
@@ -469,64 +572,10 @@ export function generateStatementCanvas(data: StatementCanvasData): HTMLCanvasEl
     currentY += rowHeight;
   };
 
-  const isDateView = data.viewMode === 'DATE';
-
-  // 1. মোট ক্যান্টিন বিল (only in ITEM mode if > 0)
-  if (!isDateView && totalMonthBill > 0) {
-    drawSummaryRow('মোট ক্যান্টিন বিল', `৳${toBengaliNum(totalMonthBill)}`, '#000000');
-  }
-
-  // 1.1 ডিসকাউন্ট (only in ITEM mode if > 0, right below মোট ক্যান্টিন বিল)
-  if (!isDateView && totalDiscount && totalDiscount > 0) {
-    drawSummaryRow('ডিসকাউন্ট', `-৳${toBengaliNum(totalDiscount)}`, '#059669');
-  }
-
-  if (isDateView) {
-    // In DATE mode: Only সর্বমোট প্রদেয় বিল is shown at the bottom
-    drawSummaryRow('সর্বমোট প্রদেয় বিল', `৳${toBengaliNum(netPayable)}`, '#e11d48', 16);
-  } else {
-    // 2. বকেয়া বিল (if > 0)
-    if (previousDue > 0) {
-      drawSummaryRow('বকেয়া বিল', `৳${toBengaliNum(previousDue)}`, '#000000');
-    }
-
-    // 2.1 পূর্বের অগ্রিম (if > 0, displayed in green amount)
-    if (previousAdvance > 0) {
-      drawSummaryRow('পূর্বের অগ্রিম', `৳${toBengaliNum(previousAdvance)}`, '#059669');
-    }
-
-    // 3. ইউনিট ফান্ড
-    if (unitFundBill > 0) {
-      drawSummaryRow('ইউনিট ফান্ড', `৳${toBengaliNum(unitFundBill)}`, '#000000');
-    }
-
-    // 4. Category-wise Breakdown
-    if (data.othersBreakdown && data.othersBreakdown.length > 0) {
-      data.othersBreakdown.forEach((b) => {
-        if (b.amount > 0) {
-          const rawCat = String(b.category || '').trim();
-          const isSupply = rawCat.toLowerCase().includes('supply') || rawCat.toLowerCase().includes('others') || rawCat.includes('অন্যান্য') || rawCat.includes('সাপ্লাই');
-          const displayCat = isSupply ? 'Supply Item' : rawCat;
-          drawSummaryRow(displayCat, `৳${toBengaliNum(b.amount)}`, '#000000');
-        }
-      });
-    } else if (othersFundBill > 0) {
-      drawSummaryRow('Supply Item', `৳${toBengaliNum(othersFundBill)}`, '#000000');
-    }
-
-    // 5. পরিশোধিত বিল (if > 0)
-    if (effectivePayments > 0) {
-      drawSummaryRow('পরিশোধিত বিল', `৳${toBengaliNum(effectivePayments)}`, '#059669');
-    }
-
-    // 6. সর্বমোট প্রদেয় বিল (Bold Red Text on normal white background)
-    drawSummaryRow('সর্বমোট প্রদেয় বিল', `৳${toBengaliNum(netPayable)}`, '#e11d48', 16);
-
-    // 7. অবশিষ্ট অগ্রিম (if > 0, displayed in green)
-    if (remainingAdvance > 0) {
-      drawSummaryRow('অবশিষ্ট অগ্রিম', `৳${toBengaliNum(remainingAdvance)}`, '#059669');
-    }
-  }
+  // Render Summary Rows matching exact pre-calculated summaryRows
+  summaryRows.forEach((row) => {
+    drawSummaryRow(row.label, row.valText, row.color, row.fontSize || 14);
+  });
 
   // Outer border around whole table for clean crisp outline
   ctx.strokeStyle = '#000000';

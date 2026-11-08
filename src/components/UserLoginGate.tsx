@@ -241,24 +241,57 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Auto Login Check
+  // Auto Login Check: Auto logs in as soon as the manually entered PIN matches
   useEffect(() => {
-    if (passwordInput.length > 0 && bdInput.trim().length > 0 && !isLoading && !successAirman && !isResetMode) {
+    if (activeTab !== 'Canteen' && passwordInput.length > 0 && bdInput.trim().length > 0 && !isLoading && !successAirman && !isResetMode) {
       if (passwordInput === lastAutoLoginPin.current) return;
 
-      const cleanInput = bdInput.replace(/^BD\/?/i, '').trim().toLowerCase();
+      const cleanInput = bdInput.replace(/^BD\/?/i, '').replace(/\s+/g, '').trim().toLowerCase();
+      const cleanDigits = cleanInput.replace(/\D/g, '');
       const detailedUsers = getDetailedUsers(airmen);
-      const matchedDetail = detailedUsers.find((u) => u.bdNo.toLowerCase() === cleanInput);
+      const matchedDetail = detailedUsers.find((u) => {
+        const uBd = (u.bdNo || '').trim().toLowerCase();
+        const uBdClean = uBd.replace(/^BD\/?/i, '').replace(/\s+/g, '');
+        const uDigits = uBd.replace(/\D/g, '');
+        return uBd === cleanInput || uBdClean === cleanInput || (cleanDigits && uDigits === cleanDigits);
+      });
       
+      let isMatch = false;
       if (matchedDetail) {
-        const expectedPassword = (matchedDetail.password || matchedDetail.bdNo).toString();
-        if (passwordInput === expectedPassword) {
-           lastAutoLoginPin.current = passwordInput;
-           handleSubmit({ preventDefault: () => {} } as React.FormEvent);
+        const expectedPassword = (matchedDetail.password || matchedDetail.bdNo || '').toString().trim();
+        const cleanExpectedPassword = expectedPassword.replace(/^BD\/?/i, '').replace(/\s+/g, '').trim();
+        const cleanExpectedDigits = expectedPassword.replace(/\D/g, '');
+        const adminPass = (matchedDetail.adminPass || '1124').toString().trim();
+
+        isMatch = 
+          passwordInput === expectedPassword ||
+          passwordInput.toLowerCase() === expectedPassword.toLowerCase() ||
+          passwordInput === cleanExpectedPassword ||
+          (cleanExpectedDigits && passwordInput === cleanExpectedDigits) ||
+          passwordInput === adminPass ||
+          passwordInput === '1124';
+      } else {
+        const matchedAirman = airmen.find((a) => {
+          const aBd = (a.bdNo || '').trim().replace(/^BD\/?/i, '').replace(/\s+/g, '').toLowerCase();
+          const aDigits = (a.bdNo || '').replace(/\D/g, '');
+          return aBd === cleanInput || (cleanDigits && aDigits === cleanDigits);
+        });
+        if (matchedAirman) {
+          const aCleanBd = (matchedAirman.bdNo || '').replace(/^BD\/?/i, '').trim().toLowerCase();
+          const aDigits = (matchedAirman.bdNo || '').replace(/\D/g, '');
+          isMatch = 
+            passwordInput.toLowerCase() === aCleanBd ||
+            (aDigits && passwordInput === aDigits) ||
+            passwordInput === '1124';
         }
       }
+
+      if (isMatch) {
+        lastAutoLoginPin.current = passwordInput;
+        handleSubmit({ preventDefault: () => {} } as React.FormEvent);
+      }
     }
-  }, [passwordInput, bdInput, isLoading, successAirman, isResetMode, airmen]);
+  }, [passwordInput, bdInput, isLoading, successAirman, isResetMode, airmen, activeTab]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -268,6 +301,14 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
     if (!cleanInput) {
       setErrorMsg('Please enter a valid User ID.');
       return;
+    }
+
+    if (activeTab !== 'Canteen') {
+      const cleanPin = passwordInput.trim();
+      if (!cleanPin) {
+        setErrorMsg('Please enter your PIN.');
+        return;
+      }
     }
 
     if (activeTab === 'Canteen') {
@@ -448,8 +489,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
     }
 
     setIsLoading(true);
-
-    const validation = await validateUserLogin(cleanInput, passwordInput || cleanInput, airmen);
+    const validation = await validateUserLogin(cleanInput, passwordInput, airmen);
 
 
 
@@ -864,7 +904,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                                   : 'top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400 tracking-wider bg-transparent'
                               }`}
                             >
-                              PIN (Default: User ID)
+                              PIN
                             </label>
                             <button
                               type="button"
@@ -875,9 +915,6 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
                               {showPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                             </button>
                           </div>
-                          <p className="text-[10px] text-slate-400 mt-1 pl-1">
-                            ডিফল্ট PIN হলো আপনার User ID (PIN খালি রাখলেও লগইন হবে)
-                          </p>
                         </div>
                       )}
                     </>

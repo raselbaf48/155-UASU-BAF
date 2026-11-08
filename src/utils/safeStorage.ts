@@ -105,25 +105,7 @@ export function pruneNonEssentialStorage(): number {
       }
     } catch {}
 
-    // 5. Trim canteen_bill_import_history and canteen_pos_import_history to most recent 2 entries
-    try {
-      const rawImportHistory = window.localStorage.getItem('canteen_bill_import_history');
-      if (rawImportHistory) {
-        const parsed = JSON.parse(rawImportHistory);
-        if (Array.isArray(parsed) && parsed.length > 2) {
-          window.localStorage.setItem('canteen_bill_import_history', JSON.stringify(parsed.slice(0, 2)));
-          freedCount++;
-        }
-      }
-      const rawPosHistory = window.localStorage.getItem('canteen_pos_import_history');
-      if (rawPosHistory) {
-        const parsed = JSON.parse(rawPosHistory);
-        if (Array.isArray(parsed) && parsed.length > 2) {
-          window.localStorage.setItem('canteen_pos_import_history', JSON.stringify(parsed.slice(0, 2)));
-          freedCount++;
-        }
-      }
-    } catch {}
+
 
     // 6. Prune baf_presence if large
     try {

@@ -531,14 +531,16 @@ export const validateUserLogin = async (
 
   if (matchedDetail) {
     const rawProvided = (passwordInput || '').trim();
+    if (!rawProvided) {
+      return { success: false, message: 'Please enter your PIN.' };
+    }
     const expectedPassword = (matchedDetail.password || matchedDetail.bdNo || '').toString().trim();
     const cleanExpectedPassword = expectedPassword.replace(/^BD\/?/i, '').trim();
     const cleanExpectedDigits = expectedPassword.replace(/\D/g, '');
     const adminPass = (matchedDetail.adminPass || '1124').toString().trim();
 
-    // In BAF system, default PIN is the User ID / BD No. If PIN is blank, auto-match default PIN.
+    // In BAF system: PIN must be manually entered and must match
     const isMatch = 
-      !rawProvided || 
       rawProvided === expectedPassword ||
       rawProvided.toLowerCase() === expectedPassword.toLowerCase() ||
       rawProvided === cleanExpectedPassword ||
@@ -787,7 +789,7 @@ export const validateUserLogin = async (
 
   // If user was registered in detailed users but credentials failed local and cloud checks
   if (matchedDetail) {
-    return { success: false, message: 'Invalid User ID or PIN. (Default PIN is your BD Number or 1124)' };
+    return { success: false, message: 'Invalid User ID or PIN. (ভুল User ID অথবা PIN)' };
   }
 
   // 4. If not explicitly in detailed list, check nominal roll
@@ -802,13 +804,17 @@ export const validateUserLogin = async (
     const aDigits = (matchedAirman.bdNo || "").replace(/\D/g, '');
     const rawProvided = (passwordInput || '').trim();
 
+    if (!rawProvided) {
+      return { success: false, message: 'Please enter your PIN.' };
+    }
+
     const isMatch = 
       rawProvided.toLowerCase() === aCleanBd ||
       (aDigits && rawProvided === aDigits) ||
       rawProvided === '1124';
 
     if (!isMatch) {
-      return { success: false, message: `Invalid User ID or PIN. (Default PIN is your BD Number or 1124)` };
+      return { success: false, message: 'Invalid User ID or PIN. (ভুল User ID অথবা PIN)' };
     }
     // Auto-detail this airman and allow login
     const isPrimary = cleanInput === '48456' || cleanDigits === '48456';

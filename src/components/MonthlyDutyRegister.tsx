@@ -12,16 +12,7 @@ import { FlightDutyRatioModal } from './FlightDutyRatioModal';
 import { EntryHistoryModal } from './EntryHistoryModal';
 import { getCurrentUserSession } from '../utils/authSession';
 import { checkDutyPermission, isDateInPast } from '../utils/dutyPermissions';
-
-
-const formatAirmanName = (name: string) => {
-  if (!name) return '';
-  const lower = name.toLowerCase().trim();
-  if (lower === 'sgt') return 'Sgt';
-  if (lower === 'cpl') return 'Cpl';
-  if (['mwo', 'swo', 'wo', 'lac', 'ac', 'mw'].includes(lower)) return lower.toUpperCase();
-  return name.toLowerCase().split(' ').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-};
+import { formatRank, formatAirmanName } from '../utils/rankFormatter';
 interface RestoreItem {
   airmanId: string;
   date: string;
