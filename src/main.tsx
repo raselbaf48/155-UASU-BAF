@@ -19,7 +19,11 @@ try {
       if (
         msg.includes('WebSocket closed without opened') ||
         msg.includes('failed to connect to websocket') ||
-        msg.includes('@vite/client')
+        msg.includes('@vite/client') ||
+        msg.includes('resource-exhausted') ||
+        msg.includes('Quota limit exceeded') ||
+        msg.includes('Quota exceeded') ||
+        msg.includes('maximum backoff delay')
       ) {
         event.preventDefault();
         event.stopImmediatePropagation();

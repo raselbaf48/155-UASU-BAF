@@ -273,12 +273,19 @@ export function markCanteenDirty(key: string, data?: any) {
     localStorage.setItem('canteen_pending_sync', 'true');
   }
 
+  if (isFirestoreQuotaExceeded()) {
+    dirtyCanteenKeys.clear();
+    dirtyCanteenValues.clear();
+    if (typeof window !== 'undefined') localStorage.removeItem('canteen_pending_sync');
+    return;
+  }
+
   // Schedule / debounce backup after 10 seconds
   if (canteenBackupTimeout) {
     clearTimeout(canteenBackupTimeout);
   }
   canteenBackupTimeout = setTimeout(() => {
-    if (isInitialCanteenPullDone && dirtyCanteenKeys.size > 0) {
+    if (isInitialCanteenPullDone && dirtyCanteenKeys.size > 0 && !isFirestoreQuotaExceeded()) {
       performCanteenBackup(false);
     }
   }, 10000);
@@ -291,6 +298,14 @@ export function markCanteenDirty(key: string, data?: any) {
  */
 export async function performCanteenBackup(forceAll = false): Promise<boolean> {
   if (typeof window === 'undefined') return false;
+
+  if (isFirestoreQuotaExceeded()) {
+    dirtyCanteenKeys.clear();
+    dirtyCanteenValues.clear();
+    if (typeof window !== 'undefined') localStorage.removeItem('canteen_pending_sync');
+    notifyStatus({ status: 'synced', lastSyncTime: new Date().toLocaleTimeString() });
+    return true;
+  }
 
   // Never upload before initial cloud download completes (unless forced by manual button)
   if (!forceAll && !isInitialCanteenPullDone) {
@@ -1094,8 +1109,6 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
     }
 
     if (!data || data.length === 0) {
-      // If cloud is empty for some keys, push initial local data to cloud
-      await pushAllLocalDataToCloud();
       notifyStatus({ status: 'synced', lastSyncTime: new Date().toLocaleTimeString() });
       return;
     }
@@ -1372,6 +1385,10 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
  */
 export async function pushAllLocalDataToCloud(): Promise<boolean> {
   if (typeof window === 'undefined') return false;
+  if (isFirestoreQuotaExceeded()) {
+    notifyStatus({ status: 'synced', lastSyncTime: new Date().toLocaleTimeString() });
+    return true;
+  }
   notifyStatus({ status: 'syncing' });
 
   const promises: Promise<any>[] = [];

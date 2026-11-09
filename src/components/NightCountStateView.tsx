@@ -642,33 +642,62 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
       alert("You cannot edit disposals for past dates.");
       return;
     }
+    let resolvedCode = dutyCode;
+    if (resolvedCode === 'DUTY' || resolvedCode === 'DUTY_ON') {
+      const noteUpper = (note || '').toUpperCase();
+      if (noteUpper.includes('BTF')) resolvedCode = 'BTF';
+      else if (noteUpper.includes('NTF')) resolvedCode = 'NTF';
+      else if (noteUpper.includes('HALISHAHAR')) resolvedCode = 'HALISHAHAR';
+      else if (noteUpper.includes('AIR') || noteUpper.includes('AIRPORT')) resolvedCode = 'AIRPORT';
+      else if (noteUpper.includes('IDAC')) resolvedCode = 'IDAC';
+      else if (noteUpper.includes('CANTEEN')) resolvedCode = 'CANTEEN';
+      else resolvedCode = 'GD';
+    }
+
     const isStandardCat = [
       'ESSN',
       'CMH',
+      'BNS',
+      'BSH',
       'SICK_REPORT',
+      'ED',
+      'EX_PPGF',
       'ADMIN_ORDER',
       'LEAVE',
       'BAKE_N_BITE',
       'RECEPTION',
       'TDY',
-      'ADMIN_ORDER',
+      'TDY_HSIA',
+      'ATT_SAIA',
       'CLASS_TRG',
       'ATT',
+      'DETT',
       'GAMES',
+      'GH',
+      'AWL',
       'ABSENT',
-      'DUTY_ON',
+      'CANTEEN',
+      'ORDERLY_ROOM',
+      'UWO',
+      'AIRPORT',
+      'AIRFIELD',
+      'GD',
+      'BTF',
+      'NTF',
+      'IDAC',
+      'HALISHAHAR',
       'DUTY_OFF',
-    ].includes(dutyCode);
+    ].includes(resolvedCode);
 
     setEditDisposalModal({
       airman,
       date: fromDate,
-      currentDutyCode: dutyCode,
-      currentDutyName: dutyName || dutyCode,
+      currentDutyCode: resolvedCode,
+      currentDutyName: dutyName && !['DUTY', 'DUTY_ON'].includes(dutyName.toUpperCase()) ? dutyName : (resolvedCode === 'GD' ? 'Base Security Duty' : resolvedCode),
       notes: note,
     });
-    setEditDisposalCategory(isStandardCat ? dutyCode : 'OTHERS');
-    setEditDisposalCustomTitle(!isStandardCat ? (dutyName || note || dutyCode || '') : '');
+    setEditDisposalCategory(isStandardCat ? resolvedCode : 'OTHERS');
+    setEditDisposalCustomTitle(!isStandardCat ? (dutyName || note || resolvedCode || '') : '');
     setEditDisposalFromDate(fromDate);
     setEditDisposalToDate(isMultiDay ? toDate : fromDate);
   };
@@ -680,7 +709,10 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
     setEditDisposalLoading(true);
     try {
       const isCustom = activeCategory === 'OTHERS';
-      const effectiveDutyCode = isCustom ? 'OTHERS' : activeCategory;
+      let effectiveDutyCode = isCustom ? 'OTHERS' : activeCategory;
+      if (effectiveDutyCode === 'DUTY' || effectiveDutyCode === 'DUTY_ON') {
+        effectiveDutyCode = 'GD';
+      }
       const effectiveNotes = isCustom ? (editDisposalCustomTitle.trim() || 'Custom Disposal') : undefined;
 
       const res = await fetch('/api/roster/assign-range', {
@@ -897,12 +929,12 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
           
           const isDutyOff = codeUpper === 'DUTY_OFF' || codeUpper === 'OFF_DUTY' || statusCategory === 'OFF' || notesLower.includes('off duty') || notesLower.includes('nt off') || notesLower.includes('night off');
           const isCanteenReception = codeUpper === 'CANTEEN' || notesLower.includes('canteen') || codeUpper === 'RECEPTION' || notesLower.includes('reception') || notesLower.includes('k/o');
-          if (isIdacNt) {
+          if (codeUpper === 'LEAVE' || statusCategory === 'LEAVE') {
+            leaveList.push({ airman, note: '' });
+          } else if (isIdacNt) {
             dutyOnList.push({ airman, note: 'IDAC Nt' });
           } else if (codeUpper === 'ON_PARADE' || codeUpper === 'PT' || codeUpper === 'PT_PARADE' || statusCategory === 'PARADE' || isIdacA || isDutyOff || isCanteenReception) {
             onPtList.push({ airman, note: '' });
-          } else if (codeUpper === 'LEAVE' || statusCategory === 'LEAVE') {
-            leaveList.push({ airman, note: '' });
           } else if (codeUpper === 'ESSN' || notesLower.includes('essn')) {
             essnList.push({ airman, note: 'ESSN' });
           } else if (['CMH', 'HOSPITAL'].includes(codeUpper) || notesLower.includes('cmh')) {
@@ -1021,13 +1053,17 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
           const isDutyOn = dutyCode === 'DUTY_ON' || ['GD', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA', 'AIRPORT'].includes(dutyCode);
           const isDutyOff = dutyCode === 'DUTY_OFF';
           let noteText = item.note && !item.note.toLowerCase().includes('imported') ? item.note : '';
+          if (isDutyOn && (noteText.toUpperCase() === 'DUTY' || noteText.toUpperCase() === 'DUTY_ON' || !noteText)) {
+            noteText = 'GD';
+          }
+          const effectiveCode = (dutyCode === 'DUTY_ON' || dutyCode === 'DUTY') ? (noteText || 'GD') : dutyCode;
 
           return (
             <li
               key={item.airman.id || i}
               onClick={() => {
                 if (true) {
-                  openEditDisposal(item.airman, dutyCode, dutyName, item.note);
+                  openEditDisposal(item.airman, effectiveCode, dutyName, noteText || item.note);
                 }
               }}
               className={`truncate group flex items-center justify-between ${

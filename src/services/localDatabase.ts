@@ -236,7 +236,7 @@ export class LocalDatabaseEngine {
       
       // Auto Sync Timer for Retries (Only runs if online and has pending sync)
       setInterval(() => {
-        if (typeof window !== 'undefined' && window.localStorage.getItem('firebase_quota_exceeded')) {
+        if (isFirestoreQuotaExceeded()) {
           return; // Stop retrying if quota is exceeded
         }
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
@@ -423,30 +423,23 @@ export class LocalDatabaseEngine {
               }
             }
 
-            emitSyncProgress(30, "Seeding Firebase Firestore from official unit records...");
-            await pushAirmenToFirebase(this.db.airmen);
-            const allAssignments: DutyAssignment[] = [];
-            Object.values(this.db.assignments || {}).forEach((arr: any) => {
-              if (Array.isArray(arr)) allAssignments.push(...arr);
-            });
-            if (allAssignments.length > 0) await pushDutyAssignmentsToFirebase(allAssignments);
-            if (this.db.activityHistory?.length) await pushParadeStatesToFirebase(this.db.activityHistory);
-            if (this.db.detailedUsers?.length) await pushUserProfilesToFirebase(this.db.detailedUsers);
+            if (isFirestoreQuotaExceeded()) {
+              this.saveToStorage(this.db, false, false, false);
+              this.isInitialPullDone = true;
+              this.isFirebaseSyncing = false;
+              isSyncingActive = false;
+              broadcastSyncState();
+              return true;
+            }
 
-            this.saveToStorage(this.db, true, false, false);
+            this.saveToStorage(this.db, false, false, false);
             firebaseConnected = true;
             firebaseLastSyncTime = new Date().toISOString();
-            if (typeof window !== 'undefined') {
-              window.localStorage.setItem('baf_cloud_connected', 'true');
-              window.localStorage.setItem('baf_cloud_last_sync', firebaseLastSyncTime);
-            }
             this.isInitialPullDone = true;
-            window.dispatchEvent(new CustomEvent('baf_db_updated', { detail: { source: 'firebase' } }));
-            addSyncLog({ timestamp: new Date().toISOString(), type: "PULL", status: "SUCCESS", message: `Auto-seeded Firebase Firestore (${this.db.airmen.length} airmen, ${allAssignments.length} duty records).` });
             this.isFirebaseSyncing = false;
             isSyncingActive = false;
             broadcastSyncState();
-            emitSyncProgress(100, "Firebase initialization complete!");
+            emitSyncProgress(100, "Database ready (Offline/Local storage)");
             return true;
           }
         } catch (fbErr: any) {
@@ -576,20 +569,30 @@ export class LocalDatabaseEngine {
       }
       
       if (dutyData) {
-         const newAssignments: Record<string, DutyAssignment[]> = {};
+         const newAssignments: Record<string, DutyAssignment[]> = { ...(this.db.assignments || {}) };
          dutyData.forEach((d: any) => {
-            const dateStr = d.duty_date;
+            const dateStr = d.duty_date || d.date;
             if (dateStr && dateStr.length >= 7) {
                const monthKey = dateStr.substring(0, 7); // YYYY-MM
                if (!newAssignments[monthKey]) newAssignments[monthKey] = [];
-               newAssignments[monthKey].push({
+               const rawType = d.duty_type || d.dutyTypeCode || d.dutyCode;
+               const cleanCode = (rawType && rawType !== 'DUTY' && rawType !== 'DUTY_ON') ? rawType : 'GD';
+               const existingIdx = newAssignments[monthKey].findIndex(a => a.airmanId === d.airman_id && a.date === dateStr);
+               const incomingAsn: DutyAssignment = {
                  airmanId: d.airman_id,
-                 date: d.duty_date,
-                 dutyCode: d.duty_type,
+                 date: dateStr,
+                 dutyCode: cleanCode,
                  idaShift: d.shift || undefined,
                  disposalScope: 'ALL',
                  notes: d.remarks || undefined
-               });
+               };
+               if (existingIdx >= 0) {
+                 if (newAssignments[monthKey][existingIdx].dutyCode !== 'LEAVE' || cleanCode === 'LEAVE') {
+                   newAssignments[monthKey][existingIdx] = incomingAsn;
+                 }
+               } else {
+                 newAssignments[monthKey].push(incomingAsn);
+               }
             }
          });
          newDb.assignments = newAssignments;
@@ -2246,9 +2249,22 @@ export class LocalDatabaseEngine {
       );
     }
 
+    let sanitizedCode: any = assignment.dutyCode;
+    if (sanitizedCode === 'DUTY' || sanitizedCode === 'DUTY_ON') {
+      const n = (assignment.notes || '').toUpperCase();
+      if (n.includes('BTF')) sanitizedCode = 'BTF';
+      else if (n.includes('NTF')) sanitizedCode = 'NTF';
+      else if (n.includes('HALISHAHAR')) sanitizedCode = 'HALISHAHAR';
+      else if (n.includes('AIR')) sanitizedCode = 'AIRPORT';
+      else if (n.includes('IDAC')) sanitizedCode = 'IDAC';
+      else if (n.includes('CANTEEN')) sanitizedCode = 'CANTEEN';
+      else sanitizedCode = 'GD';
+    }
+
     const prevAssignment = index >= 0 ? { ...list[index] } : null;
     const newAss: DutyAssignment = {
       ...assignment,
+      dutyCode: sanitizedCode,
       updatedAt: new Date().toISOString(),
     };
 
@@ -2354,10 +2370,22 @@ export class LocalDatabaseEngine {
         prevStates.push({ airmanId, date: dateStr, dutyCode: undefined });
       }
 
+      let sanitizedCode: any = dutyCode;
+      if (sanitizedCode === 'DUTY' || sanitizedCode === 'DUTY_ON') {
+        const n = (notes || '').toUpperCase();
+        if (n.includes('BTF')) sanitizedCode = 'BTF';
+        else if (n.includes('NTF')) sanitizedCode = 'NTF';
+        else if (n.includes('HALISHAHAR')) sanitizedCode = 'HALISHAHAR';
+        else if (n.includes('AIR')) sanitizedCode = 'AIRPORT';
+        else if (n.includes('IDAC')) sanitizedCode = 'IDAC';
+        else if (n.includes('CANTEEN')) sanitizedCode = 'CANTEEN';
+        else sanitizedCode = 'GD';
+      }
+
       const assignment: DutyAssignment = {
         airmanId,
         date: dateStr,
-        dutyCode,
+        dutyCode: sanitizedCode,
         idaShift,
         proxyForFlight,
         disposalScope: disposalScope || 'ALL',
@@ -2578,6 +2606,29 @@ export class LocalDatabaseEngine {
     const dateAssignments = monthAssignments.filter((a) => a.date === date);
 
     const assignmentMap = new Map<string, DutyAssignment>();
+
+    // 1. Synthesize active entries from activityHistory (e.g. Leave, TDY, Disposals)
+    (this.db.activityHistory || []).forEach((h: any) => {
+      const from = h.fromDate || h.from_date || h.date;
+      const to = h.toDate || h.to_date || from;
+      if (from && to && from <= date && to >= date) {
+        const airId = h.airmanId || h.airman_id;
+        if (!airId) return;
+        const actType = String(h.actionType || h.type || '').toUpperCase();
+        const rawCode = String(h.dutyCode || h.duty_code || (actType.includes('LEAVE') ? 'LEAVE' : 'GD')).toUpperCase();
+        const code = rawCode === 'DUTY' || rawCode === 'DUTY_ON' ? 'GD' : rawCode;
+
+        assignmentMap.set(airId, {
+          airmanId: airId,
+          date: date,
+          dutyCode: code as any,
+          idaShift: h.idaShift || h.ida_shift || undefined,
+          notes: h.notes || h.description || '',
+          disposalScope: 'ALL',
+        });
+      }
+    });
+
     dateAssignments.forEach((a) => {
       const scope = a.disposalScope || 'ALL';
       const isApplicable = scope === 'ALL' || (isPT && scope === 'PT') || (isNightCount && scope === 'NIGHT_COUNT') || (!isPT && !isNightCount && scope === 'PARADE');
@@ -2587,6 +2638,15 @@ export class LocalDatabaseEngine {
           assignmentMap.set(a.airmanId, a);
         } else {
           // Priority logic:
+          // 0. LEAVE is top military priority: routine duty cannot overwrite an active Leave!
+          if (existing.dutyCode === 'LEAVE' && a.dutyCode !== 'LEAVE') {
+            return; // Leave stays
+          }
+          if (a.dutyCode === 'LEAVE' && existing.dutyCode !== 'LEAVE') {
+            assignmentMap.set(a.airmanId, a);
+            return;
+          }
+
           // 1. Specific duty (like IDAC, GD, LEAVE, etc.) always beats baseline ON_PARADE
           const isBase = (code: string) => !code || code === 'ON_PARADE' || code === 'PT' || code === 'PT_PARADE';
           const existingIsBase = isBase(existing.dutyCode);
@@ -2763,41 +2823,95 @@ export class LocalDatabaseEngine {
       const isApplicable = scope === 'ALL' || (isPT && scope === 'PT') || (isNightCount && scope === 'NIGHT_COUNT') || (!isPT && !isNightCount && scope === 'PARADE');
 
       if (ass && isApplicable) {
-        let dutyName: string = String(ass.dutyCode);
+        let dutyName: string = ((ass as any)?.dutyName || '').trim() || String(ass.dutyCode);
         let statusCategory: string = 'DUTY';
         let previousDutyName: string | undefined = undefined;
 
-        const codeStr = String(ass.dutyCode);
+        let codeStr = String(ass.dutyCode).trim();
+
+        // If dutyCode is generic 'DUTY' or 'DUTY_ON', resolve to real disposal from notes, dutyName, or Master Disposals
+        if (codeStr === 'DUTY' || codeStr === 'DUTY_ON') {
+          const rawNote = (ass.notes || '').trim();
+          const rawName = (((ass as any)?.dutyName || '') as string).trim();
+          const isGeneric = (s: string) => !s || ['DUTY', 'DUTY_ON', 'ON DUTY', 'DUTY ON'].includes(s.toUpperCase());
+
+          if (!isGeneric(rawNote)) {
+            codeStr = rawNote.toUpperCase();
+            dutyName = rawNote;
+          } else if (!isGeneric(rawName)) {
+            codeStr = rawName.toUpperCase();
+            dutyName = rawName;
+          } else {
+            // Check if airman has a Master Disposal configured in Duty Distribution / Nominal Roll
+            let masterDisp: string | undefined;
+            if (typeof window !== 'undefined') {
+              try {
+                const masterStr = window.localStorage.getItem('baf_duty_distribution_disposals_master') || window.localStorage.getItem('baf_duty_distribution_disposals_' + date);
+                if (masterStr) {
+                  const parsed = JSON.parse(masterStr);
+                  masterDisp = parsed[airmanId];
+                }
+              } catch {}
+            }
+            if (masterDisp && masterDisp !== '-' && masterDisp !== '') {
+              dutyName = masterDisp;
+              codeStr = masterDisp.toUpperCase();
+            } else {
+              codeStr = 'GD';
+              dutyName = 'Base Security Duty';
+            }
+          }
+        }
+
         if (codeStr === 'GD') dutyName = 'Base Security Duty';
         else if (codeStr === 'BTF') dutyName = 'Base Taskforce Duty';
         else if (codeStr === 'NTF') dutyName = 'Najirpara Taskforce Duty';
         else if (codeStr === 'HALISHAHAR') dutyName = 'Halishahar Duty';
         else if (codeStr === 'AIRPORT' || codeStr === 'AIRFIELD' || codeStr === 'ATT' || codeStr === 'DETT') dutyName = 'Airfield';
+        else if (codeStr.includes('ORDERLY')) {
+          dutyName = 'Orderly Room';
+          statusCategory = 'OTHERS';
+        }
+        else if (codeStr === 'UWO') {
+          dutyName = 'UWO';
+          statusCategory = 'OTHERS';
+        }
+        else if (codeStr === 'TDY_HSIA') {
+          dutyName = 'TDY (HSIA)';
+          statusCategory = 'TDY';
+        }
+        else if (codeStr === 'ATT_SAIA') {
+          dutyName = 'Att (SAIA)';
+          statusCategory = 'TDY';
+        }
+        else if (codeStr === 'ED') {
+          dutyName = 'ED';
+          statusCategory = 'SICK_REPORT';
+        }
+        else if (codeStr === 'EX_PPGF') {
+          dutyName = 'Ex PPGF';
+          statusCategory = 'SICK_REPORT';
+        }
+        else if (codeStr === 'BNS' || codeStr === 'BSH') {
+          dutyName = codeStr;
+          statusCategory = 'CMH';
+        }
+        else if (codeStr === 'GH') {
+          dutyName = 'Guard of Honor';
+          statusCategory = 'GAMES';
+        }
+        else if (codeStr === 'AWL') {
+          dutyName = 'AWOL';
+          statusCategory = 'ABSENT';
+        }
+        else if (codeStr === 'CAT_C') {
+          dutyName = 'Drill Cat-C';
+          statusCategory = 'ADMIN_ORDER';
+        }
         else if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(codeStr)) {
           const s = ass.idaShift || 'Morning';
           dutyName = `IDAC Duty (${s})`;
-          
-          if (isPT || isNightCount) {
-            statusCategory = 'DUTY';
-          } else {
-            if (s === 'Night' && shift === 'Morning') {
-              const yestAss = yestMap.get(airmanId);
-              const hadDutyYesterday = yestAss && (
-                ['GD', 'BTF', 'NTF', 'AIRPORT', 'HALISHAHAR'].includes(yestAss.dutyCode) ||
-                ((yestAss.dutyCode === 'IDAC' || yestAss.dutyCode === 'IDA') && yestAss.idaShift === 'Night')
-              );
-              if (hadDutyYesterday) {
-                statusCategory = 'OFF';
-                previousDutyName = (yestAss.dutyCode === 'IDAC' || yestAss.dutyCode === 'IDA') ? 'IDAC Nt Off' : `${yestAss.dutyCode} Off`;
-                dutyName = previousDutyName;
-              } else {
-                statusCategory = 'PARADE';
-                dutyName = 'On Parade';
-              }
-            } else {
-              statusCategory = 'DUTY';
-            }
-          }
+          statusCategory = 'DUTY';
         }
         else if (codeStr === 'BAKE_N_BITE') {
           dutyName = 'Bake & Bite';
@@ -2967,8 +3081,8 @@ export class LocalDatabaseEngine {
         const safeNotes = (ass.notes || '').toLowerCase().includes('imported') ? '' : (ass.notes || '');
 
         return { 
-          dutyCode: ass.dutyCode, 
-          idaShift: (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(ass.dutyCode)) ? (ass.idaShift || 'Morning') : ass.idaShift, 
+          dutyCode: (String(ass.dutyCode) === 'DUTY' || String(ass.dutyCode) === 'DUTY_ON') ? (codeStr as any) : ass.dutyCode, 
+          idaShift: (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(ass.dutyCode) || ['IDAC', 'IDA'].includes(codeStr)) ? (ass.idaShift || 'Morning') : ass.idaShift, 
           proxyForFlight: ass.proxyForFlight,
           disposalScope: scope,
           notes: safeNotes, 

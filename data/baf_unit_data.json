@@ -46213,6 +46213,127 @@
         "disposalScope": "ALL",
         "notes": "",
         "updatedAt": "2026-10-17T05:30:05.986Z"
+      },
+      {
+        "id": "asn_BD_474549_2026-11-01_LEAVE_n_ALL",
+        "airmanId": "BD/474549",
+        "date": "2026-11-01",
+        "dutyCode": "LEAVE",
+        "dutyType": "LEAVE",
+        "dutyName": "Annual Leave (F-295: 5 Free Days)",
+        "shift": "",
+        "disposalScope": "ALL",
+        "notes": "Annual Leave (F-295: 5 Free Days)",
+        "updatedAt": "2026-11-09T09:15:46.485Z"
+      },
+      {
+        "id": "asn_BD_474549_2026-11-02_LEAVE_n_ALL",
+        "airmanId": "BD/474549",
+        "date": "2026-11-02",
+        "dutyCode": "LEAVE",
+        "dutyType": "LEAVE",
+        "dutyName": "Annual Leave (F-295: 5 Free Days)",
+        "shift": "",
+        "disposalScope": "ALL",
+        "notes": "Annual Leave (F-295: 5 Free Days)",
+        "updatedAt": "2026-11-09T09:15:46.485Z"
+      },
+      {
+        "id": "asn_BD_474549_2026-11-03_LEAVE_n_ALL",
+        "airmanId": "BD/474549",
+        "date": "2026-11-03",
+        "dutyCode": "LEAVE",
+        "dutyType": "LEAVE",
+        "dutyName": "Annual Leave (F-295: 5 Free Days)",
+        "shift": "",
+        "disposalScope": "ALL",
+        "notes": "Annual Leave (F-295: 5 Free Days)",
+        "updatedAt": "2026-11-09T09:15:46.485Z"
+      },
+      {
+        "id": "asn_BD_474549_2026-11-04_LEAVE_n_ALL",
+        "airmanId": "BD/474549",
+        "date": "2026-11-04",
+        "dutyCode": "LEAVE",
+        "dutyType": "LEAVE",
+        "dutyName": "Annual Leave (F-295: 5 Free Days)",
+        "shift": "",
+        "disposalScope": "ALL",
+        "notes": "Annual Leave (F-295: 5 Free Days)",
+        "updatedAt": "2026-11-09T09:15:46.485Z"
+      },
+      {
+        "id": "asn_BD_474549_2026-11-05_LEAVE_n_ALL",
+        "airmanId": "BD/474549",
+        "date": "2026-11-05",
+        "dutyCode": "LEAVE",
+        "dutyType": "LEAVE",
+        "dutyName": "Annual Leave (F-295: 5 Free Days)",
+        "shift": "",
+        "disposalScope": "ALL",
+        "notes": "Annual Leave (F-295: 5 Free Days)",
+        "updatedAt": "2026-11-09T09:15:46.485Z"
+      },
+      {
+        "id": "asn_BD_474549_2026-11-06_LEAVE_n_ALL",
+        "airmanId": "BD/474549",
+        "date": "2026-11-06",
+        "dutyCode": "LEAVE",
+        "dutyType": "LEAVE",
+        "dutyName": "Annual Leave (F-295: 5 Free Days)",
+        "shift": "",
+        "disposalScope": "ALL",
+        "notes": "Annual Leave (F-295: 5 Free Days)",
+        "updatedAt": "2026-11-09T09:15:46.485Z"
+      },
+      {
+        "id": "asn_BD_474549_2026-11-07_LEAVE_n_ALL",
+        "airmanId": "BD/474549",
+        "date": "2026-11-07",
+        "dutyCode": "LEAVE",
+        "dutyType": "LEAVE",
+        "dutyName": "Annual Leave (F-295: 5 Free Days)",
+        "shift": "",
+        "disposalScope": "ALL",
+        "notes": "Annual Leave (F-295: 5 Free Days)",
+        "updatedAt": "2026-11-09T09:15:46.485Z"
+      },
+      {
+        "id": "asn_BD_474549_2026-11-08_LEAVE_n_ALL",
+        "airmanId": "BD/474549",
+        "date": "2026-11-08",
+        "dutyCode": "LEAVE",
+        "dutyType": "LEAVE",
+        "dutyName": "Annual Leave (F-295: 5 Free Days)",
+        "shift": "",
+        "disposalScope": "ALL",
+        "notes": "Annual Leave (F-295: 5 Free Days)",
+        "updatedAt": "2026-11-09T09:15:46.485Z"
+      },
+      {
+        "id": "asn_BD_474549_2026-11-09_LEAVE_n_ALL",
+        "airmanId": "BD/474549",
+        "date": "2026-11-09",
+        "dutyCode": "LEAVE",
+        "dutyType": "LEAVE",
+        "dutyName": "Annual Leave (F-295: 5 Free Days)",
+        "shift": "",
+        "disposalScope": "ALL",
+        "notes": "Annual Leave (F-295: 5 Free Days)",
+        "updatedAt": "2026-11-09T09:15:46.485Z"
+      },
+      {
+        "id": "asn_BD_475268_2026-11-09_IDAC_Night_ALL",
+        "airmanId": "BD/475268",
+        "date": "2026-11-09",
+        "dutyCode": "IDAC",
+        "dutyType": "IDAC",
+        "dutyName": "IDAC Duty (Night)",
+        "shift": "Night",
+        "idaShift": "Night",
+        "disposalScope": "ALL",
+        "notes": "IDAC Night",
+        "updatedAt": "2026-11-09T09:13:33.587Z"
       }
     ],
     "2026-03": [
@@ -51481,11 +51602,12 @@
       "airmanName": "LAC Nishad",
       "airmanRank": "LAC",
       "airmanTrade": "Radio Fitt",
-      "dutyCode": "GD",
+      "dutyCode": "IDAC",
       "fromDate": "2026-11-09",
       "toDate": "2026-11-09",
       "date": "2026-11-09",
-      "notes": ""
+      "notes": "IDAC Night",
+      "idaShift": "Night"
     },
     {
       "id": "hist_1794157385833_2i43p",

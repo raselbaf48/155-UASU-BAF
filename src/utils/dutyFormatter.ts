@@ -129,9 +129,57 @@ export function formatDutyOnShortName(
     return 'Halishahar';
   }
 
-  // 6. Base Security / GD
+  // 6. Canteen
+  if (code === 'CANTEEN' || notesLower.includes('canteen') || nameLower.includes('canteen')) {
+    return 'Canteen';
+  }
+
+  // 7. Orderly Room & UWO
+  if (code.includes('ORDERLY') || notesLower.includes('orderly') || nameLower.includes('orderly')) {
+    return 'Orderly Room';
+  }
+  if (code === 'UWO' || notesLower.includes('uwo') || nameLower.includes('uwo')) {
+    return 'UWO';
+  }
+
+  // 8. Bake & Bite
+  if (
+    code === 'BAKE_BITE' ||
+    code === 'BAKE_N_BITE' ||
+    notesLower.includes('bake') ||
+    nameLower.includes('bake')
+  ) {
+    return 'Bake & Bite';
+  }
+
+  // 9. TDY
+  if (
+    code === 'TDY' ||
+    code === 'ATT' ||
+    code === 'DETT' ||
+    notesLower.includes('tdy') ||
+    notesLower.includes('attachment')
+  ) {
+    return 'TDY';
+  }
+
+  // 10. Leave
+  if (
+    code === 'LEAVE' ||
+    notesLower.includes('leave') ||
+    notesLower.includes('cl') ||
+    notesLower.includes('al')
+  ) {
+    if (notesLower.includes('casual') || notesLower.includes('cl')) return 'CL';
+    if (notesLower.includes('annual') || notesLower.includes('al')) return 'AL';
+    return 'Leave';
+  }
+
+  // 11. Base Security / GD
   if (
     code === 'GD' ||
+    code === 'GUARD_DUTY' ||
+    code === 'SECURITY' ||
     notesLower.includes('base sec') ||
     notesLower.includes('guard duty') ||
     notesLower.includes('sy duty') ||
@@ -144,48 +192,17 @@ export function formatDutyOnShortName(
     return 'GD';
   }
 
-  // 7. Bake & Bite
-  if (
-    code === 'BAKE_BITE' ||
-    code === 'BAKE_N_BITE' ||
-    notesLower.includes('bake') ||
-    nameLower.includes('bake')
-  ) {
-    return 'Bake & Bite';
-  }
-
-  // 8. TDY
-  if (
-    code === 'TDY' ||
-    code === 'ATT' ||
-    code === 'DETT' ||
-    notesLower.includes('tdy') ||
-    notesLower.includes('attachment')
-  ) {
-    return 'TDY';
-  }
-
-  // 9. Leave
-  if (
-    code === 'LEAVE' ||
-    notesLower.includes('leave') ||
-    notesLower.includes('cl') ||
-    notesLower.includes('al')
-  ) {
-    if (notesLower.includes('casual') || notesLower.includes('cl')) return 'CL';
-    if (notesLower.includes('annual') || notesLower.includes('al')) return 'AL';
-    return 'Leave';
-  }
-
-  // Custom fallback: clean any internal "imported" tag
-  if (dutyName && !dutyName.toLowerCase().includes('imported')) {
+  // 12. Custom fallback: clean any internal "imported" tag and avoid returning generic "DUTY"
+  const isGenericDuty = (str: string) => ['DUTY', 'DUTY_ON', 'ON DUTY', 'DUTY ON'].includes(str.toUpperCase().trim());
+  if (dutyName && !dutyName.toLowerCase().includes('imported') && !isGenericDuty(dutyName)) {
     return dutyName;
   }
-  if (notesStr && !notesLower.includes('imported')) {
+  if (notesStr && !notesLower.includes('imported') && !isGenericDuty(notesStr)) {
     return notesStr;
   }
 
-  return code || 'GD';
+  // 13. Any remaining generic duty code falls back to GD (Base Security Duty in 155 UASU BAF)
+  return (code && !isGenericDuty(code)) ? code : 'GD';
 }
 
 export function formatDutyOffShortName(

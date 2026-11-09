@@ -1,4 +1,4 @@
-import { db, isFirebaseConfigured } from '../../../firebase';
+import { db, isFirebaseConfigured, isFirestoreQuotaExceeded } from '../../../firebase';
 import { doc, getDoc, getDocs, setDoc, collection } from 'firebase/firestore';
 
 export interface CanteenMenuItem {
@@ -375,7 +375,7 @@ export function saveUserMenuOverride(item: Partial<CanteenMenuItem> & { id: stri
 
     localStorage.setItem(MENU_USER_OVERRIDES_KEY, JSON.stringify(updated));
     // Immediately persist to cloud app_settings in Firestore
-    if (isFirebaseConfigured && db) {
+    if (isFirebaseConfigured && db && !isFirestoreQuotaExceeded()) {
       setDoc(doc(db, 'app_settings', MENU_USER_OVERRIDES_KEY), {
         setting_key: MENU_USER_OVERRIDES_KEY,
         setting_value: JSON.stringify(updated),

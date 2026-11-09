@@ -183,14 +183,19 @@ function normalizeRecord(collectionName: string, docData: any, docId: string): a
   }
 
   if (collectionName === 'duty_rosters') {
+    const rawDuty = docData.duty_type || docData.dutyTypeCode || docData.dutyCode || docData.dutyType || 'GD';
+    const cleanDuty = (rawDuty === 'DUTY' || rawDuty === 'DUTY_ON') ? 'GD' : rawDuty;
+    const cleanDate = docData.duty_date || docData.date || '';
     return {
       assignment_id: docData.assignment_id || docData.assignmentId || docData.id || docId,
       id: docData.id || docId,
       airmanId: docData.airmanId || docData.airman_id || '',
-      date: docData.date || '',
+      date: cleanDate,
+      duty_date: cleanDate,
       shift: docData.shift || 'D',
-      dutyType: docData.dutyType || 'DUTY',
-      dutyTypeCode: docData.dutyTypeCode || docData.dutyCode || docData.dutyType || 'DUTY',
+      dutyType: cleanDuty,
+      duty_type: cleanDuty,
+      dutyTypeCode: cleanDuty,
       monthKey: docData.monthKey || '',
       remarks: docData.remarks || docData.notes || '',
       status: docData.status || 'SCHEDULED',
