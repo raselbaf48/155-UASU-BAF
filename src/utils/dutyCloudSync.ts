@@ -1,4 +1,4 @@
-import { db, isFirebaseConfigured, handleFirestoreError, OperationType } from '../firebase';
+import { db, isFirebaseConfigured, handleFirestoreError, OperationType, isQuotaExceededError, isFirestoreQuotaExceeded, setFirestoreQuotaExceeded } from '../firebase';
 import { collection, doc, getDoc, getDocs, setDoc, writeBatch } from 'firebase/firestore';
 import { DutyRatioTable, getStoredDutyMatrix, saveDutyMatrix, INITIAL_OFFICIAL_DUTY_MATRIX } from '../data/officialDutyRatioMatrix';
 import { FlightName, Rank } from '../types';
@@ -204,8 +204,8 @@ let pendingMatrixToSync: DutyRatioTable[] | null = null;
  * Strictly updates existing rows in-place and only inserts when a new duty is added
  */
 export async function pushDutyListToCloud(matrixInput?: DutyRatioTable[]): Promise<DutySyncResult> {
-  if (!isFirebaseConfigured || !db) {
-    return { success: false, message: 'Firebase is not configured' };
+  if (!isFirebaseConfigured || !db || isFirestoreQuotaExceeded()) {
+    return { success: false, message: 'Firebase is not configured or quota limit reached' };
   }
 
   if (isSyncInProgress) {
@@ -244,6 +244,10 @@ export async function pushDutyListToCloud(matrixInput?: DutyRatioTable[]): Promi
       message: `Successfully updated ${rows.length} duties in Firebase Firestore!`,
     };
   } catch (err: any) {
+    if (isQuotaExceededError(err)) {
+      setFirestoreQuotaExceeded(true);
+      return { success: false, message: 'Firestore quota limit reached. Using local duty matrix.' };
+    }
     console.error('[DutyCloudSync] Unexpected error pushing to Firebase:', err);
     return { success: false, message: err.message || 'Unknown network error' };
   } finally {
@@ -260,8 +264,8 @@ export async function pushDutyListToCloud(matrixInput?: DutyRatioTable[]): Promi
  * Fetch Duty List from Cloud and update the app's matrix
  */
 export async function pullDutyListFromCloud(): Promise<DutySyncResult> {
-  if (!isFirebaseConfigured || !db) {
-    return { success: false, message: 'Firebase is not configured' };
+  if (!isFirebaseConfigured || !db || isFirestoreQuotaExceeded()) {
+    return { success: false, message: 'Firebase is not configured or quota limit reached' };
   }
 
   try {
@@ -409,6 +413,10 @@ export async function pullDutyListFromCloud(): Promise<DutySyncResult> {
       message: `Successfully synchronized ${data.length} duties from Cloud!`,
     };
   } catch (err: any) {
+    if (isQuotaExceededError(err)) {
+      setFirestoreQuotaExceeded(true);
+      return { success: false, message: 'Firestore quota limit reached. Using local duty matrix.' };
+    }
     console.error('[DutyCloudSync] Error pulling from cloud:', err);
     return { success: false, message: err.message || 'Unknown network error' };
   }

@@ -9,7 +9,7 @@ import {
   onSnapshot,
   Unsubscribe
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { db, isQuotaExceededError, isFirestoreQuotaExceeded, setFirestoreQuotaExceeded } from './firebase';
 
 export const DIRECT_SUPABASE_URL = 'https://firestore.firebase.google.com';
 export const supabaseAnonKey = 'firebase-firestore-unified-key';
@@ -354,6 +354,13 @@ export class FirestoreQueryBuilder implements PromiseLike<{ data: any; error: an
     if (!db) {
       return { data: null, error: new Error('Firebase Firestore is not initialized') };
     }
+    if (isFirestoreQuotaExceeded()) {
+      const cached = globalCollectionCache.get(this.collectionName);
+      if (cached && cached.data) {
+        return { data: this.isSingle ? (cached.data[0] || null) : cached.data, error: null };
+      }
+      return { data: this.isSingle ? null : [], error: null };
+    }
 
     try {
       // 1. Direct doc lookup optimization: if querying by docId
@@ -543,6 +550,11 @@ export class FirestoreQueryBuilder implements PromiseLike<{ data: any; error: an
       }
       return { data: results, error: null };
     } catch (err: any) {
+      if (isQuotaExceededError(err)) {
+        setFirestoreQuotaExceeded(true);
+        console.warn(`[FirestoreSupabaseBridge] Quota exceeded on ${this.collectionName}, using local data.`);
+        return { data: this.isSingle ? null : [], error: null };
+      }
       if (err?.code === 'permission-denied') {
         return { data: this.isSingle ? null : [], error: null };
       }
@@ -554,6 +566,9 @@ export class FirestoreQueryBuilder implements PromiseLike<{ data: any; error: an
   private async executeMutate(): Promise<{ data: any; error: any }> {
     if (!db) {
       return { data: null, error: new Error('Firebase Firestore is not initialized') };
+    }
+    if (isFirestoreQuotaExceeded()) {
+      return { data: this.mutateData, error: null };
     }
 
     try {
@@ -722,6 +737,11 @@ export class FirestoreQueryBuilder implements PromiseLike<{ data: any; error: an
 
       return { data: null, error: null };
     } catch (err: any) {
+      if (isQuotaExceededError(err)) {
+        setFirestoreQuotaExceeded(true);
+        console.warn(`[FirestoreSupabaseBridge] Quota exceeded during mutation on ${this.collectionName}. Data preserved locally.`);
+        return { data: this.mutateData, error: null };
+      }
       if (err?.code === 'permission-denied') {
         return { data: null, error: null };
       }
@@ -780,7 +800,11 @@ export class FirestoreRealtimeChannel {
           });
         });
       }, (err: any) => {
-        // Silently ignore collections managed via app_settings or not yet provisioned
+        // Silently ignore collections managed via app_settings or not yet provisioned, or quota limits
+        if (isQuotaExceededError(err)) {
+          setFirestoreQuotaExceeded(true);
+          return;
+        }
         if (err?.code === 'permission-denied' || colName === 'canteen_menu') return;
         console.warn(`[FirestoreRealtime] Snapshot warning for ${colName}:`, err);
       });

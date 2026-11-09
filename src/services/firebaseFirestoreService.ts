@@ -10,7 +10,7 @@ import {
   where,
   getDocFromServer
 } from 'firebase/firestore';
-import { db, isFirebaseConfigured, handleFirestoreError, OperationType } from '../firebase';
+import { db, isFirebaseConfigured, handleFirestoreError, OperationType, isQuotaExceededError, isFirestoreQuotaExceeded, setFirestoreQuotaExceeded } from '../firebase';
 import { Airman, DutyAssignment, ActivityHistoryItem } from '../types';
 import { INITIAL_AIRMEN } from '../data/initialAirmen';
 
@@ -31,11 +31,15 @@ export interface FirebaseMigrationResult {
  * Check if Firebase connection is alive
  */
 export async function checkFirebaseHealth(): Promise<boolean> {
-  if (!isFirebaseConfigured || !db) return false;
+  if (!isFirebaseConfigured || !db || isFirestoreQuotaExceeded()) return false;
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
     return true;
   } catch (err: any) {
+    if (isQuotaExceededError(err)) {
+      setFirestoreQuotaExceeded(true);
+      return false;
+    }
     if (err?.code === 'permission-denied' || (err?.message && !err.message.includes('offline'))) {
       // Permission or connection reached server
       return true;
@@ -48,7 +52,7 @@ export async function checkFirebaseHealth(): Promise<boolean> {
  * Push Airmen list to Firestore in batches
  */
 export async function pushAirmenToFirebase(airmen: any[]): Promise<number> {
-  if (!db || !airmen.length) return 0;
+  if (!db || !airmen.length || isFirestoreQuotaExceeded()) return 0;
   let count = 0;
   const path = 'airmen';
   try {
@@ -131,6 +135,11 @@ export async function pushAirmenToFirebase(airmen: any[]): Promise<number> {
     }
     return count;
   } catch (error) {
+    if (isQuotaExceededError(error)) {
+      setFirestoreQuotaExceeded(true);
+      console.warn(`[pushAirmenToFirebase] Quota limit reached on ${path}. Gracefully skipping.`);
+      return 0;
+    }
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
@@ -139,7 +148,7 @@ export async function pushAirmenToFirebase(airmen: any[]): Promise<number> {
  * Fetch all Airmen from Firestore
  */
 export async function fetchAirmenFromFirebase(): Promise<Airman[]> {
-  if (!db) return [];
+  if (!db || isFirestoreQuotaExceeded()) return [];
   const path = 'airmen';
   try {
     const snap = await getDocs(collection(db, path));
@@ -195,6 +204,11 @@ export async function fetchAirmenFromFirebase(): Promise<Airman[]> {
     });
     return list;
   } catch (error) {
+    if (isQuotaExceededError(error)) {
+      setFirestoreQuotaExceeded(true);
+      console.warn(`[fetchAirmenFromFirebase] Quota limit reached on ${path}. Gracefully skipping.`);
+      return [];
+    }
     handleFirestoreError(error, OperationType.GET, path);
   }
 }
@@ -203,7 +217,7 @@ export async function fetchAirmenFromFirebase(): Promise<Airman[]> {
  * Push Duty Assignments to Firestore
  */
 export async function pushDutyAssignmentsToFirebase(assignments: DutyAssignment[]): Promise<number> {
-  if (!db || !assignments.length) return 0;
+  if (!db || !assignments.length || isFirestoreQuotaExceeded()) return 0;
   let count = 0;
   const path = 'duty_rosters';
   try {
@@ -245,6 +259,11 @@ export async function pushDutyAssignmentsToFirebase(assignments: DutyAssignment[
     }
     return count;
   } catch (error) {
+    if (isQuotaExceededError(error)) {
+      setFirestoreQuotaExceeded(true);
+      console.warn(`[pushDutyAssignmentsToFirebase] Quota limit reached on ${path}. Gracefully skipping.`);
+      return 0;
+    }
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
@@ -253,7 +272,7 @@ export async function pushDutyAssignmentsToFirebase(assignments: DutyAssignment[
  * Fetch Duty Assignments from Firestore
  */
 export async function fetchDutyAssignmentsFromFirebase(): Promise<DutyAssignment[]> {
-  if (!db) return [];
+  if (!db || isFirestoreQuotaExceeded()) return [];
   const path = 'duty_rosters';
   try {
     const snap = await getDocs(collection(db, path));
@@ -294,6 +313,11 @@ export async function fetchDutyAssignmentsFromFirebase(): Promise<DutyAssignment
     });
     return list;
   } catch (error) {
+    if (isQuotaExceededError(error)) {
+      setFirestoreQuotaExceeded(true);
+      console.warn(`[fetchDutyAssignmentsFromFirebase] Quota limit reached on ${path}. Gracefully skipping.`);
+      return [];
+    }
     handleFirestoreError(error, OperationType.GET, path);
   }
 }
@@ -302,7 +326,7 @@ export async function fetchDutyAssignmentsFromFirebase(): Promise<DutyAssignment
  * Push Parade State History to Firestore
  */
 export async function pushParadeStatesToFirebase(history: ActivityHistoryItem[]): Promise<number> {
-  if (!db || !history.length) return 0;
+  if (!db || !history.length || isFirestoreQuotaExceeded()) return 0;
   let count = 0;
   const path = 'parade_states';
   try {
@@ -330,6 +354,11 @@ export async function pushParadeStatesToFirebase(history: ActivityHistoryItem[])
     }
     return count;
   } catch (error) {
+    if (isQuotaExceededError(error)) {
+      setFirestoreQuotaExceeded(true);
+      console.warn(`[pushParadeStatesToFirebase] Quota limit reached on ${path}. Gracefully skipping.`);
+      return 0;
+    }
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
@@ -338,7 +367,7 @@ export async function pushParadeStatesToFirebase(history: ActivityHistoryItem[])
  * Fetch Parade State History from Firestore
  */
 export async function fetchParadeStatesFromFirebase(): Promise<ActivityHistoryItem[]> {
-  if (!db) return [];
+  if (!db || isFirestoreQuotaExceeded()) return [];
   const path = 'parade_states';
   try {
     const snap = await getDocs(collection(db, path));
@@ -355,6 +384,11 @@ export async function fetchParadeStatesFromFirebase(): Promise<ActivityHistoryIt
     });
     return list;
   } catch (error) {
+    if (isQuotaExceededError(error)) {
+      setFirestoreQuotaExceeded(true);
+      console.warn(`[fetchParadeStatesFromFirebase] Quota limit reached on ${path}. Gracefully skipping.`);
+      return [];
+    }
     handleFirestoreError(error, OperationType.GET, path);
   }
 }
@@ -363,7 +397,7 @@ export async function fetchParadeStatesFromFirebase(): Promise<ActivityHistoryIt
  * Push Detailed Users to Firestore
  */
 export async function pushUserProfilesToFirebase(users: any[]): Promise<number> {
-  if (!db || !users.length) return 0;
+  if (!db || !users.length || isFirestoreQuotaExceeded()) return 0;
   let count = 0;
   const path = 'user_profiles';
   try {
@@ -387,6 +421,11 @@ export async function pushUserProfilesToFirebase(users: any[]): Promise<number> 
     await batch.commit();
     return count;
   } catch (error) {
+    if (isQuotaExceededError(error)) {
+      setFirestoreQuotaExceeded(true);
+      console.warn(`[pushUserProfilesToFirebase] Quota limit reached on ${path}. Gracefully skipping.`);
+      return 0;
+    }
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
@@ -395,7 +434,7 @@ export async function pushUserProfilesToFirebase(users: any[]): Promise<number> 
  * Fetch User Profiles from Firestore
  */
 export async function fetchUserProfilesFromFirebase(): Promise<any[]> {
-  if (!db) return [];
+  if (!db || isFirestoreQuotaExceeded()) return [];
   const path = 'user_profiles';
   try {
     const snap = await getDocs(collection(db, path));
@@ -417,6 +456,11 @@ export async function fetchUserProfilesFromFirebase(): Promise<any[]> {
     });
     return list;
   } catch (error) {
+    if (isQuotaExceededError(error)) {
+      setFirestoreQuotaExceeded(true);
+      console.warn(`[fetchUserProfilesFromFirebase] Quota limit reached on ${path}. Gracefully skipping.`);
+      return [];
+    }
     handleFirestoreError(error, OperationType.GET, path);
   }
 }
@@ -425,7 +469,7 @@ export async function fetchUserProfilesFromFirebase(): Promise<any[]> {
  * Push App Settings to Firestore
  */
 export async function pushAppSettingsToFirebase(settings: Array<{ setting_key: string; setting_value: string }>): Promise<number> {
-  if (!db || !settings.length) return 0;
+  if (!db || !settings.length || isFirestoreQuotaExceeded()) return 0;
   let count = 0;
   const path = 'app_settings';
   const FORBIDDEN_KEYS = ['baf_155_uasu_v2_db', 'baf_database_v2', 'baf_sync_logs', 'baf_pending_sync'];
@@ -463,6 +507,11 @@ export async function pushAppSettingsToFirebase(settings: Array<{ setting_key: s
     }
     return count;
   } catch (error) {
+    if (isQuotaExceededError(error)) {
+      setFirestoreQuotaExceeded(true);
+      console.warn(`[pushAppSettingsToFirebase] Quota limit reached on ${path}. Gracefully skipping.`);
+      return 0;
+    }
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
@@ -471,7 +520,7 @@ export async function pushAppSettingsToFirebase(settings: Array<{ setting_key: s
  * Fetch App Settings from Firestore
  */
 export async function fetchAppSettingsFromFirebase(): Promise<Record<string, string>> {
-  if (!db) return {};
+  if (!db || isFirestoreQuotaExceeded()) return {};
   const path = 'app_settings';
   try {
     const snap = await getDocs(collection(db, path));
@@ -484,6 +533,11 @@ export async function fetchAppSettingsFromFirebase(): Promise<Record<string, str
     });
     return res;
   } catch (error) {
+    if (isQuotaExceededError(error)) {
+      setFirestoreQuotaExceeded(true);
+      console.warn(`[fetchAppSettingsFromFirebase] Quota limit reached on ${path}. Gracefully skipping.`);
+      return {};
+    }
     handleFirestoreError(error, OperationType.GET, path);
   }
 }
@@ -492,7 +546,7 @@ export async function fetchAppSettingsFromFirebase(): Promise<Record<string, str
  * Push Canteen Members to Firestore
  */
 export async function pushCanteenMembersToFirebase(members: any[]): Promise<number> {
-  if (!db || !members.length) return 0;
+  if (!db || !members.length || isFirestoreQuotaExceeded()) return 0;
   let count = 0;
   const path = 'canteen_members';
   try {
@@ -529,6 +583,11 @@ export async function pushCanteenMembersToFirebase(members: any[]): Promise<numb
     }
     return count;
   } catch (error) {
+    if (isQuotaExceededError(error)) {
+      setFirestoreQuotaExceeded(true);
+      console.warn(`[pushCanteenMembersToFirebase] Quota limit reached on ${path}. Gracefully skipping.`);
+      return 0;
+    }
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
@@ -537,7 +596,7 @@ export async function pushCanteenMembersToFirebase(members: any[]): Promise<numb
  * Fetch Canteen Members from Firestore
  */
 export async function fetchCanteenMembersFromFirebase(): Promise<any[]> {
-  if (!db) return [];
+  if (!db || isFirestoreQuotaExceeded()) return [];
   const path = 'canteen_members';
   try {
     const snap = await getDocs(collection(db, path));
@@ -570,6 +629,11 @@ export async function fetchCanteenMembersFromFirebase(): Promise<any[]> {
     });
     return list;
   } catch (error) {
+    if (isQuotaExceededError(error)) {
+      setFirestoreQuotaExceeded(true);
+      console.warn(`[fetchCanteenMembersFromFirebase] Quota limit reached on ${path}. Gracefully skipping.`);
+      return [];
+    }
     handleFirestoreError(error, OperationType.GET, path);
   }
 }
@@ -578,7 +642,7 @@ export async function fetchCanteenMembersFromFirebase(): Promise<any[]> {
  * Push Canteen Transactions (POS Sales History) to Firestore
  */
 export async function pushCanteenTransactionsToFirebase(txs: any[]): Promise<number> {
-  if (!db || !txs.length) return 0;
+  if (!db || !txs.length || isFirestoreQuotaExceeded()) return 0;
   let count = 0;
   const path = 'canteen_transactions';
   try {
@@ -612,6 +676,11 @@ export async function pushCanteenTransactionsToFirebase(txs: any[]): Promise<num
     }
     return count;
   } catch (error) {
+    if (isQuotaExceededError(error)) {
+      setFirestoreQuotaExceeded(true);
+      console.warn(`[pushCanteenTransactionsToFirebase] Quota limit reached on ${path}. Gracefully skipping.`);
+      return 0;
+    }
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
@@ -620,7 +689,7 @@ export async function pushCanteenTransactionsToFirebase(txs: any[]): Promise<num
  * Fetch Canteen Transactions (POS Sales History) from Firestore
  */
 export async function fetchCanteenTransactionsFromFirebase(): Promise<any[]> {
-  if (!db) return [];
+  if (!db || isFirestoreQuotaExceeded()) return [];
   const path = 'canteen_transactions';
   try {
     const snap = await getDocs(collection(db, path));
@@ -630,6 +699,11 @@ export async function fetchCanteenTransactionsFromFirebase(): Promise<any[]> {
     });
     return list;
   } catch (error) {
+    if (isQuotaExceededError(error)) {
+      setFirestoreQuotaExceeded(true);
+      console.warn(`[fetchCanteenTransactionsFromFirebase] Quota limit reached on ${path}. Gracefully skipping.`);
+      return [];
+    }
     handleFirestoreError(error, OperationType.GET, path);
   }
 }
@@ -638,7 +712,7 @@ export async function fetchCanteenTransactionsFromFirebase(): Promise<any[]> {
  * Push Canteen Expenses to Firestore
  */
 export async function pushCanteenExpensesToFirebase(expenses: any[]): Promise<number> {
-  if (!db || !expenses.length) return 0;
+  if (!db || !expenses.length || isFirestoreQuotaExceeded()) return 0;
   let count = 0;
   const path = 'canteen_expenses';
   try {
@@ -657,6 +731,11 @@ export async function pushCanteenExpensesToFirebase(expenses: any[]): Promise<nu
     }
     return count;
   } catch (error) {
+    if (isQuotaExceededError(error)) {
+      setFirestoreQuotaExceeded(true);
+      console.warn(`[pushCanteenExpensesToFirebase] Quota limit reached on ${path}. Gracefully skipping.`);
+      return 0;
+    }
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
@@ -665,7 +744,7 @@ export async function pushCanteenExpensesToFirebase(expenses: any[]): Promise<nu
  * Fetch Canteen Expenses from Firestore
  */
 export async function fetchCanteenExpensesFromFirebase(): Promise<any[]> {
-  if (!db) return [];
+  if (!db || isFirestoreQuotaExceeded()) return [];
   const path = 'canteen_expenses';
   try {
     const snap = await getDocs(collection(db, path));
@@ -675,6 +754,11 @@ export async function fetchCanteenExpensesFromFirebase(): Promise<any[]> {
     });
     return list;
   } catch (error) {
+    if (isQuotaExceededError(error)) {
+      setFirestoreQuotaExceeded(true);
+      console.warn(`[fetchCanteenExpensesFromFirebase] Quota limit reached on ${path}. Gracefully skipping.`);
+      return [];
+    }
     handleFirestoreError(error, OperationType.GET, path);
   }
 }

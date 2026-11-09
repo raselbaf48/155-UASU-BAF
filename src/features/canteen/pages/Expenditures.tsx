@@ -24,7 +24,9 @@ import {
   getDeletedExpenseIds,
   recordDeletedAdvanceId,
   getDeletedAdvanceIds,
-  recordDeletedTxId
+  recordDeletedTxId,
+  getSafeCanteenExpenses,
+  getSafeCanteenAdvances
 } from '../utils/canteenCloudSync';
 import { resolveImageUrl } from '../utils/canteenSettings';
 
@@ -217,25 +219,22 @@ const formatMonthKeyLabel = (key: string): string => {
 export const Expenditures: React.FC = () => {
   // Main states
   const [expenses, setExpenses] = useState<ExpenseRecord[]>(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
+    return getSafeCanteenExpenses();
   });
 
   const [advances, setAdvances] = useState<BazarAdvance[]>(() => {
-    try {
-      const raw = localStorage.getItem(ADVANCES_KEY);
-      if (!raw) return [];
-      const parsed: any[] = JSON.parse(raw);
-      const delIds = getDeletedAdvanceIds();
-      return Array.isArray(parsed) ? parsed.filter(a => a && a.id && !delIds.has(String(a.id))) : [];
-    } catch {
-      return [];
-    }
+    const parsed = getSafeCanteenAdvances();
+    const delIds = getDeletedAdvanceIds();
+    return parsed.filter(a => a && a.id && !delIds.has(String(a.id)));
   });
+
+  // Guarded safe arrays to ensure zero runtime crashes even with corrupted state
+  const safeExpenses = useMemo(() => getSafeCanteenExpenses(expenses), [expenses]);
+  const safeAdvances = useMemo(() => {
+    const list = getSafeCanteenAdvances(advances);
+    const delIds = getDeletedAdvanceIds();
+    return list.filter(a => a && a.id && !delIds.has(String(a.id)));
+  }, [advances]);
 
   const [rawItems, setRawItems] = useState<RawInventoryItem[]>([]);
   const [civilians, setCivilians] = useState<CivilianPerson[]>([
@@ -278,16 +277,20 @@ export const Expenditures: React.FC = () => {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       set.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
     }
-    advances.forEach(a => {
-      const k = getYearMonthKey(a.date);
-      if (k) set.add(k);
-    });
-    expenses.forEach(e => {
-      const k = getYearMonthKey(e.date);
-      if (k) set.add(k);
-    });
+    if (Array.isArray(safeAdvances)) {
+      safeAdvances.forEach(a => {
+        const k = getYearMonthKey(a?.date);
+        if (k) set.add(k);
+      });
+    }
+    if (Array.isArray(safeExpenses)) {
+      safeExpenses.forEach(e => {
+        const k = getYearMonthKey(e?.date);
+        if (k) set.add(k);
+      });
+    }
     return Array.from(set).sort().reverse();
-  }, [advances, expenses, runningMonthKey]);
+  }, [safeAdvances, safeExpenses, runningMonthKey]);
 
   // Main UI Mode / Modal States
   const [showAddForm, setShowAddForm] = useState(false);
@@ -504,31 +507,27 @@ export const Expenditures: React.FC = () => {
 
     const handleSync = () => {
       try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        setExpenses(raw ? JSON.parse(raw) : []);
+        setExpenses(getSafeCanteenExpenses());
       } catch {}
       try {
-        const rawAdv = localStorage.getItem(ADVANCES_KEY);
-        if (rawAdv) {
-          const parsedAdv: BazarAdvance[] = JSON.parse(rawAdv);
-          let changed = false;
-          const healed = parsedAdv.map(a => {
-            const hasReturn = Number(a.returnAmount) > 0;
-            const hasSettledNote = Boolean(a.notes && a.notes.includes('[Settled]'));
-            const hasSettledDate = Boolean(a.settledDate);
-            if ((hasReturn || hasSettledNote || hasSettledDate) && a.status !== 'SETTLED') {
-              changed = true;
-              return { ...a, status: 'SETTLED' as const };
-            }
-            return a;
-          });
-          if (changed) {
-            localStorage.setItem(ADVANCES_KEY, JSON.stringify(healed));
+        const parsedAdv = getSafeCanteenAdvances();
+        const delIds = getDeletedAdvanceIds();
+        const validAdv = parsedAdv.filter(a => a && a.id && !delIds.has(String(a.id)));
+        let changed = false;
+        const healed = validAdv.map(a => {
+          const hasReturn = Number(a.returnAmount) > 0;
+          const hasSettledNote = Boolean(a.notes && a.notes.includes('[Settled]'));
+          const hasSettledDate = Boolean(a.settledDate);
+          if ((hasReturn || hasSettledNote || hasSettledDate) && a.status !== 'SETTLED') {
+            changed = true;
+            return { ...a, status: 'SETTLED' as const };
           }
-          setAdvances(healed);
-        } else {
-          setAdvances([]);
+          return a;
+        });
+        if (changed) {
+          localStorage.setItem(ADVANCES_KEY, JSON.stringify(healed));
         }
+        setAdvances(healed);
       } catch {}
       setRawItems(getRawInventoryItems());
     };

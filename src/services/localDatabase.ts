@@ -19,7 +19,7 @@ import { calculateDutyStats, detectConflicts, getDaysInMonth } from '../data/ros
 import { DutyRatioTable, INITIAL_OFFICIAL_DUTY_MATRIX, getStoredDutyMatrix, saveDutyMatrix } from '../data/officialDutyRatioMatrix';
 import { findBestAirmanMatch as matchAirmanRankFirst, parseRosterTextHeuristically } from '../utils/airmanMatcher';
 import { sortAirmenBySeniority, normalizeAirmenSeniority, reorderAirmanSeniority } from '../utils/seniority';
-import { isFirebaseConfigured } from '../firebase';
+import { isFirebaseConfigured, isFirestoreQuotaExceeded } from '../firebase';
 import {
   fetchAirmenFromFirebase,
   pushAirmenToFirebase,
@@ -274,6 +274,13 @@ export class LocalDatabaseEngine {
 
       // 0. Primary Provider: Firebase Firestore
       if (isFirebaseConfigured) {
+        if (isFirestoreQuotaExceeded()) {
+          console.warn('[localDatabase] Firestore quota limit reached for free tier. Safely operating from local storage.');
+          this.isFirebaseSyncing = false;
+          isSyncingActive = false;
+          broadcastSyncState();
+          return true;
+        }
         emitSyncProgress(15, "Connecting to Firebase Firestore...");
         try {
           const fbAirmen = await fetchAirmenFromFirebase();
@@ -875,6 +882,11 @@ export class LocalDatabaseEngine {
       // Don't attempt to sync if neither Firebase nor Supabase is configured
       if (typeof window !== 'undefined') window.localStorage.removeItem('baf_pending_sync');
       return false;
+    }
+
+    if (isFirestoreQuotaExceeded()) {
+      if (typeof window !== 'undefined') window.localStorage.removeItem('baf_pending_sync');
+      return true;
     }
     
     // Prevent accidental pushes if we haven't finished our initial sync pull yet

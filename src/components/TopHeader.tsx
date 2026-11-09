@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Menu, KeyRound, ShieldCheck, LogOut, User, Cloud, CloudOff, RefreshCw } from 'lucide-react';
+import { Menu, KeyRound, ShieldCheck, LogOut, User, Cloud, CloudOff, RefreshCw, AlertTriangle } from 'lucide-react';
 import { SidebarTab } from './Sidebar';
 import { UserRole } from '../types';
 import { UserSession } from '../utils/authSession';
 import { getFirebaseSyncState, FirebaseSyncStatusState, getSyncLogs, localDb } from '../services/localDatabase';
+import { isFirestoreQuotaExceeded } from '../firebase';
 
 const CloudSyncIndicator = () => {
   const [syncState, setSyncState] = useState<FirebaseSyncStatusState>(getFirebaseSyncState());
   const [hasError, setHasError] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [quotaExceeded, setQuotaExceeded] = useState(() => isFirestoreQuotaExceeded());
 
   useEffect(() => {
     const handleSyncUpdate = (e: any) => {
@@ -22,8 +24,13 @@ const CloudSyncIndicator = () => {
       }
     };
 
+    const handleQuotaStatus = (e: any) => {
+      setQuotaExceeded(Boolean(e.detail?.exceeded));
+    };
+
     window.addEventListener('d1_sync_update', handleSyncUpdate);
     window.addEventListener('baf_sync_logs_updated', handleLogsUpdate);
+    window.addEventListener('baf_firestore_quota_status', handleQuotaStatus);
     
     // Initial error check
     const logs = getSyncLogs();
@@ -34,6 +41,7 @@ const CloudSyncIndicator = () => {
     return () => {
       window.removeEventListener('d1_sync_update', handleSyncUpdate);
       window.removeEventListener('baf_sync_logs_updated', handleLogsUpdate);
+      window.removeEventListener('baf_firestore_quota_status', handleQuotaStatus);
     };
   }, []);
 
@@ -56,11 +64,13 @@ const CloudSyncIndicator = () => {
     <button
       type="button"
       onClick={handleManualSync}
-      title="Click to sync with Cloud Firestore"
+      title={quotaExceeded ? "Firestore Free Quota Reached. Operating safely in local offline storage." : "Click to sync with Cloud Firestore"}
       className="hidden sm:flex items-center justify-center p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/60 shadow-sm relative group cursor-pointer transition-colors"
     >
       {isSyncing ? (
         <RefreshCw className="w-4 h-4 text-blue-500 animate-spin" />
+      ) : quotaExceeded ? (
+        <AlertTriangle className="w-4 h-4 text-amber-400" />
       ) : hasError ? (
         <CloudOff className="w-4 h-4 text-red-500" />
       ) : isOnline ? (
@@ -70,13 +80,17 @@ const CloudSyncIndicator = () => {
       )}
       
       {/* Tooltip */}
-      <div className="absolute right-0 top-full mt-2 w-56 p-2.5 bg-slate-900 text-white text-xs rounded-lg shadow-xl opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+      <div className="absolute right-0 top-full mt-2 w-64 p-2.5 bg-slate-900 text-white text-xs rounded-lg shadow-xl opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
         <div className="flex items-center justify-between font-bold mb-1 border-b border-slate-800 pb-1">
           <span>Cloud Sync Status</span>
-          <span className="text-[10px] text-emerald-400 font-normal">Firestore Active</span>
+          <span className={`text-[10px] font-normal ${quotaExceeded ? 'text-amber-400' : 'text-emerald-400'}`}>
+            {quotaExceeded ? 'Daily Quota Exceeded' : 'Firestore Active'}
+          </span>
         </div>
         <p className="text-slate-300 text-[11px] leading-tight">
-          {isSyncing
+          {quotaExceeded
+            ? 'Free tier daily read/write quota reached. Data is 100% safely saved in local offline storage and resets tomorrow.'
+            : isSyncing
             ? 'Syncing with cloud...'
             : hasError
             ? 'Error in last sync. Click to retry.'

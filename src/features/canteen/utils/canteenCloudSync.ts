@@ -1,4 +1,4 @@
-import { db, isFirebaseConfigured, handleFirestoreError, OperationType } from '../../../firebase';
+import { db, isFirebaseConfigured, handleFirestoreError, OperationType, isQuotaExceededError, isFirestoreQuotaExceeded, setFirestoreQuotaExceeded } from '../../../firebase';
 import { supabase } from '../../../supabase';
 import { doc, getDoc, getDocs, setDoc, collection } from 'firebase/firestore';
 import { deduplicateRawItems, getRawItemUserOverrides } from './recipeManager';
@@ -126,6 +126,63 @@ export const clearCanteenSyncLogs = () => {
     window.dispatchEvent(new CustomEvent('canteen_sync_logs_updated', { detail: [] }));
   }
 };
+
+/**
+ * Safe parser for canteen_expenses: guarantees a valid Array is always returned.
+ * If data was saved as an object map, wraps values or extracts array safely.
+ */
+export function getSafeCanteenExpenses(input?: any): any[] {
+  try {
+    let data = input;
+    if (data === undefined && typeof window !== 'undefined') {
+      const raw = localStorage.getItem('canteen_expenses');
+      data = raw ? JSON.parse(raw) : [];
+    } else if (typeof data === 'string') {
+      data = JSON.parse(data);
+    }
+    if (Array.isArray(data)) {
+      return data;
+    }
+    if (data && typeof data === 'object') {
+      if (Array.isArray((data as any).expenses)) return (data as any).expenses;
+      if (Array.isArray((data as any).items)) return (data as any).items;
+      if (Array.isArray((data as any).data)) return (data as any).data;
+      const values = Object.values(data).filter(val => val && typeof val === 'object' && !Array.isArray(val));
+      if (values.length > 0) return values;
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Safe parser for canteen_bazar_advances: guarantees a valid Array is always returned.
+ */
+export function getSafeCanteenAdvances(input?: any): any[] {
+  try {
+    let data = input;
+    if (data === undefined && typeof window !== 'undefined') {
+      const raw = localStorage.getItem('canteen_bazar_advances');
+      data = raw ? JSON.parse(raw) : [];
+    } else if (typeof data === 'string') {
+      data = JSON.parse(data);
+    }
+    if (Array.isArray(data)) {
+      return data;
+    }
+    if (data && typeof data === 'object') {
+      if (Array.isArray((data as any).advances)) return (data as any).advances;
+      if (Array.isArray((data as any).items)) return (data as any).items;
+      if (Array.isArray((data as any).data)) return (data as any).data;
+      const values = Object.values(data).filter(val => val && typeof val === 'object' && !Array.isArray(val));
+      if (values.length > 0) return values;
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
 
 let syncStatus: CloudSyncStatus = {
   status: 'idle',
@@ -820,7 +877,7 @@ export async function pushKeyToCloud(key: string, data: any, retryCount = 1): Pr
       return true;
     }
 
-    if (isFirebaseConfigured && db) {
+    if (isFirebaseConfigured && db && !isFirestoreQuotaExceeded()) {
       const docRef = doc(db, 'app_settings', key);
       await setDoc(docRef, {
         setting_key: key,
@@ -831,6 +888,11 @@ export async function pushKeyToCloud(key: string, data: any, retryCount = 1): Pr
     lastSyncedCloudHashes.set(key, strVal);
     return true;
   } catch (err: any) {
+    if (isQuotaExceededError(err)) {
+      setFirestoreQuotaExceeded(true);
+      lastSyncedCloudHashes.set(key, strVal);
+      return true;
+    }
     if (retryCount > 0) {
       await new Promise(r => setTimeout(r, 600));
       return pushKeyToCloud(key, data, retryCount - 1);
@@ -845,13 +907,16 @@ export async function pushKeyToCloud(key: string, data: any, retryCount = 1): Pr
  * Pull a specific key from Firebase Firestore app_settings or local server backup
  */
 export async function pullKeyFromCloud(key: string): Promise<any | null> {
-  if (isFirebaseConfigured && db) {
+  if (isFirebaseConfigured && db && !isFirestoreQuotaExceeded()) {
     try {
       const snap = await getDoc(doc(db, 'app_settings', key));
       if (snap.exists() && snap.data()?.setting_value) {
         return unwrapSettingValue(snap.data().setting_value);
       }
     } catch (err) {
+      if (isQuotaExceededError(err)) {
+        setFirestoreQuotaExceeded(true);
+      }
       console.warn(`[CanteenCloudSync] Firebase pull notice for ${key}:`, err);
     }
   }
@@ -1066,13 +1131,49 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
       }
     }
 
+    const ARRAY_KEYS = new Set([
+      'canteen_txs',
+      'canteen_expenses',
+      'canteen_bazar_advances',
+      'canteen_pre_orders',
+      'canteen_daily_menu',
+      'canteen_menu_recipes_v3',
+      'canteen_menu_recipes_20pax_v1',
+      'canteen_menu_recipes_v2',
+      'canteen_raw_stock_logs_v2',
+      'canteen_raw_inventory_items_v2',
+      'canteen_menu_items_catalog_v1',
+      'canteen_bill_import_history',
+      'canteen_pos_import_history',
+      'canteen_member_seniority',
+      'canteen_due_shops_v1',
+      'canteen_purpose_presets',
+      'baf_others_fund_categories',
+      'canteen_fund_transfers'
+    ]);
+
     // Iterate over all canteen cloud keys
     for (const key of CANTEEN_CLOUD_KEYS) {
-      const cloudVal = cloudKeyMap.get(key);
+      let cloudVal = cloudKeyMap.get(key);
       const localRaw = typeof window !== 'undefined' ? localStorage.getItem(key) : null;
       let localVal: any = null;
       if (localRaw) {
         try { localVal = JSON.parse(localRaw); } catch { localVal = localRaw; }
+      }
+
+      if (key === 'canteen_expenses') {
+        localVal = getSafeCanteenExpenses(localVal);
+        if (cloudVal !== undefined) cloudVal = getSafeCanteenExpenses(cloudVal);
+      } else if (key === 'canteen_bazar_advances') {
+        localVal = getSafeCanteenAdvances(localVal);
+        if (cloudVal !== undefined) cloudVal = getSafeCanteenAdvances(cloudVal);
+      } else if (ARRAY_KEYS.has(key)) {
+        if (localVal && !Array.isArray(localVal)) {
+          localVal = typeof localVal === 'object' ? Object.values(localVal).filter(v => v && typeof v === 'object') : [];
+        }
+        if (cloudVal !== undefined && !Array.isArray(cloudVal)) {
+          cloudVal = typeof cloudVal === 'object' && cloudVal !== null ? Object.values(cloudVal).filter(v => v && typeof v === 'object') : [];
+        }
       }
 
       if (cloudVal !== undefined) {
@@ -1164,7 +1265,15 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
             finalVal = localVal;
           }
         } else if (typeof cloudVal === 'object' && cloudVal !== null && typeof localVal === 'object' && localVal !== null) {
-          finalVal = { ...cloudVal, ...localVal };
+          if (ARRAY_KEYS.has(key)) {
+            finalVal = [];
+          } else {
+            finalVal = { ...cloudVal, ...localVal };
+          }
+        }
+
+        if (ARRAY_KEYS.has(key) && !Array.isArray(finalVal)) {
+          finalVal = [];
         }
 
         if (Array.isArray(finalVal)) {

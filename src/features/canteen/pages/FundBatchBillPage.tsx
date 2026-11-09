@@ -2328,32 +2328,44 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                               return (
                                 <div
                                   key={`${catName}-${idx}`}
-                                  className={`p-3 rounded-xl border flex items-center justify-between gap-2.5 transition-all ${
+                                  className={`p-2.5 rounded-xl border flex flex-col gap-2 transition-all ${
                                     isValidVal
                                       ? 'bg-slate-900/95 border-slate-800/90 hover:border-slate-700'
-                                      : 'bg-rose-950/15 border-rose-500/40'
+                                      : 'bg-rose-950/20 border-rose-500/40'
                                   }`}
                                 >
-                                  <div className="flex items-center space-x-2.5 min-w-0 flex-1">
-                                    <span className="w-5 text-[10px] font-mono text-indigo-400 font-bold text-center shrink-0">
-                                      {idx + 1}
-                                    </span>
-                                    <div className="p-2 rounded-xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-400 shrink-0">
-                                      <Tag className="w-4 h-4" />
-                                    </div>
-                                    <div className="min-w-0 flex-1">
-                                      <span className="font-bold text-white text-xs block truncate">
-                                        {catName}
+                                  {/* Top Row: Category Index, Prominent Category Name Badge, and Delete Button */}
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center space-x-2 min-w-0 flex-1">
+                                      <span className="px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 font-mono text-xs font-black shrink-0 border border-indigo-500/30">
+                                        #{idx + 1}
                                       </span>
-                                      <span className="text-[9px] text-slate-400 font-mono block mt-0.5">
-                                        ক্যাটাগরি বিল এন্ট্রি
-                                      </span>
+                                      <div className="min-w-0 flex-1">
+                                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-950/90 border border-indigo-500/50 text-indigo-100 text-xs sm:text-sm font-black shadow-sm max-w-full">
+                                          <Tag className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                                          <span className="truncate">{catName}</span>
+                                        </span>
+                                      </div>
                                     </div>
+
+                                    {/* Quick Remove Category */}
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const nextList = activeSingleMemberCats.filter(c => c !== catName);
+                                        setSingleMemberCategories(nextList);
+                                        setPurpose(nextList.join(', '));
+                                      }}
+                                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-950/50 border border-transparent hover:border-rose-500/30 transition-colors cursor-pointer shrink-0"
+                                      title={`Remove "${catName}"`}
+                                    >
+                                      <X className="w-4 h-4" />
+                                    </button>
                                   </div>
 
-                                  {/* Note option beside the category + Amount Box + Quick Remove Category */}
-                                  <div className="flex items-center space-x-2 shrink-0">
-                                    <div className="relative w-32 sm:w-44">
+                                  {/* Bottom Row: Note input (flex-1) + Amount Box (w-24 sm:w-28) */}
+                                  <div className="flex items-center gap-2 pl-1 sm:pl-2">
+                                    <div className="relative flex-1 min-w-0">
                                       <input
                                         type="text"
                                         placeholder="Note (ঐচ্ছিক)"
@@ -2365,11 +2377,11 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                                             [catName]: val
                                           }));
                                         }}
-                                        className="w-full bg-slate-950 border border-slate-700 focus:border-indigo-500 rounded-xl px-2.5 py-1.5 text-xs text-white placeholder-slate-500 outline-none transition-all shadow-inner"
+                                        className="w-full bg-slate-950 border border-slate-700/80 focus:border-indigo-500 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-slate-500 outline-none transition-all shadow-inner"
                                       />
                                     </div>
-                                    <div className="relative w-16 sm:w-20">
-                                      <span className="absolute left-1.5 top-1/2 -translate-y-1/2 font-mono font-bold text-slate-400 text-xs">
+                                    <div className="relative w-24 sm:w-28 shrink-0">
+                                      <span className="absolute left-2 top-1/2 -translate-y-1/2 font-mono font-bold text-slate-400 text-xs">
                                         ৳
                                       </span>
                                       <input
@@ -2385,25 +2397,13 @@ export const FundBatchBillPage: React.FC<FundBatchBillPageProps> = ({
                                             [catName]: val
                                           }));
                                         }}
-                                        className={`w-full bg-slate-950 border rounded-xl pl-4 pr-1 py-1 text-xs font-mono font-black text-white outline-none shadow-inner transition-all ${
+                                        className={`w-full bg-slate-950 border rounded-lg pl-5 pr-2 py-1.5 text-xs font-mono font-black text-white outline-none shadow-inner transition-all ${
                                           isValidVal
-                                            ? 'border-slate-700 focus:border-indigo-500'
+                                            ? 'border-slate-700/80 focus:border-indigo-500'
                                             : 'border-rose-500/50 focus:border-rose-400'
                                         }`}
                                       />
                                     </div>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const nextList = activeSingleMemberCats.filter(c => c !== catName);
-                                        setSingleMemberCategories(nextList);
-                                        setPurpose(nextList.join(', '));
-                                      }}
-                                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 transition-colors cursor-pointer"
-                                      title={`Remove "${catName}"`}
-                                    >
-                                      <X className="w-3.5 h-3.5" />
-                                    </button>
                                   </div>
                                 </div>
                               );

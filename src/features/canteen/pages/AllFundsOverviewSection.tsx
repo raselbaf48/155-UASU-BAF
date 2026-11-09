@@ -26,24 +26,33 @@ export const AllFundsOverviewSection: React.FC<AllFundsOverviewProps> = ({ onSel
   const [othersTransfers, setOthersTransfers] = useState<any[]>([]);
 
   const loadAllData = () => {
-    try {
-      setCanteenTxs(JSON.parse(localStorage.getItem('canteen_txs') || '[]'));
-      setCanteenExpenses(JSON.parse(localStorage.getItem('canteen_expenses') || '[]'));
-      setCanteenTransfers(JSON.parse(localStorage.getItem('canteen_fund_transfers') || '[]'));
-    } catch { /* empty */ }
+    const parseArray = (key: string) => {
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+        if (parsed && typeof parsed === 'object') {
+          return Object.values(parsed).filter(v => v && typeof v === 'object' && !Array.isArray(v));
+        }
+        return [];
+      } catch {
+        return [];
+      }
+    };
 
-    try {
-      setUnitInflows(JSON.parse(localStorage.getItem('baf_unit_fund_inflows') || '[]'));
-      setUnitExpenses(JSON.parse(localStorage.getItem('baf_unit_fund_expenses') || '[]'));
-      setUnitTransfers(JSON.parse(localStorage.getItem('baf_unit_fund_transfers') || '[]'));
-    } catch { /* empty */ }
+    setCanteenTxs(parseArray('canteen_txs'));
+    setCanteenExpenses(parseArray('canteen_expenses'));
+    setCanteenTransfers(parseArray('canteen_fund_transfers'));
 
-    try {
-      setOthersCats(JSON.parse(localStorage.getItem('baf_others_fund_categories') || '[]'));
-      setOthersInflows(JSON.parse(localStorage.getItem('baf_others_fund_inflows') || '[]'));
-      setOthersExpenses(JSON.parse(localStorage.getItem('baf_others_fund_expenses') || '[]'));
-      setOthersTransfers(JSON.parse(localStorage.getItem('baf_others_fund_transfers') || '[]'));
-    } catch { /* empty */ }
+    setUnitInflows(parseArray('baf_unit_fund_inflows'));
+    setUnitExpenses(parseArray('baf_unit_fund_expenses'));
+    setUnitTransfers(parseArray('baf_unit_fund_transfers'));
+
+    setOthersCats(parseArray('baf_others_fund_categories'));
+    setOthersInflows(parseArray('baf_others_fund_inflows'));
+    setOthersExpenses(parseArray('baf_others_fund_expenses'));
+    setOthersTransfers(parseArray('baf_others_fund_transfers'));
   };
 
   useEffect(() => {
