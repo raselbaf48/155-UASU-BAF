@@ -15,6 +15,9 @@ export const DIRECT_SUPABASE_URL = 'https://firestore.firebase.google.com';
 export const supabaseAnonKey = 'firebase-firestore-unified-key';
 export const isSupabaseConfigured = true;
 
+// Fast in-memory cache to eliminate repeat network latency on button clicks
+const globalCollectionCache = new Map<string, { data: any[]; timestamp: number }>();
+
 /**
  * Normalizes table names to Firebase Firestore collections
  */
@@ -367,6 +370,46 @@ export class FirestoreQueryBuilder implements PromiseLike<{ data: any; error: an
       }
 
       if (this.collectionName === 'canteen_members') {
+        // Fast in-memory / local-storage resolution: check members cache first (0ms latency)
+        if (typeof window !== 'undefined') {
+          try {
+            const raw = localStorage.getItem('canteen_members_cache');
+            if (raw) {
+              const membersList = JSON.parse(raw);
+              if (Array.isArray(membersList) && membersList.length > 0) {
+                let localMatched = membersList;
+                for (const f of this.filters) {
+                  if (f.op === '==') {
+                    const cleanVal = String(f.value).toLowerCase();
+                    localMatched = localMatched.filter((m: any) => {
+                      const mAid = String(m.airman_id || m.id || '').toLowerCase();
+                      const mBd = String(m['BD No'] || m.bdNo || '').replace(/\D/g, '').toLowerCase();
+                      return mAid === cleanVal || mBd === cleanVal || String(m[f.field] || '').toLowerCase() === cleanVal;
+                    });
+                  } else if (f.op === 'or') {
+                    const parts = String(f.value).split(',');
+                    localMatched = localMatched.filter((m: any) => {
+                      return parts.some((p: string) => {
+                        const [, , v] = p.split('.');
+                        if (!v) return false;
+                        const cleanTgt = v.replace(/["'\\]/g, '').trim().toLowerCase();
+                        const mAid = String(m.airman_id || m.id || '').toLowerCase();
+                        const mBd = String(m['BD No'] || m.bdNo || '').replace(/\D/g, '').toLowerCase();
+                        const mBdRaw = String(m['BD No'] || m.bdNo || '').toLowerCase();
+                        return mAid === cleanTgt || mBd === cleanTgt || mBdRaw === cleanTgt;
+                      });
+                    });
+                  }
+                }
+                if (localMatched.length > 0) {
+                  const normalized = localMatched.map((m: any) => normalizeRecord('canteen_members', m, m.airman_id || m.id || 'mem'));
+                  return { data: this.isSingle ? normalized[0] : normalized, error: null };
+                }
+              }
+            }
+          } catch {}
+        }
+
         const idEq = this.filters.find(f => (f.field === 'airman_id' || f.field === 'id') && f.op === '==');
         if (idEq && typeof idEq.value === 'string') {
           const snap = await getDoc(doc(db, 'canteen_members', idEq.value));
@@ -421,14 +464,21 @@ export class FirestoreQueryBuilder implements PromiseLike<{ data: any; error: an
         return { data: this.isSingle ? (items[0] || null) : items, error: null };
       }
 
-      // 2. Fetch full collection
-      const colRef = collection(db, this.collectionName);
-      const snap = await getDocs(colRef);
+      // 2. Fast cached collection fetch: avoid repeated Firestore network delay on clicks
+      const now = Date.now();
+      const cachedCol = globalCollectionCache.get(this.collectionName);
       let results: any[] = [];
 
-      snap.forEach(d => {
-        results.push(normalizeRecord(this.collectionName, d.data(), d.id));
-      });
+      if (cachedCol && now - cachedCol.timestamp < 30000) {
+        results = [...cachedCol.data];
+      } else {
+        const colRef = collection(db, this.collectionName);
+        const snap = await getDocs(colRef);
+        snap.forEach(d => {
+          results.push(normalizeRecord(this.collectionName, d.data(), d.id));
+        });
+        globalCollectionCache.set(this.collectionName, { data: results, timestamp: now });
+      }
 
       // Apply in-memory filtering
       for (const f of this.filters) {
@@ -513,16 +563,65 @@ export class FirestoreQueryBuilder implements PromiseLike<{ data: any; error: an
           try {
             const currentRaw = localStorage.getItem('canteen_raw_inventory_items_v2');
             let currentList: any[] = currentRaw ? JSON.parse(currentRaw) : [];
+            const filterId = this.filters.find(f => f.field === 'id' || f.field === 'airman_id')?.value;
             for (const it of items) {
               if (!it) continue;
-              const idx = currentList.findIndex(c => String(c.id).toLowerCase() === String(it.id).toLowerCase());
-              if (idx !== -1) currentList[idx] = { ...currentList[idx], ...it };
-              else currentList.push(it);
+              const targetId = it.id || filterId;
+              if (!targetId) continue;
+              const idx = currentList.findIndex(c => String(c.id).toLowerCase() === String(targetId).toLowerCase());
+              if (idx !== -1) {
+                currentList[idx] = { 
+                  ...currentList[idx], 
+                  ...it, 
+                  dp: it.dp || it.DP || it.image || currentList[idx].dp || currentList[idx].DP,
+                  DP: it.DP || it.dp || it.image || currentList[idx].DP || currentList[idx].dp,
+                  image: it.image || it.dp || it.DP || currentList[idx].image
+                };
+              } else {
+                currentList.push({ ...it, id: targetId });
+              }
             }
             localStorage.setItem('canteen_raw_inventory_items_v2', JSON.stringify(currentList));
             setDoc(doc(db, 'app_settings', 'canteen_raw_inventory_items_v2'), {
               setting_key: 'canteen_raw_inventory_items_v2',
               setting_value: JSON.stringify(currentList),
+              updated_at: new Date().toISOString()
+            }, { merge: true }).catch(() => {});
+          } catch {}
+        }
+        return { data: items, error: null };
+      }
+
+      if (this.collectionName === 'canteen_menu') {
+        const items = Array.isArray(this.mutateData) ? this.mutateData : [this.mutateData];
+        if (typeof window !== 'undefined') {
+          try {
+            const currentRaw = localStorage.getItem('canteen_menu_cache') || localStorage.getItem('canteen_menu_items_list');
+            let currentList: any[] = currentRaw ? JSON.parse(currentRaw) : [];
+            const filterId = this.filters.find(f => f.field === 'id' || f.field === 'airman_id')?.value;
+            for (const it of items) {
+              if (!it) continue;
+              const targetId = it.id || filterId;
+              if (!targetId) continue;
+              const idx = currentList.findIndex(c => String(c.id).toLowerCase() === String(targetId).toLowerCase());
+              if (idx !== -1) {
+                currentList[idx] = { 
+                  ...currentList[idx], 
+                  ...it,
+                  DP: it.DP || it.dp || it.img || it.image || currentList[idx].DP || currentList[idx].img,
+                  img: it.DP || it.dp || it.img || it.image || currentList[idx].img || currentList[idx].DP,
+                  image: it.DP || it.dp || it.img || it.image || currentList[idx].image
+                };
+              } else {
+                currentList.push({ ...it, id: targetId });
+              }
+            }
+            const cleanJson = JSON.stringify(currentList);
+            localStorage.setItem('canteen_menu_cache', cleanJson);
+            localStorage.setItem('canteen_menu_items_list', cleanJson);
+            setDoc(doc(db, 'app_settings', 'canteen_menu_items_catalog_v1'), {
+              setting_key: 'canteen_menu_items_catalog_v1',
+              setting_value: cleanJson,
               updated_at: new Date().toISOString()
             }, { merge: true }).catch(() => {});
           } catch {}
@@ -572,12 +671,14 @@ export class FirestoreQueryBuilder implements PromiseLike<{ data: any; error: an
         }
 
         if (writeCount > 0) {
+          globalCollectionCache.delete(this.collectionName);
           await batch.commit();
         }
         return { data: normalizedItems, error: null };
       }
 
       if (this.operation === 'update') {
+        globalCollectionCache.delete(this.collectionName);
         const values = this.mutateData || {};
         const idFilter = this.filters.find(f => f.field === 'airman_id' || f.field === 'id' || f.field === 'User ID' || f.field === 'setting_key');
         if (idFilter && idFilter.value) {
@@ -601,6 +702,7 @@ export class FirestoreQueryBuilder implements PromiseLike<{ data: any; error: an
       }
 
       if (this.operation === 'delete') {
+        globalCollectionCache.delete(this.collectionName);
         const idFilter = this.filters.find(f => f.field === 'airman_id' || f.field === 'id' || f.field === 'User ID' || f.field === 'setting_key' || f.field === 'assignment_id');
         if (idFilter && idFilter.value) {
           const docId = resolveDocId(this.collectionName, { [idFilter.field]: idFilter.value });

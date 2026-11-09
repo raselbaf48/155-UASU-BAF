@@ -822,19 +822,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
     }
   }, [forcedCategory]);
 
-  const [selectedMonth, setSelectedMonth] = useState<string>(() => {
-    try {
-      const txs = getSafeCanteenTransactions();
-      const running = getRunningMonthKey();
-      const hasRunning = txs.some((t: any) => (t.monthKey || getTxMonthKey(t.date)) === running);
-      if (hasRunning) return running;
-      const validMonths = txs.map((t: any) => t.monthKey || getTxMonthKey(t.date)).filter(Boolean);
-      const sorted = Array.from(new Set(validMonths)).sort().reverse();
-      return (sorted[0] as string) || running;
-    } catch {
-      return getRunningMonthKey();
-    }
-  });
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => getRunningMonthKey());
   const [filterMode, setFilterMode] = useState<'AUTO' | 'ALL' | 'DUE'>(hideFundTabs ? 'ALL' : 'AUTO');
   const [rankTypeFilter, setRankTypeFilter] = useState<'OVERALL' | 'OFFICER' | 'AIRMEN' | 'CIVILIAN'>('OVERALL');
   const [viewMode, setViewMode] = useState<'BOX' | 'TABLE'>('BOX');
@@ -928,19 +916,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
   const [statementMember, setStatementMember] = useState<any | null>(null);
   const [statementTx, setStatementTx] = useState<any[]>([]);
   const [statementCategory, setStatementCategory] = useState<BillCategory>('ALL');
-  const [statementMonth, setStatementMonth] = useState<string>(() => {
-    try {
-      const txs = getSafeCanteenTransactions();
-      const running = getRunningMonthKey();
-      const hasRunning = txs.some((t: any) => (t.monthKey || getTxMonthKey(t.date)) === running);
-      if (hasRunning) return running;
-      const validMonths = txs.map((t: any) => t.monthKey || getTxMonthKey(t.date)).filter(Boolean);
-      const sorted = Array.from(new Set(validMonths)).sort().reverse();
-      return (sorted[0] as string) || running;
-    } catch {
-      return getRunningMonthKey();
-    }
-  });
+  const [statementMonth, setStatementMonth] = useState<string>(() => getRunningMonthKey());
   const [statementViewMode, setStatementViewMode] = useState<'ITEM' | 'DATE'>('ITEM');
 
   // Live refs to guarantee real-time updates for open modals on background events
@@ -5241,33 +5217,10 @@ export const MemberDB: React.FC<MemberDBProps> = ({
           )}
         </div>
 
-        {/* Actions: Add Member Button, Import Button & Export Button (Only when ALL is selected) & View Mode Toggle (Icons Only) */}
+        {/* Actions: Import Button & Export Button (Only when ALL is selected) */}
         <div className="flex items-center space-x-2 self-end sm:self-auto shrink-0 flex-wrap gap-y-2">
           {selectedCategory === 'ALL' && (
             <>
-              <button
-                type="button"
-                onClick={() => setIsRestoreModalOpen(true)}
-                className="px-3.5 py-2.5 bg-gradient-to-r from-amber-600 via-amber-500 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white rounded-2xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 shadow-md shadow-amber-500/25 border-t border-amber-300/40 active:translate-y-0.5 transition-all cursor-pointer"
-                title="মেম্বার ও বকেয়া বিল ডাটা রিকভারি ও ক্লাউড আনব্লক সেন্টার"
-              >
-                <Sparkles className="w-4 h-4 text-amber-200" />
-                <span>RESTORE / CLOUD</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setMemberToEdit(null);
-                  setIsAddMemberModalOpen(true);
-                }}
-                className="px-3.5 py-2.5 bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white rounded-2xl text-xs font-black uppercase tracking-wider flex items-center space-x-1.5 shadow-md shadow-indigo-500/25 border-t border-indigo-300/40 active:translate-y-0.5 transition-all cursor-pointer"
-                title="নতুন মেম্বার যুক্ত করুন (Officer / Airmen / Civilian)"
-              >
-                <UserPlus className="w-4 h-4" />
-                <span>ADD MEMBER</span>
-              </button>
-
               <button
                 type="button"
                 onClick={() => {
@@ -5292,36 +5245,6 @@ export const MemberDB: React.FC<MemberDBProps> = ({
               </button>
             </>
           )}
-
-          {/* View Mode Toggle: Box vs Table (Icons only) */}
-          <div className="flex items-center bg-slate-900 rounded-2xl p-1 border border-slate-800 shadow-sm">
-            <button
-              type="button"
-              onClick={() => setViewMode('BOX')}
-              className={`p-2 rounded-xl text-xs transition-all cursor-pointer flex items-center justify-center ${
-                viewMode === 'BOX'
-                  ? 'bg-indigo-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-              title="Box / Card View"
-              aria-label="Box View"
-            >
-              <LayoutGrid className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode('TABLE')}
-              className={`p-2 rounded-xl text-xs transition-all cursor-pointer flex items-center justify-center ${
-                viewMode === 'TABLE'
-                  ? 'bg-indigo-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-              title="Table View"
-              aria-label="Table View"
-            >
-              <List className="w-4 h-4" />
-            </button>
-          </div>
         </div>
       </div>
 

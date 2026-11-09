@@ -35,7 +35,7 @@ import { queuePushKeyToCloud } from '../utils/canteenCloudSync';
 import { SaveButton } from '../components/SaveButton';
 import { formatCanteenDate } from '../utils/dateUtils';
 import { DateNavigator, getTodayYMD } from '../components/DateNavigator';
-import { getCanteenConfig, getItemDisplayName, CanteenConfig } from '../utils/canteenSettings';
+import { getCanteenConfig, getItemDisplayName, resolveImageUrl, CanteenConfig } from '../utils/canteenSettings';
 import { ImportStockModal } from '../components/ImportStockModal';
 
 export type { RawInventoryItem, RawStockLog, InventoryItemType };
@@ -1889,35 +1889,51 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
     setShowResetConfirmModal(false);
   };
 
-  // Quick DP Photo Update Handler (Instantly syncs to Supabase Canteen_Inventory DP column)
+  // Quick DP Photo Update Handler (Instantly syncs to Supabase Canteen_Inventory DP column and local/cloud storage)
   const handleQuickUpdateDp = async (itemId: string, newDp: string) => {
     try {
       setIsUpdatingDp(true);
       const cleanDp = newDp.trim();
-      // Optimistic local state update
-      setItems(prev => prev.map(it => {
-        if (it.id === itemId) {
-          return {
-            ...it,
-            dp: cleanDp || undefined,
-            DP: cleanDp || undefined,
-            image: cleanDp || undefined
-          };
-        }
-        return it;
-      }));
+      let updatedList: RawInventoryItem[] = [];
+      setItems(prev => {
+        updatedList = prev.map(it => {
+          if (it.id === itemId) {
+            return {
+              ...it,
+              dp: cleanDp || undefined,
+              DP: cleanDp || undefined,
+              image: cleanDp || undefined
+            };
+          }
+          return it;
+        });
+        return updatedList;
+      });
 
-      // Directly update Supabase Canteen_Inventory table DP column
-      const { error } = await supabase
-        .from('Canteen_Inventory')
-        .update({ 'DP': cleanDp || null })
-        .eq('id', itemId);
-
-      if (error) {
-        console.warn('Direct DP update to Supabase Canteen_Inventory failed:', error);
+      // 1. Immediately persist full list to localStorage and cloud
+      if (updatedList.length > 0) {
+        lastSavedItemsJsonRef.current = JSON.stringify(updatedList);
+        saveRawInventoryItems(updatedList);
       }
 
-      setQuickDpToast('আইটেমের ছবি (DP) ক্লাউডে সফলভাবে সংরক্ষিত হয়েছে!');
+      // 2. Persist to user overrides so deduplicateRawItems never drops it
+      const targetItem = updatedList.find(it => it.id === itemId);
+      saveRawItemUserOverride(itemId, {
+        dp: cleanDp || undefined,
+        DP: cleanDp || undefined,
+        image: cleanDp || undefined,
+        name: targetItem?.name,
+        nameBn: targetItem?.nameBn
+      });
+
+      // 3. Directly update Supabase Canteen_Inventory table DP column
+      await supabase
+        .from('Canteen_Inventory')
+        .upsert({ id: itemId, DP: cleanDp || null }, { onConflict: 'id' });
+
+      queuePushKeyToCloud('canteen_raw_inventory_items_v2', updatedList);
+
+      setQuickDpToast('আইটেমের ছবি (DP) সফলভাবে সংরক্ষিত হয়েছে!');
       setTimeout(() => setQuickDpToast(null), 3500);
       setTimeout(() => {
         window.dispatchEvent(new Event('canteen_raw_inventory_updated'));
@@ -2248,7 +2264,14 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                                 : 'bg-slate-950 text-indigo-400'
                             }`}>
                               {(item.dp || item.DP || item.image) ? (
-                                <img src={item.dp || item.DP || item.image} alt={item.name} className="w-full h-full object-cover" />
+                                <img 
+                                  src={resolveImageUrl(item.dp || item.DP || item.image)} 
+                                  alt={item.name} 
+                                  className="w-full h-full object-cover"
+                                  onError={(e) => {
+                                    (e.target as HTMLElement).style.display = 'none';
+                                  }}
+                                />
                               ) : (
                                 <span className="text-base font-black tracking-wider">{item.name.slice(0, 2).toUpperCase()}</span>
                               )}
@@ -2506,7 +2529,14 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                                   : 'bg-slate-800 text-indigo-400 border border-slate-700'
                               }`}>
                                 {(item.dp || item.DP || item.image) ? (
-                                  <img src={item.dp || item.DP || item.image} alt={item.name} className="w-full h-full object-cover" />
+                                  <img 
+                                    src={resolveImageUrl(item.dp || item.DP || item.image)} 
+                                    alt={item.name} 
+                                    className="w-full h-full object-cover" 
+                                    onError={(e) => {
+                                      (e.target as HTMLElement).style.display = 'none';
+                                    }}
+                                  />
                                 ) : (
                                   item.name.slice(0, 2).toUpperCase()
                                 )}
@@ -2783,7 +2813,14 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
                   <div className="flex items-center gap-3.5 p-3.5 bg-slate-950/60 border border-slate-800 rounded-2xl">
                     <div className="relative w-16 h-16 rounded-2xl bg-slate-800 border-2 border-dashed border-slate-700 flex items-center justify-center overflow-hidden shrink-0 shadow-inner">
                       {newItemData.dp ? (
-                        <img src={newItemData.dp} alt="Item DP" className="w-full h-full object-cover" />
+                        <img 
+                          src={resolveImageUrl(newItemData.dp)} 
+                          alt="Item DP" 
+                          className="w-full h-full object-cover" 
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
+                        />
                       ) : (
                         <div className="flex flex-col items-center justify-center text-slate-500 p-2 text-center">
                           <ImageIcon className="w-5 h-5 opacity-60" />
@@ -4106,7 +4143,14 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
             <div className="flex flex-col items-center justify-center gap-3 p-4 bg-slate-950/70 border border-slate-800 rounded-2xl">
               <div className="relative w-28 h-28 rounded-2xl bg-slate-800 border-2 border-slate-700 overflow-hidden shadow-inner flex items-center justify-center">
                 {quickDpInput ? (
-                  <img src={quickDpInput} alt="Preview" className="w-full h-full object-cover" />
+                  <img 
+                    src={resolveImageUrl(quickDpInput)} 
+                    alt="Preview" 
+                    className="w-full h-full object-cover" 
+                    onError={(e) => {
+                      (e.target as HTMLElement).style.display = 'none';
+                    }}
+                  />
                 ) : (
                   <div className="flex flex-col items-center justify-center text-slate-500 p-2 text-center">
                     <ImageIcon className="w-10 h-10 opacity-50" />
@@ -4220,7 +4264,14 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
             <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800/80 flex items-center gap-3.5">
               <div className="w-12 h-12 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center overflow-hidden shrink-0">
                 {(itemToDelete.dp || itemToDelete.DP || itemToDelete.image) ? (
-                  <img src={itemToDelete.dp || itemToDelete.DP || itemToDelete.image} alt={itemToDelete.name} className="w-full h-full object-cover" />
+                  <img 
+                    src={resolveImageUrl(itemToDelete.dp || itemToDelete.DP || itemToDelete.image)} 
+                    alt={itemToDelete.name} 
+                    className="w-full h-full object-cover" 
+                    onError={(e) => {
+                      (e.target as HTMLElement).style.display = 'none';
+                    }}
+                  />
                 ) : (
                   <span className="text-sm font-black text-indigo-400">{itemToDelete.name.slice(0, 2).toUpperCase()}</span>
                 )}

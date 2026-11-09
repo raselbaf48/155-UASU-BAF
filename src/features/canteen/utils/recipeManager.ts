@@ -111,7 +111,58 @@ export const decodeNotesMeta = (notes?: string): Record<string, any> => {
 
 export const RAW_ITEMS_USER_OVERRIDES_KEY = 'canteen_raw_items_user_overrides';
 
-export function getRawItemUserOverrides(): Record<string, { packSize?: number; subUnit?: string; hasSubUnits?: boolean; unit?: string; updatedAt?: string }> {
+export const DEFAULT_RAW_ITEM_PHOTOS: Record<string, string> = {
+  chicken: 'https://images.unsplash.com/photo-1601050690597-df0568f70950?w=300&q=80',
+  egg: 'https://images.unsplash.com/photo-1525351484163-7529414344d8?w=300&q=80',
+  'hotel-porota': 'https://images.unsplash.com/photo-1626082927389-6cd097cdc6ec?w=300&q=80',
+  porota: 'https://images.unsplash.com/photo-1589301760014-d929f3979dbc?w=300&q=80',
+  rice: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?w=300&q=80',
+  dal: 'https://images.unsplash.com/photo-1585994192704-5e1fe746a470?w=300&q=80',
+  'milk-powder': 'https://images.unsplash.com/photo-1550583724-b2692b85b150?w=300&q=80',
+  milk: 'https://images.unsplash.com/photo-1550583724-b2692b85b150?w=300&q=80',
+  'tea-bag': 'https://images.unsplash.com/photo-1576092768241-dec231879fc3?w=300&q=80',
+  tea: 'https://images.unsplash.com/photo-1576092768241-dec231879fc3?w=300&q=80',
+  coffee: 'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?w=300&q=80',
+  noodles: 'https://images.unsplash.com/photo-1569718212165-3a8278d5f624?w=300&q=80',
+  biscuit: 'https://images.unsplash.com/photo-1558961363-fa8fdf82db35?w=300&q=80',
+  'sandwich-bread': 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=300&q=80',
+  bread: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=300&q=80',
+  banana: 'https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?w=300&q=80',
+  pasta: 'https://images.unsplash.com/photo-1551183053-bf91a1d81141?w=300&q=80',
+  'soyabin-oil': 'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?w=300&q=80',
+  oil: 'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?w=300&q=80',
+  sugar: 'https://images.unsplash.com/photo-1622484212850-cab596d66e70?w=300&q=80',
+  onion: 'https://images.unsplash.com/photo-1508747703725-719777637510?w=300&q=80',
+  lpg: 'https://images.unsplash.com/photo-1585338107529-13afc5f02586?w=300&q=80',
+  'tomato-sauce': 'https://images.unsplash.com/photo-1607532941433-304659e8198a?w=300&q=80',
+  'green-chili': 'https://images.unsplash.com/photo-1588252303782-cb80119abd6d?w=300&q=80',
+  beef: 'https://images.unsplash.com/photo-1551028150-64b9f398f678?w=300&q=80',
+  water: 'https://images.unsplash.com/photo-1548839140-29a749e1bc4e?w=300&q=80',
+  coke: 'https://images.unsplash.com/photo-1622483767028-3f66f32aef97?w=300&q=80',
+  beverage: 'https://images.unsplash.com/photo-1622483767028-3f66f32aef97?w=300&q=80',
+};
+
+export function getDefaultRawItemPhoto(name: string, category?: string): string {
+  if (!name) return '';
+  const norm = normalizeRawItemName(name || '');
+  for (const [k, url] of Object.entries(DEFAULT_RAW_ITEM_PHOTOS)) {
+    if (norm === k || norm.includes(k) || k.includes(norm)) {
+      return url;
+    }
+  }
+  return '';
+}
+
+export function getRawItemUserOverrides(): Record<string, { 
+  packSize?: number; 
+  subUnit?: string; 
+  hasSubUnits?: boolean; 
+  unit?: string; 
+  dp?: string;
+  DP?: string;
+  image?: string;
+  updatedAt?: string 
+}> {
   if (typeof window === 'undefined') return {};
   try {
     const raw = localStorage.getItem(RAW_ITEMS_USER_OVERRIDES_KEY);
@@ -122,7 +173,17 @@ export function getRawItemUserOverrides(): Record<string, { packSize?: number; s
 
 export function saveRawItemUserOverride(
   itemId: string,
-  override: { packSize?: number; subUnit?: string; hasSubUnits?: boolean; unit?: string; name?: string; nameBn?: string }
+  override: { 
+    packSize?: number; 
+    subUnit?: string; 
+    hasSubUnits?: boolean; 
+    unit?: string; 
+    name?: string; 
+    nameBn?: string;
+    dp?: string;
+    DP?: string;
+    image?: string;
+  }
 ): void {
   if (!itemId || typeof window === 'undefined') return;
   try {
@@ -131,9 +192,13 @@ export function saveRawItemUserOverride(
     const cleanId = rawId.toLowerCase();
     const normName = normalizeRawItemName(override.name || '');
     const normBn = normalizeRawItemName(override.nameBn || '');
+    const dpVal = override.dp || override.DP || override.image || (current[rawId]?.dp) || (current[rawId]?.DP);
     const entry = {
       ...(current[rawId] || current[cleanId] || {}),
       ...override,
+      dp: dpVal || undefined,
+      DP: dpVal || undefined,
+      image: dpVal || undefined,
       updatedAt: new Date().toISOString()
     };
     const updated: Record<string, any> = {
@@ -1780,8 +1845,14 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
     }
 
     const pureBn = cleanPureBanglaName(item.nameBn || '');
+    const preferredDp = (userOverride as any)?.dp || (userOverride as any)?.DP || (userOverride as any)?.image || 
+      item.dp || item.DP || item.image || 
+      getDefaultRawItemPhoto(item.name || item.nameBn || '');
     const normalizedItem: RawInventoryItem = {
       ...item,
+      dp: preferredDp || undefined,
+      DP: preferredDp || undefined,
+      image: preferredDp || undefined,
       nameBn: pureBn || item.nameBn || item.name,
       unit: (isCase || key === 'egg' || key === 'canon_egg' || normKey === 'egg') ? 'case' : item.unit,
       subCategory: isPcs ? (item.subCategory || 'Pcs') : subCategory,
@@ -1914,9 +1985,17 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
           ? normalizedItem.supplier
           : (existing.supplier && existing.supplier !== 'Hotel Paratha Supply' ? existing.supplier : 'Control Mor');
 
+        const porotaDp = (userOverride as any)?.dp || (userOverride as any)?.DP || (userOverride as any)?.image ||
+          normalizedItem.dp || normalizedItem.DP || normalizedItem.image ||
+          existing.dp || existing.DP || existing.image ||
+          getDefaultRawItemPhoto('Hotel Porota');
+
         seenKeys.set('canon_hotel-porota', {
           ...existing,
           ...normalizedItem,
+          dp: porotaDp || undefined,
+          DP: porotaDp || undefined,
+          image: porotaDp || undefined,
           id: 'raw-11',
           name: 'Hotel Porota',
           nameBn: 'পরোটা হোটেল',
@@ -1953,6 +2032,11 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
       const chosenCategory = normalizedItem.category || existing.category || 'Packaging & Disposables';
       const chosenSubCategory = normalizedItem.subCategory || existing.subCategory || (key === 'gas-cylinder' ? 'Gas Cylinder' : '');
 
+      const mergedDp = (userOverride as any)?.dp || (userOverride as any)?.DP || (userOverride as any)?.image || 
+        normalizedItem.dp || normalizedItem.DP || normalizedItem.image || 
+        existing.dp || existing.DP || existing.image || 
+        getDefaultRawItemPhoto(preferredName || preferredNameBn || '');
+
       if (currentIsStandard && !existingIsStandard) {
         if (!isProtectedRawItem(existing)) {
           removedIds.push(existing.id);
@@ -1963,6 +2047,9 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
         seenKeys.set(key, {
           ...existing,
           ...normalizedItem,
+          dp: mergedDp || undefined,
+          DP: mergedDp || undefined,
+          image: mergedDp || undefined,
           itemType: mergedItemType,
           name: preferredName,
           nameBn: preferredNameBn,
@@ -1983,6 +2070,9 @@ export const deduplicateRawItems = (items: RawInventoryItem[] | any): { deduplic
         seenKeys.set(key, {
           ...existing,
           ...normalizedItem,
+          dp: mergedDp || undefined,
+          DP: mergedDp || undefined,
+          image: mergedDp || undefined,
           itemType: mergedItemType,
           name: preferredName,
           nameBn: preferredNameBn,

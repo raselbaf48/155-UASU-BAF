@@ -33,8 +33,16 @@ export function installApiInterceptor() {
       if (
         urlObj.pathname === '/api/parade-state' ||
         urlObj.pathname === '/api/analytics' ||
-        urlObj.pathname === '/api/roster/history'
+        urlObj.pathname === '/api/roster/history' ||
+        urlObj.pathname === '/api/airmen' ||
+        urlObj.pathname === '/api/duty-types' ||
+        urlObj.pathname === '/api/duty-assignments' ||
+        urlObj.pathname.startsWith('/api/roster')
       ) {
+        // For data mutations (assign, delete), sync in background without blocking UI
+        if (init?.method && init.method.toUpperCase() !== 'GET') {
+          originalFetch(input, init).catch(() => {});
+        }
         return handleLocalApiRequest(urlStr, init);
       }
       try {

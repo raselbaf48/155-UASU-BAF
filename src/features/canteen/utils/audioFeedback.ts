@@ -1,16 +1,32 @@
 /**
  * Audio feedback utilities using Web Audio API (zero external assets needed)
+ * Uses a single shared AudioContext singleton to prevent hardware latency on clicks.
  */
+
+let sharedAudioCtx: AudioContext | null = null;
+
+function getSharedAudioContext(): AudioContext | null {
+  try {
+    if (typeof window === 'undefined') return null;
+    if (!sharedAudioCtx) {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        sharedAudioCtx = new AudioCtx();
+      }
+    }
+    if (sharedAudioCtx && sharedAudioCtx.state === 'suspended') {
+      sharedAudioCtx.resume().catch(() => {});
+    }
+    return sharedAudioCtx;
+  } catch {
+    return null;
+  }
+}
 
 export function playSuccessChime(): void {
   try {
-    if (typeof window === 'undefined') return;
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx();
-    if (ctx.state === 'suspended') {
-      ctx.resume();
-    }
+    const ctx = getSharedAudioContext();
+    if (!ctx) return;
     const now = ctx.currentTime;
     // Pleasant major arpeggio chime: C5, E5, G5, C6
     const notes = [523.25, 659.25, 783.99, 1046.50];
@@ -32,13 +48,8 @@ export function playSuccessChime(): void {
 
 export function playCelebrationSound(): void {
   try {
-    if (typeof window === 'undefined') return;
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx();
-    if (ctx.state === 'suspended') {
-      ctx.resume();
-    }
+    const ctx = getSharedAudioContext();
+    if (!ctx) return;
     const now = ctx.currentTime;
     // Ascending melody with gentle bell shimmer: D5, F#5, A5, D6
     const notes = [587.33, 739.99, 880.00, 1174.66];
@@ -60,13 +71,8 @@ export function playCelebrationSound(): void {
 
 export function playTrashPopSound(): void {
   try {
-    if (typeof window === 'undefined') return;
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx();
-    if (ctx.state === 'suspended') {
-      ctx.resume();
-    }
+    const ctx = getSharedAudioContext();
+    if (!ctx) return;
     const now = ctx.currentTime;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
@@ -81,3 +87,4 @@ export function playTrashPopSound(): void {
     osc.stop(now + 0.22);
   } catch {}
 }
+

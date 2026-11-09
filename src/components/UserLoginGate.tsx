@@ -165,8 +165,10 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
   }, []);
 
   const handlePortalChange = (newPortal: PortalType) => {
-    setActiveTab(newPortal);
-    setLastUsedPortal(newPortal);
+    React.startTransition(() => {
+      setActiveTab(newPortal);
+      setLastUsedPortal(newPortal);
+    });
     setTargetAirman(null);
     setPasswordInput('');
     setErrorMsg('');
@@ -179,12 +181,14 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
       setBdInput('');
     }
 
-    // When switching to Canteen, immediately ensure everything is downloaded and DPs cached
+    // Defer heavy sync so the tab switch action renders with 0ms latency
     if (newPortal === 'Canteen') {
-      import('../features/canteen/utils/canteenCloudSync').then((m) => {
-        m.syncCanteenMembersFromCloud(true);
-        m.pullAllCanteenDataFromCloud();
-      }).catch(() => {});
+      setTimeout(() => {
+        import('../features/canteen/utils/canteenCloudSync').then((m) => {
+          m.syncCanteenMembersFromCloud(true);
+          m.pullAllCanteenDataFromCloud();
+        }).catch(() => {});
+      }, 400);
     }
   };
 
@@ -481,10 +485,12 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
         role: isManager ? 'manager' : 'employee'
       };
 
-      setSuccessAirman(enrichedAirman);
-      setIsCanteenAuth(true);
-      setIsCanteenManagerMode(isManager);
-      setLastUsedPortal('Canteen');
+      React.startTransition(() => {
+        setSuccessAirman(enrichedAirman);
+        setIsCanteenAuth(true);
+        setIsCanteenManagerMode(isManager);
+        setLastUsedPortal('Canteen');
+      });
       return;
     }
 
@@ -525,7 +531,7 @@ export const UserLoginGate: React.FC<UserLoginGateProps> = ({
       setIsSuccessAnimation(true);
       setTimeout(() => {
         onAuthenticated();
-      }, 450);
+      }, 80);
     } else {
       setErrorMsg(validation.message || 'Invalid User ID or PIN.');
       setPasswordInput('');

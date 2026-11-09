@@ -1984,9 +1984,9 @@ export const PosSales: React.FC<PosSalesProps> = ({
                               <div className={`w-11 h-11 rounded-xl flex items-center justify-center overflow-hidden shrink-0 border ${
                                 isOutOfStock ? 'border-slate-800 bg-slate-950 text-slate-600' : 'border-slate-800 bg-slate-950 text-slate-400'
                               }`}>
-                                {item.DP ? (
+                                {(item.DP || item.img || item.image) ? (
                                   <img 
-                                    src={resolveImageUrl(item.DP)} 
+                                    src={resolveImageUrl(item.DP || item.img || item.image)} 
                                     alt={primaryName} 
                                     referrerPolicy="no-referrer"
                                     className="w-full h-full object-cover"
@@ -2090,9 +2090,9 @@ export const PosSales: React.FC<PosSalesProps> = ({
                               <div className={`w-12 h-12 rounded-xl flex items-center justify-center overflow-hidden shrink-0 border ${
                                 isOutOfStock ? 'border-slate-800 bg-slate-950 text-slate-600' : 'border-slate-800 bg-slate-950 text-slate-400'
                               }`}>
-                                {item.DP ? (
+                                {(item.DP || item.img || item.image) ? (
                                   <img 
-                                    src={resolveImageUrl(item.DP)} 
+                                    src={resolveImageUrl(item.DP || item.img || item.image)} 
                                     alt={primaryName} 
                                     referrerPolicy="no-referrer"
                                     className="w-full h-full object-cover"

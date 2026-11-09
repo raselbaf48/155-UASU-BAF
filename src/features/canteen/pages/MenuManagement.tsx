@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Coffee, Plus, Calendar, X, Utensils, Edit2 } from 'lucide-react';
+import { Coffee, Plus, Calendar, X, Utensils, Edit2, Upload, Image as ImageIcon, Trash2 } from 'lucide-react';
 import { supabase } from '../../../supabase';
 import { resolveImageUrl, getItemDisplayName } from '../utils/canteenSettings';
 import { queuePushKeyToCloud, pushKeyToCloud } from '../utils/canteenCloudSync';
+import { processGalleryImage } from '../utils/imageUpload';
 import { getCanteenMenuCache, fetchCanteenMenuOnce, setCanteenMenuCache, updateSingleMenuItemInCache, isOneTimeBoxItem, normalizeCatalogKey, deduplicateCanteenMenuItems, saveUserMenuOverride, getUserMenuOverrides } from '../utils/canteenMenuData';
 import { calculateMenuItemStockInfo, getRawInventoryItems, getMenuRecipes } from '../utils/recipeManager';
 import { getMenuItemBanglaName, saveMenuItemBanglaName, getMenuBanglaNamesMap } from '../utils/menuBanglaNames';
@@ -656,9 +657,66 @@ export const MenuManagement: React.FC = () => {
                             <input required type="number" min="0" value={formData.max ?? ""} onChange={e => setFormData({...formData, max: e.target.value})} className="w-full px-4 py-2.5 border border-slate-700 bg-slate-950 text-white font-mono font-bold rounded-xl outline-none focus:border-emerald-500 text-xs sm:text-sm" placeholder="50" />
                         </div>
                     </div>
-                    <div>
-                        <label className="block text-xs font-bold text-slate-200 mb-1">Photo / DP URL (ঐচ্ছিক ছবি লিঙ্ক)</label>
-                        <input type="text" value={formData.DP ?? ""} onChange={e => setFormData({...formData, DP: e.target.value})} className="w-full px-4 py-2.5 border border-slate-700 bg-slate-950 text-white rounded-xl outline-none focus:border-emerald-500 text-xs font-mono" placeholder="https://..." />
+                    <div className="space-y-2">
+                        <label className="block text-xs font-bold text-slate-200">Photo / DP (আইটেমের ছবি)</label>
+                        <div className="flex items-center gap-3 p-3 bg-slate-950/80 border border-slate-800 rounded-2xl">
+                          <div className="w-14 h-14 rounded-xl bg-slate-900 border border-slate-700 overflow-hidden flex items-center justify-center shrink-0 shadow-inner">
+                            {formData.DP ? (
+                              <img 
+                                src={resolveImageUrl(formData.DP)} 
+                                alt="Preview" 
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                  (e.target as HTMLElement).style.display = 'none';
+                                }}
+                              />
+                            ) : (
+                              <ImageIcon className="w-6 h-6 text-slate-500" />
+                            )}
+                          </div>
+
+                          <div className="flex-1 space-y-2">
+                            <input 
+                              type="text" 
+                              value={formData.DP ?? ""} 
+                              onChange={e => setFormData({...formData, DP: e.target.value})} 
+                              className="w-full px-3 py-1.5 border border-slate-700 bg-slate-900 text-white rounded-lg outline-none focus:border-emerald-500 text-xs font-mono" 
+                              placeholder="Image link / URL (https://...)" 
+                            />
+                            <div className="flex items-center gap-2">
+                              <label className="inline-flex items-center gap-1.5 px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[11px] font-bold transition-all shadow-xs cursor-pointer active:scale-95">
+                                <Upload className="w-3 h-3" />
+                                <span>Choose Image</span>
+                                <input 
+                                  type="file" 
+                                  accept="image/*" 
+                                  className="hidden" 
+                                  onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) {
+                                      try {
+                                        const base64 = await processGalleryImage(file);
+                                        setFormData(prev => ({ ...prev, DP: base64 }));
+                                      } catch (err) {
+                                        console.error('Failed to load image:', err);
+                                      }
+                                    }
+                                  }}
+                                />
+                              </label>
+                              {formData.DP && (
+                                <button
+                                  type="button"
+                                  onClick={() => setFormData(prev => ({ ...prev, DP: '' }))}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-lg text-[11px] font-bold transition-colors cursor-pointer"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                  <span>Remove</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
                     </div>
                     <div className="pt-3">
                         <button 

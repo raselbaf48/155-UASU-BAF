@@ -105,7 +105,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const handleSelectTab = (tab: SidebarTab) => {
-    setActiveTab(tab);
+    React.startTransition(() => {
+      setActiveTab(tab);
+    });
     setMobileOpen(false);
   };
 

@@ -94,12 +94,7 @@ export default function App() {
       const target = e.target as HTMLElement | null;
       if (!target) return;
 
-      // Skip if clicking a clear button or an action button inside the box
-      if (target.closest('button, [role="button"]') && !target.closest('button[data-date-trigger]')) {
-        return;
-      }
-      
-      // If clicking an input[type="date"]
+      // If directly clicking an input[type="date"]
       if (target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'date') {
         const input = target as HTMLInputElement;
         if (typeof (input as any).showPicker === 'function') {
@@ -110,8 +105,13 @@ export default function App() {
         return;
       }
 
-      // If clicking inside a date container, label, or date-box
-      const container = target.closest('[data-date-box], label, .date-picker-wrapper, .date-input-container');
+      // Fast exit: Skip all buttons, links, inputs, and interactive controls to prevent any click lag
+      if (target.closest('button, [role="button"], a, input, select, textarea, [data-prevent-date-click]')) {
+        return;
+      }
+
+      // Only check dedicated date containers explicitly marked
+      const container = target.closest('[data-date-box], .date-picker-wrapper, .date-input-container');
       if (container) {
         const input = container.querySelector('input[type="date"]') as HTMLInputElement | null;
         if (input && typeof (input as any).showPicker === 'function') {
@@ -122,8 +122,8 @@ export default function App() {
       }
     };
 
-    document.addEventListener('click', handleGlobalDateClick, true);
-    return () => document.removeEventListener('click', handleGlobalDateClick, true);
+    document.addEventListener('click', handleGlobalDateClick, { capture: false, passive: true });
+    return () => document.removeEventListener('click', handleGlobalDateClick);
   }, []);
 
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);

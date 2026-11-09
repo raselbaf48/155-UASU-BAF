@@ -54,6 +54,12 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
 
   const [activeTab, setActiveTab] = useState<string>(isManager ? 'manager_dashboard' : 'personal_portal');
 
+  const switchTab = (tabId: string) => {
+    React.startTransition(() => {
+      setActiveTab(tabId);
+    });
+  };
+
   const cachedMember = (() => {
     if (!cleanBdInitial || isMasterManager) return null;
     try {
@@ -281,9 +287,21 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
     try {
       const cleanBd = currentUser.bdNo ? currentUser.bdNo.replace(/^BD\/?/i, '').trim() : '';
       
-      // 1. Fetch info directly from DB Canteen table
-      let canteenMember: any = null;
-      if (cleanBd) {
+      // 1. Instant local resolution from cachedMember or local members cache (0ms latency)
+      let canteenMember: any = cachedMember;
+      if (!canteenMember && cleanBd) {
+        try {
+          const raw = localStorage.getItem('canteen_members_cache');
+          if (raw) {
+            const list = JSON.parse(raw);
+            if (Array.isArray(list)) {
+              canteenMember = list.find((m: any) => String(m['BD No'] || m.airman_id || '').replace(/\D/g, '') === cleanBd);
+            }
+          }
+        } catch {}
+      }
+
+      if (!canteenMember && cleanBd) {
         const { data, error } = await supabase
           .from('Canteen_Member')
           .select('*')
@@ -597,11 +615,11 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
   const renderManagerTab = (tabId: string) => {
     switch (tabId) {
       case 'manager_dashboard': return <ManagerDashboard />;
-      case 'pos_sales': return <PosSales initialView="POS" onNavigateToHistory={() => setActiveTab('pos_history')} />;
-      case 'pos_history': return <PosSales initialView="HISTORY" onNavigateToPos={() => setActiveTab('pos_sales')} />;
-      case 'unit_fund': return <MemberDB forcedCategory="UNIT_FUND" onNavigateToTab={(tab) => setActiveTab(tab)} />;
-      case 'others': return <MemberDB forcedCategory="OTHERS" onNavigateToTab={(tab) => setActiveTab(tab)} />;
-      case 'member_db': return <MemberDB initialCategory="ALL" hideFundTabs={true} onNavigateToTab={(tab) => setActiveTab(tab)} />;
+      case 'pos_sales': return <PosSales initialView="POS" onNavigateToHistory={() => switchTab('pos_history')} />;
+      case 'pos_history': return <PosSales initialView="HISTORY" onNavigateToPos={() => switchTab('pos_sales')} />;
+      case 'unit_fund': return <MemberDB forcedCategory="UNIT_FUND" onNavigateToTab={(tab) => switchTab(tab)} />;
+      case 'others': return <MemberDB forcedCategory="OTHERS" onNavigateToTab={(tab) => switchTab(tab)} />;
+      case 'member_db': return <MemberDB initialCategory="ALL" hideFundTabs={true} onNavigateToTab={(tab) => switchTab(tab)} />;
       case 'due_register': return <DueRegister />;
       case 'menu': return <CanteenInventory readOnly={currentUser.role !== 'manager'} />;
       case 'inventory': return <RawInventoryManagement readOnly={currentUser.role !== 'manager'} />;
@@ -609,7 +627,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
       case 'reports': return <CanteenReports />;
       case 'fund': return <CanteenFund />;
       case 'raw_distribution': return <RawDistributionPage />;
-      case 'settings': return <CanteenSettings onClose={() => setActiveTab('manager_dashboard')} />;
+      case 'settings': return <CanteenSettings onClose={() => switchTab('manager_dashboard')} />;
       default: return null;
     }
   };
@@ -742,7 +760,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
                 key={item.id}
                 whileHover={{ x: 2 }}
                 whileTap={{ scale: 0.97 }}
-                onClick={() => setActiveTab(item.id)}
+                onClick={() => switchTab(item.id)}
                 className={`relative w-full flex items-center space-x-3 px-5 py-3.5 rounded-2xl transition-colors font-bold overflow-hidden cursor-pointer ${
                   isActive 
                   ? 'text-white shadow-lg shadow-indigo-500/30' 
@@ -774,7 +792,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
                   DP: initialDp,
                   due: cachedMember?.due || 0
                 });
-                setActiveTab('personal_portal');
+                switchTab('personal_portal');
               }}
               className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl text-emerald-200 bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/40 hover:border-emerald-400 transition-all font-bold text-xs uppercase tracking-widest shadow-md cursor-pointer active:scale-95"
             >
@@ -919,7 +937,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
                         <button 
                             key={item.id}
                             onClick={() => {
-                                setActiveTab(item.id as any);
+                                switchTab(item.id as any);
                                 setMobileMenuOpen(false);
                             }}
                             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-2xl transition-all font-bold cursor-pointer ${
@@ -983,7 +1001,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
                 {currentUser.role === 'manager' && (
                   <button
                     onClick={() => {
-                      setActiveTab('settings');
+                      switchTab('settings');
                       setMobileMenuOpen(false);
                     }}
                     className={`w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl transition-all font-bold text-xs uppercase tracking-widest cursor-pointer border ${
@@ -1007,7 +1025,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
                         DP: initialDp,
                         due: cachedMember?.due || 0
                       });
-                      setActiveTab('personal_portal');
+                      switchTab('personal_portal');
                       setMobileMenuOpen(false);
                     }}
                     className="w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl text-emerald-200 bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/40 transition-all font-bold text-xs uppercase tracking-widest shadow-md cursor-pointer active:scale-95"

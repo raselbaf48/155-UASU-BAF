@@ -713,26 +713,28 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
       notes,
     };
 
+    // Optimistic UI update: instant 0ms reaction on click
+    setAssignments((prev) => {
+      const filtered = prev.filter((a) => !(a.airmanId === assignment.airmanId && a.date === assignment.date));
+      return [...filtered, assignment];
+    });
+    const dutyLabel = DUTY_TYPE_MAP.get(code)?.name || code;
+    setLastUndoAction({
+      label: `${dutyLabel} assigned to ${activeCell.airman.name} (${activeCell.date})`,
+      items: [{ airmanId: activeCell.airman.id, date: activeCell.date, assignment: prevAss }],
+    });
+    setActiveCell(null);
+
     try {
-      const res = await fetch('/api/roster/assign', {
+      fetch('/api/roster/assign', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ monthKey, assignment }),
-      });
-
-      if (res.ok) {
-        // Update local state
-        setAssignments((prev) => {
-          const filtered = prev.filter((a) => !(a.airmanId === assignment.airmanId && a.date === assignment.date));
-          return [...filtered, assignment];
-        });
-        const dutyLabel = DUTY_TYPE_MAP.get(code)?.name || code;
-        setLastUndoAction({
-          label: `${dutyLabel} assigned to ${activeCell.airman.name} (${activeCell.date})`,
-          items: [{ airmanId: activeCell.airman.id, date: activeCell.date, assignment: prevAss }],
-        });
-        window.dispatchEvent(new CustomEvent('baf_state_updated'));
-      }
+      }).then((res) => {
+        if (res.ok) {
+          window.dispatchEvent(new CustomEvent('baf_state_updated'));
+        }
+      }).catch((err) => console.error('Failed to assign duty:', err));
     } catch (err) {
       console.error('Failed to assign duty:', err);
     }
@@ -741,20 +743,29 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
   const handleDeleteSingleDuty = async () => {
     if (!activeCell) return;
     const prevAss = assignmentMap.get(`${activeCell.airman.id}_${activeCell.date}`) || null;
+    const targetAirmanId = activeCell.airman.id;
+    const targetDate = activeCell.date;
+    const targetDutyCode = activeCell.assignment?.dutyCode;
+    const airmanName = activeCell.airman.name;
+
+    // Optimistic UI update: instant 0ms reaction on click
+    setAssignments((prev) => prev.filter((a) => !(a.airmanId === targetAirmanId && a.date === targetDate && a.dutyCode === targetDutyCode)));
+    setLastUndoAction({
+      label: `Deleted duty for ${airmanName} (${targetDate})`,
+      items: [{ airmanId: targetAirmanId, date: targetDate, assignment: prevAss }],
+    });
+    setActiveCell(null);
+
     try {
-      const res = await fetch('/api/roster/delete-assignment', {
+      fetch('/api/roster/delete-assignment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ airmanId: activeCell.airman.id, date: activeCell.date, dutyCode: activeCell.assignment?.dutyCode }),
-      });
-      if (res.ok) {
-        setAssignments((prev) => prev.filter((a) => !(a.airmanId === activeCell.airman.id && a.date === activeCell.date && a.dutyCode === activeCell.assignment?.dutyCode)));
-        setLastUndoAction({
-          label: `Deleted duty for ${activeCell.airman.name} (${activeCell.date})`,
-          items: [{ airmanId: activeCell.airman.id, date: activeCell.date, assignment: prevAss }],
-        });
-        window.dispatchEvent(new CustomEvent('baf_state_updated'));
-      }
+        body: JSON.stringify({ airmanId: targetAirmanId, date: targetDate, dutyCode: targetDutyCode }),
+      }).then((res) => {
+        if (res.ok) {
+          window.dispatchEvent(new CustomEvent('baf_state_updated'));
+        }
+      }).catch((err) => console.error('Failed to delete assignment:', err));
     } catch (err) {
       console.error('Failed to delete assignment:', err);
     }

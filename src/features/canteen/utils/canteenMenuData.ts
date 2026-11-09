@@ -240,16 +240,10 @@ export function deduplicateCanteenMenuItems(items: CanteenMenuItem[]): CanteenMe
  */
 export function stripImagesForStorage(items: any[]): any[] {
   if (!Array.isArray(items)) return [];
+  // Retain all images (base64 data URLs, Cloudinary, Unsplash, Google Drive / Photos) without destructive stripping
   return items.map((it) => {
     if (!it || typeof it !== 'object') return it;
-    const copy = { ...it };
-    const dp = copy.DP || copy.img || copy.image;
-    if (typeof dp === 'string' && (dp.startsWith('data:') || dp.length > 200)) {
-      delete copy.DP;
-      delete copy.img;
-      delete copy.image;
-    }
-    return copy;
+    return { ...it };
   });
 }
 
@@ -262,7 +256,10 @@ export function getCanteenMenuCache(): CanteenMenuItem[] {
   }
   if (typeof window === 'undefined') return DEFAULT_CANTEEN_MENU_ITEMS;
   try {
-    const raw = localStorage.getItem('canteen_menu_cache') || localStorage.getItem('canteen_menu_items_list');
+    const raw = localStorage.getItem('canteen_menu_cache') || 
+                localStorage.getItem('canteen_menu_items_list') || 
+                localStorage.getItem('canteen_menu_items_catalog_v1');
+    const userOverrides = getUserMenuOverrides();
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
@@ -270,10 +267,12 @@ export function getCanteenMenuCache(): CanteenMenuItem[] {
           .filter((p: any) => !isOneTimeBoxItem(p))
           .map((p: any) => {
             const def = DEFAULT_CANTEEN_MENU_ITEMS.find((d) => d.id === p.id || d.name?.toLowerCase() === p.name?.toLowerCase());
-            const dp = p.DP || p.img || p.image || def?.DP || def?.img || def?.image || '';
+            const userOv = findUserMenuOverride(userOverrides, p) || (p.id && userOverrides[p.id]) || (p.id && userOverrides[String(p.id).toLowerCase()]);
+            const dp = userOv?.DP || userOv?.img || userOv?.image || p.DP || p.img || p.image || def?.DP || def?.img || def?.image || '';
             return {
               ...def,
               ...p,
+              ...userOv,
               DP: dp,
               img: dp,
               image: dp
@@ -348,6 +347,7 @@ export function saveUserMenuOverride(item: Partial<CanteenMenuItem> & { id: stri
     const cleanId = rawId.toLowerCase();
     const nameEn = String(item.name_en || item.name || '').trim();
     const nameBn = String(item.name_bn || item.nameBn || item['Name (BN)'] || (item as any).Name_BN || '').trim();
+    const dpVal = item.DP || item.img || item.image || (current[rawId]?.DP) || (current[cleanId]?.DP);
 
     const overrideEntry: Partial<CanteenMenuItem> = {
       ...item,
@@ -357,6 +357,9 @@ export function saveUserMenuOverride(item: Partial<CanteenMenuItem> & { id: stri
       name_bn: nameBn || undefined,
       nameBn: nameBn || undefined,
       'Name (BN)': nameBn || undefined,
+      DP: dpVal || undefined,
+      img: dpVal || undefined,
+      image: dpVal || undefined,
       updated_at: new Date().toISOString()
     };
 

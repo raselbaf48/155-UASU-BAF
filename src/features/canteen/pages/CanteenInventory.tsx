@@ -341,7 +341,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       cost: initialCost,
       stock: initialStock,
       rawItem: initialRawItem,
-      DP: item.DP || ''
+      DP: item.DP || item.img || item.image || ''
     });
     setModalRecipe(normalizedRecipe);
 
@@ -601,7 +601,7 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
       price: item.price,
       cost: existingRec.length > 0 ? recipeCost : Number(item.Cost ?? item.cost ?? 0),
       rawItem: existingRec.length > 0 ? formatRecipeRawItemsString(existingRec, rawList) : (item['Raw Item'] ?? item.rawItem ?? ''),
-      DP: item.DP || ''
+      DP: item.DP || item.img || item.image || ''
     });
     setItemRecipe(existingRec);
     setShowAddModal(true);
@@ -1172,9 +1172,9 @@ export const CanteenInventory: React.FC<{readOnly?: boolean}> = ({readOnly = fal
                         <div className={`w-14 h-14 rounded-2xl flex items-center justify-center font-black text-lg overflow-hidden shrink-0 shadow-inner group-hover:scale-105 transition-transform duration-300 border ${
                            isLowStock ? "bg-rose-950/60 border-rose-500/40 text-rose-400" : "bg-indigo-950/70 border-indigo-500/30 text-indigo-400"
                         }`}>
-                           {item.DP ? (
+                           {(item.DP || item.img || item.image) ? (
                               <img 
-                                 src={resolveImageUrl(item.DP)} 
+                                 src={resolveImageUrl(item.DP || item.img || item.image)} 
                                  alt={item.name} 
                                  className="w-full h-full object-cover"
                                  onError={(e) => {
