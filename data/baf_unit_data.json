@@ -51338,12 +51338,333 @@
   },
   "activityHistory": [
     {
+      "id": "hist_1794216680617_z20nk",
+      "timestamp": "2026-11-09T09:31:20.617Z",
+      "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
+      "airmanId": "BD/474549",
+      "airmanName": "LAC Rakib",
+      "airmanRank": "LAC",
+      "airmanTrade": "Radio Fitt",
+      "dutyCode": "GD",
+      "fromDate": "2026-11-18",
+      "toDate": "2026-11-18",
+      "date": "2026-11-18",
+      "notes": ""
+    },
+    {
+      "id": "hist_1794216676129_q9fjo",
+      "timestamp": "2026-11-09T09:31:16.129Z",
+      "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
+      "airmanId": "BD/474455",
+      "airmanName": "LAC Rasel",
+      "airmanRank": "LAC",
+      "airmanTrade": "E&I Fitt",
+      "dutyCode": "GD",
+      "fromDate": "2026-11-18",
+      "toDate": "2026-11-18",
+      "date": "2026-11-18",
+      "notes": ""
+    },
+    {
+      "id": "hist_1794216551670_b0vn4",
+      "timestamp": "2026-11-09T09:29:11.670Z",
+      "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
+      "airmanId": "BD/474455",
+      "airmanName": "LAC Rasel",
+      "airmanRank": "LAC",
+      "airmanTrade": "E&I Fitt",
+      "dutyCode": "GD",
+      "fromDate": "2026-11-18",
+      "toDate": "2026-11-18",
+      "date": "2026-11-18",
+      "notes": ""
+    },
+    {
+      "id": "hist_1794216490571_gb1ec",
+      "timestamp": "2026-11-09T09:28:10.571Z",
+      "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
+      "airmanId": "BD/469598",
+      "airmanName": "Sgt Mustakim",
+      "airmanRank": "Sgt",
+      "airmanTrade": "Radio Fitt",
+      "dutyCode": "GD",
+      "fromDate": "2026-11-17",
+      "toDate": "2026-11-17",
+      "date": "2026-11-17",
+      "notes": ""
+    },
+    {
+      "id": "hist_1794216269690_sl6f2",
+      "timestamp": "2026-11-09T09:24:29.690Z",
+      "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
+      "airmanId": "BD/474455",
+      "airmanName": "LAC Rasel",
+      "airmanRank": "LAC",
+      "airmanTrade": "E&I Fitt",
+      "dutyCode": "GD",
+      "fromDate": "2026-11-15",
+      "toDate": "2026-11-15",
+      "date": "2026-11-15",
+      "notes": ""
+    },
+    {
+      "id": "hist_1794216213093_mh0hw",
+      "timestamp": "2026-11-09T09:23:33.093Z",
+      "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
+      "airmanId": "BD/474549",
+      "airmanName": "LAC Rakib",
+      "airmanRank": "LAC",
+      "airmanTrade": "Radio Fitt",
+      "dutyCode": "GD",
+      "fromDate": "2026-11-14",
+      "toDate": "2026-11-14",
+      "date": "2026-11-14",
+      "notes": ""
+    },
+    {
+      "id": "hist_1794216050599_2v2ad",
+      "timestamp": "2026-11-09T09:20:50.599Z",
+      "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
+      "airmanId": "BD/475268",
+      "airmanName": "LAC Nishad",
+      "airmanRank": "LAC",
+      "airmanTrade": "Radio Fitt",
+      "dutyCode": "GD",
+      "fromDate": "2026-11-13",
+      "toDate": "2026-11-13",
+      "date": "2026-11-13",
+      "notes": ""
+    },
+    {
+      "id": "hist_1794215927000_nx47u",
+      "timestamp": "2026-11-09T09:18:47.000Z",
+      "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
+      "airmanId": "BD/474549",
+      "airmanName": "LAC Rakib",
+      "airmanRank": "LAC",
+      "airmanTrade": "Radio Fitt",
+      "dutyCode": "GD",
+      "fromDate": "2026-11-10",
+      "toDate": "2026-11-10",
+      "date": "2026-11-10",
+      "notes": ""
+    },
+    {
+      "id": "hist_1794215746485_mmr5m",
+      "timestamp": "2026-11-09T09:15:46.485Z",
+      "actionType": "GRANT_LEAVE",
+      "type": "GRANT_LEAVE",
+      "airmanId": "BD/474549",
+      "airmanName": "LAC Rakib",
+      "airmanRank": "LAC",
+      "airmanTrade": "Radio Fitt",
+      "dutyCode": "LEAVE",
+      "fromDate": "2026-10-20",
+      "toDate": "2026-11-09",
+      "date": "2026-10-20",
+      "notes": "Annual Leave (F-295: 5 Free Days)"
+    },
+    {
+      "id": "hist_1794215613587_ki8w4",
+      "timestamp": "2026-11-09T09:13:33.587Z",
+      "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
+      "airmanId": "BD/475268",
+      "airmanName": "LAC Nishad",
+      "airmanRank": "LAC",
+      "airmanTrade": "Radio Fitt",
+      "dutyCode": "GD",
+      "fromDate": "2026-11-09",
+      "toDate": "2026-11-09",
+      "date": "2026-11-09",
+      "notes": ""
+    },
+    {
+      "id": "hist_1794157385833_2i43p",
+      "timestamp": "2026-11-08T17:03:05.833Z",
+      "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
+      "airmanId": "airman-unknown",
+      "airmanName": "Airman",
+      "airmanRank": "",
+      "airmanTrade": "",
+      "dutyCode": "GD",
+      "fromDate": "2026-11-08",
+      "toDate": "2026-11-08",
+      "date": "2026-11-08",
+      "notes": "{}"
+    },
+    {
+      "id": "hist_1794157318264_b3lr3",
+      "timestamp": "2026-11-08T17:01:58.264Z",
+      "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
+      "airmanId": "airman-unknown",
+      "airmanName": "Airman",
+      "airmanRank": "",
+      "airmanTrade": "",
+      "dutyCode": "GD",
+      "fromDate": "2026-11-08",
+      "toDate": "2026-11-08",
+      "date": "2026-11-08",
+      "notes": "{}"
+    },
+    {
+      "id": "hist_1794157286012_myu8u",
+      "timestamp": "2026-11-08T17:01:26.012Z",
+      "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
+      "airmanId": "airman-unknown",
+      "airmanName": "Airman",
+      "airmanRank": "",
+      "airmanTrade": "",
+      "dutyCode": "GD",
+      "fromDate": "2026-11-08",
+      "toDate": "2026-11-08",
+      "date": "2026-11-08",
+      "notes": "{}"
+    },
+    {
+      "id": "hist_1794157237136_ra955",
+      "timestamp": "2026-11-08T17:00:37.136Z",
+      "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
+      "airmanId": "airman-unknown",
+      "airmanName": "Airman",
+      "airmanRank": "",
+      "airmanTrade": "",
+      "dutyCode": "GD",
+      "fromDate": "2026-11-08",
+      "toDate": "2026-11-08",
+      "date": "2026-11-08",
+      "notes": "{}"
+    },
+    {
+      "id": "hist_1794157232770_8zr45",
+      "timestamp": "2026-11-08T17:00:32.770Z",
+      "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
+      "airmanId": "airman-unknown",
+      "airmanName": "Airman",
+      "airmanRank": "",
+      "airmanTrade": "",
+      "dutyCode": "GD",
+      "fromDate": "2026-11-08",
+      "toDate": "2026-11-08",
+      "date": "2026-11-08",
+      "notes": "{}"
+    },
+    {
+      "id": "hist_1794157219165_h8wt1",
+      "timestamp": "2026-11-08T17:00:19.165Z",
+      "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
+      "airmanId": "airman-unknown",
+      "airmanName": "Airman",
+      "airmanRank": "",
+      "airmanTrade": "",
+      "dutyCode": "GD",
+      "fromDate": "2026-11-08",
+      "toDate": "2026-11-08",
+      "date": "2026-11-08",
+      "notes": "{}"
+    },
+    {
+      "id": "hist_1794157208300_fz9oy",
+      "timestamp": "2026-11-08T17:00:08.300Z",
+      "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
+      "airmanId": "BD/469153",
+      "airmanName": "Sgt Asad",
+      "airmanRank": "Sgt",
+      "airmanTrade": "GS",
+      "dutyCode": "GD",
+      "fromDate": "2026-11-08",
+      "toDate": "2026-11-08",
+      "date": "2026-11-08",
+      "notes": "{}"
+    },
+    {
+      "id": "hist_1794119579808_ingf6",
+      "timestamp": "2026-11-08T00:00:00.000Z",
+      "actionType": "SYSTEM_ACTION",
+      "type": "SYSTEM_ACTION",
+      "airmanId": "airman-unknown",
+      "airmanName": "System Action",
+      "airmanRank": "",
+      "airmanTrade": "",
+      "dutyCode": "GD",
+      "fromDate": "2026-11-08",
+      "toDate": "2026-11-08",
+      "date": "2026-11-08",
+      "notes": ""
+    },
+    {
+      "id": "hist_1792373497333_qtbs2",
+      "timestamp": "2026-10-19T01:31:37.333Z",
+      "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
+      "airmanId": "BD/474549",
+      "airmanName": "LAC Rakib",
+      "airmanRank": "LAC",
+      "airmanTrade": "Radio Fitt",
+      "dutyCode": "GD",
+      "fromDate": "2026-10-19",
+      "toDate": "2026-10-19",
+      "date": "2026-10-19",
+      "notes": "{}"
+    },
+    {
+      "id": "hist_1792316425346_yizdr",
+      "timestamp": "2026-10-18T09:40:25.346Z",
+      "actionType": "GRANT_LEAVE",
+      "type": "GRANT_LEAVE",
+      "airmanId": "BD/474455",
+      "airmanName": "LAC Rasel",
+      "airmanRank": "LAC",
+      "airmanTrade": "E&I Fitt",
+      "dutyCode": "LEAVE",
+      "fromDate": "2026-10-18",
+      "toDate": "2026-11-06",
+      "date": "2026-10-18",
+      "notes": "Recreation Leave (F-295: 2 Free Days)"
+    },
+    {
+      "id": "hist_1792229004863_9nbj5",
+      "timestamp": "2026-10-17T09:23:24.863Z",
+      "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
+      "airmanId": "airman-unknown",
+      "airmanName": "Airman",
+      "airmanRank": "",
+      "airmanTrade": "",
+      "dutyCode": "GD",
+      "fromDate": "2026-10-17",
+      "toDate": "2026-10-17",
+      "date": "2026-10-17",
+      "notes": "{}"
+    },
+    {
+      "id": "hist_1788101114173_8196r",
+      "timestamp": "2026-08-30T14:45:14.173Z",
       "actionType": "ASSIGN_DUTY",
+      "type": "ASSIGN_RANGE",
       "airmanId": "airman-37",
       "airmanName": "LAC Rakib",
+      "airmanRank": "LAC",
+      "airmanTrade": "Radio Fitt",
       "dutyCode": "GD",
       "fromDate": "2026-08-02",
       "toDate": "2026-08-02",
+      "date": "2026-10-17",
       "notes": "",
       "previousAssignments": [
         {
@@ -51352,19 +51673,21 @@
           "dutyCode": "GD",
           "notes": ""
         }
-      ],
-      "id": "hist_1788101114173_8196r",
-      "timestamp": "2026-08-30T14:45:14.173Z",
-      "airmanRank": "LAC",
-      "airmanTrade": "Radio Fitt"
+      ]
     },
     {
+      "id": "hist_1788100479566_tq39t",
+      "timestamp": "2026-08-30T14:34:39.566Z",
       "actionType": "CLEAR_RANGE",
+      "type": "ASSIGN_RANGE",
       "airmanId": "airman-5",
       "airmanName": "WO A. Baten",
+      "airmanRank": "WO",
+      "airmanTrade": "Radio Fitt",
       "dutyCode": "ON_PARADE",
       "fromDate": "2026-08-30",
       "toDate": "2026-08-30",
+      "date": "2026-10-17",
       "notes": "Cleared 1 day(s)",
       "previousAssignments": [
         {
@@ -51373,77 +51696,78 @@
           "dutyCode": "CMH",
           "notes": ""
         }
-      ],
-      "id": "hist_1788100479566_tq39t",
-      "timestamp": "2026-08-30T14:34:39.566Z",
-      "airmanRank": "WO",
-      "airmanTrade": "Radio Fitt"
+      ]
     },
     {
+      "id": "hist_1788100470892_bsms2",
+      "timestamp": "2026-08-30T14:34:30.892Z",
       "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
       "airmanId": "airman-5",
       "airmanName": "WO A. Baten",
+      "airmanRank": "WO",
+      "airmanTrade": "Radio Fitt",
       "dutyCode": "CMH",
       "fromDate": "2026-08-30",
       "toDate": "2026-08-30",
+      "date": "2026-10-17",
+      "notes": "",
       "previousAssignments": [
         {
           "airmanId": "airman-5",
           "date": "2026-08-30"
         }
-      ],
-      "id": "hist_1788100470892_bsms2",
-      "timestamp": "2026-08-30T14:34:30.892Z",
-      "airmanRank": "WO",
-      "airmanTrade": "Radio Fitt"
+      ]
     },
     {
-      "actionType": "CLEAR_RANGE",
-      "airmanId": "airman-5",
-      "airmanName": "WO A. Baten",
-      "dutyCode": "ON_PARADE",
-      "fromDate": "2026-08-30",
-      "toDate": "2026-08-30",
-      "notes": "Cleared 1 day(s)",
-      "previousAssignments": [
-        {
-          "airmanId": "airman-5",
-          "date": "2026-08-30",
-          "dutyCode": "OTHERS",
-          "notes": "xgdgfgfx"
-        }
-      ],
       "id": "hist_1788100453275_qle82",
       "timestamp": "2026-08-30T14:34:13.275Z",
-      "airmanRank": "WO",
-      "airmanTrade": "Radio Fitt"
+      "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
+      "airmanId": "airman-unknown",
+      "airmanName": "Airman",
+      "airmanRank": "",
+      "airmanTrade": "",
+      "dutyCode": "GD",
+      "fromDate": "2026-10-17",
+      "toDate": "2026-10-17",
+      "date": "2026-10-17",
+      "notes": ""
     },
     {
+      "id": "hist_1788100445451_0yu42",
+      "timestamp": "2026-08-30T14:34:05.451Z",
       "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
       "airmanId": "airman-5",
       "airmanName": "WO A. Baten",
+      "airmanRank": "WO",
+      "airmanTrade": "Radio Fitt",
       "dutyCode": "OTHERS",
       "fromDate": "2026-08-30",
       "toDate": "2026-08-30",
+      "date": "2026-10-17",
       "notes": "xgdgfgfx",
       "previousAssignments": [
         {
           "airmanId": "airman-5",
           "date": "2026-08-30"
         }
-      ],
-      "id": "hist_1788100445451_0yu42",
-      "timestamp": "2026-08-30T14:34:05.451Z",
-      "airmanRank": "WO",
-      "airmanTrade": "Radio Fitt"
+      ]
     },
     {
+      "id": "hist_1788099903083_dg9d7",
+      "timestamp": "2026-08-30T14:25:03.083Z",
       "actionType": "CLEAR_RANGE",
+      "type": "ASSIGN_RANGE",
       "airmanId": "airman-26",
       "airmanName": "Cpl Harun",
+      "airmanRank": "Cpl",
+      "airmanTrade": "E&I Fitt",
       "dutyCode": "ON_PARADE",
       "fromDate": "2026-08-30",
       "toDate": "2026-08-30",
+      "date": "2026-10-17",
       "notes": "Cleared 1 day(s)",
       "previousAssignments": [
         {
@@ -51453,19 +51777,21 @@
           "idaShift": "Night",
           "notes": ""
         }
-      ],
-      "id": "hist_1788099903083_dg9d7",
-      "timestamp": "2026-08-30T14:25:03.083Z",
-      "airmanRank": "Cpl",
-      "airmanTrade": "E&I Fitt"
+      ]
     },
     {
+      "id": "hist_1788099899270_uy38r",
+      "timestamp": "2026-08-30T14:24:59.270Z",
       "actionType": "CLEAR_RANGE",
+      "type": "ASSIGN_RANGE",
       "airmanId": "airman-20",
       "airmanName": "Sgt Mehedi",
+      "airmanRank": "Sgt",
+      "airmanTrade": "Afr Fitt",
       "dutyCode": "ON_PARADE",
       "fromDate": "2026-08-30",
       "toDate": "2026-08-30",
+      "date": "2026-10-17",
       "notes": "Cleared 1 day(s)",
       "previousAssignments": [
         {
@@ -51475,19 +51801,21 @@
           "idaShift": "Night",
           "notes": ""
         }
-      ],
-      "id": "hist_1788099899270_uy38r",
-      "timestamp": "2026-08-30T14:24:59.270Z",
-      "airmanRank": "Sgt",
-      "airmanTrade": "Afr Fitt"
+      ]
     },
     {
+      "id": "hist_1788093418381_iy2r0",
+      "timestamp": "2026-08-30T12:36:58.381Z",
       "actionType": "CLEAR_RANGE",
+      "type": "ASSIGN_RANGE",
       "airmanId": "airman-11",
       "airmanName": "Sgt Mobarak",
+      "airmanRank": "Sgt",
+      "airmanTrade": "Radio Fitt",
       "dutyCode": "ON_PARADE",
       "fromDate": "2026-08-30",
       "toDate": "2026-08-30",
+      "date": "2026-10-17",
       "notes": "Cleared 1 day(s)",
       "previousAssignments": [
         {
@@ -51496,97 +51824,93 @@
           "dutyCode": "OTHERS",
           "notes": "GCS Sy"
         }
-      ],
-      "id": "hist_1788093418381_iy2r0",
-      "timestamp": "2026-08-30T12:36:58.381Z",
-      "airmanRank": "Sgt",
-      "airmanTrade": "Radio Fitt"
+      ]
     },
     {
+      "id": "hist_1788093397899_5od2g",
+      "timestamp": "2026-08-30T12:36:37.899Z",
       "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
       "airmanId": "airman-11",
       "airmanName": "Sgt Mobarak",
+      "airmanRank": "Sgt",
+      "airmanTrade": "Radio Fitt",
       "dutyCode": "OTHERS",
       "fromDate": "2026-08-30",
       "toDate": "2026-08-30",
+      "date": "2026-10-17",
       "notes": "GCS Sy",
       "previousAssignments": [
         {
           "airmanId": "airman-11",
           "date": "2026-08-30"
         }
-      ],
-      "id": "hist_1788093397899_5od2g",
-      "timestamp": "2026-08-30T12:36:37.899Z",
-      "airmanRank": "Sgt",
-      "airmanTrade": "Radio Fitt"
+      ]
     },
     {
-      "actionType": "CLEAR_RANGE",
-      "airmanId": "airman-5",
-      "airmanName": "WO A. Baten",
-      "dutyCode": "ON_PARADE",
-      "fromDate": "2026-08-30",
-      "toDate": "2026-08-30",
-      "notes": "Cleared 1 day(s)",
-      "previousAssignments": [
-        {
-          "airmanId": "airman-5",
-          "date": "2026-08-30",
-          "dutyCode": "OTHERS",
-          "notes": "gagdg"
-        }
-      ],
       "id": "hist_1788093380984_c7rti",
       "timestamp": "2026-08-30T12:36:20.984Z",
-      "airmanRank": "WO",
-      "airmanTrade": "Radio Fitt"
+      "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
+      "airmanId": "airman-unknown",
+      "airmanName": "Airman",
+      "airmanRank": "",
+      "airmanTrade": "",
+      "dutyCode": "GD",
+      "fromDate": "2026-10-17",
+      "toDate": "2026-10-17",
+      "date": "2026-10-17",
+      "notes": ""
     },
     {
-      "actionType": "ASSIGN_RANGE",
-      "airmanId": "airman-5",
-      "airmanName": "WO A. Baten",
-      "dutyCode": "OTHERS",
-      "fromDate": "2026-08-30",
-      "toDate": "2026-08-30",
-      "notes": "gagdg",
-      "previousAssignments": [
-        {
-          "airmanId": "airman-5",
-          "date": "2026-08-30"
-        }
-      ],
       "id": "hist_1788093360975_vv4gq",
       "timestamp": "2026-08-30T12:36:00.975Z",
-      "airmanRank": "WO",
-      "airmanTrade": "Radio Fitt"
+      "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
+      "airmanId": "airman-unknown",
+      "airmanName": "Airman",
+      "airmanRank": "",
+      "airmanTrade": "",
+      "dutyCode": "GD",
+      "fromDate": "2026-10-17",
+      "toDate": "2026-10-17",
+      "date": "2026-10-17",
+      "notes": ""
     },
     {
+      "id": "hist_1788092569541_ur3l2",
+      "timestamp": "2026-08-30T12:22:49.541Z",
       "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
       "airmanId": "airman-37",
       "airmanName": "LAC Rakib",
+      "airmanRank": "LAC",
+      "airmanTrade": "Radio Fitt",
       "dutyCode": "GD",
       "fromDate": "2026-09-01",
       "toDate": "2026-09-01",
+      "date": "2026-10-17",
       "notes": "",
       "previousAssignments": [
         {
           "airmanId": "airman-37",
           "date": "2026-09-01"
         }
-      ],
-      "id": "hist_1788092569541_ur3l2",
-      "timestamp": "2026-08-30T12:22:49.541Z",
-      "airmanRank": "LAC",
-      "airmanTrade": "Radio Fitt"
+      ]
     },
     {
+      "id": "hist_1788092569419_44y3y",
+      "timestamp": "2026-08-30T12:22:49.419Z",
       "actionType": "CLEAR_RANGE",
+      "type": "ASSIGN_RANGE",
       "airmanId": "airman-35",
       "airmanName": "LAC Rasel",
+      "airmanRank": "LAC",
+      "airmanTrade": "E&I Fitt",
       "dutyCode": "ON_PARADE",
       "fromDate": "2026-09-01",
       "toDate": "2026-09-01",
+      "date": "2026-10-17",
       "notes": "Cleared 1 day(s)",
       "previousAssignments": [
         {
@@ -51595,38 +51919,42 @@
           "dutyCode": "GD",
           "notes": ""
         }
-      ],
-      "id": "hist_1788092569419_44y3y",
-      "timestamp": "2026-08-30T12:22:49.419Z",
-      "airmanRank": "LAC",
-      "airmanTrade": "E&I Fitt"
+      ]
     },
     {
+      "id": "hist_1788092534720_5x7gy",
+      "timestamp": "2026-08-30T12:22:14.720Z",
       "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
       "airmanId": "airman-37",
       "airmanName": "LAC Rakib",
+      "airmanRank": "LAC",
+      "airmanTrade": "Radio Fitt",
       "dutyCode": "GD",
       "fromDate": "2026-09-02",
       "toDate": "2026-09-02",
+      "date": "2026-10-17",
       "notes": "",
       "previousAssignments": [
         {
           "airmanId": "airman-37",
           "date": "2026-09-02"
         }
-      ],
-      "id": "hist_1788092534720_5x7gy",
-      "timestamp": "2026-08-30T12:22:14.720Z",
-      "airmanRank": "LAC",
-      "airmanTrade": "Radio Fitt"
+      ]
     },
     {
+      "id": "hist_1788092532283_0s4gq",
+      "timestamp": "2026-08-30T12:22:12.283Z",
       "actionType": "CLEAR_RANGE",
+      "type": "ASSIGN_RANGE",
       "airmanId": "airman-35",
       "airmanName": "LAC Rasel",
+      "airmanRank": "LAC",
+      "airmanTrade": "E&I Fitt",
       "dutyCode": "ON_PARADE",
       "fromDate": "2026-09-02",
       "toDate": "2026-09-02",
+      "date": "2026-10-17",
       "notes": "Cleared 1 day(s)",
       "previousAssignments": [
         {
@@ -51635,206 +51963,202 @@
           "dutyCode": "GD",
           "notes": ""
         }
-      ],
-      "id": "hist_1788092532283_0s4gq",
-      "timestamp": "2026-08-30T12:22:12.283Z",
-      "airmanRank": "LAC",
-      "airmanTrade": "E&I Fitt"
+      ]
     },
     {
+      "id": "hist_1788092531044_plt1q",
+      "timestamp": "2026-08-30T12:22:11.044Z",
       "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
       "airmanId": "airman-35",
       "airmanName": "LAC Rasel",
+      "airmanRank": "LAC",
+      "airmanTrade": "E&I Fitt",
       "dutyCode": "GD",
       "fromDate": "2026-09-02",
       "toDate": "2026-09-02",
+      "date": "2026-10-17",
       "notes": "",
       "previousAssignments": [
         {
           "airmanId": "airman-35",
           "date": "2026-09-02"
         }
-      ],
-      "id": "hist_1788092531044_plt1q",
-      "timestamp": "2026-08-30T12:22:11.044Z",
-      "airmanRank": "LAC",
-      "airmanTrade": "E&I Fitt"
+      ]
     },
     {
+      "id": "hist_1788092526233_nzrj0",
+      "timestamp": "2026-08-30T12:22:06.233Z",
       "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
       "airmanId": "airman-35",
       "airmanName": "LAC Rasel",
+      "airmanRank": "LAC",
+      "airmanTrade": "E&I Fitt",
       "dutyCode": "GD",
       "fromDate": "2026-09-01",
       "toDate": "2026-09-01",
+      "date": "2026-10-17",
       "notes": "",
       "previousAssignments": [
         {
           "airmanId": "airman-35",
           "date": "2026-09-01"
         }
-      ],
-      "id": "hist_1788092526233_nzrj0",
-      "timestamp": "2026-08-30T12:22:06.233Z",
-      "airmanRank": "LAC",
-      "airmanTrade": "E&I Fitt"
+      ]
     },
     {
+      "id": "hist_1788092514550_jeooy",
+      "timestamp": "2026-08-30T12:21:54.550Z",
       "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
       "airmanId": "airman-37",
       "airmanName": "LAC Rakib",
+      "airmanRank": "LAC",
+      "airmanTrade": "Radio Fitt",
       "dutyCode": "GD",
       "fromDate": "2026-08-31",
       "toDate": "2026-08-31",
+      "date": "2026-10-17",
       "notes": "",
       "previousAssignments": [
         {
           "airmanId": "airman-37",
           "date": "2026-08-31"
         }
-      ],
-      "id": "hist_1788092514550_jeooy",
-      "timestamp": "2026-08-30T12:21:54.550Z",
-      "airmanRank": "LAC",
-      "airmanTrade": "Radio Fitt"
+      ]
     },
     {
-      "actionType": "CLEAR_RANGE",
-      "airmanId": "airman-5",
-      "airmanName": "WO A. Baten",
-      "dutyCode": "ON_PARADE",
-      "fromDate": "2026-08-30",
-      "toDate": "2026-08-30",
-      "notes": "Cleared 1 day(s)",
-      "previousAssignments": [
-        {
-          "airmanId": "airman-5",
-          "date": "2026-08-30",
-          "dutyCode": "OTHERS",
-          "notes": "Close Arrest"
-        }
-      ],
       "id": "hist_1788092387852_6nvpx",
       "timestamp": "2026-08-30T12:19:47.852Z",
-      "airmanRank": "WO",
-      "airmanTrade": "Radio Fitt"
+      "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
+      "airmanId": "airman-unknown",
+      "airmanName": "Airman",
+      "airmanRank": "",
+      "airmanTrade": "",
+      "dutyCode": "GD",
+      "fromDate": "2026-10-17",
+      "toDate": "2026-10-17",
+      "date": "2026-10-17",
+      "notes": ""
     },
     {
-      "actionType": "ASSIGN_RANGE",
-      "airmanId": "airman-5",
-      "airmanName": "WO A. Baten",
-      "dutyCode": "OTHERS",
-      "fromDate": "2026-08-30",
-      "toDate": "2026-08-30",
-      "notes": "Close Arrest",
-      "previousAssignments": [
-        {
-          "airmanId": "airman-5",
-          "date": "2026-08-30"
-        }
-      ],
       "id": "hist_1788092365223_zghvp",
       "timestamp": "2026-08-30T12:19:25.223Z",
-      "airmanRank": "WO",
-      "airmanTrade": "Radio Fitt"
+      "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
+      "airmanId": "airman-unknown",
+      "airmanName": "Airman",
+      "airmanRank": "",
+      "airmanTrade": "",
+      "dutyCode": "GD",
+      "fromDate": "2026-10-17",
+      "toDate": "2026-10-17",
+      "date": "2026-10-17",
+      "notes": ""
     },
     {
-      "actionType": "ASSIGN_RANGE",
-      "airmanId": "airman-37",
-      "airmanName": "LAC Rakib",
-      "dutyCode": "GD",
-      "fromDate": "2026-08-02",
-      "toDate": "2026-08-02",
-      "notes": "",
-      "previousAssignments": [
-        {
-          "airmanId": "airman-37",
-          "date": "2026-08-02"
-        }
-      ],
       "id": "hist_1788092210577_n65t7",
       "timestamp": "2026-08-30T12:16:50.577Z",
-      "airmanRank": "LAC",
-      "airmanTrade": "Radio Fitt"
+      "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
+      "airmanId": "airman-unknown",
+      "airmanName": "Airman",
+      "airmanRank": "",
+      "airmanTrade": "",
+      "dutyCode": "GD",
+      "fromDate": "2026-10-17",
+      "toDate": "2026-10-17",
+      "date": "2026-10-17",
+      "notes": ""
     },
     {
+      "id": "hist_1788092192360_dh3eg",
+      "timestamp": "2026-08-30T12:16:32.360Z",
       "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
       "airmanId": "airman-37",
       "airmanName": "LAC Rakib",
+      "airmanRank": "LAC",
+      "airmanTrade": "Radio Fitt",
       "dutyCode": "GD",
       "fromDate": "2026-08-30",
       "toDate": "2026-08-30",
+      "date": "2026-10-17",
       "notes": "",
       "previousAssignments": [
         {
           "airmanId": "airman-37",
           "date": "2026-08-30"
         }
-      ],
-      "id": "hist_1788092192360_dh3eg",
-      "timestamp": "2026-08-30T12:16:32.360Z",
-      "airmanRank": "LAC",
-      "airmanTrade": "Radio Fitt"
+      ]
     },
     {
+      "id": "hist_1788083725964_476kc",
+      "timestamp": "2026-08-30T09:55:25.964Z",
       "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
       "airmanId": "airman-26",
       "airmanName": "Cpl Harun",
+      "airmanRank": "Cpl",
+      "airmanTrade": "E&I Fitt",
       "dutyCode": "IDAC",
-      "idaShift": "Night",
       "fromDate": "2026-08-30",
       "toDate": "2026-08-30",
+      "date": "2026-10-17",
       "notes": "",
+      "idaShift": "Night",
       "previousAssignments": [
         {
           "airmanId": "airman-26",
           "date": "2026-08-30"
         }
-      ],
-      "id": "hist_1788083725964_476kc",
-      "timestamp": "2026-08-30T09:55:25.964Z",
-      "airmanRank": "Cpl",
-      "airmanTrade": "E&I Fitt"
+      ]
     },
     {
+      "id": "hist_1788083716967_61qnl",
+      "timestamp": "2026-08-30T09:55:16.967Z",
       "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
       "airmanId": "airman-20",
       "airmanName": "Sgt Mehedi",
+      "airmanRank": "Sgt",
+      "airmanTrade": "Afr Fitt",
       "dutyCode": "IDAC",
-      "idaShift": "Night",
       "fromDate": "2026-08-30",
       "toDate": "2026-08-30",
+      "date": "2026-10-17",
       "notes": "",
+      "idaShift": "Night",
       "previousAssignments": [
         {
           "airmanId": "airman-20",
           "date": "2026-08-30"
         }
-      ],
-      "id": "hist_1788083716967_61qnl",
-      "timestamp": "2026-08-30T09:55:16.967Z",
-      "airmanRank": "Sgt",
-      "airmanTrade": "Afr Fitt"
+      ]
     },
     {
+      "id": "hist_1788083683369_y7ug3",
+      "timestamp": "2026-08-30T09:54:43.369Z",
       "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
       "airmanId": "airman-35",
       "airmanName": "LAC Rasel",
+      "airmanRank": "LAC",
+      "airmanTrade": "E&I Fitt",
       "dutyCode": "IDAC",
-      "idaShift": "Afternoon",
       "fromDate": "2026-08-30",
       "toDate": "2026-08-30",
+      "date": "2026-10-17",
       "notes": "",
+      "idaShift": "Afternoon",
       "previousAssignments": [
         {
           "airmanId": "airman-35",
           "date": "2026-08-30"
         }
-      ],
-      "id": "hist_1788083683369_y7ug3",
-      "timestamp": "2026-08-30T09:54:43.369Z",
-      "airmanRank": "LAC",
-      "airmanTrade": "E&I Fitt"
+      ]
     }
   ],
   "adminPasscode": "1124",

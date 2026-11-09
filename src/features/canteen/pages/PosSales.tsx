@@ -400,29 +400,7 @@ export const PosSales: React.FC<PosSalesProps> = ({
       }
     }).catch(() => {});
 
-    // Supabase Realtime Channels for 100% live synchronization with database
-    const channelName = `pos_realtime_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const channel = supabase
-      .channel(channelName)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'Canteen_Inventory' }, () => {
-        fetchRawInventoryFromDb();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'Canteen_Menu' }, () => {
-        fetchCatalog();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'Canteen_Member' }, () => {
-        fetchMembers();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'app_settings', filter: 'setting_key=eq.canteen_raw_inventory_items_v2' }, () => {
-        fetchRawInventoryFromDb();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'app_settings', filter: 'setting_key=eq.canteen_menu_recipes_v3' }, () => {
-        setRecipesMap(getMenuRecipes());
-      })
-      .subscribe();
-
     return () => {
-      supabase.removeChannel(channel);
       window.removeEventListener('canteen_members_updated', handleMembersUpdated);
       window.removeEventListener('canteen_settings_updated', handleCfgUpdate);
       window.removeEventListener('canteen_raw_inventory_updated', handleSyncStock);

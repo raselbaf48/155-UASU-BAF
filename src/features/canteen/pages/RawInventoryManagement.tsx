@@ -1026,19 +1026,8 @@ export const RawInventoryManagement: React.FC<{ readOnly?: boolean }> = ({ readO
     };
     window.addEventListener('online', handleOnline);
 
-    // Realtime listener for Canteen_Inventory with unique channel name
-    const channelName = `raw_inventory_realtime_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const channel = supabase
-      .channel(channelName)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'Canteen_Inventory' }, () => {
-        fetchFromDb();
-        flushOfflineInventoryQueue();
-      })
-      .subscribe();
-
     return () => {
       window.removeEventListener('online', handleOnline);
-      supabase.removeChannel(channel);
     };
   }, []);
 

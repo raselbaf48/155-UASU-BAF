@@ -4082,23 +4082,8 @@ export const MemberDB: React.FC<MemberDBProps> = ({
       setLoading(false);
     }, 1500);
 
-    // 3. Subscribe to realtime updates on Canteen_Member table (debounced delta sync)
-    let debounceTimer: any = null;
-    const channelName = `canteen_members_realtime_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const channel = supabase
-      .channel(channelName)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'Canteen_Member' }, () => {
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-          fetchMembers(true);
-        }, 1200);
-      })
-      .subscribe();
-
     return () => {
       clearTimeout(safetyTimer);
-      clearTimeout(debounceTimer);
-      supabase.removeChannel(channel);
     };
   }, []);
 

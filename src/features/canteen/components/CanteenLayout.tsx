@@ -152,8 +152,7 @@ export const CanteenLayout: React.FC<CanteenLayoutProps> = ({ onBack, initialMem
     getCanteenMenuCache();
     getRawInventoryItems();
     fetchCanteenMenuOnce().catch(() => {});
-    fetchCanteenMembersOnce(true).catch(() => {});
-    pullAllCanteenDataFromCloud().catch(() => {});
+    fetchCanteenMembersOnce(false).catch(() => {});
 
     fetchCanteenConfigFromCloud().then(cfg => {
       if (cfg) setCanteenConfig(cfg);

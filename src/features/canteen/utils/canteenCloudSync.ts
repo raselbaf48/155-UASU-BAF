@@ -871,6 +871,11 @@ export async function pushKeyToCloud(key: string, data: any, retryCount = 1): Pr
   }
 
   try {
+    const prevSynced = lastSyncedCloudHashes.get(key);
+    if (prevSynced && prevSynced === strVal) {
+      return true; // Already synced to cloud with identical content, skip duplicate Firestore setDoc
+    }
+
     if (key === 'baf_155_uasu_v2_db' || key.endsWith('_db') || strVal.length > 700000) {
       console.warn(`[CanteenCloudSync] Skipping Firestore push for '${key}' (${strVal.length} bytes) to protect document size limit`);
       lastSyncedCloudHashes.set(key, strVal);
@@ -1669,26 +1674,6 @@ export async function syncCanteenMembersFromCloud(forceFull = false): Promise<vo
       if (!alreadyInMerged) {
         hasDelta = true;
         mergedList.push(localM);
-        // Background push to Supabase Canteen_Member so it syncs up to cloud
-        try {
-          const cleanBd = String(localM['BD No'] || localM.airman_id || '').replace(/\D/g, '');
-          const aid = localM.airman_id || (cleanBd ? `airman-${cleanBd}` : '');
-          if (aid) {
-            supabase.from('Canteen_Member').upsert([{
-              airman_id: aid,
-              "BD No": cleanBd,
-              Rank: localM.Rank || 'LAC',
-              Surname: localM.Surname || localM.surname || localM.name || '',
-              Contact: localM.Contact || '',
-              Role: localM.Role || 'Member',
-              Due: Number(localM.Due) || 0,
-              DP: localM.DP || null,
-              Name_BN: localM.Name_BN || localM.name_bn || null,
-              Rank_BN: localM.Rank_BN || localM.rank_bn || null,
-              active: true
-            }], { onConflict: 'airman_id' }).then();
-          }
-        } catch {}
       }
     }
 

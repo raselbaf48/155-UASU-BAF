@@ -471,12 +471,46 @@ export class FirestoreQueryBuilder implements PromiseLike<{ data: any; error: an
         return { data: this.isSingle ? (items[0] || null) : items, error: null };
       }
 
-      // 2. Fast cached collection fetch: avoid repeated Firestore network delay on clicks
+      // Pushdown: single setting_key lookup for app_settings without scanning whole collection
+      if (this.collectionName === 'app_settings') {
+        const keyFilter = this.filters.find(f => f.field === 'setting_key' && f.op === '==');
+        if (keyFilter && keyFilter.value) {
+          const settingKey = String(keyFilter.value).trim();
+          try {
+            const snap = await getDoc(doc(db, 'app_settings', settingKey));
+            if (snap.exists()) {
+              const item = normalizeRecord('app_settings', snap.data(), snap.id);
+              return { data: this.isSingle ? item : [item], error: null };
+            }
+            return { data: this.isSingle ? null : [], error: null };
+          } catch (err: any) {
+            if (isQuotaExceededError(err)) setFirestoreQuotaExceeded(true);
+          }
+        }
+      }
+
+      // Pushdown: single document lookup by ID
+      const directIdFilter = this.filters.find(f => (f.field === 'id' || f.field === 'airman_id' || f.field === 'assignment_id') && f.op === '==');
+      if (directIdFilter && directIdFilter.value) {
+        const targetId = resolveDocId(this.collectionName, { [directIdFilter.field]: directIdFilter.value });
+        try {
+          const snap = await getDoc(doc(db, this.collectionName, targetId));
+          if (snap.exists()) {
+            const item = normalizeRecord(this.collectionName, snap.data(), snap.id);
+            return { data: this.isSingle ? item : [item], error: null };
+          }
+          return { data: this.isSingle ? null : [], error: null };
+        } catch (err: any) {
+          if (isQuotaExceededError(err)) setFirestoreQuotaExceeded(true);
+        }
+      }
+
+      // 2. Fast cached collection fetch: 5 minutes TTL to dramatically cut Firestore reads
       const now = Date.now();
       const cachedCol = globalCollectionCache.get(this.collectionName);
       let results: any[] = [];
 
-      if (cachedCol && now - cachedCol.timestamp < 30000) {
+      if (cachedCol && now - cachedCol.timestamp < 300000) {
         results = [...cachedCol.data];
       } else {
         const colRef = collection(db, this.collectionName);
@@ -767,12 +801,93 @@ export class FirestoreQueryBuilder implements PromiseLike<{ data: any; error: an
   }
 }
 
+interface SharedCollectionSubscription {
+  unsub: Unsubscribe;
+  refCount: number;
+  callbacks: Set<(payload: any) => void>;
+}
+
+const sharedCollectionSubscriptions = new Map<string, SharedCollectionSubscription>();
+
+function subscribeToSharedCollection(
+  colName: string,
+  callback: (payload: any) => void,
+  filter?: { filter?: string; table?: string }
+): () => void {
+  if (!db || isFirestoreQuotaExceeded()) return () => {};
+
+  let sub = sharedCollectionSubscriptions.get(colName);
+  if (!sub) {
+    const callbacks = new Set<(payload: any) => void>();
+    try {
+      const unsub = onSnapshot(collection(db, colName), (snap) => {
+        snap.docChanges().forEach((change) => {
+          const docData = change.doc.data();
+          const norm = normalizeRecord(colName, docData, change.doc.id);
+          const eventPayload = {
+            eventType: change.type === 'removed' ? 'DELETE' : (change.type === 'added' ? 'INSERT' : 'UPDATE'),
+            new: norm,
+            old: change.type === 'removed' ? norm : undefined,
+            schema: 'public',
+            table: filter?.table || colName
+          };
+          callbacks.forEach(cb => {
+            try { cb(eventPayload); } catch (e) { console.warn(e); }
+          });
+        });
+      }, (err: any) => {
+        if (isQuotaExceededError(err)) {
+          setFirestoreQuotaExceeded(true);
+          return;
+        }
+        if (err?.code === 'permission-denied' || colName === 'canteen_menu') return;
+        console.warn(`[FirestoreRealtime] Snapshot warning for ${colName}:`, err);
+      });
+
+      sub = { unsub, refCount: 0, callbacks };
+      sharedCollectionSubscriptions.set(colName, sub);
+    } catch (err: any) {
+      if (err?.code === 'permission-denied' || colName === 'canteen_menu') return () => {};
+      console.warn(`[FirestoreRealtime] Channel subscription warning for ${colName}:`, err);
+      return () => {};
+    }
+  }
+
+  // Filter check wrapper to dispatch only matching records
+  const wrappedCb = (payload: any) => {
+    if (filter?.filter) {
+      const match = filter.filter.match(/^([^=]+)=eq\.(.+)$/);
+      if (match) {
+        const [, field, val] = match;
+        if (payload?.new?.[field] !== val && payload?.old?.[field] !== val) {
+          return;
+        }
+      }
+    }
+    callback(payload);
+  };
+
+  sub.callbacks.add(wrappedCb);
+  sub.refCount++;
+
+  return () => {
+    const currentSub = sharedCollectionSubscriptions.get(colName);
+    if (!currentSub) return;
+    currentSub.callbacks.delete(wrappedCb);
+    currentSub.refCount--;
+    if (currentSub.refCount <= 0) {
+      try { currentSub.unsub(); } catch {}
+      sharedCollectionSubscriptions.delete(colName);
+    }
+  };
+}
+
 /**
- * Universal Firestore-backed Realtime Channel
+ * Universal Firestore-backed Realtime Channel (Multiplexed)
  */
 export class FirestoreRealtimeChannel {
   private channelName: string;
-  private unsubs: Unsubscribe[] = [];
+  private unsubs: (() => void)[] = [];
 
   constructor(channelName: string) {
     this.channelName = channelName;
@@ -786,35 +901,8 @@ export class FirestoreRealtimeChannel {
     if (!db || !filter || !filter.table) return this;
 
     const colName = resolveCollectionName(filter.table);
-    try {
-      const unsub = onSnapshot(collection(db, colName), (snap) => {
-        snap.docChanges().forEach((change) => {
-          const docData = change.doc.data();
-          const norm = normalizeRecord(colName, docData, change.doc.id);
-          callback({
-            eventType: change.type === 'removed' ? 'DELETE' : (change.type === 'added' ? 'INSERT' : 'UPDATE'),
-            new: norm,
-            old: change.type === 'removed' ? norm : undefined,
-            schema: 'public',
-            table: filter.table
-          });
-        });
-      }, (err: any) => {
-        // Silently ignore collections managed via app_settings or not yet provisioned, or quota limits
-        if (isQuotaExceededError(err)) {
-          setFirestoreQuotaExceeded(true);
-          return;
-        }
-        if (err?.code === 'permission-denied' || colName === 'canteen_menu') return;
-        console.warn(`[FirestoreRealtime] Snapshot warning for ${colName}:`, err);
-      });
-
-      this.unsubs.push(unsub);
-    } catch (err: any) {
-      if (err?.code === 'permission-denied' || colName === 'canteen_menu') return this;
-      console.warn(`[FirestoreRealtime] Channel subscription warning for ${colName}:`, err);
-    }
-
+    const unsub = subscribeToSharedCollection(colName, callback, filter);
+    this.unsubs.push(unsub);
     return this;
   }
 

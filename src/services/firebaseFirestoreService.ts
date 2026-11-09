@@ -340,12 +340,21 @@ export async function pushParadeStatesToFirebase(history: ActivityHistoryItem[])
         const docRef = doc(db, path, docId);
         const data = {
           log_id: docId,
-          date: anyH.timestamp || anyH.date || new Date().toISOString(),
+          date: anyH.fromDate || anyH.date || anyH.timestamp || new Date().toISOString(),
           type: anyH.actionType || anyH.action || anyH.type || '',
+          action_type: anyH.actionType || anyH.type || '',
+          airman_id: anyH.airmanId || anyH.airman_id || '',
+          airman_name: anyH.airmanName || anyH.airman_name || anyH.title || '',
+          title: anyH.airmanName || anyH.title || 'System Action',
+          duty_code: anyH.dutyCode || anyH.duty_code || '',
+          from_date: anyH.fromDate || anyH.date || '',
+          to_date: anyH.toDate || anyH.fromDate || anyH.date || '',
           count: anyH.count || 0,
-          notes: anyH.details || anyH.notes || '',
+          notes: anyH.notes || anyH.details || anyH.description || '',
+          description: anyH.description || anyH.notes || '',
           details: typeof anyH.details === 'string' ? anyH.details : JSON.stringify(anyH.details || {}),
-          user: anyH.user || anyH.assignedBy || 'System'
+          user: anyH.user || anyH.assignedBy || 'System',
+          created_at: anyH.timestamp || anyH.created_at || new Date().toISOString()
         };
         batch.set(docRef, data, { merge: true });
         count++;
@@ -374,11 +383,26 @@ export async function fetchParadeStatesFromFirebase(): Promise<ActivityHistoryIt
     const list: ActivityHistoryItem[] = [];
     snap.forEach((d) => {
       const data = d.data();
+      const rawTitle = data.title || data.airman_name || data.airmanName || '';
+      const actType = data.action_type || data.actionType || data.type || '';
+      const isLeave = actType === 'GRANT_LEAVE' || (data.description && data.description.includes('Leave')) || (data.notes && data.notes.includes('Leave'));
+      const dutyCode = data.duty_code || data.dutyCode || (isLeave ? 'LEAVE' : 'GD');
+      let fromDate = data.from_date || data.fromDate || (data.date ? data.date.split('T')[0] : '');
+      let toDate = data.to_date || data.toDate || fromDate;
+
       list.push({
         id: data.log_id || d.id,
-        timestamp: data.date || '',
-        action: data.type || '',
-        details: data.details || data.notes || '',
+        timestamp: data.created_at || data.timestamp || data.date || '',
+        actionType: actType,
+        type: actType,
+        airmanId: data.airman_id || data.airmanId || '',
+        airmanName: data.airman_name || data.airmanName || rawTitle || 'Airman',
+        dutyCode,
+        fromDate,
+        toDate,
+        date: fromDate,
+        notes: data.notes || data.description || data.details || '',
+        description: data.description || data.notes || '',
         user: data.user || 'Admin'
       } as any);
     });

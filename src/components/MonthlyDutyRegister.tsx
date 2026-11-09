@@ -2113,7 +2113,7 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
       {showHistoryModal && (
         <EntryHistoryModal
           airmen={airmen}
-          filterType="DUTY"
+          filterType="ALL"
           onClose={() => setShowHistoryModal(false)}
           onRefreshData={() => {
             fetchRoster();

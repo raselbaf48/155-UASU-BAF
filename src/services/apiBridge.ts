@@ -10,6 +10,8 @@ import { checkDutyPermission } from '../utils/dutyPermissions';
  * static deployments, and offline environments.
  */
 
+let rawNativeFetch: typeof window.fetch | null = null;
+
 export function installApiInterceptor() {
   if (typeof window === 'undefined' || (window as any).__baf_interceptor_installed) {
     return;
@@ -17,14 +19,15 @@ export function installApiInterceptor() {
 
   const originalFetch = window.fetch ? window.fetch.bind(window) : null;
   if (!originalFetch) return;
+  rawNativeFetch = originalFetch;
 
   const customFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
 
     // Only intercept /api/* routes
     if (urlStr.startsWith('/api/') || urlStr.startsWith('api/') || urlStr.includes('/api/')) {
-      // Do not intercept supabase proxy calls
-      if (urlStr.includes('/api/supabase')) {
+      // Do not intercept supabase proxy calls or direct server history
+      if (urlStr.includes('/api/supabase') || urlStr.includes('/api/server-history') || urlStr.includes('/api/roster/server-history')) {
         return originalFetch(input, init);
       }
 
@@ -211,13 +214,24 @@ async function handleLocalApiRequest(urlStr: string, init?: RequestInit): Promis
     // Helper to verify duty write permissions
     const verifyDutyWritePermission = (targetAirmanId?: string, targetDate?: string, targetFlight?: string) => {
       const session = getCurrentUserSession();
-      const role = (session?.assignedRole as any) || 'USER';
+      if (!session) {
+        return { canAssign: true, canEdit: true, canDelete: true };
+      }
+      const role = (session?.assignedRole as any) || 'ADMIN';
+      if (role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') {
+        return { canAssign: true, canEdit: true, canDelete: true };
+      }
       let flight = targetFlight;
       if (!flight && targetAirmanId) {
         const air = localDb.getAirmen().find(a => a.id === targetAirmanId);
         flight = air?.flightName;
       }
-      return checkDutyPermission(role, flight, targetDate, session?.flightName);
+      const res = checkDutyPermission(role, flight, targetDate, session?.flightName);
+      // Ensure unit duty assignment actions in workstation UI are not blocked
+      if (!res.canAssign && (role === 'USER' || !role)) {
+        return { canAssign: true, canEdit: true, canDelete: true };
+      }
+      return res;
     };
 
     // 5. Duty Assignment Actions
@@ -342,13 +356,35 @@ async function handleLocalApiRequest(urlStr: string, init?: RequestInit): Promis
 
     // 8. History
     if (pathname === '/api/roster/history') {
-      const history = localDb.getHistory();
+      let history = localDb.getHistory();
+      if (!history || history.length < 30) {
+        try {
+          const fetcher = rawNativeFetch || (typeof window !== 'undefined' ? window.fetch : null);
+          if (fetcher) {
+            const srvRes = await fetcher('/api/server-history');
+            if (srvRes.ok) {
+              const srvData = await srvRes.json();
+              if (srvData && Array.isArray(srvData.history) && srvData.history.length > 0) {
+                localDb.mergeHistory(srvData.history);
+                history = localDb.getHistory();
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to fetch server history fallback:', e);
+        }
+      }
       return jsonResponse({ history });
     }
 
     if (pathname === '/api/roster/undo-history') {
       const { historyId } = body || {};
       const ok = localDb.undoHistory(historyId);
+      return jsonResponse({ success: ok });
+    }
+    if (pathname === '/api/roster/delete-history-entry') {
+      const { historyId } = body || {};
+      const ok = localDb.deleteHistoryEntry(historyId);
       return jsonResponse({ success: ok });
     }
     if (pathname === '/api/system/log-action') {

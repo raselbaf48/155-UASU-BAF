@@ -197,6 +197,16 @@ export class LocalDatabaseEngine {
     this.lastSyncedDbStr = JSON.stringify(this.db);
     if (typeof window !== 'undefined') {
       window.localStorage.removeItem('baf_pending_sync');
+      if (!this.db.activityHistory || this.db.activityHistory.length < 25) {
+        fetch('/api/server-history')
+          .then((r) => r.json())
+          .then((d) => {
+            if (d && Array.isArray(d.history) && d.history.length > 0) {
+              this.mergeHistory(d.history);
+            }
+          })
+          .catch(() => {});
+      }
       if (false) {
         this.saveToFirebase(this.db, true).then(() => this.syncFromFirebase());
       } else {
@@ -595,21 +605,64 @@ export class LocalDatabaseEngine {
          console.warn("Failed to fetch history from Cloud: " + (e?.message || e)); 
       }
       
-      if (histData) {
-         const parsedHistory: ActivityHistoryItem[] = histData.map((h: any) => ({
-            id: h.log_id || 'log-' + Math.random().toString(36).substring(2, 9),
-            airmanId: h.airman_id || '',
-            airmanName: h.airman_name || h.user_name || 'System',
-            date: h.date || '',
-            type: h.type || 'SYSTEM',
-            title: h.title || '',
-            description: h.description || '',
-            performedByUserId: h.user_id || undefined,
-            performedByUserName: h.user_name || undefined,
-            timestamp: h.created_at || new Date().toISOString()
-         })).sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-         
-         newDb.activityHistory = parsedHistory;
+      if (histData && histData.length > 0) {
+         const parsedHistory: ActivityHistoryItem[] = histData.map((h: any) => {
+            const rawTitle = h.title || h.airman_name || h.airmanName || '';
+            const air = (newDb.airmen || this.db.airmen || []).find((a: any) => 
+               (h.airman_id && a.id === h.airman_id) ||
+               (h.airmanId && a.id === h.airmanId) ||
+               (a.bdNo && rawTitle.includes(String(a.bdNo))) ||
+               (a.name && rawTitle.toLowerCase().includes(a.name.toLowerCase())) ||
+               (`${a.rank} ${a.name}`.toLowerCase() === rawTitle.toLowerCase())
+            );
+
+            let fromDate = h.fromDate || h.from_date || h.date || h.created_at || h.timestamp || '';
+            if (fromDate.includes('T')) fromDate = fromDate.split('T')[0];
+            if (!fromDate || fromDate.length < 8) fromDate = '2026-11-08';
+
+            let toDate = h.toDate || h.to_date || fromDate;
+            if (toDate.includes('T')) toDate = toDate.split('T')[0];
+
+            const actType = h.actionType || h.action_type || h.type || ((h.description || '').includes('Leave') ? 'GRANT_LEAVE' : 'ASSIGN_RANGE');
+            const isLeave = actType === 'GRANT_LEAVE' || (h.description && h.description.includes('Leave')) || (h.notes && h.notes.includes('Leave'));
+            const dutyCode = h.dutyCode || h.duty_code || (isLeave ? 'LEAVE' : 'GD');
+
+            return {
+               id: h.log_id || h.id || 'log-' + Math.random().toString(36).substring(2, 9),
+               airmanId: air ? air.id : (h.airman_id || h.airmanId || 'airman-unknown'),
+               airmanName: air ? `${air.rank} ${air.name}` : (rawTitle || 'Airman'),
+               airmanRank: air ? air.rank : (h.airmanRank || ''),
+               airmanTrade: air ? air.trade : (h.airmanTrade || ''),
+               dutyCode: dutyCode as any,
+               idaShift: h.idaShift || h.ida_shift || undefined,
+               actionType: actType as any,
+               type: actType,
+               fromDate,
+               toDate,
+               date: fromDate,
+               notes: h.notes || h.description || h.details || '',
+               description: h.description || h.notes || '',
+               performedByUserId: h.user_id || undefined,
+               performedByUserName: h.user_name || undefined,
+               timestamp: h.created_at || h.timestamp || h.date || new Date().toISOString()
+            };
+         });
+
+         // Merge cloud history with local history so no historical logs are overwritten or lost
+         const historyMap = new Map<string, ActivityHistoryItem>();
+         (this.db.activityHistory || []).forEach((item: any) => {
+            if (item && item.id) historyMap.set(item.id, item);
+         });
+         parsedHistory.forEach((item: any) => {
+            if (item && item.id) {
+               const existing = historyMap.get(item.id);
+               historyMap.set(item.id, existing ? { ...item, ...existing, fromDate: existing.fromDate || item.fromDate, dutyCode: existing.dutyCode || item.dutyCode } : item);
+            }
+         });
+
+         newDb.activityHistory = Array.from(historyMap.values()).sort(
+            (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+         );
          dataChanged = true;
       }
       
@@ -1603,25 +1656,6 @@ export class LocalDatabaseEngine {
            }
         }
 
-        // Direct Push to Firebase Firestore
-        if (isFirebaseConfigured) {
-          try {
-            if (changedAirmen.length > 0) {
-              await pushAirmenToFirebase(changedAirmen);
-            }
-            if (changedAssignments.length > 0) {
-              await pushDutyAssignmentsToFirebase(changedAssignments);
-            }
-            if (changedHistory.length > 0) {
-              await pushParadeStatesToFirebase(changedHistory);
-            }
-            if (changedUsers.length > 0) {
-              await pushUserProfilesToFirebase(changedUsers);
-            }
-          } catch (fbPushErr) {
-            console.warn("Direct Firebase Firestore push warning:", fbPushErr);
-          }
-        }
 
         if (hasError) {
            emitSyncProgress(0, "Sync Failed!");
@@ -1815,7 +1849,20 @@ export class LocalDatabaseEngine {
               airmen: normalizeAirmenSeniority(syncedAirmen),
               assignments: migratedAssignments,
 
-              activityHistory: parsed.activityHistory || [],
+              activityHistory: (() => {
+                const rawHistory: ActivityHistoryItem[] = parsed.activityHistory || [];
+                const seenHistKey = new Set<string>();
+                const cleanHist: ActivityHistoryItem[] = [];
+                for (const h of rawHistory) {
+                  if (h.airmanId && h.fromDate) {
+                    const key = `${h.airmanId}_${h.fromDate}_${h.dutyCode || 'DUTY'}`;
+                    if (seenHistKey.has(key)) continue;
+                    seenHistKey.add(key);
+                  }
+                  cleanHist.push(h);
+                }
+                return cleanHist;
+              })(),
               adminPasscode: parsed.adminPasscode || DEFAULT_ADMIN_PASSCODE,
               detailedUsers: parsed.detailedUsers || [],
               importHistory: parsed.importHistory || [],
@@ -2246,8 +2293,18 @@ export class LocalDatabaseEngine {
     proxyForFlight?: FlightName;
     replaceAirmanId?: string;
     disposalScope?: 'ALL' | 'PARADE' | 'PT' | 'NIGHT_COUNT';
+    replaceHistoryId?: string;
   }): { count: number; assignedDates: string[] } {
-    const { airmanId, dutyCode, idaShift, fromDate, toDate, notes, proxyForFlight, replaceAirmanId, disposalScope } = params;
+    const { airmanId, dutyCode, idaShift, fromDate, toDate, notes, proxyForFlight, replaceAirmanId, disposalScope, replaceHistoryId } = params;
+
+    // If an existing history entry is being replaced/edited, remove it first so no ghost entry remains
+    if (replaceHistoryId && this.db.activityHistory) {
+      const oldHistIdx = this.db.activityHistory.findIndex((h) => h.id === replaceHistoryId);
+      if (oldHistIdx !== -1) {
+        this.db.activityHistory.splice(oldHistIdx, 1);
+      }
+    }
+
     const assignedDates = getDatesInRange(fromDate, toDate);
     const prevStates: Array<{ airmanId: string; date: string; dutyCode?: any; idaShift?: any; notes?: string }> = [];
 
@@ -3070,7 +3127,59 @@ export class LocalDatabaseEngine {
 
   // --- ACTIVITY HISTORY ---
   public getHistory(): ActivityHistoryItem[] {
+    this.cleanDuplicateHistory();
     return this.db.activityHistory || [];
+  }
+
+  public deleteHistoryEntry(historyId: string): boolean {
+    if (!this.db.activityHistory) return false;
+    const idx = this.db.activityHistory.findIndex((h) => h.id === historyId);
+    if (idx === -1) return false;
+    this.db.activityHistory.splice(idx, 1);
+    this.saveToStorage();
+    return true;
+  }
+
+  public cleanDuplicateHistory(): void {
+    if (!this.db.activityHistory || this.db.activityHistory.length <= 1) return;
+
+    const seenMap = new Map<string, string>();
+    const itemsToRemove = new Set<string>();
+
+    for (const item of this.db.activityHistory) {
+      if (!item.airmanId || !item.fromDate) continue;
+      // Deduplicate when multiple entries exist for the same airman, start date, and duty
+      const key = `${item.airmanId}_${item.fromDate}_${item.dutyCode || 'DUTY'}`;
+      if (seenMap.has(key)) {
+        itemsToRemove.add(item.id);
+      } else {
+        seenMap.set(key, item.id);
+      }
+    }
+
+    if (itemsToRemove.size > 0) {
+      this.db.activityHistory = this.db.activityHistory.filter((h) => !itemsToRemove.has(h.id));
+      this.saveToStorage();
+    }
+  }
+
+  public mergeHistory(incoming: ActivityHistoryItem[]): void {
+    if (!Array.isArray(incoming) || incoming.length === 0) return;
+    const historyMap = new Map<string, ActivityHistoryItem>();
+    (this.db.activityHistory || []).forEach((h) => {
+      if (h && h.id) historyMap.set(h.id, h);
+    });
+    incoming.forEach((h) => {
+      if (h && h.id) {
+        const curr = historyMap.get(h.id);
+        historyMap.set(h.id, curr ? { ...h, ...curr, fromDate: curr.fromDate || h.fromDate, dutyCode: curr.dutyCode || h.dutyCode } : h);
+      }
+    });
+    this.db.activityHistory = Array.from(historyMap.values()).sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+    this.cleanDuplicateHistory();
+    this.saveToStorage();
   }
 
   public undoHistory(historyId: string): boolean {

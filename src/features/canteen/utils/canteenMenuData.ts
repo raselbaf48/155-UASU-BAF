@@ -654,8 +654,16 @@ export { getCanteenMembersCache, setCanteenMembersCache };
  * Uses stale-while-revalidate pattern so existing cached members are returned instantly
  * while background refresh updates silently.
  */
+let lastMembersFetchTimestamp = 0;
+
 export async function fetchCanteenMembersOnce(force = false): Promise<any[]> {
   const cached = getCanteenMembersCache();
+  const now = Date.now();
+
+  // If cached members exist and were fetched within last 5 minutes without force, return immediately
+  if (!force && cached.length > 0 && (now - lastMembersFetchTimestamp < 300000)) {
+    return cached;
+  }
 
   if (memberFetchPromise && !force) {
     if (cached.length > 0) return cached;
@@ -664,6 +672,7 @@ export async function fetchCanteenMembersOnce(force = false): Promise<any[]> {
 
   memberFetchPromise = (async () => {
     try {
+      lastMembersFetchTimestamp = Date.now();
       let data: any[] = [];
       if (isFirebaseConfigured && db) {
         try {

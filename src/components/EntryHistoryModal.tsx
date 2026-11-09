@@ -146,37 +146,54 @@ export const EntryHistoryModal: React.FC<EntryHistoryModalProps> = ({
     setErrorMsg('');
     setSuccessMsg('');
 
+    const oldId = editingItem.id;
+    const oldAirmanId = editingItem.airmanId;
+    const oldFromDate = editingItem.fromDate;
+    const oldToDate = editingItem.toDate || editingItem.fromDate;
+
     try {
       // 1. Delete original dates for original airman
       await fetch('/api/roster/delete-range', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          airmanId: editingItem.airmanId,
-          fromDate: editingItem.fromDate,
-          toDate: editingItem.toDate || editingItem.fromDate,
+          airmanId: oldAirmanId,
+          fromDate: oldFromDate,
+          toDate: oldToDate,
         }),
       });
 
-      // 2. Assign new range (for selected airman)
+      // 2. Delete the old history log entry so it is completely replaced and not duplicated
+      await fetch('/api/roster/delete-history-entry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          historyId: oldId,
+        }),
+      });
+
+      // 3. Assign new range (for selected airman) with replaceHistoryId
       const res = await fetch('/api/roster/assign-range', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          airmanId: editAirmanId || editingItem.airmanId,
+          airmanId: editAirmanId || oldAirmanId,
           dutyCode: editDutyCode,
           idaShift: editDutyCode === 'IDAC' || editDutyCode === 'IDA' ? editIdaShift : undefined,
           fromDate: editFromDate,
           toDate: editToDate,
           notes: editNotes,
+          replaceHistoryId: oldId,
         }),
       });
 
       const result = await res.json();
       if (res.ok && result.success) {
-        const targetAirman = airmen.find((a) => a.id === (editAirmanId || editingItem.airmanId));
+        const targetAirman = airmen.find((a) => a.id === (editAirmanId || oldAirmanId));
         setSuccessMsg(`Updated entry for ${targetAirman ? `${targetAirman.rank} ${targetAirman.name}` : editingItem.airmanName}`);
         setEditingItem(null);
+        // Optimistically remove old entry from local state
+        setHistoryList((prev) => prev.filter((h) => h.id !== oldId));
         fetchHistory();
         if (onRefreshData) onRefreshData();
       } else {
@@ -189,7 +206,28 @@ export const EntryHistoryModal: React.FC<EntryHistoryModalProps> = ({
     }
   };
 
-    const filteredHistory = historyList.filter((item) => {
+  // Deduplicate superseded history entries (e.g. if an edited entry left the old record behind)
+  const deduplicatedHistory = React.useMemo(() => {
+    const seen = new Set<string>();
+    const result: ActivityHistoryItem[] = [];
+    for (const item of historyList) {
+      const fromDate = item.fromDate || (item.date ? item.date.split('T')[0] : '');
+      const airmanKey = item.airmanId || item.airmanName || (item as any).title || '';
+      if (!airmanKey || !fromDate) {
+        result.push(item);
+        continue;
+      }
+      // If an airman has multiple entries with the same start date and duty code, keep the newer one
+      const key = `${airmanKey}_${fromDate}_${item.dutyCode || (item.actionType === 'GRANT_LEAVE' || item.type === 'GRANT_LEAVE' ? 'LEAVE' : 'DUTY')}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        result.push(item);
+      }
+    }
+    return result;
+  }, [historyList]);
+
+  const filteredHistory = deduplicatedHistory.filter((item) => {
     // Hide corrupted logs immediately
     if (!item.actionType && !item.type) return false;
     if (item.actionType === 'undefined' || item.type === 'undefined') return false;
@@ -197,33 +235,40 @@ export const EntryHistoryModal: React.FC<EntryHistoryModalProps> = ({
     const isSystem = item.actionType === 'SYSTEM_ACTION' || item.type === 'SYSTEM_ACTION';
     
     // Check missing airman
-    const air = airmen.find((a) => a.id === item.airmanId);
-    const resolvedName = air ? air.name : item.airmanName;
+    const rawName = item.airmanName || (item as any).title || '';
+    const air = airmen.find((a) => 
+      (item.airmanId && a.id === item.airmanId) ||
+      (a.bdNo && rawName.includes(String(a.bdNo))) ||
+      (a.name && rawName.toLowerCase().includes(a.name.toLowerCase()))
+    );
+    const resolvedName = air ? `${air.rank} ${air.name}` : (rawName === 'undefined' ? '' : rawName);
     if (!isSystem && (!resolvedName || resolvedName === 'undefined')) return false;
 
-    // Check missing duty for non-system logs
-    if (!isSystem && (!item.dutyCode || item.dutyCode === 'undefined')) return false;
+    // Check missing date (with fallback to item.date or item.timestamp)
+    const fromDate = item.fromDate || (item.date ? item.date.split('T')[0] : '') || (item.timestamp ? item.timestamp.split('T')[0] : '');
+    if (!fromDate || fromDate === 'undefined') return false;
 
-    // Check missing date
-    if (!item.fromDate || item.fromDate === 'undefined') return false;
+    // Check missing duty for non-system logs (with fallback)
+    const isLeave = item.dutyCode === 'LEAVE' || item.actionType === 'GRANT_LEAVE' || item.type === 'GRANT_LEAVE' || ((item.notes || '') + ' ' + (item.description || '')).includes('Leave');
+    const effectiveDutyCode = item.dutyCode || (isLeave ? 'LEAVE' : 'GD');
 
     // Type filters
-    if (filterType === 'LEAVE' && item.dutyCode !== 'LEAVE') return false;
-    if (filterType === 'TDY' && item.dutyCode !== 'TDY') return false;
-    if (filterType === 'DEPLOYMENT' && item.dutyCode !== 'DEPLOYMENT') return false;
-    if (filterType === 'DUTY' && (item.dutyCode === 'LEAVE' || item.dutyCode === 'TDY' || item.dutyCode === 'DEPLOYMENT')) return false;
+    if (filterType === 'LEAVE' && effectiveDutyCode !== 'LEAVE') return false;
+    if (filterType === 'TDY' && effectiveDutyCode !== 'TDY') return false;
+    if (filterType === 'DEPLOYMENT' && effectiveDutyCode !== 'DEPLOYMENT') return false;
+    if (filterType === 'DUTY' && (effectiveDutyCode === 'LEAVE' || effectiveDutyCode === 'TDY' || effectiveDutyCode === 'DEPLOYMENT')) return false;
     if (filterType === 'SYSTEM' && !isSystem) return false;
 
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
     return (
       (resolvedName || '').toLowerCase().includes(q) ||
-      (item.dutyCode || '').toLowerCase().includes(q) ||
+      (effectiveDutyCode || '').toLowerCase().includes(q) ||
       (item.notes && item.notes.toLowerCase().includes(q)) ||
-      (item.fromDate && item.fromDate.includes(q)) ||
+      (fromDate && fromDate.includes(q)) ||
       (item.toDate && item.toDate.includes(q))
     );
-    });
+  });
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 bg-slate-950/75 backdrop-blur-xs animate-fadeIn">
@@ -442,18 +487,27 @@ export const EntryHistoryModal: React.FC<EntryHistoryModalProps> = ({
               const timeStr = dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
               const dateStr = dt.toLocaleDateString('en-GB', { month: 'short', day: '2-digit', year: '2-digit' }).replace(/Sept/gi, 'Sep');
 
-              const air = airmen.find((a) => a.id === item.airmanId);
-              const isLeave = item.dutyCode === 'LEAVE' || item.actionType === 'GRANT_LEAVE';
+              const rawName = item.airmanName || (item as any).title || '';
+              const air = airmen.find((a) => 
+                (item.airmanId && a.id === item.airmanId) ||
+                (a.bdNo && rawName.includes(String(a.bdNo))) ||
+                (a.name && rawName.toLowerCase().includes(a.name.toLowerCase()))
+              );
+              const isLeave = item.dutyCode === 'LEAVE' || item.actionType === 'GRANT_LEAVE' || item.type === 'GRANT_LEAVE' || ((item.notes || '') + ' ' + (item.description || '')).includes('Leave');
               const isDelete = item.actionType === 'DELETE_ASSIGNMENT' || item.actionType === 'CLEAR_RANGE';
+              const effectiveDutyCode = item.dutyCode || (isLeave ? 'LEAVE' : 'GD');
+              const effectiveFromDate = item.fromDate || (item.date ? item.date.split('T')[0] : '') || (item.timestamp ? item.timestamp.split('T')[0] : '');
+              const effectiveToDate = item.toDate || effectiveFromDate;
 
               // Calculate number of days
-              const fD = new Date(item.fromDate);
-              const tD = new Date(item.toDate || item.fromDate);
+              const fD = new Date(effectiveFromDate);
+              const tD = new Date(effectiveToDate);
               let diffDays = Math.max(1, Math.round((tD.getTime() - fD.getTime()) / (1000 * 60 * 60 * 24)) + 1);
               if (isNaN(diffDays)) diffDays = 1;
               
-              if (item.notes && (item.dutyCode === 'LEAVE' || item.actionType === 'GRANT_LEAVE')) {
-                  const match = item.notes.match(/\(F-295: (\d+) Free Days\)/);
+              const noteText = item.notes || item.description || '';
+              if (noteText && isLeave) {
+                  const match = noteText.match(/\(F-295: (\d+) Free Days\)/);
                   if (match && match[1]) {
                       diffDays = Math.max(0, diffDays - parseInt(match[1], 10));
                   }
@@ -496,11 +550,11 @@ export const EntryHistoryModal: React.FC<EntryHistoryModalProps> = ({
                             ? 'bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300'
                             : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
                         }`}>
-                          {(item.actionType || item.type || '').replace(/_/g, ' ')}
+                          {(item.actionType || item.type || (isLeave ? 'GRANT LEAVE' : 'ASSIGN RANGE')).replace(/_/g, ' ')}
                         </span>
 
                         <span className="font-extrabold text-slate-900 dark:text-slate-100 text-sm">
-                          {air ? `${air.rank} ${air.name}` : (item.airmanName === 'undefined' ? '' : item.airmanName)}
+                          {air ? `${air.rank} ${air.name}` : (rawName === 'undefined' ? 'Personnel' : rawName)}
                         </span>
 
                         {air && (
@@ -510,7 +564,7 @@ export const EntryHistoryModal: React.FC<EntryHistoryModalProps> = ({
                         )}
 
                         <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200">
-                          Duty: {item.dutyCode === 'undefined' ? '' : item.dutyCode} {item.dutyCode && item.dutyCode.includes('IDA') ? ` ${(item.idaShift && item.idaShift !== 'undefined' ? item.idaShift : 'Morning')}` : ''}
+                          Duty: {effectiveDutyCode} {effectiveDutyCode && effectiveDutyCode.includes('IDA') ? ` ${(item.idaShift && item.idaShift !== 'undefined' ? item.idaShift : 'Morning')}` : ''}
                         </span>
                       </div>
 
@@ -519,15 +573,15 @@ export const EntryHistoryModal: React.FC<EntryHistoryModalProps> = ({
                         <span className="flex items-center space-x-1 font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800/60">
                           <Calendar className="w-3.5 h-3.5" />
                           <span>
-                            {(!item.fromDate || item.fromDate === 'undefined') ? '' : (item.fromDate === item.toDate
-                              ? `${item.fromDate} (1 Day)`
-                              : `${item.fromDate} to ${item.toDate} (${diffDays} Days)`)}
+                            {!effectiveFromDate ? '' : (effectiveFromDate === effectiveToDate
+                              ? `${effectiveFromDate} (1 Day)`
+                              : `${effectiveFromDate} to ${effectiveToDate} (${diffDays} Days)`)}
                           </span>
                         </span>
 
-                        {(item.notes && item.notes !== 'undefined') && (
+                        {(noteText && noteText !== 'undefined') && (
                           <span className="text-slate-600 dark:text-slate-400">
-                            • Note: <em className="text-slate-800 dark:text-slate-200 font-medium">{item.notes}</em>
+                            • Note: <em className="text-slate-800 dark:text-slate-200 font-medium">{noteText}</em>
                           </span>
                         )}
 

@@ -766,9 +766,33 @@ async function startServer() {
     });
   });
 
+  app.get('/api/server-history', (req, res) => {
+    const db = loadDatabase();
+    res.json({ history: db.activityHistory || [] });
+  });
+
+  app.get('/api/roster/server-history', (req, res) => {
+    const db = loadDatabase();
+    res.json({ history: db.activityHistory || [] });
+  });
+
   app.get('/api/roster/history', (req, res) => {
     const db = loadDatabase();
     res.json({ history: db.activityHistory || [] });
+  });
+
+  app.post('/api/roster/delete-history-entry', express.json(), (req, res) => {
+    const { historyId } = req.body || {};
+    if (!historyId) return res.status(400).json({ error: 'Missing historyId' });
+    const db = loadDatabase();
+    if (db.activityHistory) {
+      const idx = db.activityHistory.findIndex((h: any) => h.id === historyId);
+      if (idx !== -1) {
+        db.activityHistory.splice(idx, 1);
+        fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf-8');
+      }
+    }
+    res.json({ success: true });
   });
 
   // Dedicated Canteen Settings & Full Backup Endpoints

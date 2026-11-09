@@ -325,16 +325,7 @@ export const CanteenMemberDB: React.FC = () => {
     };
     window.addEventListener('canteen_settings_updated', handleSettingsUpdate);
 
-    const channelName = `canteen_member_db_realtime_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const channel = supabase
-      .channel(channelName)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'Canteen_Member' }, () => {
-        fetchMembersFromCloud();
-      })
-      .subscribe();
-
     return () => {
-      supabase.removeChannel(channel);
       window.removeEventListener('canteen_members_updated', handleSync);
       window.removeEventListener('canteen_settings_updated', handleSettingsUpdate);
     };
