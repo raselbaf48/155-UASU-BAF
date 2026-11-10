@@ -624,6 +624,20 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
 
     // 1. Current Day Assignment
     if (airmanAssignments.length > 0) {
+      // IDAC Duties (Check first among operational duties to preserve shift information)
+      const idacAssignments = airmanAssignments.filter((a) => 
+        a.dutyCode === 'IDAC' || a.dutyCode === 'IDA' ||
+        (a.dutyName && a.dutyName.toUpperCase().includes('IDAC')) ||
+        (a.notes && a.notes.toUpperCase().includes('IDAC'))
+      );
+      if (idacAssignments.length > 0) {
+        const shifts = idacAssignments.map((a) => {
+          const s = a.idaShift || (a.notes?.toLowerCase().includes('night') ? 'Night' : a.notes?.toLowerCase().includes('afternoon') ? 'Afternoon' : 'Morning');
+          return s === 'Morning' ? 'M' : s === 'Afternoon' ? 'A' : s === 'Night' ? 'Nt' : s;
+        }).filter(Boolean).join('+');
+        return { label: shifts ? `IDAC (${shifts})` : 'IDAC', type: 'IDAC', isFixed: false };
+      }
+
       // Deployment (Canteen/Reception)
       const deployment = airmanAssignments.find((a) => a.dutyCode === 'DEPLOYMENT');
       if (deployment) {
@@ -652,37 +666,27 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
       if (tdy) return { label: 'TDY', type: 'TDY', isFixed: true };
 
       // Fixed Task Forces
-      const btf = airmanAssignments.find((a) => a.dutyCode === 'BTF');
+      const btf = airmanAssignments.find((a) => a.dutyCode === 'BTF' || (a.dutyName && a.dutyName.toUpperCase().includes('BTF')));
       if (btf) return { label: 'BTF', type: 'BTF', isFixed: true };
 
-      const ntf = airmanAssignments.find((a) => a.dutyCode === 'NTF');
+      const ntf = airmanAssignments.find((a) => a.dutyCode === 'NTF' || (a.dutyName && a.dutyName.toUpperCase().includes('NTF')));
       if (ntf) return { label: 'NTF', type: 'NTF', isFixed: true };
 
       const halishahar = airmanAssignments.find((a) => a.dutyCode === 'HALISHAHAR');
       if (halishahar) return { label: 'Halishahar', type: 'HALISHAHAR', isFixed: true };
 
       // Other operational duties
-      const airport = airmanAssignments.find((a) => a.dutyCode === 'AIRPORT' || a.dutyCode === 'ATT');
+      const airport = airmanAssignments.find((a) => a.dutyCode === 'AIRPORT' || a.dutyCode === 'ATT' || (a.dutyName && a.dutyName.toUpperCase().includes('AIRPORT')) || (a.dutyName && a.dutyName.toUpperCase().includes('AIRFIELD')));
       if (airport) return { label: 'Airport', type: 'AIRPORT', isFixed: false };
 
-      const gd = airmanAssignments.find((a) => a.dutyCode === 'GD' || a.dutyCode === 'DUTY' || a.dutyCode === 'DUTY_ON');
+      // Base Security Duty (GD) - ONLY if dutyCode is actually GD or dutyName mentions Security
+      const gd = airmanAssignments.find((a) => a.dutyCode === 'GD' || (a.dutyName && (a.dutyName.toUpperCase().includes('SECURITY') || a.dutyName.toUpperCase().includes('GD'))));
       if (gd) {
-        const isGeneric = (s?: string) => !s || ['DUTY', 'DUTY_ON', 'ON DUTY', 'DUTY ON'].includes(s.toUpperCase().trim());
-        let gdLabel = 'Security (GD)';
-        if (gd.dutyName && !isGeneric(gd.dutyName)) gdLabel = gd.dutyName;
-        else if (gd.notes && !isGeneric(gd.notes)) gdLabel = gd.notes;
-        return { label: gdLabel, type: 'GD', isFixed: false };
+        return { label: 'Security (GD)', type: 'GD', isFixed: false };
       }
 
       const bnb = airmanAssignments.find((a) => a.dutyCode === 'BAKE_N_BITE');
       if (bnb) return { label: 'Bake & Bite', type: 'BAKE_N_BITE', isFixed: false };
-
-      // IDAC Duties
-      const idacAssignments = airmanAssignments.filter((a) => a.dutyCode === 'IDAC' || a.dutyCode === 'IDA');
-      if (idacAssignments.length > 0) {
-        const shifts = idacAssignments.map((a) => a.idaShift).filter(Boolean).join(' + ');
-        return { label: `IDAC ${shifts || ''}`.trim(), type: 'IDAC', isFixed: false };
-      }
 
       const firstDuty = airmanAssignments[0];
       const isGenericStr = (s?: string) => !s || ['DUTY', 'DUTY_ON', 'ON DUTY', 'DUTY ON'].includes(s.toUpperCase().trim());
@@ -691,16 +695,11 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
                  (firstDuty.notes && !isGenericStr(firstDuty.notes) ? firstDuty.notes : '') || 
                  firstDuty.dutyCode;
 
-      if (firstDuty.dutyCode === 'DUTY' || firstDuty.dutyCode === 'DUTY_ON') {
-        name = (firstDuty.dutyName && !isGenericStr(firstDuty.dutyName)) ? firstDuty.dutyName : 
-               (firstDuty.notes && !isGenericStr(firstDuty.notes)) ? firstDuty.notes : 'Security (GD)';
-      }
-
       if (firstDuty.dutyCode === 'DUTY_OFF') {
         if (prevAssignments.length > 0) {
           const yestAss = prevAssignments[0];
           let offShort = 'GD Off';
-          if (yestAss.dutyCode === 'GD' || yestAss.dutyCode === 'DUTY' || yestAss.dutyCode === 'DUTY_ON') offShort = 'GD Off';
+          if (yestAss.dutyCode === 'GD') offShort = 'GD Off';
           else if (yestAss.dutyCode === 'BTF') offShort = 'BTF Off';
           else if (yestAss.dutyCode === 'NTF') offShort = 'NTF Off';
           else if (yestAss.dutyCode === 'AIRPORT') offShort = 'Airport Off';
@@ -1534,6 +1533,14 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
                         ) : statusInfo.type === 'BTF' || statusInfo.type === 'NTF' || statusInfo.type === 'HALISHAHAR' ? (
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
                             - {statusInfo.label}
+                          </span>
+                        ) : statusInfo.type === 'IDAC' ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-teal-100 dark:bg-teal-950/60 text-teal-800 dark:text-teal-300 border border-teal-200 dark:border-teal-800">
+                            - {statusInfo.label}
+                          </span>
+                        ) : statusInfo.type === 'AIRPORT' ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-sky-100 dark:bg-sky-950/60 text-sky-800 dark:text-sky-300 border border-sky-200 dark:border-sky-800">
+                            - Airport
                           </span>
                         ) : statusInfo.type === 'NIGHT_OFF' ? (
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
