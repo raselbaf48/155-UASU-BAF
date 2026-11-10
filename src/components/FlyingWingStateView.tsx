@@ -10,6 +10,7 @@ interface FlyingWingUnitData {
   totalStr: number;
   detTdy: number;
   disposals: Record<string, number>;
+  isManual?: boolean;
 }
 
 interface FlyingWingStateViewProps {
@@ -111,21 +112,30 @@ export function FlyingWingStateView({
             unit: d.unit,
             totalStr: d.totalStr || 0,
             detTdy: d.detTdy || 0,
+            isManual: d.isManual,
             disposals: {
               'Leave': d.leave || 0,
-              'ED/ EX PPGF': d.edExPpgf || 0,
-              'CMH/ BNS/ BSH/Qrnt': d.cmhBnsBsh || 0,
+              'ED': d.edExPpgf || 0,
+              'CMH': d.cmhBnsBsh || 0,
               'Office Duty': d.officeDuty || 0,
-              'TF/Base/Airfield Duty': d.baseAirfieldDuty || 0,
+              'Base Security (GD)': d.baseAirfieldDuty || 0,
               'Driving': d.driving || 0
             }
           };
         });
-        setUnitsData(migrated);
+
+        // Ensure all FLYING_WING_UNITS are present in the loaded array
+        const merged = FLYING_WING_UNITS.map(unit => {
+          const existing = migrated.find((m: any) => m.unit === unit);
+          if (existing) return existing;
+          return { unit, totalStr: 0, detTdy: 0, disposals: {} };
+        });
+
+        setUnitsData(merged);
         
         // Extract custom columns from data
         const allKeys = new Set<string>();
-        migrated.forEach((d: FlyingWingUnitData) => {
+        merged.forEach((d: FlyingWingUnitData) => {
           Object.keys(d.disposals).forEach(k => allKeys.add(k));
         });
         const custom = Array.from(allKeys).filter(k => !DISPOSAL_COLUMNS.includes(k));
@@ -170,22 +180,34 @@ export function FlyingWingStateView({
     }
   };
 
-  // Replace default unit "155 UASU BAF" with stats from parade state if needed
+  // Replace default unit "155 UASU BAF" with stats from parade state if not manually entered
   const displayData = unitsData.map(d => {
-    if (d.unit === '155 UASU BAF' && uasuStats) {
-      return {
-        ...d,
-        totalStr: uasuStats.totalStr,
-        detTdy: uasuStats.detTdy,
-        disposals: {
-          ...d.disposals,
-          'Leave': uasuStats.leave,
-          'ED/ EX PPGF': uasuStats.edExPpgf,
-          'CMH/ BNS/ BSH/Qrnt': uasuStats.cmhBnsBsh,
-          'Office Duty': uasuStats.officeDuty,
-          'TF/Base/Airfield Duty': uasuStats.baseAirfieldDuty
-        }
-      };
+    if (d.unit === '155 UASU BAF') {
+      // If user has explicitly entered manual numbers for 155 UASU BAF, use manual data!
+      if (d.isManual) {
+        return d;
+      }
+      // Otherwise auto-populate from 155 UASU Parade State if available
+      if (uasuStats) {
+        const autoDisposals: Record<string, number> = { ...d.disposals };
+        if (uasuStats.leave) autoDisposals['Leave'] = uasuStats.leave;
+        const edVal = uasuStats.edEx || uasuStats.edExPpgf;
+        if (edVal) autoDisposals['ED'] = edVal;
+        const cmhVal = uasuStats.cmh || uasuStats.cmhBnsBsh;
+        if (cmhVal) autoDisposals['CMH'] = cmhVal;
+        const offVal = uasuStats.office || uasuStats.officeDuty;
+        if (offVal) autoDisposals['Office Duty'] = offVal;
+        const baseAirVal = uasuStats.baseAirfield || uasuStats.baseAirfieldDuty;
+        if (baseAirVal) autoDisposals['Base Security (GD)'] = baseAirVal;
+        if (uasuStats.driving) autoDisposals['Driving'] = uasuStats.driving;
+
+        return {
+          ...d,
+          totalStr: uasuStats.totalStr || 0,
+          detTdy: uasuStats.detTdy || 0,
+          disposals: autoDisposals
+        };
+      }
     }
     return d;
   });
@@ -283,7 +305,8 @@ export function FlyingWingStateView({
           ...d,
           totalStr: newTotalStr,
           detTdy: newDetTdy,
-          disposals: newDisposals
+          disposals: newDisposals,
+          isManual: true
         };
       }
       return d;
@@ -457,9 +480,40 @@ export function FlyingWingStateView({
             <form onSubmit={handleAddSubmit} className="p-5 overflow-y-auto flex-1 space-y-6">
               {/* 1. Select Unit */}
               <div className="space-y-2 bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
-                <label className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
-                  1. Select Unit <span className="text-red-500">*</span>
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
+                    1. Select Unit <span className="text-red-500">*</span>
+                  </label>
+                  {selectedUnit === '155 UASU BAF' && unitsData.find(u => u.unit === '155 UASU BAF')?.isManual && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newData = unitsData.map(u => u.unit === '155 UASU BAF' ? { ...u, isManual: false } : u);
+                        saveData(newData);
+                        const vals: Record<string, number> = {};
+                        if (uasuStats) {
+                          vals['Total Str'] = uasuStats.totalStr || 0;
+                          vals['Det/Tdy'] = uasuStats.detTdy || 0;
+                          if (uasuStats.leave) vals['Leave'] = uasuStats.leave;
+                          const edVal = uasuStats.edEx || uasuStats.edExPpgf;
+                          if (edVal) vals['ED'] = edVal;
+                          const cmhVal = uasuStats.cmh || uasuStats.cmhBnsBsh;
+                          if (cmhVal) vals['CMH'] = cmhVal;
+                          const offVal = uasuStats.office || uasuStats.officeDuty;
+                          if (offVal) vals['Office Duty'] = offVal;
+                          const baseAirVal = uasuStats.baseAirfield || uasuStats.baseAirfieldDuty;
+                          if (baseAirVal) vals['Base Security (GD)'] = baseAirVal;
+                          if (uasuStats.driving) vals['Driving'] = uasuStats.driving;
+                        }
+                        setFormDisposalValues(vals);
+                      }}
+                      className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                      title="Clear manual override and sync with live 155 UASU Parade State"
+                    >
+                      ↺ Reset to Live State
+                    </button>
+                  )}
+                </div>
                 <select
                   value={selectedUnit}
                   onChange={(e) => setSelectedUnit(e.target.value)}
@@ -467,10 +521,17 @@ export function FlyingWingStateView({
                   required
                 >
                   <option value="" disabled>— Select Unit —</option>
-                  {FLYING_WING_UNITS.filter(u => u !== '155 UASU BAF').map(u => (
+                  {FLYING_WING_UNITS.map(u => (
                     <option key={u} value={u}>{u}</option>
                   ))}
                 </select>
+                {selectedUnit === '155 UASU BAF' && (
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                    {unitsData.find(u => u.unit === '155 UASU BAF')?.isManual 
+                      ? '✏️ Manual entry active: The numbers saved here will appear on the Flying Wing State table.' 
+                      : 'ℹ️ Currently preloaded from live Parade State. You can edit any numbers to manually override.'}
+                  </p>
+                )}
               </div>
               
               

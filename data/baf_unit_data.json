@@ -47449,10 +47449,11 @@
         "dutyCode": "TDY",
         "dutyType": "TDY",
         "dutyName": "TDY",
-        "shift": "",
+        "shift": "D",
         "disposalScope": "ALL",
         "notes": "",
-        "updatedAt": "2026-10-17T05:30:05.986Z"
+        "updatedAt": "2026-10-17T10:55:21.502Z",
+        "assignment_id": "asn_BD_465669_2026-11-01_TDY_n_ALL"
       },
       {
         "id": "asn_BD_465669_2026-11-02_TDY_n_ALL",
@@ -47461,10 +47462,11 @@
         "dutyCode": "TDY",
         "dutyType": "TDY",
         "dutyName": "TDY",
-        "shift": "",
+        "shift": "D",
         "disposalScope": "ALL",
         "notes": "",
-        "updatedAt": "2026-10-17T05:30:05.986Z"
+        "updatedAt": "2026-10-17T10:55:21.502Z",
+        "assignment_id": "asn_BD_465669_2026-11-02_TDY_n_ALL"
       },
       {
         "id": "asn_BD_465669_2026-11-03_TDY_n_ALL",
@@ -47473,10 +47475,11 @@
         "dutyCode": "TDY",
         "dutyType": "TDY",
         "dutyName": "TDY",
-        "shift": "",
+        "shift": "D",
         "disposalScope": "ALL",
         "notes": "",
-        "updatedAt": "2026-10-17T05:30:05.986Z"
+        "updatedAt": "2026-10-17T10:55:21.502Z",
+        "assignment_id": "asn_BD_465669_2026-11-03_TDY_n_ALL"
       },
       {
         "id": "asn_BD_465669_2026-11-04_TDY_n_ALL",
@@ -47485,10 +47488,11 @@
         "dutyCode": "TDY",
         "dutyType": "TDY",
         "dutyName": "TDY",
-        "shift": "",
+        "shift": "D",
         "disposalScope": "ALL",
         "notes": "",
-        "updatedAt": "2026-10-17T05:30:05.986Z"
+        "updatedAt": "2026-10-17T10:55:21.502Z",
+        "assignment_id": "asn_BD_465669_2026-11-04_TDY_n_ALL"
       },
       {
         "id": "asn_BD_465669_2026-11-05_TDY_n_ALL",
@@ -47497,10 +47501,11 @@
         "dutyCode": "TDY",
         "dutyType": "TDY",
         "dutyName": "TDY",
-        "shift": "",
+        "shift": "D",
         "disposalScope": "ALL",
         "notes": "",
-        "updatedAt": "2026-10-17T05:30:05.986Z"
+        "updatedAt": "2026-10-17T10:55:21.502Z",
+        "assignment_id": "asn_BD_465669_2026-11-05_TDY_n_ALL"
       },
       {
         "id": "asn_BD_465669_2026-11-06_TDY_n_ALL",
@@ -47509,10 +47514,11 @@
         "dutyCode": "TDY",
         "dutyType": "TDY",
         "dutyName": "TDY",
-        "shift": "",
+        "shift": "D",
         "disposalScope": "ALL",
         "notes": "",
-        "updatedAt": "2026-10-17T05:30:05.986Z"
+        "updatedAt": "2026-10-17T10:55:21.502Z",
+        "assignment_id": "asn_BD_465669_2026-11-06_TDY_n_ALL"
       },
       {
         "id": "asn_BD_465669_2026-11-07_TDY_n_ALL",
@@ -47521,10 +47527,11 @@
         "dutyCode": "TDY",
         "dutyType": "TDY",
         "dutyName": "TDY",
-        "shift": "",
+        "shift": "D",
         "disposalScope": "ALL",
         "notes": "",
-        "updatedAt": "2026-10-17T05:30:05.986Z"
+        "updatedAt": "2026-10-17T10:55:21.502Z",
+        "assignment_id": "asn_BD_465669_2026-11-07_TDY_n_ALL"
       },
       {
         "id": "asn_BD_465669_2026-11-08_TDY_n_ALL",
@@ -47533,10 +47540,11 @@
         "dutyCode": "TDY",
         "dutyType": "TDY",
         "dutyName": "TDY",
-        "shift": "",
+        "shift": "D",
         "disposalScope": "ALL",
         "notes": "",
-        "updatedAt": "2026-10-17T05:30:05.986Z"
+        "updatedAt": "2026-10-17T10:55:21.502Z",
+        "assignment_id": "asn_BD_465669_2026-11-08_TDY_n_ALL"
       },
       {
         "id": "asn_BD_465669_2026-11-09_TDY_n_ALL",
@@ -47545,10 +47553,11 @@
         "dutyCode": "TDY",
         "dutyType": "TDY",
         "dutyName": "TDY",
-        "shift": "",
+        "shift": "D",
         "disposalScope": "ALL",
         "notes": "",
-        "updatedAt": "2026-10-17T05:30:05.986Z"
+        "updatedAt": "2026-10-17T10:55:21.502Z",
+        "assignment_id": "asn_BD_465669_2026-11-09_TDY_n_ALL"
       },
       {
         "id": "asn_BD_474549_2026-11-01_LEAVE_n_ALL",
@@ -47670,6 +47679,445 @@
         "disposalScope": "ALL",
         "notes": "IDAC Night",
         "updatedAt": "2026-11-09T09:13:33.587Z"
+      },
+      {
+        "id": "asn_BD_467992_2026-11-08_NTF_n_ALL",
+        "assignment_id": "asn_BD_467992_2026-11-08_NTF_n_ALL",
+        "airmanId": "BD/467992",
+        "date": "2026-11-08",
+        "dutyCode": "NTF",
+        "dutyType": "NTF",
+        "dutyName": "NTF",
+        "shift": "D",
+        "notes": "",
+        "updatedAt": "2026-11-08T17:01:58.264Z"
+      },
+      {
+        "id": "asn_BD_467992_2026-11-10_BTF_n_ALL",
+        "assignment_id": "asn_BD_467992_2026-11-10_BTF_n_ALL",
+        "airmanId": "BD/467992",
+        "date": "2026-11-10",
+        "dutyCode": "BTF",
+        "dutyType": "BTF",
+        "dutyName": "BTF",
+        "shift": "D",
+        "notes": "",
+        "updatedAt": "2026-11-10T12:50:08.521Z"
+      },
+      {
+        "id": "asn_BD_468991_2026-11-08_IDAC_Night_ALL",
+        "assignment_id": "asn_BD_468991_2026-11-08_IDAC_Night_ALL",
+        "airmanId": "BD/468991",
+        "date": "2026-11-08",
+        "dutyCode": "IDAC",
+        "dutyType": "IDAC",
+        "dutyName": "IDAC",
+        "shift": "Night",
+        "idaShift": "Night",
+        "notes": "",
+        "updatedAt": "2026-11-08T17:00:32.770Z"
+      },
+      {
+        "id": "asn_BD_469153_2026-11-08_IDAC_Morning_ALL",
+        "assignment_id": "asn_BD_469153_2026-11-08_IDAC_Morning_ALL",
+        "airmanId": "BD/469153",
+        "date": "2026-11-08",
+        "dutyCode": "IDAC",
+        "dutyType": "IDAC",
+        "dutyName": "IDAC",
+        "shift": "Morning",
+        "idaShift": "Morning",
+        "notes": "",
+        "updatedAt": "2026-11-08T17:00:08.300Z"
+      },
+      {
+        "id": "asn_BD_469598_2026-11-01_AIRPORT_n_ALL",
+        "assignment_id": "asn_BD_469598_2026-11-01_AIRPORT_n_ALL",
+        "airmanId": "BD/469598",
+        "date": "2026-11-01",
+        "dutyCode": "AIRPORT",
+        "dutyType": "AIRPORT",
+        "dutyName": "AIRPORT",
+        "shift": "D",
+        "notes": "",
+        "updatedAt": "2026-11-08T17:03:05.833Z"
+      },
+      {
+        "id": "asn_BD_469598_2026-11-02_AIRPORT_n_ALL",
+        "assignment_id": "asn_BD_469598_2026-11-02_AIRPORT_n_ALL",
+        "airmanId": "BD/469598",
+        "date": "2026-11-02",
+        "dutyCode": "AIRPORT",
+        "dutyType": "AIRPORT",
+        "dutyName": "AIRPORT",
+        "shift": "D",
+        "notes": "",
+        "updatedAt": "2026-11-08T17:03:05.833Z"
+      },
+      {
+        "id": "asn_BD_469598_2026-11-03_AIRPORT_n_ALL",
+        "assignment_id": "asn_BD_469598_2026-11-03_AIRPORT_n_ALL",
+        "airmanId": "BD/469598",
+        "date": "2026-11-03",
+        "dutyCode": "AIRPORT",
+        "dutyType": "AIRPORT",
+        "dutyName": "AIRPORT",
+        "shift": "D",
+        "notes": "",
+        "updatedAt": "2026-11-08T17:03:05.833Z"
+      },
+      {
+        "id": "asn_BD_469598_2026-11-04_AIRPORT_n_ALL",
+        "assignment_id": "asn_BD_469598_2026-11-04_AIRPORT_n_ALL",
+        "airmanId": "BD/469598",
+        "date": "2026-11-04",
+        "dutyCode": "AIRPORT",
+        "dutyType": "AIRPORT",
+        "dutyName": "AIRPORT",
+        "shift": "D",
+        "notes": "",
+        "updatedAt": "2026-11-08T17:03:05.833Z"
+      },
+      {
+        "id": "asn_BD_469598_2026-11-05_AIRPORT_n_ALL",
+        "assignment_id": "asn_BD_469598_2026-11-05_AIRPORT_n_ALL",
+        "airmanId": "BD/469598",
+        "date": "2026-11-05",
+        "dutyCode": "AIRPORT",
+        "dutyType": "AIRPORT",
+        "dutyName": "AIRPORT",
+        "shift": "D",
+        "notes": "",
+        "updatedAt": "2026-11-08T17:03:05.833Z"
+      },
+      {
+        "id": "asn_BD_469598_2026-11-06_AIRPORT_n_ALL",
+        "assignment_id": "asn_BD_469598_2026-11-06_AIRPORT_n_ALL",
+        "airmanId": "BD/469598",
+        "date": "2026-11-06",
+        "dutyCode": "AIRPORT",
+        "dutyType": "AIRPORT",
+        "dutyName": "AIRPORT",
+        "shift": "D",
+        "notes": "",
+        "updatedAt": "2026-11-08T17:03:05.833Z"
+      },
+      {
+        "id": "asn_BD_469598_2026-11-07_AIRPORT_n_ALL",
+        "assignment_id": "asn_BD_469598_2026-11-07_AIRPORT_n_ALL",
+        "airmanId": "BD/469598",
+        "date": "2026-11-07",
+        "dutyCode": "AIRPORT",
+        "dutyType": "AIRPORT",
+        "dutyName": "AIRPORT",
+        "shift": "D",
+        "notes": "",
+        "updatedAt": "2026-11-08T17:03:05.833Z"
+      },
+      {
+        "id": "asn_BD_469598_2026-11-08_AIRPORT_n_ALL",
+        "assignment_id": "asn_BD_469598_2026-11-08_AIRPORT_n_ALL",
+        "airmanId": "BD/469598",
+        "date": "2026-11-08",
+        "dutyCode": "AIRPORT",
+        "dutyType": "AIRPORT",
+        "dutyName": "AIRPORT",
+        "shift": "D",
+        "notes": "",
+        "updatedAt": "2026-11-08T17:03:05.833Z"
+      },
+      {
+        "id": "asn_BD_469598_2026-11-09_AIRPORT_n_ALL",
+        "assignment_id": "asn_BD_469598_2026-11-09_AIRPORT_n_ALL",
+        "airmanId": "BD/469598",
+        "date": "2026-11-09",
+        "dutyCode": "AIRPORT",
+        "dutyType": "AIRPORT",
+        "dutyName": "AIRPORT",
+        "shift": "D",
+        "notes": "",
+        "updatedAt": "2026-11-08T17:03:05.833Z"
+      },
+      {
+        "id": "asn_BD_469598_2026-11-10_AIRPORT_n_ALL",
+        "assignment_id": "asn_BD_469598_2026-11-10_AIRPORT_n_ALL",
+        "airmanId": "BD/469598",
+        "date": "2026-11-10",
+        "dutyCode": "AIRPORT",
+        "dutyType": "AIRPORT",
+        "dutyName": "AIRPORT",
+        "shift": "D",
+        "notes": "",
+        "updatedAt": "2026-11-10T12:50:08.530Z"
+      },
+      {
+        "id": "asn_BD_469598_2026-11-11_AIRPORT_n_ALL",
+        "assignment_id": "asn_BD_469598_2026-11-11_AIRPORT_n_ALL",
+        "airmanId": "BD/469598",
+        "date": "2026-11-11",
+        "dutyCode": "AIRPORT",
+        "dutyType": "AIRPORT",
+        "dutyName": "AIRPORT",
+        "shift": "D",
+        "notes": "",
+        "updatedAt": "2026-11-08T17:03:05.833Z"
+      },
+      {
+        "id": "asn_BD_469598_2026-11-12_AIRPORT_n_ALL",
+        "assignment_id": "asn_BD_469598_2026-11-12_AIRPORT_n_ALL",
+        "airmanId": "BD/469598",
+        "date": "2026-11-12",
+        "dutyCode": "AIRPORT",
+        "dutyType": "AIRPORT",
+        "dutyName": "AIRPORT",
+        "shift": "D",
+        "notes": "",
+        "updatedAt": "2026-11-08T17:03:05.833Z"
+      },
+      {
+        "id": "asn_BD_469598_2026-11-13_AIRPORT_n_ALL",
+        "assignment_id": "asn_BD_469598_2026-11-13_AIRPORT_n_ALL",
+        "airmanId": "BD/469598",
+        "date": "2026-11-13",
+        "dutyCode": "AIRPORT",
+        "dutyType": "AIRPORT",
+        "dutyName": "AIRPORT",
+        "shift": "D",
+        "notes": "",
+        "updatedAt": "2026-11-08T17:03:05.833Z"
+      },
+      {
+        "id": "asn_BD_469598_2026-11-14_AIRPORT_n_ALL",
+        "assignment_id": "asn_BD_469598_2026-11-14_AIRPORT_n_ALL",
+        "airmanId": "BD/469598",
+        "date": "2026-11-14",
+        "dutyCode": "AIRPORT",
+        "dutyType": "AIRPORT",
+        "dutyName": "AIRPORT",
+        "shift": "D",
+        "notes": "",
+        "updatedAt": "2026-11-08T17:03:05.833Z"
+      },
+      {
+        "id": "asn_BD_469598_2026-11-15_AIRPORT_n_ALL",
+        "assignment_id": "asn_BD_469598_2026-11-15_AIRPORT_n_ALL",
+        "airmanId": "BD/469598",
+        "date": "2026-11-15",
+        "dutyCode": "AIRPORT",
+        "dutyType": "AIRPORT",
+        "dutyName": "AIRPORT",
+        "shift": "D",
+        "notes": "",
+        "updatedAt": "2026-11-08T17:03:05.833Z"
+      },
+      {
+        "id": "asn_BD_469598_2026-11-16_AIRPORT_n_ALL",
+        "assignment_id": "asn_BD_469598_2026-11-16_AIRPORT_n_ALL",
+        "airmanId": "BD/469598",
+        "date": "2026-11-16",
+        "dutyCode": "AIRPORT",
+        "dutyType": "AIRPORT",
+        "dutyName": "AIRPORT",
+        "shift": "D",
+        "notes": "",
+        "updatedAt": "2026-11-08T17:03:05.833Z"
+      },
+      {
+        "id": "asn_BD_474455_2026-11-01_LEAVE_n_ALL",
+        "assignment_id": "asn_BD_474455_2026-11-01_LEAVE_n_ALL",
+        "airmanId": "BD/474455",
+        "date": "2026-11-01",
+        "dutyCode": "LEAVE",
+        "dutyType": "LEAVE",
+        "dutyName": "LEAVE",
+        "shift": "D",
+        "notes": "Recreation Leave (F-295: 2 Free Days)",
+        "updatedAt": "2026-10-18T09:40:25.346Z"
+      },
+      {
+        "id": "asn_BD_474455_2026-11-02_LEAVE_n_ALL",
+        "assignment_id": "asn_BD_474455_2026-11-02_LEAVE_n_ALL",
+        "airmanId": "BD/474455",
+        "date": "2026-11-02",
+        "dutyCode": "LEAVE",
+        "dutyType": "LEAVE",
+        "dutyName": "LEAVE",
+        "shift": "D",
+        "notes": "Recreation Leave (F-295: 2 Free Days)",
+        "updatedAt": "2026-10-18T09:40:25.346Z"
+      },
+      {
+        "id": "asn_BD_474455_2026-11-03_LEAVE_n_ALL",
+        "assignment_id": "asn_BD_474455_2026-11-03_LEAVE_n_ALL",
+        "airmanId": "BD/474455",
+        "date": "2026-11-03",
+        "dutyCode": "LEAVE",
+        "dutyType": "LEAVE",
+        "dutyName": "LEAVE",
+        "shift": "D",
+        "notes": "Recreation Leave (F-295: 2 Free Days)",
+        "updatedAt": "2026-10-18T09:40:25.346Z"
+      },
+      {
+        "id": "asn_BD_474455_2026-11-04_LEAVE_n_ALL",
+        "assignment_id": "asn_BD_474455_2026-11-04_LEAVE_n_ALL",
+        "airmanId": "BD/474455",
+        "date": "2026-11-04",
+        "dutyCode": "LEAVE",
+        "dutyType": "LEAVE",
+        "dutyName": "LEAVE",
+        "shift": "D",
+        "notes": "Recreation Leave (F-295: 2 Free Days)",
+        "updatedAt": "2026-10-18T09:40:25.346Z"
+      },
+      {
+        "id": "asn_BD_474455_2026-11-05_LEAVE_n_ALL",
+        "assignment_id": "asn_BD_474455_2026-11-05_LEAVE_n_ALL",
+        "airmanId": "BD/474455",
+        "date": "2026-11-05",
+        "dutyCode": "LEAVE",
+        "dutyType": "LEAVE",
+        "dutyName": "LEAVE",
+        "shift": "D",
+        "notes": "Recreation Leave (F-295: 2 Free Days)",
+        "updatedAt": "2026-10-18T09:40:25.346Z"
+      },
+      {
+        "id": "asn_BD_474455_2026-11-06_LEAVE_n_ALL",
+        "assignment_id": "asn_BD_474455_2026-11-06_LEAVE_n_ALL",
+        "airmanId": "BD/474455",
+        "date": "2026-11-06",
+        "dutyCode": "LEAVE",
+        "dutyType": "LEAVE",
+        "dutyName": "LEAVE",
+        "shift": "D",
+        "notes": "Recreation Leave (F-295: 2 Free Days)",
+        "updatedAt": "2026-10-18T09:40:25.346Z"
+      },
+      {
+        "id": "asn_BD_474455_2026-11-09_GD_n_ALL",
+        "assignment_id": "asn_BD_474455_2026-11-09_GD_n_ALL",
+        "airmanId": "BD/474455",
+        "date": "2026-11-09",
+        "dutyCode": "GD",
+        "dutyType": "GD",
+        "dutyName": "GD",
+        "shift": "D",
+        "notes": "",
+        "updatedAt": "2026-11-08T17:01:26.012Z"
+      },
+      {
+        "id": "asn_BD_474455_2026-11-11_IDAC_Afternoon_ALL",
+        "assignment_id": "asn_BD_474455_2026-11-11_IDAC_Afternoon_ALL",
+        "airmanId": "BD/474455",
+        "date": "2026-11-11",
+        "dutyCode": "IDAC",
+        "dutyType": "IDAC",
+        "dutyName": "IDAC",
+        "shift": "Afternoon",
+        "idaShift": "Afternoon",
+        "notes": "",
+        "updatedAt": "2026-11-10T12:50:08.542Z"
+      },
+      {
+        "id": "asn_BD_474455_2026-11-12_GD_n_ALL",
+        "assignment_id": "asn_BD_474455_2026-11-12_GD_n_ALL",
+        "airmanId": "BD/474455",
+        "date": "2026-11-12",
+        "dutyCode": "GD",
+        "dutyType": "GD",
+        "dutyName": "GD",
+        "shift": "D",
+        "notes": "",
+        "updatedAt": "2026-11-10T12:50:08.542Z"
+      },
+      {
+        "id": "asn_BD_474549_2026-11-10_IDAC_Morning_ALL",
+        "assignment_id": "asn_BD_474549_2026-11-10_IDAC_Morning_ALL",
+        "airmanId": "BD/474549",
+        "date": "2026-11-10",
+        "dutyCode": "IDAC",
+        "dutyType": "IDAC",
+        "dutyName": "IDAC",
+        "shift": "Morning",
+        "idaShift": "Morning",
+        "notes": "",
+        "updatedAt": "2026-11-10T12:50:08.543Z"
+      },
+      {
+        "id": "asn_BD_474608_2026-11-08_IDAC_Night_ALL",
+        "assignment_id": "asn_BD_474608_2026-11-08_IDAC_Night_ALL",
+        "airmanId": "BD/474608",
+        "date": "2026-11-08",
+        "dutyCode": "IDAC",
+        "dutyType": "IDAC",
+        "dutyName": "IDAC",
+        "shift": "Night",
+        "idaShift": "Night",
+        "notes": "",
+        "updatedAt": "2026-11-08T17:00:37.136Z"
+      },
+      {
+        "id": "asn_BD_475268_2026-11-12_IDAC_Night_ALL",
+        "assignment_id": "asn_BD_475268_2026-11-12_IDAC_Night_ALL",
+        "airmanId": "BD/475268",
+        "date": "2026-11-12",
+        "dutyCode": "IDAC",
+        "dutyType": "IDAC",
+        "dutyName": "IDAC",
+        "shift": "Night",
+        "idaShift": "Night",
+        "notes": "",
+        "updatedAt": "2026-11-10T12:50:08.551Z"
+      },
+      {
+        "id": "asn_BD_475391_2026-11-08_IDAC_Afternoon_ALL",
+        "assignment_id": "asn_BD_475391_2026-11-08_IDAC_Afternoon_ALL",
+        "airmanId": "BD/475391",
+        "date": "2026-11-08",
+        "dutyCode": "IDAC",
+        "dutyType": "IDAC",
+        "dutyName": "IDAC",
+        "shift": "Afternoon",
+        "idaShift": "Afternoon",
+        "notes": "",
+        "updatedAt": "2026-11-08T17:00:19.165Z"
+      },
+      {
+        "id": "asn_BD_469598_2026-11-17_GD_n_ALL",
+        "assignment_id": "asn_BD_469598_2026-11-17_GD_n_ALL",
+        "airmanId": "BD/469598",
+        "date": "2026-11-17",
+        "dutyCode": "GD",
+        "dutyType": "GD",
+        "dutyName": "GD",
+        "shift": "D",
+        "notes": "",
+        "updatedAt": "2026-11-10T13:01:14.574Z"
+      },
+      {
+        "id": "asn_BD_474455_2026-11-18_GD_n_ALL",
+        "assignment_id": "asn_BD_474455_2026-11-18_GD_n_ALL",
+        "airmanId": "BD/474455",
+        "date": "2026-11-18",
+        "dutyCode": "GD",
+        "dutyType": "GD",
+        "dutyName": "GD",
+        "shift": "D",
+        "notes": "",
+        "updatedAt": "2026-11-10T13:01:14.574Z"
+      },
+      {
+        "id": "asn_BD_474549_2026-11-18_GD_n_ALL",
+        "assignment_id": "asn_BD_474549_2026-11-18_GD_n_ALL",
+        "airmanId": "BD/474549",
+        "date": "2026-11-18",
+        "dutyCode": "GD",
+        "dutyType": "GD",
+        "dutyName": "GD",
+        "shift": "D",
+        "notes": "",
+        "updatedAt": "2026-11-10T13:01:14.574Z"
       }
     ],
     "2026-03": [
@@ -52794,6 +53242,20 @@
     ]
   },
   "activityHistory": [
+    {
+      "id": "hist_1794315725671_m2rq4",
+      "timestamp": "2026-11-10T13:02:05.671Z",
+      "actionType": "ASSIGN_RANGE",
+      "type": "ASSIGN_RANGE",
+      "airmanId": "BD/474455",
+      "airmanName": "BD/474455",
+      "airmanRank": "",
+      "airmanTrade": "",
+      "dutyCode": "GD",
+      "fromDate": "2026-11-19",
+      "toDate": "2026-11-19",
+      "notes": "Test Assign"
+    },
     {
       "id": "hist_1794216680617_z20nk",
       "timestamp": "2026-11-09T09:31:20.617Z",

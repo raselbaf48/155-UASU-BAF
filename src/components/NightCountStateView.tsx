@@ -129,7 +129,8 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
   const [disposalFlight, setDisposalFlight] = useState<FlightName | 'All'>(userFlight ? (userFlight as FlightName) : 'All');
   const [disposalCategory, setDisposalCategory] = useState<string>('');
   const [disposalCustomTitle, setDisposalCustomTitle] = useState<string>('');
-    const [selectedDisposalAirmenIds, setSelectedDisposalAirmenIds] = useState<string[]>([]);
+  const [disposalSearchQuery, setDisposalSearchQuery] = useState<string>('');
+  const [selectedDisposalAirmenIds, setSelectedDisposalAirmenIds] = useState<string[]>([]);
   const [disposalPersonnelStatusMap, setDisposalPersonnelStatusMap] = useState<Record<string, { statusCategory: string; dutyCode: string; notes?: string; dutyName?: string }>>({});
   const [disposalFromDate, setDisposalFromDate] = useState<string>(selectedDate);
   const [disposalToDate, setDisposalToDate] = useState<string>(selectedDate);
@@ -252,6 +253,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
   const [editDisposalFromDate, setEditDisposalFromDate] = useState<string>(selectedDate);
   const [editDisposalToDate, setEditDisposalToDate] = useState<string>(selectedDate);
   const [editDisposalLoading, setEditDisposalLoading] = useState<boolean>(false);
+  const [editDisposalFilterText, setEditDisposalFilterText] = useState<string>('');
 
   // Flight Duty Ratio / Quota States
   const [showRatioModal, setShowRatioModal] = useState<boolean>(false);
@@ -691,20 +693,21 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
 
     setEditDisposalModal({
       airman,
-      date: fromDate,
+      date: disposalFromDate || fromDate,
       currentDutyCode: resolvedCode,
       currentDutyName: dutyName && !['DUTY', 'DUTY_ON'].includes(dutyName.toUpperCase()) ? dutyName : (resolvedCode === 'GD' ? 'Base Security Duty' : resolvedCode),
       notes: note,
     });
     setEditDisposalCategory(isStandardCat ? resolvedCode : 'OTHERS');
     setEditDisposalCustomTitle(!isStandardCat ? (dutyName || note || resolvedCode || '') : '');
-    setEditDisposalFromDate(fromDate);
-    setEditDisposalToDate(isMultiDay ? toDate : fromDate);
+    setEditDisposalFromDate(disposalFromDate || fromDate);
+    setEditDisposalToDate(disposalFromDate || (isMultiDay ? toDate : fromDate));
+    setEditDisposalFilterText('');
   };
 
   // Save changes to edited disposal
-  const handleSaveEditDisposal = async (overrideCat?: string) => {
-  const activeCategory = overrideCat || editDisposalCategory;
+  const handleSaveEditDisposal = async (overrideCat?: string, customNote?: string) => {
+    const activeCategory = overrideCat || editDisposalCategory;
     if (!editDisposalModal || !editDisposalFromDate || !editDisposalToDate) return;
     setEditDisposalLoading(true);
     try {
@@ -713,7 +716,9 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
       if (effectiveDutyCode === 'DUTY' || effectiveDutyCode === 'DUTY_ON') {
         effectiveDutyCode = 'GD';
       }
-      const effectiveNotes = isCustom ? (editDisposalCustomTitle.trim() || 'Custom Disposal') : undefined;
+      const effectiveNotes = customNote !== undefined 
+        ? customNote 
+        : (isCustom ? (editDisposalCustomTitle.trim() || 'Custom Disposal') : undefined);
 
       const res = await fetch('/api/roster/assign-range', {
         method: 'POST',
@@ -732,6 +737,18 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
         window.dispatchEvent(new CustomEvent('baf_state_updated'));
         if (isMultiDay) await fetchMulti();
         else await fetchSingle();
+
+        // Update local map instantly
+        setDisposalPersonnelStatusMap(prev => ({
+          ...prev,
+          [editDisposalModal.airman.id]: {
+            statusCategory: effectiveDutyCode === 'ON_PARADE' ? 'PARADE' : (effectiveDutyCode === 'LEAVE' ? 'LEAVE' : 'DUTY'),
+            dutyCode: effectiveDutyCode,
+            notes: effectiveNotes,
+            dutyName: effectiveDutyCode === 'ON_PARADE' ? 'On Parade' : (effectiveNotes || effectiveDutyCode),
+          }
+        }));
+
         setEditDisposalModal(null);
       } else {
         alert('Failed to update disposal');
@@ -1822,20 +1839,20 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
 
       {/* Add Disposal Modal */}
       {showAddDisposalModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-fadeIn">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-xl w-full p-6 space-y-5 relative overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/70 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-3xl w-full p-4 sm:p-6 space-y-4 relative overflow-hidden max-h-[92vh] flex flex-col">
             {/* Modal Header */}
-            <div className="flex items-start justify-between border-b border-slate-200 dark:border-slate-800 pb-4">
+            <div className="flex items-start justify-between border-b border-slate-200 dark:border-slate-800 pb-3 shrink-0">
               <div className="flex items-center space-x-3">
                 <div className="p-2.5 rounded-xl bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50">
-                  <UserPlus className="w-6 h-6" />
+                  <UserPlus className="w-5 h-5 sm:w-6 sm:h-6" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-slate-900 dark:text-white print:text-black">
+                  <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white print:text-black">
                     Add Personnel Disposal
                   </h2>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    Assign non-routine disposals (ESSN, CMH, Sick Report, Drill Cat C, Leave, Bake & Bite, etc.).
+                  <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Assign non-routine disposals (ESSN, CMH, Sick Report, Drill Cat C, Leave, Bake &amp; Bite, etc.).
                   </p>
                 </div>
               </div>
@@ -1850,407 +1867,332 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
 
             {/* Success Message */}
             {disposalSuccessMsg && (
-              <div className="p-3 bg-emerald-100 dark:bg-emerald-950/90 text-emerald-900 dark:text-emerald-200 rounded-xl border border-emerald-300 dark:border-emerald-800 text-xs font-bold animate-fadeIn">
+              <div className="p-2.5 bg-emerald-100 dark:bg-emerald-950/90 text-emerald-900 dark:text-emerald-200 rounded-xl border border-emerald-300 dark:border-emerald-800 text-xs font-bold animate-fadeIn shrink-0">
                 {disposalSuccessMsg}
               </div>
             )}
 
-            {/* Form */}
-            <form onSubmit={handleAddDisposalSubmit} className="space-y-4">
-              
-              {/* 1. Date Selection */}
-              <div className="space-y-2 bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
-                <label className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
-                      1. Select Date
-                    </label>
-                    <div className="w-56">
-                      <DateNavigator
-                    value={disposalFromDate}
-                    onChange={(e) => {
-                      setDisposalFromDate(e.target.value);
-                      setDisposalToDate(e.target.value);
-                    }}
-                    className="w-full px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white print:text-black outline-none focus:border-emerald-500 shadow-xs"
-                    required
+            {/* 1. Select Date */}
+            <div className="space-y-1.5 bg-slate-50 dark:bg-slate-800/50 p-2.5 sm:p-3 rounded-xl border border-slate-200 dark:border-slate-800 shrink-0">
+              <label className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
+                1. Select Date
+              </label>
+              <div className="w-56">
+                <DateNavigator
+                  value={disposalFromDate}
+                  onChange={(e) => {
+                    setDisposalFromDate(e.target.value);
+                    setDisposalToDate(e.target.value);
+                  }}
+                  className="w-full px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white print:text-black outline-none focus:border-emerald-500 shadow-xs"
+                  required
+                />
+              </div>
+            </div>
+
+            {/* 2. Select Flight & Disposal Section */}
+            <div className="space-y-2 shrink-0">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                  Select Flight &amp; Disposal
+                </label>
+                <div className="relative w-full sm:w-64">
+                  <input
+                    type="text"
+                    value={disposalSearchQuery}
+                    onChange={(e) => setDisposalSearchQuery(e.target.value)}
+                    placeholder="Search name, rank, trade..."
+                    className="w-full pl-7 pr-7 py-1 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 outline-none focus:border-purple-500"
                   />
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  {disposalSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setDisposalSearchQuery('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs"
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
               </div>
 
+              {/* Flight Selection Tabs */}
+              <div className="grid grid-cols-5 gap-1.5">
+                {(['All', 'Avionics', 'Mechanics', 'GCS', 'Admin'] as const).map((fl) => (
+                  <button
+                    key={fl}
+                    type="button"
+                    onClick={() => setDisposalFlight(fl)}
+                    className={`py-1.5 px-1.5 sm:px-2 text-xs font-bold rounded-lg border text-center transition-all cursor-pointer ${
+                      disposalFlight === fl
+                        ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
+                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:border-slate-400'
+                    }`}
+                  >
+                    {fl}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-              {/* 2. Select Disposal Category */}
-              <div className="space-y-2 relative">
-                <div className="flex justify-between items-center">
-                  <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                    2. Select Disposal Category
-                  </label>
-                  
-                    <button
-                      type="button"
-                      onClick={() => setIsEditingDisposals(!isEditingDisposals)}
-                      className={`p-1 rounded-md transition-colors cursor-pointer ${isEditingDisposals ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
-                      title="Manage Saved Categories"
-                    >
-                      <Settings className="w-4 h-4" />
-                    </button>
-                  
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {savedDisposals.map((cat, idx) => {
-                    const isSelected = !isEditingDisposals && disposalCategory === cat.code && (cat.code !== 'OTHERS' || disposalCustomTitle === cat.customTitle);
-                    return (
-                      <div key={`${cat.code}-${cat.label}-${cat.customTitle || ''}`} className="relative group">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (isEditingDisposals) return;
-                            setDisposalCategory(cat.code);
-                            if (cat.customTitle) setDisposalCustomTitle(cat.customTitle);
-                          }}
-                          className={`px-2.5 py-1.5 rounded-xl text-xs font-bold border transition-all truncate ${isEditingDisposals ? 'pr-6 opacity-80 cursor-default bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700' : 'cursor-pointer'} ${
-                            isSelected
-                              ? 'ring-2 ring-emerald-500 border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-100 shadow-xs'
-                              : (!isEditingDisposals ? 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600' : '')
-                          }`}
-                        >
-                          {cat.label}
-                        </button>
-                        {isEditingDisposals && (
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveDisposalOption(cat.label)}
-                            className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 rounded-full bg-red-100 text-red-600 hover:bg-red-200 dark:bg-red-900/50 dark:text-red-400 dark:hover:bg-red-900 transition-colors cursor-pointer"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {!isEditingDisposals && (
-                    <DisposalCategoryDropdown
-                      options={[...ALL_DISPOSAL_OPTIONS, ...historicalCustomCats]}
-                      savedDisposals={savedDisposals}
-                      onSelectOption={handleAddDisposalOption}
-                      buttonLabel="Add Category"
-                    />
-                  )}
-                </div>
-
-                {/* Custom Title Input if OTHERS selected */}
-                {disposalCategory === 'OTHERS' && (!ALL_DISPOSAL_OPTIONS.find(o => o.label === disposalCustomTitle && o.customTitle === disposalCustomTitle) || disposalCustomTitle === '') && !isEditingDisposals && (
-                  <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl space-y-1 animate-fadeIn mt-2">
-                    <label className="text-xs font-bold text-amber-900 dark:text-amber-200">
-                      Specify Custom Disposal Name
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Special Escort, VVIP Detail..."
-                      value={disposalCustomTitle}
-                      onChange={(e) => setDisposalCustomTitle(e.target.value)}
-                      className="w-full px-3 py-1.5 text-xs rounded-lg border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white print:text-black outline-none focus:border-amber-500 shadow-xs"
-                      required
-                    />
-                  </div>
-                )}
-                </div>
-
-                {/* 3. Flight Filter & Airman Selection */}
-                <div className="space-y-2 pt-1">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                      3. Select Flight & Personnel
-                    </label>
-                    <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-                      Select flight to view personnel
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-5 gap-1.5">
-                    {(['All', 'Avionics', 'Mechanics', 'GCS', 'Admin'] as const).map((fl) => (
-                      <button
-                        key={fl}
-                        type="button"
-                        onClick={() => setDisposalFlight(fl)}
-                        className={`py-1.5 px-2 text-xs font-bold rounded-lg border text-center transition-all cursor-pointer ${
-                          disposalFlight === fl
-                            ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
-                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:border-slate-400'
-                        }`}
-                      >
-                        {fl}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Multi-Select Airmen List */}
-                {(() => {
-                  const flightAirmen = airmen.filter((a) => (disposalFlight === 'All' ? true : a.flightName === disposalFlight)).filter(a => {
-    if (!['CPL', 'Cpl', 'LAC', 'AC'].includes(a.rank)) return false;
-    const block = (a.addressBlock || '').toLowerCase();
-    const isLOut = block.includes('qtr') || 
-                   block.includes('quarter') || 
-                   block.includes('outside') || block.includes('maizpara') ||
-                   block.includes('l/o') ||
-                   block.includes('l/out') ||
-                   block.includes('living out') ||
-                   block.includes('dhaka') ||
-                   block.includes('mirpur') ||
-                   block.includes('cantt') ||
-                   block.includes('ghat') ||
-                   block === 'lo' || 
-                   block === 'l o';
-    return !isLOut;
-});
-
-                  const getAirmanStatusLabel = (airmanId: string) => {
-                    const st = disposalPersonnelStatusMap[airmanId];
-                    if (!st) return { isOnParade: true, label: 'On Parade', dutyCode: 'ON_PARADE', notes: '', dutyName: 'On Parade' };
-
-                    const { statusCategory, dutyCode, notes, dutyName } = st;
-                    const codeUpper = (dutyCode || '').toUpperCase();
-                    const notesLower = (notes || '').toLowerCase();
-
-                    const shiftLower = (st.idaShift || '').toLowerCase();
-                    const isIdac = codeUpper === 'IDAC' || codeUpper === 'IDA' || notesLower.includes('idac') || notesLower.includes('ida center');
-                    const isIdacNt = isIdac && (
-                      shiftLower === 'night' || shiftLower === 'c' || shiftLower === 'nt' ||
-                      notesLower.includes('night') || notesLower.includes('nt') || notesLower.includes('shift c') || notesLower.includes('"c"')
-                    );
-
-                    if (isIdacNt) {
-                      return { isOnParade: false, label: 'IDAC Nt', dutyCode: 'IDAC', notes: 'IDAC Nt', dutyName: 'IDAC Nt' };
-                    }
-
-                    if (codeUpper === 'ON_PARADE' || statusCategory === 'PARADE') {
-                      return { isOnParade: true, label: 'On Parade', dutyCode: 'ON_PARADE', notes, dutyName: 'On Parade' };
-                    }
-                    const isIdacA = isIdac && !isIdacNt && (
-                      shiftLower === 'morning' || shiftLower === 'a' ||
-                      notesLower.includes('morning') || notesLower.includes('idac a') || notesLower.includes('shift a') || notesLower.includes('"a"') ||
-                      (!notesLower.includes('afternoon') && !notesLower.includes('aft') && shiftLower !== 'afternoon' && shiftLower !== 'b')
-                    );
-
-                    if (isIdacA) {
-                      return { isOnParade: true, label: 'On Parade', dutyCode: 'ON_PARADE', notes: '', dutyName: 'On Parade' };
-                    }
-                    if (statusCategory === 'OFF' || codeUpper === 'DUTY_OFF' || codeUpper === 'OFF_DUTY' || notesLower.includes('off duty') || notesLower.includes('nt off') || notesLower.includes('night off')) {
-                      return { isOnParade: true, label: 'On Parade', dutyCode: 'ON_PARADE', notes: '', dutyName: 'On Parade' };
-                    }
-                    if (codeUpper === 'CANTEEN' || notesLower.includes('canteen') || codeUpper === 'RECEPTION' || notesLower.includes('reception') || notesLower.includes('k/o')) {
-                      return { isOnParade: true, label: 'On Parade', dutyCode: 'ON_PARADE', notes: '', dutyName: 'On Parade' };
-                    }
-                    if (codeUpper === 'LEAVE' || statusCategory === 'LEAVE') {
-                      return { isOnParade: false, label: 'Leave', dutyCode: 'LEAVE', notes, dutyName: 'Leave' };
-                    }
-                    if (['TDY', 'ATT', 'DETT', 'ATTACHMENT', 'DETACHMENT'].includes(codeUpper) || statusCategory === 'TDY') {
-                      return { isOnParade: false, label: 'TDY', dutyCode: 'TDY', notes, dutyName: 'TDY' };
-                    }
-                    if (['BAKE_BITE', 'BAKE_N_BITE'].includes(codeUpper) || statusCategory === 'BAKE_N_BITE') {
-                      return { isOnParade: false, label: 'Bake & Bite', dutyCode: 'BAKE_N_BITE', notes, dutyName: 'Bake & Bite' };
-                    }
-                    if (codeUpper === 'ESSN' || notesLower.includes('essn')) {
-                      return { isOnParade: false, label: 'ESSN', dutyCode: 'ESSN', notes, dutyName: 'ESSN' };
-                    }
-                    if (['CMH', 'BNS', 'BSH', 'HOSPITAL'].includes(codeUpper) || notesLower.includes('cmh') || notesLower.includes('bns') || notesLower.includes('bsh')) {
-                      return { isOnParade: false, label: 'CMH / Hospital', dutyCode: 'CMH', notes, dutyName: 'CMH / Hospital' };
-                    }
-                    if (['SICK_REPORT', 'SICK', 'EX_PPGF', 'ED'].includes(codeUpper) || notesLower.includes('sick')) {
-                      return { isOnParade: false, label: 'Sick Report', dutyCode: 'SICK_REPORT', notes, dutyName: 'Sick Report' };
-                    }
-                    if (['ADMIN_ORDER', 'CAT_C', 'DRILL'].includes(codeUpper)) {
-                      return { isOnParade: false, label: "Admin Order", dutyCode: 'ADMIN_ORDER', notes, dutyName: "Admin Order" };
-                    }
-                    if (codeUpper === 'RECEPTION' || notesLower.includes('reception')) {
-                      return { isOnParade: false, label: 'Reception / KO', dutyCode: 'RECEPTION', notes, dutyName: 'Reception / KO' };
-                    }
-                    if (['ADMIN_ORDER', 'BOI'].includes(codeUpper) || notesLower.includes('admin order')) {
-                      return { isOnParade: false, label: 'Admin Order', dutyCode: 'ADMIN_ORDER', notes, dutyName: 'Admin Order' };
-                    }
-                    if (['CLASS_TRG', 'CLASS', 'TRG'].includes(codeUpper)) {
-                      return { isOnParade: false, label: 'Class / Trg', dutyCode: 'CLASS_TRG', notes, dutyName: 'Class / Trg' };
-                    }
-                    if (['AIRPORT', 'AIR_FD', 'AIRFIELD', 'ATT'].includes(codeUpper)) {
-                      return { isOnParade: false, label: 'Airfield', dutyCode: 'ATT', notes, dutyName: 'Airfield' };
-                    }
-                    if (['GAMES', 'GH', 'GAME_HONOR'].includes(codeUpper)) {
-                      return { isOnParade: false, label: 'G/H & Games', dutyCode: 'GAMES', notes, dutyName: 'G/H & Games' };
-                    }
-                    if (['ABSENT', 'AWL'].includes(codeUpper)) {
-                      return { isOnParade: false, label: 'Absent', dutyCode: 'ABSENT', notes, dutyName: 'Absent' };
-                    }
-                    if (statusCategory === 'DUTY' || ['GD', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA'].includes(codeUpper)) {
-                      const displayDuty = formatDutyOnShortName(codeUpper, st.idaShift, notes, dutyName);
-                      return { isOnParade: false, label: displayDuty || 'On Duty', dutyCode: dutyCode || 'DUTY_ON', notes, dutyName: dutyName || 'On Duty' };
-                    }
-
-                    return { isOnParade: false, label: notes || dutyCode || 'Disposal', dutyCode: dutyCode || 'OTHERS', notes, dutyName: dutyName || 'Disposal' };
-                  };
-
-                  const availableOnParade = flightAirmen.filter((a) => getAirmanStatusLabel(a.id).isOnParade);
-
-                  const handleSelectAllFlightAvailable = () => {
-                    const availableIds = availableOnParade.map((a) => a.id);
-                    setSelectedDisposalAirmenIds((prev) => Array.from(new Set([...prev, ...availableIds])));
-                  };
-
-                  const handleDeselectFlight = () => {
-                    const flightIds = flightAirmen.map((a) => a.id);
-                    setSelectedDisposalAirmenIds((prev) => prev.filter((id) => !flightIds.includes(id)));
-                  };
-                  
-                  if (disposalFromDate < todayStr && !isSuperAdmin) {
-                    return (
-                      <div className="py-8 text-center text-sm font-bold text-slate-500 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-dashed border-slate-300 dark:border-slate-700">
-                        <div className="mb-2">🚫</div>
-                        Modifications are disabled for past dates.
-                      </div>
-                    );
+            {/* Personnel Listing Table */}
+            {(() => {
+              const flightAirmen = airmen
+                .filter((a) => a.active !== false)
+                .filter((a) => {
+                  // Only Living In Cpl & Below
+                  const rankUpper = (a.rank || '').toUpperCase().trim();
+                  if (!['CPL', 'LAC', 'AC'].includes(rankUpper)) return false;
+                  const block = (a.addressBlock || '').toLowerCase().trim();
+                  if (
+                    block.includes('qtr') ||
+                    block.includes('quarter') ||
+                    block.includes('outside') ||
+                    block.includes('maizpara') ||
+                    block.includes('dhaka') ||
+                    block.includes('mirpur') ||
+                    block.includes('cantt') ||
+                    block.includes('ghat') ||
+                    block.includes('l/o') ||
+                    block.includes('l/out') ||
+                    block.includes('living out') ||
+                    block === 'lo' ||
+                    block === 'l o'
+                  ) {
+                    return false;
                   }
-
+                  return true;
+                })
+                .filter((a) => {
+                  if (disposalFlight === 'All') return true;
+                  const aFlight = (a.flightName || '').toLowerCase();
+                  const sel = disposalFlight.toLowerCase();
+                  if (sel.startsWith('mech')) return aFlight.startsWith('mech');
+                  if (sel.startsWith('av')) return aFlight.startsWith('av');
+                  return aFlight.includes(sel) || sel.includes(aFlight);
+                })
+                .filter((a) => {
+                  if (!disposalSearchQuery.trim()) return true;
+                  const q = disposalSearchQuery.toLowerCase();
                   return (
-                    <div className="space-y-1.5">
-                      {/* Selection Toolbar */}
-                      <div className="flex items-center justify-between px-1 text-xs">
-                        <span className="text-slate-600 dark:text-slate-400 font-medium">
-                          Available: <strong className="text-emerald-700 dark:text-emerald-400 font-bold">{availableOnParade.length}</strong> / {flightAirmen.length} in {disposalFlight === 'All' ? 'All Flights' : `${disposalFlight} Flight`}
-                          {selectedDisposalAirmenIds.length > 0 && (
-                            <span className="ml-2 font-bold text-emerald-600 dark:text-emerald-400">
-                              ({selectedDisposalAirmenIds.length} Selected)
-                            </span>
-                          )}
-                        </span>
-                        <div className="flex items-center space-x-2">
-                          <button
-                            type="button"
-                            onClick={handleSelectAllFlightAvailable}
-                            disabled={availableOnParade.length === 0}
-                            className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline disabled:opacity-40 cursor-pointer"
-                          >
-                            Select All Available
-                          </button>
-                          <span className="text-slate-300 ">|</span>
-                          <button
-                            type="button"
-                            onClick={handleDeselectFlight}
-                            className="text-[11px] font-semibold text-slate-500 hover:text-slate-700  cursor-pointer"
-                          >
-                            Clear
-                          </button>
-                        </div>
-                      </div>
+                    (a.name || '').toLowerCase().includes(q) ||
+                    (a.rank || '').toLowerCase().includes(q) ||
+                    (a.trade || '').toLowerCase().includes(q) ||
+                    (a.bdNo || '').toLowerCase().includes(q)
+                  );
+                })
+                .sort((a, b) => (Number(a.serNo) || 9999) - (Number(b.serNo) || 9999));
 
-                      {/* Airmen List Scrollbox */}
-                      <div className="max-h-56 overflow-y-auto space-y-1.5 p-2 rounded-xl bg-slate-50/50 dark:bg-slate-800/30 border border-slate-200 dark:border-slate-700/50">
+              const getAirmanStatusLabel = (airman: Airman) => {
+                const airmanId = airman.id;
+                const digits = (airman.bdNo || airman.id || '').replace(/\D/g, '');
+                let st = disposalPersonnelStatusMap[airmanId];
+                if (!st) {
+                  const alt1 = airmanId.replace(/\//g, '_');
+                  const alt2 = airmanId.replace(/_/g, '/');
+                  st = disposalPersonnelStatusMap[alt1] || disposalPersonnelStatusMap[alt2];
+                }
+                if (!st && digits) {
+                  const foundKey = Object.keys(disposalPersonnelStatusMap).find(k => k.replace(/\D/g, '') === digits);
+                  if (foundKey) st = disposalPersonnelStatusMap[foundKey];
+                }
+
+                if (!st) return { isOnParade: true, label: 'On Parade', dutyCode: 'ON_PARADE', notes: '', dutyName: 'On Parade' };
+
+                const { statusCategory, dutyCode, notes, dutyName } = st;
+                const codeUpper = (dutyCode || '').toUpperCase();
+                const notesLower = (notes || '').toLowerCase();
+
+                const shiftLower = (st.idaShift || '').toLowerCase();
+                const isIdac = codeUpper === 'IDAC' || codeUpper === 'IDA' || notesLower.includes('idac') || notesLower.includes('ida center');
+                const isIdacNt = isIdac && (
+                  shiftLower === 'night' || shiftLower === 'c' || shiftLower === 'nt' ||
+                  notesLower.includes('night') || notesLower.includes('nt') || notesLower.includes('shift c') || notesLower.includes('"c"')
+                );
+
+                if (isIdacNt) {
+                  return { isOnParade: false, label: 'IDAC Nt', dutyCode: 'IDAC', notes: 'IDAC Nt', dutyName: 'IDAC Nt' };
+                }
+
+                if (codeUpper === 'ON_PARADE' || statusCategory === 'PARADE') {
+                  return { isOnParade: true, label: 'On Parade', dutyCode: 'ON_PARADE', notes, dutyName: 'On Parade' };
+                }
+                const isIdacA = isIdac && !isIdacNt && (
+                  shiftLower === 'morning' || shiftLower === 'a' ||
+                  notesLower.includes('morning') || notesLower.includes('idac a') || notesLower.includes('shift a') || notesLower.includes('"a"') ||
+                  (!notesLower.includes('afternoon') && !notesLower.includes('aft') && shiftLower !== 'afternoon' && shiftLower !== 'b')
+                );
+
+                if (isIdacA) {
+                  return { isOnParade: true, label: 'On Parade', dutyCode: 'ON_PARADE', notes: '', dutyName: 'On Parade' };
+                }
+                if (statusCategory === 'OFF' || codeUpper === 'DUTY_OFF' || codeUpper === 'OFF_DUTY' || notesLower.includes('off duty') || notesLower.includes('nt off') || notesLower.includes('night off')) {
+                  return { isOnParade: true, label: 'On Parade', dutyCode: 'ON_PARADE', notes: '', dutyName: 'On Parade' };
+                }
+                if (codeUpper === 'CANTEEN' || notesLower.includes('canteen') || codeUpper === 'RECEPTION' || notesLower.includes('reception') || notesLower.includes('k/o')) {
+                  return { isOnParade: true, label: 'On Parade', dutyCode: 'ON_PARADE', notes: '', dutyName: 'On Parade' };
+                }
+                if (codeUpper === 'LEAVE' || statusCategory === 'LEAVE') {
+                  return { isOnParade: false, label: 'Leave', dutyCode: 'LEAVE', notes, dutyName: 'Leave' };
+                }
+                if (['TDY', 'ATT', 'DETT', 'ATTACHMENT', 'DETACHMENT'].includes(codeUpper) || statusCategory === 'TDY') {
+                  return { isOnParade: false, label: notes && notes !== 'TDY' ? notes : (codeUpper.startsWith('TDY_') ? 'TDY (HSIA)' : 'TDY'), dutyCode: 'TDY', notes, dutyName: 'TDY' };
+                }
+                if (['BAKE_BITE', 'BAKE_N_BITE'].includes(codeUpper) || statusCategory === 'BAKE_N_BITE') {
+                  return { isOnParade: false, label: 'Bake & Bite', dutyCode: 'BAKE_N_BITE', notes, dutyName: 'Bake & Bite' };
+                }
+                if (codeUpper === 'ESSN' || notesLower.includes('essn')) {
+                  return { isOnParade: false, label: 'ESSN', dutyCode: 'ESSN', notes, dutyName: 'ESSN' };
+                }
+                if (['CMH', 'BNS', 'BSH', 'HOSPITAL'].includes(codeUpper) || notesLower.includes('cmh') || notesLower.includes('bns') || notesLower.includes('bsh')) {
+                  return { isOnParade: false, label: codeUpper === 'BNS' ? 'BNS' : (codeUpper === 'BSH' ? 'BSH' : 'CMH'), dutyCode: 'CMH', notes, dutyName: 'CMH / Hospital' };
+                }
+                if (['SICK_REPORT', 'SICK', 'EX_PPGF', 'ED'].includes(codeUpper) || notesLower.includes('sick')) {
+                  return { isOnParade: false, label: codeUpper === 'ED' ? 'ED' : (codeUpper === 'EX_PPGF' ? 'Ex PPGF' : 'Sick Report'), dutyCode: 'SICK_REPORT', notes, dutyName: 'Sick Report' };
+                }
+                if (['ADMIN_ORDER', 'CAT_C', 'DRILL', 'BOI'].includes(codeUpper)) {
+                  return { isOnParade: false, label: "Admin Order", dutyCode: 'ADMIN_ORDER', notes, dutyName: "Admin Order" };
+                }
+                if (codeUpper === 'RECEPTION' || notesLower.includes('reception')) {
+                  return { isOnParade: false, label: 'Reception / KO', dutyCode: 'RECEPTION', notes, dutyName: 'Reception / KO' };
+                }
+                if (['CLASS_TRG', 'CLASS', 'TRG'].includes(codeUpper) || notesLower.includes('class') || notesLower.includes('exam')) {
+                  return { isOnParade: false, label: notesLower.includes('exam') ? 'Exam' : 'Class / Trg', dutyCode: 'CLASS_TRG', notes, dutyName: 'Class / Trg' };
+                }
+                if (['AIRPORT', 'AIR_FD', 'AIRFIELD', 'ATT'].includes(codeUpper)) {
+                  return { isOnParade: false, label: 'Airfield Duty', dutyCode: 'AIRPORT', notes, dutyName: 'Airfield Duty' };
+                }
+                if (['GAMES', 'GH', 'GAME_HONOR'].includes(codeUpper)) {
+                  return { isOnParade: false, label: codeUpper === 'GH' ? 'Guard of Honor' : 'Games', dutyCode: 'GAMES', notes, dutyName: 'Games' };
+                }
+                if (['ABSENT', 'AWL'].includes(codeUpper)) {
+                  return { isOnParade: false, label: codeUpper === 'AWL' ? 'AWOL' : 'Detention', dutyCode: 'ABSENT', notes, dutyName: 'Absent' };
+                }
+                if (statusCategory === 'DUTY' || ['GD', 'BTF', 'NTF', 'HALISHAHAR', 'IDAC', 'IDA'].includes(codeUpper)) {
+                  const displayDuty = formatDutyOnShortName(codeUpper, st.idaShift, notes, dutyName);
+                  return { isOnParade: false, label: displayDuty || 'Base Security (GD)', dutyCode: dutyCode || 'GD', notes, dutyName: dutyName || 'Duty' };
+                }
+
+                return { isOnParade: false, label: notes || dutyName || dutyCode || 'Disposal', dutyCode: dutyCode || 'OTHERS', notes, dutyName: dutyName || 'Disposal' };
+              };
+
+              const onParadeCount = flightAirmen.filter((a) => getAirmanStatusLabel(a).isOnParade).length;
+              const disposalCount = flightAirmen.length - onParadeCount;
+
+              return (
+                <div className="flex-1 flex flex-col min-h-0 space-y-2">
+                  {/* Summary Bar */}
+                  <div className="flex items-center justify-between px-1 text-xs shrink-0">
+                    <span className="text-slate-600 dark:text-slate-400 font-medium">
+                      Living In (Cpl &amp; Below): <strong className="text-slate-900 dark:text-white font-bold">{flightAirmen.length}</strong> personnel in {disposalFlight === 'All' ? 'All Flights' : `${disposalFlight} Flight`}
+                    </span>
+                    <div className="flex items-center space-x-3 text-[11px] font-semibold">
+                      <span className="text-emerald-700 dark:text-emerald-400">
+                        On Parade: <strong>{onParadeCount}</strong>
+                      </span>
+                      <span className="text-slate-300 dark:text-slate-600">|</span>
+                      <span className="text-amber-700 dark:text-amber-400">
+                        Disposal: <strong>{disposalCount}</strong>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Table with Heading Row: ser no, Rank, Name, Trade, Disposal */}
+                  <div className="flex-1 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/50 shadow-xs max-h-[46vh]">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead className="sticky top-0 z-10 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-b border-slate-200 dark:border-slate-700 font-bold uppercase text-[11px]">
+                        <tr>
+                          <th className="py-2.5 px-3 w-16 text-center">ser no</th>
+                          <th className="py-2.5 px-3 w-24">Rank</th>
+                          <th className="py-2.5 px-3">Name</th>
+                          <th className="py-2.5 px-3 w-36">Trade</th>
+                          <th className="py-2.5 px-3 w-44 text-right">Disposal</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                         {flightAirmen.length === 0 ? (
-                          <div className="py-4 text-center text-xs text-slate-400">
-                            No airmen registered in {disposalFlight === 'All' ? 'any' : disposalFlight} Flight
-                          </div>
+                          <tr>
+                            <td colSpan={5} className="py-8 text-center text-xs text-slate-400">
+                              No personnel found in {disposalFlight === 'All' ? 'any' : disposalFlight} Flight.
+                            </td>
+                          </tr>
                         ) : (
-                          flightAirmen.map((a) => {
-                            const statusInfo = getAirmanStatusLabel(a.id);
-                            const { isOnParade, label: statusLabel } = statusInfo;
-                            const isChecked = selectedDisposalAirmenIds.includes(a.id);
-
-                            if (isOnParade) {
-                              return (
-                                <div onClick={() => { if (isChecked) { setSelectedDisposalAirmenIds((prev) => prev.filter((id) => id !== a.id)); } else { setSelectedDisposalAirmenIds((prev) => [...prev, a.id]); } }}
-                                  key={a.id}
-                                  className={`flex items-center justify-between p-2 rounded-lg border transition-all cursor-pointer select-none text-xs ${isChecked ? 'bg-emerald-50 dark:bg-emerald-900/30 border-emerald-400 dark:border-emerald-700 text-emerald-950 dark:text-emerald-300 font-bold shadow-xs' : 'bg-white dark:bg-slate-900/50 border-slate-200 dark:border-slate-700/50 hover:border-emerald-300 dark:hover:border-emerald-700 text-slate-800 dark:text-slate-200 font-medium'}`}
-                                >
-                                  <div className="flex items-center space-x-2.5 min-w-0">
-                                    <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 transition-colors ${isChecked ? 'bg-emerald-600 border-emerald-600 text-white' : 'bg-slate-100 dark:bg-slate-700 border-slate-300 dark:border-slate-600 border'}`}>
-                          {isChecked && <Check className="w-3 h-3" strokeWidth={3} />}
-                        </div>
-                                    <span className="truncate">
-                                      <span className="font-bold">{formatAirmanName(a.rank)}</span> {a.name} <span className="text-[11px] text-slate-400">({a.trade})</span>
-                                    </span>
-                                  </div>
-                                  <span className="px-2 py-0.5 text-[10px] font-extrabold rounded-md bg-emerald-100 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 shrink-0 ml-2">
-                                    On Parade
-                                  </span>
-                                </div>
-                              );
-                            }
-
-                            // Airman with existing disposal / duty - with Edit / Change button
+                          flightAirmen.map((a, idx) => {
+                            const statusInfo = getAirmanStatusLabel(a);
+                            const isOnParade = statusInfo.isOnParade;
                             return (
-                              <div
+                              <tr
                                 key={a.id}
-                                className="flex items-center justify-between p-2 rounded-lg border border-slate-200/80 dark:border-slate-700/80 bg-slate-100/80 dark:bg-slate-800/60 text-xs select-none"
+                                className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors"
                               >
-                                <div className="flex items-center space-x-2.5 min-w-0">
-                                  <span className="truncate text-slate-700 dark:text-slate-300">
-                                    <span className="font-bold">{formatAirmanName(a.rank)}</span> {a.name} ({a.trade})
-                                  </span>
-                                </div>
-                                <div className="flex items-center space-x-1.5 shrink-0 ml-2">
-                                  <span className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-slate-200 dark:bg-slate-800 print:bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 ">
-                                    {statusLabel}
-                                  </span>
+                                {/* Fixed Columns */}
+                                <td className="py-2 px-3 text-center font-mono font-bold text-slate-500 dark:text-slate-400">
+                                  {idx + 1}
+                                </td>
+                                <td className="py-2 px-3 font-bold text-slate-900 dark:text-white whitespace-nowrap">
+                                  {formatRank(a.rank)}
+                                </td>
+                                <td className="py-2 px-3 font-semibold text-slate-800 dark:text-slate-200 whitespace-nowrap">
+                                  {a.name}
+                                </td>
+                                <td className="py-2 px-3 text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                                  {a.trade}
+                                </td>
+                                {/* Editable Disposal Column */}
+                                <td className="py-2 px-3 text-right">
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      openEditDisposal(a, statusInfo.dutyCode, statusInfo.dutyName, statusInfo.notes);
-                                    }}
-                                    className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300  hover:bg-emerald-200 dark:hover:bg-emerald-800 transition-colors cursor-pointer flex items-center space-x-1"
-                                    title="Click to edit, change or remove disposal for this airman"
+                                    onClick={() => openEditDisposal(a, statusInfo.dutyCode, statusInfo.dutyName, statusInfo.notes)}
+                                    className={`inline-flex items-center justify-between gap-1.5 px-2.5 py-1 text-xs font-bold rounded-lg border transition-all cursor-pointer shadow-2xs hover:scale-[1.02] ${
+                                      isOnParade
+                                        ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700'
+                                        : 'bg-amber-50 hover:bg-amber-100 text-amber-900 dark:bg-amber-950/50 dark:hover:bg-amber-900/70 dark:text-amber-200 border-amber-300 dark:border-amber-700'
+                                    }`}
+                                    title="Click to view all disposals and edit/change"
                                   >
-                                    <span>✏️ Change</span>
+                                    <span className="truncate max-w-[130px]">{statusInfo.label}</span>
+                                    <span className="text-[10px] text-slate-400">✏️</span>
                                   </button>
-                                </div>
-                              </div>
+                                </td>
+                              </tr>
                             );
                           })
                         )}
-                      </div>
-                    </div>
-                  );
-                })()}
-              {/* Submit Buttons */}
-              <div className="flex items-center justify-between pt-3 border-t border-slate-200 dark:border-slate-800">
-                <span className="text-xs font-bold text-slate-600 ">
-                  {selectedDisposalAirmenIds.length === 0 ? (
-                    'Select personnel above'
-                  ) : (
-                    <span className="text-emerald-600 dark:text-emerald-400">
-                      {selectedDisposalAirmenIds.length} personnel selected
-                    </span>
-                  )}
-                </span>
-                <div className="flex items-center space-x-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowAddDisposalModal(false)}
-                    className="px-4 py-2 text-xs font-semibold text-slate-600  hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-              <button
-                type="submit"
-                disabled={selectedDisposalAirmenIds.length === 0 || disposalLoading || (disposalCategory === 'OTHERS' && !disposalCustomTitle.trim())}
-                className="px-5 py-2 text-xs font-black text-white bg-rose-600 hover:bg-rose-500 rounded-xl disabled:opacity-50 transition-all shadow-md shadow-rose-900/20 cursor-pointer"
-              >
-                {disposalLoading ? 'Applying...' : 'Apply Disposal'}
-              </button>
-
-                  
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-          </div>
-        </form>
+              );
+            })()}
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between pt-3 border-t border-slate-200 dark:border-slate-800 shrink-0">
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                Click on any airman&apos;s <strong>Disposal</strong> to edit or clear.
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowAddDisposalModal(false)}
+                className="px-5 py-2 text-xs font-bold text-white bg-slate-800 hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 rounded-xl transition-all cursor-pointer shadow-xs"
+              >
+                Done / Close
+              </button>
+            </div>
           </div>
         </div>
       )}
 
       {/* Edit / Change Disposal Modal */}
       {editDisposalModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn print:hidden">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-lg w-full p-6 border border-slate-200  space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-200  pb-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/70 backdrop-blur-xs animate-fadeIn print:hidden">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-xl w-full p-4 sm:p-6 border border-slate-200 dark:border-slate-800 space-y-4 max-h-[92vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3 shrink-0">
               <div>
                 <h3 className="text-base font-black text-slate-900 dark:text-white print:text-black flex items-center space-x-2">
                   <span>✏️ Edit / Change Disposal</span>
                 </h3>
-                <p className="text-xs font-semibold text-slate-500  mt-0.5">
+                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mt-0.5">
                   {formatAirmanName(editDisposalModal.airman.rank)} {editDisposalModal.airman.name} • BD/{editDisposalModal.airman.bdNo} • {editDisposalModal.airman.trade} ({editDisposalModal.airman.flightName} Flt)
                 </p>
               </div>
@@ -2262,145 +2204,236 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
               </button>
             </div>
 
-            <div className="space-y-4 text-xs">
-              {/* Current Status Info */}
-              <div className="bg-emerald-50 dark:bg-emerald-950/20 p-3 rounded-xl border border-emerald-200 dark:border-emerald-800/50 flex items-center justify-between">
+            <div className="flex-1 overflow-y-auto space-y-4 text-xs pr-1">
+              {/* Current Status Info & Quick Clear Button */}
+              <div className="bg-emerald-50 dark:bg-emerald-950/20 p-3 rounded-xl border border-emerald-200 dark:border-emerald-800/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
                   <span className="text-[11px] text-emerald-700 dark:text-emerald-400 font-semibold block">Current Assignment:</span>
                   <span className="font-bold text-slate-900 dark:text-white print:text-black text-xs">
                     {editDisposalModal.currentDutyName || editDisposalModal.currentDutyCode}
-                    {editDisposalModal.notes && <span className="text-slate-500  ml-1">({editDisposalModal.notes})</span>}
+                    {editDisposalModal.notes && <span className="text-slate-500 ml-1">({editDisposalModal.notes})</span>}
                   </span>
                 </div>
                 <button
                   type="button"
                   onClick={() => handleSaveEditDisposal('ON_PARADE')}
                   disabled={editDisposalLoading}
-                  className="px-3 py-1.5 text-xs font-bold text-rose-700  bg-rose-100 /60 hover:bg-rose-200 dark:hover:bg-rose-900 rounded-lg border border-rose-200  transition-colors cursor-pointer"
+                  className="px-3 py-1.5 text-xs font-bold text-emerald-800 dark:text-emerald-200 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-900/60 dark:hover:bg-emerald-800 rounded-lg border border-emerald-300 dark:border-emerald-700 transition-colors cursor-pointer flex items-center justify-center space-x-1"
                 >
-                  Clear Disposal (Set On Parade)
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Clear Disposal (Set On Parade)</span>
                 </button>
               </div>
 
               {/* Date Range for Edit */}
               <div className="grid grid-cols-2 gap-3 bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
                 <div>
-                  <label className="text-[11px] font-bold text-slate-700  block mb-1">
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
                     From Date:
                   </label>
                   <DateNavigator
-                    
                     value={editDisposalFromDate}
                     onChange={(e) => setEditDisposalFromDate(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-slate-300  bg-white dark:bg-slate-900 text-slate-900 dark:text-white print:text-black outline-none focus:border-emerald-500 shadow-xs"
+                    className="w-full px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white print:text-black outline-none focus:border-emerald-500 shadow-xs"
                   />
                 </div>
                 <div>
-                  <label className="text-[11px] font-bold text-slate-700  block mb-1">
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
                     To Date:
                   </label>
                   <DateNavigator
-                    
                     value={editDisposalToDate}
                     min={editDisposalFromDate}
                     onChange={(e) => setEditDisposalToDate(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-slate-300  bg-white dark:bg-slate-900 text-slate-900 dark:text-white print:text-black outline-none focus:border-emerald-500 shadow-xs"
+                    className="w-full px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white print:text-black outline-none focus:border-emerald-500 shadow-xs"
                   />
                 </div>
               </div>
 
-              {/* Change Category Selection */}
-              <div className="space-y-2 relative">
-                <div className="flex justify-between items-center">
+              {/* All Disposals List - Vertical Single-Column Layout (single single disposal niche niche) */}
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                    Change Disposal Category To:
+                    Select Disposal from List:
                   </label>
-                  <button
-                    type="button"
-                    onClick={() => setIsEditingDisposals(!isEditingDisposals)}
-                    className={`p-1 rounded-md transition-colors cursor-pointer ${isEditingDisposals ? 'bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
-                    title="Manage Saved Categories"
-                  >
-                    <Settings className="w-4 h-4" />
-                  </button>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+                    Click any disposal to assign
+                  </span>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  {savedDisposals.map((cat, idx) => {
-                    const isSelected = !isEditingDisposals && editDisposalCategory === cat.code && (cat.code !== 'OTHERS' || editDisposalCustomTitle === cat.customTitle);
-                    return (
-                      <div key={`${cat.code}-${cat.label}-${cat.customTitle || ''}`} className="relative group">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (isEditingDisposals) return;
-                            setEditDisposalCategory(cat.code);
-                            if (cat.customTitle) setEditDisposalCustomTitle(cat.customTitle);
-                            else if (cat.code === 'OTHERS') setEditDisposalCustomTitle('');
-                          }}
-                          className={`px-2.5 py-1.5 rounded-xl text-xs font-bold border transition-all truncate ${isEditingDisposals ? 'pr-6 opacity-80 cursor-default bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700' : 'cursor-pointer'} ${
-                            isSelected
-                              ? 'ring-2 ring-emerald-500 border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-100 shadow-xs'
-                              : (!isEditingDisposals ? 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600' : '')
-                          }`}
-                        >
-                          {cat.label}
-                        </button>
-                        {isEditingDisposals && (
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveDisposalOption(cat.label)}
-                            className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 rounded-full bg-red-100 text-red-600 hover:bg-red-200 dark:bg-red-900/50 dark:text-red-400 dark:hover:bg-red-900 transition-colors cursor-pointer"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {!isEditingDisposals && (
-                    <DisposalCategoryDropdown
-                      options={[...ALL_DISPOSAL_OPTIONS, ...historicalCustomCats]}
-                      savedDisposals={savedDisposals}
-                      dropUp={true}
-                      onSelectOption={(opt) => {
-                        handleAddDisposalOption(opt);
-                        setEditDisposalCategory(opt.code);
-                        if (opt.customTitle) {
-                          setEditDisposalCustomTitle(opt.customTitle);
-                          saveCustomDisposal(opt.customTitle);
-                        } else if (opt.code === 'OTHERS') {
-                          setEditDisposalCustomTitle('');
-                        }
-                      }}
-                      buttonLabel="Add Category"
-                    />
+
+                {/* Search Box for quick filtering */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={editDisposalFilterText}
+                    onChange={(e) => setEditDisposalFilterText(e.target.value)}
+                    placeholder="Search disposal (e.g. Leave, CMH, GD, BTF)..."
+                    className="w-full pl-8 pr-7 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:border-emerald-500 shadow-2xs"
+                  />
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  {editDisposalFilterText && (
+                    <button
+                      type="button"
+                      onClick={() => setEditDisposalFilterText('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs"
+                    >
+                      ✕
+                    </button>
                   )}
                 </div>
 
-                {/* Custom Title Input if OTHERS selected */}
-                {editDisposalCategory === 'OTHERS' && (!ALL_DISPOSAL_OPTIONS.find(o => o.label === editDisposalCustomTitle) || editDisposalCustomTitle === '') && !isEditingDisposals && (
-                  <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl space-y-1 animate-fadeIn mt-2">
-                    <label className="text-xs font-bold text-amber-900 dark:text-amber-200">
-                      Specify Custom Disposal Name
+                {/* Vertical List: Single single disposal niche niche */}
+                {(() => {
+                  const ALL_DISPOSALS_VERTICAL = [
+                    { code: 'ON_PARADE', label: 'On Parade (Clear Disposal)', isClear: true, color: 'emerald' },
+                    { code: 'GD', label: 'Base Security (GD)', color: 'amber' },
+                    { code: 'AIRPORT', label: 'Airfield Duty', color: 'amber' },
+                    { code: 'BTF', label: 'Base Taskforce (BTF)', color: 'amber' },
+                    { code: 'NTF', label: 'Night Taskforce (NTF)', color: 'amber' },
+                    { code: 'OFFICE', label: 'Office Duty', color: 'amber' },
+                    { code: 'HALISHAHAR', label: 'Halishahar Duty', color: 'amber' },
+                    { code: 'LEAVE', label: 'Leave', color: 'blue' },
+                    { code: 'SICK_REPORT', label: 'Sick report', color: 'rose' },
+                    { code: 'CMH', label: 'CMH', color: 'rose' },
+                    { code: 'BNS', label: 'BNS', color: 'rose' },
+                    { code: 'BSH', label: 'BSH', color: 'rose' },
+                    { code: 'ED', label: 'ED', color: 'rose' },
+                    { code: 'EX_PPGF', label: 'Ex PPGF', color: 'rose' },
+                    { code: 'OTHERS', customTitle: 'Quarantine', label: 'Quarantine', color: 'rose' },
+                    { code: 'TDY', label: 'TDY (Air HQ)', customTitle: 'TDY (Air HQ)', color: 'purple' },
+                    { code: 'TDY_HSIA', label: 'TDY (HSIA)', customTitle: 'TDY (HSIA)', color: 'purple' },
+                    { code: 'ATT_SAIA', label: 'Att (SAIA)', customTitle: 'Att (SAIA)', color: 'purple' },
+                    { code: 'DETT', label: 'Detachment', color: 'purple' },
+                    { code: 'OTHERS', customTitle: 'Course', label: 'Course', color: 'indigo' },
+                    { code: 'CLASS_TRG', label: 'Class', color: 'indigo' },
+                    { code: 'OTHERS', customTitle: 'Exam', label: 'Exam', color: 'indigo' },
+                    { code: 'ESSN', label: 'ESSN', color: 'emerald' },
+                    { code: 'BAKE_N_BITE', label: 'Bake & Bite', color: 'emerald' },
+                    { code: 'GAMES', label: 'Games', color: 'cyan' },
+                    { code: 'GH', label: 'Guard of Honor', color: 'cyan' },
+                    { code: 'OTHERS', customTitle: 'Driving', label: 'Driving', color: 'amber' },
+                    { code: 'AWL', label: 'AWOL', color: 'slate' },
+                    { code: 'ABSENT', label: 'Detention', color: 'slate' },
+                    { code: 'ORDERLY_ROOM', label: 'Orderly Room', color: 'amber' },
+                    { code: 'OTHERS', customTitle: 'U/C', label: 'U/C', color: 'slate' },
+                    { code: 'OTHERS', customTitle: 'U/Board', label: 'U/Board', color: 'slate' },
+                    { code: 'OTHERS', customTitle: 'Aft Flg', label: 'Aft Flg', color: 'sky' },
+                    { code: 'OTHERS', customTitle: 'Ni Flg', label: 'Ni Flg', color: 'sky' },
+                    { code: 'OTHERS', customTitle: 'Ni Duty', label: 'Ni Duty', color: 'sky' },
+                    { code: 'OTHERS', label: 'Custom...', color: 'emerald' },
+                  ];
+
+                  const q = editDisposalFilterText.toLowerCase().trim();
+                  const filtered = ALL_DISPOSALS_VERTICAL.filter((d) => {
+                    if (!q) return true;
+                    return (
+                      d.label.toLowerCase().includes(q) ||
+                      (d.customTitle && d.customTitle.toLowerCase().includes(q)) ||
+                      d.code.toLowerCase().includes(q)
+                    );
+                  });
+
+                  return (
+                    <div className="flex flex-col space-y-1.5 max-h-[48vh] overflow-y-auto pr-1">
+                      {filtered.length === 0 ? (
+                        <div className="py-6 text-center text-xs text-slate-400">
+                          No disposals match &quot;{editDisposalFilterText}&quot;
+                        </div>
+                      ) : (
+                        filtered.map((item) => {
+                          const isSel = (item.isClear && editDisposalModal.currentDutyCode === 'ON_PARADE') ||
+                            (!item.isClear && editDisposalCategory === item.code && (item.label === 'Custom...' ? (!item.customTitle && editDisposalCustomTitle && !['Course', 'Exam', 'Quarantine', 'Driving', 'U/C', 'U/Board', 'Aft Flg', 'Ni Flg', 'Ni Duty', 'TDY (Air HQ)', 'TDY (HSIA)', 'Att (SAIA)'].includes(editDisposalCustomTitle)) : (!item.customTitle || editDisposalCustomTitle === item.customTitle)));
+
+                          return (
+                            <button
+                              key={item.label}
+                              type="button"
+                              onClick={() => {
+                                if (item.isClear) {
+                                  handleSaveEditDisposal('ON_PARADE');
+                                } else if (item.label === 'Custom...') {
+                                  setEditDisposalCategory('OTHERS');
+                                  setEditDisposalCustomTitle('');
+                                } else {
+                                  setEditDisposalCategory(item.code);
+                                  if (item.customTitle) setEditDisposalCustomTitle(item.customTitle);
+                                  else if (item.code !== 'OTHERS') setEditDisposalCustomTitle('');
+                                  handleSaveEditDisposal(item.code, item.customTitle || (item.code === 'OTHERS' ? item.label : undefined));
+                                }
+                              }}
+                              className={`w-full py-2.5 px-3.5 text-xs font-bold rounded-xl border text-left flex items-center justify-between transition-all cursor-pointer ${
+                                isSel
+                                  ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-500 text-emerald-900 dark:text-emerald-100 shadow-xs ring-1 ring-emerald-500/30'
+                                  : 'bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/60 hover:border-slate-300 dark:hover:border-slate-600'
+                              }`}
+                            >
+                              <div className="flex items-center space-x-2.5 min-w-0">
+                                <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                                  item.color === 'emerald' ? 'bg-emerald-500' :
+                                  item.color === 'blue' ? 'bg-blue-500' :
+                                  item.color === 'rose' ? 'bg-rose-500' :
+                                  item.color === 'purple' ? 'bg-purple-500' :
+                                  item.color === 'indigo' ? 'bg-indigo-500' :
+                                  item.color === 'cyan' ? 'bg-cyan-500' :
+                                  item.color === 'sky' ? 'bg-sky-500' :
+                                  item.color === 'slate' ? 'bg-slate-400' : 'bg-amber-500'
+                                }`} />
+                                <span className="truncate">{item.label}</span>
+                              </div>
+                              {isSel ? (
+                                <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center space-x-1 shrink-0 ml-2">
+                                  <Check className="w-3.5 h-3.5" />
+                                  <span>Active</span>
+                                </span>
+                              ) : (
+                                <span className="text-[11px] text-slate-400 dark:text-slate-500 shrink-0 ml-2">
+                                  Select →
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* Custom Title Input if custom disposal selected */}
+                {(editDisposalCategory === 'OTHERS' && !['Course', 'Exam', 'Quarantine', 'Driving', 'U/C', 'U/Board', 'Aft Flg', 'Ni Flg', 'Ni Duty', 'TDY (Air HQ)', 'TDY (HSIA)', 'Att (SAIA)'].includes(editDisposalCustomTitle)) && (
+                  <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl space-y-2 animate-fadeIn mt-2">
+                    <label className="text-xs font-bold text-amber-900 dark:text-amber-200 block">
+                      Specify Custom Disposal Name:
                     </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Special Escort, VVIP Detail..."
-                      value={editDisposalCustomTitle}
-                      onChange={(e) => setEditDisposalCustomTitle(e.target.value)}
-                      className="w-full px-3 py-1.5 text-xs rounded-lg border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white print:text-black outline-none focus:border-amber-500 shadow-xs"
-                      required
-                    />
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="text"
+                        placeholder="e.g. Special Escort, VVIP Detail..."
+                        value={editDisposalCustomTitle}
+                        onChange={(e) => setEditDisposalCustomTitle(e.target.value)}
+                        className="flex-1 px-3 py-2 text-xs rounded-lg border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white print:text-black outline-none focus:border-amber-500 shadow-xs"
+                        required
+                        autoFocus
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleSaveEditDisposal('OTHERS', editDisposalCustomTitle.trim())}
+                        disabled={!editDisposalCustomTitle.trim() || editDisposalLoading}
+                        className="px-4 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-500 disabled:opacity-50 rounded-lg cursor-pointer transition-all"
+                      >
+                        Save
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
             </div>
+
             {/* Modal Action Buttons */}
-            <div className="flex items-center justify-end space-x-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-end space-x-2 pt-3 border-t border-slate-200 dark:border-slate-800 shrink-0">
               <button
                 type="button"
                 onClick={() => setEditDisposalModal(null)}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl cursor-pointer"
+                className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl cursor-pointer"
               >
                 Cancel
               </button>
@@ -2412,7 +2445,6 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
               >
                 {editDisposalLoading ? 'Applying...' : 'Apply Changes'}
               </button>
-              
             </div>
           </div>
         </div>

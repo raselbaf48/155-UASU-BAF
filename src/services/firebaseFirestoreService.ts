@@ -241,14 +241,19 @@ export async function pushDutyAssignmentsToFirebase(assignments: DutyAssignment[
           docId = `asn_${safeAir}_${dateVal}_${safeDuty}_${shiftVal}_${scopeVal}`;
         }
 
+        const effectiveIda = anyA.idaShift || (anyA.shift && ['Morning', 'Afternoon', 'Night'].includes(anyA.shift) ? anyA.shift : '');
         const docRef = doc(db, path, docId);
         const data = {
           assignment_id: docId,
           duty_name: dutyVal,
+          dutyType: dutyVal,
+          dutyCode: dutyVal,
           date: dateVal,
           airman_id: airmanIdVal,
+          airmanId: airmanIdVal,
           notes: a.notes || anyA.notes || anyA.remarks || '',
           shift: anyA.shift || anyA.idaShift || '',
+          idaShift: effectiveIda,
           category: anyA.category || '',
           created_at: anyA.created_at || anyA.updatedAt || new Date().toISOString()
         };
@@ -295,6 +300,8 @@ export async function fetchDutyAssignmentsFromFirebase(): Promise<DutyAssignment
 
       if (!cleanDate || cleanDate.length < 10) return; // Skip invalid or non-date items
 
+      const effectiveShift = data.idaShift || (data.shift && ['Morning', 'Afternoon', 'Night'].includes(data.shift) ? data.shift : (parsedShift && ['Morning', 'Afternoon', 'Night'].includes(parsedShift) ? parsedShift : undefined));
+
       list.push({
         id: data.assignment_id || d.id,
         assignment_id: data.assignment_id || d.id,
@@ -305,6 +312,7 @@ export async function fetchDutyAssignmentsFromFirebase(): Promise<DutyAssignment
         dutyType: cleanDuty,
         dutyName: cleanDuty,
         shift: data.shift || parsedShift || undefined,
+        idaShift: effectiveShift,
         disposalScope: parsedScope,
         category: data.category || undefined,
         notes: data.notes || '',

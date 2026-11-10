@@ -118,9 +118,10 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  const todayStr = new Date().toISOString().split('T')[0];
  const [showAddDisposalModal, setShowAddDisposalModal] = useState<boolean>(false);
  const [disposalDateMode, setDisposalDateMode] = useState<'SINGLE' | 'MULTI'>('SINGLE');
- const [disposalFlight, setDisposalFlight] = useState<FlightName>(role === 'ADMIN' && userFlight ? userFlight as FlightName : 'Avionics');
+ const [disposalFlight, setDisposalFlight] = useState<FlightName | 'All'>(role === 'ADMIN' && userFlight ? userFlight as FlightName : 'All');
  const [disposalCategory, setDisposalCategory] = useState<string>('');
  const [disposalCustomTitle, setDisposalCustomTitle] = useState<string>('');
+ const [disposalSearchQuery, setDisposalSearchQuery] = useState<string>('');
  const [selectedDisposalAirmenIds, setSelectedDisposalAirmenIds] = useState<string[]>([]);
  const [disposalPersonnelStatusMap, setDisposalPersonnelStatusMap] = useState<Record<string, { statusCategory: string; dutyCode: string; notes?: string; dutyName?: string }>>({});
  const [disposalFromDate, setDisposalFromDate] = useState<string>(selectedDate);

@@ -183,23 +183,33 @@ function normalizeRecord(collectionName: string, docData: any, docId: string): a
   }
 
   if (collectionName === 'duty_rosters') {
-    const rawDuty = docData.duty_type || docData.dutyTypeCode || docData.dutyCode || docData.dutyType || 'GD';
+    const rawDuty = docData.duty_name || docData.duty_type || docData.dutyTypeCode || docData.dutyCode || docData.dutyType || 'GD';
     const cleanDuty = (rawDuty === 'DUTY' || rawDuty === 'DUTY_ON') ? 'GD' : rawDuty;
     const cleanDate = docData.duty_date || docData.date || '';
+    const rawAirmanId = docData.airmanId || docData.airman_id || '';
+    const cleanAirmanId = rawAirmanId ? String(rawAirmanId).replace(/_/g, '/') : '';
+    const cleanShift = docData.shift || 'D';
+    const cleanIdaShift = docData.idaShift || (['Morning', 'Afternoon', 'Night'].includes(docData.shift) ? docData.shift : undefined);
+
     return {
       assignment_id: docData.assignment_id || docData.assignmentId || docData.id || docId,
       id: docData.id || docId,
-      airmanId: docData.airmanId || docData.airman_id || '',
+      airmanId: cleanAirmanId,
+      airman_id: cleanAirmanId,
       date: cleanDate,
       duty_date: cleanDate,
-      shift: docData.shift || 'D',
+      shift: cleanShift,
+      idaShift: cleanIdaShift,
+      dutyCode: cleanDuty,
       dutyType: cleanDuty,
       duty_type: cleanDuty,
       dutyTypeCode: cleanDuty,
+      dutyName: cleanDuty,
       monthKey: docData.monthKey || '',
       remarks: docData.remarks || docData.notes || '',
+      notes: docData.notes || docData.remarks || '',
       status: docData.status || 'SCHEDULED',
-      updatedAt: docData.updatedAt || new Date().toISOString()
+      updatedAt: docData.updatedAt || docData.created_at || new Date().toISOString()
     };
   }
 

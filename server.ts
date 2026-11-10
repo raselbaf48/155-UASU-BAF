@@ -8,6 +8,24 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import pdfParsePkg from 'pdf-parse/lib/pdf-parse.js';
 
+process.on('uncaughtException', (err: any) => {
+  const msg = String(err?.message || err || '');
+  if (msg.includes('Port 24678') || msg.includes('WebSocket') || msg.includes('EADDRINUSE')) {
+    console.warn('[server] Suppressed non-fatal server warning:', msg);
+    return;
+  }
+  console.error('[server] Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (reason: any) => {
+  const msg = String(reason?.message || reason || '');
+  if (msg.includes('Port 24678') || msg.includes('WebSocket') || msg.includes('EADDRINUSE')) {
+    console.warn('[server] Suppressed non-fatal rejection:', msg);
+    return;
+  }
+  console.error('[server] Unhandled Rejection:', reason);
+});
+
 import { INITIAL_AIRMEN } from './src/data/initialAirmen';
 import { DUTY_TYPES } from './src/data/dutyTypes';
 import { generateSeedAssignments, calculateDutyStats, detectConflicts } from './src/data/rosterGenerator';
@@ -17,6 +35,7 @@ import { Airman, DutyAssignment, FlightName, ParadeShift, ActivityHistoryItem, D
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'baf_unit_data.json');
 const SETTINGS_FILE = path.join(DATA_DIR, 'app_settings.json');
+
 
 function loadAppSettings(): Record<string, { setting_key: string; setting_value: string; updated_at: string }> {
   try {
@@ -302,7 +321,12 @@ async function syncServerWithFirestore() {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const portArgIdx = process.argv.indexOf('--port');
+  const portFromArg = portArgIdx !== -1 && process.argv[portArgIdx + 1] ? parseInt(process.argv[portArgIdx + 1], 10) : NaN;
+  const PORT = !isNaN(portFromArg) ? portFromArg : (process.env.PORT ? parseInt(process.env.PORT, 10) : 3000);
+
+  const hostArgIdx = process.argv.indexOf('--host');
+  const HOST = hostArgIdx !== -1 && process.argv[hostArgIdx + 1] ? process.argv[hostArgIdx + 1] : (process.env.HOST || '0.0.0.0');
 
   let db = loadDatabase();
   syncServerWithFirestore().catch(() => {});
@@ -819,9 +843,26 @@ async function startServer() {
     });
   });
 
-  app.get('/api/server-history', (req, res) => {
+  app.get('/api/roster', (req, res) => {
+    const month = (req.query.month as string) || `${new Date().getFullYear()}-${(new Date().getMonth() + 1).toString().padStart(2, '0')}`;
     const db = loadDatabase();
-    res.json({ history: db.activityHistory || [] });
+    const assignments = (db.assignments && db.assignments[month]) || [];
+    res.json({ monthKey: month, assignments });
+  });
+
+  app.get('/api/roster/year', (req, res) => {
+    const year = parseInt((req.query.year as string) || `${new Date().getFullYear()}`, 10);
+    const db = loadDatabase();
+    const prefix = `${year}-`;
+    const assignments: any[] = [];
+    if (db.assignments) {
+      Object.keys(db.assignments).forEach((mKey) => {
+        if (mKey.startsWith(prefix)) {
+          assignments.push(...(db.assignments[mKey] || []));
+        }
+      });
+    }
+    res.json({ year, assignments });
   });
 
   app.get('/api/roster/server-history', (req, res) => {
@@ -846,6 +887,223 @@ async function startServer() {
       }
     }
     res.json({ success: true });
+  });
+
+  function getDatesInRange(fromDateStr: string, toDateStr: string): string[] {
+    const dates: string[] = [];
+    const [fY, fM, fD] = fromDateStr.split('-').map(Number);
+    const [tY, tM, tD] = toDateStr.split('-').map(Number);
+    if (!fY || !fM || !fD || !tY || !tM || !tD) return [fromDateStr];
+    const current = new Date(Date.UTC(fY, fM - 1, fD));
+    const end = new Date(Date.UTC(tY, tM - 1, tD));
+    while (current <= end) {
+      const y = current.getUTCFullYear();
+      const m = String(current.getUTCMonth() + 1).padStart(2, '0');
+      const d = String(current.getUTCDate()).padStart(2, '0');
+      dates.push(`${y}-${m}-${d}`);
+      current.setUTCDate(current.getUTCDate() + 1);
+    }
+    return dates;
+  }
+
+  app.post('/api/roster/assign-range', express.json(), (req, res) => {
+    const { airmanId, dutyCode, idaShift, fromDate, toDate, notes, proxyForFlight, disposalScope } = req.body || {};
+    if (!airmanId || !dutyCode || !fromDate) {
+      return res.status(400).json({ error: 'Missing required parameters: airmanId, dutyCode, fromDate' });
+    }
+    const db = loadDatabase();
+    if (!db.assignments) db.assignments = {};
+    const dates = getDatesInRange(fromDate, toDate || fromDate);
+    const airman = (db.airmen || []).find((a: any) => a.id === airmanId || a.bdNo === airmanId);
+
+    for (const dateStr of dates) {
+      const monthKey = dateStr.slice(0, 7);
+      if (!db.assignments[monthKey]) db.assignments[monthKey] = [];
+      const list = db.assignments[monthKey];
+
+      const isIdac = ['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(dutyCode);
+      const isAirport = ['ATT', 'AIRPORT', 'AIRFIELD_DUTY'].includes(dutyCode);
+      const scope = disposalScope || 'ALL';
+
+      const cleanTargetDigits = String(airmanId).replace(/\D/g, '');
+      const matchAirmanId = (itemAirmanId: any) => {
+        if (itemAirmanId === airmanId) return true;
+        const c = String(itemAirmanId || '').replace(/\D/g, '');
+        return Boolean(cleanTargetDigits && c && c === cleanTargetDigits);
+      };
+
+      let index = -1;
+      if (isIdac) {
+        if (idaShift === 'Night') {
+          index = list.findIndex((a: any) => 
+            matchAirmanId(a.airmanId) && a.date === dateStr &&
+            ((a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && (a.idaShift === 'Night' || a.shift === 'Night'))
+          );
+        } else {
+          index = list.findIndex((a: any) =>
+            matchAirmanId(a.airmanId) && a.date === dateStr &&
+            !((a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && (a.idaShift === 'Night' || a.shift === 'Night'))
+          );
+        }
+      } else if (isAirport) {
+        index = list.findIndex((a: any) =>
+          matchAirmanId(a.airmanId) && a.date === dateStr &&
+          (a.dutyCode === 'AIRPORT' || a.dutyCode === 'ATT' || a.dutyCode === 'AIRFIELD_DUTY')
+        );
+      } else {
+        index = list.findIndex((a: any) =>
+          matchAirmanId(a.airmanId) && a.date === dateStr &&
+          (a.disposalScope || 'ALL') === scope
+        );
+      }
+
+      const assignmentObj: any = {
+        id: `asn_${String(airmanId).replace(/[^a-zA-Z0-9_-]/g, '_')}_${dateStr}_${dutyCode}_${idaShift || 'n'}_${scope}`,
+        assignment_id: `asn_${String(airmanId).replace(/[^a-zA-Z0-9_-]/g, '_')}_${dateStr}_${dutyCode}_${idaShift || 'n'}_${scope}`,
+        airmanId,
+        date: dateStr,
+        dutyCode,
+        dutyType: dutyCode,
+        dutyName: dutyCode,
+        idaShift: isIdac ? idaShift : undefined,
+        shift: isIdac ? idaShift : undefined,
+        notes: notes || '',
+        proxyForFlight: proxyForFlight || undefined,
+        disposalScope: scope,
+        updatedAt: new Date().toISOString()
+      };
+
+      if (index >= 0) {
+        list[index] = assignmentObj;
+      } else {
+        list.push(assignmentObj);
+      }
+    }
+
+    if (!db.activityHistory) db.activityHistory = [];
+    db.activityHistory.unshift({
+      id: `hist_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      timestamp: new Date().toISOString(),
+      actionType: dutyCode === 'LEAVE' ? 'GRANT_LEAVE' : 'ASSIGN_RANGE',
+      type: dutyCode === 'LEAVE' ? 'GRANT_LEAVE' : 'ASSIGN_RANGE',
+      airmanId,
+      airmanName: airman ? `${airman.rank || ''} ${airman.name || ''}`.trim() : airmanId,
+      airmanRank: airman?.rank || '',
+      airmanTrade: airman?.trade || '',
+      dutyCode,
+      idaShift,
+      fromDate,
+      toDate: toDate || fromDate,
+      notes: notes || ''
+    });
+    if (db.activityHistory.length > 250) db.activityHistory = db.activityHistory.slice(0, 250);
+
+    fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf-8');
+    res.json({ success: true, count: dates.length, assignedDates: dates });
+  });
+
+  app.post('/api/roster/delete-range', express.json(), (req, res) => {
+    const { airmanId, fromDate, toDate, dutyCode, idaShift } = req.body || {};
+    if (!airmanId || !fromDate) {
+      return res.status(400).json({ error: 'Missing required parameters: airmanId, fromDate' });
+    }
+    const db = loadDatabase();
+    if (!db.assignments) db.assignments = {};
+    const dates = getDatesInRange(fromDate, toDate || fromDate);
+
+    const cleanTargetDigits = String(airmanId).replace(/\D/g, '');
+    const matchAirmanId = (itemAirmanId: any) => {
+      if (itemAirmanId === airmanId) return true;
+      const c = String(itemAirmanId || '').replace(/\D/g, '');
+      return Boolean(cleanTargetDigits && c && c === cleanTargetDigits);
+    };
+
+    for (const dateStr of dates) {
+      const monthKey = dateStr.slice(0, 7);
+      if (!db.assignments[monthKey]) continue;
+      db.assignments[monthKey] = db.assignments[monthKey].filter((a: any) => {
+        if (!matchAirmanId(a.airmanId) || a.date !== dateStr) return true;
+        if (dutyCode) {
+          if (dutyCode === 'ATT' || dutyCode === 'AIRPORT' || dutyCode === 'AIRFIELD_DUTY') {
+            return a.dutyCode !== 'ATT' && a.dutyCode !== 'AIRPORT' && a.dutyCode !== 'AIRFIELD_DUTY';
+          }
+          if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(dutyCode)) {
+            if (idaShift) {
+              return !((a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && (a.idaShift === idaShift || a.shift === idaShift));
+            }
+            return !(a.dutyCode === 'IDAC' || a.dutyCode === 'IDA');
+          }
+          return a.dutyCode !== dutyCode;
+        }
+        return false;
+      });
+    }
+
+    fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf-8');
+    res.json({ success: true });
+  });
+
+  app.post('/api/roster/assign', express.json(), (req, res) => {
+    const { monthKey, assignment } = req.body || {};
+    if (!assignment || !assignment.airmanId || !assignment.date) {
+      return res.status(400).json({ error: 'Missing assignment details' });
+    }
+    const targetMonth = monthKey || assignment.date.slice(0, 7);
+    const db = loadDatabase();
+    if (!db.assignments) db.assignments = {};
+    if (!db.assignments[targetMonth]) db.assignments[targetMonth] = [];
+
+    const list = db.assignments[targetMonth];
+    const idx = list.findIndex((a: any) => a.airmanId === assignment.airmanId && a.date === assignment.date && a.dutyCode === assignment.dutyCode);
+    if (idx >= 0) {
+      list[idx] = { ...list[idx], ...assignment, updatedAt: new Date().toISOString() };
+    } else {
+      list.push({ ...assignment, updatedAt: new Date().toISOString() });
+    }
+
+    fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf-8');
+    res.json({ success: true, assignment });
+  });
+
+  app.post('/api/roster/batch-assign', express.json(), (req, res) => {
+    const { assignments: batchList, fromDate, toDate } = req.body || {};
+    if (!Array.isArray(batchList)) {
+      return res.status(400).json({ error: 'Expected assignments array' });
+    }
+    const db = loadDatabase();
+    if (!db.assignments) db.assignments = {};
+    for (const item of batchList) {
+      if (!item.airmanId || !item.date) continue;
+      const mKey = item.date.slice(0, 7);
+      if (!db.assignments[mKey]) db.assignments[mKey] = [];
+      const list = db.assignments[mKey];
+      const idx = list.findIndex((a: any) => a.airmanId === item.airmanId && a.date === item.date && a.dutyCode === item.dutyCode);
+      if (idx >= 0) {
+        list[idx] = { ...list[idx], ...item, updatedAt: new Date().toISOString() };
+      } else {
+        list.push({ ...item, updatedAt: new Date().toISOString() });
+      }
+    }
+    fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf-8');
+    res.json({ success: true, count: batchList.length });
+  });
+
+  app.post('/api/roster/clear-all', express.json(), (req, res) => {
+    const db = loadDatabase();
+    db.assignments = {};
+    fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf-8');
+    res.json({ success: true, message: 'All duties cleared' });
+  });
+
+  app.post('/api/roster/clear-month', express.json(), (req, res) => {
+    const { monthKey } = req.body || {};
+    if (!monthKey) return res.status(400).json({ error: 'Missing monthKey' });
+    const db = loadDatabase();
+    if (db.assignments && db.assignments[monthKey]) {
+      db.assignments[monthKey] = [];
+      fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf-8');
+    }
+    res.json({ success: true, message: `Month ${monthKey} cleared` });
   });
 
   // Dedicated Canteen Settings & Full Backup Endpoints
@@ -1950,12 +2208,22 @@ ${combinedText.substring(0, 30000)}
 
   // Vite middleware in dev or static serving in production
   if (process.env.NODE_ENV !== 'production') {
+    const isWatchDisabled = process.env.DISABLE_HMR === 'true';
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
         hmr: false,
-        watch: {
-          ignored: ['**/data/**', '**/*.json', '**/*.db', '**/dist/**'],
+        watch: isWatchDisabled ? null : {
+          ignored: [
+            '**/data/**',
+            '**/*.json',
+            '**/*.db',
+            '**/dist/**',
+            '**/package-lock.json',
+            '**/bun.lock',
+            '**/yarn.lock',
+            '**/node_modules/**',
+          ],
         },
       },
       appType: 'spa',
@@ -1969,9 +2237,20 @@ ${combinedText.substring(0, 30000)}
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[155 UASU BAF] Duty Management Server running on http://localhost:${PORT}`);
+  const server = app.listen(PORT, HOST, () => {
+    console.log(`[155 UASU BAF] Duty Management Server running on http://${HOST}:${PORT}`);
+  });
+
+  server.on('error', (err: any) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`[server] Port ${PORT} already in use, continuing.`);
+    } else {
+      console.error('[server] Server error:', err);
+    }
   });
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error('[server] Failed to start server:', err);
+});
+

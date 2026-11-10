@@ -433,6 +433,29 @@ export class LocalDatabaseEngine {
             }
 
             if (isFirestoreQuotaExceeded()) {
+              try {
+                const srvRes = await fetch('/api/duty-assignments');
+                if (srvRes.ok) {
+                  const srvDuty = await srvRes.json();
+                  if (srvDuty && typeof srvDuty === 'object') {
+                    Object.keys(srvDuty).forEach((mKey) => {
+                      if (!this.db.assignments[mKey]) this.db.assignments[mKey] = [];
+                      const list = srvDuty[mKey] || [];
+                      list.forEach((sItem: any) => {
+                        const sDigits = String(sItem.airmanId || '').replace(/\D/g, '');
+                        const exists = this.db.assignments[mKey].some((lItem: any) =>
+                          lItem.date === sItem.date &&
+                          String(lItem.airmanId || '').replace(/\D/g, '') === sDigits &&
+                          lItem.dutyCode === sItem.dutyCode
+                        );
+                        if (!exists) {
+                          this.db.assignments[mKey].push(sItem);
+                        }
+                      });
+                    });
+                  }
+                }
+              } catch (sErr) {}
               this.saveToStorage(this.db, false, false, false);
               this.isInitialPullDone = true;
               this.isFirebaseSyncing = false;
