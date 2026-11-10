@@ -399,20 +399,32 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
   // Helper to get detailed list of assigned airmen for any duty code (and optional shift)
   const getAssignedAirmenForDuty = (dutyCode: DutyCategoryCode, shift?: IDAShift) => {
     const list: { airman: Airman; assignment: DutyAssignment }[] = [];
+    const seenAirmen = new Set<string>();
+
     assignmentsList.forEach((assignment) => {
       const airman = airmanMap.get(assignment.airmanId);
       if (!airman) return;
       if (activeFlight !== 'All' && airman.flightName !== activeFlight) return;
 
-      const isMatch =
-        (dutyCode === 'ATT' || dutyCode === 'AIRPORT')
-          ? assignment.dutyCode === 'ATT' || assignment.dutyCode === 'AIRPORT'
-          : (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(dutyCode))
-          ? (assignment.dutyCode === 'IDAC' || assignment.dutyCode === 'IDA') && (!shift || assignment.idaShift === shift)
-          : assignment.dutyCode === dutyCode;
-
-      if (isMatch) {
+      if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(dutyCode)) {
+        if (assignment.dutyCode !== 'IDAC' && assignment.dutyCode !== 'IDA') return;
+        if (shift) {
+          const aShift = assignment.idaShift || 'Morning';
+          if (aShift.toLowerCase() !== shift.toLowerCase()) return;
+        }
+        if (seenAirmen.has(airman.id)) return;
+        seenAirmen.add(airman.id);
         list.push({ airman, assignment });
+      } else {
+        const isMatch =
+          (dutyCode === 'ATT' || dutyCode === 'AIRPORT')
+            ? assignment.dutyCode === 'ATT' || assignment.dutyCode === 'AIRPORT'
+            : assignment.dutyCode === dutyCode;
+        if (isMatch) {
+          if (seenAirmen.has(airman.id)) return;
+          seenAirmen.add(airman.id);
+          list.push({ airman, assignment });
+        }
       }
     });
 
@@ -567,44 +579,15 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
         }
       } else {
         // Direct Assign Airman
-        const notes = activeDutyCode === 'LEAVE' ? `${activeLeaveType} Leave` : '';
-        const targetFlight = proxyForFlight && isProxyEnabled ? proxyForFlight : (activeFlight !== 'All' ? activeFlight : airman.flightName);
-
-        // Find if there is any previously assigned airman from this same flight for this duty (and shift if IDAC)
-        // We only do this auto-replace if the quota for this flight is exactly 1, or if it's not a matrix-tracked duty.
-        const reqQuota = getRequiredCountForDuty(activeDutyCode, activeIdaShift);
-        const previousFlightAssignee = reqQuota <= 1 ? assignmentsList.find((a) => {
-          if (a.airmanId === airman.id) return false;
-          const assignedAirman = airmen.find((m) => m.id === a.airmanId);
-          if (!assignedAirman || assignedAirman.flightName !== targetFlight) return false;
-          if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(activeDutyCode as string)) {
-            return (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === activeIdaShift;
-          }
-          if (activeDutyCode === 'ATT' || activeDutyCode === 'AIRPORT') {
-            return a.dutyCode === 'ATT' || a.dutyCode === 'AIRPORT';
-          }
-          return a.dutyCode === activeDutyCode;
-        }) : undefined;
-
-        // If previously assigned airman exists from this flight, unassign them first to enforce single selection per flight slot
-        if (previousFlightAssignee) {
-          try {
-            await fetch('/api/roster/delete-range', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                airmanId: previousFlightAssignee.airmanId,
-                fromDate,
-                toDate,
-                dutyCode: previousFlightAssignee.dutyCode,
-                idaShift: previousFlightAssignee.idaShift,
-              }),
-            });
-          } catch (e) {
-            console.error('Error auto-replacing previous assignee:', e);
-          }
+        if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(activeDutyCode as string) && !activeIdaShift) {
+          setToastMessage('⚠️ Please select an IDAC Shift (Morning, Afternoon, or Night) first.');
+          setTimeout(() => setToastMessage(''), 2500);
+          setProcessingAirmanId(null);
+          return;
         }
 
+        const notes = activeDutyCode === 'LEAVE' ? `${activeLeaveType} Leave` : '';
+        const targetFlight = proxyForFlight && isProxyEnabled ? proxyForFlight : (activeFlight !== 'All' ? activeFlight : airman.flightName);
         const res = await fetch('/api/roster/assign-range', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -629,21 +612,13 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
             proxyForFlight: isProxyEnabled && proxyForFlight ? proxyForFlight : undefined,
           };
           setAssignmentsList((prev) => {
-            let updated = prev;
-            if (previousFlightAssignee) {
-              updated = updated.filter((a) => !(a.airmanId === previousFlightAssignee.airmanId && a.dutyCode === previousFlightAssignee.dutyCode && a.idaShift === previousFlightAssignee.idaShift));
-            }
+            const updated = prev;
             if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(activeDutyCode as string)) {
-              if (activeIdaShift === 'Night') {
-                const filtered = updated.filter((a) => !(a.airmanId === airman.id && (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night'));
-                return [...filtered, newAssignment];
-              } else {
-                const filtered = updated.filter((a) => !(a.airmanId === airman.id && (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift !== 'Night'));
-                return [...filtered, newAssignment];
-              }
+              // Completely replace any previous IDAC assignment for this airman on this date
+              const filtered = updated.filter((a) => !(a.airmanId === airman.id && (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA' || a.dutyCode === 'DUTY' || a.dutyCode === 'DUTY_ON' || a.dutyCode === 'ON_PARADE')));
+              return [...filtered, newAssignment];
             } else {
               const filtered = updated.filter((a) => a.airmanId !== airman.id);
-              return [...filtered, newAssignment];
             }
           });
           const dtName = DUTY_TYPE_MAP.get(activeDutyCode as any)?.name || activeDutyCode;
@@ -667,15 +642,8 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
 
             // Construct next assignments state
             let nextAssignments = assignmentsList;
-            if (previousFlightAssignee) {
-              nextAssignments = nextAssignments.filter((a) => !(a.airmanId === previousFlightAssignee.airmanId && a.dutyCode === previousFlightAssignee.dutyCode && a.idaShift === previousFlightAssignee.idaShift));
-            }
             if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(activeDutyCode as string)) {
-              if (activeIdaShift === 'Night') {
-                nextAssignments = [...nextAssignments.filter((a) => !(a.airmanId === airman.id && (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night')), newAssignment];
-              } else {
-                nextAssignments = [...nextAssignments.filter((a) => !(a.airmanId === airman.id && (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift !== 'Night')), newAssignment];
-              }
+              nextAssignments = [...nextAssignments.filter((a) => !(a.airmanId === airman.id && (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA' || a.dutyCode === 'DUTY' || a.dutyCode === 'DUTY_ON' || a.dutyCode === 'ON_PARADE'))), newAssignment];
             } else {
               nextAssignments = [...nextAssignments.filter((a) => a.airmanId !== airman.id), newAssignment];
             }
@@ -796,9 +764,10 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
       if (leave) {
         const notesLower = (leave.notes || '').toLowerCase();
         let lbl = 'Leave';
-        if (notesLower.includes('casual')) lbl = 'Leave (CL)';
-        else if (notesLower.includes('annual')) lbl = 'Leave (AL)';
-        else if (notesLower.includes('recreation')) lbl = 'Leave (RL)';
+        if (notesLower.includes('sick')) lbl = 'Sick Leave';
+        else if (notesLower.includes('recreation') || notesLower.includes('rl') || notesLower.includes('rec leave')) lbl = 'Leave (RL)';
+        else if (notesLower.includes('casual') || notesLower.includes('cl')) lbl = 'Leave (CL)';
+        else if (notesLower.includes('annual') || notesLower.includes('al')) lbl = 'Leave (AL)';
         return { label: lbl, type: 'LEAVE', isFixed: true };
       }
       // TDY
@@ -829,7 +798,38 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
       if (bnb) return { label: 'Bake & Bite', type: 'BAKE_N_BITE', isFixed: false };
 
       const firstDuty = airmanAssignments[0];
-      const isGenericStr = (s?: string) => !s || ['DUTY', 'DUTY_ON', 'ON DUTY', 'DUTY ON'].includes(s.toUpperCase().trim());
+      const isGenericStr = (s?: string) => !s || ['DUTY', 'DUTY_ON', 'ON DUTY', 'DUTY ON', 'ON_PARADE', 'ON PARADE', '-'].includes(s.toUpperCase().trim());
+
+      // If dutyCode itself is generic or unspecific ('DUTY', 'DUTY_ON', 'ON_PARADE'):
+      if (['DUTY', 'DUTY_ON', 'ON DUTY', 'DUTY ON', 'ON_PARADE'].includes(String(firstDuty.dutyCode).toUpperCase().trim())) {
+        const specificName = (!isGenericStr(firstDuty.dutyName) ? firstDuty.dutyName : '') || 
+                             (!isGenericStr(firstDuty.notes) ? firstDuty.notes : '');
+        if (specificName) {
+          return { label: specificName, type: firstDuty.dutyCode, isFixed: false };
+        }
+
+        // The airman does not have a real duty assigned!
+        // Check if yesterday they performed heavy duty (Night Off)
+        if (prevAssignments.length > 0) {
+          const yestAss = prevAssignments[0];
+          const isHeavy =
+            ['GD', 'BTF', 'NTF', 'AIRPORT'].includes(yestAss.dutyCode) ||
+            ((yestAss.dutyCode === 'IDAC' || yestAss.dutyCode === 'IDA') && yestAss.idaShift === 'Night') ||
+            (yestAss.notes || '').toLowerCase().includes('idac');
+          if (isHeavy) {
+            let offShort = 'GD Off';
+            if (yestAss.dutyCode === 'GD') offShort = 'GD Off';
+            else if (yestAss.dutyCode === 'BTF') offShort = 'BTF Off';
+            else if (yestAss.dutyCode === 'NTF') offShort = 'NTF Off';
+            else if (yestAss.dutyCode === 'AIRPORT') offShort = 'Airport Off';
+            else if ((yestAss.dutyCode === 'IDAC' || yestAss.dutyCode === 'IDA') && yestAss.idaShift === 'Night') offShort = 'IDAC Nt Off';
+            else if ((yestAss.notes || '').toLowerCase().includes('idac')) offShort = 'IDAC Nt Off';
+            return { label: offShort, type: 'NIGHT_OFF', isFixed: false };
+          }
+        }
+        return { label: 'On Parade', type: 'ON_PARADE', isFixed: false };
+      }
+
       let name = DUTY_TYPE_MAP.get(firstDuty.dutyCode as any)?.name || 
                  (firstDuty.dutyName && !isGenericStr(firstDuty.dutyName) ? firstDuty.dutyName : '') || 
                  (firstDuty.notes && !isGenericStr(firstDuty.notes) ? firstDuty.notes : '') || 
@@ -851,6 +851,10 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
         } else {
           name = firstDuty.previousDutyName || firstDuty.notes || 'GD Off';
         }
+      }
+
+      if (isGenericStr(name)) {
+        return { label: 'On Parade', type: 'ON_PARADE', isFixed: false };
       }
 
       return { label: name, type: firstDuty.dutyCode, isFixed: false };
@@ -1500,14 +1504,14 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
                     ? `Flight is locked to ${activeFlight}. Click to unlock.` 
                     : 'Click to lock this flight: Only shows duties for this flight, auto-advances duty on assign, and auto-advances date when complete.'
                 }
-                className={`px-2 py-1 text-xs font-bold rounded-lg border flex items-center gap-1.5 transition-all cursor-pointer ${
+                className={`p-1.5 text-xs font-bold rounded-lg border flex items-center justify-center transition-all cursor-pointer ${
                   isFlightLocked
                     ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-sm ring-2 ring-amber-400/40'
                     : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-amber-400 hover:text-amber-600'
                 }`}
+                aria-label={isFlightLocked ? 'Flight Locked' : 'Flight Unlocked'}
               >
                 {isFlightLocked ? <Lock className="w-3.5 h-3.5 stroke-[2.5]" /> : <Unlock className="w-3.5 h-3.5" />}
-                <span className="text-[10px] uppercase tracking-wider">{isFlightLocked ? 'Locked' : 'Lock'}</span>
               </button>
 
               {(['All', 'Avionics', 'Mechanics', 'GCS', 'Admin'] as Array<FlightName | 'All'>).filter(flt => {

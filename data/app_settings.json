@@ -141,8 +141,8 @@
   },
   "baf_duty_distribution_disposals_master": {
     "setting_key": "baf_duty_distribution_disposals_master",
-    "setting_value": "{\"airman-47\":\"Bake & Bite\",\"airman-28\":\"TDY\",\"airman-12\":\"\",\"airman-46\":\"Bake & Bite\",\"airman-45\":\"TDY\",\"airman-32\":\"Bake & Bite\",\"airman-33\":\"Bake & Bite\",\"airman-42\":\"Canteen\",\"BD/471269\":\"-\",\"BD/471830\":\"TDY (Air HQ)\",\"BD/472026\":\"TDY (HSIA)\",\"BD/474455\":\"Canteen\",\"BD/474513\":\"Att (SAIA)\",\"BD/475268\":\"Att (SAIA)\",\"BD/475296\":\"TDY (Air HQ)\",\"BD/475902\":\"Att (SAIA)\",\"BD/474806\":\"TDY (Air HQ)\"}",
-    "updated_at": "2026-11-09T11:06:39.445Z"
+    "setting_value": "{\"airman-47\":\"Bake & Bite\",\"airman-28\":\"TDY\",\"airman-12\":\"\",\"airman-46\":\"Bake & Bite\",\"airman-45\":\"TDY\",\"airman-32\":\"Bake & Bite\",\"airman-33\":\"Bake & Bite\",\"airman-42\":\"Canteen\",\"BD/471269\":\"-\",\"BD/471830\":\"TDY (Air HQ)\",\"BD/472026\":\"TDY (HSIA)\",\"BD/474455\":\"Canteen\",\"BD/474513\":\"Att (SAIA)\",\"BD/475296\":\"TDY (Air HQ)\",\"BD/475902\":\"Att (SAIA)\",\"BD/474806\":\"TDY (Air HQ)\"}",
+    "updated_at": "2026-11-10T09:13:26.624Z"
   },
   "baf_duty_distribution_manpower": {
     "setting_key": "baf_duty_distribution_manpower",

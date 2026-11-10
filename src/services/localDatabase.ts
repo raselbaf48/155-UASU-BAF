@@ -333,10 +333,17 @@ export class LocalDatabaseEngine {
             try {
               const fbHistory = await fetchParadeStatesFromFirebase();
               if (fbHistory && fbHistory.length > 0) {
-                if (JSON.stringify(fbHistory) !== JSON.stringify(this.db.activityHistory)) {
-                  newDb.activityHistory = fbHistory;
-                  dataChanged = true;
-                }
+                const histMap = new Map<string, ActivityHistoryItem>();
+                (this.db.activityHistory || []).forEach(h => { if (h && h.id) histMap.set(h.id, h); });
+                fbHistory.forEach(h => {
+                  if (h && h.id && !histMap.has(h.id)) {
+                    histMap.set(h.id, h);
+                    dataChanged = true;
+                  }
+                });
+                newDb.activityHistory = Array.from(histMap.values()).sort(
+                  (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+                );
               }
             } catch (hErr) {}
 
@@ -578,7 +585,7 @@ export class LocalDatabaseEngine {
                const monthKey = dateStr.substring(0, 7); // YYYY-MM
                if (!newAssignments[monthKey]) newAssignments[monthKey] = [];
                const rawType = d.duty_type || d.dutyTypeCode || d.dutyCode;
-               const cleanCode = (rawType && rawType !== 'DUTY' && rawType !== 'DUTY_ON') ? rawType : 'GD';
+               const cleanCode = (rawType && rawType !== 'DUTY' && rawType !== 'DUTY_ON') ? rawType : (rawType || 'GD');
                const existingIdx = newAssignments[monthKey].findIndex(a => a.airmanId === d.airman_id && a.date === dateStr);
                const incomingAsn: DutyAssignment = {
                  airmanId: d.airman_id,
@@ -588,12 +595,9 @@ export class LocalDatabaseEngine {
                  disposalScope: 'ALL',
                  notes: d.remarks || undefined
                };
-               if (existingIdx >= 0) {
-                 if (newAssignments[monthKey][existingIdx].dutyCode !== 'LEAVE' || cleanCode === 'LEAVE') {
-                   newAssignments[monthKey][existingIdx] = incomingAsn;
-                 }
-               } else {
+               if (existingIdx === -1) {
                  newAssignments[monthKey].push(incomingAsn);
+                 dataChanged = true;
                }
             }
          });
@@ -1875,20 +1879,7 @@ export class LocalDatabaseEngine {
               airmen: normalizeAirmenSeniority(syncedAirmen),
               assignments: migratedAssignments,
 
-              activityHistory: (() => {
-                const rawHistory: ActivityHistoryItem[] = parsed.activityHistory || [];
-                const seenHistKey = new Set<string>();
-                const cleanHist: ActivityHistoryItem[] = [];
-                for (const h of rawHistory) {
-                  if (h.airmanId && h.fromDate) {
-                    const key = `${h.airmanId}_${h.fromDate}_${h.dutyCode || 'DUTY'}`;
-                    if (seenHistKey.has(key)) continue;
-                    seenHistKey.add(key);
-                  }
-                  cleanHist.push(h);
-                }
-                return cleanHist;
-              })(),
+              activityHistory: Array.isArray(parsed.activityHistory) ? parsed.activityHistory : [],
               adminPasscode: parsed.adminPasscode || DEFAULT_ADMIN_PASSCODE,
               detailedUsers: parsed.detailedUsers || [],
               importHistory: parsed.importHistory || [],
@@ -2232,8 +2223,9 @@ export class LocalDatabaseEngine {
     const today = new Date();
     const defaultMonthKey = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}`;
     const targetMonth = monthKey || defaultMonthKey;
-    const assignments = this.db.assignments[targetMonth] || [];
-    return { monthKey: targetMonth, assignments };
+    const rawAssignments = this.db.assignments[targetMonth] || [];
+
+    return { monthKey: targetMonth, assignments: [...rawAssignments] };
   }
 
   public getRosterYear(year?: number): { year: number; assignments: DutyAssignment[] } {
@@ -2257,15 +2249,9 @@ export class LocalDatabaseEngine {
 
     const isDep = (code) => code && ['ATT', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(code);
     if (assignment.dutyCode === 'IDAC' || assignment.dutyCode === 'IDA') {
-      if (assignment.idaShift === 'Night') {
-        index = list.findIndex(
-          (a) => a.airmanId === assignment.airmanId && a.date === assignment.date && (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night'
-        );
-      } else {
-        index = list.findIndex(
-          (a) => a.airmanId === assignment.airmanId && a.date === assignment.date && !((a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night') && isDep(a.dutyCode) === isDep(assignment.dutyCode)
-        );
-      }
+      index = list.findIndex(
+        (a) => a.airmanId === assignment.airmanId && a.date === assignment.date && (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA')
+      );
     } else {
       index = list.findIndex(
         (a) => a.airmanId === assignment.airmanId && a.date === assignment.date && !((a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night') && isDep(a.dutyCode) === isDep(assignment.dutyCode)
@@ -2490,14 +2476,10 @@ export class LocalDatabaseEngine {
         let index = -1;
         const isDep = (code) => code && ['ATT', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(code);
         if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(dutyCode)) {
-          if (idaShift === 'Night') {
-            index = list.findIndex((a) => a.airmanId === airmanId && a.date === dateStr && (
-              ((a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night') ||
-              a.dutyCode === 'ON_PARADE'
-            ));
-          } else {
-            index = list.findIndex((a) => a.airmanId === airmanId && a.date === dateStr && !((a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night') && isDep(a.dutyCode) === isDep(dutyCode));
-          }
+          index = list.findIndex((a) => a.airmanId === airmanId && a.date === dateStr && (
+            a.dutyCode === 'IDAC' || a.dutyCode === 'IDA' ||
+            ['ON_PARADE', 'DUTY', 'DUTY_ON', 'IDAC CENTER', 'IDA CENTER'].includes(a.dutyCode as any)
+          ));
         } else {
           const scope = disposalScope || 'ALL';
           index = list.findIndex((a) => a.airmanId === airmanId && a.date === dateStr && !((a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night') && (a.disposalScope || 'ALL') === scope && isDep(a.dutyCode) === isDep(dutyCode));
@@ -2869,7 +2851,7 @@ export class LocalDatabaseEngine {
             let masterDisp: string | undefined;
             if (typeof window !== 'undefined') {
               try {
-                const masterStr = window.localStorage.getItem('baf_duty_distribution_disposals_master') || window.localStorage.getItem('baf_duty_distribution_disposals_' + date);
+                const masterStr = window.localStorage.getItem('baf_duty_distribution_disposals_' + date);
                 if (masterStr) {
                   const parsed = JSON.parse(masterStr);
                   masterDisp = parsed[airmanId];
@@ -2880,8 +2862,9 @@ export class LocalDatabaseEngine {
               dutyName = masterDisp;
               codeStr = masterDisp.toUpperCase();
             } else {
-              codeStr = 'GD';
-              dutyName = 'Base Security Duty';
+              codeStr = 'ON_PARADE';
+              dutyName = isPT ? 'On PT' : 'On Parade';
+              statusCategory = 'PARADE';
             }
           }
         }
@@ -3278,26 +3261,8 @@ export class LocalDatabaseEngine {
   }
 
   public cleanDuplicateHistory(): void {
-    if (!this.db.activityHistory || this.db.activityHistory.length <= 1) return;
-
-    const seenMap = new Map<string, string>();
-    const itemsToRemove = new Set<string>();
-
-    for (const item of this.db.activityHistory) {
-      if (!item.airmanId || !item.fromDate) continue;
-      // Deduplicate when multiple entries exist for the same airman, start date, and duty
-      const key = `${item.airmanId}_${item.fromDate}_${item.dutyCode || 'DUTY'}`;
-      if (seenMap.has(key)) {
-        itemsToRemove.add(item.id);
-      } else {
-        seenMap.set(key, item.id);
-      }
-    }
-
-    if (itemsToRemove.size > 0) {
-      this.db.activityHistory = this.db.activityHistory.filter((h) => !itemsToRemove.has(h.id));
-      this.saveToStorage();
-    }
+    // Preserve all history items - user requested: "kono Duty , History , Log remove hbe na"
+    // No history entries or logs are deleted
   }
 
   public mergeHistory(incoming: ActivityHistoryItem[]): void {

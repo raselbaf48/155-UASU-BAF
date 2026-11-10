@@ -207,6 +207,67 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
     return () => window.removeEventListener('baf_state_updated', handleUpdate);
   }, []);
 
+  // Helper to determine exact leave breakdown type (Annual Leave, Casual Leave, Recreation Leave, Sick Leave)
+  const getLeaveBreakdownInfo = (group: DutyAssignment[]) => {
+    const first = group[0];
+    const spanLength = group.length;
+    const isSpanAnnual = spanLength > 7;
+
+    let combinedNotes = '';
+    group.forEach((a) => {
+      if (a.notes) combinedNotes += ' ' + a.notes;
+    });
+    const notesLower = combinedNotes.toLowerCase();
+
+    const hasRecreation = notesLower.includes('recreation') || notesLower.includes('(rl)') || notesLower.includes(' rl') || notesLower.includes('rec leave');
+    const hasCasual = notesLower.includes('casual') || notesLower.includes('(cl)') || notesLower.includes(' cl');
+    const hasAnnual = notesLower.includes('annual') || notesLower.includes('(al)') || notesLower.includes(' al');
+    const hasSick = notesLower.includes('sick');
+
+    let leaveType = 'Casual Leave';
+    let badgeBg = 'bg-sky-50 dark:bg-sky-950/60';
+    let badgeText = 'text-sky-700 dark:text-sky-300';
+    let badgeBorder = 'border-sky-300 dark:border-sky-800';
+
+    if (hasSick) {
+      leaveType = 'Sick Leave';
+      badgeBg = 'bg-rose-50 dark:bg-rose-950/60';
+      badgeText = 'text-rose-700 dark:text-rose-300';
+      badgeBorder = 'border-rose-300 dark:border-rose-800';
+    } else if (hasRecreation) {
+      leaveType = 'Recreation Leave';
+      badgeBg = 'bg-indigo-50 dark:bg-indigo-950/60';
+      badgeText = 'text-indigo-700 dark:text-indigo-300';
+      badgeBorder = 'border-indigo-300 dark:border-indigo-800';
+    } else if (hasAnnual || isSpanAnnual) {
+      leaveType = 'Annual Leave';
+      badgeBg = 'bg-amber-50 dark:bg-amber-950/60';
+      badgeText = 'text-amber-700 dark:text-amber-300';
+      badgeBorder = 'border-amber-300 dark:border-amber-800';
+    } else if (hasCasual) {
+      leaveType = 'Casual Leave';
+      badgeBg = 'bg-sky-50 dark:bg-sky-950/60';
+      badgeText = 'text-sky-700 dark:text-sky-300';
+      badgeBorder = 'border-sky-300 dark:border-sky-800';
+    } else {
+      leaveType = spanLength > 7 ? 'Annual Leave' : 'Casual Leave';
+      badgeBg = spanLength > 7 ? 'bg-amber-50 dark:bg-amber-950/60' : 'bg-sky-50 dark:bg-sky-950/60';
+      badgeText = spanLength > 7 ? 'text-amber-700 dark:text-amber-300' : 'text-sky-700 dark:text-sky-300';
+      badgeBorder = spanLength > 7 ? 'border-amber-300 dark:border-amber-800' : 'border-sky-300 dark:border-sky-800';
+    }
+
+    let cleanNote = (first.notes || '').trim();
+    cleanNote = cleanNote.replace(/^(Annual|Casual|Recreation|Sick)?\s*Leave\s*:?\s*/i, '').trim();
+
+    const f295Match = combinedNotes.match(/\(F-295: (\d+) Free Days\)/i);
+    let f295Text = '';
+    if (f295Match) {
+      f295Text = `(F-295: ${f295Match[1]} Free Days)`;
+    }
+
+    return { leaveType, badgeBg, badgeText, badgeBorder, cleanNote, f295Text };
+  };
+
   const handleGroupClick = (group: DutyAssignment[]) => {
     if (!allowEditDelete) return;
     setEditingGroup(group);
@@ -239,10 +300,11 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
         setEditTdyCustomDestination(customDest);
         setEditTdyRemarks(rem);
     } else if (group[0].dutyCode === 'LEAVE') {
+        const info = getLeaveBreakdownInfo(group);
         let type = 'Casual';
-        if (rawNotes.includes('Annual')) type = 'Annual';
-        else if (rawNotes.includes('Sick')) type = 'Sick';
-        else if (rawNotes.includes('Recreation')) type = 'Recreation';
+        if (info.leaveType === 'Annual Leave') type = 'Annual';
+        else if (info.leaveType === 'Sick Leave') type = 'Sick';
+        else if (info.leaveType === 'Recreation Leave') type = 'Recreation';
         setEditLeaveType(type);
 
         const f295Match = rawNotes.match(/\(F-295: (\d+) Free Days\)/);
@@ -637,6 +699,42 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
 
   const isGroupedView = categoryFilter === 'ALL' || categoryFilter === 'LEAVE' || categoryFilter === 'TDY' || categoryFilter === 'DEPL' || categoryFilter === 'DUTY' || categoryFilter === 'CANTEEN';
   const groupedList = isGroupedView ? getGroupedList(filteredList) : [];
+
+  // Leave breakdown summary totals for the selected period
+  const leaveSummary = useMemo(() => {
+    let casualDays = 0;
+    let annualDays = 0;
+    let recreationDays = 0;
+    let sickDays = 0;
+    let f295Days = 0;
+    let totalLeaveDays = 0;
+
+    const leaveOnlyGroups = groupedList.filter((g) => g[0] && g[0].dutyCode === 'LEAVE');
+    leaveOnlyGroups.forEach((group) => {
+      const info = getLeaveBreakdownInfo(group);
+      const spanLength = group.length;
+
+      let spanF295 = 0;
+      let combinedNotes = '';
+      group.forEach((a) => { if (a.notes) combinedNotes += ' ' + a.notes; });
+      const f295Match = combinedNotes.match(/f-295:\s*(\d+)/i);
+      if (f295Match && f295Match[1]) {
+        spanF295 = parseInt(f295Match[1], 10);
+      }
+      f295Days += spanF295;
+
+      const netDays = Math.max(0, spanLength - spanF295);
+
+      if (info.leaveType === 'Annual Leave') annualDays += netDays;
+      else if (info.leaveType === 'Recreation Leave') recreationDays += netDays;
+      else if (info.leaveType === 'Sick Leave') sickDays += netDays;
+      else casualDays += netDays;
+
+      totalLeaveDays += netDays;
+    });
+
+    return { casualDays, annualDays, recreationDays, sickDays, f295Days, totalLeaveDays };
+  }, [groupedList]);
 
   const canteenHistoryItems = useMemo(() => {
     if (!canteenOnly) return [];
@@ -1637,68 +1735,123 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                     </table>
                   </div>
                 ) : isGroupedView ? (
-                  <table className="w-full text-center border-collapse text-xs">
-                    <thead>
-                      <tr className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-extrabold uppercase text-[10px] tracking-wider">
-                        <th className="py-2.5 px-3.5">Ser</th>
-                        <th className="py-2.5 px-3.5">Description</th>
-                        <th className="py-2.5 px-3.5">Period</th>
-                        <th className="py-2.5 px-3.5 text-right">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                      {loading ? (
-                        <tr><td colSpan={4} className="py-6 text-center text-slate-400">Loading duty history...</td></tr>
-                      ) : groupedList.length === 0 ? (
-                        <tr><td colSpan={4} className="py-6 text-center text-slate-400">No records found for this period.</td></tr>
-                      ) : (
-                        groupedList.map((group, idx) => {
-                          const first = group[0];
-                          const last = group[group.length - 1];
-                          const typeOrDest = (() => {
-                            if (first.dutyCode === 'LEAVE') return first.notes || 'Leave';
-                            if (first.dutyCode === 'TDY') return first.notes || 'TDY';
-                            if (['ATT', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(first.dutyCode)) return first.notes || DUTY_TYPE_MAP.get(first.dutyCode)?.name || 'Deployment';
-                            if (first.dutyCode === 'OTHERS' || first.dutyCode === 'OTHER' || (typeof first.dutyCode === 'string' && first.dutyCode.startsWith('OTHERS_'))) {
-                              const noteName = first.notes?.trim();
-                              return (noteName && !['OTHER', 'OTHERS', 'OTHER DISPOSAL', 'CUSTOM DISPOSAL', 'CUSTOM'].includes(noteName.toUpperCase())) ? noteName : 'Disposal';
-                            }
-                            return DUTY_TYPE_MAP.get(first.dutyCode)?.name || first.dutyCode;
-                          })();
-                          return (
-                            <tr
-                              key={idx}
-                              onClick={allowEditDelete ? () => handleGroupClick(group) : undefined}
-                              className={`transition-colors ${allowEditDelete ? 'hover:bg-slate-50 dark:hover:bg-slate-800/40 cursor-pointer' : ''}`}
-                              title={allowEditDelete ? 'Click to edit or remove' : undefined}
-                            >
-                              <td className="py-2.5 px-3.5 font-mono font-bold text-slate-800 dark:text-slate-200">
-                                {String(idx + 1).padStart(2, '0')}
-                              </td>
-                              <td className="py-2.5 px-3.5 font-bold text-slate-700 dark:text-slate-300">
-                                {typeOrDest}
-                              </td>
-                              <td className="py-2.5 px-3.5 text-slate-600 dark:text-slate-400 font-semibold whitespace-nowrap">
-                                {formatDateRange(first.date, last.date)}
-                              </td>
-                              <td className="py-2.5 px-3.5 text-right font-black text-emerald-600 dark:text-emerald-400">
-                                {(() => {
-                                  let days = group.length;
-                                  if (first.dutyCode === 'LEAVE' && first.notes) {
-                                    const match = first.notes.match(/\(F-295: (\d+) Free Days\)/);
-                                    if (match && match[1]) {
-                                      days = Math.max(0, days - parseInt(match[1], 10));
+                  <div>
+                    {(categoryFilter === 'LEAVE' || initialCategory === 'LEAVE' || groupedList.some(g => g[0]?.dutyCode === 'LEAVE')) && (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+                        <div className="p-2.5 rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800/60 text-center">
+                          <span className="text-[10px] font-bold text-sky-600 dark:text-sky-400 uppercase tracking-wider block">Casual Leave</span>
+                          <span className="text-base font-black text-sky-700 dark:text-sky-300">
+                            {leaveSummary.casualDays} {leaveSummary.casualDays === 1 ? 'Day' : 'Days'}
+                          </span>
+                        </div>
+                        <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-center">
+                          <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider block">Annual Leave</span>
+                          <span className="text-base font-black text-amber-700 dark:text-amber-300">
+                            {leaveSummary.annualDays} {leaveSummary.annualDays === 1 ? 'Day' : 'Days'}
+                          </span>
+                        </div>
+                        <div className="p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 text-center">
+                          <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider block">Recreation Leave</span>
+                          <span className="text-base font-black text-indigo-700 dark:text-indigo-300">
+                            {leaveSummary.recreationDays} {leaveSummary.recreationDays === 1 ? 'Day' : 'Days'}
+                          </span>
+                        </div>
+                        <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 text-center">
+                          <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">Total Leave</span>
+                          <span className="text-base font-black text-emerald-700 dark:text-emerald-300">
+                            {leaveSummary.totalLeaveDays} {leaveSummary.totalLeaveDays === 1 ? 'Day' : 'Days'}
+                          </span>
+                          {leaveSummary.f295Days > 0 && (
+                            <span className="text-[9.5px] font-bold text-purple-600 dark:text-purple-400 block mt-0.5">
+                              +{leaveSummary.f295Days}d F-295 Free
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    <table className="w-full text-center border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-extrabold uppercase text-[10px] tracking-wider">
+                          <th className="py-2.5 px-3.5">Ser</th>
+                          <th className="py-2.5 px-3.5">{categoryFilter === 'LEAVE' || initialCategory === 'LEAVE' ? 'Leave Type / Description' : 'Description'}</th>
+                          <th className="py-2.5 px-3.5">Period</th>
+                          <th className="py-2.5 px-3.5 text-right">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {loading ? (
+                          <tr><td colSpan={4} className="py-6 text-center text-slate-400">Loading duty history...</td></tr>
+                        ) : groupedList.length === 0 ? (
+                          <tr><td colSpan={4} className="py-6 text-center text-slate-400">No records found for this period.</td></tr>
+                        ) : (
+                          groupedList.map((group, idx) => {
+                            const first = group[0];
+                            const last = group[group.length - 1];
+                            const isLeave = first.dutyCode === 'LEAVE';
+                            const leaveInfo = isLeave ? getLeaveBreakdownInfo(group) : null;
+                            const typeOrDest = (() => {
+                              if (first.dutyCode === 'LEAVE') return leaveInfo?.leaveType || first.notes || 'Leave';
+                              if (first.dutyCode === 'TDY') return first.notes || 'TDY';
+                              if (['ATT', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(first.dutyCode)) return first.notes || DUTY_TYPE_MAP.get(first.dutyCode)?.name || 'Deployment';
+                              if (first.dutyCode === 'OTHERS' || first.dutyCode === 'OTHER' || (typeof first.dutyCode === 'string' && first.dutyCode.startsWith('OTHERS_'))) {
+                                const noteName = first.notes?.trim();
+                                return (noteName && !['OTHER', 'OTHERS', 'OTHER DISPOSAL', 'CUSTOM DISPOSAL', 'CUSTOM'].includes(noteName.toUpperCase())) ? noteName : 'Disposal';
+                              }
+                              return DUTY_TYPE_MAP.get(first.dutyCode)?.name || first.dutyCode;
+                            })();
+                            return (
+                              <tr
+                                key={idx}
+                                onClick={allowEditDelete ? () => handleGroupClick(group) : undefined}
+                                className={`transition-colors ${allowEditDelete ? 'hover:bg-slate-50 dark:hover:bg-slate-800/40 cursor-pointer' : ''}`}
+                                title={allowEditDelete ? 'Click to edit or remove' : undefined}
+                              >
+                                <td className="py-2.5 px-3.5 font-mono font-bold text-slate-800 dark:text-slate-200">
+                                  {String(idx + 1).padStart(2, '0')}
+                                </td>
+                                <td className="py-2.5 px-3.5 font-bold text-slate-700 dark:text-slate-300">
+                                  {isLeave && leaveInfo ? (
+                                    <div className="flex flex-col items-center justify-center gap-0.5">
+                                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-black border ${leaveInfo.badgeBg} ${leaveInfo.badgeText} ${leaveInfo.badgeBorder}`}>
+                                        {leaveInfo.leaveType}
+                                      </span>
+                                      {leaveInfo.cleanNote && leaveInfo.cleanNote !== leaveInfo.leaveType && (
+                                        <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                                          {leaveInfo.cleanNote}
+                                        </span>
+                                      )}
+                                      {leaveInfo.f295Text && (
+                                        <span className="text-[10px] font-bold text-purple-600 dark:text-purple-400">
+                                          {leaveInfo.f295Text}
+                                        </span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    typeOrDest
+                                  )}
+                                </td>
+                                <td className="py-2.5 px-3.5 text-slate-600 dark:text-slate-400 font-semibold whitespace-nowrap">
+                                  {formatDateRange(first.date, last.date)}
+                                </td>
+                                <td className="py-2.5 px-3.5 text-right font-black text-emerald-600 dark:text-emerald-400">
+                                  {(() => {
+                                    let days = group.length;
+                                    if (first.dutyCode === 'LEAVE' && first.notes) {
+                                      const match = first.notes.match(/\(F-295: (\d+) Free Days\)/);
+                                      if (match && match[1]) {
+                                        days = Math.max(0, days - parseInt(match[1], 10));
+                                      }
                                     }
-                                  }
-                                  return `${String(days).padStart(2, '0')} days`;
-                                })()}
-                              </td>
-                            </tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
+                                    return `${String(days).padStart(2, '0')} days`;
+                                  })()}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 ) : (
                   <table className="w-full text-center border-collapse text-xs">
                     <thead>
@@ -1731,6 +1884,11 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                       ) : (
                         filteredList.map((item, idx) => {
                           const typeInfo = DUTY_TYPE_MAP.get(item.dutyCode);
+                          const singleLeaveInfo = (() => {
+                            if (item.dutyCode !== 'LEAVE') return null;
+                            const parentGroup = groupedList.find(g => g.some(a => a.date === item.date && a.dutyCode === 'LEAVE'));
+                            return getLeaveBreakdownInfo(parentGroup || [item]);
+                          })();
                           return (
                             <tr
                               key={idx}
@@ -1749,11 +1907,16 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                                 <>
                                   <td className="py-2.5 px-3.5">
                                     <span
-                                      className={`px-2 py-0.5 rounded font-black text-[10px] ${
-                                        typeInfo?.badgeBg || 'bg-slate-100'
-                                      } ${typeInfo?.badgeText || 'text-slate-800'}`}
+                                      className={`px-2 py-0.5 rounded font-black text-[10px] border ${
+                                        singleLeaveInfo
+                                          ? `${singleLeaveInfo.badgeBg} ${singleLeaveInfo.badgeText} ${singleLeaveInfo.badgeBorder}`
+                                          : `${typeInfo?.badgeBg || 'bg-slate-100'} ${typeInfo?.badgeText || 'text-slate-800'} border-transparent`
+                                      }`}
                                     >
                                       {(() => {
+                                        if (singleLeaveInfo) {
+                                          return singleLeaveInfo.leaveType;
+                                        }
                                         if (item.dutyCode === 'OTHERS' || item.dutyCode === 'OTHER' || (typeof item.dutyCode === 'string' && item.dutyCode.startsWith('OTHERS_'))) {
                                           const noteName = item.notes?.trim();
                                           return (noteName && !['OTHER', 'OTHERS', 'OTHER DISPOSAL', 'CUSTOM DISPOSAL', 'CUSTOM'].includes(noteName.toUpperCase())) ? noteName : 'Disposal';
