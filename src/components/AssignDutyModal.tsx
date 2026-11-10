@@ -21,7 +21,9 @@ import {
   Building,
   UserCheck,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Lock,
+  Unlock
 } from 'lucide-react';
 import {
   Airman,
@@ -101,6 +103,12 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
     if (isAdmin && adminFlight) return adminFlight as FlightName;
     return initialFlight;
   });
+  const [isFlightLocked, setIsFlightLocked] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return window.sessionStorage.getItem('baf_duty_flight_locked') === 'true';
+    }
+    return false;
+  });
   const [activeIdaShift, setActiveIdaShift] = useState<IDAShift | undefined>(undefined);
   const [activeLeaveType, setActiveLeaveType] = useState<'Casual' | 'Annual' | 'Recreation'>('Casual');
   const [isProxyEnabled, setIsProxyEnabled] = useState<boolean>(false);
@@ -140,10 +148,12 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
   }, [isOpen, selectedDate, onlyIdac, initialDutyCode, isAdmin, adminFlight, todayStr]);
 
   // Dynamically compute available IDAC shifts based on ratio matrix for fromDate
-  // DO NOT filter by activeFlight, otherwise users can't switch to a shift assigned to a different flight!
   const availableIdaShifts = useMemo(() => {
+    if (isFlightLocked && activeFlight !== 'All') {
+      return getIdacShiftsForDateAndFlight(fromDate, activeFlight as FlightName);
+    }
     return getIdacShiftsForDateAndFlight(fromDate, undefined);
-  }, [fromDate]);
+  }, [fromDate, isFlightLocked, activeFlight]);
 
   // Auto-select removed as requested by user.
 
@@ -212,6 +222,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
   }, [isOpen, fromDate]);
 
   useEffect(() => {
+    if (isFlightLocked) return;
     if (activeFlight !== 'All') {
       const dutyConfig = DUTY_TYPE_MAP.get(activeDutyCode as any);
       if (dutyConfig) {
@@ -223,7 +234,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
         }
       }
     }
-  }, [activeDutyCode, activeFlight]);
+  }, [activeDutyCode, activeFlight, isFlightLocked]);
 
   // Reset or auto-select shift when duty config changes
   useEffect(() => {
@@ -246,6 +257,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
 
   // Auto-select flight for matrix-tracked duties based on quota and unfulfilled assignments
   useEffect(() => {
+    if (isFlightLocked) return;
     if (userManuallySelectedFlightRef.current) return;
     const isMatrixTracked = getStoredDutyMatrix().some(t => t.dutyCode === activeDutyCode);
     if (isMatrixTracked) {
@@ -286,7 +298,60 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
       
       setActiveFlight(targetFlight);
     }
-  }, [activeDutyCode, fromDate, activeIdaShift, assignmentsList, airmanMap]);
+  }, [activeDutyCode, fromDate, activeIdaShift, assignmentsList, airmanMap, isFlightLocked]);
+
+  // Auto-select duty for locked flight on date/flight/roster change
+  useEffect(() => {
+    if (isFlightLocked && activeFlight !== 'All') {
+      const targetFlight = activeFlight as FlightName;
+      const _storedMatrix = getStoredDutyMatrix();
+      const allDuties = DUTY_TYPES.filter((dt) => {
+        if (!dt.isCountedAsDuty) return false;
+        const mEntries = _storedMatrix.filter(t => t.dutyCode === dt.code);
+        if (mEntries.length > 0 && mEntries.every(t => t.isDisabled)) return false;
+        return true;
+      });
+
+      const slots: Array<{ dutyCode: DutyCategoryCode; shift?: IDAShift; required: number; assigned: number }> = [];
+      allDuties.forEach((dt) => {
+        if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(dt.code)) {
+          const shifts: IDAShift[] = ['Morning', 'Afternoon', 'Night'];
+          shifts.forEach((sh) => {
+            const req = getFlightDutyQuotaForDate(fromDate, targetFlight, 'IDAC', sh);
+            if (req > 0) {
+              const assigned = assignmentsList.filter((a) => {
+                const air = airmanMap.get(a.airmanId);
+                return air && air.flightName === targetFlight &&
+                  (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') &&
+                  a.idaShift === sh;
+              }).length;
+              slots.push({ dutyCode: 'IDAC', shift: sh, required: req, assigned });
+            }
+          });
+        } else {
+          const req = getFlightDutyQuotaForDate(fromDate, targetFlight, dt.code);
+          if (req > 0) {
+            const assigned = assignmentsList.filter((a) => {
+              const air = airmanMap.get(a.airmanId);
+              if (!air || air.flightName !== targetFlight) return false;
+              if (dt.code === 'ATT' || dt.code === 'AIRPORT') return a.dutyCode === 'ATT' || a.dutyCode === 'AIRPORT';
+              return a.dutyCode === dt.code;
+            }).length;
+            slots.push({ dutyCode: dt.code, required: req, assigned });
+          }
+        }
+      });
+
+      if (slots.length > 0) {
+        const currentSlot = slots.find(s => s.dutyCode === activeDutyCode && (!s.shift || s.shift === activeIdaShift));
+        if (!currentSlot || currentSlot.assigned >= currentSlot.required) {
+          const firstUnfulfilled = slots.find(s => s.assigned < s.required) || slots[0];
+          setActiveDutyCode(firstUnfulfilled.dutyCode);
+          setActiveIdaShift(firstUnfulfilled.shift);
+        }
+      }
+    }
+  }, [isFlightLocked, activeFlight, fromDate, assignmentsList]);
 
 
   // Helper to get required ratio count for duty
@@ -589,18 +654,93 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
           if (onRefreshParadeData) onRefreshParadeData();
           if (onSuccess) onSuccess();
 
-          // Auto-advance logic
-          if (selectionMode === 'FlightFirst' && activeFlight !== 'All' && activeDutyCode) {
-            const _storedMatrix = getStoredDutyMatrix(); const allDuties = DUTY_TYPES.filter((dt) => { if (!dt.isCountedAsDuty) return false; const mEntries = _storedMatrix.filter(t => t.dutyCode === dt.code); if (mEntries.length > 0 && mEntries.every(t => t.isDisabled)) return false; return true; });
-            const ratioFiltered = allDuties.filter((dt) => getRequiredCountForDuty(dt.code, undefined, activeFlight) > 0);
-            if (ratioFiltered.length > 1) {
-              const currentIndex = ratioFiltered.findIndex((d) => d.code === activeDutyCode);
-              if (currentIndex !== -1 && currentIndex + 1 < ratioFiltered.length) {
-                setActiveDutyCode(ratioFiltered[currentIndex + 1].code);
-                if (ratioFiltered[currentIndex + 1].code === 'IDAC' || ratioFiltered[currentIndex + 1].code === 'IDA') {
-                   // Optional: attempt to auto-select the first needed shift, but activeIdaShift might be needed
-                   setActiveIdaShift(undefined); 
+          // Auto-advance logic: Advance to next unfulfilled duty or next date when all flight duties are fulfilled
+          if ((isFlightLocked || selectionMode === 'FlightFirst') && activeFlight !== 'All' && activeDutyCode) {
+            const targetFlight = activeFlight as FlightName;
+            const _storedMatrix = getStoredDutyMatrix();
+            const allDuties = DUTY_TYPES.filter((dt) => {
+              if (!dt.isCountedAsDuty) return false;
+              const mEntries = _storedMatrix.filter(t => t.dutyCode === dt.code);
+              if (mEntries.length > 0 && mEntries.every(t => t.isDisabled)) return false;
+              return true;
+            });
+
+            // Construct next assignments state
+            let nextAssignments = assignmentsList;
+            if (previousFlightAssignee) {
+              nextAssignments = nextAssignments.filter((a) => !(a.airmanId === previousFlightAssignee.airmanId && a.dutyCode === previousFlightAssignee.dutyCode && a.idaShift === previousFlightAssignee.idaShift));
+            }
+            if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(activeDutyCode as string)) {
+              if (activeIdaShift === 'Night') {
+                nextAssignments = [...nextAssignments.filter((a) => !(a.airmanId === airman.id && (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift === 'Night')), newAssignment];
+              } else {
+                nextAssignments = [...nextAssignments.filter((a) => !(a.airmanId === airman.id && (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') && a.idaShift !== 'Night')), newAssignment];
+              }
+            } else {
+              nextAssignments = [...nextAssignments.filter((a) => a.airmanId !== airman.id), newAssignment];
+            }
+
+            interface DutySlot {
+              dutyCode: DutyCategoryCode;
+              shift?: IDAShift;
+              required: number;
+              assigned: number;
+            }
+            const slots: DutySlot[] = [];
+
+            allDuties.forEach((dt) => {
+              if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(dt.code)) {
+                const shifts: IDAShift[] = ['Morning', 'Afternoon', 'Night'];
+                shifts.forEach((sh) => {
+                  const req = getFlightDutyQuotaForDate(fromDate, targetFlight, 'IDAC', sh);
+                  if (req > 0) {
+                    const assigned = nextAssignments.filter((a) => {
+                      const air = airmanMap.get(a.airmanId);
+                      return air && air.flightName === targetFlight &&
+                        (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA') &&
+                        a.idaShift === sh;
+                    }).length;
+                    slots.push({ dutyCode: 'IDAC', shift: sh, required: req, assigned });
+                  }
+                });
+              } else {
+                const req = getFlightDutyQuotaForDate(fromDate, targetFlight, dt.code);
+                if (req > 0) {
+                  const assigned = nextAssignments.filter((a) => {
+                    const air = airmanMap.get(a.airmanId);
+                    if (!air || air.flightName !== targetFlight) return false;
+                    if (dt.code === 'ATT' || dt.code === 'AIRPORT') return a.dutyCode === 'ATT' || a.dutyCode === 'AIRPORT';
+                    return a.dutyCode === dt.code;
+                  }).length;
+                  slots.push({ dutyCode: dt.code, required: req, assigned });
                 }
+              }
+            });
+
+            // Check if all duty slots for this locked flight on fromDate are now fulfilled
+            const allFulfilled = slots.length > 0 && slots.every((s) => s.assigned >= s.required);
+
+            if (allFulfilled && isFlightLocked) {
+              const d = new Date(fromDate);
+              d.setDate(d.getDate() + 1);
+              const nextDateStr = d.toISOString().split('T')[0];
+              
+              setToastMessage(`🎉 All ${targetFlight} duties completed for ${fromDate}! Advancing to next date...`);
+              setTimeout(() => {
+                setFromDate(nextDateStr);
+                setToDate(nextDateStr);
+                setSelectedPresetDays(1);
+              }, 700);
+            } else {
+              // Auto-advance to next unfulfilled duty
+              const currentSlotIdx = slots.findIndex(s => s.dutyCode === activeDutyCode && (!s.shift || s.shift === activeIdaShift));
+              let nextSlot = slots.slice(currentSlotIdx + 1).find(s => s.assigned < s.required);
+              if (!nextSlot) {
+                nextSlot = slots.find(s => s.assigned < s.required);
+              }
+              if (nextSlot) {
+                setActiveDutyCode(nextSlot.dutyCode);
+                setActiveIdaShift(nextSlot.shift);
               }
             }
           }
@@ -1087,23 +1227,50 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
                 {(() => {
                   const _storedMatrix = getStoredDutyMatrix(); const allDuties = DUTY_TYPES.filter((dt) => { if (!dt.isCountedAsDuty) return false; const mEntries = _storedMatrix.filter(t => t.dutyCode === dt.code); if (mEntries.length > 0 && mEntries.every(t => t.isDisabled)) return false; return true; });
                   const ratioFiltered = allDuties.filter((dt) => {
-    const req = getRequiredCountForDuty(dt.code);
-    const assignedCount = assignmentsList.filter(a => {
-      if (activeFlight !== 'All') {
-        const airman = airmanMap.get(a.airmanId);
-        if (airman && airman.flightName !== activeFlight) return false;
-      }
-      if (dt.code === 'ATT' || dt.code === 'AIRPORT') {
-        return a.dutyCode === 'ATT' || a.dutyCode === 'AIRPORT';
-      }
-      if (dt.code === 'IDAC' || dt.code === 'IDA') {
-        return a.dutyCode === 'IDAC' || a.dutyCode === 'IDA';
-      }
-      return a.dutyCode === dt.code;
-    }).length;
-    return req > 0 || assignedCount > 0;
-});
-                  const dutiesToRender = filterByRatio ? ratioFiltered : allDuties; if(dutiesToRender.length === 0) return <div className="col-span-full py-6 text-center text-sm font-bold text-slate-500 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-dashed border-slate-300 dark:border-slate-700">No active duties scheduled in the Ratio Matrix for this date.</div>;
+                    const req = getRequiredCountForDuty(dt.code);
+                    const assignedCount = assignmentsList.filter(a => {
+                      if (activeFlight !== 'All') {
+                        const airman = airmanMap.get(a.airmanId);
+                        if (airman && airman.flightName !== activeFlight) return false;
+                      }
+                      if (dt.code === 'ATT' || dt.code === 'AIRPORT') {
+                        return a.dutyCode === 'ATT' || a.dutyCode === 'AIRPORT';
+                      }
+                      if (dt.code === 'IDAC' || dt.code === 'IDA') {
+                        return a.dutyCode === 'IDAC' || a.dutyCode === 'IDA';
+                      }
+                      return a.dutyCode === dt.code;
+                    }).length;
+                    return req > 0 || assignedCount > 0;
+                  });
+
+                  // If flight is locked, strictly show duties that have quota or assignments for this locked flight on this date
+                  const dutiesToRender = (() => {
+                    if (isFlightLocked && activeFlight !== 'All') {
+                      return allDuties.filter((dt) => {
+                        const fltQuota = getRequiredCountForDuty(dt.code, undefined, activeFlight as FlightName);
+                        const fltAssigned = assignmentsList.filter(a => {
+                          const airman = airmanMap.get(a.airmanId);
+                          if (!airman || airman.flightName !== activeFlight) return false;
+                          if (dt.code === 'ATT' || dt.code === 'AIRPORT') return a.dutyCode === 'ATT' || a.dutyCode === 'AIRPORT';
+                          if (dt.code === 'IDAC' || dt.code === 'IDA') return a.dutyCode === 'IDAC' || a.dutyCode === 'IDA';
+                          return a.dutyCode === dt.code;
+                        }).length;
+                        return fltQuota > 0 || fltAssigned > 0;
+                      });
+                    }
+                    return filterByRatio ? ratioFiltered : allDuties;
+                  })();
+
+                  if (dutiesToRender.length === 0) {
+                    return (
+                      <div className="col-span-full py-6 text-center text-sm font-bold text-slate-500 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-dashed border-slate-300 dark:border-slate-700">
+                        {isFlightLocked && activeFlight !== 'All' 
+                          ? `No duties scheduled for ${activeFlight} Flight on ${fromDate}.` 
+                          : 'No active duties scheduled in the Ratio Matrix for this date.'}
+                      </div>
+                    );
+                  }
 
                   return dutiesToRender.map((dt) => {
                     const isSelected = activeDutyCode === dt.code;
@@ -1310,15 +1477,45 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
           {/* 3. Flight Filter & Candidate Controls */}
           <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-200 dark:border-slate-800">
             {/* Flight Tabs */}
-            <div className="flex items-center space-x-1.5">
-              <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 mr-1">
+            <div className="flex items-center space-x-1.5 flex-wrap gap-y-1">
+              <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 mr-1 flex items-center gap-1">
                 2. Flight:
               </span>
+
+              {/* Flight Lock Toggle Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  const nextLocked = !isFlightLocked;
+                  setIsFlightLocked(nextLocked);
+                  if (typeof window !== 'undefined') {
+                    window.sessionStorage.setItem('baf_duty_flight_locked', String(nextLocked));
+                  }
+                  if (nextLocked && activeFlight === 'All') {
+                    setActiveFlight('Avionics');
+                  }
+                }}
+                title={
+                  isFlightLocked 
+                    ? `Flight is locked to ${activeFlight}. Click to unlock.` 
+                    : 'Click to lock this flight: Only shows duties for this flight, auto-advances duty on assign, and auto-advances date when complete.'
+                }
+                className={`px-2 py-1 text-xs font-bold rounded-lg border flex items-center gap-1.5 transition-all cursor-pointer ${
+                  isFlightLocked
+                    ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-sm ring-2 ring-amber-400/40'
+                    : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-amber-400 hover:text-amber-600'
+                }`}
+              >
+                {isFlightLocked ? <Lock className="w-3.5 h-3.5 stroke-[2.5]" /> : <Unlock className="w-3.5 h-3.5" />}
+                <span className="text-[10px] uppercase tracking-wider">{isFlightLocked ? 'Locked' : 'Lock'}</span>
+              </button>
+
               {(['All', 'Avionics', 'Mechanics', 'GCS', 'Admin'] as Array<FlightName | 'All'>).filter(flt => {
                 if (isAdmin && adminFlight) {
                   return flt === adminFlight;
                 }
                 if (flt === 'All') return true;
+                if (isFlightLocked) return true; // Keep all flights visible when locked so user can switch
                 const matrixConfig = getStoredDutyMatrix().find(t => t.dutyCode === activeDutyCode);
                 
                 if (matrixConfig) {
@@ -1346,6 +1543,7 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
                 return true;
               }).map((flt) => {
                 const isDisabledFlt = flt !== 'All' && ((isAdmin && adminFlight && flt !== adminFlight) || (isPastDate && !isSuperAdmin));
+                const isSelected = activeFlight === flt;
                 return (
                 <button
                   key={flt}
@@ -1378,13 +1576,16 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
                     }
                   }}
                   disabled={isDisabledFlt}
-                  className={`px-2.5 py-1 text-xs font-bold rounded-lg border transition-all ${
+                  className={`px-2.5 py-1 text-xs font-bold rounded-lg border transition-all flex items-center gap-1 ${
                     isDisabledFlt ? 'opacity-50 cursor-not-allowed bg-slate-100 text-slate-400 border-slate-200 dark:bg-slate-800 dark:text-slate-600 dark:border-slate-700' :
-                    activeFlight === flt
+                    isSelected
                       ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 border-slate-900 dark:border-slate-100 shadow-xs cursor-pointer'
                       : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-slate-400 cursor-pointer'
                   }`}
                 >
+                  {isFlightLocked && isSelected && flt !== 'All' && (
+                    <Lock className="w-3 h-3 text-amber-400 stroke-[2.5]" />
+                  )}
                   {flt}
                 </button>
                 );
