@@ -665,8 +665,14 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
       const airport = airmanAssignments.find((a) => a.dutyCode === 'AIRPORT' || a.dutyCode === 'ATT');
       if (airport) return { label: 'Airport', type: 'AIRPORT', isFixed: false };
 
-      const gd = airmanAssignments.find((a) => a.dutyCode === 'GD');
-      if (gd) return { label: 'Security (GD)', type: 'GD', isFixed: false };
+      const gd = airmanAssignments.find((a) => a.dutyCode === 'GD' || a.dutyCode === 'DUTY' || a.dutyCode === 'DUTY_ON');
+      if (gd) {
+        const isGeneric = (s?: string) => !s || ['DUTY', 'DUTY_ON', 'ON DUTY', 'DUTY ON'].includes(s.toUpperCase().trim());
+        let gdLabel = 'Security (GD)';
+        if (gd.dutyName && !isGeneric(gd.dutyName)) gdLabel = gd.dutyName;
+        else if (gd.notes && !isGeneric(gd.notes)) gdLabel = gd.notes;
+        return { label: gdLabel, type: 'GD', isFixed: false };
+      }
 
       const bnb = airmanAssignments.find((a) => a.dutyCode === 'BAKE_N_BITE');
       if (bnb) return { label: 'Bake & Bite', type: 'BAKE_N_BITE', isFixed: false };
@@ -679,13 +685,22 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
       }
 
       const firstDuty = airmanAssignments[0];
-      let name = DUTY_TYPE_MAP.get(firstDuty.dutyCode as any)?.name || firstDuty.dutyCode;
+      const isGenericStr = (s?: string) => !s || ['DUTY', 'DUTY_ON', 'ON DUTY', 'DUTY ON'].includes(s.toUpperCase().trim());
+      let name = DUTY_TYPE_MAP.get(firstDuty.dutyCode as any)?.name || 
+                 (firstDuty.dutyName && !isGenericStr(firstDuty.dutyName) ? firstDuty.dutyName : '') || 
+                 (firstDuty.notes && !isGenericStr(firstDuty.notes) ? firstDuty.notes : '') || 
+                 firstDuty.dutyCode;
+
+      if (firstDuty.dutyCode === 'DUTY' || firstDuty.dutyCode === 'DUTY_ON') {
+        name = (firstDuty.dutyName && !isGenericStr(firstDuty.dutyName)) ? firstDuty.dutyName : 
+               (firstDuty.notes && !isGenericStr(firstDuty.notes)) ? firstDuty.notes : 'Security (GD)';
+      }
 
       if (firstDuty.dutyCode === 'DUTY_OFF') {
         if (prevAssignments.length > 0) {
           const yestAss = prevAssignments[0];
           let offShort = 'GD Off';
-          if (yestAss.dutyCode === 'GD') offShort = 'GD Off';
+          if (yestAss.dutyCode === 'GD' || yestAss.dutyCode === 'DUTY' || yestAss.dutyCode === 'DUTY_ON') offShort = 'GD Off';
           else if (yestAss.dutyCode === 'BTF') offShort = 'BTF Off';
           else if (yestAss.dutyCode === 'NTF') offShort = 'NTF Off';
           else if (yestAss.dutyCode === 'AIRPORT') offShort = 'Airport Off';

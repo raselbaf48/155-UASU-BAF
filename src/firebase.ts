@@ -59,14 +59,11 @@ export function isFirestoreQuotaExceeded(): boolean {
   if (quotaExceededCached !== null) return quotaExceededCached;
   if (typeof window !== 'undefined') {
     try {
-      const stored = localStorage.getItem('baf_firestore_quota_exceeded_timestamp') || localStorage.getItem('baf_firestore_write_quota_exceeded');
-      if (stored) {
-        const time = parseInt(stored, 10);
+      const storedTime = localStorage.getItem('baf_firestore_quota_exceeded_timestamp');
+      if (storedTime) {
+        const time = parseInt(storedTime, 10);
         // Quota resets daily (check if it was recorded within last 24 hours)
         if (!isNaN(time) && Date.now() - time < 24 * 60 * 60 * 1000) {
-          quotaExceededCached = true;
-          return true;
-        } else if (stored === 'true') {
           quotaExceededCached = true;
           return true;
         } else {
@@ -74,10 +71,9 @@ export function isFirestoreQuotaExceeded(): boolean {
           localStorage.removeItem('baf_firestore_write_quota_exceeded');
           localStorage.removeItem('firebase_quota_exceeded');
         }
-      }
-      if (localStorage.getItem('firebase_quota_exceeded') === new Date().toDateString()) {
-        quotaExceededCached = true;
-        return true;
+      } else {
+        localStorage.removeItem('baf_firestore_write_quota_exceeded');
+        localStorage.removeItem('firebase_quota_exceeded');
       }
     } catch {}
   }

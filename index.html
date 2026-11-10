@@ -80,11 +80,9 @@
         });
       }
       try {
-        if (!localStorage.getItem('baf_firestore_write_quota_exceeded')) {
-          localStorage.setItem('baf_firestore_write_quota_exceeded', 'true');
-          localStorage.setItem('baf_firestore_quota_exceeded_timestamp', String(Date.now()));
-          localStorage.setItem('firebase_quota_exceeded', new Date().toDateString());
-        }
+        localStorage.removeItem('baf_firestore_write_quota_exceeded');
+        localStorage.removeItem('baf_firestore_quota_exceeded_timestamp');
+        localStorage.removeItem('firebase_quota_exceeded');
       } catch (e) {}
     </script>
     <div id="root"></div>

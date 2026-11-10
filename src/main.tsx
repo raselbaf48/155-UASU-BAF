@@ -8,6 +8,12 @@ import { installSafeStorageProtection } from './utils/safeStorage';
 
 // Protect localStorage against quota errors and initialize Universal API Bridge
 try {
+  if (typeof window !== 'undefined') {
+    if (!localStorage.getItem('baf_firestore_quota_exceeded_timestamp')) {
+      localStorage.removeItem('baf_firestore_write_quota_exceeded');
+      localStorage.removeItem('firebase_quota_exceeded');
+    }
+  }
   installSafeStorageProtection();
   installApiInterceptor();
 

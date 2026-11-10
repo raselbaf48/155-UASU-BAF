@@ -248,11 +248,64 @@ function saveDatabase(db: LocalDB, eventType: string = 'DATA_UPDATED') {
   }
 }
 
+async function syncServerWithFirestore() {
+  try {
+    const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+    if (!fs.existsSync(configPath)) return;
+    const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    if (!cfg.projectId || !cfg.apiKey) return;
+
+    const projectId = cfg.projectId;
+    const databaseId = cfg.firestoreDatabaseId || '(default)';
+    const apiKey = cfg.apiKey;
+
+    const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/app_settings?key=${apiKey}&pageSize=300`;
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const data: any = await res.json();
+    if (!data.documents || !Array.isArray(data.documents)) return;
+
+    const currentSettings = loadAppSettings();
+    for (const doc of data.documents) {
+      const docName = doc.name ? doc.name.split('/').pop() : '';
+      if (!docName) continue;
+      const f = doc.fields || {};
+      const key = f.setting_key?.stringValue || docName;
+      const val = f.setting_value?.stringValue || '';
+      const updated = f.updated_at?.stringValue || new Date().toISOString();
+      if (key && val) {
+        currentSettings[key] = { setting_key: key, setting_value: val, updated_at: updated };
+      }
+    }
+    saveAppSettings(currentSettings);
+
+    if (currentSettings['canteen_txs']?.setting_value) {
+      try {
+        const txs = JSON.parse(currentSettings['canteen_txs'].setting_value);
+        if (Array.isArray(txs) && txs.length > 0) {
+          saveCanteenTransactions(txs);
+        }
+      } catch {}
+    }
+    if (currentSettings['canteen_members']?.setting_value) {
+      try {
+        const mems = JSON.parse(currentSettings['canteen_members'].setting_value);
+        if (Array.isArray(mems) && mems.length > 0) {
+          saveCanteenMembers(mems);
+        }
+      } catch {}
+    }
+  } catch (err) {
+    console.warn('[server.ts] Background Firestore sync notice:', err);
+  }
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   let db = loadDatabase();
+  syncServerWithFirestore().catch(() => {});
 
   app.all('/api/supabase/*', express.raw({ type: '*/*', limit: '50mb' }), async (req, res) => {
     let targetUrl = '';

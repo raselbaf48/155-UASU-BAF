@@ -62,6 +62,8 @@ export interface FirebaseSyncStatusState {
 }
 
 let isSyncingActive: boolean = false;
+const lastSyncedSettingsMap = new Map<string, string>();
+let lastSyncedMatrixRaw: string = '';
 let firebaseConnected: boolean = (() => {
   if (isFirebaseConfigured || isSupabaseConfigured) return true;
   if (typeof window !== 'undefined') {
@@ -212,14 +214,13 @@ export class LocalDatabaseEngine {
       } else {
         setTimeout(() => this.syncFromFirebase(), 1000);
       }
-      window.addEventListener("baf_idac_settings_updated", (e: any) => { if (e.detail?.source !== 'firebase') this.saveToFirebase(this.db); });
-      window.addEventListener("baf_duty_ratio_updated", (e: any) => { if (e.detail?.source !== 'firebase') this.saveToFirebase(this.db); });
+      window.addEventListener("baf_idac_settings_updated", (e: any) => { if (e.detail?.source !== 'firebase') this.saveToFirebase(this.db, false); });
+      window.addEventListener("baf_duty_ratio_updated", (e: any) => { if (e.detail?.source !== 'firebase') this.saveToFirebase(this.db, false); });
       window.addEventListener("baf_sync_duty_matrix_cloud", (e: any) => {
         this.syncDutyMatrixToCloud(e.detail?.matrix);
       });
-      window.addEventListener("baf_signatures_updated", (e: any) => { if (e.detail?.source !== 'firebase') this.saveToFirebase(this.db); });
-      window.addEventListener("baf_logo_updated", (e: any) => { if (e.detail?.source !== 'firebase') this.saveToFirebase(this.db); });
-      window.addEventListener("baf_theme_updated", (e: any) => { if (e.detail?.source !== 'firebase') this.saveToFirebase(this.db); });
+      window.addEventListener("baf_signatures_updated", (e: any) => { if (e.detail?.source !== 'firebase') this.saveToFirebase(this.db, false); });
+      window.addEventListener("baf_logo_updated", (e: any) => { if (e.detail?.source !== 'firebase') this.saveToFirebase(this.db, false); });
       
       window.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') {
@@ -234,29 +235,24 @@ export class LocalDatabaseEngine {
         }
       });
       
-      // Auto Sync Timer for Retries (Only runs if online and has pending sync)
+      // Auto Sync Timer for Retries: only runs if online, NOT currently syncing, and has actual unsynced differences
       setInterval(() => {
-        if (isFirestoreQuotaExceeded()) {
-          return; // Stop retrying if quota is exceeded
-        }
-        if (typeof navigator !== 'undefined' && !navigator.onLine) {
-          return; // Stop retrying if offline
-        }
-        if (!this.isFirebaseSyncing) {
-          const hasPendingSync = typeof window !== 'undefined' ? window.localStorage.getItem('baf_pending_sync') === 'true' : false;
-          // Note: saveTimeout is handled by its own timeout, we only need to retry if hasPendingSync is true
-          if (hasPendingSync && !this.saveTimeout) {
-            // Verify if there are ACTUAL differences before running retry push
-            if (this.lastSyncedDbStr && this.lastSyncedDbStr === JSON.stringify(this.db)) {
-              if (typeof window !== 'undefined') window.localStorage.removeItem('baf_pending_sync');
-              return;
-            }
-            this.saveToFirebase(this.db, true).then(() => {
-              if (typeof window !== 'undefined') window.localStorage.removeItem('baf_pending_sync');
-            });
+        if (isFirestoreQuotaExceeded()) return;
+        if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+        if (this.isFirebaseSyncing || this.isPushing) return;
+
+        const hasPendingSync = typeof window !== 'undefined' ? window.localStorage.getItem('baf_pending_sync') === 'true' : false;
+        if (hasPendingSync && !this.saveTimeout) {
+          // If in-memory state is already identical to last synced string, clear pending sync and exit
+          if (this.lastSyncedDbStr && this.lastSyncedDbStr === JSON.stringify(this.db)) {
+            if (typeof window !== 'undefined') window.localStorage.removeItem('baf_pending_sync');
+            return;
           }
+          this.saveToFirebase(this.db, false).then(() => {
+            if (typeof window !== 'undefined') window.localStorage.removeItem('baf_pending_sync');
+          });
         }
-      }, 60000);
+      }, 120000);
     }
   }
 
@@ -358,10 +354,16 @@ export class LocalDatabaseEngine {
               const fbSettings = await fetchAppSettingsFromFirebase();
               if (fbSettings && Object.keys(fbSettings).length > 0) {
                 Object.entries(fbSettings).forEach(([k, v]) => {
+                  lastSyncedSettingsMap.set(k, String(v));
                   if (typeof window !== 'undefined') window.localStorage.setItem(k, v);
                 });
               }
             } catch (sErr) {}
+
+            if (typeof window !== 'undefined') {
+              const curMatrix = window.localStorage.getItem('baf_official_duty_matrix_v4');
+              if (curMatrix) lastSyncedMatrixRaw = curMatrix;
+            }
 
             if (dataChanged) {
               newDb.lastUpdated = new Date().toISOString();
@@ -1065,30 +1067,38 @@ export class LocalDatabaseEngine {
            return !prev || JSON.stringify(prev) !== JSON.stringify(a);
         });
         
-        // Compute delta for duties
+        // Compute delta for duties with accurate composite keys (handles multi-duty days & shifts)
         const changedAssignments: any[] = [];
         const deletedAssignments: any[] = [];
+        const getAsnKey = (a: any) => a.id || `asn_${a.airmanId}_${a.date}_${a.dutyCode || ''}_${a.idaShift || 'n'}_${a.disposalScope || 'ALL'}`;
+
+        const prevAsnMap = new Map<string, any>();
         Object.keys(lastSyncedDb.assignments || {}).forEach(monthKey => {
            const prevMonth = lastSyncedDb.assignments[monthKey] || [];
-           const currentMonth = dbToSave.assignments[monthKey] || [];
            prevMonth.forEach((prevA: any) => {
-              const stillExists = currentMonth.find((c: any) => c.airmanId === prevA.airmanId && c.date === prevA.date && c.dutyCode === prevA.dutyCode && c.idaShift === prevA.idaShift && (c.disposalScope || 'ALL') === (prevA.disposalScope || 'ALL'));
-              if (!stillExists) {
-                 deletedAssignments.push(prevA);
-              }
+              prevAsnMap.set(getAsnKey(prevA), prevA);
            });
         });
-        
+
+        const currAsnMap = new Map<string, any>();
         Object.keys(dbToSave.assignments || {}).forEach(monthKey => {
            const currentMonth = dbToSave.assignments[monthKey] || [];
-           const prevMonth = (lastSyncedDb.assignments && lastSyncedDb.assignments[monthKey]) ? lastSyncedDb.assignments[monthKey] : [];
-           
-           currentMonth.forEach(a => {
-              const prev = prevMonth.find((p: any) => p.airmanId === a.airmanId && p.date === a.date);
-              if (!prev || JSON.stringify(prev) !== JSON.stringify(a)) {
-                 changedAssignments.push(a);
-              }
+           currentMonth.forEach((currA: any) => {
+              currAsnMap.set(getAsnKey(currA), currA);
            });
+        });
+
+        prevAsnMap.forEach((prevA, key) => {
+           if (!currAsnMap.has(key)) {
+              deletedAssignments.push(prevA);
+           }
+        });
+
+        currAsnMap.forEach((currA, key) => {
+           const prevA = prevAsnMap.get(key);
+           if (!prevA || JSON.stringify(prevA) !== JSON.stringify(currA)) {
+              changedAssignments.push(currA);
+           }
         });
         
         // Compute delta for history
@@ -1108,7 +1118,7 @@ export class LocalDatabaseEngine {
         const hasCoreChanges = changedAirmen.length > 0 || changedAssignments.length > 0 || deletedAssignments.length > 0 || changedHistory.length > 0 || changedUsers.length > 0;
 
         if (!hasCoreChanges && !immediate) {
-           // Quickly ensure settings & matrix are up to date in cloud
+           // Quickly ensure settings & matrix are up to date in cloud ONLY if they actually changed
            try {
              const settingsPayload: any[] = [];
              const SETTING_PREFIXES = ['baf_', 'savedDisposalKeys', 'parade_historical', 'flg_wg_'];
@@ -1137,11 +1147,17 @@ export class LocalDatabaseEngine {
                  if (!key || IGNORED_KEYS.includes(key) || key === STORAGE_KEY || key.endsWith('_db')) continue;
                  if (SETTING_PREFIXES.some(prefix => key.startsWith(prefix))) {
                    const val = window.localStorage.getItem(key);
-                   if (val && val.length < 500000) settingsPayload.push({ setting_key: key, setting_value: val, updated_at: new Date().toISOString() });
+                   if (val && val.length < 500000) {
+                     const cached = lastSyncedSettingsMap.get(key);
+                     if (cached !== val) {
+                       settingsPayload.push({ setting_key: key, setting_value: val, updated_at: new Date().toISOString() });
+                     }
+                   }
                  }
                }
                if (settingsPayload.length > 0) {
                  await supabase.from('app_settings').upsert(settingsPayload, { onConflict: 'setting_key' });
+                 settingsPayload.forEach(item => lastSyncedSettingsMap.set(item.setting_key, item.setting_value));
                }
              }
            } catch(err) {
@@ -1566,7 +1582,7 @@ export class LocalDatabaseEngine {
            }
         }
         
-        // 5. Sync Settings / Configurations
+        // 5. Sync Settings / Configurations (Only changed settings!)
         const settingsPayload: any[] = [];
         const SETTING_PREFIXES = ['baf_', 'savedDisposalKeys', 'parade_historical', 'flg_wg_'];
         const IGNORED_KEYS = [
@@ -1601,11 +1617,14 @@ export class LocalDatabaseEngine {
             if (isMatch) {
               const val = window.localStorage.getItem(key);
               if (val && val.length < 500000) {
-                settingsPayload.push({
-                  setting_key: key,
-                  setting_value: val,
-                  updated_at: new Date().toISOString()
-                });
+                const cached = lastSyncedSettingsMap.get(key);
+                if (cached !== val) {
+                  settingsPayload.push({
+                    setting_key: key,
+                    setting_value: val,
+                    updated_at: new Date().toISOString()
+                  });
+                }
               }
             }
           }
@@ -1615,13 +1634,15 @@ export class LocalDatabaseEngine {
            const { error: settingsErr } = await supabase.from('app_settings').upsert(settingsPayload, { onConflict: 'setting_key' });
            if (settingsErr) {
               console.warn("Could not sync settings. (app_settings table might not exist yet)", settingsErr);
+           } else {
+              settingsPayload.forEach(item => lastSyncedSettingsMap.set(item.setting_key, item.setting_value));
            }
         }
         
-        // 6. Sync Duty Ratio Matrix
+        // 6. Sync Duty Ratio Matrix (Only if matrix has actually changed!)
         if (typeof window !== 'undefined') {
            const matrixRaw = window.localStorage.getItem('baf_official_duty_matrix_v4');
-           if (matrixRaw) {
+           if (matrixRaw && matrixRaw !== lastSyncedMatrixRaw) {
                try {
                    const matrix = JSON.parse(matrixRaw);
                    if (Array.isArray(matrix)) {
@@ -1651,6 +1672,8 @@ export class LocalDatabaseEngine {
                        const { error: matrixErr } = await supabase.from('duty_ratio_matrix').upsert(matrixPayload, { onConflict: 'id' });
                        if (matrixErr) {
                            console.error("Error syncing duty matrix to Supabase:", matrixErr);
+                       } else {
+                           lastSyncedMatrixRaw = matrixRaw;
                        }
                    }
                } catch(e) {
