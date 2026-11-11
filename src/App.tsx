@@ -50,7 +50,6 @@ import { supabase, isSupabaseConfigured } from './supabase';
 import { setLastUsedPortal } from './services/portalPreferenceService';
 import { initGoogleDriveAuth } from './services/googleDriveService';
 import { StandaloneBackupPage } from './components/StandaloneBackupPage';
-import { StandaloneGmailLoginPage } from './components/StandaloneGmailLoginPage';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<SidebarTab>('overview');
@@ -61,11 +60,11 @@ export default function App() {
     return saved === 'ADMIN' ? 'ADMIN' : 'USER';
   });
   const [userSession, setUserSession] = useState<UserSession | null>(() => getCurrentUserSession());
-  const [standaloneView, setStandaloneView] = useState<'backup' | 'gmail-login' | null>(null);
+  const [standaloneView, setStandaloneView] = useState<'backup' | null>(null);
 
   useEffect(() => {
     const handleOpenStandalone = (e: any) => {
-      if (e.detail === 'backup' || e.detail === 'gmail-login') {
+      if (e.detail === 'backup') {
         setStandaloneView(e.detail);
       }
     };
@@ -597,27 +596,11 @@ return () => mediaQuery.removeEventListener('change', listener);
     }
   };
 
-  // Standalone Full-Page Views (Backup & Restore Center, Gmail Login Portal)
+  // Standalone Full-Page Views (Offline Local Backup & Restore Center)
   if (standaloneView === 'backup') {
     return (
       <StandaloneBackupPage
         onBack={() => setStandaloneView(null)}
-      />
-    );
-  }
-
-  if (standaloneView === 'gmail-login') {
-    return (
-      <StandaloneGmailLoginPage
-        onBack={() => setStandaloneView(null)}
-        onLoginSuccess={() => {
-          const sess = getCurrentUserSession();
-          setUserSession(sess);
-          if (sess?.assignedRole) {
-            handleRoleChange(sess.assignedRole as any);
-          }
-          setStandaloneView(null);
-        }}
       />
     );
   }

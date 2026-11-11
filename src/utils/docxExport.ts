@@ -1461,7 +1461,8 @@ export async function exportMonthlyDutyRegisterDocx(
         else if (ass.dutyCode === 'HALISHAHAR') { codeDisplay = 'HAL'; totalDutyCount++; }
         else if (ass.dutyCode === 'AIRPORT') { codeDisplay = 'APT'; totalDutyCount++; }
         else if (ass.dutyCode === 'IDAC' || ass.dutyCode === 'IDA') {
-          codeDisplay = ass.idaShift === 'Night' ? 'I-N' : ass.idaShift === 'Afternoon' ? 'I-A' : 'I-M';
+          const rawS = (ass.idaShift || (ass as any).shift || '').toString().trim();
+          codeDisplay = (/night/i.test(rawS) || rawS === 'C') ? 'I-N' : (/afternoon/i.test(rawS) || rawS === 'B') ? 'I-A' : 'I-M';
           totalDutyCount++;
         } else if (ass.dutyCode === 'LEAVE') codeDisplay = 'L';
         else if (ass.dutyCode === 'TDY') codeDisplay = 'TDY';

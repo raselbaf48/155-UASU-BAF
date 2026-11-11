@@ -342,7 +342,18 @@ export const DutyRosterPeriodView: React.FC<DutyRosterPeriodViewProps> = ({
  const assignedParts: string[] = [];
  const fulfilledFlights: FlightName[] = [];
 
+ // Deduplicate airmen within the same shift cell to prevent duplicate names
+ const uniqueShiftAssignments: DutyAssignment[] = [];
+ const seenAirmenInShift = new Set<string>();
  shiftAssignments.forEach((a) => {
+ const rawId = (a.airmanId || '').replace(/^BD[_-]/, '');
+ if (!seenAirmenInShift.has(rawId)) {
+ seenAirmenInShift.add(rawId);
+ uniqueShiftAssignments.push(a);
+ }
+ });
+
+ uniqueShiftAssignments.forEach((a) => {
  const air = airMap.get(a.airmanId);
  if (!air) {
  assignedParts.push(a.notes || 'Duty Airman');
@@ -419,10 +430,17 @@ export const DutyRosterPeriodView: React.FC<DutyRosterPeriodViewProps> = ({
 
  const dateAss = assignments.filter((a) => a.date === dateStr && (a.dutyCode === 'IDAC' || a.dutyCode === 'IDA'));
 
+ const getIdaShift = (a: any): 'Morning' | 'Afternoon' | 'Night' => {
+ const raw = (a.idaShift || a.shift || a.notes || '').toString().trim();
+ if (/night/i.test(raw) || raw === 'C' || raw === '3' || raw === 'I-N') return 'Night';
+ if (/afternoon/i.test(raw) || raw === 'B' || raw === '2' || raw === 'I-A') return 'Afternoon';
+ return 'Morning';
+ };
+
  // Extract Morning, Afternoon, Night shift assignments
- const morningAss = dateAss.filter((a) => !a.idaShift || a.idaShift === 'Morning');
- const afternoonAss = dateAss.filter((a) => a.idaShift === 'Afternoon');
- const nightAss = dateAss.filter((a) => a.idaShift === 'Night');
+ const morningAss = dateAss.filter((a) => getIdaShift(a) === 'Morning');
+ const afternoonAss = dateAss.filter((a) => getIdaShift(a) === 'Afternoon');
+ const nightAss = dateAss.filter((a) => getIdaShift(a) === 'Night');
 
  const morningDisplay = formatShiftDutyDisplay(dateStr, 'Morning', morningAss, airmanMap);
  const afternoonDisplay = formatShiftDutyDisplay(dateStr, 'Afternoon', afternoonAss, airmanMap);

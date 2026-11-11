@@ -318,44 +318,12 @@ export class LocalDatabaseEngine {
         this.db.airmen = normalizeAirmenSeniority(mergedAirmen);
       }
 
-      // 2. Duty Assignments: deduplicate by airman BD digits, date, dutyCode, and shift
+      // 2. Duty Assignments: authoritative sync from server
       if (srvDb.assignments && typeof srvDb.assignments === 'object') {
         if (!this.db.assignments) this.db.assignments = {};
-        const getAsnKey = (x: any) => {
-          const airDigits = String(x.airmanId || '').replace(/\D/g, '');
-          const shift = x.idaShift || x.shift || 'n';
-          const scope = x.disposalScope || 'ALL';
-          return `${airDigits}_${x.date}_${x.dutyCode}_${shift}_${scope}`;
-        };
-
         Object.keys(srvDb.assignments).forEach((mKey) => {
-          const srvList = srvDb.assignments[mKey] || [];
-          const localList = this.db.assignments[mKey] || [];
-          
-          const localKeys = new Set<string>();
-          const dedupedList: any[] = [];
-          localList.forEach((a: any) => {
-            const k = getAsnKey(a);
-            if (!localKeys.has(k)) {
-              localKeys.add(k);
-              dedupedList.push(a);
-            }
-          });
-
-          let added = false;
-          srvList.forEach((sa: any) => {
-            const k = getAsnKey(sa);
-            if (!localKeys.has(k)) {
-              localKeys.add(k);
-              dedupedList.push(sa);
-              added = true;
-            }
-          });
-
-          if (added || dedupedList.length !== localList.length) {
-            changed = true;
-          }
-          this.db.assignments[mKey] = dedupedList;
+          this.db.assignments[mKey] = srvDb.assignments[mKey] || [];
+          changed = true;
         });
       }
 

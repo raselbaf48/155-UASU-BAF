@@ -1147,7 +1147,7 @@ async function startServer() {
     });
     if (db.activityHistory.length > 250) db.activityHistory = db.activityHistory.slice(0, 250);
 
-    fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf-8');
+    saveDatabase(db, 'DATABASE_UPDATED');
     res.json({ success: true, count: dates.length, assignedDates: dates });
   });
 
@@ -1173,8 +1173,13 @@ async function startServer() {
       db.assignments[monthKey] = db.assignments[monthKey].filter((a: any) => {
         if (!matchAirmanId(a.airmanId) || a.date !== dateStr) return true;
         if (dutyCode) {
-          if (dutyCode === 'ATT' || dutyCode === 'AIRPORT' || dutyCode === 'AIRFIELD_DUTY') {
-            return a.dutyCode !== 'ATT' && a.dutyCode !== 'AIRPORT' && a.dutyCode !== 'AIRFIELD_DUTY';
+          const isAirport = ['ATT', 'AIRPORT', 'AIRFIELD_DUTY', 'AIRFIELD'].includes(dutyCode);
+          if (isAirport) {
+            return !['ATT', 'AIRPORT', 'AIRFIELD_DUTY', 'AIRFIELD'].includes(a.dutyCode);
+          }
+          const isGd = ['GD', 'BASE_SECURITY', 'SECURITY', 'BASE SECURITY DUTY'].includes(dutyCode);
+          if (isGd) {
+            return !['GD', 'BASE_SECURITY', 'SECURITY', 'BASE SECURITY DUTY'].includes(a.dutyCode) && !(a.dutyName && a.dutyName.toUpperCase().includes('SECURITY'));
           }
           if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(dutyCode)) {
             if (idaShift) {
@@ -1188,7 +1193,7 @@ async function startServer() {
       });
     }
 
-    fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf-8');
+    saveDatabase(db, 'DATABASE_UPDATED');
     res.json({ success: true });
   });
 

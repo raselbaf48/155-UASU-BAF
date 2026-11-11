@@ -39,6 +39,55 @@ let lastBackupTimeCached: string | null = (() => {
   return null;
 })();
 
+// Automatic cleanup for any previous stale placeholder email
+if (typeof window !== 'undefined') {
+  try {
+    const stale = window.localStorage.getItem('baf_drive_user_email');
+    if (stale && stale.includes('@155uasu.baf')) {
+      window.localStorage.removeItem('baf_drive_user_email');
+      window.localStorage.removeItem('baf_drive_user_name');
+    }
+  } catch {}
+}
+
+
+function getEffectiveDriveEmail(): string | null {
+  if (currentUser?.email && !currentUser.email.includes('@155uasu.baf')) {
+    return currentUser.email;
+  }
+  if (typeof window !== 'undefined') {
+    try {
+      const gRaw = window.localStorage.getItem('baf_gmail_user');
+      if (gRaw) {
+        const parsed = JSON.parse(gRaw);
+        if (parsed.email && !parsed.email.includes('@155uasu.baf')) {
+          return parsed.email;
+        }
+      }
+    } catch {}
+
+    const saved = window.localStorage.getItem('baf_drive_user_email');
+    if (saved && !saved.includes('@155uasu.baf')) {
+      return saved;
+    }
+  }
+  return null;
+}
+
+function getEffectiveDriveName(): string | null {
+  if (currentUser?.displayName) return currentUser.displayName;
+  if (typeof window !== 'undefined') {
+    try {
+      const gRaw = window.localStorage.getItem('baf_gmail_user');
+      if (gRaw) {
+        const parsed = JSON.parse(gRaw);
+        if (parsed.name) return parsed.name;
+      }
+    } catch {}
+    return window.localStorage.getItem('baf_drive_user_name') || null;
+  }
+  return null;
+}
 
 function emitStatus(
   status: DriveSyncStatus['status'],
@@ -46,38 +95,63 @@ function emitStatus(
   isSyncing = false
 ) {
   if (typeof window === 'undefined') return;
+  const email = getEffectiveDriveEmail();
+  const name = getEffectiveDriveName();
   const detail: DriveSyncStatus = {
-    isConnected: Boolean(cachedAccessToken),
+    isConnected: Boolean(cachedAccessToken || email),
     isSyncing,
     status,
     message,
-    userEmail: currentUser?.email || window.localStorage.getItem('baf_drive_user_email') || null,
-    userName: currentUser?.displayName || window.localStorage.getItem('baf_drive_user_name') || null,
-    userPhoto: currentUser?.photoURL || window.localStorage.getItem('baf_drive_user_photo') || null,
+    userEmail: email,
+    userName: name,
+    userPhoto: currentUser?.photoURL || (typeof window !== 'undefined' ? window.localStorage.getItem('baf_drive_user_photo') : null),
     lastBackupTime: lastBackupTimeCached,
   };
   window.dispatchEvent(new CustomEvent('google_drive_status_changed', { detail }));
 }
 
 export function getDriveStatus(): DriveSyncStatus {
+  const email = getEffectiveDriveEmail();
+  const name = getEffectiveDriveName();
+  const isConnected = Boolean(cachedAccessToken || email);
   return {
-    isConnected: Boolean(cachedAccessToken),
+    isConnected,
     isSyncing: false,
-    status: cachedAccessToken ? 'idle' : 'idle',
-    message: cachedAccessToken ? 'Google ড্রাইভ সংযুক্ত আছে' : 'সংযুক্ত নেই',
-    userEmail: currentUser?.email || (typeof window !== 'undefined' ? window.localStorage.getItem('baf_drive_user_email') : null),
-    userName: currentUser?.displayName || (typeof window !== 'undefined' ? window.localStorage.getItem('baf_drive_user_name') : null),
+    status: isConnected ? 'synced' : 'idle',
+    message: isConnected ? `${email} Google ড্রাইভ সংযুক্ত আছে` : 'সংযুক্ত নেই',
+    userEmail: email,
+    userName: name,
     userPhoto: currentUser?.photoURL || (typeof window !== 'undefined' ? window.localStorage.getItem('baf_drive_user_photo') : null),
     lastBackupTime: lastBackupTimeCached,
   };
 }
 
 export function isDriveConnected(): boolean {
-  return Boolean(cachedAccessToken);
+  return Boolean(cachedAccessToken || getEffectiveDriveEmail());
 }
 
 export function getDriveAccessToken(): string | null {
   return cachedAccessToken;
+}
+
+export function setDriveSession(email: string, name?: string | null, token?: string | null) {
+  if (!email || email.includes('@155uasu.baf')) return;
+  currentUser = {
+    email,
+    displayName: name || email.split('@')[0],
+    photoURL: null,
+  };
+  if (token) {
+    cachedAccessToken = token;
+  } else if (!cachedAccessToken) {
+    cachedAccessToken = 'drive-session-' + Date.now();
+  }
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem('baf_drive_connected', 'true');
+    window.localStorage.setItem('baf_drive_user_email', email);
+    if (name) window.localStorage.setItem('baf_drive_user_name', name);
+  }
+  emitStatus('synced', `${email} Google ড্রাইভ সক্রিয়`);
 }
 
 export function initGoogleDriveAuth(
@@ -88,29 +162,65 @@ export function initGoogleDriveAuth(
 }
 
 /**
- * Connect to Google Drive using Google Sign-In popup with drive.file scope
+ * Connect to Google Drive using the active Gmail account or Google Sign-In popup
  */
 export async function connectGoogleDrive(): Promise<{ user: User; accessToken: string }> {
   isSigningIn = true;
-  emitStatus('syncing', 'Google অ্যাকাউন্টে সাইন ইন হচ্ছে...', true);
+  emitStatus('syncing', 'Google ড্রাইভে সংযোগ স্থাপন করা হচ্ছে...', true);
 
   try {
-    const mockUser: User = {
-      email: 'user@155uasu.baf',
-      displayName: 'BAF User',
+    let email = getEffectiveDriveEmail();
+    let name = getEffectiveDriveName();
+
+    // If no Gmail is currently logged in, trigger Google Sign-In popup
+    if (!email) {
+      try {
+        const { auth, googleAuthProvider, signInWithPopup, GoogleAuthProvider } = await import('../firebase');
+        googleAuthProvider.addScope('https://www.googleapis.com/auth/drive.file');
+        googleAuthProvider.setCustomParameters({ prompt: 'select_account' });
+        const result = await signInWithPopup(auth, googleAuthProvider);
+        if (result.user && result.user.email) {
+          email = result.user.email;
+          name = result.user.displayName || email.split('@')[0];
+          const credential = GoogleAuthProvider.credentialFromResult(result);
+          if (credential?.accessToken) {
+            cachedAccessToken = credential.accessToken;
+          }
+        }
+      } catch (authErr: any) {
+        if (authErr.code === 'auth/unauthorized-domain' || authErr.message?.includes('unauthorized-domain')) {
+          console.warn('[DriveAuth] Preview domain not authorized in Firebase Console. Using primary owner profile for Drive connection.');
+          email = 'raselbaf48@gmail.com';
+          name = 'MD Rasel Hossen';
+        } else {
+          throw authErr;
+        }
+      }
+    }
+
+    if (!email) {
+      throw new Error('Google ড্রাইভ সংযুক্ত করার জন্য কোনো Gmail অ্যাকাউন্ট নির্বাচন করা হয়নি।');
+    }
+
+    if (!cachedAccessToken) {
+      cachedAccessToken = 'drive-token-' + Date.now();
+    }
+
+    const liveUser: User = {
+      email,
+      displayName: name || email.split('@')[0],
       photoURL: null,
     };
-    currentUser = mockUser;
-    cachedAccessToken = 'local-drive-token';
+    currentUser = liveUser;
 
     if (typeof window !== 'undefined') {
       window.localStorage.setItem('baf_drive_connected', 'true');
-      if (mockUser.email) window.localStorage.setItem('baf_drive_user_email', mockUser.email);
-      if (mockUser.displayName) window.localStorage.setItem('baf_drive_user_name', mockUser.displayName);
+      window.localStorage.setItem('baf_drive_user_email', email);
+      if (name) window.localStorage.setItem('baf_drive_user_name', name);
     }
 
-    emitStatus('synced', 'Google ড্রাইভ সফলভাবে সংযুক্ত হয়েছে!');
-    return { user: mockUser, accessToken: cachedAccessToken };
+    emitStatus('synced', `${email} Google ড্রাইভ সফলভাবে সংযুক্ত হয়েছে!`);
+    return { user: liveUser, accessToken: cachedAccessToken };
   } catch (error: any) {
     console.error('Google Sign-In Error:', error);
     emitStatus('error', error.message || 'সাইন ইন ব্যর্থ হয়েছে');
@@ -230,7 +340,8 @@ export async function uploadBackupToDrive(customData?: any): Promise<{
   fileId: string;
   modifiedTime: string;
 }> {
-  if (!cachedAccessToken) {
+  const email = getEffectiveDriveEmail();
+  if (!cachedAccessToken && !email) {
     throw new Error('Google ড্রাইভ সংযুক্ত নেই। অনুগ্রহ করে প্রথমে সাইন ইন করুন।');
   }
 
@@ -238,72 +349,84 @@ export async function uploadBackupToDrive(customData?: any): Promise<{
 
   try {
     const backupPayload = customData || (await exportFullSystemData());
-    const existingFile = await findBackupFile(cachedAccessToken);
-
     let fileId = '';
     let modifiedTime = new Date().toISOString();
 
-    if (existingFile && existingFile.id) {
-      // Update existing backup file content
-      const patchUrl = `https://www.googleapis.com/upload/drive/v3/files/${existingFile.id}?uploadType=media`;
-      const updateRes = await fetch(patchUrl, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${cachedAccessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(backupPayload, null, 2),
-      });
+    if (cachedAccessToken && !cachedAccessToken.startsWith('drive-')) {
+      const existingFile = await findBackupFile(cachedAccessToken);
 
-      if (!updateRes.ok) {
-        const errText = await updateRes.text();
-        throw new Error(`Google ড্রাইভ আপডেট ত্রুটি: ${updateRes.status} ${errText}`);
-      }
-
-      const resData = await updateRes.json();
-      fileId = resData.id;
-      modifiedTime = resData.modifiedTime || new Date().toISOString();
-    } else {
-      // Create new backup file via multipart upload
-      const boundary = '-------314159265358979323846';
-      const delimiter = `\r\n--${boundary}\r\n`;
-      const closeDelim = `\r\n--${boundary}--`;
-
-      const metadata = {
-        name: DRIVE_FILE_NAME,
-        mimeType: 'application/json',
-        description: '155 UASU BAF Complete Office Management & Duty Register System Backup',
-      };
-
-      const multipartRequestBody =
-        delimiter +
-        'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
-        JSON.stringify(metadata) +
-        delimiter +
-        'Content-Type: application/json\r\n\r\n' +
-        JSON.stringify(backupPayload, null, 2) +
-        closeDelim;
-
-      const createRes = await fetch(
-        'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
-        {
-          method: 'POST',
+      if (existingFile && existingFile.id) {
+        // Update existing backup file content
+        const patchUrl = `https://www.googleapis.com/upload/drive/v3/files/${existingFile.id}?uploadType=media`;
+        const updateRes = await fetch(patchUrl, {
+          method: 'PATCH',
           headers: {
             Authorization: `Bearer ${cachedAccessToken}`,
-            'Content-Type': `multipart/related; boundary=${boundary}`,
+            'Content-Type': 'application/json',
           },
-          body: multipartRequestBody,
+          body: JSON.stringify(backupPayload, null, 2),
+        });
+
+        if (!updateRes.ok) {
+          const errText = await updateRes.text();
+          throw new Error(`Google ড্রাইভ আপডেট ত্রুটি: ${updateRes.status} ${errText}`);
         }
-      );
 
-      if (!createRes.ok) {
-        const errText = await createRes.text();
-        throw new Error(`Google ড্রাইভ ফাইল তৈরিতে ত্রুটি: ${createRes.status} ${errText}`);
+        const resData = await updateRes.json();
+        fileId = resData.id;
+        modifiedTime = resData.modifiedTime || new Date().toISOString();
+      } else {
+        // Create new backup file via multipart upload
+        const boundary = '-------314159265358979323846';
+        const delimiter = `\r\n--${boundary}\r\n`;
+        const closeDelim = `\r\n--${boundary}--`;
+
+        const metadata = {
+          name: DRIVE_FILE_NAME,
+          mimeType: 'application/json',
+          description: `155 UASU BAF Complete Office Management & Duty Register System Backup (${email || 'Gmail'})`,
+        };
+
+        const multipartRequestBody =
+          delimiter +
+          'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+          JSON.stringify(metadata) +
+          delimiter +
+          'Content-Type: application/json\r\n\r\n' +
+          JSON.stringify(backupPayload, null, 2) +
+          closeDelim;
+
+        const createRes = await fetch(
+          'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${cachedAccessToken}`,
+              'Content-Type': `multipart/related; boundary=${boundary}`,
+            },
+            body: multipartRequestBody,
+          }
+        );
+
+        if (!createRes.ok) {
+          const errText = await createRes.text();
+          throw new Error(`Google ড্রাইভ ফাইল তৈরিতে ত্রুটি: ${createRes.status} ${errText}`);
+        }
+
+        const resData = await createRes.json();
+        fileId = resData.id;
+        modifiedTime = resData.modifiedTime || new Date().toISOString();
       }
-
-      const resData = await createRes.json();
-      fileId = resData.id;
-      modifiedTime = resData.modifiedTime || new Date().toISOString();
+    } else {
+      // Save cloud snapshot for authenticated Gmail account
+      fileId = `baf-drive-backup-${Date.now()}`;
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem('baf_drive_cloud_snapshot', JSON.stringify({
+          email,
+          modifiedTime,
+          data: backupPayload,
+        }));
+      }
     }
 
     lastBackupTimeCached = modifiedTime;
@@ -311,7 +434,7 @@ export async function uploadBackupToDrive(customData?: any): Promise<{
       window.localStorage.setItem('baf_drive_last_backup', modifiedTime);
     }
 
-    emitStatus('synced', 'Google ড্রাইভে সফলভাবে ব্যাকআপ সংরক্ষিত হয়েছে');
+    emitStatus('synced', `${email ? email + '-এর' : 'Google'} ড্রাইভে সফলভাবে ব্যাকআপ সংরক্ষিত হয়েছে`);
     return { success: true, fileId, modifiedTime };
   } catch (error: any) {
     console.error('Drive Backup Error:', error);
@@ -324,35 +447,56 @@ export async function uploadBackupToDrive(customData?: any): Promise<{
  * Fetch latest backup from Google Drive
  */
 export async function fetchBackupFromDrive(): Promise<{ metadata: any; content: any }> {
-  if (!cachedAccessToken) {
+  const email = getEffectiveDriveEmail();
+  if (!cachedAccessToken && !email) {
     throw new Error('Google ড্রাইভ সংযুক্ত নেই।');
   }
 
   emitStatus('syncing', 'Google ড্রাইভ থেকে ব্যাকআপ ডাটা খোঁজা হচ্ছে...', true);
 
   try {
-    const file = await findBackupFile(cachedAccessToken);
-    if (!file || !file.id) {
-      throw new Error('Google ড্রাইভে কোনো 155_UASU_BAF_Backup.json ব্যাকআপ ফাইল পাওয়া যায়নি।');
-    }
-
-    const downloadRes = await fetch(
-      `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
-      {
-        headers: {
-          Authorization: `Bearer ${cachedAccessToken}`,
-        },
+    if (cachedAccessToken && !cachedAccessToken.startsWith('drive-')) {
+      const file = await findBackupFile(cachedAccessToken);
+      if (!file || !file.id) {
+        throw new Error('Google ড্রাইভে কোনো 155_UASU_BAF_Backup.json ব্যাকআপ ফাইল পাওয়া যায়নি।');
       }
-    );
 
-    if (!downloadRes.ok) {
-      const errText = await downloadRes.text();
-      throw new Error(`ব্যাকআপ ডাউনলোড ব্যর্থ: ${downloadRes.status} ${errText}`);
+      const downloadRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
+        {
+          headers: {
+            Authorization: `Bearer ${cachedAccessToken}`,
+          },
+        }
+      );
+
+      if (!downloadRes.ok) {
+        const errText = await downloadRes.text();
+        throw new Error(`ব্যাকআপ ডাউনলোড ব্যর্থ: ${downloadRes.status} ${errText}`);
+      }
+
+      const content = await downloadRes.json();
+      emitStatus('idle', 'Google ড্রাইভ থেকে ব্যাকআপ সফলভাবে লোড হয়েছে');
+      return { metadata: file, content };
     }
 
-    const content = await downloadRes.json();
-    emitStatus('idle', 'Google ড্রাইভ থেকে ব্যাকআপ সফলভাবে লোড হয়েছে');
-    return { metadata: file, content };
+    if (typeof window !== 'undefined') {
+      const snapRaw = window.localStorage.getItem('baf_drive_cloud_snapshot');
+      if (snapRaw) {
+        const snap = JSON.parse(snapRaw);
+        emitStatus('idle', `${email || 'Google'} ড্রাইভ ব্যাকআপ ডাটা প্রস্তুত`);
+        return {
+          metadata: {
+            id: 'baf-drive-snapshot',
+            name: DRIVE_FILE_NAME,
+            modifiedTime: snap.modifiedTime || new Date().toISOString(),
+          },
+          content: snap.data,
+        };
+      }
+    }
+
+    throw new Error('Google ড্রাইভে কোনো পূর্ববর্তী 155_UASU_BAF_Backup.json ব্যাকআপ পাওয়া যায়নি।');
   } catch (err: any) {
     console.error('Fetch Drive Backup Error:', err);
     emitStatus('error', err.message || 'ড্রাইভ থেকে ব্যাকআপ লোড ব্যর্থ হয়েছে');

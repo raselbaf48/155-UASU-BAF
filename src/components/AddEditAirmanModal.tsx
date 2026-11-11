@@ -480,11 +480,11 @@ export const AddEditAirmanModal: React.FC<AddEditAirmanModalProps> = ({
           <div className="bg-slate-50 dark:bg-slate-800/50 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 space-y-1.5">
             <div className="flex items-center justify-between">
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center space-x-1.5">
-                <Mail className="w-3.5 h-3.5 text-red-500 shrink-0" />
-                <span>Gmail Address / জিমেইল এড্রেস</span>
+                <Mail className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                <span>Email Address / ইমেইল এড্রেস</span>
               </label>
-              <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
-                Gmail Login & Sync
+              <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700">
+                Contact Info
               </span>
             </div>
             <div className="relative flex items-center">
@@ -497,7 +497,7 @@ export const AddEditAirmanModal: React.FC<AddEditAirmanModalProps> = ({
               />
             </div>
             <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
-              এই জিমেইল এড্রেস যুক্ত থাকলে সদস্য <strong>Gmail Login</strong> বাটন দিয়ে সরাসরি লগইন করতে পারবেন।
+              সদস্যের অফিসিয়াল বা ব্যক্তিগত যোগাযোগের ইমেইল ঠিকানা।
             </p>
           </div>
 

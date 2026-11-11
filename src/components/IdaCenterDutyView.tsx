@@ -228,9 +228,11 @@ export const IdaCenterDutyView: React.FC<IdaCenterDutyViewProps> = ({
           }
 
           // 2. Check roster assignments for this shift
-          const rosterMatches = dateRoster.filter(
-            (a: any) => a.idaShift === sh || (!a.idaShift && sh === 'Morning')
-          );
+          const rosterMatches = dateRoster.filter((a: any) => {
+            const rawShift = (a.idaShift || a.shift || a.notes || '').toString().trim();
+            const ash = /night/i.test(rawShift) || rawShift === 'C' ? 'Night' : /afternoon/i.test(rawShift) || rawShift === 'B' ? 'Afternoon' : 'Morning';
+            return ash === sh;
+          });
 
           // 3. Check parade state personnel for this shift ONLY if actively on duty (strictly exclude Duty Off / IDAC Nt Off)
           const paradeMatches = pList.filter((item: any) => {
@@ -246,10 +248,11 @@ export const IdaCenterDutyView: React.FC<IdaCenterDutyViewProps> = ({
             const isIda = (code === 'IDAC' || code === 'IDA') && statusCat === 'DUTY';
             if (!isIda) return false;
 
+            const rawShift = (item.idaShift || item.shift || notes || '').toString().trim();
             const shiftType =
-              item.idaShift === 'Night' || notes.includes('night')
+              /night/i.test(rawShift) || rawShift === 'C'
                 ? 'Night'
-                : item.idaShift === 'Afternoon' || notes.includes('aft')
+                : /afternoon/i.test(rawShift) || rawShift === 'B'
                 ? 'Afternoon'
                 : 'Morning';
             return shiftType === sh;
