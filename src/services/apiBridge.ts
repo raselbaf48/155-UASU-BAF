@@ -20,14 +20,27 @@ export function installApiInterceptor() {
   const originalFetch = window.fetch ? window.fetch.bind(window) : null;
   if (!originalFetch) return;
   rawNativeFetch = originalFetch;
+  if (typeof window !== 'undefined') {
+    (window as any).__baf_raw_fetch = originalFetch;
+  }
 
   const customFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
 
     // Only intercept /api/* routes
     if (urlStr.startsWith('/api/') || urlStr.startsWith('api/') || urlStr.includes('/api/')) {
-      // Do not intercept supabase proxy calls or direct server history
-      if (urlStr.includes('/api/supabase') || urlStr.includes('/api/server-history') || urlStr.includes('/api/roster/server-history')) {
+      // Do not intercept supabase proxy calls, database exports, or direct server data endpoints
+      if (
+        urlStr.includes('/api/supabase') ||
+        urlStr.includes('/api/server-history') ||
+        urlStr.includes('/api/roster/server-history') ||
+        urlStr.includes('/api/database') ||
+        urlStr.includes('/api/canteen/all-settings') ||
+        urlStr.includes('/api/canteen/export-full-backup') ||
+        urlStr.includes('/api/canteen/save-setting') ||
+        urlStr.includes('/api/canteen/restore-full-backup') ||
+        urlStr.includes('/api/full-system')
+      ) {
         return originalFetch(input, init);
       }
 

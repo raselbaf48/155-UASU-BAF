@@ -48,6 +48,7 @@ import { getCurrentUserSession, clearUserSession, UserSession } from './utils/au
 import { localDb } from './services/localDatabase';
 import { supabase, isSupabaseConfigured } from './supabase';
 import { setLastUsedPortal } from './services/portalPreferenceService';
+import { initGoogleDriveAuth } from './services/googleDriveService';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<SidebarTab>('overview');
@@ -69,6 +70,12 @@ export default function App() {
 
   // Priority 1: Background data sync without blocking initial Login Gate render (<1s)
   useEffect(() => {
+    // Initialize Google Drive OAuth state listener
+    let unsubscribeDriveAuth: (() => void) | null = null;
+    try {
+      unsubscribeDriveAuth = initGoogleDriveAuth();
+    } catch {}
+
     // Stagger localDb sync so the initial UI renders instantly without network flood
     const syncTimer = setTimeout(() => {
       localDb.syncFromFirebase();
@@ -82,6 +89,7 @@ export default function App() {
     }, 2800);
 
     return () => {
+      if (unsubscribeDriveAuth) unsubscribeDriveAuth();
       clearTimeout(syncTimer);
       clearTimeout(canteenTimer);
       if (cleanupCanteenSync) cleanupCanteenSync();

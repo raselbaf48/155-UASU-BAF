@@ -1074,7 +1074,8 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
     // If Supabase returned error or was restricted by egress quota, seamlessly fall back to local server storage
     if (fetchError || !data || data.length === 0) {
       try {
-        const localRes = await fetch('/api/canteen/all-settings');
+        const rawFetcher = (typeof window !== 'undefined' && (window as any).__baf_raw_fetch) || fetch;
+        const localRes = await rawFetcher('/api/canteen/all-settings');
         if (localRes.ok) {
           const localSettings = await localRes.json();
           if (Array.isArray(localSettings) && localSettings.length > 0) {
@@ -1116,8 +1117,22 @@ export async function pullAllCanteenDataFromCloud(): Promise<void> {
     const cloudKeyMap = new Map<string, any>();
     for (const row of data) {
       if (!row.setting_key) continue;
-      cloudKeyMap.set(row.setting_key, unwrapSettingValue(row.setting_value));
+      const unwrapped = unwrapSettingValue(row.setting_value);
+      cloudKeyMap.set(row.setting_key, unwrapped);
+      if (typeof window !== 'undefined') {
+        const rawStr = typeof row.setting_value === 'string' ? row.setting_value : JSON.stringify(row.setting_value);
+        if (row.setting_key.startsWith('canteen_member_')) {
+          localStorage.setItem(row.setting_key, rawStr);
+        }
+        if (row.setting_key === 'canteen_members') {
+          localStorage.setItem('canteen_members_cache', rawStr);
+        }
+        if (row.setting_key === 'baf_official_duty_matrix_v4' || row.setting_key === 'baf_detailed_user_logins' || row.setting_key === 'baf_custom_duties_v1') {
+          localStorage.setItem(row.setting_key, rawStr);
+        }
+      }
     }
+
 
     // Merge deleted transaction IDs first so any incoming txs are filtered accurately
     const cloudDeleted = cloudKeyMap.get('canteen_deleted_tx_ids');

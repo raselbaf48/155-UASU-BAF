@@ -35,6 +35,7 @@ import {
   executeFullMigrationToFirebase,
   FirebaseMigrationResult
 } from './firebaseFirestoreService';
+import { scheduleDriveAutoBackup } from './googleDriveService';
 
 export interface LocalStorageDB {
   airmen: Airman[];
@@ -199,6 +200,8 @@ export class LocalDatabaseEngine {
     this.lastSyncedDbStr = JSON.stringify(this.db);
     if (typeof window !== 'undefined') {
       window.localStorage.removeItem('baf_pending_sync');
+      this.pullDatabaseFromServer();
+      this.pullAllSettingsFromServer();
       if (!this.db.activityHistory || this.db.activityHistory.length < 25) {
         fetch('/api/server-history')
           .then((r) => r.json())
@@ -209,11 +212,8 @@ export class LocalDatabaseEngine {
           })
           .catch(() => {});
       }
-      if (false) {
-        this.saveToFirebase(this.db, true).then(() => this.syncFromFirebase());
-      } else {
-        setTimeout(() => this.syncFromFirebase(), 1000);
-      }
+      setTimeout(() => this.syncFromFirebase(), 1000);
+
       window.addEventListener("baf_idac_settings_updated", (e: any) => { if (e.detail?.source !== 'firebase') this.saveToFirebase(this.db, false); });
       window.addEventListener("baf_duty_ratio_updated", (e: any) => { if (e.detail?.source !== 'firebase') this.saveToFirebase(this.db, false); });
       window.addEventListener("baf_sync_duty_matrix_cloud", (e: any) => {
@@ -256,14 +256,118 @@ export class LocalDatabaseEngine {
     }
   }
 
+  public async pullAllSettingsFromServer(): Promise<boolean> {
+    if (typeof window === 'undefined') return false;
+    try {
+      const rawFetch = (window as any).__baf_raw_fetch || fetch;
+      const res = await rawFetch('/api/canteen/all-settings');
+      if (!res.ok) return false;
+      const settings = await res.json();
+      if (Array.isArray(settings) && settings.length > 0) {
+        settings.forEach((s: any) => {
+          if (s && s.setting_key && s.setting_value !== undefined) {
+            const val = typeof s.setting_value === 'string' ? s.setting_value : JSON.stringify(s.setting_value);
+            localStorage.setItem(s.setting_key, val);
+          }
+        });
+        window.dispatchEvent(new CustomEvent('baf_settings_synced'));
+        return true;
+      }
+    } catch (e) {
+      console.warn('[localDatabase] Failed to pull settings from server:', e);
+    }
+    return false;
+  }
+
+  public async pullDatabaseFromServer(): Promise<boolean> {
+    if (typeof window === 'undefined') return false;
+    try {
+      const rawFetch = (window as any).__baf_raw_fetch || fetch;
+      const res = await rawFetch('/api/database');
+      if (!res.ok) return false;
+      const srvDb = await res.json();
+      if (!srvDb) return false;
+      let changed = false;
+
+      // 1. Airmen
+      if (Array.isArray(srvDb.airmen) && srvDb.airmen.length > 0) {
+        if (!this.db.airmen || this.db.airmen.length < srvDb.airmen.length) {
+          this.db.airmen = normalizeAirmenSeniority(srvDb.airmen);
+          changed = true;
+        } else {
+          const localMap = new Map(this.db.airmen.map(a => [a.id || a.bdNo, a]));
+          srvDb.airmen.forEach((sa: any) => {
+            const key = sa.id || sa.bdNo;
+            if (!localMap.has(key)) {
+              this.db.airmen.push(sa);
+              changed = true;
+            }
+          });
+        }
+      }
+
+      // 2. Duty Assignments
+      if (srvDb.assignments && typeof srvDb.assignments === 'object') {
+        if (!this.db.assignments) this.db.assignments = {};
+        Object.keys(srvDb.assignments).forEach((mKey) => {
+          const srvList = srvDb.assignments[mKey] || [];
+          const localList = this.db.assignments[mKey] || [];
+          if (!this.db.assignments[mKey] || localList.length < srvList.length) {
+            this.db.assignments[mKey] = srvList;
+            changed = true;
+          } else {
+            const localKeys = new Set(localList.map((x: any) => `${x.airmanId}_${x.date}_${x.dutyCode}_${x.idaShift || 'n'}`));
+            let added = false;
+            srvList.forEach((sa: any) => {
+              const k = `${sa.airmanId}_${sa.date}_${sa.dutyCode}_${sa.idaShift || 'n'}`;
+              if (!localKeys.has(k)) {
+                this.db.assignments[mKey].push(sa);
+                added = true;
+              }
+            });
+            if (added) changed = true;
+          }
+        });
+      }
+
+      // 3. Activity History
+      if (Array.isArray(srvDb.activityHistory) && srvDb.activityHistory.length > 0) {
+        this.mergeHistory(srvDb.activityHistory);
+        changed = true;
+      }
+
+      // 4. Admin Passcode
+      if (srvDb.adminPasscode && srvDb.adminPasscode !== this.db.adminPasscode) {
+        this.db.adminPasscode = srvDb.adminPasscode;
+        changed = true;
+      }
+
+      if (changed) {
+        this.db.lastUpdated = new Date().toISOString();
+        this.saveToStorage(this.db, true, false, false);
+        window.dispatchEvent(new CustomEvent('baf_data_updated'));
+        window.dispatchEvent(new CustomEvent('baf_duty_distribution_updated'));
+        window.dispatchEvent(new CustomEvent('baf_state_updated'));
+      }
+      return true;
+    } catch (e) {
+      console.warn('[localDatabase] Failed to pull database from server:', e);
+      return false;
+    }
+  }
+
   /**
    * Synchronize database with Firebase Firestore
    */
   public async syncFromFirebase(): Promise<boolean> {
+
     if (typeof window === 'undefined') return false;
     
     if (!isFirebaseConfigured && !isSupabaseConfigured) {
-      return false;
+      await this.pullDatabaseFromServer();
+      await this.pullAllSettingsFromServer();
+      this.isInitialPullDone = true;
+      return true;
     }
     
     if (this.isFirebaseSyncing) return false;
@@ -281,12 +385,15 @@ export class LocalDatabaseEngine {
       // 0. Primary Provider: Firebase Firestore
       if (isFirebaseConfigured) {
         if (isFirestoreQuotaExceeded()) {
-          console.warn('[localDatabase] Firestore quota limit reached for free tier. Safely operating from local storage.');
+          console.warn('[localDatabase] Firestore quota limit reached for free tier. Seamlessly pulling full database and settings from server.');
+          await this.pullDatabaseFromServer();
+          await this.pullAllSettingsFromServer();
           this.isFirebaseSyncing = false;
           isSyncingActive = false;
           broadcastSyncState();
           return true;
         }
+
         emitSyncProgress(15, "Connecting to Firebase Firestore...");
         try {
           const fbAirmen = await fetchAirmenFromFirebase();
@@ -402,82 +509,22 @@ export class LocalDatabaseEngine {
             emitSyncProgress(100, "Firebase sync complete!");
             return true;
           } else {
-            // Firebase Firestore is newly provisioned: auto-seed from local database or server records!
-            if (!this.db.airmen || this.db.airmen.length === 0) {
-              try {
-                const srvRes = await fetch('/api/airmen');
-                if (srvRes.ok) {
-                  const srvAirmen = await srvRes.json();
-                  if (Array.isArray(srvAirmen) && srvAirmen.length > 0) {
-                    this.db.airmen = normalizeAirmenSeniority(srvAirmen);
-                  }
-                }
-              } catch {}
-            }
-            if (!this.db.airmen || this.db.airmen.length === 0) {
-              this.db.airmen = normalizeAirmenSeniority([...INITIAL_AIRMEN]);
-            }
-            if (!this.db.assignments || Object.keys(this.db.assignments).length === 0) {
-              try {
-                const srvDutyRes = await fetch('/api/duty-assignments');
-                if (srvDutyRes.ok) {
-                  this.db.assignments = await srvDutyRes.json();
-                }
-              } catch {}
-              if (!this.db.assignments || Object.keys(this.db.assignments).length === 0) {
-                this.db.assignments = {
-                  '2026-07': generateOfficialMonthAssignments(2026, 7),
-                  '2026-08': generateOfficialMonthAssignments(2026, 8),
-                };
-              }
-            }
-
-            if (isFirestoreQuotaExceeded()) {
-              try {
-                const srvRes = await fetch('/api/duty-assignments');
-                if (srvRes.ok) {
-                  const srvDuty = await srvRes.json();
-                  if (srvDuty && typeof srvDuty === 'object') {
-                    Object.keys(srvDuty).forEach((mKey) => {
-                      if (!this.db.assignments[mKey]) this.db.assignments[mKey] = [];
-                      const list = srvDuty[mKey] || [];
-                      list.forEach((sItem: any) => {
-                        const sDigits = String(sItem.airmanId || '').replace(/\D/g, '');
-                        const exists = this.db.assignments[mKey].some((lItem: any) =>
-                          lItem.date === sItem.date &&
-                          String(lItem.airmanId || '').replace(/\D/g, '') === sDigits &&
-                          lItem.dutyCode === sItem.dutyCode
-                        );
-                        if (!exists) {
-                          this.db.assignments[mKey].push(sItem);
-                        }
-                      });
-                    });
-                  }
-                }
-              } catch (sErr) {}
-              this.saveToStorage(this.db, false, false, false);
-              this.isInitialPullDone = true;
-              this.isFirebaseSyncing = false;
-              isSyncingActive = false;
-              broadcastSyncState();
-              return true;
-            }
-
+            // Firestore returned empty or quota limit was reached: sync from server database and settings!
+            await this.pullDatabaseFromServer();
+            await this.pullAllSettingsFromServer();
             this.saveToStorage(this.db, false, false, false);
-            firebaseConnected = true;
-            firebaseLastSyncTime = new Date().toISOString();
             this.isInitialPullDone = true;
             this.isFirebaseSyncing = false;
             isSyncingActive = false;
             broadcastSyncState();
-            emitSyncProgress(100, "Database ready (Offline/Local storage)");
+            emitSyncProgress(100, "Synced latest records from server");
             return true;
           }
         } catch (fbErr: any) {
           console.warn("Firebase sync attempt error, fallback to Supabase if configured:", fbErr);
         }
       }
+
       
       // Helper to fetch all rows with pagination and timeout resilience
       const fetchAll = async (table: string) => {
@@ -1949,11 +1996,27 @@ export class LocalDatabaseEngine {
       console.error('Failed to save to localStorage:', err);
     }
 
-    if (pushToFirebase) {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.setItem('baf_pending_sync', 'true');
+    // Persist to server local JSON storage (data/baf_unit_data.json)
+    if (typeof window !== 'undefined') {
+      try {
+        const rawFetch = (window as any).__baf_raw_fetch || window.fetch;
+        rawFetch('/api/database/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(dbToSave),
+        }).catch((err: any) => {
+          console.warn('Server database sync warning:', err);
+        });
+      } catch (e) {
+        console.warn('Server save dispatch error:', e);
       }
-      this.saveToFirebase(dbToSave);
+
+      // Automatically trigger debounced backup to user's Google Drive if connected
+      try {
+        scheduleDriveAutoBackup();
+      } catch (e) {
+        console.warn('Google Drive auto backup schedule warning:', e);
+      }
     }
 
     if (notify && typeof window !== 'undefined') {
@@ -2635,6 +2698,36 @@ export class LocalDatabaseEngine {
 
     const assignmentMap = new Map<string, DutyAssignment>();
 
+    const getAirmanKeyAliases = (rawId: string): string[] => {
+      if (!rawId) return [];
+      const keys = new Set<string>();
+      keys.add(rawId);
+      if (rawId.includes('/')) keys.add(rawId.replace(/\//g, '_'));
+      if (rawId.includes('_')) keys.add(rawId.replace(/_/g, '/'));
+      const digits = String(rawId).replace(/\D/g, '');
+      if (digits) {
+        keys.add(`BD_${digits}`);
+        keys.add(`BD/${digits}`);
+        keys.add(digits);
+      }
+      return Array.from(keys);
+    };
+
+    const findInAssignmentMap = (map: Map<string, DutyAssignment>, rawId: string): DutyAssignment | undefined => {
+      if (!rawId) return undefined;
+      if (map.has(rawId)) return map.get(rawId);
+      const aliases = getAirmanKeyAliases(rawId);
+      for (const k of aliases) {
+        if (map.has(k)) return map.get(k);
+      }
+      return undefined;
+    };
+
+    const putIntoAssignmentMap = (map: Map<string, DutyAssignment>, a: DutyAssignment) => {
+      const aliases = getAirmanKeyAliases(a.airmanId);
+      aliases.forEach((k) => map.set(k, a));
+    };
+
     // 1. Synthesize active entries from activityHistory (e.g. Leave, TDY, Disposals)
     (this.db.activityHistory || []).forEach((h: any) => {
       const from = h.fromDate || h.from_date || h.date;
@@ -2646,7 +2739,7 @@ export class LocalDatabaseEngine {
         const rawCode = String(h.dutyCode || h.duty_code || (actType.includes('LEAVE') ? 'LEAVE' : 'GD')).toUpperCase();
         const code = rawCode === 'DUTY' || rawCode === 'DUTY_ON' ? 'GD' : rawCode;
 
-        assignmentMap.set(airId, {
+        putIntoAssignmentMap(assignmentMap, {
           airmanId: airId,
           date: date,
           dutyCode: code as any,
@@ -2661,9 +2754,9 @@ export class LocalDatabaseEngine {
       const scope = a.disposalScope || 'ALL';
       const isApplicable = scope === 'ALL' || (isPT && scope === 'PT') || (isNightCount && scope === 'NIGHT_COUNT') || (!isPT && !isNightCount && scope === 'PARADE');
       if (isApplicable) {
-        const existing = assignmentMap.get(a.airmanId);
+        const existing = findInAssignmentMap(assignmentMap, a.airmanId);
         if (!existing) {
-          assignmentMap.set(a.airmanId, a);
+          putIntoAssignmentMap(assignmentMap, a);
         } else {
           // Priority logic:
           // 0. LEAVE is top military priority: routine duty cannot overwrite an active Leave!
@@ -2671,7 +2764,7 @@ export class LocalDatabaseEngine {
             return; // Leave stays
           }
           if (a.dutyCode === 'LEAVE' && existing.dutyCode !== 'LEAVE') {
-            assignmentMap.set(a.airmanId, a);
+            putIntoAssignmentMap(assignmentMap, a);
             return;
           }
 
@@ -2680,7 +2773,7 @@ export class LocalDatabaseEngine {
           const existingIsBase = isBase(existing.dutyCode);
           const newIsBase = isBase(a.dutyCode);
           if (existingIsBase && !newIsBase) {
-            assignmentMap.set(a.airmanId, a);
+            putIntoAssignmentMap(assignmentMap, a);
             return;
           }
           if (!existingIsBase && newIsBase) {
@@ -2692,7 +2785,7 @@ export class LocalDatabaseEngine {
             (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(asn.dutyCode)) &&
             (asn.idaShift === 'Night' || (asn.notes || '').toLowerCase().includes('night') || (asn.notes || '').toLowerCase().includes('nt'));
           if ((isPT || isNightCount) && isIdacNt(a) && !isIdacNt(existing)) {
-            assignmentMap.set(a.airmanId, a);
+            putIntoAssignmentMap(assignmentMap, a);
             return;
           }
           if ((isPT || isNightCount) && !isIdacNt(a) && isIdacNt(existing)) {
@@ -2704,11 +2797,11 @@ export class LocalDatabaseEngine {
           const existingIsDep = isDeployment(existing.dutyCode);
           const newIsDep = isDeployment(a.dutyCode);
           if (existingIsDep && !newIsDep) {
-            assignmentMap.set(a.airmanId, a);
+            putIntoAssignmentMap(assignmentMap, a);
           } else if (!existingIsDep && !newIsDep) {
             // Overwrite with higher specificity scope if applicable, else overwrite
             if ((existing.disposalScope || 'ALL') === 'ALL') {
-              assignmentMap.set(a.airmanId, a);
+              putIntoAssignmentMap(assignmentMap, a);
             }
           }
         }
@@ -2767,9 +2860,9 @@ export class LocalDatabaseEngine {
       const scope = a.disposalScope || 'ALL';
       const isApplicable = scope === 'ALL' || (isPT && scope === 'PT') || (isNightCount && scope === 'NIGHT_COUNT') || (!isPT && !isNightCount && scope === 'PARADE');
       if (isApplicable) {
-        const existing = yestMap.get(a.airmanId);
+        const existing = findInAssignmentMap(yestMap, a.airmanId);
         if (!existing || (existing.disposalScope || 'ALL') === 'ALL') {
-          yestMap.set(a.airmanId, a);
+          putIntoAssignmentMap(yestMap, a);
         }
       }
     });
@@ -2806,10 +2899,10 @@ export class LocalDatabaseEngine {
       previousDutyName?: string;
       statusCategory: string;
     } => {
-      const ass = assignmentMap.get(airmanId);
+      const ass = findInAssignmentMap(assignmentMap, airmanId);
       const isDep = ass && ['ATT', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(ass.dutyCode);
       if (!isPT && (!ass || isDep)) {
-        const yestAss = yestMap.get(airmanId);
+        const yestAss = findInAssignmentMap(yestMap, airmanId);
         if (yestAss) {
           let offShort = 'GD Off';
           if (yestAss.dutyCode === 'GD') offShort = 'GD Off';

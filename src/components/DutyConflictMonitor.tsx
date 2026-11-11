@@ -177,7 +177,30 @@ export const DutyConflictMonitor: React.FC<DutyConflictMonitorProps> = ({
     }
   };
 
-  const airmanMap = new Map(airmen.map((a) => [a.id, a]));
+  const airmanMap = React.useMemo(() => {
+    const map = new Map<string, Airman>();
+    airmen.forEach((a) => {
+      map.set(a.id, a);
+      if (a.bdNo) {
+        const d = String(a.bdNo).replace(/\D/g, '');
+        map.set(a.bdNo, a);
+        map.set(`BD/${a.bdNo}`, a);
+        map.set(`BD_${a.bdNo}`, a);
+        if (d) {
+          map.set(d, a);
+          map.set(`BD/${d}`, a);
+          map.set(`BD_${d}`, a);
+        }
+      }
+      const rawDigits = String(a.id).replace(/\D/g, '');
+      if (rawDigits) {
+        map.set(rawDigits, a);
+        map.set(`BD/${rawDigits}`, a);
+        map.set(`BD_${rawDigits}`, a);
+      }
+    });
+    return map;
+  }, [airmen]);
 
   return (
     <div className="space-y-6">

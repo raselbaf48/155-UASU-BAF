@@ -706,7 +706,8 @@ export async function fetchCanteenMembersOnce(force = false): Promise<any[]> {
       // Fallback to local server if cloud was not yet populated
       if (data.length === 0) {
         try {
-          const res = await fetch('/api/canteen/export-full-backup');
+          const rawFetcher = (typeof window !== 'undefined' && (window as any).__baf_raw_fetch) || fetch;
+          const res = await rawFetcher('/api/canteen/export-full-backup');
           if (res.ok) {
             const srv = await res.json();
             if (Array.isArray(srv.members) && srv.members.length > 0) {
@@ -714,6 +715,7 @@ export async function fetchCanteenMembersOnce(force = false): Promise<any[]> {
             }
           }
         } catch {}
+
       }
 
       if (data && data.length > 0) {

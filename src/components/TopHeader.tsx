@@ -3,107 +3,68 @@ import { Menu, KeyRound, ShieldCheck, LogOut, User, Cloud, CloudOff, RefreshCw, 
 import { SidebarTab } from './Sidebar';
 import { UserRole } from '../types';
 import { UserSession } from '../utils/authSession';
-import { getFirebaseSyncState, FirebaseSyncStatusState, getSyncLogs, localDb } from '../services/localDatabase';
-import { isFirestoreQuotaExceeded } from '../firebase';
+import { GoogleDriveBackupModal } from './GoogleDriveBackupModal';
+import { getDriveStatus, DriveSyncStatus } from '../services/googleDriveService';
 
-const CloudSyncIndicator = () => {
-  const [syncState, setSyncState] = useState<FirebaseSyncStatusState>(getFirebaseSyncState());
-  const [hasError, setHasError] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [quotaExceeded, setQuotaExceeded] = useState(() => isFirestoreQuotaExceeded());
+const GoogleDriveSyncButton = () => {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [driveStatus, setDriveStatus] = useState<DriveSyncStatus>(getDriveStatus());
 
   useEffect(() => {
-    const handleSyncUpdate = (e: any) => {
-      setSyncState(e.detail || getFirebaseSyncState());
+    const handleStatusChanged = (e: any) => {
+      if (e.detail) setDriveStatus(e.detail);
     };
-    
-    const handleLogsUpdate = (e: any) => {
-      const logs = e.detail;
-      if (logs && logs.length > 0) {
-        setHasError(logs[0].status === 'ERROR');
-      }
-    };
-
-    const handleQuotaStatus = (e: any) => {
-      setQuotaExceeded(Boolean(e.detail?.exceeded));
-    };
-
-    window.addEventListener('d1_sync_update', handleSyncUpdate);
-    window.addEventListener('baf_sync_logs_updated', handleLogsUpdate);
-    window.addEventListener('baf_firestore_quota_status', handleQuotaStatus);
-    
-    // Initial error check
-    const logs = getSyncLogs();
-    if (logs && logs.length > 0) {
-       setHasError(logs[0].status === 'ERROR');
-    }
-
+    window.addEventListener('google_drive_status_changed', handleStatusChanged);
     return () => {
-      window.removeEventListener('d1_sync_update', handleSyncUpdate);
-      window.removeEventListener('baf_sync_logs_updated', handleLogsUpdate);
-      window.removeEventListener('baf_firestore_quota_status', handleQuotaStatus);
+      window.removeEventListener('google_drive_status_changed', handleStatusChanged);
     };
   }, []);
 
-  const handleManualSync = async () => {
-    if (isRefreshing || syncState.status === 'syncing') return;
-    setIsRefreshing(true);
-    try {
-      await localDb.syncFromFirebase();
-    } catch (err) {
-      console.warn("Manual sync error:", err);
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
-
-  const isSyncing = syncState.status === 'syncing' || isRefreshing;
-  const isOnline = syncState.isConfigured || syncState.status === 'connected';
+  const isConnected = driveStatus.isConnected;
+  const isSyncing = driveStatus.isSyncing;
 
   return (
-    <button
-      type="button"
-      onClick={handleManualSync}
-      title={quotaExceeded ? "Firestore Free Quota Reached. Operating safely in local offline storage." : "Click to sync with Cloud Firestore"}
-      className="hidden sm:flex items-center justify-center p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/60 shadow-sm relative group cursor-pointer transition-colors"
-    >
-      {isSyncing ? (
-        <RefreshCw className="w-4 h-4 text-blue-500 animate-spin" />
-      ) : quotaExceeded ? (
-        <AlertTriangle className="w-4 h-4 text-amber-400" />
-      ) : hasError ? (
-        <CloudOff className="w-4 h-4 text-red-500" />
-      ) : isOnline ? (
-        <Cloud className="w-4 h-4 text-emerald-500" />
-      ) : (
-        <CloudOff className="w-4 h-4 text-slate-400" />
-      )}
-      
-      {/* Tooltip */}
-      <div className="absolute right-0 top-full mt-2 w-64 p-2.5 bg-slate-900 text-white text-xs rounded-lg shadow-xl opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
-        <div className="flex items-center justify-between font-bold mb-1 border-b border-slate-800 pb-1">
-          <span>Cloud Sync Status</span>
-          <span className={`text-[10px] font-normal ${quotaExceeded ? 'text-amber-400' : 'text-emerald-400'}`}>
-            {quotaExceeded ? 'Daily Quota Exceeded' : 'Firestore Active'}
-          </span>
+    <>
+      <button
+        type="button"
+        onClick={() => setIsModalOpen(true)}
+        className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/70 shadow-sm transition-all text-xs cursor-pointer group"
+        title="Google Drive অটো ব্যাকআপ ও রিস্টোর"
+      >
+        <div className="relative flex items-center justify-center">
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
+            <path d="M7.71 3.5L1.15 15l3.43 6 6.56-11.5L7.71 3.5z" fill="#0066DA" />
+            <path d="M14.57 3.5H7.71l6.56 11.5h6.86L14.57 3.5z" fill="#00AC47" />
+            <path d="M22.85 15l-3.42-6H4.58L8 15h14.85z" fill="#EA4335" />
+            <path d="M14.57 15l-3.43 6h11.71l3.43-6H14.57z" fill="#FFBA00" />
+            <path d="M1.15 15l3.43 6h6.86l-3.43-6H1.15z" fill="#00832D" />
+            <path d="M8 9.5l3.43-6h6.86l-3.43 6H8z" fill="#2684FC" />
+          </svg>
+          {isConnected && (
+            <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-slate-900" />
+          )}
         </div>
-        <p className="text-slate-300 text-[11px] leading-tight">
-          {quotaExceeded
-            ? 'Free tier daily read/write quota reached. Data is 100% safely saved in local offline storage and resets tomorrow.'
-            : isSyncing
-            ? 'Syncing with cloud...'
-            : hasError
-            ? 'Error in last sync. Click to retry.'
-            : isOnline
-            ? 'Connected & up to date (Firestore).'
-            : 'Cloud sync not configured.'}
-        </p>
-        <p className="text-[10px] text-emerald-300/80 mt-1.5 flex items-center justify-between">
-          <span>{syncState.lastSyncTime ? `Last sync: ${new Date(syncState.lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : 'Ready to sync'}</span>
-          <span className="text-slate-400 font-mono">(Click to sync)</span>
-        </p>
-      </div>
-    </button>
+
+        <span className="hidden md:inline font-semibold text-slate-700 dark:text-slate-200">
+          Drive Backup
+        </span>
+
+        {isConnected ? (
+          <span className="hidden sm:inline text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-500/30">
+            {isSyncing ? 'Syncing...' : 'Auto-Sync'}
+          </span>
+        ) : (
+          <span className="hidden sm:inline text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 font-medium">
+            Local Only
+          </span>
+        )}
+      </button>
+
+      <GoogleDriveBackupModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+      />
+    </>
   );
 };
 
@@ -197,7 +158,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
 
         {/* Upper Right: User Profile & Admin Option */}
         <div className="flex items-center space-x-2.5">
-          <CloudSyncIndicator />
+          <GoogleDriveSyncButton />
           {/* User Session Info Badge */}
           {userSession && (
             <div className="hidden sm:flex items-center space-x-2 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 px-2.5 py-1.5 rounded-xl">

@@ -8,27 +8,37 @@ export function addAssignmentToMap(assignmentMap: Map<string, DutyAssignment>, a
   const scope = ass.disposalScope || 'ALL';
   if (scope !== 'ALL') return; // We only build the map for the main roster
   
-  const key = `${ass.airmanId}_${ass.date}`;
-  const existing = assignmentMap.get(key);
+  const rawId = ass.airmanId || '';
+  const digits = String(rawId).replace(/\D/g, '');
+  const keys = [
+    `${rawId}_${ass.date}`,
+    rawId.includes('/') ? `${rawId.replace(/\//g, '_')}_${ass.date}` : '',
+    rawId.includes('_') ? `${rawId.replace(/_/g, '/')}_${ass.date}` : '',
+    digits ? `BD_${digits}_${ass.date}` : '',
+    digits ? `BD/${digits}_${ass.date}` : '',
+    digits ? `${digits}_${ass.date}` : ''
+  ].filter(Boolean);
   
-  if (!existing) {
-    assignmentMap.set(key, ass);
-  } else {
-    // Both exist. Determine priority.
-    const isDeployment = (code: string) => ['ATT', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(code);
-    const existingIsDep = isDeployment(existing.dutyCode);
-    const newIsDep = isDeployment(ass.dutyCode);
-    
-    // If the existing is a deployment and the new one is not, the new one overwrites it.
-    if (existingIsDep && !newIsDep) {
+  keys.forEach((key) => {
+    const existing = assignmentMap.get(key);
+    if (!existing) {
       assignmentMap.set(key, ass);
-    } 
-    // If both are not deployments, or both are deployments, usually the latest assignment wins
-    // but just overwrite normally.
-    else if (!existingIsDep && !newIsDep) {
-      assignmentMap.set(key, ass);
+    } else {
+      // Both exist. Determine priority.
+      const isDeployment = (code: string) => ['ATT', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(code);
+      const existingIsDep = isDeployment(existing.dutyCode);
+      const newIsDep = isDeployment(ass.dutyCode);
+      
+      // If the existing is a deployment and the new one is not, the new one overwrites it.
+      if (existingIsDep && !newIsDep) {
+        assignmentMap.set(key, ass);
+      } 
+      // If both are not deployments, or both are deployments, usually the latest assignment wins
+      else if (!existingIsDep && !newIsDep) {
+        assignmentMap.set(key, ass);
+      }
     }
-  }
+  });
 }
 
 export function getDaysInMonth(year: number, month: number): number {
@@ -50,8 +60,18 @@ export function resolveAirmanDutyForDate(
   dateStr: string,
   assignmentMap: Map<string, DutyAssignment>
 ): DutyAssignment {
-  const directKey = `${airmanId}_${dateStr}`;
-  const currentAss = assignmentMap.get(directKey);
+  const digits = String(airmanId || '').replace(/\D/g, '');
+  const findAss = (d: string) => {
+    if (assignmentMap.has(`${airmanId}_${d}`)) return assignmentMap.get(`${airmanId}_${d}`);
+    if (airmanId.includes('/') && assignmentMap.has(`${airmanId.replace(/\//g, '_')}_${d}`)) return assignmentMap.get(`${airmanId.replace(/\//g, '_')}_${d}`);
+    if (airmanId.includes('_') && assignmentMap.has(`${airmanId.replace(/_/g, '/')}_${d}`)) return assignmentMap.get(`${airmanId.replace(/_/g, '/')}_${d}`);
+    if (digits) {
+      return assignmentMap.get(`BD_${digits}_${d}`) || assignmentMap.get(`BD/${digits}_${d}`) || assignmentMap.get(`${digits}_${d}`);
+    }
+    return undefined;
+  };
+
+  const currentAss = findAss(dateStr);
 
   // Calculate previous date D-1
   const d = new Date(dateStr);
@@ -60,9 +80,8 @@ export function resolveAirmanDutyForDate(
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   const yestStr = `${year}-${month}-${day}`;
-  const yestKey = `${airmanId}_${yestStr}`;
 
-  const yestAss = assignmentMap.get(yestKey);
+  const yestAss = findAss(yestStr);
   const isHeavyDuty = yestAss ? (
     ['GD', 'BTF', 'NTF', 'AIRPORT', 'ATT', 'HALISHAHAR'].includes(yestAss.dutyCode) ||
     ((yestAss.dutyCode === 'IDAC' || yestAss.dutyCode === 'IDA') && yestAss.idaShift === 'Night') ||
@@ -111,7 +130,7 @@ export function calculateDutyStats(
   const map = new Map<string, AirmanDutyStats>();
 
   airmen.forEach((a) => {
-    map.set(a.id, {
+    const statObj: AirmanDutyStats = {
       airmanId: a.id,
       airmanName: a.name,
       rank: a.rank,
@@ -131,7 +150,16 @@ export function calculateDutyStats(
       totalLeave: 0,
       totalDutyOff: 0,
       totalDutyCount: 0,
-    });
+    };
+    map.set(a.id, statObj);
+    if (a.id.includes('_')) map.set(a.id.replace(/_/g, '/'), statObj);
+    if (a.id.includes('/')) map.set(a.id.replace(/\//g, '_'), statObj);
+    const digits = a.bdNo || a.id.replace(/\D/g, '');
+    if (digits) {
+      map.set(`BD_${digits}`, statObj);
+      map.set(`BD/${digits}`, statObj);
+      map.set(digits, statObj);
+    }
   });
 
   const assignmentMap = new Map<string, DutyAssignment>();

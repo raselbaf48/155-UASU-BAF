@@ -1,3 +1,6 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express from 'express';
 import Tesseract from 'tesseract.js';
 import mammoth from 'mammoth';
@@ -7,6 +10,7 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import pdfParsePkg from 'pdf-parse/lib/pdf-parse.js';
+import { migrateAllToSupabase } from './scripts/migrate_all_to_supabase';
 
 process.on('uncaughtException', (err: any) => {
   const msg = String(err?.message || err || '');
@@ -75,11 +79,46 @@ function loadCanteenMembers(): any[] {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) return parsed;
     }
+    if (fs.existsSync(SETTINGS_FILE)) {
+      const raw = fs.readFileSync(SETTINGS_FILE, 'utf-8');
+      const settings = JSON.parse(raw);
+      const memKeys = Object.keys(settings).filter(k => k.startsWith('canteen_member_'));
+      const extracted: any[] = [];
+      for (const k of memKeys) {
+        try {
+          const val = typeof settings[k].setting_value === 'string' ? JSON.parse(settings[k].setting_value) : settings[k].setting_value;
+          const cleanBd = String(val.bdNo || k.replace('canteen_member_', '')).replace(/\D/g, '');
+          extracted.push({
+            airman_id: 'airman-' + cleanBd,
+            id: 'airman-' + cleanBd,
+            'BD No': cleanBd,
+            service_number: cleanBd,
+            Surname: val.surname || val.name || '',
+            Rank: val.rank || 'LAC',
+            Contact: val.contact || '',
+            Due: Number(val.due || 0),
+            DP: val.dp || '',
+            Role: val.role || 'Member',
+            Seniority: val.seniority || 999,
+            Name_BN: val.nameBn || '',
+            Rank_BN: val.rankBn || '',
+            active: true,
+            ...val
+          });
+        } catch {}
+      }
+      if (extracted.length > 0) {
+        extracted.sort((a, b) => (a.Seniority || 999) - (b.Seniority || 999));
+        saveCanteenMembers(extracted);
+        return extracted;
+      }
+    }
   } catch (err) {
     console.error('Error reading canteen_members.json:', err);
   }
   return [];
 }
+
 
 function saveCanteenMembers(members: any[]) {
   try {
@@ -329,7 +368,53 @@ async function startServer() {
   const HOST = hostArgIdx !== -1 && process.argv[hostArgIdx + 1] ? process.argv[hostArgIdx + 1] : (process.env.HOST || '0.0.0.0');
 
   let db = loadDatabase();
-  syncServerWithFirestore().catch(() => {});
+  // Firestore sync disabled in favor of Supabase cloud database
+
+  app.post('/api/migrate-to-supabase', express.json(), async (req, res) => {
+    try {
+      const { supabaseUrl, supabaseKey } = req.body || {};
+      const url = supabaseUrl || process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+      const key = supabaseKey || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+      if (!url || !key) {
+        return res.status(400).json({ success: false, error: 'Supabase URL and API Key are required' });
+      }
+      const result = await migrateAllToSupabase(url, key);
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message || err });
+    }
+  });
+
+  app.get('/api/supabase-client-config', (req, res) => {
+    const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+    const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
+    res.json({
+      url,
+      anonKey,
+      configured: Boolean(url && anonKey && url.startsWith('http') && !url.includes('firestore.firebase'))
+    });
+  });
+
+  app.get('/api/supabase-status', (req, res) => {
+    const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+    const isConfigured = Boolean(url && url.startsWith('http') && !url.includes('firestore.firebase'));
+    res.json({
+      configured: isConfigured,
+      url: isConfigured ? url.replace(/^(https?:\/\/[^\/]+).*/, '$1') : null
+    });
+  });
+
+  // Automatically trigger migration if Supabase credentials are provided in process.env
+  const detectedUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+  const detectedKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
+  if (detectedUrl && detectedKey && detectedUrl.startsWith('http') && !detectedUrl.includes('firestore.firebase')) {
+    console.log('[server] Supabase credentials detected in environment! Launching background data migration...');
+    migrateAllToSupabase(detectedUrl, detectedKey).then((r) => {
+      console.log('[server] Auto data migration result:', r);
+    }).catch((err) => {
+      console.warn('[server] Auto data migration error:', err);
+    });
+  }
 
   app.all('/api/supabase/*', express.raw({ type: '*/*', limit: '50mb' }), async (req, res) => {
     let targetUrl = '';
@@ -754,6 +839,106 @@ async function startServer() {
     res.json(db);
   });
 
+  app.post('/api/database/save', express.json({ limit: '50mb' }), (req, res) => {
+    try {
+      const incomingDb = req.body;
+      if (incomingDb && (incomingDb.airmen || incomingDb.assignments)) {
+        saveDatabase(incomingDb, 'DATABASE_UPDATED');
+        return res.json({ success: true, message: 'Database saved successfully' });
+      }
+      return res.status(400).json({ error: 'Invalid database payload' });
+    } catch (err: any) {
+      console.error('Error saving database via /api/database/save:', err);
+      return res.status(500).json({ error: err.message || 'Failed to save database' });
+    }
+  });
+
+  app.get('/api/full-system-backup', (req, res) => {
+    try {
+      const db = loadDatabase();
+      const members = loadCanteenMembers();
+      const transactions = loadCanteenTransactions();
+      const expenses = loadCanteenExpenses();
+      const settings = Object.values(loadAppSettings());
+      res.json({
+        version: '3.0',
+        app: '155 UASU BAF Office Management & Duty Register System',
+        exportedAt: new Date().toISOString(),
+        baf_unit_data: db,
+        canteen: {
+          members,
+          transactions,
+          expenses,
+          settings,
+        },
+        counts: {
+          airmen: db.airmen?.length || 0,
+          assignments: Object.values(db.assignments || {}).reduce((acc: number, list: any) => acc + (list?.length || 0), 0),
+          canteenMembers: members.length,
+          transactions: transactions.length,
+          settings: settings.length,
+        }
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to generate full system backup' });
+    }
+  });
+
+  app.post('/api/full-system-restore', express.json({ limit: '50mb' }), (req, res) => {
+    try {
+      const { baf_unit_data, canteen } = req.body || {};
+      let restoredAirmen = 0;
+      let restoredAssignments = 0;
+      let restoredMembers = 0;
+      let restoredTxs = 0;
+
+      if (baf_unit_data && (baf_unit_data.airmen || baf_unit_data.assignments)) {
+        saveDatabase(baf_unit_data, 'DATABASE_RESTORED');
+        restoredAirmen = baf_unit_data.airmen?.length || 0;
+        restoredAssignments = Number((Object.values(baf_unit_data.assignments || {}) as any[]).reduce((acc: number, list: any) => acc + (list?.length || 0), 0));
+      }
+
+      if (canteen) {
+        if (Array.isArray(canteen.members) && canteen.members.length > 0) {
+          saveCanteenMembers(canteen.members);
+          restoredMembers = canteen.members.length;
+        }
+        if (Array.isArray(canteen.transactions) && canteen.transactions.length > 0) {
+          saveCanteenTransactions(canteen.transactions);
+          restoredTxs = canteen.transactions.length;
+        }
+        if (Array.isArray(canteen.expenses) && canteen.expenses.length > 0) {
+          saveCanteenExpenses(canteen.expenses);
+        }
+        if (Array.isArray(canteen.settings) && canteen.settings.length > 0) {
+          const currentSettings = loadAppSettings();
+          for (const s of canteen.settings) {
+            if (s && s.setting_key) {
+              currentSettings[s.setting_key] = {
+                setting_key: s.setting_key,
+                setting_value: typeof s.setting_value === 'string' ? s.setting_value : JSON.stringify(s.setting_value),
+                updated_at: s.updated_at || new Date().toISOString()
+              };
+            }
+          }
+          saveAppSettings(currentSettings);
+        }
+      }
+
+      broadcastRealtimeEvent('FULL_SYSTEM_RESTORED');
+      res.json({
+        success: true,
+        restoredAirmen,
+        restoredAssignments,
+        restoredMembers,
+        restoredTxs,
+      });
+    } catch (err: any) {
+      console.error('Full system restore error:', err);
+      res.status(500).json({ error: err.message || 'Full system restore failed' });
+    }
+  });
+
   app.get('/api/duty-assignments', (req, res) => {
     const db = loadDatabase();
     res.json(db.assignments || {});
@@ -776,7 +961,15 @@ async function startServer() {
     let otherOff = 0;
 
     const personnelStatusList = targetAirmen.map((airman: any) => {
-      const match = dateAssignments.find((a: any) => a.airmanId === airman.id);
+      const airDigits = String(airman.bdNo || airman.id || '').replace(/\D/g, '');
+      const match = dateAssignments.find((a: any) => {
+        if (a.airmanId === airman.id || a.airmanId === airman.bdNo) return true;
+        const aNorm = String(a.airmanId || '').replace(/[\/_]/g, '');
+        const airNorm = String(airman.id || airman.bdNo || '').replace(/[\/_]/g, '');
+        if (aNorm && airNorm && aNorm === airNorm) return true;
+        const aDigits = String(a.airmanId || '').replace(/\D/g, '');
+        return Boolean(airDigits && aDigits && aDigits === airDigits);
+      });
       const dutyCode = match?.dutyCode || 'ON_PARADE';
       let statusCategory = 'PARADE';
       if (dutyCode === 'ON_PARADE') { onParade++; statusCategory = 'PARADE'; }
@@ -786,7 +979,10 @@ async function startServer() {
       else { onDuty++; statusCategory = 'DUTY'; }
 
       let dutyName = dutyCode === 'ON_PARADE' ? 'On Parade' : dutyCode;
-      if (dutyCode === 'LEAVE') {
+      if (['IDAC', 'IDA', 'IDA C', 'IDA_C'].includes(dutyCode)) {
+        const s = match?.idaShift || (match as any)?.shift || 'Morning';
+        dutyName = `IDAC Duty (${s})`;
+      } else if (dutyCode === 'LEAVE') {
         const notesLower = (match?.notes || '').toLowerCase();
         const rawDuty = (((match as any)?.dutyName || '') as string).toLowerCase();
         const comb = `${notesLower} ${rawDuty}`;
@@ -811,6 +1007,7 @@ async function startServer() {
         airman,
         dutyCode,
         dutyName,
+        idaShift: match?.idaShift || (match as any)?.shift,
         statusCategory,
         notes: match?.notes || ''
       };

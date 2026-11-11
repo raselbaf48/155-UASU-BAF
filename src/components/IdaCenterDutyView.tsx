@@ -69,7 +69,30 @@ export const IdaCenterDutyView: React.FC<IdaCenterDutyViewProps> = ({
     setShiftTimesConfig(getIdacShiftTimes());
   };
 
-  const airmanMap = useMemo(() => new Map<string, Airman>(airmen.map((a) => [a.id, a])), [airmen]);
+  const airmanMap = useMemo(() => {
+    const map = new Map<string, Airman>();
+    airmen.forEach((a) => {
+      map.set(a.id, a);
+      if (a.bdNo) {
+        const d = String(a.bdNo).replace(/\D/g, '');
+        map.set(a.bdNo, a);
+        map.set(`BD/${a.bdNo}`, a);
+        map.set(`BD_${a.bdNo}`, a);
+        if (d) {
+          map.set(d, a);
+          map.set(`BD/${d}`, a);
+          map.set(`BD_${d}`, a);
+        }
+      }
+      const rawDigits = String(a.id).replace(/\D/g, '');
+      if (rawDigits) {
+        map.set(rawDigits, a);
+        map.set(`BD/${rawDigits}`, a);
+        map.set(`BD_${rawDigits}`, a);
+      }
+    });
+    return map;
+  }, [airmen]);
 
   // Live Clock & Date
   useEffect(() => {

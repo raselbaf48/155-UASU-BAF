@@ -42,6 +42,7 @@ import {
 } from 'lucide-react';
 import { Logo155UASU } from './Logo155UASU';
 import { UserManagementTab } from './UserManagementTab';
+import { GoogleDriveBackupModal } from './GoogleDriveBackupModal';
 import { UserRole, ThemePreference, DetailedUserLogin, UserLoginStatus, UserLoginRole, Rank, FlightName } from '../types';
 import { getCustomDuties, saveCustomDuties, addCustomDuty, removeCustomDuty, CustomDutyConfig } from '../utils/customDuties';
 import { subscribeToActiveUsers, subscribeToLoginHistory } from '../services/presenceService';
@@ -324,6 +325,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [isBackingUp, setIsBackingUp] = useState<boolean>(false);
   const [editingPasswordType, setEditingPasswordType] = useState<'portal' | 'admin' | null>(null);
   const [pendingRestoreFile, setPendingRestoreFile] = useState<File | null>(null);
+  const [isDriveModalOpen, setIsDriveModalOpen] = useState<boolean>(false);
 
   // In-App Software Update State (Capacitor + Supabase)
   const [currentAppVersion, setCurrentAppVersion] = useState<{ versionCode: number; versionName: string }>(DEFAULT_CURRENT_APP);
@@ -1623,6 +1625,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               )}
 
+              {/* Google Drive Personal Cloud Auto-Backup */}
+              <div className="p-5 bg-gradient-to-r from-emerald-500/10 via-slate-800 to-slate-800 rounded-2xl border border-emerald-500/30 shadow-sm space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-emerald-500/20 text-emerald-400 rounded-xl">
+                      <Cloud className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                        Google Drive ক্লাউড অটো ব্যাকআপ ও রিস্টোর
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-medium">
+                          Active
+                        </span>
+                      </h3>
+                      <p className="text-xs text-slate-400">
+                        ব্যক্তিগত Gmail দিয়ে Google ড্রাইভে স্বয়ংক্রিয় রিয়েল-টাইম ব্যাকআপ ও এক ক্লিকে রিস্টোর
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsDriveModalOpen(true)}
+                    className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-sm cursor-pointer whitespace-nowrap self-start sm:self-center"
+                  >
+                    ড্রাইভ ব্যাকআপ প্যানেল
+                  </button>
+                </div>
+              </div>
+
               <div className="p-5 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">
                 <div className="space-y-1">
                   <h3 className="text-sm font-bold flex items-center gap-2 text-slate-800 dark:text-slate-200">
@@ -1961,6 +1992,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
         )}
+
+        <GoogleDriveBackupModal
+          isOpen={isDriveModalOpen}
+          onClose={() => setIsDriveModalOpen(false)}
+        />
       </div>
     </div>
   );
