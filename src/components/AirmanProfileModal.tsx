@@ -1,10 +1,11 @@
 import { DateNavigator } from './DateNavigator';
 import React, { useState, useEffect, useMemo } from 'react';
 import { Airman, DutyAssignment } from '../types';
-import { X, Shield, Phone, MapPin, Award, Calendar, FileText, User, Filter, Printer, Clock, Settings, Trash2, Check, RefreshCw, AlertCircle, ShoppingBag, CreditCard } from 'lucide-react';
+import { X, Shield, Phone, MapPin, Award, Calendar, FileText, User, Filter, Printer, Clock, Settings, Trash2, Check, RefreshCw, AlertCircle, ShoppingBag, CreditCard, Mail } from 'lucide-react';
 import { DUTY_TYPE_MAP } from '../data/dutyTypes';
 import { supabase } from '../supabase';
 import { resolveImageUrl } from '../features/canteen/utils/canteenSettings';
+import { INITIAL_AIRMEN } from '../data/initialAirmen';
 
 const parseTxDateToIso = (dateStr: string): string => {
   if (!dateStr) return '';
@@ -48,6 +49,15 @@ interface AirmanProfileModalProps {
 const presetLocations = ['AIR HQ', 'BAF AKR', 'BAF BSR', 'BAF MTR', 'BAF CXB', 'BAF SMD'];
 
 export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, onClose, onEditAirman, onRemoveAirman, role, initialTab = 'profile', initialCategory = 'ALL', historyOnly = false, allowEditDelete = false, variant = "nominal", canteenOnly = false }) => {
+  const initialAirman = useMemo(() => {
+    const cleanBd = (airman.bdNo || '').replace(/^BD\/?/i, '').trim();
+    return INITIAL_AIRMEN.find((a) => (a.bdNo || '').replace(/^BD\/?/i, '').trim() === cleanBd);
+  }, [airman.bdNo]);
+
+  const effectiveFullName = airman.fullName || initialAirman?.fullName || airman.name;
+  const effectiveFlight = airman.flightName || initialAirman?.flightName || 'General';
+  const effectiveEmail = (airman as any).email || (airman as any).gmail || initialAirman?.email;
+
   const [activeTab, setActiveTab] = useState<'history' | 'profile'>(historyOnly ? 'history' : initialTab);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [fromDate, setFromDate] = useState<string>(() => {
@@ -825,8 +835,8 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
               </div>
               <h2 className="text-lg font-black mt-1 text-white">
                 {canteenOnly 
-                  ? `${canteenMemberData?.Rank || airman.rank} ${canteenMemberData?.Surname || airman.fullName || airman.name}` 
-                  : `${airman.rank} ${airman.fullName || airman.name}`}
+                  ? `${canteenMemberData?.Rank || airman.rank} ${canteenMemberData?.Surname || effectiveFullName}` 
+                  : `${airman.rank} ${effectiveFullName}`}
               </h2>
               <p className="text-xs text-slate-400 font-semibold">
                 {canteenOnly ? (
@@ -834,7 +844,7 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                     Canteen Member • {canteenMemberData?.Contact || canteenMemberData?.['Mobile No'] || airman.mobileNo || 'N/A'}
                   </span>
                 ) : (
-                  `${airman.flightName} Flight • ${airman.trade}`
+                  `${effectiveFlight} Flight • ${airman.trade}`
                 )}
               </p>
             </div>
@@ -2060,7 +2070,7 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                       Full Name
                     </span>
                     <span className="font-bold text-slate-900 dark:text-slate-100">
-                      {airman.fullName || airman.name}
+                      {effectiveFullName}
                     </span>
                   </div>
                   <div>
@@ -2076,7 +2086,7 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                       Flight
                     </span>
                     <span className="font-black text-emerald-600 dark:text-emerald-400">
-                      {airman.flightName}
+                      {effectiveFlight}
                     </span>
                   </div>
                 </div>
@@ -2120,6 +2130,34 @@ export const AirmanProfileModal: React.FC<AirmanProfileModalProps> = ({ airman, 
                   <div className="flex items-center justify-between">
                     <span className="text-slate-500 font-semibold text-xs">Contact</span>
                     <span className="font-mono font-bold text-slate-900 dark:text-slate-100 text-sm">{airman.mobileNo || 'N/A'}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500 font-semibold text-xs flex items-center space-x-1.5">
+                      <Mail className="w-3.5 h-3.5 text-red-500" />
+                      <span>Gmail Address</span>
+                    </span>
+                    {effectiveEmail ? (
+                      <a
+                        href={`mailto:${effectiveEmail}`}
+                        className="font-mono font-bold text-xs text-emerald-600 dark:text-emerald-400 hover:underline bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800"
+                        title="Send Email"
+                      >
+                        {effectiveEmail}
+                      </a>
+                    ) : (
+                      <div className="flex items-center space-x-1.5">
+                        <span className="font-mono text-xs text-slate-400 italic">Not Linked</span>
+                        {allowEditDelete && onEditAirman && (
+                          <button
+                            type="button"
+                            onClick={() => { onClose(); onEditAirman(airman); }}
+                            className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer bg-emerald-100 dark:bg-emerald-950 px-1.5 py-0.5 rounded border border-emerald-300 dark:border-emerald-800"
+                          >
+                            + Add Gmail
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                   {variant === 'biodata' && (
                     <div className="flex items-center justify-between">

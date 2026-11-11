@@ -178,7 +178,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
       case 'ida-center':
         return { category: 'SCHEDULE MANAGEMENT', title: 'IDA Center Duty' };
       case 'register':
-        return { category: 'SCHEDULE MANAGEMENT', title: 'Monthly Duty Register' };
+        return { category: 'SCHEDULE MANAGEMENT', title: 'Monthly Attendance Register' };
       case 'duty-roster':
         return { category: 'SCHEDULE MANAGEMENT', title: 'Duty Roster Period' };
       case 'duty-ratio':

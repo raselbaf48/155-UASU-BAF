@@ -138,7 +138,7 @@ export const INITIAL_DUTY_TYPES: DutyTypeInfo[] = [
   {
     code: 'ON_PARADE',
     name: 'On Parade',
-    shortName: 'PRD',
+    shortName: 'P',
     category: 'Status',
     color: 'bg-emerald-600 text-white',
     badgeBg: 'bg-emerald-100 dark:bg-emerald-900/40 border border-emerald-300 dark:border-emerald-700',

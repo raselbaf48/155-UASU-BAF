@@ -92,11 +92,12 @@ export function resolveAirmanDutyForDate(
 
   if (!currentAss || isDeployment) {
     if (isHeavyDuty) {
+      const yCode = yestAss?.dutyCode === 'IDA' ? 'IDAC' : (yestAss?.dutyCode || 'DUTY');
       return {
         airmanId,
         date: dateStr,
         dutyCode: 'DUTY_OFF',
-        notes: 'Auto Duty Off (Post Night/Heavy Duty)',
+        notes: `${yCode} OFF`,
       };
     }
   }

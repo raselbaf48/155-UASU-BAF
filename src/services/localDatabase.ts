@@ -1968,10 +1968,15 @@ export class LocalDatabaseEngine {
 
             const defaultInactiveIds = new Set(INITIAL_AIRMEN.filter(a => a.active === false).map(a => a.id));
             const syncedAirmen = (migratedAirmen || []).map((a: any) => {
-              if (defaultInactiveIds.has(a.id) && a.active !== false) {
-                return { ...a, active: false };
-              }
-              return a;
+              const initA = INITIAL_AIRMEN.find(i => (i.bdNo && i.bdNo === a.bdNo) || (i.id && i.id === a.id));
+              const isActive = defaultInactiveIds.has(a.id) ? false : (a.active !== false);
+              return {
+                ...a,
+                fullName: (a.fullName && a.fullName !== a.name) ? a.fullName : (initA?.fullName || a.fullName || a.name),
+                flightName: a.flightName || a.flight || a.Flight || initA?.flightName || 'Admin',
+                email: a.email || a.gmail || undefined,
+                active: isActive,
+              };
             });
 
             // DEDUPLICATE AIRMEN BY UNIQUE BD NUMBER DIGITS
@@ -2178,6 +2183,7 @@ export class LocalDatabaseEngine {
       dateJoined: data.dateJoined || '',
       dateLeft: data.dateLeft || '',
       leaveReason: data.leaveReason || '',
+      email: data.email || undefined,
       active: data.active !== undefined ? data.active : true,
     };
 

@@ -301,8 +301,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 {renderNavButton(
                   'register',
                   <Calendar className="w-4 h-4 shrink-0" />,
-                  'Duty Register',
-                  'Duty Register',
+                  'Attendance Register',
+                  'Attendance Register',
                   conflictCount > 0 ? (
                     <span className="w-5 h-5 bg-amber-500 text-slate-950 text-[10px] font-black rounded-full flex items-center justify-center shadow-xs animate-pulse">
                       {conflictCount}

@@ -1401,7 +1401,7 @@ export async function exportMonthlyDutyRegisterDocx(
       spacing: { after: 40 },
       children: [
         new TextRun({
-          text: 'MONTHLY DUTY REGISTER : 155 UASU BAF',
+          text: 'MONTHLY ATTENDANCE REGISTER : 155 UASU BAF',
           font: 'Arial',
           bold: true,
           size: 26,
@@ -1434,10 +1434,65 @@ export async function exportMonthlyDutyRegisterDocx(
       ...Array.from({ length: daysInMonth }, (_, i) =>
         createArialHeaderCell(String(i + 1), 260)
       ),
+      createArialHeaderCell('Present', 650),
+      createArialHeaderCell('GD', 350),
+      createArialHeaderCell('BTF', 350),
+      createArialHeaderCell('NTF', 350),
+      createArialHeaderCell('Total Duty', 650),
     ],
   });
 
   const dataRows = filteredAirmen.map((a, idx) => {
+    let pCount = 0;
+    let gdCount = 0;
+    let btfCount = 0;
+    let ntfCount = 0;
+    let totalDutyCount = 0;
+
+    const dayCells = Array.from({ length: daysInMonth }, (_, i) => {
+      const dayNum = i + 1;
+      const dStr = `${year}-${String(month).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+      const ass = assignmentMap.get(`${a.id}_${dStr}`);
+      let codeDisplay = 'P';
+      if (ass) {
+        if (ass.dutyCode === 'GD') { codeDisplay = 'GD'; gdCount++; totalDutyCount++; }
+        else if (ass.dutyCode === 'BTF') { codeDisplay = 'BTF'; btfCount++; totalDutyCount++; }
+        else if (ass.dutyCode === 'NTF') { codeDisplay = 'NTF'; ntfCount++; totalDutyCount++; }
+        else if (ass.dutyCode === 'HALISHAHAR') { codeDisplay = 'HAL'; totalDutyCount++; }
+        else if (ass.dutyCode === 'AIRPORT') { codeDisplay = 'APT'; totalDutyCount++; }
+        else if (ass.dutyCode === 'IDAC' || ass.dutyCode === 'IDA') {
+          codeDisplay = ass.idaShift === 'Night' ? 'I-N' : ass.idaShift === 'Afternoon' ? 'I-A' : 'I-M';
+          totalDutyCount++;
+        } else if (ass.dutyCode === 'LEAVE') codeDisplay = 'L';
+        else if (ass.dutyCode === 'TDY') codeDisplay = 'TDY';
+        else if (ass.dutyCode === 'DUTY_OFF' || (ass.dutyCode as any) === 'OFF') {
+          let offCode = '';
+          if (ass.notes) {
+            const m = ass.notes.match(/\b(NTF|GD|BTF|IDAC|IDA|AIRPORT|APT|HALISHAHAR|HAL)\b/i);
+            if (m) offCode = m[1].toUpperCase();
+          }
+          if (!offCode) {
+            const prevDStr = `${year}-${String(month).padStart(2, '0')}-${String(dayNum - 1).padStart(2, '0')}`;
+            const prevAss = assignmentMap.get(`${a.id}_${prevDStr}`);
+            if (prevAss && prevAss.dutyCode && !['ON_PARADE', 'DUTY_OFF', 'OFF'].includes(prevAss.dutyCode as any)) {
+              offCode = prevAss.dutyCode === 'IDA' ? 'IDAC' : prevAss.dutyCode;
+            }
+          }
+          codeDisplay = offCode ? `${offCode} OFF` : 'OFF';
+        } else if (ass.dutyCode === 'ON_PARADE') {
+          codeDisplay = 'P';
+          pCount++;
+        } else {
+          codeDisplay = ass.dutyCode || 'P';
+          if (codeDisplay === 'P') pCount++;
+        }
+      } else {
+        codeDisplay = 'P';
+        pCount++;
+      }
+      return createArialDataCell(codeDisplay, 260, AlignmentType.CENTER);
+    });
+
     return new TableRow({ cantSplit: true,
       children: [
         createArialDataCell(String(idx + 1), 500, AlignmentType.CENTER),
@@ -1445,25 +1500,12 @@ export async function exportMonthlyDutyRegisterDocx(
         createArialDataCell(formatRank(a.rank), 800, AlignmentType.CENTER),
         createArialDataCell(formatRunningLetter(a.name), 1800, AlignmentType.LEFT),
         createArialDataCell(a.flightName.slice(0, 3), 700, AlignmentType.CENTER),
-        ...Array.from({ length: daysInMonth }, (_, i) => {
-          const dStr = `${year}-${String(month).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`;
-          const ass = assignmentMap.get(`${a.id}_${dStr}`);
-          let codeDisplay = '-';
-          if (ass) {
-            if (ass.dutyCode === 'GD') codeDisplay = 'GD';
-            else if (ass.dutyCode === 'BTF') codeDisplay = 'BTF';
-            else if (ass.dutyCode === 'NTF') codeDisplay = 'NTF';
-            else if (ass.dutyCode === 'HALISHAHAR') codeDisplay = 'HALI';
-            else if (ass.dutyCode === 'AIRPORT') codeDisplay = 'AIR';
-            else if (ass.dutyCode === 'IDAC' || ass.dutyCode === 'IDA') {
-              codeDisplay = ass.idaShift === 'Night' ? 'IDAn' : ass.idaShift === 'Afternoon' ? 'IDAa' : 'IDAm';
-            } else if (ass.dutyCode === 'LEAVE') codeDisplay = 'L';
-            else if (ass.dutyCode === 'TDY') codeDisplay = 'TDY';
-            else if (ass.dutyCode === 'BAKE_N_BITE') codeDisplay = 'BB';
-            else if (ass.dutyCode === 'DUTY_OFF') codeDisplay = 'OFF';
-          }
-          return createArialDataCell(codeDisplay, 260, AlignmentType.CENTER);
-        }),
+        ...dayCells,
+        createArialDataCell(String(pCount), 650, AlignmentType.CENTER),
+        createArialDataCell(String(gdCount), 350, AlignmentType.CENTER),
+        createArialDataCell(String(btfCount), 350, AlignmentType.CENTER),
+        createArialDataCell(String(ntfCount), 350, AlignmentType.CENTER),
+        createArialDataCell(String(totalDutyCount), 650, AlignmentType.CENTER),
       ],
     });
   });

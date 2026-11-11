@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { Airman, FlightName, Rank } from '../types';
-import { X, Check, Building2, Home, MapPin, User, Phone, Shield, AlertCircle } from 'lucide-react';
+import { X, Check, Building2, Home, MapPin, User, Phone, Shield, AlertCircle, Mail } from 'lucide-react';
 import { getRankSeniorityRange, resolveTargetSeniority, isJcoRank } from '../utils/seniority';
+import { INITIAL_AIRMEN } from '../data/initialAirmen';
 
 interface AddEditAirmanModalProps {
   variant?: 'nominal' | 'biodata';
@@ -18,15 +19,22 @@ export const AddEditAirmanModal: React.FC<AddEditAirmanModalProps> = ({
   onSave,
   onClose,
 }) => {
-  const [fullName, setFullName] = useState(airmanToEdit?.fullName || airmanToEdit?.name || '');
-  const [name, setName] = useState(airmanToEdit?.name || '');
+  const initialMatch = useMemo(() => {
+    if (!airmanToEdit) return undefined;
+    const cleanBd = (airmanToEdit.bdNo || '').replace(/^BD\/?/i, '').trim();
+    return INITIAL_AIRMEN.find((a) => (a.bdNo || '').replace(/^BD\/?/i, '').trim() === cleanBd);
+  }, [airmanToEdit]);
+
+  const [fullName, setFullName] = useState(airmanToEdit?.fullName || initialMatch?.fullName || airmanToEdit?.name || '');
+  const [name, setName] = useState(airmanToEdit?.name || initialMatch?.name || '');
   const [bdNo, setBdNo] = useState(airmanToEdit?.bdNo || '');
   const [code, setCode] = useState(airmanToEdit?.code || '');
-  const [rank, setRank] = useState<Rank | ''>(airmanToEdit?.rank || '');
-  const [trade, setTrade] = useState(airmanToEdit?.trade || '');
-    const [flightName, setFlightName] = useState<FlightName | ''>(airmanToEdit?.flightName || '');
-  const [mobileNo, setMobileNo] = useState(airmanToEdit?.mobileNo || '');
-  const [bloodGroup, setBloodGroup] = useState(airmanToEdit?.bloodGroup || '');
+  const [rank, setRank] = useState<Rank | ''>(airmanToEdit?.rank || (initialMatch?.rank as any) || '');
+  const [trade, setTrade] = useState(airmanToEdit?.trade || initialMatch?.trade || '');
+  const [flightName, setFlightName] = useState<FlightName | ''>(airmanToEdit?.flightName || (initialMatch?.flightName as any) || '');
+  const [email, setEmail] = useState((airmanToEdit as any)?.email || (airmanToEdit as any)?.gmail || initialMatch?.email || '');
+  const [mobileNo, setMobileNo] = useState(airmanToEdit?.mobileNo || initialMatch?.mobileNo || '');
+  const [bloodGroup, setBloodGroup] = useState(airmanToEdit?.bloodGroup || initialMatch?.bloodGroup || '');
   const [seniority, setSeniority] = useState<number | ''>(airmanToEdit?.seniority !== undefined ? airmanToEdit.seniority : '');
   const [permanentAddress, setPermanentAddress] = useState(airmanToEdit?.permanentAddress || '');
 
@@ -230,6 +238,7 @@ export const AddEditAirmanModal: React.FC<AddEditAirmanModalProps> = ({
       flightName,
       addressBlock: finalAddress,
       mobileNo: mobileNo.trim() || '01',
+      email: email.trim() || undefined,
       bloodGroup: bloodGroup || '',
       permanentAddress: isAddressPreset ? `Vill: ${addrVill.trim()}; P/O: ${addrPO.trim()}; P/S: ${addrPS.trim()}; Dist: ${addrDist.trim()}` : permanentAddress.trim(),
       remarks: remarks.trim(),
@@ -465,6 +474,31 @@ export const AddEditAirmanModal: React.FC<AddEditAirmanModalProps> = ({
                 className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-semibold text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
               />
             </div>
+          </div>
+
+          {/* Gmail Address field */}
+          <div className="bg-slate-50 dark:bg-slate-800/50 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center space-x-1.5">
+                <Mail className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                <span>Gmail Address / জিমেইল এড্রেস</span>
+              </label>
+              <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
+                Gmail Login & Sync
+              </span>
+            </div>
+            <div className="relative flex items-center">
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="airman.name@gmail.com"
+                className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-xl text-sm font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 placeholder:text-slate-400 placeholder:font-normal font-mono"
+              />
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
+              এই জিমেইল এড্রেস যুক্ত থাকলে সদস্য <strong>Gmail Login</strong> বাটন দিয়ে সরাসরি লগইন করতে পারবেন।
+            </p>
           </div>
 
           {/* Blood Group */}

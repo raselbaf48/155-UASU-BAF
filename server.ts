@@ -217,7 +217,13 @@ function loadDatabase(): LocalDB {
         INITIAL_AIRMEN.forEach((initA) => {
           const existing = existingMap.get(initA.id) || existingMap.get(initA.bdNo);
           if (existing) {
-            finalAirmen.push({ ...initA, ...existing });
+            finalAirmen.push({
+              ...initA,
+              ...existing,
+              fullName: (existing.fullName && existing.fullName !== existing.name) ? existing.fullName : (initA.fullName || existing.fullName || existing.name),
+              flightName: existing.flightName || (existing as any).flight || (existing as any).Flight || initA.flightName || 'Admin',
+              email: (existing as any).email || (existing as any).gmail || undefined,
+            });
           } else {
             finalAirmen.push(initA);
           }

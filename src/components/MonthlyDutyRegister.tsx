@@ -5,14 +5,16 @@ import { DUTY_TYPES, DUTY_TYPE_MAP } from '../data/dutyTypes';
 import { getDaysInMonth, calculateDutyStats, detectConflicts, resolveAirmanDutyForDate, addAssignmentToMap, getAirmanShortCode } from '../data/rosterGenerator';
 import { DutyCellPopover } from './DutyCellPopover';
 import { getOptimalMinColumnWidth } from '../utils/tableUtils';
-import { Calendar, CalendarRange, AlertTriangle, ShieldAlert, ChevronLeft, ChevronRight, Search, Filter, RefreshCw, CheckCircle, X, Plus, Clock, Trash2, FileText, RotateCcw, Sliders, Eye, EyeOff, History } from 'lucide-react';
+import { Calendar, CalendarRange, AlertTriangle, ShieldAlert, ChevronLeft, ChevronRight, Search, Filter, RefreshCw, CheckCircle, X, Plus, Clock, Trash2, FileText, RotateCcw, Sliders, Eye, EyeOff, History, Printer } from 'lucide-react';
 import { getStoredDutyRatiosForDate } from '../data/dutyRatios';
 import { getIdacShiftsForDateAndFlight, getFlightDutyQuotaForDate } from '../data/officialDutyRatioMatrix';
 import { FlightDutyRatioModal } from './FlightDutyRatioModal';
 import { EntryHistoryModal } from './EntryHistoryModal';
+import { PrintableMonthlyAttendanceModal } from './PrintableMonthlyAttendanceModal';
 import { getCurrentUserSession } from '../utils/authSession';
 import { checkDutyPermission, isDateInPast } from '../utils/dutyPermissions';
 import { formatRank, formatAirmanName } from '../utils/rankFormatter';
+import { getAirmanJoinDateISO, getAirmanLeftDateISO } from '../utils/csvExport';
 interface RestoreItem {
   airmanId: string;
   date: string;
@@ -131,8 +133,9 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
     return isWeekend || customHolidays.includes(dateStr);
   };
 
-  // View Mode: 'DUTY_MATRIX' (Master BAF Duty Register format) or 'AIRMEN_GRID' (Airman View)
-  const [viewMode, setViewMode] = useState<'DUTY_MATRIX' | 'AIRMEN_GRID'>('DUTY_MATRIX');
+  // View Mode: 'AIRMEN_GRID' (Personnel Register View)
+  const [viewMode, setViewMode] = useState<'DUTY_MATRIX' | 'AIRMEN_GRID'>('AIRMEN_GRID');
+  const [showPrintPreview, setShowPrintPreview] = useState<boolean>(false);
 
   // Filters
   const [flightFilter, setFlightFilter] = useState<FlightName | 'All'>('All');
@@ -675,6 +678,32 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
     isFullYearView ? undefined : currentMonth
   );
   const statsMap = new Map(statsList.map((s) => [s.airmanId, s]));
+
+  // Precompute Present ("P") days count for each airman in the visible days of the selected month
+  const presentMap = useMemo(() => {
+    const map = new Map<string, number>();
+    airmen.forEach((airman) => {
+      let pCount = 0;
+      daysArray.forEach((day) => {
+        const dayStr = day < 10 ? `0${day}` : `${day}`;
+        const dateStr = `${monthKey}-${dayStr}`;
+
+        const joinDate = getAirmanJoinDateISO(airman);
+        if (joinDate && dateStr < joinDate) return;
+        const leftDate = getAirmanLeftDateISO(airman);
+        if (leftDate && dateStr > leftDate) return;
+
+        const ass = resolveAirmanDutyForDate(airman.id, dateStr, assignmentMap);
+        const dutyCode = ass?.dutyCode;
+        if (dutyCode === 'ON_PARADE' || DUTY_TYPE_MAP.get(dutyCode as any)?.shortName === 'P' || DUTY_TYPE_MAP.get(dutyCode as any)?.shortName === 'PRD') {
+          pCount++;
+        }
+      });
+      map.set(airman.id, pCount);
+    });
+    return map;
+  }, [airmen, daysArray, monthKey, assignmentMap]);
+
   const alerts = detectConflicts(airmen, assignments);
 
   useEffect(() => {
@@ -891,13 +920,13 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
         {/* Left - Title */}
         <div className="flex-1 text-center lg:text-left flex flex-col items-center lg:items-start">
           <h1 className="text-xl font-bold text-slate-900 dark:text-slate-100 flex flex-col sm:flex-row items-center gap-2">
-            <span>Monthly Duty Register</span>
+            <span>Monthly Attendance Register</span>
             <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300">
               {isFullYearView ? `Full Year ${currentYear}` : `1st to ${daysCount}th`}
             </span>
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Dynamic Roster Matrix for 155 UASU BAF
+            Dynamic Attendance & Roster Matrix for 155 UASU BAF
           </p>
         </div>
 
@@ -979,26 +1008,14 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
 
         {/* Right - Action Buttons */}
         <div className="flex-1 flex flex-wrap justify-center lg:justify-end gap-2 mt-4 lg:mt-0">
-          {(role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER') && (
-            <div className="flex flex-wrap justify-center lg:justify-end gap-2">
-              <button
-                onClick={() => setShowHistoryModal(true)}
-                className="flex items-center space-x-1.5 px-3 py-2 text-xs font-bold rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 shadow-xs transition-all active:scale-95"
-                title="View Last 10 Entries, revert wrong entries, or edit"
-              >
-                <History className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                <span className="hidden xl:inline">History</span>
-              </button>
-
-              <button
-                onClick={() => handleOpenBulkModal()}
-                className="flex items-center space-x-2 px-3.5 py-2 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-all active:scale-95"
-              >
-                <CalendarRange className="w-4 h-4" />
-                <span className="hidden xl:inline">Assign</span>
-              </button>
-            </div>
-          )}
+          <button
+            onClick={() => setShowPrintPreview(true)}
+            className="flex items-center space-x-2 px-5 py-2.5 text-xs font-black rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-900/20 transition-all cursor-pointer active:scale-95"
+            title="Official Export / Print Preview"
+          >
+            <Printer className="w-4 h-4" />
+            <span>Official Export / Print</span>
+          </button>
         </div>
       </div>
 
@@ -1047,42 +1064,14 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
         </div>
       )}
 
-      {/* View Switcher Bar */}
-      <div className="flex flex-col sm:flex-row items-center justify-between bg-white dark:bg-slate-900 rounded-xl p-3 border border-slate-200 dark:border-slate-800 shadow-xs gap-3">
-        <div className="flex items-center space-x-1.5 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl w-full sm:w-auto">
-          <button
-            onClick={() => setViewMode('DUTY_MATRIX')}
-            className={`flex items-center justify-center space-x-2 px-4 py-2 rounded-lg text-xs font-bold transition-all w-1/2 sm:w-auto ${
-              viewMode === 'DUTY_MATRIX'
-                ? 'bg-emerald-600 text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100'
-            }`}
-          >
-            <FileText className="w-3.5 h-3.5" />
-            <span>Master BAF Register (Duty Sheet View)</span>
-          </button>
-          <button
-            onClick={() => setViewMode('AIRMEN_GRID')}
-            className={`flex items-center justify-center space-x-2 px-4 py-2 rounded-lg text-xs font-bold transition-all w-1/2 sm:w-auto ${
-              viewMode === 'AIRMEN_GRID'
-                ? 'bg-emerald-600 text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100'
-            }`}
-          >
-            <Calendar className="w-3.5 h-3.5" />
-            <span>Personnel Roster (Airman View)</span>
-          </button>
+      {/* Personnel Attendance Register Sub-Banner */}
+      <div className="flex flex-col sm:flex-row items-center justify-between bg-white dark:bg-slate-900 rounded-xl px-4 py-2.5 border border-slate-200 dark:border-slate-800 shadow-xs gap-2">
+        <div className="flex items-center space-x-2 text-xs font-bold text-slate-800 dark:text-slate-200">
+          <Calendar className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+          <span>Personnel Attendance Register (Airman View)</span>
         </div>
-
-        <div className="text-xs text-slate-500 font-medium hidden md:block">
-          {viewMode === 'DUTY_MATRIX' ? (
-            <span className="text-emerald-700 dark:text-emerald-400 font-bold flex items-center space-x-1">
-              <CheckCircle className="w-3.5 h-3.5" />
-              <span>Official BAF 155 UASU Duty Register Matrix (Duty & Flight x 1..31 Days)</span>
-            </span>
-          ) : (
-            <span>Individual Airman Duty Timeline Grid (Airmen x 1..31 Days)</span>
-          )}
+        <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+          Individual Airman Attendance & Duty Timeline Grid (Airmen x 1..{daysCount} Days)
         </div>
       </div>
 
@@ -1092,7 +1081,7 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
           <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
           <input
             type="text"
-            placeholder={viewMode === 'DUTY_MATRIX' ? 'Search Short Code or Airman...' : 'Search Name or BD No...'}
+            placeholder="Search Name or BD No..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 outline-none focus:border-emerald-500"
@@ -1440,6 +1429,9 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                     })}
 
                   {/* Auto Counter summary sticky right columns */}
+                  <th className="py-3 px-1.5 text-center bg-emerald-950 text-emerald-300 w-10 border-l border-slate-800 font-bold" title="Total Present / On Routine Parade Days">
+                    Present
+                  </th>
                   <th className="py-3 px-1.5 text-center bg-red-950 text-red-300 w-9 border-l border-slate-800 font-bold" title="Base Security Duty (GD)">
                     GD
                   </th>
@@ -1464,11 +1456,8 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                   <th className="py-3 px-1.5 text-center bg-indigo-950 text-indigo-300 w-9 border-l border-slate-800 font-bold" title="IDAC Night Duty">
                     I-N
                   </th>
-                  <th className="py-3 px-1.5 text-center bg-orange-950 text-orange-300 w-9 border-l border-slate-800 font-bold" title="Bake & Bite Duty">
-                    BnB
-                  </th>
-                  <th className="py-3 px-2 text-center bg-emerald-950 text-emerald-300 w-11 border-l border-slate-800 font-bold" title="Total Active Duties">
-                    Total
+                  <th className="py-3 px-2 text-center bg-emerald-950 text-emerald-300 w-12 border-l border-slate-800 font-bold" title="Total Duties Performed">
+                    Total Duty
                   </th>
                 </tr>
               </thead>
@@ -1521,13 +1510,41 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                           dutyCodeStr.toUpperCase() === 'OTHER' ||
                           dutyCodeStr.startsWith('OTHERS_');
 
+                        const joinDate = getAirmanJoinDateISO(airman);
+                        const leftDate = getAirmanLeftDateISO(airman);
+                        const isNotJoined = joinDate && dateStr < joinDate;
+                        const isLeft = leftDate && dateStr > leftDate;
+
                         let displayLabel = '';
-                        const displayBadgeBg = dutyType
+                        let displayBadgeBg = dutyType
                           ? `${dutyType.badgeBg} ${dutyType.badgeText}`
                           : 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700';
 
-                        if ((dutyCode === 'IDAC' || dutyCode === 'IDA') && ass?.idaShift && ass.idaShift !== 'None') {
-                          displayLabel = `I-${ass.idaShift.charAt(0)}`;
+                        if (isNotJoined || isLeft) {
+                          displayLabel = '-';
+                          displayBadgeBg = 'text-slate-400 dark:text-slate-600 font-bold text-center';
+                        } else if (dutyCode === 'ON_PARADE' || dutyType?.shortName === 'PRD' || dutyType?.shortName === 'P') {
+                          displayLabel = 'P';
+                          displayBadgeBg = 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700';
+                        } else if (dutyCode === 'DUTY_OFF' || (dutyCode as any) === 'OFF') {
+                          let offDuty = '';
+                          if (ass?.notes) {
+                            const match = ass.notes.match(/\b(NTF|GD|BTF|IDAC|IDA|AIRPORT|APT|HALISHAHAR|HAL)\b/i);
+                            if (match) offDuty = match[1].toUpperCase();
+                          }
+                          if (!offDuty) {
+                            const yestDate = new Date(currentYear, currentMonth - 1, day - 1);
+                            const yDateStr = `${yestDate.getFullYear()}-${String(yestDate.getMonth() + 1).padStart(2, '0')}-${String(yestDate.getDate()).padStart(2, '0')}`;
+                            const yestAss = resolveAirmanDutyForDate(airman.id, yDateStr, assignmentMap);
+                            if (yestAss && yestAss.dutyCode && !['ON_PARADE', 'DUTY_OFF', 'OFF'].includes(yestAss.dutyCode as any)) {
+                              offDuty = yestAss.dutyCode === 'IDA' ? 'IDAC' : yestAss.dutyCode;
+                            }
+                          }
+                          displayLabel = offDuty ? `${offDuty} OFF` : 'OFF';
+                          displayBadgeBg = 'bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700';
+                        } else if (dutyCode === 'IDAC' || dutyCode === 'IDA') {
+                          const s = (ass?.idaShift || '').toLowerCase();
+                          displayLabel = s.startsWith('m') ? 'IDA-M' : s.startsWith('a') ? 'IDA-A' : s.startsWith('n') ? 'IDA-NT' : 'IDA';
                         } else if (isOtherDisposal) {
                           // Resolve specific disposal name (e.g., Course, Exam, Driving, etc.)
                           const cleanNote = ass?.notes?.trim();
@@ -1548,7 +1565,7 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                           }
                           displayLabel = name.toUpperCase();
                         } else if (dutyType) {
-                          displayLabel = dutyType.shortName;
+                          displayLabel = dutyType.shortName === 'PRD' ? 'P' : dutyType.shortName;
                         } else {
                           displayLabel = dutyCode;
                         }
@@ -1573,6 +1590,9 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                       })}
 
                       {/* Auto Duty Counters */}
+                      <td className="py-2.5 px-1.5 text-center font-bold font-mono text-emerald-600 dark:text-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/20 border-l border-slate-200 dark:border-slate-800" title="Present / On Routine Parade Days">
+                        {presentMap.get(airman.id) ?? 0}
+                      </td>
                       <td className="py-2.5 px-1.5 text-center font-bold font-mono text-red-600 dark:text-red-400 bg-red-50/50 dark:bg-red-950/20 border-l border-slate-200 dark:border-slate-800">
                         {stat?.totalGD || 0}
                       </td>
@@ -1596,9 +1616,6 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                       </td>
                       <td className="py-2.5 px-1.5 text-center font-bold font-mono text-indigo-600 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-950/20 border-l border-slate-200 dark:border-slate-800" title="IDAC Night">
                         {stat?.totalIDACNight || 0}
-                      </td>
-                      <td className="py-2.5 px-1.5 text-center font-bold font-mono text-orange-600 dark:text-orange-400 bg-orange-50/50 dark:bg-orange-950/20 border-l border-slate-200 dark:border-slate-800">
-                        {stat?.totalBakeNBite || 0}
                       </td>
                       <td className="py-2.5 px-2 text-center font-extrabold font-mono text-emerald-600 dark:text-emerald-400 bg-emerald-50/50 dark:bg-emerald-950/20 border-l border-slate-200 dark:border-slate-800">
                         {stat?.totalDutyCount || 0}
@@ -2128,6 +2145,19 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
           date={bulkFromDate || `${currentYear}-${currentMonth.toString().padStart(2, '0')}-01`}
           onClose={() => setShowRatioModal(false)}
           onRatiosUpdated={() => setRatioRefreshTrigger((prev) => prev + 1)}
+        />
+      )}
+
+      {/* Printable Monthly Attendance Register Modal (In-App Preview) */}
+      {showPrintPreview && (
+        <PrintableMonthlyAttendanceModal
+          isOpen={showPrintPreview}
+          onClose={() => setShowPrintPreview(false)}
+          airmen={airmen}
+          assignments={assignments}
+          year={currentYear}
+          month={currentMonth}
+          flightFilter={flightFilter}
         />
       )}
 

@@ -1,7 +1,10 @@
 import XLSX from 'xlsx-js-style';
 import { saveAs } from 'file-saver';
 import JSZip from 'jszip';
-import { Airman } from '../types';
+import { Airman, DutyAssignment } from '../types';
+import { formatRank } from './rankFormatter';
+import { DUTY_TYPE_MAP } from '../data/dutyTypes';
+import { resolveAirmanDutyForDate, addAssignmentToMap, calculateDutyStats } from '../data/rosterGenerator';
 
 export function normalizeDateToISO(val: any): string {
   if (!val) return '';
@@ -1050,5 +1053,311 @@ export function exportFlightDutyScheduleExcel(
   const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
   const blob = new Blob([wbout], { type: 'application/octet-stream' });
   saveAs(blob, finalName);
+}
+
+export function formatFlightFullName(flight?: string): string {
+  if (!flight) return '-';
+  const f = flight.trim();
+  if (/^adm/i.test(f)) return 'Admin';
+  if (/^mec/i.test(f)) return 'Mechanics';
+  if (/^avi/i.test(f)) return 'Avionics';
+  if (/^gcs/i.test(f)) return 'GCS';
+  return f;
+}
+
+export const RANK_ORDER: string[] = [
+  'MWO',
+  'SWO',
+  'WO',
+  'FLT SGT',
+  'Sgt',
+  'Cpl',
+  'LCpl',
+  'LAC',
+  'AC-1',
+  'AC-2',
+  'AC',
+];
+
+export const getRankTier = (rankStr?: string): number => {
+  if (!rankStr) return 999;
+  const formatted = formatRank(rankStr);
+  const idx = RANK_ORDER.findIndex((r) => r.toLowerCase() === formatted.toLowerCase());
+  return idx !== -1 ? idx : 999;
+};
+
+export const getAirmanJoinDateISO = (airman?: Airman | null): string => {
+  if (!airman) return '';
+  const raw =
+    airman.dateJoined ||
+    (airman as any)['Dt of Posting'] ||
+    (airman as any).dtOfPosting ||
+    (airman as any).dateOfPosting ||
+    (airman as any).postingDate;
+  if (!raw) return '';
+  return normalizeDateToISO(raw) || '';
+};
+
+export const getAirmanLeftDateISO = (airman?: Airman | null): string => {
+  if (!airman) return '';
+  const raw =
+    airman.dateLeft ||
+    (airman as any)['Unit Left date'] ||
+    (airman as any).unitLeftDate;
+  if (!raw) return '';
+  return normalizeDateToISO(raw) || '';
+};
+
+export function exportMonthlyAttendanceRegisterExcel(
+  airmen: Airman[],
+  assignments: DutyAssignment[],
+  year: number,
+  month: number,
+  selectedFlight: string = 'All',
+  selectedRank: string = 'All',
+  filename?: string
+) {
+  const monthName = new Date(year, month - 1, 1).toLocaleString('en-US', {
+    month: 'long',
+    year: 'numeric',
+  });
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+
+  const assignmentMap = new Map<string, DutyAssignment>();
+  assignments.forEach((ass) => addAssignmentToMap(assignmentMap, ass));
+
+  const statsList = calculateDutyStats(airmen, assignments, year, month);
+  const statsMap = new Map(statsList.map((s) => [s.airmanId, s]));
+
+  const resolveDutyLabel = (airman: Airman, day: number) => {
+    const dayStr = day < 10 ? `0${day}` : `${day}`;
+    const dateStr = `${monthKey}-${dayStr}`;
+
+    const joinDate = getAirmanJoinDateISO(airman);
+    if (joinDate && dateStr < joinDate) return '-';
+    const leftDate = getAirmanLeftDateISO(airman);
+    if (leftDate && dateStr > leftDate) return '-';
+
+    const ass = resolveAirmanDutyForDate(airman.id, dateStr, assignmentMap);
+    const dutyCode = ass?.dutyCode;
+    const dutyType = DUTY_TYPE_MAP.get(dutyCode as any);
+
+    if (dutyCode === 'ON_PARADE' || dutyType?.shortName === 'PRD' || dutyType?.shortName === 'P') {
+      return 'P';
+    }
+
+    if (dutyCode === 'DUTY_OFF' || (dutyCode as any) === 'OFF') {
+      let offDuty = '';
+      if (ass?.notes) {
+        const match = ass.notes.match(/\b(NTF|GD|BTF|IDAC|IDA|AIRPORT|APT|HALISHAHAR|HAL)\b/i);
+        if (match) offDuty = match[1].toUpperCase();
+      }
+      if (!offDuty) {
+        const yestDate = new Date(year, month - 1, day - 1);
+        const yDateStr = `${yestDate.getFullYear()}-${String(yestDate.getMonth() + 1).padStart(2, '0')}-${String(yestDate.getDate()).padStart(2, '0')}`;
+        const yestAss = resolveAirmanDutyForDate(airman.id, yDateStr, assignmentMap);
+        if (yestAss && yestAss.dutyCode && !['ON_PARADE', 'DUTY_OFF', 'OFF'].includes(yestAss.dutyCode as any)) {
+          offDuty = yestAss.dutyCode === 'IDA' ? 'IDAC' : yestAss.dutyCode;
+        }
+      }
+      return offDuty ? `${offDuty} OFF` : 'OFF';
+    }
+
+    if (dutyCode === 'IDAC' || dutyCode === 'IDA') {
+      const s = (ass?.idaShift || '').toLowerCase();
+      return s.startsWith('m') ? 'IDA-M' : s.startsWith('a') ? 'IDA-A' : 'IDA-NT';
+    }
+
+    if (dutyCode === 'LEAVE') return 'L';
+    if (dutyCode === 'TDY') return 'TDY';
+
+    return dutyType?.shortName || dutyCode || '-';
+  };
+
+  // Filter airmen based on selected flight and rank (Rank & Below)
+  const filteredAirmen = airmen.filter((a) => {
+    if (selectedFlight !== 'All') {
+      const fltFull = formatFlightFullName(a.flightName);
+      if (fltFull !== selectedFlight && a.flightName !== selectedFlight) return false;
+    }
+    if (selectedRank !== 'All') {
+      const selectedTier = getRankTier(selectedRank);
+      const airmanTier = getRankTier(a.rank);
+      if (airmanTier < selectedTier) return false;
+    }
+    return true;
+  });
+
+  const wb = XLSX.utils.book_new();
+  const rows: any[][] = [];
+
+  // Title Headers as requested:
+  // Heading: 155 UASU, BAF (BOLD)
+  // Attendance Register (underline)
+  // Month: [Month]
+  rows.push(['155 UASU, BAF']);
+  rows.push(['ATTENDANCE REGISTER']);
+  rows.push([`Month: ${monthName}`]);
+  rows.push([]); // blank spacing row
+
+  const tableHeaderRowIndex = rows.length;
+  const headers = [
+    'SER',
+    'BD NO',
+    'RANK',
+    'NAME',
+    'FLT',
+    ...daysArray.map((d) => String(d)),
+    'Present',
+    'GD',
+    'BTF',
+    'NTF',
+    'HAL',
+    'APT',
+    'IDA-M',
+    'IDA-A',
+    'IDA-NT',
+    'Total Duty',
+  ];
+  rows.push(headers);
+
+  filteredAirmen.forEach((airman, idx) => {
+    const stat = statsMap.get(airman.id);
+    let pCount = 0;
+    const dayLabels: string[] = [];
+
+    daysArray.forEach((day) => {
+      const label = resolveDutyLabel(airman, day);
+      if (label === 'P') pCount++;
+      dayLabels.push(label);
+    });
+
+    const row: any[] = [
+      idx + 1,
+      String(airman.bdNo || ''),
+      formatRank(airman.rank),
+      airman.fullName || airman.name || '',
+      formatFlightFullName(airman.flightName),
+      ...dayLabels,
+      pCount,
+      stat?.totalGD || 0,
+      stat?.totalBTF || 0,
+      stat?.totalNTF || 0,
+      stat?.totalHalishahar || 0,
+      stat?.totalAirport || 0,
+      stat?.totalIDACMorning || 0,
+      stat?.totalIDACAfternoon || 0,
+      stat?.totalIDACNight || 0,
+      stat?.totalDutyCount || 0,
+    ];
+
+    rows.push(row);
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+
+  const thinBorder = {
+    top: { style: 'thin', color: { rgb: '000000' } },
+    bottom: { style: 'thin', color: { rgb: '000000' } },
+    left: { style: 'thin', color: { rgb: '000000' } },
+    right: { style: 'thin', color: { rgb: '000000' } },
+  };
+
+  const totalCols = headers.length;
+
+  // Title styling (Row 0, 1, 2)
+  if (ws['A1']) {
+    ws['A1'].s = {
+      font: { name: 'Calibri', sz: 14, bold: true, color: { rgb: '000000' } },
+      alignment: { horizontal: 'center', vertical: 'center' },
+    };
+  }
+  if (ws['A2']) {
+    ws['A2'].s = {
+      font: { name: 'Calibri', sz: 12, bold: true, underline: true, color: { rgb: '000000' } },
+      alignment: { horizontal: 'center', vertical: 'center' },
+    };
+  }
+  if (ws['A3']) {
+    ws['A3'].s = {
+      font: { name: 'Calibri', sz: 11, bold: true, color: { rgb: '000000' } },
+      alignment: { horizontal: 'center', vertical: 'center' },
+    };
+  }
+
+  // Merge title cells across all columns
+  ws['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: totalCols - 1 } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: totalCols - 1 } },
+    { s: { r: 2, c: 0 }, e: { r: 2, c: totalCols - 1 } },
+  ];
+
+  // Format table rows (No alternating colors - clean white background everywhere)
+  for (let r = tableHeaderRowIndex; r < rows.length; r++) {
+    const isHeader = r === tableHeaderRowIndex;
+    for (let c = 0; c < totalCols; c++) {
+      const cellAddr = XLSX.utils.encode_cell({ r, c });
+      if (!ws[cellAddr]) ws[cellAddr] = { t: 's', v: '' };
+
+      const isName = c === 3;
+      const isBdNo = c === 1;
+
+      if (!isHeader && isBdNo) {
+        ws[cellAddr].t = 's';
+        ws[cellAddr].z = '@';
+      }
+
+      ws[cellAddr].s = {
+        border: thinBorder,
+        font: {
+          name: 'Calibri',
+          sz: isHeader ? 10 : 9,
+          bold: isHeader || c === 0 || c >= totalCols - 10,
+          color: { rgb: '000000' },
+        },
+        alignment: {
+          vertical: 'center',
+          horizontal: isName && !isHeader ? 'left' : 'center',
+          wrapText: false,
+        },
+        fill: {
+          fgColor: { rgb: isHeader ? 'F1F5F9' : 'FFFFFF' },
+        },
+      };
+    }
+  }
+
+  // Column widths
+  const colWidths = [
+    { wch: 6 },  // SER
+    { wch: 11 }, // BD NO
+    { wch: 9 },  // RANK
+    { wch: 24 }, // NAME
+    { wch: 13 }, // FLT
+    ...Array.from({ length: daysInMonth }, () => ({ wch: 4.5 })), // Days
+    { wch: 9 },  // Present
+    { wch: 6 },  // GD
+    { wch: 6 },  // BTF
+    { wch: 6 },  // NTF
+    { wch: 6 },  // HAL
+    { wch: 6 },  // APT
+    { wch: 6 },  // I-M
+    { wch: 6 },  // I-A
+    { wch: 6 },  // I-N
+    { wch: 11 }, // Total Duty
+  ];
+  ws['!cols'] = colWidths;
+
+  XLSX.utils.book_append_sheet(wb, ws, 'Attendance Register');
+
+  const defaultName = `155_UASU_Attendance_Register_${year}_${String(month).padStart(2, '0')}.xlsx`;
+  const cleanName = (filename || defaultName).replace(/\.(xlsx|csv)$/i, '') + '.xlsx';
+  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([wbout], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+  saveAs(blob, cleanName);
 }
 
