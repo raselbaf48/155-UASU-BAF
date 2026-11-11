@@ -81,8 +81,8 @@
   },
   "baf_custom_duties_v1": {
     "setting_key": "baf_custom_duties_v1",
-    "setting_value": "[]",
-    "updated_at": "2026-11-09T11:06:39.443Z"
+    "setting_value": "[{\"code\":\"CUST_1794394964393\",\"name\":\"Escort Duty\",\"shortName\":\"Escort\",\"category\":\"Special\",\"color\":\"bg-indigo-600 text-white\",\"badgeBg\":\"bg-indigo-100 dark:bg-indigo-900/40 border border-indigo-300 dark:border-indigo-700\",\"badgeText\":\"text-indigo-800 dark:text-indigo-300\",\"isCountedAsDuty\":true,\"description\":\"Escort Duty\",\"isCustom\":true,\"eligibleFlights\":[\"Mechanics\",\"Avionics\",\"GCS\",\"Admin\"],\"eligibleRanks\":[\"Sgt\",\"Cpl\",\"LAC\",\"AC-1\",\"AC-2\"]}]",
+    "updated_at": "2026-11-11T11:05:00.000Z"
   },
   "baf_custom_holidays": {
     "setting_key": "baf_custom_holidays",

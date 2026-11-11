@@ -56969,6 +56969,7 @@
         "airmanId": "BD/474549",
         "date": "2026-11-11",
         "dutyCode": "CUST_1794394964393",
+        "dutyName": "Escort Duty",
         "disposalScope": "ALL",
         "notes": "",
         "updatedAt": "2026-11-11T11:05:00.072Z"
@@ -62101,9 +62102,10 @@
       "airmanId": "BD/474549",
       "airmanName": "LAC Rakib",
       "dutyCode": "CUST_1794394964393",
+      "dutyName": "Escort Duty",
       "fromDate": "2026-11-11",
       "toDate": "2026-11-11",
-      "notes": "",
+      "notes": "Escort Duty",
       "previousAssignments": [
         {
           "airmanId": "BD/474549",

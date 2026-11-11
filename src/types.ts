@@ -75,6 +75,7 @@ export interface DutyAssignment {
   airmanId: string;
   date: string;       // YYYY-MM-DD
   dutyCode: DutyCategoryCode;
+  dutyName?: string;
   idaShift?: IDAShift;
   proxyForFlight?: FlightName;
   disposalScope?: 'ALL' | 'PARADE' | 'PT' | 'NIGHT_COUNT';

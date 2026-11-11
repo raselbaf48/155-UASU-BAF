@@ -931,7 +931,39 @@ async function startServer() {
       else { onDuty++; statusCategory = 'DUTY'; }
 
       let dutyName = dutyCode === 'ON_PARADE' ? 'On Parade' : dutyCode;
-      if (['IDAC', 'IDA', 'IDA C', 'IDA_C'].includes(dutyCode)) {
+      const isCustomCode = dutyCode.startsWith('CUST_') || dutyCode.startsWith('cust_') || dutyCode.includes('1794394');
+      if (isCustomCode) {
+        if ((match as any)?.dutyName && !(match as any).dutyName.startsWith('CUST_')) {
+          dutyName = (match as any).dutyName;
+        } else if (dutyCode.includes('1794394')) {
+          dutyName = 'Escort Duty';
+        } else {
+          try {
+            const settings = loadAppSettings();
+            const rawCustom = settings?.['baf_custom_duties_v1']?.setting_value;
+            if (rawCustom) {
+              const parsed = JSON.parse(rawCustom);
+              if (Array.isArray(parsed)) {
+                const found = parsed.find((p: any) => p.code === dutyCode);
+                if (found?.name) dutyName = found.name;
+              }
+            }
+            if (dutyName === dutyCode) {
+              const rawMatrix = settings?.['baf_official_duty_matrix_v4']?.setting_value;
+              if (rawMatrix) {
+                const parsed = JSON.parse(rawMatrix);
+                if (Array.isArray(parsed)) {
+                  const found = parsed.find((p: any) => p.id === dutyCode || p.dutyCode === dutyCode);
+                  if (found?.title) dutyName = found.title;
+                }
+              }
+            }
+          } catch {}
+          if (dutyName === dutyCode) {
+            dutyName = 'Escort Duty';
+          }
+        }
+      } else if (['IDAC', 'IDA', 'IDA C', 'IDA_C'].includes(dutyCode)) {
         const s = match?.idaShift || (match as any)?.shift || 'Morning';
         dutyName = `IDAC Duty (${s})`;
       } else if (dutyCode === 'LEAVE') {

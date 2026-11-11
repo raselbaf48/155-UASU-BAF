@@ -36,6 +36,7 @@ import {
   FirebaseMigrationResult
 } from './firebaseFirestoreService';
 import { scheduleDriveAutoBackup } from './googleDriveService';
+import { getCustomDutyName } from '../utils/customDuties';
 
 export interface LocalStorageDB {
   airmen: Airman[];
@@ -2523,6 +2524,9 @@ export class LocalDatabaseEngine {
         airmanId,
         date: dateStr,
         dutyCode: sanitizedCode,
+        dutyName: (String(sanitizedCode).startsWith('CUST_') || String(sanitizedCode).includes('1794394'))
+          ? (getCustomDutyName(sanitizedCode) || 'Escort Duty')
+          : undefined,
         idaShift,
         proxyForFlight,
         disposalScope: disposalScope || 'ALL',
@@ -2993,6 +2997,15 @@ export class LocalDatabaseEngine {
         let previousDutyName: string | undefined = undefined;
 
         let codeStr = String(ass.dutyCode).trim();
+
+        if (codeStr.startsWith('CUST_') || codeStr.includes('1794394') || dutyName.startsWith('CUST_') || dutyName.includes('1794394')) {
+          const resolved = getCustomDutyName(codeStr) || getCustomDutyName(dutyName);
+          if (resolved) {
+            dutyName = resolved;
+          } else if (codeStr.includes('1794394') || dutyName.includes('1794394')) {
+            dutyName = 'Escort Duty';
+          }
+        }
 
         // If dutyCode is generic 'DUTY' or 'DUTY_ON', resolve to real disposal from notes, dutyName, or Master Disposals
         if (codeStr === 'DUTY' || codeStr === 'DUTY_ON') {

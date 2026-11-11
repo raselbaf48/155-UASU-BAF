@@ -1,3 +1,6 @@
+import { getCustomDutyName, getCustomDuties } from './customDuties';
+import { DUTY_TYPE_MAP } from '../data/dutyTypes';
+
 /**
  * Standard Duty & Disposal short name formatting utility for 155 UASU BAF
  * 
@@ -192,16 +195,41 @@ export function formatDutyOnShortName(
     return 'GD';
   }
 
-  // 12. Custom fallback: clean any internal "imported" tag and avoid returning generic "DUTY"
+  // 12. Custom duty code resolution (handles CUST_..., timestamp codes, custom duties)
+  const isRawCode = (str?: string | null) => Boolean(
+    str && (
+      str.toUpperCase().startsWith('CUST_') ||
+      str.includes('1794394') ||
+      /^[A-Z0-9_]{10,}$/.test(str.trim())
+    )
+  );
   const isGenericDuty = (str: string) => ['DUTY', 'DUTY_ON', 'ON DUTY', 'DUTY ON'].includes(str.toUpperCase().trim());
-  if (dutyName && !dutyName.toLowerCase().includes('imported') && !isGenericDuty(dutyName)) {
+
+  if (isRawCode(code) || isRawCode(dutyName)) {
+    const rawTarget = isRawCode(code) ? code : (dutyName || '');
+    if (rawTarget.includes('1794394')) return 'Escort Duty';
+    const resolvedName = getCustomDutyName(rawTarget) ||
+      DUTY_TYPE_MAP.get(rawTarget as any)?.name ||
+      getCustomDuties().find(d => d.code === rawTarget)?.name;
+    if (resolvedName && !isRawCode(resolvedName)) {
+      return resolvedName;
+    }
+  }
+
+  // 13. Custom fallback: clean any internal "imported" tag and avoid returning generic "DUTY" or raw codes
+  if (dutyName && !isRawCode(dutyName) && !dutyName.toLowerCase().includes('imported') && !isGenericDuty(dutyName)) {
     return dutyName;
   }
-  if (notesStr && !notesLower.includes('imported') && !isGenericDuty(notesStr)) {
+  if (notesStr && !isRawCode(notesStr) && !notesLower.includes('imported') && !isGenericDuty(notesStr)) {
     return notesStr;
   }
 
-  // 13. Any remaining generic duty code falls back to GD (Base Security Duty in 155 UASU BAF)
+  // 14. If the code was a raw custom code and wasn't resolved yet
+  if (isRawCode(code)) {
+    return code.includes('1794394') ? 'Escort Duty' : 'Special Duty';
+  }
+
+  // 15. Any remaining generic duty code falls back to GD (Base Security Duty in 155 UASU BAF)
   return (code && !isGenericDuty(code)) ? code : 'GD';
 }
 
