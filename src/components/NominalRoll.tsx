@@ -280,7 +280,7 @@ export const NominalRoll: React.FC<NominalRollProps> = ({
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
               {filteredAirmen.map((airman, idx) => (
                 <tr
-                  key={airman.id}
+                  key={`${airman.id}-${idx}`}
                   onClick={() => {
                     if (variant === 'biodata') {
                       onEditAirman(airman);

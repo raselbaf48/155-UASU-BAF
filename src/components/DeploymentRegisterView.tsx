@@ -510,7 +510,7 @@ export const DeploymentRegisterView: React.FC<DeploymentRegisterViewProps> = ({
 
                   return (
                     <tr
-                      key={airman.id}
+                      key={`${airman.id}-${idx}`}
                       onClick={() => onViewProfile && onViewProfile(airman, { initialTab: 'history', initialCategory: 'ATT', historyOnly: true })}
                       className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer group"
                     >

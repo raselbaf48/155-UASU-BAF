@@ -129,6 +129,7 @@ export function calculateDutyStats(
   });
   const assignments = Array.from(uniqueAss.values());
 
+  const statsList: AirmanDutyStats[] = [];
   const map = new Map<string, AirmanDutyStats>();
 
   airmen.forEach((a) => {
@@ -153,6 +154,7 @@ export function calculateDutyStats(
       totalDutyOff: 0,
       totalDutyCount: 0,
     };
+    statsList.push(statObj);
     map.set(a.id, statObj);
     if (a.id.includes('_')) map.set(a.id.replace(/_/g, '/'), statObj);
     if (a.id.includes('/')) map.set(a.id.replace(/\//g, '_'), statObj);
@@ -295,7 +297,7 @@ export function calculateDutyStats(
     });
   }
 
-  return Array.from(map.values());
+  return statsList;
 }
 
 export function detectConflicts(airmen: Airman[], assignments: DutyAssignment[]): ConflictAlert[] {

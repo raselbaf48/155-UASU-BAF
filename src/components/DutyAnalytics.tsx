@@ -589,11 +589,11 @@ export const DutyAnalytics: React.FC<DutyAnalyticsProps> = ({ airmen, onViewProf
                 <span>{selectedFlight ? `Highest Duty Load (${selectedFlight} Flight)` : 'Highest Duty Load Personnel (Top 5)'}</span>
               </h3>
               <div className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
-                {highestDuties.map((s) => {
+                {highestDuties.map((s, idx) => {
                   const airman = airmanMap.get(s.airmanId);
                   const effectiveCount = getDutyCountExcludingAirfield(s);
                   return (
-                    <div key={s.airmanId} className="py-2.5 flex items-center justify-between">
+                    <div key={`${s.airmanId}-${idx}`} className="py-2.5 flex items-center justify-between">
                       <div>
                         <button
                           onClick={() => airman && onViewProfile(airman)}
@@ -624,11 +624,11 @@ export const DutyAnalytics: React.FC<DutyAnalyticsProps> = ({ airmen, onViewProf
                 <span>{selectedFlight ? `Lowest Duty Load (${selectedFlight} Flight)` : 'Lowest Duty Load Personnel (Top 5)'}</span>
               </h3>
               <div className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
-                {lowestDuties.map((s) => {
+                {lowestDuties.map((s, idx) => {
                   const airman = airmanMap.get(s.airmanId);
                   const effectiveCount = getDutyCountExcludingAirfield(s);
                   return (
-                    <div key={s.airmanId} className="py-2.5 flex items-center justify-between">
+                    <div key={`${s.airmanId}-${idx}`} className="py-2.5 flex items-center justify-between">
                       <div>
                         <button
                           onClick={() => airman && onViewProfile(airman)}
@@ -765,7 +765,7 @@ const DutyDetailsModal: React.FC<{
       </thead>
       <tbody>
         {dutyAirmen.map((airman, idx) => (
-          <tr key={airman.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
+          <tr key={`${airman.id}-${idx}`} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
             <td className="px-3 py-2 border-b border-r border-slate-200 dark:border-slate-700 text-center font-bold text-slate-500">
               {idx + 1}
             </td>

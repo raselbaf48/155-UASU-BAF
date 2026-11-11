@@ -1350,7 +1350,7 @@ export const CanteenMemberDB: React.FC = () => {
 
             return (
               <div
-                key={member.airman_id || `box-${member['BD No'] || i}-${i}`}
+                key={member.airman_id ? `${member.airman_id}-${i}` : `box-${member['BD No'] || i}-${i}`}
                 className="bg-gradient-to-b from-slate-900 via-slate-900/90 to-slate-950 rounded-3xl p-5 border border-slate-800/80 shadow-md hover:border-slate-700 transition-all flex flex-col justify-between space-y-4 group"
               >
                 <div className="flex items-start">
@@ -1504,7 +1504,7 @@ export const CanteenMemberDB: React.FC = () => {
 
                   return (
                     <tr 
-                      key={member.airman_id || `row-${member['BD No'] || i}-${i}`}
+                      key={member.airman_id ? `${member.airman_id}-${i}` : `row-${member['BD No'] || i}-${i}`}
                       className="hover:bg-slate-800/50 transition-colors group"
                     >
                       <td className="px-3 py-3 text-center">
@@ -2685,7 +2685,7 @@ export const CanteenMemberDB: React.FC = () => {
                   .map((m, i) => {
                     const isCurrent = String(m['BD No']).trim() === String(canteenConfig?.managerBdNo).trim();
                     return (
-                      <div key={m.airman_id || `mgr_m_${m['BD No'] || i}_${i}`} className="p-2.5 flex items-center justify-between gap-3 hover:bg-slate-900/70 rounded-xl transition-colors">
+                      <div key={m.airman_id ? `${m.airman_id}-${i}` : `mgr_m_${m['BD No'] || i}_${i}`} className="p-2.5 flex items-center justify-between gap-3 hover:bg-slate-900/70 rounded-xl transition-colors">
                         <div className="flex items-center space-x-3 min-w-0">
                           <div className="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-xs text-indigo-400 overflow-hidden shrink-0">
                             {m.DP ? (

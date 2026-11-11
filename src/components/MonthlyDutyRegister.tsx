@@ -1476,7 +1476,7 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                {filteredAirmen.map((airman) => {
+                {filteredAirmen.map((airman, idx) => {
                   const stat = statsMap.get(airman.id);
                   const visibleDays = daysArray.filter((day) => {
                     if (!onlyHolidaysFilter) return true;
@@ -1488,7 +1488,7 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
 
                   return (
                     <tr
-                      key={airman.id}
+                      key={`${airman.id}-${idx}`}
                       className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group"
                     >
                       {/* Sticky left info */}

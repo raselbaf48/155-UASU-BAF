@@ -414,7 +414,7 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
                 const pCount = presentMap.get(airman.id) ?? 0;
 
                 return (
-                  <tr key={airman.id} className="border-b border-slate-900">
+                  <tr key={`${airman.id}-${idx}`} className="border-b border-slate-900">
                     <td className="border border-slate-900 py-1 px-1 text-center font-mono font-bold bg-white text-slate-900">
                       {idx + 1}
                     </td>

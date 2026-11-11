@@ -495,7 +495,7 @@ export const TdyRegisterView: React.FC<TdyRegisterViewProps> = ({
 
                   return (
                     <tr
-                      key={airman.id}
+                      key={`${airman.id}-${idx}`}
                       onClick={() => onViewProfile && onViewProfile(airman, { initialTab: 'history', initialCategory: 'TDY', historyOnly: true })}
                       className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer group"
                     >

@@ -183,7 +183,7 @@ export const PrintableNominalRollModal: React.FC<PrintableNominalRollModalProps>
                 </thead>
                 <tbody style={{ display: 'table-row-group' }}>
                   {airmen.map((airman, idx) => (
-                    <tr key={airman.id} className="even:bg-gray-100 print:even:bg-gray-100" style={{ pageBreakInside: 'avoid', pageBreakAfter: 'auto' }}>
+                    <tr key={`${airman.id}-${idx}`} className="even:bg-gray-100 print:even:bg-gray-100" style={{ pageBreakInside: 'avoid', pageBreakAfter: 'auto' }}>
                       <td className="p-1 sm:p-1.5 border border-black text-center font-mono">
                         {idx + 1}
                       </td>

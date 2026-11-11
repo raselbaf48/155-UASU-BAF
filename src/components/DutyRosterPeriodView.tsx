@@ -21,9 +21,18 @@ import {
  Clock,
  CheckCircle2,
  ListFilter,
- X
+ X,
+ ChevronLeft,
+ ChevronRight,
+ PenTool,
 } from 'lucide-react';
 import { Logo155UASU } from './Logo155UASU';
+import {
+  IdacSignatureModal,
+  IdacSignatureDetails,
+  getSavedIdacSignature,
+  saveIdacSignature,
+} from './IdacSignatureModal';
 
 interface DutyRosterPeriodViewProps {
  role: UserRole;
@@ -88,6 +97,80 @@ export const DutyRosterPeriodView: React.FC<DutyRosterPeriodViewProps> = ({
  const [loading, setLoading] = useState<boolean>(false);
  const [assignments, setAssignments] = useState<DutyAssignment[]>([]);
  const [isExportingDocx, setIsExportingDocx] = useState<boolean>(false);
+
+ // Dedicated IDAC Duty Signature state (completely independent of Parade State)
+ const [showIdacSignatureModal, setShowIdacSignatureModal] = useState<boolean>(false);
+ const [idacSignature, setIdacSignature] = useState<IdacSignatureDetails>(getSavedIdacSignature);
+
+ // Listen for IDAC-specific signature updates
+ useEffect(() => {
+   const handleIdacSigUpdated = () => {
+     setIdacSignature(getSavedIdacSignature());
+   };
+   window.addEventListener('baf_idac_signature_updated', handleIdacSigUpdated);
+   return () => window.removeEventListener('baf_idac_signature_updated', handleIdacSigUpdated);
+ }, []);
+
+ // Helper to format short month & year for signature footer: e.g. "Sep 26"
+ const formatRosterMonthShort = (dateStr: string) => {
+   if (!dateStr) return '';
+   const [yStr, mStr] = dateStr.split('-');
+   const y = parseInt(yStr, 10);
+   const m = parseInt(mStr, 10) - 1;
+   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+   const monthName = months[m] || '';
+   const shortYr = String(y).slice(-2);
+   return `${monthName} ${shortYr}`;
+ };
+
+ // Helper to format full month display: e.g. "Month: November 26"
+ const formatMonthNameDisplay = (dateStr: string) => {
+   if (!dateStr) return '';
+   const [yStr, mStr] = dateStr.split('-');
+   const y = parseInt(yStr, 10);
+   const m = parseInt(mStr, 10) - 1;
+   const months = [
+     'January', 'February', 'March', 'April', 'May', 'June',
+     'July', 'August', 'September', 'October', 'November', 'December'
+   ];
+   const monthName = months[m] || '';
+   const shortYr = String(y).slice(-2);
+   return `Month: ${monthName} ${shortYr}`;
+ };
+
+ const setFullMonthRange = (year: number, monthIndex: number) => {
+   const mm = String(monthIndex + 1).padStart(2, '0');
+   const lastDay = new Date(year, monthIndex + 1, 0).getDate();
+   setFromDate(`${year}-${mm}-01`);
+   setToDate(`${year}-${mm}-${String(lastDay).padStart(2, '0')}`);
+   setWeekPreset('FULL_MONTH');
+ };
+
+ const handlePrevMonth = () => {
+   const base = fromDate || selectedDate || '2026-11-01';
+   const [yStr, mStr] = base.split('-');
+   let y = parseInt(yStr, 10);
+   let m = parseInt(mStr, 10) - 1;
+   m -= 1;
+   if (m < 0) {
+     m = 11;
+     y -= 1;
+   }
+   setFullMonthRange(y, m);
+ };
+
+ const handleNextMonth = () => {
+   const base = fromDate || selectedDate || '2026-11-01';
+   const [yStr, mStr] = base.split('-');
+   let y = parseInt(yStr, 10);
+   let m = parseInt(mStr, 10) - 1;
+   m += 1;
+   if (m > 11) {
+     m = 0;
+     y += 1;
+   }
+   setFullMonthRange(y, m);
+ };
 
  // Load assignments for months covered by fromDate and toDate
  const fetchRosterData = async () => {
@@ -467,11 +550,14 @@ export const DutyRosterPeriodView: React.FC<DutyRosterPeriodViewProps> = ({
  `Base_Duties_Roster_155_UASU_${fromDate}_to_${toDate}.docx`
  );
  } else {
+ const dateSub = weekPreset === 'FULL_MONTH' ? formatMonthNameDisplay(fromDate) : headerDateRange;
  await exportIdacRosterDocx(
  '155 UASU BAF',
- headerDateRange,
+ dateSub,
  idacRosterRows,
- `IDAC_Center_Duty_Roster_155_UASU_${fromDate}_to_${toDate}.docx`
+ `IDAC_Duty_Roster_155_UASU_${weekPreset === 'FULL_MONTH' ? fromDate.slice(0, 7) : `${fromDate}_to_${toDate}`}.docx`,
+ idacSignature,
+ formatRosterMonthShort(fromDate)
  );
  }
  } catch (err) {
@@ -536,28 +622,48 @@ export const DutyRosterPeriodView: React.FC<DutyRosterPeriodViewProps> = ({
  </button>
  <button
  onClick={() => {
- const now = new Date(selectedDate || '2026-08-14');
- const y = now.getFullYear();
- const m = String(now.getMonth() + 1).padStart(2, '0');
- const lastDay = new Date(y, now.getMonth() + 1, 0).getDate();
- setFromDate(`${y}-${m}-01`);
- setToDate(`${y}-${m}-${lastDay}`);
- setWeekPreset('FULL_MONTH');
+ const baseDate = fromDate || selectedDate || '2026-11-01';
+ const [yStr, mStr] = baseDate.split('-');
+ const y = parseInt(yStr, 10);
+ const m = parseInt(mStr, 10) - 1;
+ setFullMonthRange(y, m);
  }}
  className={`px-2.5 py-1.5 rounded-lg transition-all ${
  weekPreset === 'FULL_MONTH'
  ? 'bg-emerald-600 text-white shadow-xs font-black'
- : 'text-slate-700 dark:text-slate-300 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700'
+ : 'text-slate-700 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700'
  }`}
  >
  Full Month
  </button>
  </div>
 
+ {weekPreset === 'FULL_MONTH' ? (
+ <div className="flex items-center bg-slate-100 dark:bg-slate-800 px-2 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold space-x-1.5">
+ <button
+ type="button"
+ onClick={handlePrevMonth}
+ className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
+ title="Previous Month"
+ >
+ <ChevronLeft className="w-4 h-4" />
+ </button>
+ <span className="text-slate-900 dark:text-white font-black px-2 select-none whitespace-nowrap">
+ {formatMonthNameDisplay(fromDate)}
+ </span>
+ <button
+ type="button"
+ onClick={handleNextMonth}
+ className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
+ title="Next Month"
+ >
+ <ChevronRight className="w-4 h-4" />
+ </button>
+ </div>
+ ) : (
  <div className="flex items-center bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold space-x-2">
  <span className="text-slate-500 font-semibold">From:</span>
  <DateNavigator
- 
  value={fromDate || ''}
  onChange={(e) => {
  setFromDate(e.target.value);
@@ -567,7 +673,6 @@ export const DutyRosterPeriodView: React.FC<DutyRosterPeriodViewProps> = ({
  />
  <span className="text-slate-400 font-semibold">To:</span>
  <DateNavigator
- 
  value={toDate || ''}
  onChange={(e) => {
  setToDate(e.target.value);
@@ -576,9 +681,18 @@ export const DutyRosterPeriodView: React.FC<DutyRosterPeriodViewProps> = ({
  className="bg-transparent text-slate-900 dark:text-white font-black outline-none cursor-pointer"
  />
  </div>
+ )}
 
- {/* Refresh button */}
- 
+ {/* Signatures Settings Button (Dedicated for IDAC Duty) */}
+ <button
+ type="button"
+ onClick={() => setShowIdacSignatureModal(true)}
+ className="flex items-center space-x-1.5 px-3.5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl font-bold text-xs shadow-xs transition-colors cursor-pointer"
+ title="IDAC Duty Signatures"
+ >
+ <PenTool className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+ <span>Signatures</span>
+ </button>
 
  {/* Export document button */}
  <button
@@ -759,13 +873,10 @@ export const DutyRosterPeriodView: React.FC<DutyRosterPeriodViewProps> = ({
  <Logo155UASU className="h-14 w-14" />
  </div>
  <h2 className="text-base sm:text-lg font-bold uppercase tracking-wide underline text-slate-950 dark:text-white">
- DUTY ROSTER : 155 UASU BAF
+ IDAC DUTY ROSTER : 155 UASU BAF
  </h2>
- <h3 className="text-sm font-bold text-slate-900 dark:text-white mt-0.5">
- (IDA CENTER DUTY)
- </h3>
  <p className="text-xs font-bold text-slate-800 dark:text-slate-200 mt-1">
- ({headerDateRange})
+ {weekPreset === 'FULL_MONTH' ? formatMonthNameDisplay(fromDate) : `(${headerDateRange})`}
  </p>
  </div>
 
@@ -834,6 +945,41 @@ export const DutyRosterPeriodView: React.FC<DutyRosterPeriodViewProps> = ({
  </tbody>
  </table>
  </div>
+
+ {/* Spacer to provide signature headroom */}
+ <div className="w-full" style={{ height: '0.8in' }} />
+
+ {/* Official Signature Footer (Right Side - Authorized By) */}
+ <div
+ className="flex justify-end items-end pt-2 text-slate-900 dark:text-white print:text-black text-xs"
+ style={{ fontFamily: 'Arial, sans-serif' }}
+ >
+ <div
+ onClick={() => setShowIdacSignatureModal(true)}
+ className="text-left font-bold min-w-[210px] cursor-pointer group select-none"
+ title="Click to configure IDAC Duty signature"
+ >
+ {idacSignature.signDigitally && (
+ <div className="mb-1 text-left font-serif italic text-xs text-slate-900 dark:text-white print:text-black select-none">
+ <span className="font-bold underline">
+ {idacSignature.digitalSignatureText || idacSignature.name}
+ </span>
+ <span className="block text-[8px] font-mono not-italic text-slate-600 dark:text-slate-400">
+ [Digitally Signed • BAF Verified]
+ </span>
+ </div>
+ )}
+ <div className="border-t border-slate-900 dark:border-white print:border-black pt-1.5 group-hover:border-blue-500 transition-colors">
+ <div className="text-xs uppercase font-black">{idacSignature.name}</div>
+ <div className="text-[11px] font-normal">{idacSignature.rank}</div>
+ <div className="text-[11px] font-normal">{idacSignature.designation}</div>
+ <div className="text-[10px] uppercase font-bold">{idacSignature.unit || '155 UASU BAF'}</div>
+ <div className="text-[11px] font-normal text-slate-900 dark:text-white print:text-black mt-0.5">
+ {formatRosterMonthShort(fromDate)}
+ </div>
+ </div>
+ </div>
+ </div>
  </div>
  )}
  
@@ -881,6 +1027,15 @@ export const DutyRosterPeriodView: React.FC<DutyRosterPeriodViewProps> = ({
         </div>,
         document.body
       )}
+      {/* Dedicated IDAC Signature Modal (100% independent of Parade State) */}
+      <IdacSignatureModal
+        isOpen={showIdacSignatureModal}
+        onClose={() => setShowIdacSignatureModal(false)}
+        rosterMonthDisplay={formatRosterMonthShort(fromDate)}
+        onSignatureUpdated={(updated) => {
+          setIdacSignature(updated);
+        }}
+      />
     </div>
   );
 };

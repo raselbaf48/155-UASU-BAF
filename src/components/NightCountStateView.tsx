@@ -1077,7 +1077,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
 
           return (
             <li
-              key={item.airman.id || i}
+              key={`${item.airman?.id || item.airman?.bdNo || "airman"}-${i}`}
               onClick={() => {
                 if (true) {
                   openEditDisposal(item.airman, effectiveCode, dutyName, noteText || item.note);
@@ -1595,7 +1595,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                       {/* Left side: 1 to 15 */}
                       <ol className="space-y-0.5 font-normal leading-tight">
                         {onPtList.slice(0, 15).map((item, idx) => (
-                          <li key={item.airman.id} className="whitespace-nowrap cursor-pointer hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40 px-1 rounded transition-colors" onClick={() => openEditDisposal(item.airman, 'ON_PARADE', 'On Parade')} title="Click to edit, change or remove disposal">
+                      <li key={`${item.airman.id || item.airman.bdNo || "pt"}-${idx}`} className="whitespace-nowrap cursor-pointer hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40 px-1 rounded transition-colors" onClick={() => openEditDisposal(item.airman, 'ON_PARADE', 'On Parade')} title="Click to edit, change or remove disposal">
                             {idx + 1}. {formatAirmanName(item.airman.rank)} {formatAirmanName(item.airman.name)}
                             {item.note && <span className="text-slate-800 dark:text-slate-200 font-medium ml-1">- {item.note}</span>}
                           </li>
@@ -1606,7 +1606,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                       {onPtList.length > 15 && (
                         <ol className="space-y-0.5 font-normal leading-tight">
                           {onPtList.slice(15, 30).map((item, idx) => (
-                            <li key={item.airman.id} className="whitespace-nowrap cursor-pointer hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40 px-1 rounded transition-colors" onClick={() => openEditDisposal(item.airman, 'ON_PARADE', 'On Parade')} title="Click to edit, change or remove disposal">
+                      <li key={`${item.airman.id || item.airman.bdNo || "pt"}-${16 + idx}`} className="whitespace-nowrap cursor-pointer hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40 px-1 rounded transition-colors" onClick={() => openEditDisposal(item.airman, 'ON_PARADE', 'On Parade')} title="Click to edit, change or remove disposal">
                               {16 + idx}. {formatAirmanName(item.airman.rank)} {formatAirmanName(item.airman.name)}
                               {item.note && <span className="text-slate-800 dark:text-slate-200 font-medium ml-1">- {item.note}</span>}
                             </li>
@@ -1618,7 +1618,7 @@ export const NightCountStateView: React.FC<NightCountStateViewProps> = ({
                       {onPtList.length > 30 && (
                         <ol className="space-y-0.5 font-normal leading-tight">
                           {onPtList.slice(30).map((item, idx) => (
-                            <li key={item.airman.id} className="whitespace-nowrap cursor-pointer hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40 px-1 rounded transition-colors" onClick={() => openEditDisposal(item.airman, 'ON_PARADE', 'On Parade')} title="Click to edit, change or remove disposal">
+                      <li key={`${item.airman.id || item.airman.bdNo || "pt"}-${31 + idx}`} className="whitespace-nowrap cursor-pointer hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40 px-1 rounded transition-colors" onClick={() => openEditDisposal(item.airman, 'ON_PARADE', 'On Parade')} title="Click to edit, change or remove disposal">
                               {31 + idx}. {formatAirmanName(item.airman.rank)} {formatAirmanName(item.airman.name)}
                               {item.note && <span className="text-slate-800 dark:text-slate-200 font-medium ml-1">- {item.note}</span>}
                             </li>

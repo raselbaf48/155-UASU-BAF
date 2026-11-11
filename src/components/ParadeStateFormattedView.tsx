@@ -1196,7 +1196,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
 
  return (
  <li
- key={item.airman.id || i}
+ key={`${item.airman?.id || item.airman?.bdNo || "airman"}-${i}`}
  onClick={() => {
  if ((role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'OWNER')) {
  openEditDisposal(item.airman, effectiveCode, dutyName, noteText || item.note);
@@ -1847,7 +1847,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  {/* Left side: 1 to 15 */}
  <ol className="space-y-0.5 font-normal leading-tight">
  {onPtList.slice(0, 15).map((item, idx) => (
- <li key={item.airman.id} className="whitespace-nowrap cursor-pointer hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40 px-1 rounded transition-colors" onClick={() => openEditDisposal(item.airman, 'ON_PARADE', 'On Parade')} title="Click to edit, change or remove disposal">
+                      <li key={`${item.airman.id || item.airman.bdNo || "pt"}-${idx}`} className="whitespace-nowrap cursor-pointer hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40 px-1 rounded transition-colors" onClick={() => openEditDisposal(item.airman, 'ON_PARADE', 'On Parade')} title="Click to edit, change or remove disposal">
  {idx + 1}. {formatRank(item.airman.rank)} {formatAirmanName(item.airman.name)}
  </li>
  ))}
@@ -1857,7 +1857,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  {onPtList.length > 15 && (
  <ol className="space-y-0.5 font-normal leading-tight">
  {onPtList.slice(15, 30).map((item, idx) => (
- <li key={item.airman.id} className="whitespace-nowrap cursor-pointer hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40 px-1 rounded transition-colors" onClick={() => openEditDisposal(item.airman, 'ON_PARADE', 'On Parade')} title="Click to edit, change or remove disposal">
+                      <li key={`${item.airman.id || item.airman.bdNo || "pt"}-${16 + idx}`} className="whitespace-nowrap cursor-pointer hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40 px-1 rounded transition-colors" onClick={() => openEditDisposal(item.airman, 'ON_PARADE', 'On Parade')} title="Click to edit, change or remove disposal">
  {16 + idx}. {formatRank(item.airman.rank)} {formatAirmanName(item.airman.name)}
  </li>
  ))}
@@ -1868,7 +1868,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  {onPtList.length > 30 && (
  <ol className="space-y-0.5 font-normal leading-tight">
  {onPtList.slice(30).map((item, idx) => (
- <li key={item.airman.id} className="whitespace-nowrap cursor-pointer hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40 px-1 rounded transition-colors" onClick={() => openEditDisposal(item.airman, 'ON_PARADE', 'On Parade')} title="Click to edit, change or remove disposal">
+                      <li key={`${item.airman.id || item.airman.bdNo || "pt"}-${31 + idx}`} className="whitespace-nowrap cursor-pointer hover:text-emerald-700 dark:hover:text-emerald-300 hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40 px-1 rounded transition-colors" onClick={() => openEditDisposal(item.airman, 'ON_PARADE', 'On Parade')} title="Click to edit, change or remove disposal">
  {31 + idx}. {formatRank(item.airman.rank)} {formatAirmanName(item.airman.name)}
  </li>
  ))}
@@ -2356,7 +2356,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  No airmen registered in {disposalFlight} Flight
  </div>
  ) : (
- flightAirmen.map((a) => {
+ flightAirmen.map((a, aIdx) => {
  const statusInfo = getAirmanStatusLabel(a.id);
  const { isOnParade, label: statusLabel } = statusInfo;
  const isChecked = selectedDisposalAirmenIds.includes(a.id);
@@ -2364,7 +2364,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  if (isOnParade) {
  return (
  <div onClick={() => { if (isChecked) { setSelectedDisposalAirmenIds((prev) => prev.filter((id) => id !== a.id)); } else { setSelectedDisposalAirmenIds((prev) => [...prev, a.id]); } }}
- key={a.id}
+ key={`${a.id}-${aIdx}`}
  className={`flex items-center justify-between p-2 rounded-lg border transition-all cursor-pointer select-none text-xs ${
  isChecked
  ? 'bg-purple-50 dark:bg-purple-900/30 border-purple-400 dark:border-purple-700 text-purple-950 dark:text-purple-300 font-bold shadow-xs'
@@ -2389,7 +2389,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  // Airman with existing disposal / duty - with Edit / Change button
  return (
  <div
- key={a.id}
+ key={`${a.id}-${aIdx}`}
  className="flex items-center justify-between p-2 rounded-lg border border-slate-200 dark:border-slate-700/80 dark:border-slate-800 dark:border-white print:border-black bg-slate-100 dark:bg-slate-800 print:bg-slate-100/80 dark:bg-slate-800/60 text-xs select-none"
  >
  <div className="flex items-center space-x-2.5 min-w-0">

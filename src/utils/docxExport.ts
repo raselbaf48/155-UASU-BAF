@@ -215,33 +215,30 @@ export async function exportIdacRosterDocx(
   unitHeader: string,
   dateRangeHeader: string,
   rows: IdacRosterRow[],
-  fileName: string = 'IDAC_Duty_Roster_155_UASU.docx'
+  fileName: string = 'IDAC_Duty_Roster_155_UASU.docx',
+  authorizedBy?: {
+    name: string;
+    rank: string;
+    designation: string;
+    unit: string;
+    signDigitally?: boolean;
+    digitalSignatureText?: string;
+  },
+  rosterMonthShort?: string
 ) {
+  const isMonthFormat = dateRangeHeader.startsWith('Month:');
   const docChildren: any[] = [
-    // Main Title: DUTY ROSTER : 155 UASU BAF
+    // Main Title: IDAC DUTY ROSTER : 155 UASU BAF
     new Paragraph({
       alignment: AlignmentType.CENTER,
       spacing: { after: 60 },
       children: [
         new TextRun({
-          text: `DUTY ROSTER : ${unitHeader.toUpperCase()}`,
+          text: `IDAC DUTY ROSTER : ${unitHeader.toUpperCase()}`,
           font: 'Arial',
           bold: true,
           size: 26, // 13pt
           underline: {},
-        }),
-      ],
-    }),
-    // Sub-title: (IDA CENTER DUTY)
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 80 },
-      children: [
-        new TextRun({
-          text: '(IDA CENTER DUTY)',
-          font: 'Arial',
-          bold: true,
-          size: 24, // 12pt
         }),
       ],
     }),
@@ -250,7 +247,7 @@ export async function exportIdacRosterDocx(
       spacing: { after: 200 },
       children: [
         new TextRun({
-          text: `(${dateRangeHeader})`,
+          text: isMonthFormat ? dateRangeHeader : `(${dateRangeHeader})`,
           font: 'Arial',
           bold: true,
           size: 22, // 11pt
@@ -291,6 +288,91 @@ export async function exportIdacRosterDocx(
   });
 
   docChildren.push(table);
+
+  if (authorizedBy) {
+    docChildren.push(
+      new Paragraph({ spacing: { before: 500 } }),
+      new Paragraph({
+        alignment: AlignmentType.RIGHT,
+        spacing: { before: 150, after: 30 },
+        children: authorizedBy.signDigitally ? [
+          new TextRun({
+            text: authorizedBy.digitalSignatureText || authorizedBy.name,
+            font: 'Arial',
+            italics: true,
+            bold: true,
+            size: 20,
+          }),
+        ] : [],
+      }),
+      new Paragraph({
+        alignment: AlignmentType.RIGHT,
+        children: [
+          new TextRun({
+            text: '____________________________',
+            font: 'Arial',
+            bold: true,
+            size: 20,
+          }),
+        ],
+      }),
+      new Paragraph({
+        alignment: AlignmentType.RIGHT,
+        children: [
+          new TextRun({
+            text: authorizedBy.name.toUpperCase(),
+            font: 'Arial',
+            bold: true,
+            size: 20,
+          }),
+        ],
+      }),
+      new Paragraph({
+        alignment: AlignmentType.RIGHT,
+        children: [
+          new TextRun({
+            text: authorizedBy.rank,
+            font: 'Arial',
+            size: 19,
+          }),
+        ],
+      }),
+      new Paragraph({
+        alignment: AlignmentType.RIGHT,
+        children: [
+          new TextRun({
+            text: authorizedBy.designation,
+            font: 'Arial',
+            size: 19,
+          }),
+        ],
+      }),
+      new Paragraph({
+        alignment: AlignmentType.RIGHT,
+        children: [
+          new TextRun({
+            text: authorizedBy.unit || '155 UASU BAF',
+            font: 'Arial',
+            bold: true,
+            size: 18,
+          }),
+        ],
+      }),
+      ...(rosterMonthShort ? [
+        new Paragraph({
+          alignment: AlignmentType.RIGHT,
+          children: [
+            new TextRun({
+              text: rosterMonthShort,
+              font: 'Arial',
+              bold: true,
+              size: 19,
+            }),
+          ],
+        }),
+      ] : [])
+    );
+  }
 
   const doc = new Document({
     sections: [

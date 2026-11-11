@@ -5348,7 +5348,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
 
             return (
               <div 
-                key={member.airman_id || `card_${member['BD No'] || i}_${i}`} 
+                key={member.airman_id ? `${member.airman_id}-${i}` : `card_${member['BD No'] || i}_${i}`} 
                 onClick={() => openProfile(member)} 
                 className="relative bg-gradient-to-b from-slate-800/90 via-slate-900 to-slate-950 rounded-3xl p-5 border-t border-t-slate-600/60 border-x border-x-slate-700/60 border-b-4 border-b-slate-950 shadow-[0_12px_24px_-4px_rgba(0,0,0,0.65),0_4px_8px_-2px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.12),inset_0_-2px_4px_0_rgba(0,0,0,0.4)] hover:-translate-y-1.5 hover:shadow-[0_20px_35px_-6px_rgba(0,0,0,0.8),0_0_22px_0_rgba(79,70,229,0.3),inset_0_1px_0_0_rgba(255,255,255,0.2)] hover:border-b-indigo-900 transition-all duration-300 cursor-pointer group flex flex-col justify-between overflow-hidden"
               >
@@ -5578,7 +5578,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
 
                   return (
                     <tr 
-                      key={member.airman_id || `row_${member['BD No'] || i}_${i}`}
+                      key={member.airman_id ? `${member.airman_id}-${i}` : `row_${member['BD No'] || i}_${i}`}
                       onClick={() => openProfile(member)}
                       className={`transition-colors cursor-pointer group ${
                         i % 2 === 0
@@ -8101,7 +8101,7 @@ export const MemberDB: React.FC<MemberDBProps> = ({
                     .map((m, i) => {
                       const isCurrent = String(m['BD No']).trim() === String(canteenConfig?.managerBdNo).trim();
                       return (
-                        <div key={m.airman_id || `mgr_m_${m['BD No'] || i}_${i}`} className="p-2.5 flex items-center justify-between gap-3 hover:bg-slate-900/70 rounded-xl transition-colors">
+                        <div key={m.airman_id ? `${m.airman_id}-${i}` : `mgr_m_${m['BD No'] || i}_${i}`} className="p-2.5 flex items-center justify-between gap-3 hover:bg-slate-900/70 rounded-xl transition-colors">
                           <div className="flex items-center space-x-3 min-w-0">
                             <div className="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-xs text-indigo-400 overflow-hidden shrink-0">
                               {m.DP ? (

@@ -304,11 +304,11 @@ export const IdacSettingsModal: React.FC<IdacSettingsModalProps> = ({ isOpen, on
                       <div className="p-4 text-center text-xs text-slate-400">No personnel found.</div>
                     ) : (
                       <div className="divide-y divide-slate-100 dark:divide-slate-700/50">
-                        {filteredAirmen.map(airman => {
+                        {filteredAirmen.map((airman, idx) => {
                           const isSelected = contacts.some(c => c.id === airman.id);
                           return (
                             <div
-                              key={airman.id}
+                              key={`${airman.id}-${idx}`}
                               onClick={() => handleToggleAirman(airman)}
                               className={`p-3 flex items-center justify-between text-xs cursor-pointer transition-colors ${
                                 isSelected
