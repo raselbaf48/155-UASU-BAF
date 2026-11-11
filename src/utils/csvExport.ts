@@ -1108,6 +1108,47 @@ export const getAirmanLeftDateISO = (airman?: Airman | null): string => {
   return normalizeDateToISO(raw) || '';
 };
 
+export const isAirmanInUnitForMonth = (
+  airman?: Airman | null,
+  year?: number,
+  month?: number
+): boolean => {
+  if (!airman) return false;
+
+  // If year/month not provided, fallback to active status
+  if (!year || !month) return airman.active !== false;
+
+  const monthStartStr = `${year}-${String(month).padStart(2, '0')}-01`;
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const monthEndStr = `${year}-${String(month).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
+
+  const joinDate = getAirmanJoinDateISO(airman);
+  const leftDate = getAirmanLeftDateISO(airman);
+
+  // 1. If airman joined AFTER the end of this month -> not reported to unit yet! Exclude!
+  if (joinDate && joinDate > monthEndStr) {
+    return false;
+  }
+
+  // 2. If airman left/posted out BEFORE the beginning of this month -> already left! Exclude!
+  if (leftDate && leftDate < monthStartStr) {
+    return false;
+  }
+
+  // 3. If airman is marked inactive or posted out and has NO explicit leftDate:
+  // (e.g. Sgt Sojib who is posted out: active === false or status === 'POSTED_OUT' / 'INACTIVE' / 'DISPOSAL')
+  if (airman.active === false && !leftDate) {
+    return false;
+  }
+
+  const status = (airman as any).status;
+  if (status && (status === 'POSTED_OUT' || status === 'INACTIVE' || status === 'DISPOSAL') && !leftDate) {
+    return false;
+  }
+
+  return true;
+};
+
 export function exportMonthlyAttendanceRegisterExcel(
   airmen: Airman[],
   assignments: DutyAssignment[],
@@ -1148,6 +1189,10 @@ export function exportMonthlyAttendanceRegisterExcel(
       return 'P';
     }
 
+    if (dutyCode === 'CANTEEN' || (dutyCode as string) === 'CTN' || dutyType?.shortName === 'CTN') {
+      return 'CTN';
+    }
+
     if (dutyCode === 'DUTY_OFF' || (dutyCode as any) === 'OFF') {
       let offDuty = '';
       if (ass?.notes) {
@@ -1162,12 +1207,13 @@ export function exportMonthlyAttendanceRegisterExcel(
           offDuty = yestAss.dutyCode === 'IDA' ? 'IDAC' : yestAss.dutyCode;
         }
       }
+      if (offDuty === 'AIRPORT' || offDuty === 'AIRFIELD') offDuty = 'APT';
       return offDuty ? `${offDuty} OFF` : 'OFF';
     }
 
     if (dutyCode === 'IDAC' || dutyCode === 'IDA') {
       const s = (ass?.idaShift || '').toLowerCase();
-      return s.startsWith('m') ? 'IDA-M' : s.startsWith('a') ? 'IDA-A' : 'IDA-NT';
+      return s.startsWith('m') ? 'IDAC "A"' : s.startsWith('a') ? 'IDAC "B"' : 'IDAC "C"';
     }
 
     if (dutyCode === 'LEAVE') return 'L';
@@ -1176,8 +1222,12 @@ export function exportMonthlyAttendanceRegisterExcel(
     return dutyType?.shortName || dutyCode || '-';
   };
 
-  // Filter airmen based on selected flight and rank (Rank & Below)
+  // Filter airmen based on:
+  // 1. Belonging to unit in this month (join date <= monthEnd, left date >= monthStart, active)
+  // 2. Selected flight
+  // 3. Selected rank (Rank & Below)
   const filteredAirmen = airmen.filter((a) => {
+    if (!isAirmanInUnitForMonth(a, year, month)) return false;
     if (selectedFlight !== 'All') {
       const fltFull = formatFlightFullName(a.flightName);
       if (fltFull !== selectedFlight && a.flightName !== selectedFlight) return false;
@@ -1216,9 +1266,9 @@ export function exportMonthlyAttendanceRegisterExcel(
     'NTF',
     'HAL',
     'APT',
-    'IDA-M',
-    'IDA-A',
-    'IDA-NT',
+    'IDAC "A"',
+    'IDAC "B"',
+    'IDAC "C"',
     'Total Duty',
   ];
   rows.push(headers);
@@ -1230,7 +1280,7 @@ export function exportMonthlyAttendanceRegisterExcel(
 
     daysArray.forEach((day) => {
       const label = resolveDutyLabel(airman, day);
-      if (label === 'P') pCount++;
+      if (label === 'P' || label === 'CTN') pCount++;
       dayLabels.push(label);
     });
 
@@ -1238,7 +1288,7 @@ export function exportMonthlyAttendanceRegisterExcel(
       idx + 1,
       String(airman.bdNo || ''),
       formatRank(airman.rank),
-      airman.fullName || airman.name || '',
+      airman.name || airman.fullName || '',
       formatFlightFullName(airman.flightName),
       ...dayLabels,
       pCount,

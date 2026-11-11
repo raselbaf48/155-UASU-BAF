@@ -270,13 +270,13 @@ export const INITIAL_DUTY_TYPES: DutyTypeInfo[] = [
   {
     code: 'CANTEEN',
     name: 'Canteen',
-    shortName: 'CAN',
+    shortName: 'CTN',
     category: 'Special',
     color: 'bg-amber-600 text-white',
     badgeBg: 'bg-amber-100 dark:bg-amber-900/40 border border-amber-300 dark:border-amber-700',
     badgeText: 'text-amber-800 dark:text-amber-300',
     isCountedAsDuty: false,
-    description: 'Canteen Attachment',
+    description: 'Canteen Attachment (Counts towards Present)',
   },
 ];
 

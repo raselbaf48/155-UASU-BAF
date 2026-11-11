@@ -4,13 +4,14 @@ import { Airman, DutyAssignment } from '../types';
 import { DUTY_TYPE_MAP } from '../data/dutyTypes';
 import { resolveAirmanDutyForDate, addAssignmentToMap, calculateDutyStats } from '../data/rosterGenerator';
 import { formatRank } from '../utils/rankFormatter';
-import { Printer, FileSpreadsheet, X, Filter } from 'lucide-react';
+import { Printer, FileSpreadsheet, X, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   exportMonthlyAttendanceRegisterExcel,
   formatFlightFullName,
   getRankTier,
   getAirmanJoinDateISO,
   getAirmanLeftDateISO,
+  isAirmanInUnitForMonth,
 } from '../utils/csvExport';
 
 interface PrintableMonthlyAttendanceModalProps {
@@ -32,10 +33,17 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
   month,
   flightFilter = 'All',
 }) => {
+  const [selectedYear, setSelectedYear] = useState<number>(year);
+  const [selectedMonth, setSelectedMonth] = useState<number>(month);
   const [selectedFlight, setSelectedFlight] = useState<string>(
     flightFilter === 'All' ? 'All' : formatFlightFullName(flightFilter)
   );
   const [selectedRank, setSelectedRank] = useState<string>('All');
+
+  useEffect(() => {
+    setSelectedYear(year);
+    setSelectedMonth(month);
+  }, [year, month]);
 
   useEffect(() => {
     if (flightFilter && flightFilter !== 'All') {
@@ -43,27 +51,55 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
     }
   }, [flightFilter]);
 
-  const monthName = new Date(year, month - 1, 1).toLocaleString('en-US', {
+  const handlePrevMonth = () => {
+    if (selectedMonth === 1) {
+      setSelectedMonth(12);
+      setSelectedYear((y) => y - 1);
+    } else {
+      setSelectedMonth((m) => m - 1);
+    }
+  };
+
+  const handleNextMonth = () => {
+    if (selectedMonth === 12) {
+      setSelectedMonth(1);
+      setSelectedYear((y) => y + 1);
+    } else {
+      setSelectedMonth((m) => m + 1);
+    }
+  };
+
+  const monthName = new Date(selectedYear, selectedMonth - 1, 1).toLocaleString('en-US', {
     month: 'long',
     year: 'numeric',
   });
-  const daysInMonth = new Date(year, month, 0).getDate();
+  const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
   const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
-  const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+  const monthKey = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
 
   const availableRanks = useMemo(() => {
     const rankOrder = ['MWO', 'SWO', 'WO', 'Sgt', 'Cpl', 'LCpl', 'LAC', 'AC-1', 'AC-2', 'AC'];
-    const presentRanks = new Set<string>(airmen.map((a) => formatRank(a.rank)));
+    const presentRanks = new Set<string>(
+      airmen
+        .filter((a) => isAirmanInUnitForMonth(a, selectedYear, selectedMonth))
+        .map((a) => formatRank(a.rank))
+    );
     const ordered = rankOrder.filter((r) => presentRanks.has(r));
     presentRanks.forEach((r) => {
       if (!ordered.includes(r) && r) ordered.push(r);
     });
     return ordered;
-  }, [airmen]);
+  }, [airmen, selectedYear, selectedMonth]);
 
-  // Filter airmen based on selected flight and rank (Rank & Below logic)
+  // Filter airmen based on:
+  // 1. Belonging to unit during selected month/year (joinDate <= monthEnd && leftDate >= monthStart && active status)
+  // 2. Selected flight
+  // 3. Selected rank (Rank & Below logic)
   const filteredAirmen = useMemo(() => {
     return airmen.filter((a) => {
+      if (!isAirmanInUnitForMonth(a, selectedYear, selectedMonth)) {
+        return false;
+      }
       if (selectedFlight !== 'All') {
         const fltFull = formatFlightFullName(a.flightName);
         if (fltFull !== selectedFlight && a.flightName !== selectedFlight) return false;
@@ -75,7 +111,7 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
       }
       return true;
     });
-  }, [airmen, selectedFlight, selectedRank]);
+  }, [airmen, selectedFlight, selectedRank, selectedYear, selectedMonth]);
 
   const assignmentMap = useMemo(() => {
     const map = new Map<string, DutyAssignment>();
@@ -84,8 +120,8 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
   }, [assignments]);
 
   const statsList = useMemo(() => {
-    return calculateDutyStats(airmen, assignments, year, month);
-  }, [airmen, assignments, year, month]);
+    return calculateDutyStats(filteredAirmen, assignments, selectedYear, selectedMonth);
+  }, [filteredAirmen, assignments, selectedYear, selectedMonth]);
 
   const statsMap = useMemo(() => {
     return new Map(statsList.map((s) => [s.airmanId, s]));
@@ -115,6 +151,11 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
       return { label: 'P', type: 'PRESENT' };
     }
 
+    // Canteen is shortform CTN and counted as present
+    if (dutyCode === 'CANTEEN' || (dutyCode as string) === 'CTN' || dutyType?.shortName === 'CTN') {
+      return { label: 'CTN', type: 'PRESENT' };
+    }
+
     if (dutyCode === 'DUTY_OFF' || (dutyCode as any) === 'OFF') {
       let offDuty = '';
       if (ass?.notes) {
@@ -122,19 +163,20 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
         if (match) offDuty = match[1].toUpperCase();
       }
       if (!offDuty) {
-        const yestDate = new Date(year, month - 1, day - 1);
+        const yestDate = new Date(selectedYear, selectedMonth - 1, day - 1);
         const yDateStr = `${yestDate.getFullYear()}-${String(yestDate.getMonth() + 1).padStart(2, '0')}-${String(yestDate.getDate()).padStart(2, '0')}`;
         const yestAss = resolveAirmanDutyForDate(airman.id, yDateStr, assignmentMap);
         if (yestAss && yestAss.dutyCode && !['ON_PARADE', 'DUTY_OFF', 'OFF'].includes(yestAss.dutyCode as any)) {
           offDuty = yestAss.dutyCode === 'IDA' ? 'IDAC' : yestAss.dutyCode;
         }
       }
+      if (offDuty === 'AIRPORT' || offDuty === 'AIRFIELD') offDuty = 'APT';
       return { label: offDuty ? `${offDuty} OFF` : 'OFF', type: 'OFF' };
     }
 
     if (dutyCode === 'IDAC' || dutyCode === 'IDA') {
       const s = (ass?.idaShift || '').toLowerCase();
-      const shiftCode = s.startsWith('m') ? 'IDA-M' : s.startsWith('a') ? 'IDA-A' : 'IDA-NT';
+      const shiftCode = s.startsWith('m') ? 'IDAC "A"' : s.startsWith('a') ? 'IDAC "B"' : 'IDAC "C"';
       return { label: shiftCode, type: 'DUTY' };
     }
 
@@ -145,14 +187,14 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
     return { label, type: 'DUTY' };
   };
 
-  // Present days count for each airman
+  // Present days count for each airman (P and CTN both count as present)
   const presentMap = useMemo(() => {
     const map = new Map<string, number>();
     filteredAirmen.forEach((airman) => {
       let pCount = 0;
       daysArray.forEach((day) => {
         const info = resolveDutyLabel(airman, day);
-        if (info.label === 'P') pCount++;
+        if (info.label === 'P' || info.label === 'CTN' || info.type === 'PRESENT') pCount++;
       });
       map.set(airman.id, pCount);
     });
@@ -167,11 +209,11 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
     exportMonthlyAttendanceRegisterExcel(
       airmen,
       assignments,
-      year,
-      month,
+      selectedYear,
+      selectedMonth,
       selectedFlight,
       selectedRank,
-      `155_UASU_Attendance_Register_${year}_${String(month).padStart(2, '0')}.xlsx`
+      `155_UASU_Attendance_Register_${selectedYear}_${String(selectedMonth).padStart(2, '0')}.xlsx`
     );
   };
 
@@ -195,11 +237,34 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
           </div>
         </div>
 
-        {/* Filter Dropdowns (Flight & Rank) */}
-        <div className="flex items-center space-x-2 sm:space-x-3 bg-slate-800/80 p-1.5 px-3 rounded-xl border border-slate-700">
+        {/* Filter Controls: Month Navigator with Left/Right Arrows (Pic 2 style) + Flight & Rank */}
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 bg-slate-800/80 p-1.5 px-3 rounded-xl border border-slate-700">
           <div className="flex items-center space-x-1.5 text-xs text-slate-300">
             <Filter className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span className="font-semibold hidden md:inline">Filters:</span>
+            <span className="font-semibold hidden lg:inline">Filters:</span>
+          </div>
+
+          {/* Month Navigator with Left/Right Arrows like Pic 2 */}
+          <div className="flex items-center bg-slate-900 border border-slate-600 rounded-lg p-0.5 shadow-inner">
+            <button
+              type="button"
+              onClick={handlePrevMonth}
+              className="p-1 hover:bg-slate-800 text-slate-300 hover:text-white rounded-md transition-colors cursor-pointer"
+              title="Previous Month"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <span className="px-2.5 text-xs font-black text-white whitespace-nowrap min-w-[115px] text-center select-none">
+              {monthName}
+            </span>
+            <button
+              type="button"
+              onClick={handleNextMonth}
+              className="p-1 hover:bg-slate-800 text-slate-300 hover:text-white rounded-md transition-colors cursor-pointer"
+              title="Next Month"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
           </div>
 
           {/* Flight Dropdown */}
@@ -297,7 +362,7 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
 
                 {/* Day Columns (No weekend coloring as requested) */}
                 {daysArray.map((day) => {
-                  const dObj = new Date(year, month - 1, day);
+                  const dObj = new Date(selectedYear, selectedMonth - 1, day);
                   const dayOfWeek = ['S', 'M', 'T', 'W', 'T', 'F', 'S'][dObj.getDay()];
                   return (
                     <th
@@ -329,14 +394,14 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
                 <th className="border border-slate-900 py-1 px-1 bg-slate-100 text-slate-900 font-bold" title="Airfield (APT)">
                   APT
                 </th>
-                <th className="border border-slate-900 py-1 px-1 bg-slate-100 text-slate-900 font-bold" title="IDAC Morning">
-                  IDA-M
+                <th className="border border-slate-900 py-1 px-1 bg-slate-100 text-slate-900 font-bold" title="IDAC Shift A">
+                  IDAC "A"
                 </th>
-                <th className="border border-slate-900 py-1 px-1 bg-slate-100 text-slate-900 font-bold" title="IDAC Afternoon">
-                  IDA-A
+                <th className="border border-slate-900 py-1 px-1 bg-slate-100 text-slate-900 font-bold" title="IDAC Shift B">
+                  IDAC "B"
                 </th>
-                <th className="border border-slate-900 py-1 px-1 bg-slate-100 text-slate-900 font-bold" title="IDAC Night">
-                  IDA-NT
+                <th className="border border-slate-900 py-1 px-1 bg-slate-100 text-slate-900 font-bold" title="IDAC Shift C">
+                  IDAC "C"
                 </th>
                 <th className="border border-slate-900 py-1 px-1 bg-slate-100 text-slate-900 font-bold" title="Total Duties Performed">
                   Total Duty
@@ -360,7 +425,7 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
                       {formatRank(airman.rank)}
                     </td>
                     <td className="border border-slate-900 py-1 px-2 font-bold text-left whitespace-nowrap truncate max-w-[140px] bg-white text-slate-900">
-                      {airman.fullName || airman.name}
+                      {airman.name || airman.fullName}
                     </td>
                     <td className="border border-slate-900 py-1 px-1 text-center font-bold whitespace-nowrap bg-white text-slate-900">
                       {formatFlightFullName(airman.flightName)}

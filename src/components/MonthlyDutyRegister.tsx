@@ -14,7 +14,7 @@ import { PrintableMonthlyAttendanceModal } from './PrintableMonthlyAttendanceMod
 import { getCurrentUserSession } from '../utils/authSession';
 import { checkDutyPermission, isDateInPast } from '../utils/dutyPermissions';
 import { formatRank, formatAirmanName } from '../utils/rankFormatter';
-import { getAirmanJoinDateISO, getAirmanLeftDateISO } from '../utils/csvExport';
+import { getAirmanJoinDateISO, getAirmanLeftDateISO, isAirmanInUnitForMonth } from '../utils/csvExport';
 interface RestoreItem {
   airmanId: string;
   date: string;
@@ -670,9 +670,15 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
     };
   }, [monthKey, currentYear, isFullYearView]);
 
-  // Calculate duty stats & conflicts
+  // Calculate duty stats & conflicts for airmen present in the unit for this period
+  const eligibleAirmenForMonth = useMemo(() => {
+    return airmen.filter((a) =>
+      isFullYearView ? (a.active !== false) : isAirmanInUnitForMonth(a, currentYear, currentMonth)
+    );
+  }, [airmen, isFullYearView, currentYear, currentMonth]);
+
   const statsList = calculateDutyStats(
-    airmen,
+    eligibleAirmenForMonth,
     assignments,
     currentYear,
     isFullYearView ? undefined : currentMonth
@@ -682,7 +688,7 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
   // Precompute Present ("P") days count for each airman in the visible days of the selected month
   const presentMap = useMemo(() => {
     const map = new Map<string, number>();
-    airmen.forEach((airman) => {
+    eligibleAirmenForMonth.forEach((airman) => {
       let pCount = 0;
       daysArray.forEach((day) => {
         const dayStr = day < 10 ? `0${day}` : `${day}`;
@@ -695,14 +701,22 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
 
         const ass = resolveAirmanDutyForDate(airman.id, dateStr, assignmentMap);
         const dutyCode = ass?.dutyCode;
-        if (dutyCode === 'ON_PARADE' || DUTY_TYPE_MAP.get(dutyCode as any)?.shortName === 'P' || DUTY_TYPE_MAP.get(dutyCode as any)?.shortName === 'PRD') {
+        const dType = DUTY_TYPE_MAP.get(dutyCode as any);
+        if (
+          dutyCode === 'ON_PARADE' ||
+          dutyCode === 'CANTEEN' ||
+          (dutyCode as string) === 'CTN' ||
+          dType?.shortName === 'P' ||
+          dType?.shortName === 'PRD' ||
+          dType?.shortName === 'CTN'
+        ) {
           pCount++;
         }
       });
       map.set(airman.id, pCount);
     });
     return map;
-  }, [airmen, daysArray, monthKey, assignmentMap]);
+  }, [eligibleAirmenForMonth, daysArray, monthKey, assignmentMap]);
 
   const alerts = detectConflicts(airmen, assignments);
 
@@ -890,8 +904,8 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
     }
   };
 
-  // Filter airmen list
-  const filteredAirmen = airmen.filter((airman) => {
+  // Filter airmen list (only personnel active in unit during this period)
+  const filteredAirmen = eligibleAirmenForMonth.filter((airman) => {
     const matchesFlight = flightFilter === 'All' || airman.flightName === flightFilter;
     const q = search.toLowerCase();
     const matchesSearch =
@@ -1447,14 +1461,14 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                   <th className="py-3 px-1.5 text-center bg-blue-950 text-blue-300 w-9 border-l border-slate-800 font-bold" title="Airfield Duty (APT)">
                     APT
                   </th>
-                  <th className="py-3 px-1.5 text-center bg-sky-950 text-sky-300 w-9 border-l border-slate-800 font-bold" title="IDAC Morning Duty">
-                    I-M
+                  <th className="py-3 px-1.5 text-center bg-sky-950 text-sky-300 w-11 border-l border-slate-800 font-bold" title="IDAC Shift A (Morning)">
+                    IDAC "A"
                   </th>
-                  <th className="py-3 px-1.5 text-center bg-blue-950 text-blue-300 w-9 border-l border-slate-800 font-bold" title="IDAC Afternoon Duty">
-                    I-A
+                  <th className="py-3 px-1.5 text-center bg-blue-950 text-blue-300 w-11 border-l border-slate-800 font-bold" title="IDAC Shift B (Afternoon)">
+                    IDAC "B"
                   </th>
-                  <th className="py-3 px-1.5 text-center bg-indigo-950 text-indigo-300 w-9 border-l border-slate-800 font-bold" title="IDAC Night Duty">
-                    I-N
+                  <th className="py-3 px-1.5 text-center bg-indigo-950 text-indigo-300 w-11 border-l border-slate-800 font-bold" title="IDAC Shift C (Night)">
+                    IDAC "C"
                   </th>
                   <th className="py-3 px-2 text-center bg-emerald-950 text-emerald-300 w-12 border-l border-slate-800 font-bold" title="Total Duties Performed">
                     Total Duty
@@ -1526,6 +1540,9 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                         } else if (dutyCode === 'ON_PARADE' || dutyType?.shortName === 'PRD' || dutyType?.shortName === 'P') {
                           displayLabel = 'P';
                           displayBadgeBg = 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700';
+                        } else if (dutyCode === 'CANTEEN' || (dutyCode as string) === 'CTN' || dutyType?.shortName === 'CTN') {
+                          displayLabel = 'CTN';
+                          displayBadgeBg = 'bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700';
                         } else if (dutyCode === 'DUTY_OFF' || (dutyCode as any) === 'OFF') {
                           let offDuty = '';
                           if (ass?.notes) {
@@ -1540,11 +1557,12 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                               offDuty = yestAss.dutyCode === 'IDA' ? 'IDAC' : yestAss.dutyCode;
                             }
                           }
+                          if (offDuty === 'AIRPORT' || offDuty === 'AIRFIELD') offDuty = 'APT';
                           displayLabel = offDuty ? `${offDuty} OFF` : 'OFF';
                           displayBadgeBg = 'bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700';
                         } else if (dutyCode === 'IDAC' || dutyCode === 'IDA') {
                           const s = (ass?.idaShift || '').toLowerCase();
-                          displayLabel = s.startsWith('m') ? 'IDA-M' : s.startsWith('a') ? 'IDA-A' : s.startsWith('n') ? 'IDA-NT' : 'IDA';
+                          displayLabel = s.startsWith('m') ? 'IDAC "A"' : s.startsWith('a') ? 'IDAC "B"' : 'IDAC "C"';
                         } else if (isOtherDisposal) {
                           // Resolve specific disposal name (e.g., Course, Exam, Driving, etc.)
                           const cleanNote = ass?.notes?.trim();

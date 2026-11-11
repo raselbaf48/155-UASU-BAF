@@ -92,7 +92,8 @@ export function resolveAirmanDutyForDate(
 
   if (!currentAss || isDeployment) {
     if (isHeavyDuty) {
-      const yCode = yestAss?.dutyCode === 'IDA' ? 'IDAC' : (yestAss?.dutyCode || 'DUTY');
+      let yCode = yestAss?.dutyCode === 'IDA' ? 'IDAC' : (yestAss?.dutyCode || 'DUTY');
+      if (yCode === 'AIRPORT') yCode = 'APT';
       return {
         airmanId,
         date: dateStr,
