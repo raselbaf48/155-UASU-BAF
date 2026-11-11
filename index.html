@@ -79,11 +79,6 @@
           for (let r of regs) r.unregister();
         });
       }
-      try {
-        localStorage.removeItem('baf_firestore_write_quota_exceeded');
-        localStorage.removeItem('baf_firestore_quota_exceeded_timestamp');
-        localStorage.removeItem('firebase_quota_exceeded');
-      } catch (e) {}
     </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>

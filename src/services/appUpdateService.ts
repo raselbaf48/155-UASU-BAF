@@ -1,9 +1,6 @@
 import { App } from '@capacitor/app';
 import { Browser } from '@capacitor/browser';
 import { Capacitor } from '@capacitor/core';
-import { db, isFirebaseConfigured } from '../firebase';
-import { supabase } from '../supabase';
-import { collection, query, orderBy, limit, getDocs, doc, getDoc } from 'firebase/firestore';
 
 export interface AppVersionRecord {
   id?: number;
@@ -22,7 +19,6 @@ export interface AppUpdateCheckResult {
   error?: string | null;
 }
 
-// Fallback version if running in pure browser / dev environment
 export const DEFAULT_CURRENT_APP = {
   versionCode: 1,
   versionName: '1.0.0',
@@ -30,50 +26,20 @@ export const DEFAULT_CURRENT_APP = {
 
 const SKIPPED_VERSION_STORAGE_KEY = 'baf_skipped_version_code';
 
-/**
- * Detects whether the application is running inside an installed Android APK / Capacitor native app,
- * rather than in a web browser / website.
- */
 export function isRunningInApk(): boolean {
   try {
     if (typeof window === 'undefined') return false;
-
-    // 1. Capacitor native platform detection (Capacitor.isNativePlatform() is true ONLY inside native APK/app)
-    if (typeof Capacitor !== 'undefined' && typeof Capacitor.isNativePlatform === 'function' && Capacitor.isNativePlatform()) {
-      return true;
-    }
-
-    // 2. Global window Capacitor native bridge check
-    if ((window as any).Capacitor && typeof (window as any).Capacitor.isNativePlatform === 'function' && (window as any).Capacitor.isNativePlatform()) {
-      return true;
-    }
-
-    // 3. Native custom scheme (Capacitor Android native app loads from capacitor://localhost)
-    if (window.location.protocol === 'capacitor:' || window.location.protocol === 'ionic:') {
-      return true;
-    }
-
-    // 4. Android file asset origin
-    if (window.location.protocol === 'file:' && window.location.pathname.includes('android_asset')) {
-      return true;
-    }
-
-    // 5. Manual override for developer testing / previewing APK mode only
-    if (window.location.search.includes('force_apk=true') || localStorage.getItem('baf_force_apk_mode') === 'true') {
-      return true;
-    }
-
-    // Otherwise, this is running in a web browser (Website)
+    if (Capacitor.isNativePlatform()) return true;
+    if ((window as any).Capacitor?.isNative) return true;
+    if (window.location.protocol === 'capacitor:' || window.location.protocol === 'ionic:') return true;
+    if (window.location.protocol === 'file:' && window.location.pathname.includes('android_asset')) return true;
+    if (window.location.search.includes('force_apk=true') || localStorage.getItem('baf_force_apk_mode') === 'true') return true;
     return false;
   } catch {
     return false;
   }
 }
 
-/**
- * Retrieves current installed app info via Capacitor App plugin,
- * or falls back to standard client version.
- */
 export async function getCurrentAppVersion(): Promise<{ versionCode: number; versionName: string }> {
   try {
     if (Capacitor.isPluginAvailable('App')) {
@@ -88,7 +54,6 @@ export async function getCurrentAppVersion(): Promise<{ versionCode: number; ver
     console.warn('[AppUpdate] Could not retrieve app version from Capacitor App plugin:', err);
   }
 
-  // Check if saved in localStorage (e.g. for testing)
   const savedCode = localStorage.getItem('baf_app_current_version_code');
   const savedName = localStorage.getItem('baf_app_current_version_name');
   if (savedCode) {
@@ -104,47 +69,19 @@ export async function getCurrentAppVersion(): Promise<{ versionCode: number; ver
   return DEFAULT_CURRENT_APP;
 }
 
-/**
- * Fetches the latest version record from the Firebase Firestore `app_versions` collection or `app_settings`.
- */
 export async function fetchLatestAppVersion(): Promise<AppVersionRecord | null> {
-  if (!isFirebaseConfigured || !db) return null;
   try {
-    // 1. Try dedicated app_versions collection
-    const q = query(collection(db, 'app_versions'), orderBy('version_code', 'desc'), limit(1));
-    const snap = await getDocs(q);
-    if (!snap.empty) {
-      const docData = snap.docs[0].data();
-      return docData as AppVersionRecord;
+    const raw = localStorage.getItem('baf_latest_app_version');
+    if (raw) {
+      return JSON.parse(raw);
     }
-
-    // 2. Fallback to app_settings document
-    const settingSnap = await getDoc(doc(db, 'app_settings', 'latest_app_version'));
-    if (settingSnap.exists()) {
-      const sData = settingSnap.data();
-      if (sData?.setting_value) {
-        try {
-          return JSON.parse(sData.setting_value) as AppVersionRecord;
-        } catch {
-          return sData as any;
-        }
-      }
-    }
-    return null;
-  } catch (err) {
-    console.warn('[AppUpdate] Failed to query latest version from Firebase:', err);
-    return null;
-  }
+  } catch {}
+  return null;
 }
 
-/**
- * Compares current version with the latest version in Supabase.
- * NOTE: Returns hasUpdate: false on websites so that update popups NEVER show on web.
- */
 export async function checkForAppUpdate(options?: { ignoreSkipped?: boolean; forceCheck?: boolean }): Promise<AppUpdateCheckResult> {
   try {
     const isApk = isRunningInApk();
-    // Do NOT check or show update system on the Website (only on APK) unless explicitly forced
     if (!isApk && !options?.forceCheck) {
       return {
         hasUpdate: false,
@@ -168,7 +105,6 @@ export async function checkForAppUpdate(options?: { ignoreSkipped?: boolean; for
 
     const isNewer = Number(latest.version_code) > Number(current.versionCode);
 
-    // Check if the user previously skipped this version
     if (isNewer && !options?.ignoreSkipped) {
       const skippedCode = localStorage.getItem(SKIPPED_VERSION_STORAGE_KEY);
       if (skippedCode && parseInt(skippedCode, 10) === latest.version_code) {
@@ -199,76 +135,45 @@ export async function checkForAppUpdate(options?: { ignoreSkipped?: boolean; for
   }
 }
 
-/**
- * Opens the APK download URL using Capacitor's Browser plugin.
- */
-export async function downloadAppUpdate(apkUrl: string): Promise<boolean> {
-  if (!apkUrl) {
-    console.error('[AppUpdate] No apk_url provided to download');
-    return false;
-  }
-
+export async function openDownloadUrl(apkUrl: string): Promise<boolean> {
+  if (!apkUrl) return false;
   try {
-    console.log('[AppUpdate] Opening APK URL via Capacitor Browser:', apkUrl);
-    // Capacitor Browser plugin
-    await Browser.open({
-      url: apkUrl,
-      windowName: '_blank',
-      presentationStyle: 'popover',
-    });
-    return true;
-  } catch (err) {
-    console.warn('[AppUpdate] Capacitor Browser.open failed, falling back to link download:', err);
-    try {
-      const link = document.createElement('a');
-      link.href = apkUrl;
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+    if (Capacitor.isPluginAvailable('Browser')) {
+      await Browser.open({ url: apkUrl });
       return true;
-    } catch (linkErr) {
-      console.error('[AppUpdate] Fallback link navigation also failed:', linkErr);
-      return false;
     }
+  } catch (err) {
+    console.warn('[AppUpdate] Browser plugin open failed, using fallback:', err);
   }
+  window.open(apkUrl, '_blank', 'noopener,noreferrer');
+  return true;
 }
 
-/**
- * Remember skipped version code
- */
 export function skipVersionCode(versionCode: number): void {
   localStorage.setItem(SKIPPED_VERSION_STORAGE_KEY, String(versionCode));
 }
 
-/**
- * Clear skipped version code
- */
 export function clearSkippedVersion(): void {
   localStorage.removeItem(SKIPPED_VERSION_STORAGE_KEY);
 }
 
-/**
- * Helper to insert a new version into `app_versions` table (for Admin release management)
- */
 export async function publishNewAppVersion(version: Omit<AppVersionRecord, 'id' | 'created_at'>): Promise<{ success: boolean; error?: string }> {
   try {
-    const { error } = await supabase.from('app_versions').insert([
-      {
-        version_code: version.version_code,
-        version_name: version.version_name.trim(),
-        apk_url: version.apk_url.trim(),
-        release_notes: version.release_notes?.trim() || null,
-      },
-    ]);
-
-    if (error) {
-      return { success: false, error: error.message };
-    }
-
+    const record: AppVersionRecord = {
+      version_code: version.version_code,
+      version_name: version.version_name.trim(),
+      apk_url: version.apk_url.trim(),
+      release_notes: version.release_notes?.trim() || null,
+      created_at: new Date().toISOString(),
+    };
+    localStorage.setItem('baf_latest_app_version', JSON.stringify(record));
     return { success: true };
   } catch (err: any) {
     return { success: false, error: err?.message || 'Failed to publish new version' };
   }
 }
+
+export async function downloadAppUpdate(apkUrl: string): Promise<boolean> {
+  return await openDownloadUrl(apkUrl);
+}
+

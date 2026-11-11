@@ -55,9 +55,6 @@ export default defineConfig(() => {
               if (id.includes('recharts')) {
                 return 'vendor-charts';
               }
-              if (id.includes('@supabase')) {
-                return 'vendor-supabase';
-              }
               if (id.includes('lucide-react')) {
                 return 'vendor-icons';
               }

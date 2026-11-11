@@ -1,6 +1,4 @@
 import { supabase, isSupabaseConfigured } from '../supabase';
-import { db, isFirebaseConfigured } from '../firebase';
-import { doc, getDoc } from 'firebase/firestore';
 import { localDb } from '../services/localDatabase';
 import { logUserLogin, updatePresence } from '../services/presenceService';
 import { Airman, DetailedUserLogin, UserLoginRole, UserLoginStatus } from '../types';
@@ -612,57 +610,6 @@ export const validateUserLogin = async (
     }
   }
 
-  // 2. Cloud Fallback: Firebase Firestore
-  try {
-    if (isFirebaseConfigured && db) {
-      const docRef = doc(db, 'user_profiles', cleanDigits || cleanInput);
-      const snap = await getDoc(docRef);
-      if (snap.exists()) {
-        const fbUser = snap.data();
-        const expected = String(fbUser.Password || fbUser.password || fbUser["User ID"] || cleanDigits).trim();
-        const rawProvided = (passwordInput || '').trim();
-        const isMatch = 
-          rawProvided === expected || 
-          rawProvided === cleanDigits || 
-          rawProvided === '1124';
-
-        if (isMatch) {
-          const mappedUser: DetailedUserLogin = {
-            id: `user-${cleanDigits || cleanInput}`,
-            airmanId: fbUser.airman_id || `airman-${cleanDigits || cleanInput}`,
-            bdNo: cleanDigits || cleanInput,
-            rank: fbUser.Rank || 'LAC',
-            name: fbUser["Full Name"] || fbUser.Name || 'Operator',
-            flightName: fbUser.Flight || 'Admin',
-            trade: fbUser.Trade || 'General',
-            role: (fbUser.Role as UserLoginRole) || 'USER',
-            password: expected,
-            status: 'ACTIVE',
-            detailOrder: 'FIREBASE_USER',
-            detailedAt: new Date().toISOString(),
-            detailedBy: 'Firebase Firestore'
-          };
-          const nominalMatch = nominalAirmen.find(a => (a.bdNo || '').replace(/\D/g, '') === cleanDigits) || {
-            id: `airman-${cleanDigits || cleanInput}`,
-            serNo: 99,
-            code: `${mappedUser.rank}-${mappedUser.name.slice(0, 3).toUpperCase()}`,
-            bdNo: `BD/${cleanDigits || cleanInput}`,
-            rank: mappedUser.rank as any,
-            name: mappedUser.name,
-            trade: mappedUser.trade,
-            addressBlock: '155 UASU',
-            mobileNo: '',
-            flightName: mappedUser.flightName as any,
-            remarks: '',
-            active: true
-          };
-          return { success: true, airman: nominalMatch, detailedUser: mappedUser, message: `Access granted for ${mappedUser.rank} ${mappedUser.name}` };
-        }
-      }
-    }
-  } catch (fbErr) {
-    console.warn("Firebase user lookup warning:", fbErr);
-  }
 
   // 3. Cloud Fallback: Supabase (if local check failed or PIN was updated on another device)
   try {

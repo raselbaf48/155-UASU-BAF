@@ -279,7 +279,7 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
       description: 'Real-time cloud backup, sync status, push/pull, and sync logs',
       icon: <Cloud className="w-5 h-5 text-blue-400" />,
       color: 'text-blue-400 bg-blue-500/10 border-blue-500/30',
-      badge: 'Supabase Live'
+      badge: 'Local DB Active'
     }
   ];
 
@@ -1208,9 +1208,9 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
                 <div className="w-16 h-16 rounded-full bg-[#1e2b4d] flex items-center justify-center mb-6">
                   <Cloud className="w-8 h-8 text-blue-400" />
                 </div>
-                <h3 className="text-xl font-bold text-white mb-2">Database Cloud Sync</h3>
+                <h3 className="text-xl font-bold text-white mb-2">Database Local Sync</h3>
                 <p className="text-sm text-slate-400 mb-8 max-w-sm">
-                  Manually push your local canteen changes or pull updates from the central Supabase database.
+                  ক্যান্টিনের সমস্ত ডাটা লোকাল ডাটাবেসে সেভ বা রিলোড করুন।
                 </p>
 
                 {(isSyncingPush || isSyncingPull || syncStatusText) && syncProgress >= 0 && syncProgress <= 100 && (
@@ -1236,7 +1236,7 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
                     <div className="relative flex flex-row items-center justify-center gap-2 w-full h-full bg-[#1e293b] px-4 py-3.5 rounded-xl border border-slate-700/50 transition-colors group-hover:bg-[#1e293b]/80">
                       <Upload className={`w-4 h-4 text-blue-400 ${isSyncingPush ? 'animate-bounce' : ''}`} />
                       <span className="text-sm font-medium tracking-wide text-slate-200 group-hover:text-white transition-colors">
-                        {isSyncingPush && syncProgress === 100 ? 'Success!' : isSyncingPush ? 'Uploading...' : 'Push to Cloud'}
+                        {isSyncingPush && syncProgress === 100 ? 'Success!' : isSyncingPush ? 'Uploading...' : 'Save to DB'}
                       </span>
                     </div>
                   </button>
@@ -1251,57 +1251,9 @@ export const CanteenSettings: React.FC<CanteenSettingsProps> = ({ onClose }) => 
                     <div className="relative flex flex-row items-center justify-center gap-2 w-full h-full bg-[#1e293b] px-4 py-3.5 rounded-xl border border-slate-700/50 transition-colors group-hover:bg-[#1e293b]/80">
                       <Download className={`w-4 h-4 text-emerald-400 ${isSyncingPull ? 'animate-bounce' : ''}`} />
                       <span className="text-sm font-medium tracking-wide text-slate-200 group-hover:text-white transition-colors">
-                        {isSyncingPull && syncProgress === 100 ? 'Success!' : isSyncingPull ? 'Downloading...' : 'Pull from Cloud'}
+                        {isSyncingPull && syncProgress === 100 ? 'Success!' : isSyncingPull ? 'Downloading...' : 'Reload from DB'}
                       </span>
                     </div>
-                  </button>
-                </div>
-
-                {/* 1-Click Firebase Cloud Migration */}
-                <div className="mt-6 p-5 rounded-2xl bg-gradient-to-r from-amber-950/40 via-orange-950/30 to-amber-900/20 border border-amber-500/40 flex flex-col sm:flex-row items-center justify-between gap-3 text-left w-full">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase tracking-wider">
-                      <Flame className="w-4 h-4 text-amber-400" />
-                      <span>Google Firebase Firestore ক্লাউড মাইগ্রেশন</span>
-                      <span className="text-[10px] bg-amber-500/20 text-amber-300 font-mono px-2 py-0.5 rounded-full font-bold">
-                        ACTIVE
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-300">
-                      Supabase থেকে ৭৯ জন ক্যান্টিন মেম্বার, বর্তমান ব্যালেন্স, বকেয়া বিল ও সেটিংস এক ক্লিকে সরাসরি Google Firebase Firestore-এ ট্রান্সফার করুন।
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      setSyncStatusText('Firebase Firestore-এ মাইগ্রেশন হচ্ছে...');
-                      setSyncProgress(25);
-                      try {
-                        const res = await localDb.migrateToFirebase();
-                        if (res.success) {
-                          setSyncProgress(100);
-                          setSyncStatusText(`মাইগ্রেশন সম্পন্ন: ${res.canteenMembersCount} জন মেম্বার Firebase-এ সংরক্ষিত!`);
-                          setTimeout(() => {
-                            setSyncStatusText('');
-                            setSyncProgress(0);
-                            window.dispatchEvent(new CustomEvent('canteen_settings_updated'));
-                          }, 2500);
-                        } else {
-                          alert('মাইগ্রেশন ত্রুটি: ' + res.errors.join(', '));
-                          setSyncProgress(0);
-                          setSyncStatusText('');
-                        }
-                      } catch (err: any) {
-                        alert('মাইগ্রেশন ব্যর্থ: ' + err.message);
-                        setSyncProgress(0);
-                        setSyncStatusText('');
-                      }
-                    }}
-                    disabled={isSyncingPush || isSyncingPull}
-                    className="shrink-0 px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs flex items-center justify-center space-x-2 shadow-lg shadow-amber-500/20 transition-all cursor-pointer disabled:opacity-50"
-                  >
-                    <Flame className="w-4 h-4" />
-                    <span>Firebase-এ স্থানান্তর</span>
                   </button>
                 </div>
               </div>

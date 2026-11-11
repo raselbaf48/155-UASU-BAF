@@ -363,36 +363,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  const [isMigratingFirebase, setIsMigratingFirebase] = useState(false);
-  const [firebaseMigrationSuccess, setFirebaseMigrationSuccess] = useState<string | null>(null);
-
-  const handleMigrateToFirebase = async () => {
-    setIsMigratingFirebase(true);
-    setRestoreStatus('Uploading...');
-    setSyncProgress(20);
-    setSyncMessage('Migrating all data to Firebase Firestore...');
-    try {
-      const res = await localDb.migrateToFirebase();
-      if (res.success) {
-        setSyncProgress(100);
-        setSyncMessage('Migration Complete!');
-        setFirebaseMigrationSuccess(`সফলভাবে ${res.airmenCount} জন Airmen, ${res.dutyCount} টি রোস্টার, ${res.canteenMembersCount} জন ক্যান্টিন মেম্বার এবং ${res.canteenTxsCount} টি বিক্রয় রেকর্ডের ডাটা Firebase Firestore-এ ট্রান্সফার হয়েছে!`);
-        setSyncLogsState(getSyncLogs());
-        setTimeout(() => {
-          setRestoreStatus('');
-          setSyncProgress(0);
-        }, 3000);
-      } else {
-        alert('Migration partial error: ' + res.errors.join(', '));
-        setRestoreStatus('');
-      }
-    } catch (e: any) {
-      alert('Migration failed: ' + e.message);
-      setRestoreStatus('');
-    } finally {
-      setIsMigratingFirebase(false);
-    }
-  };
 
   const handlePublishVersion = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -953,11 +923,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               <h4 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
                                 <span>ইন-অ্যাপ সফটওয়্যার আপডেট</span>
                                 <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
-                                  Capacitor + Supabase
+                                  Native APK Release
                                 </span>
                               </h4>
                               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                                Supabase-এর <code className="text-emerald-500 font-mono">app_versions</code> টেবিল থেকে ভার্সন কোড ফেচ করে সরাসরি APK ডাউনলোড।
+                                নতুন ভার্সন কোড চেক করে সরাসরি APK ফাইল ডাউনলোড ও আপডেট।
                               </p>
                             </div>
                           </div>
@@ -1009,7 +979,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             <div className="flex items-center space-x-2">
                               <ShieldCheck className="w-5 h-5 text-emerald-500" />
                               <h5 className="font-bold text-sm text-slate-900 dark:text-white">
-                                Supabase রিলিজ রেকর্ড (app_versions)
+                                সফটওয়্যার রিলিজ রেকর্ড
                               </h5>
                             </div>
                             <span className="text-[10px] font-mono text-slate-400">
@@ -1150,7 +1120,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition-all cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
                             >
                               <Upload className="w-4 h-4" />
-                              <span>{isPublishingVersion ? 'পাবলিশ হচ্ছে...' : 'Supabase-এ প্রকাশ করুন'}</span>
+                              <span>{isPublishingVersion ? 'পাবলিশ হচ্ছে...' : 'রিলিজ হিসেবে প্রকাশ করুন'}</span>
                             </button>
                           </form>
                         </div>
@@ -1167,7 +1137,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         </div>
                         <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Database Cloud Sync</h3>
                         <p className="text-sm text-slate-500 dark:text-slate-400 mb-8 max-w-sm">
-                          Manually push your local changes or pull updates from the central Firebase database.
+                          লোকাল ডাটাবেস পরিবর্তনসমূহ সংরক্ষণ করুন বা সার্ভার ফাইল থেকে ডাটা রিলোড করুন।
                         </p>
 
                         {(restoreStatus === 'Uploading...' || restoreStatus === 'Downloading...') && syncProgress >= 0 && syncProgress <= 100 && (
@@ -1265,35 +1235,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           </button>
                         </div>
 
-                        {/* 1-Click Firebase Cloud Migration */}
-                        <div className="mt-5 p-4 rounded-2xl bg-gradient-to-r from-amber-950/40 via-orange-950/30 to-amber-900/20 border border-amber-500/40 flex flex-col sm:flex-row items-center justify-between gap-3 text-left">
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase tracking-wider">
-                              <Flame className="w-4 h-4 text-amber-400" />
-                              <span>Firebase Firestore ক্লাউড মাইগ্রেশন</span>
-                              <span className="text-[10px] bg-amber-500/20 text-amber-300 font-mono px-2 py-0.5 rounded-full font-bold">
-                                ACTIVE
-                              </span>
-                            </div>
-                            <p className="text-xs text-slate-300">
-                              Supabase থেকে সমস্ত Airmen Biodata, ডিউটি রোস্টার ও সেটিংস এক ক্লিকে Firebase-এ স্থানান্তর করুন।
-                            </p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={handleMigrateToFirebase}
-                            disabled={isMigratingFirebase || restoreStatus === 'Uploading...'}
-                            className="shrink-0 px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs flex items-center justify-center space-x-2 shadow-lg shadow-amber-500/20 transition-all cursor-pointer disabled:opacity-50"
-                          >
-                            <Flame className={`w-4 h-4 ${isMigratingFirebase ? 'animate-spin' : ''}`} />
-                            <span>{isMigratingFirebase ? 'মাইগ্রেশন হচ্ছে...' : 'Firebase-এ স্থানান্তর'}</span>
-                          </button>
-                        </div>
-                        {firebaseMigrationSuccess && (
-                          <div className="mt-3 p-3 bg-slate-900/90 border border-amber-500/40 rounded-xl text-xs font-mono text-amber-300 text-left">
-                            {firebaseMigrationSuccess}
-                          </div>
-                        )}
                       </div>
 
                       <div className="mt-8">

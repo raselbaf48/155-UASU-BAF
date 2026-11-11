@@ -1082,10 +1082,10 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
 
  if (codeUpper === 'LEAVE' || statusCategory === 'LEAVE') {
  leaveList.push({ airman, note: '' });
- } else if (isIdacNt) {
+ } else if (isPtDocument && isIdacNt) {
  const dutyDisplay = formatDutyOnShortName(codeUpper, idaShift, notes, item.dutyName);
  dutyOnList.push({ airman, note: dutyDisplay });
- } else if (statusCategory === 'PARADE' || codeUpper === 'ON_PARADE' || isPtIdacA) {
+ } else if (statusCategory === 'PARADE' || codeUpper === 'ON_PARADE' || isPtIdacA || (!isPtDocument && isIdacNt && statusCategory !== 'OFF')) {
  onPtList.push({ airman, note: '' });
  } else if (codeUpper === 'ESSN' || notesLower.includes('essn')) {
  essnList.push({ airman, note: 'ESSN' });

@@ -53332,21 +53332,6 @@
       "notes": ""
     },
     {
-      "id": "hist_1794216213093_mh0hw",
-      "timestamp": "2026-11-09T09:23:33.093Z",
-      "actionType": "ASSIGN_RANGE",
-      "type": "ASSIGN_RANGE",
-      "airmanId": "BD/474549",
-      "airmanName": "LAC Rakib",
-      "airmanRank": "LAC",
-      "airmanTrade": "Radio Fitt",
-      "dutyCode": "GD",
-      "fromDate": "2026-11-14",
-      "toDate": "2026-11-14",
-      "date": "2026-11-14",
-      "notes": ""
-    },
-    {
       "id": "hist_1794216050599_2v2ad",
       "timestamp": "2026-11-09T09:20:50.599Z",
       "actionType": "ASSIGN_RANGE",

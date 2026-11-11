@@ -256,10 +256,7 @@ export default function App() {
     return 'dark';
   });
   const [darkMode, setDarkMode] = useState<boolean>(true);
-  const [showQuotaBanner, setShowQuotaBanner] = useState<boolean>(() => {
-  if (typeof window === "undefined") return false;
-  return window.localStorage.getItem("firebase_quota_exceeded") === new Date().toDateString();
-});
+
 
   // Apply Theme Preference to document and darkMode state
   useEffect(() => {
@@ -395,11 +392,6 @@ return () => mediaQuery.removeEventListener('change', listener);
     return () => window.removeEventListener('baf_db_updated', handleDbUpdated);
   }, []);
 
-  useEffect(() => {
-    const handleQuota = () => setShowQuotaBanner(true);
-    window.addEventListener('baf_quota_exceeded', handleQuota);
-    return () => window.removeEventListener('baf_quota_exceeded', handleQuota);
-  }, []);
 
 
   useEffect(() => {

@@ -10,7 +10,6 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import pdfParsePkg from 'pdf-parse/lib/pdf-parse.js';
-import { migrateAllToSupabase } from './scripts/migrate_all_to_supabase';
 
 process.on('uncaughtException', (err: any) => {
   const msg = String(err?.message || err || '');
@@ -306,58 +305,6 @@ function saveDatabase(db: LocalDB, eventType: string = 'DATA_UPDATED') {
   }
 }
 
-async function syncServerWithFirestore() {
-  try {
-    const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
-    if (!fs.existsSync(configPath)) return;
-    const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    if (!cfg.projectId || !cfg.apiKey) return;
-
-    const projectId = cfg.projectId;
-    const databaseId = cfg.firestoreDatabaseId || '(default)';
-    const apiKey = cfg.apiKey;
-
-    const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/app_settings?key=${apiKey}&pageSize=300`;
-    const res = await fetch(url);
-    if (!res.ok) return;
-    const data: any = await res.json();
-    if (!data.documents || !Array.isArray(data.documents)) return;
-
-    const currentSettings = loadAppSettings();
-    for (const doc of data.documents) {
-      const docName = doc.name ? doc.name.split('/').pop() : '';
-      if (!docName) continue;
-      const f = doc.fields || {};
-      const key = f.setting_key?.stringValue || docName;
-      const val = f.setting_value?.stringValue || '';
-      const updated = f.updated_at?.stringValue || new Date().toISOString();
-      if (key && val) {
-        currentSettings[key] = { setting_key: key, setting_value: val, updated_at: updated };
-      }
-    }
-    saveAppSettings(currentSettings);
-
-    if (currentSettings['canteen_txs']?.setting_value) {
-      try {
-        const txs = JSON.parse(currentSettings['canteen_txs'].setting_value);
-        if (Array.isArray(txs) && txs.length > 0) {
-          saveCanteenTransactions(txs);
-        }
-      } catch {}
-    }
-    if (currentSettings['canteen_members']?.setting_value) {
-      try {
-        const mems = JSON.parse(currentSettings['canteen_members'].setting_value);
-        if (Array.isArray(mems) && mems.length > 0) {
-          saveCanteenMembers(mems);
-        }
-      } catch {}
-    }
-  } catch (err) {
-    console.warn('[server.ts] Background Firestore sync notice:', err);
-  }
-}
-
 async function startServer() {
   const app = express();
   const portArgIdx = process.argv.indexOf('--port');
@@ -368,53 +315,7 @@ async function startServer() {
   const HOST = hostArgIdx !== -1 && process.argv[hostArgIdx + 1] ? process.argv[hostArgIdx + 1] : (process.env.HOST || '0.0.0.0');
 
   let db = loadDatabase();
-  // Firestore sync disabled in favor of Supabase cloud database
 
-  app.post('/api/migrate-to-supabase', express.json(), async (req, res) => {
-    try {
-      const { supabaseUrl, supabaseKey } = req.body || {};
-      const url = supabaseUrl || process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-      const key = supabaseKey || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
-      if (!url || !key) {
-        return res.status(400).json({ success: false, error: 'Supabase URL and API Key are required' });
-      }
-      const result = await migrateAllToSupabase(url, key);
-      return res.json(result);
-    } catch (err: any) {
-      return res.status(500).json({ success: false, error: err.message || err });
-    }
-  });
-
-  app.get('/api/supabase-client-config', (req, res) => {
-    const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
-    const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
-    res.json({
-      url,
-      anonKey,
-      configured: Boolean(url && anonKey && url.startsWith('http') && !url.includes('firestore.firebase'))
-    });
-  });
-
-  app.get('/api/supabase-status', (req, res) => {
-    const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
-    const isConfigured = Boolean(url && url.startsWith('http') && !url.includes('firestore.firebase'));
-    res.json({
-      configured: isConfigured,
-      url: isConfigured ? url.replace(/^(https?:\/\/[^\/]+).*/, '$1') : null
-    });
-  });
-
-  // Automatically trigger migration if Supabase credentials are provided in process.env
-  const detectedUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
-  const detectedKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
-  if (detectedUrl && detectedKey && detectedUrl.startsWith('http') && !detectedUrl.includes('firestore.firebase')) {
-    console.log('[server] Supabase credentials detected in environment! Launching background data migration...');
-    migrateAllToSupabase(detectedUrl, detectedKey).then((r) => {
-      console.log('[server] Auto data migration result:', r);
-    }).catch((err) => {
-      console.warn('[server] Auto data migration error:', err);
-    });
-  }
 
   app.all('/api/supabase/*', express.raw({ type: '*/*', limit: '50mb' }), async (req, res) => {
     let targetUrl = '';
@@ -843,6 +744,41 @@ async function startServer() {
     try {
       const incomingDb = req.body;
       if (incomingDb && (incomingDb.airmen || incomingDb.assignments)) {
+        // Strict deduplication by BD number digits before saving
+        if (Array.isArray(incomingDb.airmen)) {
+          const seen = new Set<string>();
+          const cleanAirmen: any[] = [];
+          incomingDb.airmen.forEach((a: any) => {
+            const digits = String(a.bdNo || a.id || '').replace(/\D/g, '');
+            const k = digits || a.id || a.bdNo;
+            if (k && !seen.has(k)) {
+              seen.add(k);
+              cleanAirmen.push(a);
+            }
+          });
+          incomingDb.airmen = cleanAirmen;
+        }
+
+        // Strict deduplication of assignments
+        if (incomingDb.assignments && typeof incomingDb.assignments === 'object') {
+          Object.keys(incomingDb.assignments).forEach((m) => {
+            const list = incomingDb.assignments[m] || [];
+            const seen = new Set<string>();
+            const cleanList: any[] = [];
+            list.forEach((asn: any) => {
+              const airDigits = String(asn.airmanId || '').replace(/\D/g, '');
+              const shift = asn.idaShift || asn.shift || 'n';
+              const scope = asn.disposalScope || 'ALL';
+              const k = `${airDigits}_${asn.date}_${asn.dutyCode}_${shift}_${scope}`;
+              if (!seen.has(k)) {
+                seen.add(k);
+                cleanList.push(asn);
+              }
+            });
+            incomingDb.assignments[m] = cleanList;
+          });
+        }
+
         saveDatabase(incomingDb, 'DATABASE_UPDATED');
         return res.json({ success: true, message: 'Database saved successfully' });
       }
@@ -971,8 +907,18 @@ async function startServer() {
         return Boolean(airDigits && aDigits && aDigits === airDigits);
       });
       const dutyCode = match?.dutyCode || 'ON_PARADE';
+      const isIdac = ['IDAC', 'IDA', 'IDA C', 'IDA_C'].includes(dutyCode);
+      const isIdacNt = isIdac && (
+        String(match?.idaShift || (match as any)?.shift || '').toLowerCase().includes('night') ||
+        String(match?.idaShift || (match as any)?.shift || '').toLowerCase().includes('nt') ||
+        String(match?.notes || '').toLowerCase().includes('night') ||
+        String(match?.notes || '').toLowerCase().includes('nt')
+      );
       let statusCategory = 'PARADE';
-      if (dutyCode === 'ON_PARADE') { onParade++; statusCategory = 'PARADE'; }
+      if (dutyCode === 'ON_PARADE' || (shift === 'Morning' && isIdacNt)) { 
+        onParade++; 
+        statusCategory = 'PARADE'; 
+      }
       else if (dutyCode === 'LEAVE') { onLeave++; statusCategory = 'LEAVE'; }
       else if (['TDY', 'ATT', 'DETT'].includes(dutyCode)) { tdy++; statusCategory = 'TDY'; }
       else if (dutyCode === 'DUTY_OFF') { otherOff++; statusCategory = 'OFF'; }
@@ -1425,7 +1371,7 @@ async function startServer() {
   });
 
   app.get('/api/canteen/cloud-status', async (req, res) => {
-    res.json({ status: 'online', code: 200, engine: 'firebase-firestore' });
+    res.json({ status: 'online', code: 200, engine: 'local-json-database' });
   });
 
   // --- API ENDPOINTS ---

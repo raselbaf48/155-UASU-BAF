@@ -1,6 +1,3 @@
-import { db, isFirebaseConfigured, isFirestoreQuotaExceeded } from '../../../firebase';
-import { doc, getDoc, getDocs, setDoc, collection } from 'firebase/firestore';
-
 export interface CanteenMenuItem {
   id: string;
   name: string;
@@ -374,14 +371,6 @@ export function saveUserMenuOverride(item: Partial<CanteenMenuItem> & { id: stri
     if (cleanId) updated[cleanId] = overrideEntry;
 
     localStorage.setItem(MENU_USER_OVERRIDES_KEY, JSON.stringify(updated));
-    // Immediately persist to cloud app_settings in Firestore
-    if (isFirebaseConfigured && db && !isFirestoreQuotaExceeded()) {
-      setDoc(doc(db, 'app_settings', MENU_USER_OVERRIDES_KEY), {
-        setting_key: MENU_USER_OVERRIDES_KEY,
-        setting_value: JSON.stringify(updated),
-        updated_at: new Date().toISOString()
-      }, { merge: true }).catch(() => {});
-    }
   } catch (err) {
     console.warn('Error saving menu override:', err);
   }
@@ -438,15 +427,6 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
       menuFetchPromise = (async () => {
         try {
           let data: any[] | null = null;
-          if (isFirebaseConfigured && db) {
-            try {
-              const menuSnap = await getDoc(doc(db, 'app_settings', 'canteen_menu_items_catalog_v1'));
-              if (menuSnap.exists() && menuSnap.data()?.setting_value) {
-                const parsed = JSON.parse(menuSnap.data().setting_value);
-                if (Array.isArray(parsed) && parsed.length > 0) data = parsed;
-              }
-            } catch {}
-          }
           if (data && data.length > 0) {
             const currentCache = getCanteenMenuCache();
             const currentMap = new Map(currentCache.map((i) => [i.id, i]));
@@ -546,15 +526,6 @@ export async function fetchCanteenMenuOnce(forceRefresh = false): Promise<Cantee
   menuFetchPromise = (async () => {
     try {
       let data: any[] | null = null;
-      if (isFirebaseConfigured && db) {
-        try {
-          const menuSnap = await getDoc(doc(db, 'app_settings', 'canteen_menu_items_catalog_v1'));
-          if (menuSnap.exists() && menuSnap.data()?.setting_value) {
-            const parsed = JSON.parse(menuSnap.data().setting_value);
-            if (Array.isArray(parsed) && parsed.length > 0) data = parsed;
-          }
-        } catch {}
-      }
       if (data && data.length > 0) {
         const currentCache = getCanteenMenuCache();
         const currentMap = new Map(currentCache.map((i) => [i.id, i]));
@@ -674,34 +645,6 @@ export async function fetchCanteenMembersOnce(force = false): Promise<any[]> {
     try {
       lastMembersFetchTimestamp = Date.now();
       let data: any[] = [];
-      if (isFirebaseConfigured && db) {
-        try {
-          const memSnap = await getDocs(collection(db, 'canteen_members'));
-          if (!memSnap.empty) {
-            memSnap.forEach(d => {
-              const m = d.data();
-              data.push({
-                airman_id: m.airman_id || d.id,
-                id: m.airman_id || d.id,
-                'BD No': m.service_number || m['BD No'] || '',
-                service_number: m.service_number || m['BD No'] || '',
-                Name: m.name || m.Name || m.Surname || '',
-                Surname: m.name || m.Surname || '',
-                Rank: m.rank || m.Rank || '',
-                Section: m.section || m.Section || '',
-                Contact: m.phone || m.Contact || '',
-                DP: m.avatar || m.DP || '',
-                Due: Number(m.total_due ?? m.Due ?? 0),
-                Role: m.role || m.Role || 'Member',
-                Seniority: m.Seniority ?? m.seniority,
-                ...m
-              });
-            });
-          }
-        } catch (fbErr) {
-          console.warn('[CanteenMenuData] Firebase members fetch warning:', fbErr);
-        }
-      }
 
       // Fallback to local server if cloud was not yet populated
       if (data.length === 0) {

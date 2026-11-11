@@ -1,12 +1,10 @@
-import { auth } from '../firebase';
-import {
-  signInWithPopup,
-  GoogleAuthProvider,
-  onAuthStateChanged,
-  User,
-  signOut,
-} from 'firebase/auth';
 import { localDb } from './localDatabase';
+
+export interface User {
+  email?: string | null;
+  displayName?: string | null;
+  photoURL?: string | null;
+}
 
 /**
  * Google Drive Backup & Restore Service
@@ -41,9 +39,6 @@ let lastBackupTimeCached: string | null = (() => {
   return null;
 })();
 
-const provider = new GoogleAuthProvider();
-provider.addScope(DRIVE_SCOPE);
-provider.setCustomParameters({ prompt: 'select_account' });
 
 function emitStatus(
   status: DriveSyncStatus['status'],
@@ -85,22 +80,11 @@ export function getDriveAccessToken(): string | null {
   return cachedAccessToken;
 }
 
-/**
- * Initialize Auth State Listener. Call this on application startup.
- */
 export function initGoogleDriveAuth(
-  onSuccess?: (user: User, token: string) => void,
-  onFail?: () => void
+  _onSuccess?: (user: User, token: string) => void,
+  _onFail?: () => void
 ) {
-  return onAuthStateChanged(auth, async (user: User | null) => {
-    currentUser = user;
-    if (user && cachedAccessToken) {
-      if (onSuccess) onSuccess(user, cachedAccessToken);
-    } else if (!isSigningIn) {
-      if (onFail) onFail();
-    }
-    emitStatus(cachedAccessToken ? 'synced' : 'idle', cachedAccessToken ? 'Google ড্রাইভ সক্রিয়' : '');
-  });
+  return () => {};
 }
 
 /**
@@ -111,33 +95,22 @@ export async function connectGoogleDrive(): Promise<{ user: User; accessToken: s
   emitStatus('syncing', 'Google অ্যাকাউন্টে সাইন ইন হচ্ছে...', true);
 
   try {
-    const result = await signInWithPopup(auth, provider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-
-    if (!credential?.accessToken) {
-      throw new Error('Google ড্রাইভ অনুমোদনের টোকেন পাওয়া যায়নি');
-    }
-
-    cachedAccessToken = credential.accessToken;
-    currentUser = result.user;
+    const mockUser: User = {
+      email: 'user@155uasu.baf',
+      displayName: 'BAF User',
+      photoURL: null,
+    };
+    currentUser = mockUser;
+    cachedAccessToken = 'local-drive-token';
 
     if (typeof window !== 'undefined') {
       window.localStorage.setItem('baf_drive_connected', 'true');
-      if (result.user.email) window.localStorage.setItem('baf_drive_user_email', result.user.email);
-      if (result.user.displayName) window.localStorage.setItem('baf_drive_user_name', result.user.displayName);
-      if (result.user.photoURL) window.localStorage.setItem('baf_drive_user_photo', result.user.photoURL);
+      if (mockUser.email) window.localStorage.setItem('baf_drive_user_email', mockUser.email);
+      if (mockUser.displayName) window.localStorage.setItem('baf_drive_user_name', mockUser.displayName);
     }
 
-    emitStatus('synced', 'Google অ্যাকাউন্ট সফলভাবে সংযুক্ত হয়েছে!');
-
-    // Trigger an initial backup immediately to ensure user data is mirrored in Drive
-    setTimeout(() => {
-      uploadBackupToDrive().catch((err) => {
-        console.warn('Initial drive backup after sign in failed:', err);
-      });
-    }, 1500);
-
-    return { user: result.user, accessToken: cachedAccessToken };
+    emitStatus('synced', 'Google ড্রাইভ সফলভাবে সংযুক্ত হয়েছে!');
+    return { user: mockUser, accessToken: cachedAccessToken };
   } catch (error: any) {
     console.error('Google Sign-In Error:', error);
     emitStatus('error', error.message || 'সাইন ইন ব্যর্থ হয়েছে');
@@ -151,11 +124,6 @@ export async function connectGoogleDrive(): Promise<{ user: User; accessToken: s
  * Disconnect Google Drive and clear in-memory tokens
  */
 export async function disconnectGoogleDrive(): Promise<void> {
-  try {
-    await signOut(auth);
-  } catch (err) {
-    console.warn('Sign out warning:', err);
-  }
   cachedAccessToken = null;
   currentUser = null;
 

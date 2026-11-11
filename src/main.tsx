@@ -6,14 +6,8 @@ import './features/canteen/i18n';
 import { installApiInterceptor } from './services/apiBridge';
 import { installSafeStorageProtection } from './utils/safeStorage';
 
-// Protect localStorage against quota errors and initialize Universal API Bridge
+// Initialize Universal API Bridge and Safe Storage Protection
 try {
-  if (typeof window !== 'undefined') {
-    if (!localStorage.getItem('baf_firestore_quota_exceeded_timestamp')) {
-      localStorage.removeItem('baf_firestore_write_quota_exceeded');
-      localStorage.removeItem('firebase_quota_exceeded');
-    }
-  }
   installSafeStorageProtection();
   installApiInterceptor();
 

@@ -289,44 +289,73 @@ export class LocalDatabaseEngine {
       if (!srvDb) return false;
       let changed = false;
 
-      // 1. Airmen
+      // 1. Airmen: merge by canonical BD digits to prevent duplication
       if (Array.isArray(srvDb.airmen) && srvDb.airmen.length > 0) {
-        if (!this.db.airmen || this.db.airmen.length < srvDb.airmen.length) {
-          this.db.airmen = normalizeAirmenSeniority(srvDb.airmen);
-          changed = true;
-        } else {
-          const localMap = new Map(this.db.airmen.map(a => [a.id || a.bdNo, a]));
-          srvDb.airmen.forEach((sa: any) => {
-            const key = sa.id || sa.bdNo;
-            if (!localMap.has(key)) {
-              this.db.airmen.push(sa);
-              changed = true;
-            }
-          });
-        }
+        const getAirmanKey = (a: any) => String(a.bdNo || a.id || '').replace(/\D/g, '');
+        const mergedAirmen: any[] = [];
+        const seenKeys = new Set<string>();
+
+        // Priority 1: keep local airmen edits
+        (this.db.airmen || []).forEach((a: any) => {
+          const k = getAirmanKey(a);
+          if (k && !seenKeys.has(k)) {
+            seenKeys.add(k);
+            mergedAirmen.push(a);
+          }
+        });
+
+        // Priority 2: add any missing server airmen
+        srvDb.airmen.forEach((sa: any) => {
+          const k = getAirmanKey(sa);
+          if (k && !seenKeys.has(k)) {
+            seenKeys.add(k);
+            mergedAirmen.push(sa);
+            changed = true;
+          }
+        });
+
+        if (this.db.airmen.length !== mergedAirmen.length) changed = true;
+        this.db.airmen = normalizeAirmenSeniority(mergedAirmen);
       }
 
-      // 2. Duty Assignments
+      // 2. Duty Assignments: deduplicate by airman BD digits, date, dutyCode, and shift
       if (srvDb.assignments && typeof srvDb.assignments === 'object') {
         if (!this.db.assignments) this.db.assignments = {};
+        const getAsnKey = (x: any) => {
+          const airDigits = String(x.airmanId || '').replace(/\D/g, '');
+          const shift = x.idaShift || x.shift || 'n';
+          const scope = x.disposalScope || 'ALL';
+          return `${airDigits}_${x.date}_${x.dutyCode}_${shift}_${scope}`;
+        };
+
         Object.keys(srvDb.assignments).forEach((mKey) => {
           const srvList = srvDb.assignments[mKey] || [];
           const localList = this.db.assignments[mKey] || [];
-          if (!this.db.assignments[mKey] || localList.length < srvList.length) {
-            this.db.assignments[mKey] = srvList;
+          
+          const localKeys = new Set<string>();
+          const dedupedList: any[] = [];
+          localList.forEach((a: any) => {
+            const k = getAsnKey(a);
+            if (!localKeys.has(k)) {
+              localKeys.add(k);
+              dedupedList.push(a);
+            }
+          });
+
+          let added = false;
+          srvList.forEach((sa: any) => {
+            const k = getAsnKey(sa);
+            if (!localKeys.has(k)) {
+              localKeys.add(k);
+              dedupedList.push(sa);
+              added = true;
+            }
+          });
+
+          if (added || dedupedList.length !== localList.length) {
             changed = true;
-          } else {
-            const localKeys = new Set(localList.map((x: any) => `${x.airmanId}_${x.date}_${x.dutyCode}_${x.idaShift || 'n'}`));
-            let added = false;
-            srvList.forEach((sa: any) => {
-              const k = `${sa.airmanId}_${sa.date}_${sa.dutyCode}_${sa.idaShift || 'n'}`;
-              if (!localKeys.has(k)) {
-                this.db.assignments[mKey].push(sa);
-                added = true;
-              }
-            });
-            if (added) changed = true;
           }
+          this.db.assignments[mKey] = dedupedList;
         });
       }
 
@@ -1945,8 +1974,38 @@ export class LocalDatabaseEngine {
               return a;
             });
 
+            // DEDUPLICATE AIRMEN BY UNIQUE BD NUMBER DIGITS
+            const seenBd = new Set<string>();
+            const dedupedAirmen: any[] = [];
+            syncedAirmen.forEach((a: any) => {
+              const digits = String(a.bdNo || a.id || '').replace(/\D/g, '');
+              const k = digits || a.id || a.bdNo;
+              if (k && !seenBd.has(k)) {
+                seenBd.add(k);
+                dedupedAirmen.push(a);
+              }
+            });
+
+            // DEDUPLICATE ASSIGNMENTS
+            Object.keys(migratedAssignments).forEach((m) => {
+              const list = migratedAssignments[m] || [];
+              const seenAsn = new Set<string>();
+              const cleanList: any[] = [];
+              list.forEach((asn: any) => {
+                const airDigits = String(asn.airmanId || '').replace(/\D/g, '');
+                const shift = asn.idaShift || asn.shift || 'n';
+                const scope = asn.disposalScope || 'ALL';
+                const k = `${airDigits}_${asn.date}_${asn.dutyCode}_${shift}_${scope}`;
+                if (!seenAsn.has(k)) {
+                  seenAsn.add(k);
+                  cleanList.push(asn);
+                }
+              });
+              migratedAssignments[m] = cleanList;
+            });
+
             const db: LocalStorageDB = {
-              airmen: normalizeAirmenSeniority(syncedAirmen),
+              airmen: normalizeAirmenSeniority(dedupedAirmen),
               assignments: migratedAssignments,
 
               activityHistory: Array.isArray(parsed.activityHistory) ? parsed.activityHistory : [],
@@ -1955,6 +2014,15 @@ export class LocalDatabaseEngine {
               importHistory: parsed.importHistory || [],
               lastUpdated: parsed.lastUpdated || new Date().toISOString(),
             };
+
+            // If duplicates were purged from localStorage, immediately save the clean DB
+            if (dedupedAirmen.length !== parsed.airmen.length) {
+              try {
+                if (typeof window !== 'undefined' && window.localStorage) {
+                  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+                }
+              } catch (e) {}
+            }
 
             return db;
           }
@@ -2728,7 +2796,7 @@ export class LocalDatabaseEngine {
       aliases.forEach((k) => map.set(k, a));
     };
 
-    // 1. Synthesize active entries from activityHistory (e.g. Leave, TDY, Disposals)
+    // 1. Synthesize active multi-day entries (Leave, TDY) only if explicitly active Leave/TDY and not already tracked
     (this.db.activityHistory || []).forEach((h: any) => {
       const from = h.fromDate || h.from_date || h.date;
       const to = h.toDate || h.to_date || from;
@@ -2736,17 +2804,19 @@ export class LocalDatabaseEngine {
         const airId = h.airmanId || h.airman_id;
         if (!airId) return;
         const actType = String(h.actionType || h.type || '').toUpperCase();
-        const rawCode = String(h.dutyCode || h.duty_code || (actType.includes('LEAVE') ? 'LEAVE' : 'GD')).toUpperCase();
-        const code = rawCode === 'DUTY' || rawCode === 'DUTY_ON' ? 'GD' : rawCode;
-
-        putIntoAssignmentMap(assignmentMap, {
-          airmanId: airId,
-          date: date,
-          dutyCode: code as any,
-          idaShift: h.idaShift || h.ida_shift || undefined,
-          notes: h.notes || h.description || '',
-          disposalScope: 'ALL',
-        });
+        const rawCode = String(h.dutyCode || h.duty_code || '').toUpperCase();
+        // Routine daily guard duties (GD, BTF, NTF, IDAC, AIRPORT, etc.) must NEVER be synthesized from history log!
+        if (actType === 'GRANT_LEAVE' || rawCode === 'LEAVE' || rawCode === 'TDY') {
+          const code = rawCode === 'TDY' ? 'TDY' : 'LEAVE';
+          putIntoAssignmentMap(assignmentMap, {
+            airmanId: airId,
+            date: date,
+            dutyCode: code as any,
+            idaShift: h.idaShift || h.ida_shift || undefined,
+            notes: h.notes || h.description || '',
+            disposalScope: 'ALL',
+          });
+        }
       }
     });
 
@@ -3032,8 +3102,15 @@ export class LocalDatabaseEngine {
         }
         else if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(codeStr)) {
           const s = ass.idaShift || 'Morning';
+          const shiftLower = s.toLowerCase();
+          const notesLower = (ass.notes || '').toLowerCase();
+          const isIdacNt = shiftLower.includes('night') || shiftLower.includes('nt') || shiftLower === 'c' || notesLower.includes('night') || notesLower.includes('nt');
           dutyName = `IDAC Duty (${s})`;
-          statusCategory = 'DUTY';
+          if (!isPT && !isNightCount && isIdacNt) {
+            statusCategory = 'PARADE';
+          } else {
+            statusCategory = 'DUTY';
+          }
         }
         else if (codeStr === 'BAKE_N_BITE') {
           dutyName = 'Bake & Bite';

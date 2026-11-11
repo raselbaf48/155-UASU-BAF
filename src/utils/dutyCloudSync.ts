@@ -1,5 +1,3 @@
-import { db, isFirebaseConfigured, handleFirestoreError, OperationType, isQuotaExceededError, isFirestoreQuotaExceeded, setFirestoreQuotaExceeded } from '../firebase';
-import { collection, doc, getDoc, getDocs, setDoc, writeBatch } from 'firebase/firestore';
 import { DutyRatioTable, getStoredDutyMatrix, saveDutyMatrix, INITIAL_OFFICIAL_DUTY_MATRIX } from '../data/officialDutyRatioMatrix';
 import { FlightName, Rank } from '../types';
 import { isFixedEqualDuty } from './dutyDistribution';
@@ -55,12 +53,7 @@ export interface DutySyncResult {
   matrix?: DutyRatioTable[];
 }
 
-const TABLE_NAME = 'All Duty & Daily Quota';
-
-/**
- * Parses flight names from comma-separated string or 'All Flt'
- */
-function parseEligibleFlights(fltStr?: string): FlightName[] {
+export function parseEligibleFlights(fltStr?: string): FlightName[] {
   if (!fltStr) return ['Mechanics', 'Avionics', 'GCS', 'Admin'];
   const s = fltStr.trim();
   if (s.toLowerCase() === 'all flt' || s.toLowerCase() === 'all') {
@@ -75,10 +68,7 @@ function parseEligibleFlights(fltStr?: string): FlightName[] {
   return res.length > 0 ? res : ['Mechanics', 'Avionics', 'GCS', 'Admin'];
 }
 
-/**
- * Parses rank names from comma-separated string or helper strings
- */
-function parseEligibleRanks(rankStr?: string): Rank[] {
+export function parseEligibleRanks(rankStr?: string): Rank[] {
   if (!rankStr) return ['Sgt', 'Cpl', 'LAC', 'AC-1', 'AC-2'];
   const s = rankStr.trim();
   const lower = s.toLowerCase();
@@ -94,16 +84,11 @@ function parseEligibleRanks(rankStr?: string): Rank[] {
   return matched.length > 0 ? matched : ['Sgt', 'Cpl', 'LAC', 'AC-1', 'AC-2'];
 }
 
-/**
- * Extracts or calculates daily requirements (Day 1 to Day 31) for any duty table
- */
 export function getDailyRequirementsFromTable(table: DutyRatioTable): number[] {
-  // 1. If table has explicitly stored dailyRequirements with positive values, use it
   if (table.dailyRequirements && table.dailyRequirements.length === 31 && table.dailyRequirements.some(x => x > 0)) {
     return table.dailyRequirements;
   }
 
-  // 2. If table has flight matrix data (Mechanics, Avionics, GCS, Admin), sum each day
   if (table.data) {
     const flights: FlightName[] = ['Mechanics', 'Avionics', 'GCS', 'Admin'];
     const reqs: number[] = [];
@@ -119,10 +104,8 @@ export function getDailyRequirementsFromTable(table: DutyRatioTable): number[] {
     }
   }
 
-  // 3. If totalRequiredDaily is set
   if (table.totalRequiredDaily && table.totalRequiredDaily > 0) {
     if (table.totalRequiredMonth && table.totalRequiredMonth < table.totalRequiredDaily * 31) {
-      // e.g. totalRequiredMonth is 7 or 22: fill days up to totalRequiredMonth
       const reqs = new Array(31).fill(0);
       let count = 0;
       for (let i = 0; i < 31 && count < table.totalRequiredMonth; i++) {
@@ -134,7 +117,6 @@ export function getDailyRequirementsFromTable(table: DutyRatioTable): number[] {
     return new Array(31).fill(table.totalRequiredDaily);
   }
 
-  // 4. If only totalRequiredMonth is set (e.g. 7 for Halishahar)
   if (table.totalRequiredMonth && table.totalRequiredMonth > 0) {
     const reqs = new Array(31).fill(0);
     const daysToFill = Math.min(31, table.totalRequiredMonth);
@@ -144,280 +126,51 @@ export function getDailyRequirementsFromTable(table: DutyRatioTable): number[] {
     return reqs;
   }
 
-  return new Array(31).fill(0);
+  return new Array(31).fill(1);
 }
 
-/**
- * Convert a DutyRatioTable to the Supabase row format
- */
 export function formatTableToCloudRow(table: DutyRatioTable, index: number): DutyCloudRow {
-  const reqs = getDailyRequirementsFromTable(table);
-
-  // Month Total: Dynamically calculated from daily requirements or stored totalRequiredMonth
-  const computedTotal = (table.dailyRequirements && table.dailyRequirements.some(x => x > 0))
-    ? table.dailyRequirements.reduce((a, b) => a + (Number(b) || 0), 0)
-    : (table.totalRequiredMonth || reqs.reduce((a, b) => a + (Number(b) || 0), 0));
-
-  // Comma-separated list of selected flights
-  const fltStr = table.eligibleFlights && table.eligibleFlights.length > 0
-    ? table.eligibleFlights.join(', ')
-    : 'Mechanics, Avionics, GCS, Admin';
-
-  // Comma-separated list of selected ranks
-  const isSecurity = table.title.toLowerCase().includes('security');
-  const rankStr = table.eligibleRanks && table.eligibleRanks.length > 0
-    ? table.eligibleRanks.join(', ')
-    : (isSecurity ? 'Cpl, LAC, AC-1, AC-2' : 'Sgt, Cpl, LAC, AC-1, AC-2');
-
-  const statusStr = table.isDisabled ? 'Disable' : 'Active';
-
-  const allotmentDisplay = (table.eligibleFlights && table.eligibleFlights.length === 1)
-    ? 'One From Each Flt (Must)'
-    : (table.allotmentType === 'equal' || isFixedEqualDuty(table))
-    ? 'One From Each Flt'
-    : 'Ratio Based';
+  const serNo = table.serNo !== undefined ? table.serNo : index + 1;
+  const dailyReqs = getDailyRequirementsFromTable(table);
+  const total = dailyReqs.reduce((acc, curr) => acc + (curr || 0), 0);
 
   const row: DutyCloudRow = {
-    ser_no: table.serNo !== undefined && table.serNo !== null ? Number(table.serNo) : (index + 1),
-    duty_name: table.title || `Duty ${index + 1}`,
-    eligible_flt: fltStr,
-    eligible_rank: rankStr,
-    total: computedTotal,
-    Status: statusStr,
+    ser_no: serNo,
+    duty_name: table.title || `Duty ${serNo}`,
+    eligible_flt: (table.eligibleFlights || []).join(', ') || 'All Flt',
+    eligible_rank: (table.eligibleRanks || []).join(', ') || 'Cpl & Below',
+    total,
+    Status: table.isDisabled ? 'DISABLE' : 'ENABLE',
+    status: table.isDisabled ? 'disable' : 'enable',
     is_disabled: !!table.isDisabled,
-    'Allotment Type': allotmentDisplay,
-    allotment_type: allotmentDisplay,
+    isDisabled: !!table.isDisabled,
+    'Allotment Type': table.allotmentType === 'equal' ? 'equal' : 'ratio',
   };
 
-  for (let i = 1; i <= 31; i++) {
-    row[`day_${i}`] = reqs[i - 1] ?? 0;
+  for (let day = 1; day <= 31; day++) {
+    row[`day_${day}`] = dailyReqs[day - 1] !== undefined ? dailyReqs[day - 1] : 0;
   }
 
   return row;
 }
 
-let isSyncInProgress = false;
-let pendingMatrixToSync: DutyRatioTable[] | null = null;
-
-/**
- * Push current app Duty List & daily quota to Supabase Cloud Table
- * Strictly updates existing rows in-place and only inserts when a new duty is added
- */
 export async function pushDutyListToCloud(matrixInput?: DutyRatioTable[]): Promise<DutySyncResult> {
-  if (!isFirebaseConfigured || !db || isFirestoreQuotaExceeded()) {
-    return { success: false, message: 'Firebase is not configured or quota limit reached' };
-  }
-
-  if (isSyncInProgress) {
-    pendingMatrixToSync = matrixInput || null;
-    return { success: true, message: 'Sync queued' };
-  }
-
-  isSyncInProgress = true;
-
-  try {
-    const matrix = matrixInput && matrixInput.length > 0 ? matrixInput : getStoredDutyMatrix();
-    const rows = matrix.map((t, idx) => formatTableToCloudRow(t, idx));
-
-    // Save full matrix JSON to app_settings document in Firestore
-    await setDoc(doc(db, 'app_settings', 'baf_official_duty_matrix_v4'), {
-      setting_key: 'baf_official_duty_matrix_v4',
-      setting_value: JSON.stringify(matrix),
-      updated_at: new Date().toISOString()
-    }, { merge: true });
-
-    // Save individual duty rows in duty_ratio_matrix collection in Firestore
-    const batch = writeBatch(db);
-    rows.forEach((r, idx) => {
-      const docId = `duty_${r.ser_no || idx + 1}`;
-      batch.set(doc(db, 'duty_ratio_matrix', docId), {
-        ...r,
-        updated_at: new Date().toISOString()
-      }, { merge: true });
-    });
-    await batch.commit();
-
-    return {
-      success: true,
-      count: rows.length,
-      matrix,
-      message: `Successfully updated ${rows.length} duties in Firebase Firestore!`,
-    };
-  } catch (err: any) {
-    if (isQuotaExceededError(err)) {
-      setFirestoreQuotaExceeded(true);
-      return { success: false, message: 'Firestore quota limit reached. Using local duty matrix.' };
-    }
-    console.error('[DutyCloudSync] Unexpected error pushing to Firebase:', err);
-    return { success: false, message: err.message || 'Unknown network error' };
-  } finally {
-    isSyncInProgress = false;
-    if (pendingMatrixToSync) {
-      const next = pendingMatrixToSync;
-      pendingMatrixToSync = null;
-      setTimeout(() => pushDutyListToCloud(next), 400);
-    }
-  }
+  const matrix = matrixInput && matrixInput.length > 0 ? matrixInput : getStoredDutyMatrix();
+  saveDutyMatrix(matrix);
+  return {
+    success: true,
+    count: matrix.length,
+    matrix,
+    message: `Successfully saved ${matrix.length} duties locally!`,
+  };
 }
 
-/**
- * Fetch Duty List from Cloud and update the app's matrix
- */
 export async function pullDutyListFromCloud(): Promise<DutySyncResult> {
-  if (!isFirebaseConfigured || !db || isFirestoreQuotaExceeded()) {
-    return { success: false, message: 'Firebase is not configured or quota limit reached' };
-  }
-
-  try {
-    // 1. Try reading whole matrix document first
-    const matrixDoc = await getDoc(doc(db, 'app_settings', 'baf_official_duty_matrix_v4'));
-    if (matrixDoc.exists() && matrixDoc.data()?.setting_value) {
-      try {
-        const parsed = JSON.parse(matrixDoc.data().setting_value);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          saveDutyMatrix(parsed);
-          return {
-            success: true,
-            count: parsed.length,
-            matrix: parsed,
-            message: `Loaded ${parsed.length} duties from Firebase Firestore.`,
-          };
-        }
-      } catch {}
-    }
-
-    // 2. Try collection duty_ratio_matrix
-    const snap = await getDocs(collection(db, 'duty_ratio_matrix'));
-    let data: any[] = [];
-    if (!snap.empty) {
-      snap.forEach(d => data.push(d.data()));
-    }
-
-    // If cloud table is empty, auto-push our current app duties to initialize the cloud table!
-    if (!data || data.length === 0) {
-      console.log('[DutyCloudSync] Cloud table is empty, auto-populating from app...');
-      const pushRes = await pushDutyListToCloud();
-      if (pushRes.success) {
-        return {
-          success: true,
-          count: pushRes.count,
-          message: `Cloud table was empty. Initialized Cloud with ${pushRes.count} app duties!`,
-        };
-      }
-      return pushRes;
-    }
-
-    // Convert cloud rows to DutyRatioTable updates
-    const currentMatrix = getStoredDutyMatrix();
-    const updatedMatrix = [...currentMatrix];
-
-    data.forEach((row: DutyCloudRow, idx: number) => {
-      const title = (row.duty_name || '').trim();
-      const serNo = row.ser_no || idx + 1;
-      const totalMonth = Number(row.total) || 0;
-
-      // Extract daily requirements day_1 to day_31
-      const dailyReqs: number[] = [];
-      for (let day = 1; day <= 31; day++) {
-        dailyReqs.push(Number(row[`day_${day}`]) || 0);
-      }
-
-      // Check if this duty exists in currentMatrix by title first so serNo changes update the right duty
-      const normCloudTitle = title.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
-      let existingIdx = updatedMatrix.findIndex(
-        t => (t.title || '').toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim() === normCloudTitle
-      );
-      if (existingIdx === -1) {
-        existingIdx = updatedMatrix.findIndex(t => t.serNo !== undefined && t.serNo === serNo);
-      }
-
-      // Check status from cloud (supports Status string, is_disabled boolean, or fallback to prev)
-      const statusRaw = String(row.Status || row.status || '').trim().toLowerCase();
-      const isDisabled = (row.is_disabled !== undefined)
-        ? (row.is_disabled === true || String(row.is_disabled) === 'true')
-        : (row.isDisabled !== undefined)
-        ? (row.isDisabled === true || String(row.isDisabled) === 'true')
-        : (statusRaw === 'disable' || statusRaw === 'disabled' || statusRaw === 'inactive')
-        ? true
-        : (statusRaw === 'active' || statusRaw === 'enable' || statusRaw === 'enabled')
-        ? false
-        : (existingIdx !== -1 ? !!updatedMatrix[existingIdx].isDisabled : false);
-
-      const eligFlights = parseEligibleFlights(row.eligible_flt);
-      const isSingleFlt = eligFlights.length === 1;
-
-      const allotmentRaw = String(row['Allotment Type'] || row.allotment_type || row.allotmentType || '').trim().toLowerCase();
-      let finalAllotment: 'equal' | 'ratio' = 'ratio';
-      if (isSingleFlt) {
-        finalAllotment = 'equal';
-      } else if (allotmentRaw.includes('equal') || allotmentRaw.includes('one from each')) {
-        finalAllotment = 'equal';
-      } else if (allotmentRaw.includes('ratio')) {
-        finalAllotment = 'ratio';
-      } else if (existingIdx !== -1) {
-        finalAllotment = updatedMatrix[existingIdx].allotmentType || (isFixedEqualDuty(updatedMatrix[existingIdx]) ? 'equal' : 'ratio');
-      } else {
-        finalAllotment = (title.includes('AIRFIELD') || title.includes('AIRPORT')) ? 'equal' : 'ratio';
-      }
-
-      if (existingIdx !== -1) {
-        // Update existing table
-        const prev = updatedMatrix[existingIdx];
-        updatedMatrix[existingIdx] = {
-          ...prev,
-          title: title || prev.title,
-          serNo,
-          totalRequiredMonth: totalMonth || prev.totalRequiredMonth,
-          dailyRequirements: dailyReqs.some(r => r > 0) ? dailyReqs : prev.dailyRequirements,
-          eligibleFlights: eligFlights,
-          eligibleRanks: parseEligibleRanks(row.eligible_rank),
-          allotmentType: finalAllotment,
-          isDisabled,
-        };
-      } else {
-        // Add new custom duty from cloud
-        const newId = `duty_cloud_${serNo}_${Date.now()}`;
-        updatedMatrix.push({
-          id: newId,
-          serNo,
-          title,
-          dutyCode: 'GD',
-          totalRequiredMonth: totalMonth,
-          dailyRequirements: dailyReqs,
-          eligibleFlights: eligFlights,
-          eligibleRanks: parseEligibleRanks(row.eligible_rank),
-          allotmentType: finalAllotment,
-          isDisabled,
-          data: {
-            Mechanics: new Array(31).fill(0),
-            Avionics: new Array(31).fill(0),
-            GCS: new Array(31).fill(0),
-            Admin: new Array(31).fill(0),
-          },
-        });
-      }
-    });
-
-    // Ensure duties are sorted by serNo and contiguous 1..N
-    updatedMatrix.sort((a, b) => (Number(a.serNo) || 0) - (Number(b.serNo) || 0));
-    updatedMatrix.forEach((d, idx) => {
-      d.serNo = idx + 1;
-    });
-
-    saveDutyMatrix(updatedMatrix);
-
-    return {
-      success: true,
-      count: data.length,
-      matrix: updatedMatrix,
-      message: `Successfully synchronized ${data.length} duties from Cloud!`,
-    };
-  } catch (err: any) {
-    if (isQuotaExceededError(err)) {
-      setFirestoreQuotaExceeded(true);
-      return { success: false, message: 'Firestore quota limit reached. Using local duty matrix.' };
-    }
-    console.error('[DutyCloudSync] Error pulling from cloud:', err);
-    return { success: false, message: err.message || 'Unknown network error' };
-  }
+  const matrix = getStoredDutyMatrix();
+  return {
+    success: true,
+    count: matrix.length,
+    matrix,
+    message: `Loaded ${matrix.length} duties from local storage.`,
+  };
 }
