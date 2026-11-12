@@ -62,6 +62,29 @@ body, button, input, select, textarea, table, th, td {
   .duty-register-print th, .duty-register-print td {
     white-space: nowrap !important;
   }
+  @page attendance-register-page {
+    size: A4 landscape;
+    margin: 3mm 4mm;
+  }
+  .attendance-register-print {
+    page: attendance-register-page !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  .attendance-register-print table {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 100% !important;
+    table-layout: fixed !important;
+  }
+  .attendance-register-print th,
+  .attendance-register-print td {
+    overflow: hidden !important;
+    word-break: break-word !important;
+  }
   @page duty-ratio-page-landscape {
     size: A4 landscape;
     margin: 6mm 8mm;

@@ -41,11 +41,11 @@ export function formatDutyOnShortName(
     const shift = (idaShift || '').toLowerCase();
     
     // Explicit exact shift match first
-    if (shift === 'night' || shift === 'nt' || shift === 'c') return 'IDAC Nt';
+    if (shift === 'night' || shift === 'nt' || shift === 'c') return 'IDAC "C"';
     if (shift === 'afternoon' || shift === 'aft' || shift === 'b') return 'IDAC "B"';
     if (shift === 'morning' || shift === 'morn' || shift === 'a') return 'IDAC "A"';
     
-    // Check for Night shift ("Nt")
+    // Check for Night shift ("Nt" / "C")
     if (
       notesLower.includes('night') ||
       notesLower.includes('"nt"') ||
@@ -54,7 +54,7 @@ export function formatDutyOnShortName(
       notesLower.includes('"c"') ||
       nameLower.includes('night')
     ) {
-      return 'IDAC Nt';
+      return 'IDAC "C"';
     }
 
     // Check for Afternoon ("B")
@@ -135,6 +135,17 @@ export function formatDutyOnShortName(
   // 6. Canteen
   if (code === 'CANTEEN' || notesLower.includes('canteen') || nameLower.includes('canteen')) {
     return 'Canteen';
+  }
+
+  // 6.1 Escort Duty
+  if (
+    code === 'ESCORT' ||
+    code === 'ESC' ||
+    code.includes('1794394') ||
+    notesLower.includes('escort') ||
+    nameLower.includes('escort')
+  ) {
+    return 'ESC';
   }
 
   // 7. Orderly Room & UWO

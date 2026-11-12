@@ -1196,7 +1196,7 @@ export function exportMonthlyAttendanceRegisterExcel(
     if (dutyCode === 'DUTY_OFF' || (dutyCode as any) === 'OFF') {
       let offDuty = '';
       if (ass?.notes) {
-        const match = ass.notes.match(/\b(NTF|GD|BTF|IDAC|IDA|AIRPORT|APT|HALISHAHAR|HAL)\b/i);
+        const match = ass.notes.match(/\b(NTF|GD|SY|BTF|IDAC|IDA|AIRPORT|APT|AFLD|HALISHAHAR|HAL|ESC|ESCORT)\b/i);
         if (match) offDuty = match[1].toUpperCase();
       }
       if (!offDuty) {
@@ -1207,8 +1207,10 @@ export function exportMonthlyAttendanceRegisterExcel(
           offDuty = yestAss.dutyCode === 'IDA' ? 'IDAC' : yestAss.dutyCode;
         }
       }
-      if (offDuty === 'AIRPORT' || offDuty === 'AIRFIELD') offDuty = 'APT';
-      return offDuty ? `${offDuty} OFF` : 'OFF';
+      if (offDuty === 'AIRPORT' || offDuty === 'AIRFIELD' || offDuty === 'APT') offDuty = 'AFLD';
+      if (offDuty === 'GD' || offDuty === 'SECURITY') offDuty = 'SY';
+      if (offDuty === 'ESCORT') offDuty = 'ESC';
+      return offDuty ? `${offDuty}\nOFF` : 'OFF';
     }
 
     if (dutyCode === 'IDAC' || dutyCode === 'IDA') {
@@ -1218,8 +1220,21 @@ export function exportMonthlyAttendanceRegisterExcel(
 
     if (dutyCode === 'LEAVE') return 'L';
     if (dutyCode === 'TDY') return 'TDY';
+    if ((dutyCode as any) === 'ESCORT' || (dutyCode as any) === 'ESC' || (dutyCode && String(dutyCode).includes('1794394'))) return 'ESC';
+    if (dutyCode === 'GD' || (dutyCode as any) === 'SECURITY') return 'SY';
+    if (dutyCode === 'AIRPORT' || (dutyCode as any) === 'APT' || (dutyCode as any) === 'AIRFIELD' || (dutyCode as any) === 'AFLD') return 'AFLD';
 
-    return dutyType?.shortName || dutyCode || '-';
+    let label = dutyType?.shortName || dutyCode || '-';
+    if (label === 'APT' || label === 'AIRPORT' || label === 'AIRFIELD') label = 'AFLD';
+    if (label === 'GD') label = 'SY';
+    if (label === 'IDAC Nt' || label === 'IDAC NT' || label.includes('IDAC Nt')) label = 'IDAC "C"';
+    if (label.includes(' OFF')) {
+      label = label.replace(/ OFF/g, '\nOFF');
+    }
+    if (label.startsWith('APT')) label = label.replace(/^APT/, 'AFLD');
+    if (label.startsWith('GD')) label = label.replace(/^GD/, 'SY');
+    if (label.includes('IDAC Nt')) label = label.replace(/IDAC Nt/g, 'IDAC "C"');
+    return label;
   };
 
   // Filter airmen based on:
@@ -1260,15 +1275,16 @@ export function exportMonthlyAttendanceRegisterExcel(
     'NAME',
     'FLT',
     ...daysArray.map((d) => String(d)),
-    'Present',
-    'GD',
+    'On Parade',
+    'SY',
     'BTF',
     'NTF',
     'HAL',
-    'APT',
+    'AFLD',
     'IDAC "A"',
     'IDAC "B"',
     'IDAC "C"',
+    'Duty OFF',
     'Total Duty',
   ];
   rows.push(headers);
@@ -1276,13 +1292,24 @@ export function exportMonthlyAttendanceRegisterExcel(
   filteredAirmen.forEach((airman, idx) => {
     const stat = statsMap.get(airman.id);
     let pCount = 0;
+    let dutyOffCount = 0;
     const dayLabels: string[] = [];
 
     daysArray.forEach((day) => {
       const label = resolveDutyLabel(airman, day);
       if (label === 'P' || label === 'CTN') pCount++;
+      if (label.includes('OFF')) dutyOffCount++;
       dayLabels.push(label);
     });
+
+    // Row index in Excel (1-based)
+    const excelRowNum = tableHeaderRowIndex + 1 + idx + 1;
+    const dayStartCol = getExcelColName(6); // 'F'
+    const dayEndCol = getExcelColName(5 + daysInMonth); // e.g. 'AJ' for 31 days
+    const dateRange = `${dayStartCol}${excelRowNum}:${dayEndCol}${excelRowNum}`;
+
+    const syColLetter = getExcelColName(7 + daysInMonth); // e.g. 'AL'
+    const idacCColLetter = getExcelColName(14 + daysInMonth); // e.g. 'AS'
 
     const row: any[] = [
       idx + 1,
@@ -1291,16 +1318,17 @@ export function exportMonthlyAttendanceRegisterExcel(
       airman.name || airman.fullName || '',
       formatFlightFullName(airman.flightName),
       ...dayLabels,
-      pCount,
-      stat?.totalGD || 0,
-      stat?.totalBTF || 0,
-      stat?.totalNTF || 0,
-      stat?.totalHalishahar || 0,
-      stat?.totalAirport || 0,
-      stat?.totalIDACMorning || 0,
-      stat?.totalIDACAfternoon || 0,
-      stat?.totalIDACNight || 0,
-      stat?.totalDutyCount || 0,
+      { t: 'n', f: `COUNTIF(${dateRange}, "P") + COUNTIF(${dateRange}, "CTN")`, v: pCount },
+      { t: 'n', f: `COUNTIF(${dateRange}, "SY") + COUNTIF(${dateRange}, "GD")`, v: stat?.totalGD || 0 },
+      { t: 'n', f: `COUNTIF(${dateRange}, "BTF")`, v: stat?.totalBTF || 0 },
+      { t: 'n', f: `COUNTIF(${dateRange}, "NTF")`, v: stat?.totalNTF || 0 },
+      { t: 'n', f: `COUNTIF(${dateRange}, "HAL")`, v: stat?.totalHalishahar || 0 },
+      { t: 'n', f: `COUNTIF(${dateRange}, "AFLD") + COUNTIF(${dateRange}, "APT") + COUNTIF(${dateRange}, "AIRPORT")`, v: stat?.totalAirport || 0 },
+      { t: 'n', f: `COUNTIF(${dateRange}, "*IDAC*A*")`, v: stat?.totalIDACMorning || 0 },
+      { t: 'n', f: `COUNTIF(${dateRange}, "*IDAC*B*")`, v: stat?.totalIDACAfternoon || 0 },
+      { t: 'n', f: `COUNTIF(${dateRange}, "*IDAC*C*") + COUNTIF(${dateRange}, "*IDAC*Nt*")`, v: stat?.totalIDACNight || 0 },
+      { t: 'n', f: `COUNTIF(${dateRange}, "*OFF*")`, v: dutyOffCount },
+      { t: 'n', f: `SUM(${syColLetter}${excelRowNum}:${idacCColLetter}${excelRowNum})`, v: stat?.totalDutyCount || 0 },
     ];
 
     rows.push(row);
@@ -1317,22 +1345,22 @@ export function exportMonthlyAttendanceRegisterExcel(
 
   const totalCols = headers.length;
 
-  // Title styling (Row 0, 1, 2)
+  // Title styling (Row 0, 1, 2) - Font Arial
   if (ws['A1']) {
     ws['A1'].s = {
-      font: { name: 'Calibri', sz: 14, bold: true, color: { rgb: '000000' } },
+      font: { name: 'Arial', sz: 14, bold: true, color: { rgb: '000000' } },
       alignment: { horizontal: 'center', vertical: 'center' },
     };
   }
   if (ws['A2']) {
     ws['A2'].s = {
-      font: { name: 'Calibri', sz: 12, bold: true, underline: true, color: { rgb: '000000' } },
+      font: { name: 'Arial', sz: 12, bold: true, underline: true, color: { rgb: '000000' } },
       alignment: { horizontal: 'center', vertical: 'center' },
     };
   }
   if (ws['A3']) {
     ws['A3'].s = {
-      font: { name: 'Calibri', sz: 11, bold: true, color: { rgb: '000000' } },
+      font: { name: 'Arial', sz: 12, bold: true, color: { rgb: '000000' } },
       alignment: { horizontal: 'center', vertical: 'center' },
     };
   }
@@ -1344,7 +1372,7 @@ export function exportMonthlyAttendanceRegisterExcel(
     { s: { r: 2, c: 0 }, e: { r: 2, c: totalCols - 1 } },
   ];
 
-  // Format table rows (No alternating colors - clean white background everywhere)
+  // Format table rows: Font Arial 12, wrapText: true, center/left alignment
   for (let r = tableHeaderRowIndex; r < rows.length; r++) {
     const isHeader = r === tableHeaderRowIndex;
     for (let c = 0; c < totalCols; c++) {
@@ -1362,15 +1390,15 @@ export function exportMonthlyAttendanceRegisterExcel(
       ws[cellAddr].s = {
         border: thinBorder,
         font: {
-          name: 'Calibri',
-          sz: isHeader ? 10 : 9,
-          bold: isHeader || c === 0 || c >= totalCols - 10,
+          name: 'Arial',
+          sz: 12,
+          bold: isHeader || c === 0 || c >= totalCols - 11,
           color: { rgb: '000000' },
         },
         alignment: {
           vertical: 'center',
           horizontal: isName && !isHeader ? 'left' : 'center',
-          wrapText: false,
+          wrapText: true,
         },
         fill: {
           fgColor: { rgb: isHeader ? 'F1F5F9' : 'FFFFFF' },
@@ -1379,35 +1407,111 @@ export function exportMonthlyAttendanceRegisterExcel(
     }
   }
 
-  // Column widths
+  // Column widths: All Date columns have the exact same uniform width (7), Name column width narrowed
   const colWidths = [
     { wch: 6 },  // SER
-    { wch: 11 }, // BD NO
-    { wch: 9 },  // RANK
-    { wch: 24 }, // NAME
-    { wch: 13 }, // FLT
-    ...Array.from({ length: daysInMonth }, () => ({ wch: 4.5 })), // Days
-    { wch: 9 },  // Present
-    { wch: 6 },  // GD
-    { wch: 6 },  // BTF
-    { wch: 6 },  // NTF
-    { wch: 6 },  // HAL
-    { wch: 6 },  // APT
-    { wch: 6 },  // I-M
-    { wch: 6 },  // I-A
-    { wch: 6 },  // I-N
-    { wch: 11 }, // Total Duty
+    { wch: 12 }, // BD NO
+    { wch: 10 }, // RANK
+    { wch: 18 }, // NAME (narrowed from 28)
+    { wch: 14 }, // FLT
+    ...Array.from({ length: daysInMonth }, () => ({ wch: 7 })), // Days: uniform width
+    { wch: 12 }, // On Parade
+    { wch: 7 },  // SY
+    { wch: 7 },  // BTF
+    { wch: 7 },  // NTF
+    { wch: 7 },  // HAL
+    { wch: 7 },  // AFLD
+    { wch: 9 },  // IDAC "A"
+    { wch: 9 },  // IDAC "B"
+    { wch: 9 },  // IDAC "C"
+    { wch: 10 }, // Duty OFF
+    { wch: 12 }, // Total Duty
   ];
   ws['!cols'] = colWidths;
+
+  // Row heights: Header 28hpt, Data rows 32hpt to fit wrapped text comfortably
+  const rowHeights: Array<{ hpt: number }> = [];
+  rowHeights[0] = { hpt: 22 };
+  rowHeights[1] = { hpt: 20 };
+  rowHeights[2] = { hpt: 18 };
+  rowHeights[3] = { hpt: 10 };
+  rowHeights[tableHeaderRowIndex] = { hpt: 28 };
+  for (let r = tableHeaderRowIndex + 1; r < rows.length; r++) {
+    rowHeights[r] = { hpt: 32 };
+  }
+  ws['!rows'] = rowHeights;
+
+  // Freeze Panes: freeze rows up to Heading Row (Row 5) and columns up to Name (Col A..D)
+  ws['!freeze'] = { xSplit: 4, ySplit: 5, topLeftCell: 'E6', activePane: 'bottomRight', state: 'frozen' };
+  ws['!views'] = [{ xSplit: 4, ySplit: 5, topLeftCell: 'E6', activePane: 'bottomRight', state: 'frozen' }];
 
   XLSX.utils.book_append_sheet(wb, ws, 'Attendance Register');
 
   const defaultName = `155_UASU_Attendance_Register_${year}_${String(month).padStart(2, '0')}.xlsx`;
   const cleanName = (filename || defaultName).replace(/\.(xlsx|csv)$/i, '') + '.xlsx';
   const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-  const blob = new Blob([wbout], {
-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  });
-  saveAs(blob, cleanName);
+  
+  applyFreezePanesToWorkbook(wbout, 4, 5, 'E6')
+    .then((blob) => {
+      saveAs(blob, cleanName);
+    })
+    .catch((err) => {
+      console.warn('Fallback saving without freeze pane injection:', err);
+      const blob = new Blob([wbout], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      saveAs(blob, cleanName);
+    });
+}
+
+async function applyFreezePanesToWorkbook(
+  wbout: any,
+  xSplit = 4,
+  ySplit = 5,
+  topLeftCell = 'E6'
+): Promise<Blob> {
+  try {
+    const zip = await JSZip.loadAsync(wbout);
+    const sheetPath = 'xl/worksheets/sheet1.xml';
+    const sheetFile = zip.file(sheetPath);
+    if (!sheetFile) {
+      return new Blob([wbout], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+    }
+
+    let sheetXml = await sheetFile.async('text');
+    const paneXml = `<pane xSplit="${xSplit}" ySplit="${ySplit}" topLeftCell="${topLeftCell}" activePane="bottomRight" state="frozen"/><selection pane="bottomRight" activeCell="${topLeftCell}" sqref="${topLeftCell}"/>`;
+
+    if (sheetXml.includes('<sheetView workbookViewId="0"/>')) {
+      sheetXml = sheetXml.replace(
+        '<sheetView workbookViewId="0"/>',
+        `<sheetView tabSelected="1" workbookViewId="0">${paneXml}</sheetView>`
+      );
+    } else if (sheetXml.includes('</sheetView>')) {
+      sheetXml = sheetXml.replace('</sheetView>', `${paneXml}</sheetView>`);
+    } else if (sheetXml.includes('<sheetViews>')) {
+      sheetXml = sheetXml.replace(
+        '<sheetViews>',
+        `<sheetViews><sheetView tabSelected="1" workbookViewId="0">${paneXml}</sheetView>`
+      );
+    } else if (sheetXml.includes('<sheetData')) {
+      sheetXml = sheetXml.replace(
+        '<sheetData',
+        `<sheetViews><sheetView tabSelected="1" workbookViewId="0">${paneXml}</sheetView></sheetViews><sheetData`
+      );
+    }
+
+    zip.file(sheetPath, sheetXml);
+    const modifiedArray = await zip.generateAsync({ type: 'arraybuffer' });
+    return new Blob([modifiedArray], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+  } catch (err) {
+    console.error('Failed to inject freeze panes:', err);
+    return new Blob([wbout], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+  }
 }
 

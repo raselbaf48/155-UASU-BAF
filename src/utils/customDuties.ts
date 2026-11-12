@@ -10,7 +10,7 @@ export const DEFAULT_CUSTOM_DUTIES: CustomDutyConfig[] = [
   {
     code: 'CUST_1794394964393' as DutyCategoryCode,
     name: 'Escort Duty',
-    shortName: 'Escort',
+    shortName: 'ESC',
     category: 'Special',
     color: 'bg-indigo-600 text-white',
     badgeBg: 'bg-indigo-100 dark:bg-indigo-900/40 border border-indigo-300 dark:border-indigo-700',

@@ -159,7 +159,7 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
     if (dutyCode === 'DUTY_OFF' || (dutyCode as any) === 'OFF') {
       let offDuty = '';
       if (ass?.notes) {
-        const match = ass.notes.match(/\b(NTF|GD|SY|BTF|IDAC|IDA|AIRPORT|APT|AFLD|HALISHAHAR|HAL)\b/i);
+        const match = ass.notes.match(/\b(NTF|GD|SY|BTF|IDAC|IDA|AIRPORT|APT|AFLD|HALISHAHAR|HAL|ESC|ESCORT)\b/i);
         if (match) offDuty = match[1].toUpperCase();
       }
       if (!offDuty) {
@@ -172,7 +172,8 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
       }
       if (offDuty === 'GD' || offDuty === 'SECURITY') offDuty = 'SY';
       if (offDuty === 'AIRPORT' || offDuty === 'AIRFIELD' || offDuty === 'APT') offDuty = 'AFLD';
-      return { label: offDuty ? `${offDuty} OFF` : 'OFF', type: 'OFF' };
+      if (offDuty === 'ESCORT') offDuty = 'ESC';
+      return { label: offDuty ? `${offDuty}\nOFF` : 'OFF', type: 'OFF' };
     }
 
     if (dutyCode === 'IDAC' || dutyCode === 'IDA') {
@@ -183,14 +184,26 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
 
     if (dutyCode === 'LEAVE') return { label: 'L', type: 'LEAVE' };
     if (dutyCode === 'TDY') return { label: 'TDY', type: 'TDY' };
-    if (dutyCode === 'GD') return { label: 'SY', type: 'DUTY' };
-    if (dutyCode === 'AIRPORT' || (dutyCode as any) === 'APT' || (dutyCode as any) === 'AIRFIELD') return { label: 'AFLD', type: 'DUTY' };
+    if ((dutyCode as any) === 'ESCORT' || (dutyCode as any) === 'ESC' || (dutyCode && String(dutyCode).includes('1794394'))) {
+      return { label: 'ESC', type: 'DUTY' };
+    }
+    if (dutyCode === 'GD' || (dutyCode as any) === 'SECURITY') return { label: 'SY', type: 'DUTY' };
+    if (dutyCode === 'AIRPORT' || (dutyCode as any) === 'APT' || (dutyCode as any) === 'AIRFIELD' || (dutyCode as any) === 'AFLD') return { label: 'AFLD', type: 'DUTY' };
 
-    const label = dutyType?.shortName || dutyCode || '-';
+    let label = dutyType?.shortName || dutyCode || '-';
+    if (label === 'APT' || label === 'AIRPORT' || label === 'AIRFIELD') label = 'AFLD';
+    if (label === 'GD') label = 'SY';
+    if (label === 'IDAC Nt' || label === 'IDAC NT' || label.includes('IDAC Nt')) label = 'IDAC "C"';
+    if (label.includes(' OFF')) {
+      label = label.replace(/ OFF/g, '\nOFF');
+    }
+    if (label.startsWith('APT')) label = label.replace(/^APT/, 'AFLD');
+    if (label.startsWith('GD')) label = label.replace(/^GD/, 'SY');
+    if (label.includes('IDAC Nt')) label = label.replace(/IDAC Nt/g, 'IDAC "C"');
     return { label, type: 'DUTY' };
   };
 
-  // Present days count for each airman (P and CTN both count as present)
+  // Present days count for each airman (P and CTN both count as present / On Parade)
   const presentMap = useMemo(() => {
     const map = new Map<string, number>();
     filteredAirmen.forEach((airman) => {
@@ -200,6 +213,22 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
         if (info.label === 'P' || info.label === 'CTN' || info.type === 'PRESENT') pCount++;
       });
       map.set(airman.id, pCount);
+    });
+    return map;
+  }, [filteredAirmen, daysArray, monthKey, assignmentMap]);
+
+  // Duty OFF count for each airman
+  const dutyOffMap = useMemo(() => {
+    const map = new Map<string, number>();
+    filteredAirmen.forEach((airman) => {
+      let offCount = 0;
+      daysArray.forEach((day) => {
+        const info = resolveDutyLabel(airman, day);
+        if (info.type === 'OFF' || info.label.includes('OFF')) {
+          offCount++;
+        }
+      });
+      map.set(airman.id, offCount);
     });
     return map;
   }, [filteredAirmen, daysArray, monthKey, assignmentMap]);
@@ -334,34 +363,55 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
         </div>
       </div>
 
-      {/* Printable Sheet (Standard clean white document landscape format) */}
-      <div className="w-full max-w-[1350px] bg-white text-slate-900 rounded-xl shadow-2xl p-6 sm:p-8 print:p-0 print:shadow-none print:w-full print:max-w-none print:rounded-none">
+      {/* Printable Sheet (Standard clean white document landscape format, A4 fit) */}
+      <div className="attendance-register-print w-full max-w-[1400px] bg-white text-slate-900 rounded-xl shadow-2xl p-4 sm:p-6 print:p-0 print:shadow-none print:w-full print:max-w-none print:rounded-none">
         {/* Document Header as requested:
             Heading: 155 UASU, BAF (BOLD)
             Attendance Register
             Month underneath */}
-        <div className="text-center pb-3 mb-4 border-b-2 border-slate-900">
-          <h1 className="text-xl sm:text-2xl font-black uppercase tracking-wider text-slate-900">
+        <div className="text-center pb-2 mb-3 border-b-2 border-slate-900">
+          <h1 className="text-xl sm:text-2xl font-black uppercase tracking-wider text-slate-900 print:text-base">
             155 UASU, BAF
           </h1>
-          <h2 className="text-base sm:text-lg font-black uppercase underline underline-offset-4 tracking-wide text-slate-900 mt-1">
+          <h2 className="text-base sm:text-lg font-black uppercase underline underline-offset-4 tracking-wide text-slate-900 mt-0.5 print:text-xs">
             ATTENDANCE REGISTER
           </h2>
-          <p className="text-sm font-bold text-slate-800 mt-1">
+          <p className="text-sm font-bold text-slate-800 mt-0.5 print:text-[10px]">
             Month: {monthName}
           </p>
         </div>
 
-        {/* Main Attendance Table (Clean styling: no alternating colors, black/gray borders) */}
+        {/* Main Attendance Table (Clean styling: no alternating colors, black/gray borders, table-fixed for 1-page fit) */}
         <div className="overflow-x-auto print:overflow-visible">
-          <table className="w-full border-collapse border border-slate-900 text-[10px] print:text-[8px]">
+          <table className="w-full border-collapse border border-slate-900 table-fixed text-[9px] print:text-[6px] print:leading-[7px]">
+            <colgroup>
+              <col style={{ width: '2.2%' }} />
+              <col style={{ width: '4.8%' }} />
+              <col style={{ width: '3.6%' }} />
+              <col style={{ width: '7.4%' }} />
+              <col style={{ width: '4.6%' }} />
+              {daysArray.map((day) => (
+                <col key={day} style={{ width: `${52.4 / daysInMonth}%` }} />
+              ))}
+              <col style={{ width: '2.8%' }} />
+              <col style={{ width: '2.0%' }} />
+              <col style={{ width: '2.0%' }} />
+              <col style={{ width: '2.0%' }} />
+              <col style={{ width: '2.0%' }} />
+              <col style={{ width: '2.0%' }} />
+              <col style={{ width: '2.2%' }} />
+              <col style={{ width: '2.2%' }} />
+              <col style={{ width: '2.2%' }} />
+              <col style={{ width: '2.7%' }} />
+              <col style={{ width: '2.9%' }} />
+            </colgroup>
             <thead>
               <tr className="bg-slate-100 text-slate-900 font-bold border-b-2 border-slate-900 text-center">
-                <th className="border border-slate-900 py-1 px-1 w-6 bg-slate-100 text-slate-900">SER</th>
-                <th className="border border-slate-900 py-1 px-1.5 w-14 bg-slate-100 text-slate-900">BD NO</th>
-                <th className="border border-slate-900 py-1 px-1.5 w-10 bg-slate-100 text-slate-900">RANK</th>
-                <th className="border border-slate-900 py-1 px-2 text-left min-w-[120px] bg-slate-100 text-slate-900">NAME</th>
-                <th className="border border-slate-900 py-1 px-1.5 min-w-[70px] bg-slate-100 text-slate-900">FLT</th>
+                <th className="border border-slate-900 py-1 px-0.5 bg-slate-100 text-slate-900 print:p-0">SER</th>
+                <th className="border border-slate-900 py-1 px-0.5 bg-slate-100 text-slate-900 print:p-0">BD NO</th>
+                <th className="border border-slate-900 py-1 px-0.5 bg-slate-100 text-slate-900 print:p-0">RANK</th>
+                <th className="border border-slate-900 py-1 px-1 text-left bg-slate-100 text-slate-900 print:p-0 truncate">NAME</th>
+                <th className="border border-slate-900 py-1 px-0.5 bg-slate-100 text-slate-900 print:p-0">FLT</th>
 
                 {/* Day Columns (No weekend coloring as requested) */}
                 {daysArray.map((day) => {
@@ -370,43 +420,46 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
                   return (
                     <th
                       key={day}
-                      className="border border-slate-900 py-1 px-0.5 min-w-[22px] bg-slate-100 text-slate-900 font-bold"
+                      className="border border-slate-900 py-1 px-0 bg-slate-100 text-slate-900 font-bold print:p-0"
                     >
                       <div>{day}</div>
-                      <div className="text-[8px] print:text-[6px] font-bold text-slate-600">{dayOfWeek}</div>
+                      <div className="text-[7.5px] print:text-[5px] font-bold text-slate-600">{dayOfWeek}</div>
                     </th>
                   );
                 })}
 
-                {/* Summary Right Columns (Clean white/slate headers, no colored badges) */}
-                <th className="border border-slate-900 py-1 px-1 bg-slate-100 text-slate-900 font-bold" title="Total Present">
-                  Present
+                {/* Summary Right Columns */}
+                <th className="border border-slate-900 py-1 px-0.5 bg-slate-100 text-slate-900 font-bold print:p-0 leading-tight" title="On Parade">
+                  On Parade
                 </th>
-                <th className="border border-slate-900 py-1 px-1 bg-slate-100 text-slate-900 font-bold" title="Security Duty (SY)">
+                <th className="border border-slate-900 py-1 px-0.5 bg-slate-100 text-slate-900 font-bold print:p-0 leading-tight" title="Security Duty (SY)">
                   SY
                 </th>
-                <th className="border border-slate-900 py-1 px-1 bg-slate-100 text-slate-900 font-bold" title="Base Taskforce (BTF)">
+                <th className="border border-slate-900 py-1 px-0.5 bg-slate-100 text-slate-900 font-bold print:p-0 leading-tight" title="Base Taskforce (BTF)">
                   BTF
                 </th>
-                <th className="border border-slate-900 py-1 px-1 bg-slate-100 text-slate-900 font-bold" title="Najirpara Taskforce (NTF)">
+                <th className="border border-slate-900 py-1 px-0.5 bg-slate-100 text-slate-900 font-bold print:p-0 leading-tight" title="Najirpara Taskforce (NTF)">
                   NTF
                 </th>
-                <th className="border border-slate-900 py-1 px-1 bg-slate-100 text-slate-900 font-bold" title="Halishahar (HAL)">
+                <th className="border border-slate-900 py-1 px-0.5 bg-slate-100 text-slate-900 font-bold print:p-0 leading-tight" title="Halishahar (HAL)">
                   HAL
                 </th>
-                <th className="border border-slate-900 py-1 px-1 bg-slate-100 text-slate-900 font-bold" title="Airfield (AFLD)">
+                <th className="border border-slate-900 py-1 px-0.5 bg-slate-100 text-slate-900 font-bold print:p-0 leading-tight" title="Airfield (AFLD)">
                   AFLD
                 </th>
-                <th className="border border-slate-900 py-1 px-1 bg-slate-100 text-slate-900 font-bold" title="IDAC Shift A">
+                <th className="border border-slate-900 py-1 px-0.5 bg-slate-100 text-slate-900 font-bold print:p-0 leading-tight" title="IDAC Shift A">
                   IDAC "A"
                 </th>
-                <th className="border border-slate-900 py-1 px-1 bg-slate-100 text-slate-900 font-bold" title="IDAC Shift B">
+                <th className="border border-slate-900 py-1 px-0.5 bg-slate-100 text-slate-900 font-bold print:p-0 leading-tight" title="IDAC Shift B">
                   IDAC "B"
                 </th>
-                <th className="border border-slate-900 py-1 px-1 bg-slate-100 text-slate-900 font-bold" title="IDAC Shift C">
+                <th className="border border-slate-900 py-1 px-0.5 bg-slate-100 text-slate-900 font-bold print:p-0 leading-tight" title="IDAC Shift C">
                   IDAC "C"
                 </th>
-                <th className="border border-slate-900 py-1 px-1 bg-slate-100 text-slate-900 font-bold" title="Total Duties Performed">
+                <th className="border border-slate-900 py-1 px-0.5 bg-slate-100 text-slate-900 font-bold print:p-0 leading-tight" title="Duty OFF Count">
+                  Duty OFF
+                </th>
+                <th className="border border-slate-900 py-1 px-0.5 bg-slate-100 text-slate-900 font-bold print:p-0 leading-tight" title="Total Duties Performed">
                   Total Duty
                 </th>
               </tr>
@@ -415,68 +468,72 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
               {filteredAirmen.map((airman, idx) => {
                 const stat = statsMap.get(airman.id);
                 const pCount = presentMap.get(airman.id) ?? 0;
+                const dutyOffCount = dutyOffMap.get(airman.id) ?? 0;
 
                 return (
                   <tr key={`${airman.id}-${idx}`} className="border-b border-slate-900">
-                    <td className="border border-slate-900 py-1 px-1 text-center font-mono font-bold bg-white text-slate-900">
+                    <td className="border border-slate-900 py-0.5 px-0.5 text-center font-mono font-bold bg-white text-slate-900 print:p-0">
                       {idx + 1}
                     </td>
-                    <td className="border border-slate-900 py-1 px-1 text-center font-mono font-bold whitespace-nowrap bg-white text-slate-900">
+                    <td className="border border-slate-900 py-0.5 px-0.5 text-center font-mono font-bold whitespace-nowrap bg-white text-slate-900 print:p-0">
                       {airman.bdNo}
                     </td>
-                    <td className="border border-slate-900 py-1 px-1 text-center font-bold bg-white text-slate-900">
+                    <td className="border border-slate-900 py-0.5 px-0.5 text-center font-bold bg-white text-slate-900 print:p-0">
                       {formatRank(airman.rank)}
                     </td>
-                    <td className="border border-slate-900 py-1 px-2 font-bold text-left whitespace-nowrap truncate max-w-[140px] bg-white text-slate-900">
+                    <td className="border border-slate-900 py-0.5 px-1 font-bold text-left whitespace-nowrap truncate bg-white text-slate-900 print:p-0">
                       {airman.name || airman.fullName}
                     </td>
-                    <td className="border border-slate-900 py-1 px-1 text-center font-bold whitespace-nowrap bg-white text-slate-900">
+                    <td className="border border-slate-900 py-0.5 px-0.5 text-center font-bold whitespace-nowrap bg-white text-slate-900 print:p-0">
                       {formatFlightFullName(airman.flightName)}
                     </td>
 
-                    {/* Day Cells (Clean white background, no alternating colors) */}
+                    {/* Day Cells (Clean white background, whitespace-pre-line so BTF\nOFF wraps) */}
                     {daysArray.map((day) => {
                       const info = resolveDutyLabel(airman, day);
 
                       return (
                         <td
                           key={day}
-                          className="border border-slate-900 py-1 px-0.5 text-center font-mono font-bold leading-none bg-white text-slate-900 text-[9px] print:text-[7px]"
+                          className="border border-slate-900 py-0.5 px-0 text-center font-mono font-bold leading-none bg-white text-slate-900 text-[8.5px] print:text-[5.5px] print:leading-[6.5px] whitespace-pre-line print:p-0"
                         >
                           {info.label}
                         </td>
                       );
                     })}
 
-                    {/* Summary Counters (Clean white background, no colored badges) */}
-                    <td className="border border-slate-900 py-1 px-1 text-center font-mono font-bold bg-white text-slate-900">
+                    {/* Summary Counters */}
+                    <td className="border border-slate-900 py-0.5 px-0.5 text-center font-mono font-bold bg-white text-slate-900 print:p-0">
                       {pCount}
                     </td>
-                    <td className="border border-slate-900 py-1 px-1 text-center font-mono font-bold bg-white text-slate-900">
+                    <td className="border border-slate-900 py-0.5 px-0.5 text-center font-mono font-bold bg-white text-slate-900 print:p-0">
                       {stat?.totalGD || 0}
                     </td>
-                    <td className="border border-slate-900 py-1 px-1 text-center font-mono font-bold bg-white text-slate-900">
+                    <td className="border border-slate-900 py-0.5 px-0.5 text-center font-mono font-bold bg-white text-slate-900 print:p-0">
                       {stat?.totalBTF || 0}
                     </td>
-                    <td className="border border-slate-900 py-1 px-1 text-center font-mono font-bold bg-white text-slate-900">
+                    <td className="border border-slate-900 py-0.5 px-0.5 text-center font-mono font-bold bg-white text-slate-900 print:p-0">
                       {stat?.totalNTF || 0}
                     </td>
-                    <td className="border border-slate-900 py-1 px-1 text-center font-mono font-bold bg-white text-slate-900">
+                    <td className="border border-slate-900 py-0.5 px-0.5 text-center font-mono font-bold bg-white text-slate-900 print:p-0">
                       {stat?.totalHalishahar || 0}
                     </td>
-                    <td className="border border-slate-900 py-1 px-1 text-center font-mono font-bold bg-white text-slate-900">
+                    <td className="border border-slate-900 py-0.5 px-0.5 text-center font-mono font-bold bg-white text-slate-900 print:p-0">
                       {stat?.totalAirport || 0}
                     </td>
-                    <td className="border border-slate-900 py-1 px-1 text-center font-mono font-bold bg-white text-slate-900">
+                    <td className="border border-slate-900 py-0.5 px-0.5 text-center font-mono font-bold bg-white text-slate-900 print:p-0">
                       {stat?.totalIDACMorning || 0}
                     </td>
-                    <td className="border border-slate-900 py-1 px-1 text-center font-mono font-bold bg-white text-slate-900">
+                    <td className="border border-slate-900 py-0.5 px-0.5 text-center font-mono font-bold bg-white text-slate-900 print:p-0">
                       {stat?.totalIDACAfternoon || 0}
                     </td>
-                    <td className="border border-slate-900 py-1 px-1 text-center font-mono font-bold bg-white text-slate-900">
+                    <td className="border border-slate-900 py-0.5 px-0.5 text-center font-mono font-bold bg-white text-slate-900 print:p-0">
                       {stat?.totalIDACNight || 0}
                     </td>
-                    <td className="border border-slate-900 py-1 px-1 text-center font-mono font-bold bg-white text-slate-900">
+                    <td className="border border-slate-900 py-0.5 px-0.5 text-center font-mono font-bold bg-white text-slate-900 print:p-0">
+                      {dutyOffCount}
+                    </td>
+                    <td className="border border-slate-900 py-0.5 px-0.5 text-center font-mono font-bold bg-white text-slate-900 print:p-0">
                       {stat?.totalDutyCount || 0}
                     </td>
                   </tr>
