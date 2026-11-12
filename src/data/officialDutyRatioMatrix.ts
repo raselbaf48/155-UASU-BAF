@@ -232,9 +232,78 @@ export function parseDayNumber(dateStr: string): number {
   return 1;
 }
 
-const MATRIX_STORAGE_KEY = 'baf_official_duty_matrix_v4';
+export interface DutyRatioVersion {
+  id: string;
+  applyFromDate: string; // YYYY-MM-DD
+  title: string;
+  matrix: DutyRatioTable[];
+  createdAt: string;
+  notes?: string;
+}
 
-export function getStoredDutyMatrix(): DutyRatioTable[] {
+export const MATRIX_STORAGE_KEY = 'baf_official_duty_matrix_v4';
+export const RATIO_HISTORY_STORAGE_KEY = 'baf_duty_ratio_history_v1';
+
+export function normalizeDateToISOStr(val: any): string {
+  if (!val) return '';
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return '';
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, '0');
+    const d = String(val.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  const s = String(val).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
+  const dMmmMatch = s.match(/^(\d{1,2})[-\s/]([A-Za-z]{3})[-\s/](\d{2,4})$/);
+  if (dMmmMatch) {
+    const day = parseInt(dMmmMatch[1], 10);
+    const monthStr = dMmmMatch[2].toLowerCase();
+    let year = parseInt(dMmmMatch[3], 10);
+    if (year < 100) year += year >= 50 ? 1900 : 2000;
+    const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+    const monthIdx = months.indexOf(monthStr);
+    if (monthIdx >= 0) {
+      return `${year}-${String(monthIdx + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+
+  const dmyMatch = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+  if (dmyMatch) {
+    const day = parseInt(dmyMatch[1], 10);
+    const month = parseInt(dmyMatch[2], 10);
+    let year = parseInt(dmyMatch[3], 10);
+    if (year < 100) year += year >= 50 ? 1900 : 2000;
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+
+  const dt = new Date(s);
+  if (!isNaN(dt.getTime())) {
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    const d = String(dt.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return s;
+}
+
+export function sanitizeDutyMatrix(matrix: DutyRatioTable[]): DutyRatioTable[] {
+  return matrix.map((m, idx) => {
+    const copy = { ...m };
+    copy.serNo = copy.serNo !== undefined && copy.serNo !== null ? Number(copy.serNo) : (idx + 1);
+    if (copy.dailyRequirements && Array.isArray(copy.dailyRequirements) && copy.dailyRequirements.length > 0) {
+      copy.totalRequiredMonth = copy.dailyRequirements.reduce((a, b) => a + (Number(b) || 0), 0);
+    } else if (!copy.totalRequiredMonth && copy.totalRequiredDaily) {
+      copy.totalRequiredMonth = copy.totalRequiredDaily * 31;
+    }
+    return copy;
+  });
+}
+
+export function getStoredDutyMatrixInternal(): DutyRatioTable[] {
   try {
     if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
       return [...INITIAL_OFFICIAL_DUTY_MATRIX];
@@ -243,7 +312,6 @@ export function getStoredDutyMatrix(): DutyRatioTable[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        // Map over parsed and ensure official updated titles are synchronized while preserving user custom data
         const defaultsMap = new Map(INITIAL_OFFICIAL_DUTY_MATRIX.map((t) => [t.id, t]));
         const updatedParsed = parsed.map((t: DutyRatioTable) => {
           const defT = defaultsMap.get(t.id);
@@ -284,14 +352,12 @@ export function getStoredDutyMatrix(): DutyRatioTable[] {
         const validCustomIds = new Set(customDuties.map(cd => cd.code.toLowerCase() + '_duty'));
         const officialIds = new Set(INITIAL_OFFICIAL_DUTY_MATRIX.map(t => t.id));
         
-        // Filter out deleted custom duties
         let finalMatrix: DutyRatioTable[] = updatedParsed.filter(t => officialIds.has(t.id) || validCustomIds.has(t.id));
         
         if (missing.length > 0) {
           finalMatrix = [...finalMatrix, ...missing];
         }
 
-        // One-time cleanup for old auto-allocated flightTargets so exact ratio (e.g. 27 instead of auto-bumped 28) takes effect
         if (typeof window !== 'undefined' && !localStorage.getItem('baf_cleared_auto_flight_targets_v4')) {
           finalMatrix.forEach(t => {
             delete t.flightTargets;
@@ -299,7 +365,6 @@ export function getStoredDutyMatrix(): DutyRatioTable[] {
           localStorage.setItem('baf_cleared_auto_flight_targets_v4', 'true');
         }
 
-        // Cross-check metadata for any disabled duties to ensure consistency
         try {
           const metaRaw = localStorage.getItem('baf_duty_matrix_metadata');
           if (metaRaw) {
@@ -319,7 +384,6 @@ export function getStoredDutyMatrix(): DutyRatioTable[] {
           }
         } catch (e) {}
 
-        // One-time fix for old corrupted 33/6 security_duty distribution in localStorage
         const secTable = finalMatrix.find(t => t.id === 'security_duty');
         if (secTable && secTable.data?.Mechanics && secTable.data?.Admin) {
           const mechSum = secTable.data.Mechanics.reduce((a: number, b: number) => a + b, 0);
@@ -340,10 +404,7 @@ export function getStoredDutyMatrix(): DutyRatioTable[] {
           }
         }
         
-        // Dynamically append custom duties if they are missing
-        // customDuties already declared
         const existingMatrixIds = new Set(finalMatrix.map(t => t.id));
-        
         customDuties.forEach(cd => {
            const id = cd.code.toLowerCase() + '_duty';
            if (!existingMatrixIds.has(id)) {
@@ -372,7 +433,6 @@ export function getStoredDutyMatrix(): DutyRatioTable[] {
           return 0;
         });
 
-        // Ensure every duty has a mandatory contiguous Ser No: 1, 2, ..., N (kono ser faka thakbe na)
         finalMatrix.forEach((d, idx) => {
           d.serNo = idx + 1;
         });
@@ -384,7 +444,6 @@ export function getStoredDutyMatrix(): DutyRatioTable[] {
     console.error('Failed to load stored duty matrix:', e);
   }
   
-  // Default fallback
   const baseMatrix = [...INITIAL_OFFICIAL_DUTY_MATRIX];
   const customDuties = getCustomDuties();
   customDuties.forEach(cd => {
@@ -395,8 +454,8 @@ export function getStoredDutyMatrix(): DutyRatioTable[] {
              title: cd.name,
              dutyCode: cd.code as any,
              eligibleFlights: ["Mechanics", "Avionics", "GCS", "Admin"],
-                  eligibleRanks: ["Sgt", "Cpl", "LAC", "AC-1"],
-                  totalRequiredMonth: 0,
+             eligibleRanks: ["Sgt", "Cpl", "LAC", "AC-1"],
+             totalRequiredMonth: 0,
              totalRequiredDaily: 0,
              data: {
                Mechanics: Array(31).fill(0),
@@ -422,23 +481,92 @@ export function getStoredDutyMatrix(): DutyRatioTable[] {
   return baseMatrix;
 }
 
+export function getDutyRatioHistory(): DutyRatioVersion[] {
+  try {
+    if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+      return [{
+        id: 'ratio_version_base',
+        applyFromDate: '2026-01-01',
+        title: 'Base Duty Ratio (Default)',
+        matrix: [...INITIAL_OFFICIAL_DUTY_MATRIX],
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }];
+    }
+    const raw = localStorage.getItem(RATIO_HISTORY_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.sort((a, b) => (a.applyFromDate || '').localeCompare(b.applyFromDate || ''));
+      }
+    }
+  } catch (e) {
+    console.error('Failed to load duty ratio history:', e);
+  }
+
+  // Fallback: seed with existing matrix as initial version
+  const baseMatrix = getStoredDutyMatrixInternal();
+  const initialVersion: DutyRatioVersion = {
+    id: 'ratio_version_base',
+    applyFromDate: '2026-01-01',
+    title: 'Base Duty Ratio',
+    matrix: baseMatrix,
+    createdAt: new Date().toISOString(),
+    notes: 'Initial Official Duty Ratio Matrix',
+  };
+  try {
+    localStorage.setItem(RATIO_HISTORY_STORAGE_KEY, JSON.stringify([initialVersion]));
+  } catch (e) {}
+  return [initialVersion];
+}
+
+export function getDutyRatioVersionForDate(dateStr?: string): DutyRatioVersion {
+  const history = getDutyRatioHistory();
+  if (history.length === 0) {
+    return {
+      id: 'ratio_version_base',
+      applyFromDate: '2026-01-01',
+      title: 'Base Duty Ratio',
+      matrix: getStoredDutyMatrixInternal(),
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  let targetISO = '';
+  if (dateStr) {
+    targetISO = normalizeDateToISOStr(dateStr);
+  }
+  if (!targetISO) {
+    const now = new Date();
+    targetISO = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  }
+
+  // Filter versions whose applyFromDate is <= targetISO
+  const applicable = history.filter(v => (v.applyFromDate || '') <= targetISO);
+  if (applicable.length > 0) {
+    // Return latest applicable version
+    return applicable[applicable.length - 1];
+  }
+
+  // If target date is earlier than all versions, return the earliest version
+  return history[0];
+}
+
+export function getStoredDutyMatrix(dateStr?: string): DutyRatioTable[] {
+  if (dateStr) {
+    const version = getDutyRatioVersionForDate(dateStr);
+    if (version && version.matrix && version.matrix.length > 0) {
+      return version.matrix;
+    }
+  }
+  return getStoredDutyMatrixInternal();
+}
+
 export function saveDutyMatrix(matrix: DutyRatioTable[]) {
   try {
-    // 1. Sanitize matrix ensuring totalRequiredMonth always matches daily requirements sum
-    const sanitizedMatrix = matrix.map((m, idx) => {
-      const copy = { ...m };
-      copy.serNo = copy.serNo !== undefined && copy.serNo !== null ? Number(copy.serNo) : (idx + 1);
-      if (copy.dailyRequirements && Array.isArray(copy.dailyRequirements) && copy.dailyRequirements.length > 0) {
-        copy.totalRequiredMonth = copy.dailyRequirements.reduce((a, b) => a + (Number(b) || 0), 0);
-      } else if (!copy.totalRequiredMonth && copy.totalRequiredDaily) {
-        copy.totalRequiredMonth = copy.totalRequiredDaily * 31;
-      }
-      return copy;
-    });
+    const sanitizedMatrix = sanitizeDutyMatrix(matrix);
 
     localStorage.setItem(MATRIX_STORAGE_KEY, JSON.stringify(sanitizedMatrix));
     
-    // Save metadata separately so it gets synced via app_settings
     const metadata = sanitizedMatrix.map(m => ({
         id: m.id,
         serNo: m.serNo,
@@ -470,12 +598,114 @@ export function saveDutyMatrix(matrix: DutyRatioTable[]) {
   }
 }
 
+export function saveDutyRatioVersion(params: {
+  id?: string;
+  applyFromDate: string;
+  title?: string;
+  matrix: DutyRatioTable[];
+  notes?: string;
+}): DutyRatioVersion {
+  const sanitized = sanitizeDutyMatrix(params.matrix);
+  const history = getDutyRatioHistory();
+  const applyDate = normalizeDateToISOStr(params.applyFromDate) || params.applyFromDate;
+  
+  let targetVersion: DutyRatioVersion;
+  const existingIdx = history.findIndex(v => (params.id && v.id === params.id) || v.applyFromDate === applyDate);
+  
+  if (existingIdx >= 0) {
+    targetVersion = {
+      ...history[existingIdx],
+      applyFromDate: applyDate,
+      title: params.title || history[existingIdx].title || `All Duties Ratio (${applyDate})`,
+      matrix: sanitized,
+      notes: params.notes ?? history[existingIdx].notes,
+    };
+    history[existingIdx] = targetVersion;
+  } else {
+    targetVersion = {
+      id: params.id || `ratio_v_${Date.now()}`,
+      applyFromDate: applyDate,
+      title: params.title || `All Duties Ratio (${applyDate})`,
+      matrix: sanitized,
+      createdAt: new Date().toISOString(),
+      notes: params.notes || '',
+    };
+    history.push(targetVersion);
+  }
+
+  history.sort((a, b) => (a.applyFromDate || '').localeCompare(b.applyFromDate || ''));
+  
+  try {
+    localStorage.setItem(RATIO_HISTORY_STORAGE_KEY, JSON.stringify(history));
+    localStorage.setItem(MATRIX_STORAGE_KEY, JSON.stringify(sanitized));
+  } catch (e) {
+    console.error('Failed to save duty ratio history:', e);
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('baf_duty_ratio_history_updated', { detail: { history } }));
+    window.dispatchEvent(new CustomEvent('baf_duty_ratio_updated', { detail: { matrix: sanitized } }));
+  }
+
+  return targetVersion;
+}
+
+export function deleteDutyRatioVersion(id: string): boolean {
+  try {
+    const raw = localStorage.getItem(RATIO_HISTORY_STORAGE_KEY);
+    const history: DutyRatioVersion[] = raw ? JSON.parse(raw) : getDutyRatioHistory();
+    const filtered = history.filter(v => v.id !== id);
+
+    if (filtered.length === history.length) {
+      console.warn('Version not found to delete:', id);
+      return false;
+    }
+
+    if (filtered.length === 0) {
+      const resetVersion: DutyRatioVersion = {
+        id: 'ratio_version_base',
+        applyFromDate: '2026-01-01',
+        title: 'All Duties Ratio (Default)',
+        matrix: [...INITIAL_OFFICIAL_DUTY_MATRIX],
+        createdAt: new Date().toISOString(),
+        notes: 'Reset to Official Unit Default Scale',
+      };
+      localStorage.setItem(RATIO_HISTORY_STORAGE_KEY, JSON.stringify([resetVersion]));
+      localStorage.setItem(MATRIX_STORAGE_KEY, JSON.stringify(INITIAL_OFFICIAL_DUTY_MATRIX));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('baf_duty_ratio_history_updated', { detail: { history: [resetVersion] } }));
+        window.dispatchEvent(new CustomEvent('baf_duty_ratio_updated', { detail: { matrix: INITIAL_OFFICIAL_DUTY_MATRIX } }));
+      }
+      return true;
+    }
+
+    localStorage.setItem(RATIO_HISTORY_STORAGE_KEY, JSON.stringify(filtered));
+    const latest = filtered[filtered.length - 1];
+    if (latest && latest.matrix) {
+      localStorage.setItem(MATRIX_STORAGE_KEY, JSON.stringify(latest.matrix));
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('baf_duty_ratio_history_updated', { detail: { history: filtered } }));
+      if (latest && latest.matrix) {
+        window.dispatchEvent(new CustomEvent('baf_duty_ratio_updated', { detail: { matrix: latest.matrix } }));
+      }
+    }
+    return true;
+  } catch (e) {
+    console.error('Failed to delete duty ratio version:', e);
+    return false;
+  }
+}
+
 export function resetDutyMatrixToDefault(): DutyRatioTable[] {
   try {
     localStorage.removeItem(MATRIX_STORAGE_KEY);
+    localStorage.removeItem(RATIO_HISTORY_STORAGE_KEY);
     if (typeof window !== 'undefined') {
       setTimeout(() => {
         window.dispatchEvent(new CustomEvent('baf_duty_ratio_updated', { detail: { matrix: INITIAL_OFFICIAL_DUTY_MATRIX } }));
+        window.dispatchEvent(new CustomEvent('baf_duty_ratio_history_updated', { detail: { history: [] } }));
       }, 0);
     }
   } catch (e) {
@@ -489,7 +719,7 @@ export function resetDutyMatrixToDefault(): DutyRatioTable[] {
  * by extracting the day number (1..31) and summing quotas across all duty tables.
  */
 export function getDailyQuotasFromMatrix(dateStr: string): FlightDutyQuota[] {
-  const matrix = getStoredDutyMatrix();
+  const matrix = getStoredDutyMatrix(dateStr);
   const dayNum = parseDayNumber(dateStr);
   const dayIndex = Math.max(0, Math.min(30, dayNum - 1));
 
@@ -535,7 +765,7 @@ export function getIdacShiftsForDateAndFlight(dateStr: string, flight?: FlightNa
   const dayNum = parseDayNumber(dateStr);
   const dayIndex = Math.max(0, Math.min(30, dayNum - 1));
 
-  const matrix = getStoredDutyMatrix();
+  const matrix = getStoredDutyMatrix(dateStr);
 
   const morTable = matrix.find((t) => t.id === 'idac_mor' || (t.dutyCode === 'IDAC' && t.shiftLabel === 'Morning'));
   const anTable = matrix.find((t) => t.id === 'idac_an' || (t.dutyCode === 'IDAC' && t.shiftLabel === 'Afternoon'));
@@ -561,8 +791,6 @@ export function getIdacShiftsForDateAndFlight(dateStr: string, flight?: FlightNa
   if (anQuota > 0) availableShifts.push('Afternoon');
   if (ntQuota > 0) availableShifts.push('Night');
 
-  // If a specific flight is chosen, return ONLY the shifts that have quota for this flight!
-  // If no flight is specified (Overall / All) and all quotas are 0, return all 3 standard shifts
   if (!isSpecificFlight && availableShifts.length === 0) {
     return ['Morning', 'Afternoon', 'Night'];
   }
@@ -583,7 +811,7 @@ export function getFlightDutyQuotaForDate(
   const dayNum = parseDayNumber(dateStr);
   const dayIndex = Math.max(0, Math.min(30, dayNum - 1));
 
-  const matrix = getStoredDutyMatrix();
+  const matrix = getStoredDutyMatrix(dateStr);
 
   let table: DutyRatioTable | undefined;
   if (dutyCode === 'IDAC' || dutyCode === 'IDA') {
@@ -594,7 +822,6 @@ export function getFlightDutyQuotaForDate(
     } else if (shiftLabel === 'Night') {
       table = matrix.find((t) => t.id === 'idac_nt' || (t.dutyCode === 'IDAC' && t.shiftLabel === 'Night'));
     } else {
-      // If no shift is selected, we return 0 quota so no flights are auto-selected or shown
       return 0;
     }
   } else if (dutyCode === 'GD') {
@@ -613,8 +840,6 @@ export function getFlightDutyQuotaForDate(
 
   if (!table || table.isDisabled) return 0;
   
-  // If the user explicitly set a target of 0 for this flight for the whole month, return 0 for all days.
-  // This handles cases where they use LRM but haven't updated the daily arrays in the calendar.
   if (table.flightTargets && typeof table.flightTargets[flight] === 'number' && table.flightTargets[flight] === 0) {
     return 0;
   }
@@ -626,7 +851,7 @@ export function getFlightsForIdacShift(dateStr: string, shift: string): import('
   if (!dateStr || !shift) return [];
   const dayNum = parseDayNumber(dateStr);
   const dayIndex = Math.max(0, Math.min(30, dayNum - 1));
-  const matrix = getStoredDutyMatrix();
+  const matrix = getStoredDutyMatrix(dateStr);
   
   let table;
   if (shift === 'Morning') {

@@ -56,7 +56,7 @@ export function compareAirmenDefaultSeniority(a: Airman, b: Airman): number {
  */
 export function sortAirmenBySeniority(airmen: Airman[]): Airman[] {
   return [...airmen].sort((a, b) => {
-    // 1. Absolute Rank Hierarchy Check
+    // 1. Absolute Rank Hierarchy Check (MWO > SWO > WO > Sgt > Cpl > LAC > AC-1 > AC-2)
     const rankA = RANK_SENIORITY[a.rank] || 99;
     const rankB = RANK_SENIORITY[b.rank] || 99;
 
@@ -64,17 +64,20 @@ export function sortAirmenBySeniority(airmen: Airman[]): Airman[] {
       return rankA - rankB;
     }
 
-    // 2. Custom manual seniority within the rank
-    const sA = (a.seniority !== undefined && a.seniority !== null && !isNaN(Number(a.seniority))) ? Number(a.seniority) : null;
-    const sB = (b.seniority !== undefined && b.seniority !== null && !isNaN(Number(b.seniority))) ? Number(b.seniority) : null;
+    // 2. Custom manual seniority within the rank: ONLY applicable to JCOs (MWO, SWO, WO)
+    if (isJcoRank(a.rank) && isJcoRank(b.rank)) {
+      const sA = (a.seniority !== undefined && a.seniority !== null && !isNaN(Number(a.seniority))) ? Number(a.seniority) : null;
+      const sB = (b.seniority !== undefined && b.seniority !== null && !isNaN(Number(b.seniority))) ? Number(b.seniority) : null;
 
-    if (sA !== null && sB !== null && sA !== sB) {
-      return sA - sB;
+      if (sA !== null && sB !== null && sA !== sB) {
+        return sA - sB;
+      }
+      if (sA !== null && sB === null) return -1;
+      if (sA === null && sB !== null) return 1;
     }
-    if (sA !== null && sB === null) return -1;
-    if (sA === null && sB !== null) return 1;
 
-    // 3. Fallback within the same rank: strictly by BD Number (lower BD No = more senior)
+    // 3. For Non-JCOs (Sgt, Cpl, LAC, AC-1, AC-2) and fallback for JCOs:
+    // Strictly by BD Number (lower BD No = more senior in Bangladesh Air Force)
     return compareAirmenDefaultSeniority(a, b);
   });
 }

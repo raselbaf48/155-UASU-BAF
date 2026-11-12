@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { DutyRatioConfigPanel } from './DutyRatioConfigPanelV4';
 
 import {
@@ -6,7 +6,11 @@ import {
   getStoredDutyMatrix,
   saveDutyMatrix,
   resetDutyMatrixToDefault,
+  getDutyRatioVersionForDate,
+  DutyRatioVersion,
+  saveDutyRatioVersion,
 } from '../data/officialDutyRatioMatrix';
+import { formatShortDate } from '../utils/csvExport';
 import { calculateBalancedAutoTargets, autoAllocateDutyMatrix, DEFAULT_MANPOWER, AllocationMode } from '../utils/dutyDistribution';
 import { FlightName, UserRole } from '../types';
 import { pushDutyListToCloud } from '../utils/dutyCloudSync';
@@ -28,13 +32,14 @@ import {
   ArrowLeft,
   Calendar,
   Eye,
-  CheckCircle2, Clock } from 'lucide-react';
+  CheckCircle2, Clock, History } from 'lucide-react';
 import { exportDutyRatioDocx } from '../utils/docxExport';
 import { ImportDutyRatioModal } from './ImportDutyRatioModal';
 import { FlightDutyCalendarModal } from './FlightDutyCalendarModal';
 import { PrintableDutyRatioModal, formatDisplayDate } from "./PrintableDutyRatioModal";
 import { AutoAllocateModal } from './AutoAllocateModal';
 import { DateNavigator } from './DateNavigator';
+import { RatioHistoryModal } from './RatioHistoryModal';
 
 interface DutyRatioMatrixViewProps {
   role?: UserRole;
@@ -85,15 +90,41 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
     localStorage.setItem('baf_duty_distribution_target_date', targetDate);
   }, [targetDate]);
 
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState<boolean>(false);
+
+  const activeVersion = useMemo(() => {
+    return getDutyRatioVersionForDate(targetDate);
+  }, [targetDate, matrix]);
+
   useEffect(() => {
-    const handleUpdate = () => setMatrix(getStoredDutyMatrix());
+    const ver = getDutyRatioVersionForDate(targetDate);
+    if (ver && ver.matrix && ver.matrix.length > 0) {
+      setMatrix(ver.matrix);
+    }
+  }, [targetDate]);
+
+  useEffect(() => {
+    const handleUpdate = (e: any) => {
+      if (e?.detail?.matrix && Array.isArray(e.detail.matrix)) {
+        setMatrix(e.detail.matrix);
+        return;
+      }
+      const ver = getDutyRatioVersionForDate(targetDate);
+      if (ver && ver.matrix && ver.matrix.length > 0) {
+        setMatrix(ver.matrix);
+      } else {
+        setMatrix(getStoredDutyMatrix(targetDate));
+      }
+    };
     window.addEventListener('baf_custom_duties_updated', handleUpdate);
     window.addEventListener('baf_duty_ratio_updated', handleUpdate);
+    window.addEventListener('baf_duty_ratio_history_updated', handleUpdate);
     return () => {
       window.removeEventListener('baf_custom_duties_updated', handleUpdate);
       window.removeEventListener('baf_duty_ratio_updated', handleUpdate);
+      window.removeEventListener('baf_duty_ratio_history_updated', handleUpdate);
     };
-  }, []);
+  }, [targetDate]);
   const [settingsTab, setSettingsTab] = useState<'Overall' | 'Mechanics' | 'Avionics' | 'GCS' | null>(null);
   const [editingCalendar, setEditingCalendar] = useState<{tableIdx: number, flight: FlightName} | null>(null);
   const [autoAllocateToast, setAutoAllocateToast] = useState<boolean>(false);
@@ -228,22 +259,27 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
     if (forceVal !== undefined) {
       nextVal = forceVal;
     } else {
-      // 1 click -> 1, another click -> 0 (remove)
+      // 1 click on 0 -> 1, click on 1 -> 0
       nextVal = currentVal > 0 ? 0 : 1;
     }
 
-    const updated = [...matrix];
-    const tableObj = { ...updated[tableIndex] };
-    const flightData = { ...tableObj.data };
-    const arr = [...(flightData[flight] || Array(31).fill(0))];
-    arr[dayIndex] = nextVal;
-    flightData[flight] = arr;
-    tableObj.data = flightData;
-    updated[tableIndex] = tableObj;
+    const updated = matrix.map((t, idx) => {
+      if (idx !== tableIndex) return t;
+      const flightData = { ...t.data };
+      const arr = [...(flightData[flight] || Array(31).fill(0))];
+      arr[dayIndex] = nextVal;
+      flightData[flight] = arr;
+      return {
+        ...t,
+        data: flightData,
+      };
+    });
+
     setMatrix(updated);
     saveDutyMatrix(updated);
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 2000);
+    pushDutyListToCloud(updated).catch(err => console.warn('[DutyRatioMatrixViewV2] Realtime sync error:', err));
   };
 
   const handleResetTable = (tableIndex: number) => {
@@ -266,8 +302,6 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
     setTimeout(() => setIsSaved(false), 2000);
     setResetConfirmTableIdx(null);
   };
-
-
 
   const handleSave = () => {
     saveDutyMatrix(matrix);
@@ -381,6 +415,16 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
             <>
               <button
                 type="button"
+                onClick={() => setIsHistoryModalOpen(true)}
+                className="px-3 py-2 text-xs font-bold text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/50 rounded-xl transition-colors flex items-center space-x-1.5 shadow-xs cursor-pointer"
+                title="View All Duties Ratio History"
+              >
+                <History className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                <span>All Duties Ratio</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setIsImportModalOpen(true)}
                 className="px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-xl transition-colors flex items-center space-x-1.5 shadow-xs cursor-pointer"
                 title="Import Duty Ratio Matrix from CSV / Excel"
@@ -418,17 +462,39 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
 
     {/* CONTROLS SECTION */}
     <div className="flex flex-col items-center justify-center space-y-4">
-      {/* LAST UPDATING DATE */}
+      {/* APPLY FROM DATE & SAVE BUTTON */}
       <div className="flex flex-col items-center justify-center mx-auto">
         <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 flex items-center justify-center gap-1.5">
-          <span>Last Updating Date:</span>
+          <span>Apply From:</span>
         </div>
-        <DateNavigator
-          value={targetDate}
-          onChange={(e) => setTargetDate(e.target.value)}
-          format="dd_mm_yy"
-          className="px-3.5 py-1.5 font-bold text-indigo-700 dark:text-indigo-400 text-xs sm:text-sm bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg text-center shadow-xs hover:border-indigo-500 transition-colors flex items-center justify-center gap-2 min-w-[125px]"
-        />
+        <div className="flex items-center gap-2">
+          <DateNavigator
+            value={targetDate}
+            onChange={(e) => setTargetDate(e.target.value)}
+            format="dd_mm_yy"
+            className="px-3.5 py-1.5 font-bold text-indigo-700 dark:text-indigo-400 text-xs sm:text-sm bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg text-center shadow-xs hover:border-indigo-500 transition-colors flex items-center justify-center gap-2 min-w-[125px]"
+          />
+          <button
+            type="button"
+            onClick={() => {
+              const formatted = formatShortDate(targetDate);
+              const title = `All Duties Ratio (${formatted})`;
+              saveDutyRatioVersion({
+                applyFromDate: targetDate,
+                title,
+                matrix,
+                notes: `Saved for Apply From: ${targetDate}`,
+              });
+              setIsSaved(true);
+              setTimeout(() => setIsSaved(false), 2500);
+            }}
+            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-bold rounded-lg shadow-xs flex items-center gap-1.5 cursor-pointer transition-all"
+            title="Save current duty ratio to All Duties Ratio History"
+          >
+            <Save className="w-3.5 h-3.5" />
+            <span>Save</span>
+          </button>
+        </div>
       </div>
 
       {/* TAB NAVIGATION */}
@@ -1474,6 +1540,20 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
         isOpen={isAutoAllocateModalOpen}
         onClose={() => setIsAutoAllocateModalOpen(false)}
         onSelectMode={(mode) => handleTriggerAutoAllocate(mode)}
+      />
+
+      {/* Ratio History & Versioning Modal */}
+      <RatioHistoryModal
+        isOpen={isHistoryModalOpen}
+        onClose={() => setIsHistoryModalOpen(false)}
+        targetDate={targetDate}
+        currentMatrix={matrix}
+        onSelectVersion={(selected) => {
+          setTargetDate(selected.applyFromDate);
+          if (selected.matrix && selected.matrix.length > 0) {
+            setMatrix(selected.matrix);
+          }
+        }}
       />
 </div>
   );

@@ -6,6 +6,7 @@ import { Airman, Rank, FlightName, DutyCategoryCode } from '../types';
 import { addCustomDuty, CustomDutyConfig, removeCustomDuty } from '../utils/customDuties';
 import { getSavedCustomDisposals, saveCustomDisposal, removeSavedCustomDisposal } from '../utils/customDisposalStore';
 import { calculateExactDutyRatios, roundDutyByRule, isFixedEqualDuty } from '../utils/dutyDistribution';
+import { sortAirmenBySeniority } from '../utils/seniority';
 
 const STANDARD_DISPOSALS = [
   '-',
@@ -318,8 +319,8 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
   }, [airmen, targetDate]);
 
   const filteredAirmen = useMemo(() => {
-    if (nominalRollFlightFilter === 'All') return airmen;
-    return airmen.filter(a => a.flightName === nominalRollFlightFilter);
+    const list = nominalRollFlightFilter === 'All' ? airmen : airmen.filter(a => a.flightName === nominalRollFlightFilter);
+    return sortAirmenBySeniority(list);
   }, [airmen, nominalRollFlightFilter]);
 
   const getEffectiveManpower = () => {
@@ -1169,7 +1170,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                         }`}
                         title={warning ? `Current total: ${totalVal}, Target: ${t.totalRequiredMonth}` : `Matched: ${totalVal}`}
                       >
-                        {totalVal}
+                        {showExactRatio ? `${totalVal}/${t.totalRequiredMonth}` : totalVal}
                       </td>
                     );
                   })}

@@ -7,6 +7,8 @@ import { addCustomDuty, CustomDutyConfig, removeCustomDuty } from '../utils/cust
 import { getSavedCustomDisposals, saveCustomDisposal, removeSavedCustomDisposal } from '../utils/customDisposalStore';
 import { calculateBalancedAutoTargets, calculateExactDutyRatios, roundDutyByRule, isFixedEqualDuty, DEFAULT_MANPOWER } from '../utils/dutyDistribution';
 import { pushDutyListToCloud, pullDutyListFromCloud, DutySyncResult } from '../utils/dutyCloudSync';
+import { getAirmanJoinDateISO, getAirmanLeftDateISO, normalizeDateToISO, formatShortDate } from '../utils/csvExport';
+import { sortAirmenBySeniority } from '../utils/seniority';
 
 const STANDARD_DISPOSALS = [
   '-',
@@ -425,10 +427,36 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
   const [settingsTableIdx, setSettingsTableIdx] = useState<number | null>(null);
   const [airmen, setAirmen] = useState<Airman[]>([]);
   useEffect(() => {
-    const allAirmen = localDb.getAirmen().filter(a => a.active);
-    const sgtAndBelow = allAirmen.filter(a => !['MWO', 'SWO', 'WO'].includes(a.rank));
-    setAirmen(sgtAndBelow);
+    const refreshAirmen = () => {
+      const allAirmen = localDb.getAirmen();
+      const sgtAndBelow = allAirmen.filter(a => !['MWO', 'SWO', 'WO'].includes(a.rank));
+      setAirmen(sortAirmenBySeniority(sgtAndBelow));
+    };
+    refreshAirmen();
+    window.addEventListener('baf_data_updated', refreshAirmen);
+    return () => window.removeEventListener('baf_data_updated', refreshAirmen);
   }, []);
+
+  const isAirmanInUnitOnDate = (a: Airman, targetISO: string): boolean => {
+    if (!targetISO) return a.active !== false;
+    const joinDate = getAirmanJoinDateISO(a);
+    const leftDate = getAirmanLeftDateISO(a);
+    // 1. If airman joined AFTER targetDate -> not reported to unit yet! Exclude!
+    if (joinDate && joinDate > targetISO) {
+      return false;
+    }
+    // 2. If airman left BEFORE targetDate -> already left unit! Exclude!
+    if (leftDate && leftDate < targetISO) {
+      return false;
+    }
+    // 3. Inactive without explicit left date
+    if (a.active === false && !leftDate) {
+      return false;
+    }
+    return true;
+  };
+
+  const targetISO = useMemo(() => normalizeDateToISO(targetDate), [targetDate]);
 
   const airmanDefaults = useMemo(() => {
     const map: Record<string, string> = {};
@@ -436,6 +464,8 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
     const assignments = targetDate ? (localDb.getRoster(targetDate.substring(0, 7)).assignments || []).filter(a => a.date === targetDate) : [];
 
     airmen.forEach(a => {
+      if (targetISO && !isAirmanInUnitOnDate(a, targetISO)) return;
+
       const myAssignments = assignments.filter(assign => assign.airmanId === a.id);
       const bake = myAssignments.find(assign => assign.dutyCode === 'BAKE_N_BITE');
       const canteen = myAssignments.find(assign => assign.dutyCode === 'CANTEEN');
@@ -465,10 +495,14 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
     });
 
     return map;
-  }, [airmen, targetDate]);
+  }, [airmen, targetDate, targetISO]);
 
   const filteredAirmen = useMemo(() => {
-    return airmen.filter(a => {
+    const list = airmen.filter(a => {
+      // Exclude if not present on targetDate
+      if (targetISO && !isAirmanInUnitOnDate(a, targetISO)) {
+        return false;
+      }
       if (nominalRollFlightFilter !== 'All' && a.flightName !== nominalRollFlightFilter) {
         return false;
       }
@@ -480,7 +514,8 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
       }
       return a.rank === nominalRollRankFilter;
     });
-  }, [airmen, nominalRollFlightFilter, nominalRollRankFilter]);
+    return sortAirmenBySeniority(list);
+  }, [airmen, nominalRollFlightFilter, nominalRollRankFilter, targetISO]);
 
   const getEffectiveManpower = () => {
     const counts = {
@@ -491,6 +526,11 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
     };
 
     airmen.forEach(a => {
+      // Exclude if not present on targetDate
+      if (targetISO && !isAirmanInUnitOnDate(a, targetISO)) {
+        return;
+      }
+
       let disp = disposals[a.id];
       // For migration of existing bad data
       if (disp === 'Deployment' || disp === 'Deployment (Bake & Bite)' || disp === 'Deployment (Canteen)') {
@@ -1055,6 +1095,17 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                       </div>
                     </div>
 
+                    {/* Effective Target Date Indicator */}
+                    <div className="px-4 py-2 bg-indigo-50/70 dark:bg-slate-800/80 border-b border-indigo-100 dark:border-slate-700 flex flex-wrap items-center justify-between text-xs">
+                      <span className="text-slate-700 dark:text-slate-200 font-semibold flex items-center gap-1.5">
+                        <Calendar className="w-3.5 h-3.5 text-indigo-500" />
+                        Effective Manpower & Nominal Roll for: <strong className="text-indigo-600 dark:text-indigo-400 font-black">{formatShortDate(targetDate)}</strong>
+                      </span>
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400 italic">
+                        (Airmen joining after or posted out before this date are excluded)
+                      </span>
+                    </div>
+
                     <table className="w-full text-xs border-collapse table-auto">
                       <thead className="bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold">
                         <tr>
@@ -1063,6 +1114,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                           <th className="px-3 py-2 text-center border-b border-slate-300 dark:border-slate-600 whitespace-nowrap">Name</th>
                           <th className="px-3 py-2 text-center border-b border-slate-300 dark:border-slate-600 whitespace-nowrap">Trade</th>
                           <th className="px-3 py-2 text-center border-b border-slate-300 dark:border-slate-600 whitespace-nowrap">Flight</th>
+                          <th className="px-3 py-2 text-center border-b border-slate-300 dark:border-slate-600 whitespace-nowrap">Posting Dt</th>
                           <th className="px-3 py-2 text-center border-b border-slate-300 dark:border-slate-600 whitespace-nowrap">Disposal</th>
                         </tr>
                       </thead>
@@ -1085,6 +1137,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
 
                           const isCustomVal = currentVal && !STANDARD_DISPOSALS.includes(currentVal);
                           const isEven = idx % 2 === 0;
+                          const joinDtISO = getAirmanJoinDateISO(a);
 
                           return (
                             <tr 
@@ -1098,6 +1151,15 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                               <td className="px-3 py-2 text-left font-medium text-slate-800 dark:text-slate-200 whitespace-nowrap">{a.name}</td>
                               <td className="px-3 py-2 text-left text-slate-600 dark:text-slate-400 whitespace-nowrap">{a.trade}</td>
                               <td className="px-3 py-2 text-left text-slate-600 dark:text-slate-400 whitespace-nowrap">{a.flightName}</td>
+                              <td className="px-3 py-2 text-center text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                                {joinDtISO ? (
+                                  <span className="px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 font-mono text-[11px] font-semibold">
+                                    {formatShortDate(joinDtISO)}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400">-</span>
+                                )}
+                              </td>
                               <td className="px-3 py-2 text-center whitespace-nowrap">
                                 <div className="flex items-center justify-center">
                                   <select
@@ -1376,7 +1438,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                         }`}
                         title={warning ? `Current total: ${totalVal}, Target: ${t.totalRequiredMonth}` : `Matched: ${totalVal}`}
                       >
-                        {totalVal}
+                        {showExactRatio ? `${totalVal}/${t.totalRequiredMonth}` : totalVal}
                       </td>
                     );
                   })}
@@ -1401,6 +1463,7 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                   }`}>
                     {(() => {
                       let grandTotal = 0;
+                      let grandRequired = 0;
                       ['Mechanics', 'Avionics', 'GCS', 'Admin'].forEach(fl => {
                         matrix && matrix.filter(t => !t.isDisabled).forEach(t => {
                           if (t.eligibleFlights && !t.eligibleFlights.includes(fl as any)) return;
@@ -1408,7 +1471,10 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                           grandTotal += (manual !== undefined ? manual : (calculatedMatrixDistributions[t.id]?.[fl]?.autoVal || 0));
                         });
                       });
-                      return grandTotal;
+                      matrix && matrix.filter(t => !t.isDisabled).forEach(t => {
+                        grandRequired += (t.totalRequiredMonth || 0);
+                      });
+                      return showExactRatio ? `${grandTotal}/${grandRequired}` : grandTotal;
                     })()}
                   </td>
                 </tr>
