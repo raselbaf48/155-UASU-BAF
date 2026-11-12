@@ -1546,7 +1546,7 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                         } else if (dutyCode === 'DUTY_OFF' || (dutyCode as any) === 'OFF') {
                           let offDuty = '';
                           if (ass?.notes) {
-                            const match = ass.notes.match(/\b(NTF|GD|SY|BTF|IDAC|IDA|AIRPORT|APT|AFLD|HALISHAHAR|HAL)\b/i);
+                            const match = ass.notes.match(/\b(NTF|GD|SY|BTF|IDAC|IDA|AIRPORT|APT|AFLD|HALISHAHAR|HAL|ESCT|ESC|ESCORT)\b/i);
                             if (match) offDuty = match[1].toUpperCase();
                           }
                           if (!offDuty) {
@@ -1559,8 +1559,20 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                           }
                           if (offDuty === 'GD' || offDuty === 'SECURITY') offDuty = 'SY';
                           if (offDuty === 'AIRPORT' || offDuty === 'AIRFIELD' || offDuty === 'APT') offDuty = 'AFLD';
+                          if (offDuty === 'ESC' || offDuty === 'ESCORT' || offDuty?.includes('1794394') || (ass?.notes || '').toLowerCase().includes('escort')) offDuty = 'ESCT';
                           displayLabel = offDuty ? `${offDuty} OFF` : 'OFF';
                           displayBadgeBg = 'bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700';
+                        } else if (
+                          (dutyCode as any) === 'ESCORT' ||
+                          (dutyCode as any) === 'ESC' ||
+                          (dutyCode as any) === 'ESCT' ||
+                          dutyCodeStr.includes('1794394') ||
+                          dutyType?.name === 'Escort Duty' ||
+                          (ass?.notes || '').toLowerCase().includes('escort') ||
+                          ((ass as any)?.dutyName || '').toLowerCase().includes('escort')
+                        ) {
+                          displayLabel = 'ESCT';
+                          displayBadgeBg = 'bg-indigo-100 dark:bg-indigo-950/60 text-indigo-900 dark:text-indigo-200 border border-indigo-300 dark:border-indigo-700';
                         } else if (dutyCode === 'GD') {
                           displayLabel = 'SY';
                         } else if (dutyCode === 'AIRPORT' || (dutyCode as any) === 'APT' || (dutyCode as any) === 'AIRFIELD') {

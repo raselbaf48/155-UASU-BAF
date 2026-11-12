@@ -261,13 +261,24 @@ export function getAirmanDisposalForRange(
       const prevAss = prevMonthList.filter((a) => matchAirmanId(a.airmanId, airmanId) && a.date === prevDateStr);
       if (prevAss.length > 0) {
         const yestDuty = prevAss[0];
+        const yCodeStr = String(yestDuty.dutyCode || '');
+        const isEscortDuty =
+          (yestDuty.dutyCode as any) === 'ESCORT' ||
+          (yestDuty.dutyCode as any) === 'ESC' ||
+          (yestDuty.dutyCode as any) === 'ESCT' ||
+          yCodeStr.includes('1794394') ||
+          (yestDuty.dutyName || '').toLowerCase().includes('escort') ||
+          (yestDuty.notes || '').toLowerCase().includes('escort');
+
         const isNight =
-          ['GD', 'BTF', 'NTF', 'AIRPORT'].includes(yestDuty.dutyCode) ||
+          ['GD', 'BTF', 'NTF', 'AIRPORT'].includes(yestDuty.dutyCode as any) ||
           ((yestDuty.dutyCode === 'IDAC' || yestDuty.dutyCode === 'IDA') && yestDuty.idaShift === 'Night') ||
-          (yestDuty.notes || '').toLowerCase().includes('idac');
+          (yestDuty.notes || '').toLowerCase().includes('idac') ||
+          isEscortDuty;
         if (isNight) {
           let offName = 'GD Off';
-          if (yestDuty.dutyCode === 'GD') offName = 'GD Off';
+          if (isEscortDuty) offName = 'Esct Off';
+          else if (yestDuty.dutyCode === 'GD') offName = 'GD Off';
           else if (yestDuty.dutyCode === 'BTF') offName = 'BTF Off';
           else if (yestDuty.dutyCode === 'NTF') offName = 'NTF Off';
           else if (yestDuty.dutyCode === 'AIRPORT') offName = 'Airport Off';

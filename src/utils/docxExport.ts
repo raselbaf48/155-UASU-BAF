@@ -1551,7 +1551,7 @@ export async function exportMonthlyDutyRegisterDocx(
         else if (ass.dutyCode === 'DUTY_OFF' || (ass.dutyCode as any) === 'OFF') {
           let offCode = '';
           if (ass.notes) {
-            const m = ass.notes.match(/\b(NTF|GD|BTF|IDAC|IDA|AIRPORT|APT|HALISHAHAR|HAL)\b/i);
+            const m = ass.notes.match(/\b(NTF|GD|BTF|IDAC|IDA|AIRPORT|APT|HALISHAHAR|HAL|ESCT|ESC|ESCORT)\b/i);
             if (m) offCode = m[1].toUpperCase();
           }
           if (!offCode) {
@@ -1561,7 +1561,16 @@ export async function exportMonthlyDutyRegisterDocx(
               offCode = prevAss.dutyCode === 'IDA' ? 'IDAC' : prevAss.dutyCode;
             }
           }
+          if (offCode === 'ESCORT' || offCode === 'ESC' || offCode?.includes('1794394')) offCode = 'ESCT';
           codeDisplay = offCode ? `${offCode} OFF` : 'OFF';
+        } else if (
+          (ass.dutyCode as any) === 'ESCORT' ||
+          (ass.dutyCode as any) === 'ESC' ||
+          (ass.dutyCode as any) === 'ESCT' ||
+          String(ass.dutyCode || '').includes('1794394') ||
+          (ass.notes || '').toLowerCase().includes('escort')
+        ) {
+          codeDisplay = 'ESCT';
         } else if (ass.dutyCode === 'ON_PARADE') {
           codeDisplay = 'P';
           pCount++;

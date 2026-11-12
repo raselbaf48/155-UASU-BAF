@@ -82,10 +82,20 @@ export function resolveAirmanDutyForDate(
   const yestStr = `${year}-${month}-${day}`;
 
   const yestAss = findAss(yestStr);
+  const isEscort = yestAss ? (
+    (yestAss.dutyCode as any) === 'ESCORT' ||
+    (yestAss.dutyCode as any) === 'ESC' ||
+    (yestAss.dutyCode as any) === 'ESCT' ||
+    String(yestAss.dutyCode || '').includes('1794394') ||
+    (yestAss.notes || '').toLowerCase().includes('escort') ||
+    ((yestAss as any).dutyName || '').toLowerCase().includes('escort')
+  ) : false;
+
   const isHeavyDuty = yestAss ? (
     ['GD', 'BTF', 'NTF', 'AIRPORT', 'ATT', 'HALISHAHAR'].includes(yestAss.dutyCode) ||
     ((yestAss.dutyCode === 'IDAC' || yestAss.dutyCode === 'IDA') && yestAss.idaShift === 'Night') ||
-    (yestAss.notes || '').toLowerCase().includes('idac')
+    (yestAss.notes || '').toLowerCase().includes('idac') ||
+    isEscort
   ) : false;
 
   const isDeployment = currentAss && ['ATT', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(currentAss.dutyCode);
@@ -94,6 +104,7 @@ export function resolveAirmanDutyForDate(
     if (isHeavyDuty) {
       let yCode = yestAss?.dutyCode === 'IDA' ? 'IDAC' : (yestAss?.dutyCode || 'DUTY');
       if (yCode === 'AIRPORT') yCode = 'APT';
+      if (isEscort) yCode = 'ESCT';
       return {
         airmanId,
         date: dateStr,

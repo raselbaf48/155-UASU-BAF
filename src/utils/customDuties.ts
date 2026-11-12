@@ -10,7 +10,7 @@ export const DEFAULT_CUSTOM_DUTIES: CustomDutyConfig[] = [
   {
     code: 'CUST_1794394964393' as DutyCategoryCode,
     name: 'Escort Duty',
-    shortName: 'ESC',
+    shortName: 'ESCT',
     category: 'Special',
     color: 'bg-indigo-600 text-white',
     badgeBg: 'bg-indigo-100 dark:bg-indigo-900/40 border border-indigo-300 dark:border-indigo-700',
@@ -31,10 +31,22 @@ export const getCustomDuties = (): CustomDutyConfig[] => {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
     const parsed: CustomDutyConfig[] = saved ? JSON.parse(saved) : [];
-    // Ensure default custom duties like Escort Duty are always present
+    // Ensure default custom duties like Escort Duty are always present with updated shortName & rules
     const map = new Map<string, CustomDutyConfig>();
     DEFAULT_CUSTOM_DUTIES.forEach(d => map.set(d.code, d));
-    parsed.forEach(d => map.set(d.code, d));
+    parsed.forEach(d => {
+      if ((d.code as any) === 'CUST_1794394964393' || d.name === 'Escort Duty') {
+        map.set(d.code, {
+          ...d,
+          shortName: 'ESCT',
+          dutyOffNextDay: true,
+          onParadeOnDutyDay: false,
+          onPtNextDay: true
+        });
+      } else {
+        map.set(d.code, d);
+      }
+    });
     return Array.from(map.values());
   } catch {
     return DEFAULT_CUSTOM_DUTIES;

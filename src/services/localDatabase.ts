@@ -898,6 +898,9 @@ export class LocalDatabaseEngine {
                      if (sourceForPreserve.dutyCode !== undefined) duty.dutyCode = sourceForPreserve.dutyCode;
                      if (sourceForPreserve.dailyRequirements !== undefined) duty.dailyRequirements = sourceForPreserve.dailyRequirements;
                      if (sourceForPreserve.isDisabled !== undefined) duty.isDisabled = sourceForPreserve.isDisabled;
+                     if (sourceForPreserve.onParadeOnDutyDay !== undefined) duty.onParadeOnDutyDay = sourceForPreserve.onParadeOnDutyDay;
+                     if (sourceForPreserve.dutyOffNextDay !== undefined) duty.dutyOffNextDay = sourceForPreserve.dutyOffNextDay;
+                     if (sourceForPreserve.onPtNextDay !== undefined) duty.onPtNextDay = sourceForPreserve.onPtNextDay;
                  }
 
                  // Robust monthly requirement calculation - NEVER reset to 0 if dailyRequirements or quota exists!
@@ -1863,11 +1866,19 @@ export class LocalDatabaseEngine {
           isDisabled: m.isDisabled,
           totalRequiredDaily: m.totalRequiredDaily,
           totalRequiredMonth: totalReqMonth,
-          dailyRequirements: m.dailyRequirements
+          dailyRequirements: m.dailyRequirements,
+          onParadeOnDutyDay: m.onParadeOnDutyDay,
+          dutyOffNextDay: m.dutyOffNextDay,
+          onPtNextDay: m.onPtNextDay
         };
       });
 
       const settingsPayload = [
+        {
+          setting_key: 'baf_official_duty_matrix_v4',
+          setting_value: JSON.stringify(matrix),
+          updated_at: new Date().toISOString()
+        },
         {
           setting_key: 'baf_duty_matrix_metadata',
           setting_value: JSON.stringify(metadata),
@@ -2813,7 +2824,9 @@ export class LocalDatabaseEngine {
         // Default: heavy / overnight duties get Duty Off
         const isIdacNt = ['IDAC', 'IDA', 'IDA C', 'IDA_C'].includes(codeUpper) &&
           (s === 'night' || s === 'c' || s === 'nt' || notes.toLowerCase().includes('night'));
-        const isClassicHeavy = ['GD', 'BTF', 'NTF', 'AIRPORT', 'AIRFIELD', 'ATT', 'HALISHAHAR'].includes(codeUpper) || isIdacNt;
+        const isEscortDuty = codeUpper === 'ESCORT' || codeUpper === 'ESC' || codeUpper === 'ESCT' ||
+          codeUpper.includes('1794394') || name.toLowerCase().includes('escort') || notes.toLowerCase().includes('escort');
+        const isClassicHeavy = ['GD', 'BTF', 'NTF', 'AIRPORT', 'AIRFIELD', 'ATT', 'HALISHAHAR'].includes(codeUpper) || isIdacNt || isEscortDuty;
         dutyOffNextDay = isClassicHeavy;
       }
 
@@ -2825,7 +2838,12 @@ export class LocalDatabaseEngine {
         onPtNextDay = true;
       }
 
-      return { onParadeOnDutyDay, dutyOffNextDay, onPtNextDay, matchedTitle: table?.title || customDuty?.name };
+      return {
+        onParadeOnDutyDay,
+        dutyOffNextDay,
+        onPtNextDay,
+        matchedTitle: table?.title || customDuty?.name || (codeUpper.includes('1794394') || name.toLowerCase().includes('escort') ? 'Escort' : undefined)
+      };
     };
 
     const assignmentMap = new Map<string, DutyAssignment>();
@@ -3042,7 +3060,16 @@ export class LocalDatabaseEngine {
 
           if (yestRule.dutyOffNextDay) {
             let offShort = 'GD Off';
-            if (yestAss.dutyCode === 'GD') offShort = 'GD Off';
+            if (
+              (yestAss.dutyCode as any) === 'ESCORT' ||
+              (yestAss.dutyCode as any) === 'ESC' ||
+              (yestAss.dutyCode as any) === 'ESCT' ||
+              String(yestAss.dutyCode || '').includes('1794394') ||
+              (yestAss.dutyName || '').toLowerCase().includes('escort') ||
+              (yestAss.notes || '').toLowerCase().includes('escort') ||
+              (yestRule.matchedTitle || '').toLowerCase().includes('escort')
+            ) offShort = 'Escort Off';
+            else if (yestAss.dutyCode === 'GD') offShort = 'GD Off';
             else if (yestAss.dutyCode === 'BTF') offShort = 'BTF Off';
             else if (yestAss.dutyCode === 'NTF') offShort = 'NTF Off';
             else if (yestAss.dutyCode === 'AIRPORT' || (yestAss.dutyCode as any) === 'AIRFIELD') offShort = 'Airfield Off';
@@ -3055,6 +3082,8 @@ export class LocalDatabaseEngine {
             else offShort = `${yestAss.dutyCode} Off`;
 
             offShort = (offShort || "")
+              .replace(/Escort Duty Off/g, 'Escort Off')
+              .replace(/ESC Off/g, 'Escort Off')
               .replace(/DUTY_OFF/g, 'Duty')
               .replace(/Off Off/g, 'Off')
               .replace(/Duty Off Off/g, 'Duty Off');
@@ -3246,7 +3275,16 @@ export class LocalDatabaseEngine {
 
           if (yestAss) {
             const yestCodeStr = String(yestAss.dutyCode);
-            if (yestCodeStr === 'GD') offShort = 'GD Off';
+            if (
+              yestCodeStr === 'ESCORT' ||
+              yestCodeStr === 'ESC' ||
+              yestCodeStr === 'ESCT' ||
+              yestCodeStr.includes('1794394') ||
+              (yestAss.dutyName || '').toLowerCase().includes('escort') ||
+              (yestAss.notes || '').toLowerCase().includes('escort') ||
+              (yestRule?.matchedTitle || '').toLowerCase().includes('escort')
+            ) offShort = 'Escort Off';
+            else if (yestCodeStr === 'GD') offShort = 'GD Off';
             else if (yestCodeStr === 'BTF') offShort = 'BTF Off';
             else if (yestCodeStr === 'NTF') offShort = 'NTF Off';
             else if (yestCodeStr === 'AIRPORT' || yestCodeStr === 'AIRFIELD' || yestCodeStr === 'ATT' || yestCodeStr === 'DETT') offShort = 'Airfield Off';
@@ -3258,7 +3296,8 @@ export class LocalDatabaseEngine {
             else if (yestRule?.matchedTitle) offShort = `${yestRule.matchedTitle} Off`;
             else offShort = `${yestAss.dutyCode} Off`;
           } else if (ass.notes && !ass.notes.toLowerCase().includes('imported')) {
-            if (ass.notes.toLowerCase().includes('idac')) offShort = 'IDAC Nt Off';
+            if (ass.notes.toLowerCase().includes('escort') || ass.notes.toLowerCase().includes('esct')) offShort = 'Escort Off';
+            else if (ass.notes.toLowerCase().includes('idac')) offShort = 'IDAC Nt Off';
             else if (ass.notes.toLowerCase().includes('gd')) offShort = 'GD Off';
             else if (ass.notes.toLowerCase().includes('btf')) offShort = 'BTF Off';
             else if (ass.notes.toLowerCase().includes('ntf')) offShort = 'NTF Off';
@@ -3268,6 +3307,8 @@ export class LocalDatabaseEngine {
           }
 
           offShort = (offShort || "")
+            .replace(/Escort Duty Off/g, 'Escort Off')
+            .replace(/ESC Off/g, 'Escort Off')
             .replace(/DUTY_OFF/g, 'Duty')
             .replace(/Off Off/g, 'Off')
             .replace(/Duty Off Off/g, 'Duty Off');

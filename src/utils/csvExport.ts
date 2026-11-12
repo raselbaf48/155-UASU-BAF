@@ -1209,7 +1209,7 @@ export function exportMonthlyAttendanceRegisterExcel(
       }
       if (offDuty === 'AIRPORT' || offDuty === 'AIRFIELD' || offDuty === 'APT') offDuty = 'AFLD';
       if (offDuty === 'GD' || offDuty === 'SECURITY') offDuty = 'SY';
-      if (offDuty === 'ESCORT') offDuty = 'ESC';
+      if (offDuty === 'ESCORT' || offDuty === 'ESC') offDuty = 'ESCT';
       return offDuty ? `${offDuty}\nOFF` : 'OFF';
     }
 
@@ -1220,7 +1220,7 @@ export function exportMonthlyAttendanceRegisterExcel(
 
     if (dutyCode === 'LEAVE') return 'L';
     if (dutyCode === 'TDY') return 'TDY';
-    if ((dutyCode as any) === 'ESCORT' || (dutyCode as any) === 'ESC' || (dutyCode && String(dutyCode).includes('1794394'))) return 'ESC';
+    if ((dutyCode as any) === 'ESCORT' || (dutyCode as any) === 'ESC' || (dutyCode as any) === 'ESCT' || (dutyCode && String(dutyCode).includes('1794394')) || (ass?.notes || '').toLowerCase().includes('escort')) return 'ESCT';
     if (dutyCode === 'GD' || (dutyCode as any) === 'SECURITY') return 'SY';
     if (dutyCode === 'AIRPORT' || (dutyCode as any) === 'APT' || (dutyCode as any) === 'AIRFIELD' || (dutyCode as any) === 'AFLD') return 'AFLD';
 

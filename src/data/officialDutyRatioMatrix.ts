@@ -632,6 +632,45 @@ export function saveDutyMatrix(matrix: DutyRatioTable[]) {
     localStorage.setItem('baf_pending_sync', 'true');
     localStorage.setItem('baf_matrix_last_modified', String(Date.now()));
 
+    // Synchronize all versions in history so getDutyRatioVersionForDate does not revert to old matrix!
+    try {
+      const history = getDutyRatioHistory();
+      if (history.length > 0) {
+        const updatedHistory = history.map(v => ({
+          ...v,
+          matrix: sanitizedMatrix
+        }));
+        localStorage.setItem(RATIO_HISTORY_STORAGE_KEY, JSON.stringify(updatedHistory));
+      }
+    } catch (hErr) {
+      console.warn('Could not sync history versions:', hErr);
+    }
+
+    // Persist to server app_settings directly so pullAllSettingsFromServer does not overwrite with stale settings
+    if (typeof fetch !== 'undefined') {
+      fetch('/api/supabase/rest/v1/app_settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([
+          {
+            setting_key: 'baf_official_duty_matrix_v4',
+            setting_value: JSON.stringify(sanitizedMatrix),
+            updated_at: new Date().toISOString()
+          },
+          {
+            setting_key: 'baf_duty_matrix_metadata',
+            setting_value: JSON.stringify(metadata),
+            updated_at: new Date().toISOString()
+          },
+          {
+            setting_key: 'baf_duty_matrix_full',
+            setting_value: JSON.stringify(sanitizedMatrix),
+            updated_at: new Date().toISOString()
+          }
+        ])
+      }).catch(err => console.warn('Could not persist matrix to server app_settings:', err));
+    }
+
     if (typeof window !== 'undefined') {
       setTimeout(() => {
         window.dispatchEvent(new CustomEvent('baf_duty_ratio_updated', { detail: { matrix: sanitizedMatrix } }));
@@ -642,6 +681,7 @@ export function saveDutyMatrix(matrix: DutyRatioTable[]) {
     console.error('Failed to save duty matrix:', e);
   }
 }
+
 
 export function saveDutyRatioVersion(params: {
   id?: string;

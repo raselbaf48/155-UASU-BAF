@@ -172,7 +172,7 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
       }
       if (offDuty === 'GD' || offDuty === 'SECURITY') offDuty = 'SY';
       if (offDuty === 'AIRPORT' || offDuty === 'AIRFIELD' || offDuty === 'APT') offDuty = 'AFLD';
-      if (offDuty === 'ESCORT') offDuty = 'ESC';
+      if (offDuty === 'ESCORT' || offDuty === 'ESC') offDuty = 'ESCT';
       return { label: offDuty ? `${offDuty}\nOFF` : 'OFF', type: 'OFF' };
     }
 
@@ -184,8 +184,8 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
 
     if (dutyCode === 'LEAVE') return { label: 'L', type: 'LEAVE' };
     if (dutyCode === 'TDY') return { label: 'TDY', type: 'TDY' };
-    if ((dutyCode as any) === 'ESCORT' || (dutyCode as any) === 'ESC' || (dutyCode && String(dutyCode).includes('1794394'))) {
-      return { label: 'ESC', type: 'DUTY' };
+    if ((dutyCode as any) === 'ESCORT' || (dutyCode as any) === 'ESC' || (dutyCode as any) === 'ESCT' || (dutyCode && String(dutyCode).includes('1794394')) || (ass?.notes || '').toLowerCase().includes('escort')) {
+      return { label: 'ESCT', type: 'DUTY' };
     }
     if (dutyCode === 'GD' || (dutyCode as any) === 'SECURITY') return { label: 'SY', type: 'DUTY' };
     if (dutyCode === 'AIRPORT' || (dutyCode as any) === 'APT' || (dutyCode as any) === 'AIRFIELD' || (dutyCode as any) === 'AFLD') return { label: 'AFLD', type: 'DUTY' };

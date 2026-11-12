@@ -141,11 +141,12 @@ export function formatDutyOnShortName(
   if (
     code === 'ESCORT' ||
     code === 'ESC' ||
+    code === 'ESCT' ||
     code.includes('1794394') ||
     notesLower.includes('escort') ||
     nameLower.includes('escort')
   ) {
-    return 'ESC';
+    return 'ESCT';
   }
 
   // 7. Orderly Room & UWO
@@ -252,8 +253,22 @@ export function formatDutyOffShortName(
   previousDutyName?: string | null,
   notes?: string | null
 ): string {
+  const code = String(previousDutyCode || '').toUpperCase();
+  const name = String(previousDutyName || '').toLowerCase();
+  const n = String(notes || '').toLowerCase();
+  if (
+    code.includes('1794394') ||
+    code === 'ESCORT' ||
+    code === 'ESC' ||
+    code === 'ESCT' ||
+    name.includes('escort') ||
+    n.includes('escort')
+  ) {
+    return 'Escort Off';
+  }
   const shortOn = formatDutyOnShortName(previousDutyCode, undefined, notes, previousDutyName);
   if (shortOn.toLowerCase().endsWith('off')) return shortOn;
+  if (shortOn === 'ESC' || shortOn === 'ESCT' || shortOn.toLowerCase() === 'escort') return 'Escort Off';
   if (shortOn === 'Sy Duty') return 'Sy Off';
   return `${shortOn} Off`;
 }
