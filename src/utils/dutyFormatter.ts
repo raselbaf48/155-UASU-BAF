@@ -178,11 +178,13 @@ export function formatDutyOnShortName(
     return 'Leave';
   }
 
-  // 11. Base Security / GD
+  // 11. Base Security / GD / SY Duty
   if (
     code === 'GD' ||
     code === 'GUARD_DUTY' ||
     code === 'SECURITY' ||
+    code === 'SY' ||
+    code === 'SY_DUTY' ||
     notesLower.includes('base sec') ||
     notesLower.includes('guard duty') ||
     notesLower.includes('sy duty') ||
@@ -190,9 +192,10 @@ export function formatDutyOnShortName(
     notesLower.includes('gd') ||
     nameLower.includes('security') ||
     nameLower.includes('guard') ||
-    nameLower.includes('gd')
+    nameLower.includes('gd') ||
+    nameLower.includes('sy')
   ) {
-    return 'GD';
+    return 'Sy Duty';
   }
 
   // 12. Custom duty code resolution (handles CUST_..., timestamp codes, custom duties)
@@ -229,8 +232,8 @@ export function formatDutyOnShortName(
     return code.includes('1794394') ? 'Escort Duty' : 'Special Duty';
   }
 
-  // 15. Any remaining generic duty code falls back to GD (Base Security Duty in 155 UASU BAF)
-  return (code && !isGenericDuty(code)) ? code : 'GD';
+  // 15. Any remaining generic duty code falls back to Sy Duty (Security Duty in 155 UASU BAF)
+  return (code && !isGenericDuty(code)) ? code : 'Sy Duty';
 }
 
 export function formatDutyOffShortName(
@@ -240,5 +243,6 @@ export function formatDutyOffShortName(
 ): string {
   const shortOn = formatDutyOnShortName(previousDutyCode, undefined, notes, previousDutyName);
   if (shortOn.toLowerCase().endsWith('off')) return shortOn;
+  if (shortOn === 'Sy Duty') return 'Sy Off';
   return `${shortOn} Off`;
 }

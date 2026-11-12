@@ -728,7 +728,7 @@ export async function exportParadeStateSingleDocx(
     'CMH/ BNS/ BSH',
     'Sick\nReport',
     'Drill\nCat-C',
-    'Guard Duty\nOn/Off',
+    'Security Duty\nOn/Off',
     'Canteen',
     'Bake &\nBite',
     'K/O &\nReception',

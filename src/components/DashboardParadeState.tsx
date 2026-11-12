@@ -623,18 +623,18 @@ export const DashboardParadeState: React.FC<DashboardParadeStateProps> = ({
                                     if (item.dutyCode === 'BAKE_N_BITE') return '☕ Bake & Bite';
                                     if (item.dutyCode === 'DUTY_OFF' || item.statusCategory === 'OFF') {
                                       const prev = (item.previousDutyName || item.dutyName || item.notes || '').toUpperCase();
-                                      if (prev.includes('GD') || prev.includes('BASE SEC')) return '🌙 GD Off';
+                                      if (prev.includes('GD') || prev.includes('BASE SEC') || prev.includes('SY') || prev.includes('SECURITY')) return '🌙 SY Off';
                                       if (prev.includes('BTF')) return '🌙 BTF Off';
                                       if (prev.includes('NTF') || prev.includes('NAJIR')) return '🌙 NTF Off';
                                       if (prev.includes('IDAC') || prev.includes('IDA')) return '🌙 IDAC Nt Off';
-                                      if (prev.includes('AIR') || prev.includes('PORT')) return '🌙 Airfield Off';
+                                      if (prev.includes('AIR') || prev.includes('PORT') || prev.includes('AFLD')) return '🌙 Airfield Off';
                                       if (prev.includes('HALI')) return '🌙 Halishahar Off';
                                       if (item.previousDutyName) return `🌙 ${item.previousDutyName}`;
                                       if (item.dutyName && !item.dutyName.toLowerCase().includes('duty off')) return `🌙 ${item.dutyName}`;
                                       return '🌙 Duty Off';
                                     }
                                     if (item.statusCategory === 'DUTY') {
-                                      if (item.dutyCode === 'GD') return '📌 Guard Duty';
+                                      if (item.dutyCode === 'GD' || item.dutyCode === 'SY') return '📌 Security Duty';
                                       if (item.dutyCode === 'BTF') return '📌 Base Taskforce Duty';
                                       if (item.dutyCode === 'NTF') return '📌 Najirpara Taskforce Duty';
                                       if (item.dutyCode === 'HALISHAHAR') return '📌 Halishahar Duty';

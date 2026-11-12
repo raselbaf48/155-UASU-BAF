@@ -151,7 +151,7 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
     idaShift?: IDAShift;
     badgeBg: string;
   }> = [
-    { key: 'GD', dutyCode: 'GD', label: 'Base Security Duty (GD)', badgeBg: 'bg-red-100 text-red-900 border-red-300 dark:bg-red-950 dark:text-red-200 dark:border-red-800' },
+    { key: 'GD', dutyCode: 'GD', label: 'Security Duty (SY)', badgeBg: 'bg-red-100 text-red-900 border-red-300 dark:bg-red-950 dark:text-red-200 dark:border-red-800' },
     { key: 'BTF', dutyCode: 'BTF', label: 'Base Taskforce Duty (BTF)', badgeBg: 'bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950 dark:text-amber-200 dark:border-amber-800' },
     { key: 'NTF', dutyCode: 'NTF', label: 'Najirpara Taskforce Duty (NTF)', badgeBg: 'bg-orange-100 text-orange-900 border-orange-300 dark:bg-orange-950 dark:text-orange-200 dark:border-orange-800' },
     { key: 'HALISHAHAR', dutyCode: 'HALISHAHAR', label: 'Halishahar Duty', badgeBg: 'bg-cyan-100 text-cyan-900 border-cyan-300 dark:bg-cyan-950 dark:text-cyan-200 dark:border-cyan-800' },
@@ -1446,8 +1446,8 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                   <th className="py-3 px-1.5 text-center bg-emerald-950 text-emerald-300 w-10 border-l border-slate-800 font-bold" title="Total Present / On Routine Parade Days">
                     Present
                   </th>
-                  <th className="py-3 px-1.5 text-center bg-red-950 text-red-300 w-9 border-l border-slate-800 font-bold" title="Base Security Duty (GD)">
-                    GD
+                  <th className="py-3 px-1.5 text-center bg-red-950 text-red-300 w-9 border-l border-slate-800 font-bold" title="Security Duty (SY)">
+                    SY
                   </th>
                   <th className="py-3 px-1.5 text-center bg-amber-950 text-amber-300 w-9 border-l border-slate-800 font-bold" title="Base Taskforce Duty (BTF)">
                     BTF
@@ -1458,8 +1458,8 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                   <th className="py-3 px-1.5 text-center bg-indigo-950 text-indigo-300 w-9 border-l border-slate-800 font-bold" title="Halishahar Taskforce Duty (HAL)">
                     HAL
                   </th>
-                  <th className="py-3 px-1.5 text-center bg-blue-950 text-blue-300 w-9 border-l border-slate-800 font-bold" title="Airfield Duty (APT)">
-                    APT
+                  <th className="py-3 px-1.5 text-center bg-blue-950 text-blue-300 w-9 border-l border-slate-800 font-bold" title="Airfield Duty (AFLD)">
+                    AFLD
                   </th>
                   <th className="py-3 px-1.5 text-center bg-sky-950 text-sky-300 w-11 border-l border-slate-800 font-bold" title="IDAC Shift A (Morning)">
                     IDAC "A"
@@ -1546,7 +1546,7 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                         } else if (dutyCode === 'DUTY_OFF' || (dutyCode as any) === 'OFF') {
                           let offDuty = '';
                           if (ass?.notes) {
-                            const match = ass.notes.match(/\b(NTF|GD|BTF|IDAC|IDA|AIRPORT|APT|HALISHAHAR|HAL)\b/i);
+                            const match = ass.notes.match(/\b(NTF|GD|SY|BTF|IDAC|IDA|AIRPORT|APT|AFLD|HALISHAHAR|HAL)\b/i);
                             if (match) offDuty = match[1].toUpperCase();
                           }
                           if (!offDuty) {
@@ -1557,9 +1557,14 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                               offDuty = yestAss.dutyCode === 'IDA' ? 'IDAC' : yestAss.dutyCode;
                             }
                           }
-                          if (offDuty === 'AIRPORT' || offDuty === 'AIRFIELD') offDuty = 'APT';
+                          if (offDuty === 'GD' || offDuty === 'SECURITY') offDuty = 'SY';
+                          if (offDuty === 'AIRPORT' || offDuty === 'AIRFIELD' || offDuty === 'APT') offDuty = 'AFLD';
                           displayLabel = offDuty ? `${offDuty} OFF` : 'OFF';
                           displayBadgeBg = 'bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700';
+                        } else if (dutyCode === 'GD') {
+                          displayLabel = 'SY';
+                        } else if (dutyCode === 'AIRPORT' || (dutyCode as any) === 'APT' || (dutyCode as any) === 'AIRFIELD') {
+                          displayLabel = 'AFLD';
                         } else if (dutyCode === 'IDAC' || dutyCode === 'IDA') {
                           const s = (ass?.idaShift || '').toLowerCase();
                           displayLabel = s.startsWith('m') ? 'IDAC "A"' : s.startsWith('a') ? 'IDAC "B"' : 'IDAC "C"';
@@ -2318,7 +2323,7 @@ export const MonthlyDutyRegister: React.FC<MonthlyDutyRegisterProps> = ({
                         let dutySuffix = '';
                         if (res.dutyCode === 'LEAVE') dutySuffix = 'Leave';
                         else if (res.dutyCode === 'TDY') dutySuffix = 'TDY';
-                        else if (res.dutyCode === 'GD') dutySuffix = 'Guard Duty';
+                        else if (res.dutyCode === 'GD') dutySuffix = 'Security Duty';
                         else if (res.dutyCode === 'BTF') dutySuffix = 'Base Taskforce';
                         else if (res.dutyCode === 'NTF') dutySuffix = 'Najirpara Taskforce';
                         else if (res.dutyCode === 'HALISHAHAR') dutySuffix = 'Halishahar Taskforce';

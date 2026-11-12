@@ -159,7 +159,7 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
     if (dutyCode === 'DUTY_OFF' || (dutyCode as any) === 'OFF') {
       let offDuty = '';
       if (ass?.notes) {
-        const match = ass.notes.match(/\b(NTF|GD|BTF|IDAC|IDA|AIRPORT|APT|HALISHAHAR|HAL)\b/i);
+        const match = ass.notes.match(/\b(NTF|GD|SY|BTF|IDAC|IDA|AIRPORT|APT|AFLD|HALISHAHAR|HAL)\b/i);
         if (match) offDuty = match[1].toUpperCase();
       }
       if (!offDuty) {
@@ -170,7 +170,8 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
           offDuty = yestAss.dutyCode === 'IDA' ? 'IDAC' : yestAss.dutyCode;
         }
       }
-      if (offDuty === 'AIRPORT' || offDuty === 'AIRFIELD') offDuty = 'APT';
+      if (offDuty === 'GD' || offDuty === 'SECURITY') offDuty = 'SY';
+      if (offDuty === 'AIRPORT' || offDuty === 'AIRFIELD' || offDuty === 'APT') offDuty = 'AFLD';
       return { label: offDuty ? `${offDuty} OFF` : 'OFF', type: 'OFF' };
     }
 
@@ -182,6 +183,8 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
 
     if (dutyCode === 'LEAVE') return { label: 'L', type: 'LEAVE' };
     if (dutyCode === 'TDY') return { label: 'TDY', type: 'TDY' };
+    if (dutyCode === 'GD') return { label: 'SY', type: 'DUTY' };
+    if (dutyCode === 'AIRPORT' || (dutyCode as any) === 'APT' || (dutyCode as any) === 'AIRFIELD') return { label: 'AFLD', type: 'DUTY' };
 
     const label = dutyType?.shortName || dutyCode || '-';
     return { label, type: 'DUTY' };
@@ -379,8 +382,8 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
                 <th className="border border-slate-900 py-1 px-1 bg-slate-100 text-slate-900 font-bold" title="Total Present">
                   Present
                 </th>
-                <th className="border border-slate-900 py-1 px-1 bg-slate-100 text-slate-900 font-bold" title="Base Security Duty (GD)">
-                  GD
+                <th className="border border-slate-900 py-1 px-1 bg-slate-100 text-slate-900 font-bold" title="Security Duty (SY)">
+                  SY
                 </th>
                 <th className="border border-slate-900 py-1 px-1 bg-slate-100 text-slate-900 font-bold" title="Base Taskforce (BTF)">
                   BTF
@@ -391,8 +394,8 @@ export const PrintableMonthlyAttendanceModal: React.FC<PrintableMonthlyAttendanc
                 <th className="border border-slate-900 py-1 px-1 bg-slate-100 text-slate-900 font-bold" title="Halishahar (HAL)">
                   HAL
                 </th>
-                <th className="border border-slate-900 py-1 px-1 bg-slate-100 text-slate-900 font-bold" title="Airfield (APT)">
-                  APT
+                <th className="border border-slate-900 py-1 px-1 bg-slate-100 text-slate-900 font-bold" title="Airfield (AFLD)">
+                  AFLD
                 </th>
                 <th className="border border-slate-900 py-1 px-1 bg-slate-100 text-slate-900 font-bold" title="IDAC Shift A">
                   IDAC "A"

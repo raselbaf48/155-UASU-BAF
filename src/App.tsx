@@ -90,7 +90,8 @@ export default function App() {
 
     // Stagger localDb sync so the initial UI renders instantly without network flood
     const syncTimer = setTimeout(() => {
-      localDb.syncFromFirebase();
+      localDb.pullDatabaseFromServer();
+      localDb.pullAllSettingsFromServer();
     }, 1000);
 
     let cleanupCanteenSync: (() => void) | null = null;

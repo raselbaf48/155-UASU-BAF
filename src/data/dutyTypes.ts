@@ -4,14 +4,14 @@ import { getCustomDuties } from '../utils/customDuties';
 export const INITIAL_DUTY_TYPES: DutyTypeInfo[] = [
   {
     code: 'GD',
-    name: 'Base Security Duty',
-    shortName: 'GD',
+    name: 'Security Duty',
+    shortName: 'SY',
     category: 'Security',
     color: 'bg-red-500 text-white',
     badgeBg: 'bg-red-100 dark:bg-red-900/40 border border-red-300 dark:border-red-700',
     badgeText: 'text-red-800 dark:text-red-300',
     isCountedAsDuty: true,
-    description: 'General Guard Base Security Duty',
+    description: 'Security Duty (Sy Duty)',
   },
   {
     code: 'BTF',
@@ -49,7 +49,7 @@ export const INITIAL_DUTY_TYPES: DutyTypeInfo[] = [
   {
     code: 'AIRPORT',
     name: 'Airfield',
-    shortName: 'APT',
+    shortName: 'AFLD',
     category: 'Special',
     color: 'bg-blue-600 text-white',
     badgeBg: 'bg-blue-100 dark:bg-blue-900/40 border border-blue-300 dark:border-blue-700',

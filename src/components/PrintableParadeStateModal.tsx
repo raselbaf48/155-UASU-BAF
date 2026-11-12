@@ -166,7 +166,7 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  const [isEditingDisposals, setIsEditingDisposals] = useState(false);
  const [historicalCustomCats, setHistoricalCustomCats] = useState<{code: string, label: string, customTitle: string}[]>(() => { try { const saved = localStorage.getItem('parade_historical_custom'); return saved ? JSON.parse(saved) : []; } catch { return []; } });
 
- const ALL_DISPOSAL_OPTIONS = [{"code":"TDY","label":"TDY"},{"code":"DETT","label":"Detachment"},{"code":"LEAVE","label":"Leave"},{"code":"ESSN","label":"Essn"},{"code":"CMH","label":"CMH"},{"code":"BNS","label":"BNS"},{"code":"BSH","label":"BSH"},{"code":"OTHERS","customTitle":"Quarantine","label":"Quarantine"},{"code":"SICK_REPORT","label":"Sick Report"},{"code":"ED","label":"ED"},{"code":"EX_PPGF","label":"Ex PPGF"},{"code":"CANTEEN","label":"Canteen"},{"code":"DUTY_OFF","label":"Guard Duty Off"},{"code":"BAKE_N_BITE","label":"Bake & Bite"},{"code":"RECEPTION","label":"K/O & Reception"},{"code":"ADMIN_ORDER","label":"Admin Order"},{"code":"CLASS_TRG","label":"Class"},{"code":"OTHERS","customTitle":"Exam","label":"Exam"},{"code":"AIRPORT","label":"Airfield Duty"},{"code":"GAMES","label":"Games"},{"code":"GH","label":"Guard of Honor"},{"code":"AWL","label":"AWOL"},{"code":"ABSENT","label":"Detention"},{"code":"OTHERS","label":"✨ Custom..."}];
+ const ALL_DISPOSAL_OPTIONS = [{"code":"TDY","label":"TDY"},{"code":"DETT","label":"Detachment"},{"code":"LEAVE","label":"Leave"},{"code":"ESSN","label":"Essn"},{"code":"CMH","label":"CMH"},{"code":"BNS","label":"BNS"},{"code":"BSH","label":"BSH"},{"code":"OTHERS","customTitle":"Quarantine","label":"Quarantine"},{"code":"SICK_REPORT","label":"Sick Report"},{"code":"ED","label":"ED"},{"code":"EX_PPGF","label":"Ex PPGF"},{"code":"CANTEEN","label":"Canteen"},{"code":"DUTY_OFF","label":"Security Duty Off"},{"code":"BAKE_N_BITE","label":"Bake & Bite"},{"code":"RECEPTION","label":"K/O & Reception"},{"code":"ADMIN_ORDER","label":"Admin Order"},{"code":"CLASS_TRG","label":"Class"},{"code":"OTHERS","customTitle":"Exam","label":"Exam"},{"code":"AIRPORT","label":"Airfield Duty"},{"code":"GAMES","label":"Games"},{"code":"GH","label":"Guard of Honor"},{"code":"AWL","label":"AWOL"},{"code":"ABSENT","label":"Detention"},{"code":"OTHERS","label":"✨ Custom..."}];
 
  const handleAddDisposalOption = (opt: any) => {
  if (opt.code === 'OTHERS' && !opt.customTitle) {
@@ -1434,7 +1434,7 @@ export const PrintableParadeStateModal: React.FC<PrintableParadeStateModalProps>
  <div className="w-full h-28 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[9px]">Drill Cat-C</div>
  </th>
  <th className="border border-slate-800 dark:border-slate-700 p-0.5 align-middle text-center">
- <div className="w-full h-28 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[9px]">Guard Duty On/Off</div>
+ <div className="w-full h-28 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[9px]">Security Duty On/Off</div>
  </th>
  {!isPtDocument && (<th className="border border-slate-800 dark:border-slate-700 p-0.5 align-middle text-center"><div className="w-full h-28 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[9px]">Canteen</div></th>)}
  <th className="border border-slate-800 dark:border-slate-700 p-0.5 align-middle text-center">

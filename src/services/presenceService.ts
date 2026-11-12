@@ -12,8 +12,7 @@ export interface UserPresence {
   deviceInfo?: string;
 }
 
-// Call this when user logs in
-const isQuotaExceeded = () => typeof window !== 'undefined' && window.localStorage.getItem('firebase_quota_exceeded') === new Date().toDateString();
+const isQuotaExceeded = () => false;
 
 export const logUserLogin = async (user: Omit<UserPresence, 'lastActive' | 'status' | 'deviceInfo'>) => {
   try {

@@ -196,7 +196,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
     { code: "ORDERLY_ROOM", label: "Orderly Room", customTitle: "Orderly Room" },
     { code: "UWO", label: "UWO", customTitle: "UWO" },
     { code: "CANTEEN", label: "Canteen" },
-    { code: "DUTY_OFF", label: "Guard Duty Off" },
+    { code: "DUTY_OFF", label: "Security Duty Off" },
     { code: "BAKE_N_BITE", label: "Bake & Bite" },
     { code: "RECEPTION", label: "K/O & Reception" },
     { code: "ADMIN_ORDER", label: "Admin Order" },
@@ -1752,7 +1752,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  <div className="w-full h-28 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[9px]">Drill Cat-C</div>
  </th>
  <th className="border border-slate-800 dark:border-white print:border-black p-0.5 align-middle text-center">
- <div className="w-full h-28 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[9px]">Guard Duty On/Off</div>
+ <div className="w-full h-28 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[9px]">Security Duty On/Off</div>
  </th>
  {!isPtDocument && (<th className="border border-slate-800 dark:border-white print:border-black p-0.5 align-middle text-center"><div className="w-full h-28 flex items-center justify-center [writing-mode:vertical-lr] [transform:rotate(180deg)] text-[9px]">Canteen</div></th>)}
  <th className="border border-slate-800 dark:border-white print:border-black p-0.5 align-middle text-center">

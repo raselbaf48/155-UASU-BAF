@@ -295,9 +295,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {(isCollapsed || openSections.workforce) && (
               <div className="mt-2 space-y-2 sm:space-y-1">
                 {isAdminOrSuper && renderNavButton('biodata-register', <UserCircle className="w-4 h-4 shrink-0" />, 'Biodata Register', 'Biodata Register', undefined, isMobileDrawer)}
-                {renderNavButton('leave-register', <Users className="w-4 h-4 shrink-0" />, 'Leave Register', 'Leave Register (Casual & Annual Leave)', undefined, isMobileDrawer)}
-                {renderNavButton('tdy-register', <FileText className="w-4 h-4 shrink-0" />, 'TDY Register', 'TDY Register (Temporary Duty Outstation)', undefined, isMobileDrawer)}
-                {renderNavButton('attachment-register', <FileText className="w-4 h-4 shrink-0" />, 'Deployment Register', 'Deployment Register (Bake & Bite, Canteen, Custom)', undefined, isMobileDrawer)}
                 {renderNavButton(
                   'register',
                   <Calendar className="w-4 h-4 shrink-0" />,
@@ -310,6 +307,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   ) : undefined,
                   isMobileDrawer
                 )}
+                {renderNavButton('leave-register', <Users className="w-4 h-4 shrink-0" />, 'Leave Register', 'Leave Register (Casual & Annual Leave)', undefined, isMobileDrawer)}
+                {renderNavButton('tdy-register', <FileText className="w-4 h-4 shrink-0" />, 'TDY Register', 'TDY Register (Temporary Duty Outstation)', undefined, isMobileDrawer)}
+                {renderNavButton('attachment-register', <FileText className="w-4 h-4 shrink-0" />, 'Deployment Register', 'Deployment Register (Bake & Bite, Canteen, Custom)', undefined, isMobileDrawer)}
                 {isAdminOrSuper && renderNavButton('duty-ratio', <Sliders className="w-4 h-4 shrink-0" />, 'Duty Ratio Matrix', 'Duty Ratio Matrix', undefined, isMobileDrawer)}
               </div>
             )}

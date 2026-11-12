@@ -409,36 +409,6 @@ export const DataRestoreModal: React.FC<DataRestoreModalProps> = ({
     }
   };
 
-  const [isMigratingFirebase, setIsMigratingFirebase] = useState(false);
-  const [firebaseMigrationReport, setFirebaseMigrationReport] = useState<string | null>(null);
-
-  const handleMigrateToFirebase = async () => {
-    setIsMigratingFirebase(true);
-    setFirebaseMigrationReport('Firebase Firestore-এ ডাটা শিফট করা হচ্ছে...');
-    try {
-      const res = await localDb.migrateToFirebase();
-      if (res.success) {
-        setFirebaseMigrationReport(`সফলভাবে মাইগ্রেশন সম্পন্ন হয়েছে!
-• Airmen Biodata: ${res.airmenCount} টি
-• Duty Assignments: ${res.dutyCount} টি
-• Parade History: ${res.paradeCount} টি
-• Users: ${res.usersCount} টি
-• Canteen Members: ${res.canteenMembersCount} টি
-• POS Sales History: ${res.canteenTxsCount} টি
-• Canteen Expenses: ${res.canteenExpensesCount} টি
-• Settings: ${res.settingsCount} টি
-সব ডাটা A to Z এখন Google Firebase Firestore ক্লাউডে সংরক্ষিত!`);
-        if (onDataRestored) onDataRestored();
-      } else {
-        setFirebaseMigrationReport(`মাইগ্রেশনে কিছু ত্রুটি হয়েছে: ${res.errors.join(', ')}`);
-      }
-    } catch (err: any) {
-      setFirebaseMigrationReport(`ব্যর্থ হয়েছে: ${err.message}`);
-    } finally {
-      setIsMigratingFirebase(false);
-    }
-  };
-
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 overflow-y-auto">
       <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-3xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden my-auto">
@@ -518,38 +488,6 @@ export const DataRestoreModal: React.FC<DataRestoreModalProps> = ({
               <Download className={`w-4 h-4 ${isExporting ? 'animate-bounce' : ''}`} />
               <span>{isExporting ? 'ডাউনলোড হচ্ছে...' : 'ক্যান্টিন ব্যাকআপ ডাউনলোড (JSON)'}</span>
             </button>
-          </div>
-
-          {/* Option 0: Firebase Direct Migration (Recommended) */}
-          <div className="p-5 rounded-2xl bg-gradient-to-r from-amber-950/40 via-orange-950/30 to-amber-900/20 border border-amber-500/40 space-y-3 shadow-lg shadow-amber-950/20">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="space-y-1">
-                <div className="flex items-center space-x-2 text-amber-400 font-bold text-sm">
-                  <Flame className="w-5 h-5 text-amber-400" />
-                  <span>Google Firebase Firestore ক্লাউড মাইগ্রেশন (সুপারিশকৃত)</span>
-                  <span className="text-[10px] bg-amber-500/20 text-amber-300 font-mono px-2 py-0.5 rounded-full font-bold">
-                    CONNECTED
-                  </span>
-                </div>
-                <p className="text-xs text-slate-300 leading-relaxed">
-                  Supabase ফ্রি টিয়ারের ব্যান্ডউইথ লিমিট শেষ হয়ে যাওয়ার কারণে আপনার বর্তমান সমস্ত ডাটা (৭৯ জন মেম্বার, ডিউটি রোস্টার ও বিল) এক ক্লিকে সরাসরি Google Firebase Firestore-এ ট্রান্সফার করুন।
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={handleMigrateToFirebase}
-                disabled={isMigratingFirebase}
-                className="shrink-0 px-5 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs flex items-center justify-center space-x-2 shadow-lg shadow-amber-500/20 transition-all cursor-pointer disabled:opacity-50"
-              >
-                <Flame className={`w-4 h-4 ${isMigratingFirebase ? 'animate-spin' : ''}`} />
-                <span>{isMigratingFirebase ? 'মাইগ্রেশন হচ্ছে...' : 'Firebase-এ শিফট করুন'}</span>
-              </button>
-            </div>
-            {firebaseMigrationReport && (
-              <div className="mt-2 p-3 rounded-xl bg-slate-950/80 border border-amber-500/30 text-xs font-mono text-amber-300 whitespace-pre-line leading-relaxed">
-                {firebaseMigrationReport}
-              </div>
-            )}
           </div>
 
           {/* Option 1: Supabase Unblock */}
