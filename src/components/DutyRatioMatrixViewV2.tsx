@@ -417,10 +417,10 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
                 type="button"
                 onClick={() => setIsHistoryModalOpen(true)}
                 className="px-3 py-2 text-xs font-bold text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/50 rounded-xl transition-colors flex items-center space-x-1.5 shadow-xs cursor-pointer"
-                title="View All Duties Ratio History"
+                title="View Ratio History"
               >
                 <History className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                <span>All Duties Ratio</span>
+                <span>History</span>
               </button>
 
               <button
@@ -478,7 +478,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
             type="button"
             onClick={() => {
               const formatted = formatShortDate(targetDate);
-              const title = `All Duties Ratio (${formatted})`;
+              const title = `All Duty Ratio (${formatted})`;
               saveDutyRatioVersion({
                 applyFromDate: targetDate,
                 title,
@@ -489,7 +489,7 @@ export const DutyRatioMatrixView: React.FC<DutyRatioMatrixViewProps> = ({
               setTimeout(() => setIsSaved(false), 2500);
             }}
             className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-bold rounded-lg shadow-xs flex items-center gap-1.5 cursor-pointer transition-all"
-            title="Save current duty ratio to All Duties Ratio History"
+            title="Save current duty ratio to Ratio History"
           >
             <Save className="w-3.5 h-3.5" />
             <span>Save</span>

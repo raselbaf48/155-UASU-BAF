@@ -94,7 +94,7 @@ export const RatioHistoryModal: React.FC<RatioHistoryModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
-                  All Duties Ratio
+                  History
                 </h2>
                 <span className="px-2 py-0.5 text-[11px] font-bold rounded-full bg-indigo-100 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-400 border border-indigo-300 dark:border-indigo-800">
                   {history.length} {history.length === 1 ? 'Ratio' : 'Ratios'}
@@ -149,7 +149,7 @@ export const RatioHistoryModal: React.FC<RatioHistoryModalProps> = ({
                       <div className="space-y-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <h3 className="text-sm font-black text-slate-900 dark:text-white">
-                            {v.title}
+                            {v.title === 'Base Duty Ratio' || v.title === 'Base Duty Ratio (Default)' ? 'All Duty Ratio' : v.title}
                           </h3>
                           {isTargetActive && (
                             <span className="px-2 py-0.5 text-[10px] font-black rounded-full bg-emerald-500 text-white flex items-center gap-1 shadow-xs">

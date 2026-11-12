@@ -315,7 +315,7 @@ async function startServer() {
   const app = express();
   const portArgIdx = process.argv.indexOf('--port');
   const portFromArg = portArgIdx !== -1 && process.argv[portArgIdx + 1] ? parseInt(process.argv[portArgIdx + 1], 10) : NaN;
-  const PORT = !isNaN(portFromArg) ? portFromArg : (process.env.PORT ? parseInt(process.env.PORT, 10) : 3000);
+  const PORT = !isNaN(portFromArg) ? portFromArg : 3000;
 
   const hostArgIdx = process.argv.indexOf('--host');
   const HOST = hostArgIdx !== -1 && process.argv[hostArgIdx + 1] ? process.argv[hostArgIdx + 1] : (process.env.HOST || '0.0.0.0');
@@ -2423,17 +2423,25 @@ ${combinedText.substring(0, 30000)}
     });
   }
 
-  const server = app.listen(PORT, HOST, () => {
-    console.log(`[155 UASU BAF] Duty Management Server running on http://${HOST}:${PORT}`);
-  });
+  // Keep process alive indefinitely to prevent event-loop drain during server transitions
+  setInterval(() => {}, 1000 * 60 * 60);
 
-  server.on('error', (err: any) => {
-    if (err.code === 'EADDRINUSE') {
-      console.warn(`[server] Port ${PORT} already in use, continuing.`);
-    } else {
-      console.error('[server] Server error:', err);
-    }
-  });
+  const startListening = () => {
+    const server = app.listen(PORT, HOST, () => {
+      console.log(`[155 UASU BAF] Duty Management Server running on http://${HOST}:${PORT}`);
+    });
+
+    server.on('error', (err: any) => {
+      if (err.code === 'EADDRINUSE') {
+        console.warn(`[server] Port ${PORT} busy, retrying in 1000ms...`);
+        setTimeout(startListening, 1000);
+      } else {
+        console.error('[server] Server error:', err);
+      }
+    });
+  };
+
+  startListening();
 }
 
 startServer().catch((err) => {

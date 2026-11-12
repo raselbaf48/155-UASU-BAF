@@ -487,7 +487,7 @@ export function getDutyRatioHistory(): DutyRatioVersion[] {
       return [{
         id: 'ratio_version_base',
         applyFromDate: '2026-01-01',
-        title: 'Base Duty Ratio (Default)',
+        title: 'All Duty Ratio',
         matrix: [...INITIAL_OFFICIAL_DUTY_MATRIX],
         createdAt: '2026-01-01T00:00:00.000Z',
       }];
@@ -496,6 +496,18 @@ export function getDutyRatioHistory(): DutyRatioVersion[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
+        let hasModified = false;
+        parsed.forEach((item: any) => {
+          if (item && item.title && (item.title === 'Base Duty Ratio' || item.title === 'Base Duty Ratio (Default)' || item.title.startsWith('Base Duty Ratio'))) {
+            item.title = 'All Duty Ratio';
+            hasModified = true;
+          }
+        });
+        if (hasModified) {
+          try {
+            localStorage.setItem(RATIO_HISTORY_STORAGE_KEY, JSON.stringify(parsed));
+          } catch {}
+        }
         return parsed.sort((a, b) => (a.applyFromDate || '').localeCompare(b.applyFromDate || ''));
       }
     }
@@ -508,7 +520,7 @@ export function getDutyRatioHistory(): DutyRatioVersion[] {
   const initialVersion: DutyRatioVersion = {
     id: 'ratio_version_base',
     applyFromDate: '2026-01-01',
-    title: 'Base Duty Ratio',
+    title: 'All Duty Ratio',
     matrix: baseMatrix,
     createdAt: new Date().toISOString(),
     notes: 'Initial Official Duty Ratio Matrix',
@@ -525,7 +537,7 @@ export function getDutyRatioVersionForDate(dateStr?: string): DutyRatioVersion {
     return {
       id: 'ratio_version_base',
       applyFromDate: '2026-01-01',
-      title: 'Base Duty Ratio',
+      title: 'All Duty Ratio',
       matrix: getStoredDutyMatrixInternal(),
       createdAt: new Date().toISOString(),
     };
@@ -665,7 +677,7 @@ export function deleteDutyRatioVersion(id: string): boolean {
       const resetVersion: DutyRatioVersion = {
         id: 'ratio_version_base',
         applyFromDate: '2026-01-01',
-        title: 'All Duties Ratio (Default)',
+        title: 'All Duty Ratio',
         matrix: [...INITIAL_OFFICIAL_DUTY_MATRIX],
         createdAt: new Date().toISOString(),
         notes: 'Reset to Official Unit Default Scale',
