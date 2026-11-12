@@ -1960,7 +1960,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  )}
 
  {/* DISPOSAL COL C */}
- {(dutyOnList.length > 0 || (!isPtDocument && dutyOffList.length > 0) || Object.keys(customDisposalsMap).length > 0) && (
+ {(dutyOnList.length > 0 || dutyOffList.length > 0 || Object.keys(customDisposalsMap).length > 0) && (
  <div className="w-48 flex flex-col space-y-3">
  {dutyOnList.length > 0 && (
  <div>
@@ -1968,7 +1968,7 @@ export const ParadeStateFormattedView: React.FC<ParadeStateFormattedViewProps> =
  {renderDisposalAirmenList(dutyOnList, 'DUTY_ON', 'Duty On')}
  </div>
  )}
- {!isPtDocument && dutyOffList.length > 0 && (
+ {dutyOffList.length > 0 && (
  <div>
  <h3 className="font-bold underline text-slate-900 dark:text-white print:text-black mb-1 capitalize tracking-wide">Duty Off</h3>
  {renderDisposalAirmenList(dutyOffList, 'DUTY_OFF', 'Duty Off')}

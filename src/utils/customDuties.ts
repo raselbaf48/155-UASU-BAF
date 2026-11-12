@@ -19,7 +19,10 @@ export const DEFAULT_CUSTOM_DUTIES: CustomDutyConfig[] = [
     description: 'Escort Duty',
     isCustom: true,
     eligibleFlights: ['Mechanics', 'Avionics', 'GCS', 'Admin'],
-    eligibleRanks: ['Sgt', 'Cpl', 'LAC', 'AC-1', 'AC-2']
+    eligibleRanks: ['Sgt', 'Cpl', 'LAC', 'AC-1', 'AC-2'],
+    onParadeOnDutyDay: false,
+    dutyOffNextDay: true,
+    onPtNextDay: true
   }
 ];
 

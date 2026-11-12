@@ -1260,10 +1260,25 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
         // Check if yesterday they performed heavy duty (Night Off)
         if (prevAssignments.length > 0) {
           const yestAss = prevAssignments[0];
-          const isHeavy =
-            ['GD', 'BTF', 'NTF', 'AIRPORT'].includes(yestAss.dutyCode) ||
-            ((yestAss.dutyCode === 'IDAC' || yestAss.dutyCode === 'IDA') && yestAss.idaShift === 'Night') ||
-            (yestAss.notes || '').toLowerCase().includes('idac');
+          const isHeavy = (() => {
+            try {
+              const matrix = getStoredDutyMatrix(fromDate || selectedDate);
+              const c = String(yestAss.dutyCode || '').toUpperCase();
+              const s = (yestAss.idaShift || '').toLowerCase();
+              const matched = matrix.find(t => {
+                if (['IDAC', 'IDA', 'IDA C', 'IDA_C'].includes(c) && ['IDAC', 'IDA'].includes(t.dutyCode)) {
+                  return t.shiftLabel && s ? t.shiftLabel.toLowerCase() === s : true;
+                }
+                return t.dutyCode === c || t.id === yestAss.dutyCode || (t.title && t.title.toLowerCase() === String(yestAss.dutyName || yestAss.notes || '').toLowerCase());
+              });
+              if (matched?.dutyOffNextDay !== undefined) {
+                return matched.dutyOffNextDay;
+              }
+            } catch {}
+            return ['GD', 'BTF', 'NTF', 'AIRPORT', 'HALISHAHAR'].includes(yestAss.dutyCode) ||
+              ((yestAss.dutyCode === 'IDAC' || yestAss.dutyCode === 'IDA') && yestAss.idaShift === 'Night') ||
+              (yestAss.notes || '').toLowerCase().includes('idac');
+          })();
           if (isHeavy) {
             let offShort = 'GD Off';
             if (yestAss.dutyCode === 'GD') offShort = 'GD Off';
@@ -1311,10 +1326,25 @@ export const AssignDutyModal: React.FC<AssignDutyModalProps> = ({
     // 2. Check if person performed Heavy/Night Duty yesterday (Night Off today)
     if (prevAssignments.length > 0) {
       const yestAss = prevAssignments[0];
-      const isHeavy =
-        ['GD', 'BTF', 'NTF', 'AIRPORT'].includes(yestAss.dutyCode) ||
-        ((yestAss.dutyCode === 'IDAC' || yestAss.dutyCode === 'IDA') && yestAss.idaShift === 'Night') ||
-        (yestAss.notes || '').toLowerCase().includes('idac');
+      const isHeavy = (() => {
+        try {
+          const matrix = getStoredDutyMatrix(fromDate || selectedDate);
+          const c = String(yestAss.dutyCode || '').toUpperCase();
+          const s = (yestAss.idaShift || '').toLowerCase();
+          const matched = matrix.find(t => {
+            if (['IDAC', 'IDA', 'IDA C', 'IDA_C'].includes(c) && ['IDAC', 'IDA'].includes(t.dutyCode)) {
+              return t.shiftLabel && s ? t.shiftLabel.toLowerCase() === s : true;
+            }
+            return t.dutyCode === c || t.id === yestAss.dutyCode || (t.title && t.title.toLowerCase() === String(yestAss.dutyName || yestAss.notes || '').toLowerCase());
+          });
+          if (matched?.dutyOffNextDay !== undefined) {
+            return matched.dutyOffNextDay;
+          }
+        } catch {}
+        return ['GD', 'BTF', 'NTF', 'AIRPORT', 'HALISHAHAR'].includes(yestAss.dutyCode) ||
+          ((yestAss.dutyCode === 'IDAC' || yestAss.dutyCode === 'IDA') && yestAss.idaShift === 'Night') ||
+          (yestAss.notes || '').toLowerCase().includes('idac');
+      })();
         
       if (isHeavy) {
         let offShort = 'GD Off';

@@ -69,6 +69,9 @@ export interface DutyTypeInfo {
   isCustom?: boolean;
   eligibleFlights?: FlightName[];
   eligibleRanks?: Rank[];
+  onParadeOnDutyDay?: boolean;
+  dutyOffNextDay?: boolean;
+  onPtNextDay?: boolean;
 }
 
 export interface DutyAssignment {

@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { AlertCircle, Settings, Info, Users, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Calendar, X, Save, Power, PowerOff, Trash, Filter, Plus, Minus, Printer, Edit2, Shield, Cloud, RefreshCw, CheckCircle2, Copy, Check, UploadCloud, RotateCcw } from 'lucide-react';
 import { localDb } from '../services/localDatabase';
 import { Airman, Rank, FlightName, DutyCategoryCode } from '../types';
-import { addCustomDuty, CustomDutyConfig, removeCustomDuty } from '../utils/customDuties';
+import { addCustomDuty, CustomDutyConfig, removeCustomDuty, getCustomDuties, saveCustomDuties } from '../utils/customDuties';
 import { getSavedCustomDisposals, saveCustomDisposal, removeSavedCustomDisposal } from '../utils/customDisposalStore';
 import { calculateBalancedAutoTargets, calculateExactDutyRatios, roundDutyByRule, isFixedEqualDuty, DEFAULT_MANPOWER } from '../utils/dutyDistribution';
 import { pushDutyListToCloud, pullDutyListFromCloud, DutySyncResult } from '../utils/dutyCloudSync';
@@ -293,6 +293,9 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
   const [editDutyFlights, setEditDutyFlights] = useState<FlightName[]>([]);
   const [editDutyRanks, setEditDutyRanks] = useState<Rank[]>([]);
   const [editDutyAllotmentType, setEditDutyAllotmentType] = useState<AllotmentType>('ratio');
+  const [editDutyOnParade, setEditDutyOnParade] = useState<boolean>(false);
+  const [editDutyDutyOff, setEditDutyDutyOff] = useState<boolean>(true);
+  const [editDutyOnPt, setEditDutyOnPt] = useState<boolean>(true);
   
   // New Duty Modal State
   const [isAddingNewDuty, setIsAddingNewDuty] = useState(false);
@@ -301,6 +304,9 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
   const [newDutyFlights, setNewDutyFlights] = useState<FlightName[]>(['Mechanics', 'Avionics', 'GCS', 'Admin']);
   const [newDutyRanks, setNewDutyRanks] = useState<Rank[]>(['MWO', 'SWO', 'WO', 'Sgt', 'Cpl', 'LAC', 'AC-1', 'AC-2']);
   const [newDutyAllotmentType, setNewDutyAllotmentType] = useState<AllotmentType>('ratio');
+  const [newDutyOnParade, setNewDutyOnParade] = useState<boolean>(false);
+  const [newDutyDutyOff, setNewDutyDutyOff] = useState<boolean>(true);
+  const [newDutyOnPt, setNewDutyOnPt] = useState<boolean>(true);
 
   // Cloud Sync State for "All Duty & Daily Quota"
   const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(false);
@@ -719,6 +725,9 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                           setEditDutyFlights(elig);
                           setEditDutyRanks(table.eligibleRanks || (table.title.toLowerCase().includes('security') ? ['Cpl', 'LAC', 'AC-1', 'AC-2'] : ['Sgt', 'Cpl', 'LAC', 'AC-1', 'AC-2']));
                           setEditDutyAllotmentType(elig.length === 1 ? 'equal' : (table.allotmentType || (isFixedEqualDuty(table) ? 'equal' : 'ratio')));
+                          setEditDutyOnParade(table.onParadeOnDutyDay ?? false);
+                          setEditDutyDutyOff(table.dutyOffNextDay ?? (table.dutyCode === 'RECEPTION' ? false : true));
+                          setEditDutyOnPt(table.onPtNextDay ?? true);
                         }}
                         className="p-1.5 rounded-md text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                         title="Duty Settings"
@@ -1860,6 +1869,138 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                 </div>
               </div>
 
+              {/* State Rules (Parade & PT) */}
+              <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    State Rules (Parade & PT)
+                  </label>
+                </div>
+
+                {/* Switch 1: On Parade */}
+                <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/40 flex items-start justify-between gap-3">
+                  <div className="flex-1">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-sm font-bold text-slate-900 dark:text-white">On Parade</span>
+                      {newDutyOnParade ? (
+                        <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300">
+                          Enabled
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400">
+                          Off
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-snug">
+                      ডিউটির দিন <strong>Parade State</strong> এ <span className="text-emerald-600 dark:text-emerald-400 font-semibold">ON Parade</span> থাকবে, কিন্তু <strong>PT State</strong> এ <span className="text-indigo-600 dark:text-indigo-400 font-semibold">On Duty</span> থাকবে।
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={newDutyOnParade}
+                    onClick={() => setNewDutyOnParade(!newDutyOnParade)}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none mt-0.5 ${
+                      newDutyOnParade ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
+                    }`}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        newDutyOnParade ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {/* Switch 2: Duty Off */}
+                <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/40 flex flex-col gap-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-sm font-bold text-slate-900 dark:text-white">Duty Off</span>
+                        {newDutyDutyOff ? (
+                          <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300">
+                            Enabled
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400">
+                            Off
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-snug">
+                        {newDutyDutyOff ? (
+                          <>পরের দিন <strong>Parade State</strong> এ <span className="text-amber-600 dark:text-amber-400 font-semibold">Duty Off</span> থাকবে।</>
+                        ) : (
+                          <>পরের দিন স্বাভাবিক অন প্যারেড থাকবে, কোনো Duty Off প্রযোজ্য হবে না।</>
+                        )}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={newDutyDutyOff}
+                      onClick={() => setNewDutyDutyOff(!newDutyDutyOff)}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none mt-0.5 ${
+                        newDutyDutyOff ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
+                      }`}
+                    >
+                      <span
+                        aria-hidden="true"
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          newDutyDutyOff ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Sub-Switch: On PT (Only shown when Duty Off is ON) */}
+                  {newDutyDutyOff && (
+                    <div className="mt-1 pt-3 border-t border-slate-200 dark:border-slate-700/80 flex items-start justify-between gap-3 pl-2 sm:pl-3 bg-white/60 dark:bg-slate-900/40 p-2.5 rounded-lg border">
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-2">
+                          <span className="text-sm font-bold text-slate-900 dark:text-white">On PT</span>
+                          {newDutyOnPt ? (
+                            <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300">
+                              Enabled
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300">
+                              Off
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-snug">
+                          {newDutyOnPt ? (
+                            <>পরের দিন <strong>PT State</strong> এ <span className="text-emerald-600 dark:text-emerald-400 font-semibold">On PT (On Parade)</span> থাকবে।</>
+                          ) : (
+                            <>পরের দিন <strong>PT State</strong> এ <span className="text-amber-600 dark:text-amber-400 font-semibold">Duty Off</span> দেখাবে।</>
+                          )}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={newDutyOnPt}
+                        onClick={() => setNewDutyOnPt(!newDutyOnPt)}
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none mt-0.5 ${
+                          newDutyOnPt ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
+                        }`}
+                      >
+                        <span
+                          aria-hidden="true"
+                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                            newDutyOnPt ? 'translate-x-5' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
             </div>
             <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex justify-end space-x-3 bg-slate-50 dark:bg-slate-800/50 rounded-b-2xl">
               <button onClick={() => setIsAddingNewDuty(false)} className="px-4 py-2 text-sm font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors">
@@ -1881,7 +2022,10 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                     description: newDutyName,
                     isCustom: true,
                     eligibleFlights: newDutyFlights,
-                    eligibleRanks: newDutyRanks
+                    eligibleRanks: newDutyRanks,
+                    onParadeOnDutyDay: newDutyOnParade,
+                    dutyOffNextDay: newDutyDutyOff,
+                    onPtNextDay: newDutyDutyOff ? newDutyOnPt : false
                   };
                   
                   // Add globally
@@ -1904,6 +2048,9 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                       eligibleFlights: newDutyFlights,
                       eligibleRanks: newDutyRanks,
                       allotmentType: newDutyFlights.length === 1 ? 'equal' : newDutyAllotmentType,
+                      onParadeOnDutyDay: newDutyOnParade,
+                      dutyOffNextDay: newDutyDutyOff,
+                      onPtNextDay: newDutyDutyOff ? newDutyOnPt : false,
                       data: {
                         Mechanics: Array(31).fill(0),
                         Avionics: Array(31).fill(0),
@@ -2101,6 +2248,138 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                 </div>
               </div>
 
+              {/* State Rules (Parade & PT) */}
+              <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    State Rules (Parade & PT)
+                  </label>
+                </div>
+
+                {/* Switch 1: On Parade */}
+                <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/40 flex items-start justify-between gap-3">
+                  <div className="flex-1">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-sm font-bold text-slate-900 dark:text-white">On Parade</span>
+                      {editDutyOnParade ? (
+                        <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300">
+                          Enabled
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400">
+                          Off
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-snug">
+                      ডিউটির দিন <strong>Parade State</strong> এ <span className="text-emerald-600 dark:text-emerald-400 font-semibold">ON Parade</span> থাকবে, কিন্তু <strong>PT State</strong> এ <span className="text-indigo-600 dark:text-indigo-400 font-semibold">On Duty</span> থাকবে।
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={editDutyOnParade}
+                    onClick={() => setEditDutyOnParade(!editDutyOnParade)}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none mt-0.5 ${
+                      editDutyOnParade ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
+                    }`}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        editDutyOnParade ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {/* Switch 2: Duty Off */}
+                <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/40 flex flex-col gap-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-sm font-bold text-slate-900 dark:text-white">Duty Off</span>
+                        {editDutyDutyOff ? (
+                          <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300">
+                            Enabled
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-400">
+                            Off
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-snug">
+                        {editDutyDutyOff ? (
+                          <>পরের দিন <strong>Parade State</strong> এ <span className="text-amber-600 dark:text-amber-400 font-semibold">Duty Off</span> থাকবে।</>
+                        ) : (
+                          <>পরের দিন স্বাভাবিক অন প্যারেড থাকবে, কোনো Duty Off প্রযোজ্য হবে না।</>
+                        )}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={editDutyDutyOff}
+                      onClick={() => setEditDutyDutyOff(!editDutyDutyOff)}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none mt-0.5 ${
+                        editDutyDutyOff ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
+                      }`}
+                    >
+                      <span
+                        aria-hidden="true"
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          editDutyDutyOff ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Sub-Switch: On PT (Only shown when Duty Off is ON) */}
+                  {editDutyDutyOff && (
+                    <div className="mt-1 pt-3 border-t border-slate-200 dark:border-slate-700/80 flex items-start justify-between gap-3 pl-2 sm:pl-3 bg-white/60 dark:bg-slate-900/40 p-2.5 rounded-lg border">
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-2">
+                          <span className="text-sm font-bold text-slate-900 dark:text-white">On PT</span>
+                          {editDutyOnPt ? (
+                            <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300">
+                              Enabled
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300">
+                              Off
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-snug">
+                          {editDutyOnPt ? (
+                            <>পরের দিন <strong>PT State</strong> এ <span className="text-emerald-600 dark:text-emerald-400 font-semibold">On PT (On Parade)</span> থাকবে।</>
+                          ) : (
+                            <>পরের দিন <strong>PT State</strong> এ <span className="text-amber-600 dark:text-amber-400 font-semibold">Duty Off</span> দেখাবে।</>
+                          )}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={editDutyOnPt}
+                        onClick={() => setEditDutyOnPt(!editDutyOnPt)}
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none mt-0.5 ${
+                          editDutyOnPt ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
+                        }`}
+                      >
+                        <span
+                          aria-hidden="true"
+                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                            editDutyOnPt ? 'translate-x-5' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
             </div>
             <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50 rounded-b-2xl">
               <button 
@@ -2149,9 +2428,24 @@ export const DutyRatioConfigPanel: React.FC<DutyRatioConfigPanelProps> = ({ acti
                         targetItem.eligibleFlights = editDutyFlights;
                         targetItem.eligibleRanks = editDutyRanks;
                         targetItem.allotmentType = finalAllotmentType;
+                        targetItem.onParadeOnDutyDay = editDutyOnParade;
+                        targetItem.dutyOffNextDay = editDutyDutyOff;
+                        targetItem.onPtNextDay = editDutyDutyOff ? editDutyOnPt : false;
                         if (allotmentTypeChanged) {
                           delete targetItem.flightTargets;
                         }
+
+                        // Also update custom duties if applicable
+                        try {
+                          const customDuties = getCustomDuties();
+                          const cMatch = customDuties.find(cd => cd.code === targetItem.dutyCode || cd.code === targetItem.id);
+                          if (cMatch) {
+                            cMatch.onParadeOnDutyDay = editDutyOnParade;
+                            cMatch.dutyOffNextDay = editDutyDutyOff;
+                            cMatch.onPtNextDay = editDutyDutyOff ? editDutyOnPt : false;
+                            saveCustomDuties(customDuties);
+                          }
+                        } catch {}
                       }
 
                       // Re-assign contiguous serNo: 1, 2, ..., N (kono ser faka thakbe na)

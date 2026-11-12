@@ -17,6 +17,9 @@ export interface DutyRatioTable {
   eligibleFlights?: import('../types').FlightName[];
   eligibleRanks?: import('../types').Rank[];
   allotmentType?: AllotmentType;
+  onParadeOnDutyDay?: boolean; // When ON: Duty er din Parade State e ON Parade thakbe, bt PT State e On Duty thakbe
+  dutyOffNextDay?: boolean;    // When ON: Porer din Parade State e Duty Off thakbe
+  onPtNextDay?: boolean;       // When ON: Porer din PT State e On PT thakbe; When OFF: PT State e Duty Off thakbe
   flightTargets?: {
     Mechanics?: number;
     Avionics?: number;
@@ -39,6 +42,9 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
     title: 'BASE SECURITY DUTY',
     dutyCode: 'GD',
     allotmentType: 'ratio',
+    onParadeOnDutyDay: false,
+    dutyOffNextDay: true,
+    onPtNextDay: true,
     totalRequiredMonth: 88,
     totalRequiredDaily: 3,
     eligibleFlights: ['Mechanics', 'Avionics', 'GCS', 'Admin'],
@@ -57,6 +63,9 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
     title: 'BASE TASKFORCE DUTY',
     dutyCode: 'BTF',
     allotmentType: 'ratio',
+    onParadeOnDutyDay: false,
+    dutyOffNextDay: true,
+    onPtNextDay: true,
     totalRequiredMonth: 22,
     totalRequiredDaily: 1,
     eligibleFlights: ['Mechanics', 'Avionics', 'GCS', 'Admin'],
@@ -75,6 +84,9 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
     title: 'NAJIRPARA TASKFORCE DUTY',
     dutyCode: 'NTF',
     allotmentType: 'ratio',
+    onParadeOnDutyDay: false,
+    dutyOffNextDay: true,
+    onPtNextDay: true,
     totalRequiredMonth: 40,
     totalRequiredDaily: 1,
     eligibleFlights: ['Mechanics', 'Avionics', 'GCS', 'Admin'],
@@ -94,6 +106,8 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
     dutyCode: 'IDAC',
     shiftLabel: 'Morning',
     allotmentType: 'ratio',
+    onParadeOnDutyDay: false,
+    dutyOffNextDay: false,
     totalRequiredMonth: 31,
     totalRequiredDaily: 1,
     eligibleFlights: ['Mechanics', 'Avionics', 'GCS', 'Admin'],
@@ -113,6 +127,8 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
     dutyCode: 'IDAC',
     shiftLabel: 'Afternoon',
     allotmentType: 'ratio',
+    onParadeOnDutyDay: false,
+    dutyOffNextDay: false,
     totalRequiredMonth: 31,
     totalRequiredDaily: 1,
     eligibleFlights: ['Mechanics', 'Avionics', 'GCS', 'Admin'],
@@ -132,6 +148,9 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
     dutyCode: 'IDAC',
     shiftLabel: 'Night',
     allotmentType: 'ratio',
+    onParadeOnDutyDay: true,
+    dutyOffNextDay: true,
+    onPtNextDay: true,
     totalRequiredMonth: 62,
     totalRequiredDaily: 2,
     eligibleFlights: ['Mechanics', 'Avionics', 'GCS', 'Admin'],
@@ -150,6 +169,9 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
     title: 'AIRFIELD DUTY',
     dutyCode: 'AIRPORT',
     allotmentType: 'equal',
+    onParadeOnDutyDay: false,
+    dutyOffNextDay: true,
+    onPtNextDay: true,
     totalRequiredMonth: 93,
     totalRequiredDaily: 3,
     eligibleFlights: ['Mechanics', 'Avionics', 'GCS'],
@@ -168,6 +190,8 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
     title: 'RECEIPTION DUTY',
     dutyCode: 'RECEPTION',
     allotmentType: 'ratio',
+    onParadeOnDutyDay: false,
+    dutyOffNextDay: false,
     totalRequiredMonth: 31,
     totalRequiredDaily: 1,
     eligibleFlights: ['Mechanics', 'Avionics', 'GCS', 'Admin'],
@@ -186,6 +210,9 @@ export const INITIAL_OFFICIAL_DUTY_MATRIX: DutyRatioTable[] = [
     title: 'HALISHAHAR TASKFORCE DUTY',
     dutyCode: 'HALISHAHAR' as DutyCategoryCode,
     allotmentType: 'equal',
+    onParadeOnDutyDay: false,
+    dutyOffNextDay: true,
+    onPtNextDay: true,
     totalRequiredMonth: 7,
     totalRequiredDaily: 1,
     eligibleFlights: ['Mechanics', 'Avionics', 'GCS', 'Admin'],
@@ -344,6 +371,9 @@ export function getStoredDutyMatrixInternal(): DutyRatioTable[] {
             eligibleRanks: t.eligibleRanks || defT?.eligibleRanks,
             allotmentType: isSingleFlt ? 'equal' : (t.allotmentType || defT?.allotmentType),
             flightTargets: t.flightTargets,
+            onParadeOnDutyDay: t.onParadeOnDutyDay !== undefined ? t.onParadeOnDutyDay : defT?.onParadeOnDutyDay,
+            dutyOffNextDay: t.dutyOffNextDay !== undefined ? t.dutyOffNextDay : defT?.dutyOffNextDay,
+            onPtNextDay: t.onPtNextDay !== undefined ? t.onPtNextDay : (defT?.onPtNextDay !== undefined ? defT.onPtNextDay : (t.dutyOffNextDay ? true : undefined)),
           };
         });
         const existingIds = new Set(updatedParsed.map((t: DutyRatioTable) => t.id));
@@ -592,7 +622,10 @@ export function saveDutyMatrix(matrix: DutyRatioTable[]) {
         isDisabled: m.isDisabled,
         totalRequiredDaily: m.totalRequiredDaily,
         totalRequiredMonth: m.totalRequiredMonth,
-        dailyRequirements: m.dailyRequirements
+        dailyRequirements: m.dailyRequirements,
+        onParadeOnDutyDay: m.onParadeOnDutyDay,
+        dutyOffNextDay: m.dutyOffNextDay,
+        onPtNextDay: m.onPtNextDay
     }));
     localStorage.setItem('baf_duty_matrix_metadata', JSON.stringify(metadata));
     localStorage.setItem('baf_duty_matrix_full', JSON.stringify(sanitizedMatrix));

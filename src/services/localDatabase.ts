@@ -36,7 +36,7 @@ import {
   FirebaseMigrationResult
 } from './firebaseFirestoreService';
 import { scheduleDriveAutoBackup } from './googleDriveService';
-import { getCustomDutyName } from '../utils/customDuties';
+import { getCustomDutyName, getCustomDuties } from '../utils/customDuties';
 
 export interface LocalStorageDB {
   airmen: Airman[];
@@ -2742,6 +2742,92 @@ export class LocalDatabaseEngine {
     const monthAssignments = this.db.assignments[monthKey] || [];
     const dateAssignments = monthAssignments.filter((a) => a.date === date);
 
+    let currentMatrix: DutyRatioTable[] = [];
+    try {
+      currentMatrix = getStoredDutyMatrix(date);
+    } catch {
+      currentMatrix = [...INITIAL_OFFICIAL_DUTY_MATRIX];
+    }
+
+    const getDutyRule = (assignment: DutyAssignment | undefined): {
+      onParadeOnDutyDay: boolean;
+      dutyOffNextDay: boolean;
+      onPtNextDay?: boolean;
+      matchedTitle?: string;
+    } => {
+      if (!assignment) return { onParadeOnDutyDay: false, dutyOffNextDay: false, onPtNextDay: true };
+      const code = String(assignment.dutyCode || '').trim();
+      const codeUpper = code.toUpperCase();
+      const name = String((assignment as any)?.dutyName || '').trim();
+      const notes = String(assignment.notes || '').trim();
+      const s = (assignment.idaShift || '').trim().toLowerCase();
+
+      // Find in currentMatrix
+      const table = currentMatrix.find(t => {
+        if (['IDAC', 'IDA', 'IDA C', 'IDA_C', 'IDAC CENTER', 'IDA CENTER'].includes(codeUpper)) {
+          if (['IDAC', 'IDA'].includes(t.dutyCode)) {
+            if (t.shiftLabel && s) {
+              return t.shiftLabel.toLowerCase() === s;
+            }
+            return true;
+          }
+        }
+        if (t.dutyCode && t.dutyCode === code) return true;
+        if (t.id && (t.id === code || t.id.toLowerCase() === code.toLowerCase())) return true;
+        if (t.title) {
+          const tTitle = t.title.toLowerCase().trim();
+          if (name && tTitle === name.toLowerCase()) return true;
+          if (notes && tTitle === notes.toLowerCase()) return true;
+          if (code && tTitle === code.toLowerCase()) return true;
+        }
+        return false;
+      });
+
+      // Also check custom duties
+      let customDuty: any = undefined;
+      try {
+        const customs = getCustomDuties();
+        customDuty = customs.find(cd => cd.code === code || cd.code === table?.id || (name && cd.name.toLowerCase() === name.toLowerCase()));
+      } catch {}
+
+      let onParadeOnDutyDay: boolean;
+      let dutyOffNextDay: boolean;
+      let onPtNextDay: boolean;
+
+      if (table?.onParadeOnDutyDay !== undefined) {
+        onParadeOnDutyDay = table.onParadeOnDutyDay;
+      } else if (customDuty?.onParadeOnDutyDay !== undefined) {
+        onParadeOnDutyDay = customDuty.onParadeOnDutyDay;
+      } else {
+        // Default: IDAC Night shift is on parade during day parade
+        const isIdacNt = ['IDAC', 'IDA', 'IDA C', 'IDA_C'].includes(codeUpper) &&
+          (s === 'night' || s === 'c' || s === 'nt' || notes.toLowerCase().includes('night'));
+        onParadeOnDutyDay = isIdacNt;
+      }
+
+      if (table?.dutyOffNextDay !== undefined) {
+        dutyOffNextDay = table.dutyOffNextDay;
+      } else if (customDuty?.dutyOffNextDay !== undefined) {
+        dutyOffNextDay = customDuty.dutyOffNextDay;
+      } else {
+        // Default: heavy / overnight duties get Duty Off
+        const isIdacNt = ['IDAC', 'IDA', 'IDA C', 'IDA_C'].includes(codeUpper) &&
+          (s === 'night' || s === 'c' || s === 'nt' || notes.toLowerCase().includes('night'));
+        const isClassicHeavy = ['GD', 'BTF', 'NTF', 'AIRPORT', 'AIRFIELD', 'ATT', 'HALISHAHAR'].includes(codeUpper) || isIdacNt;
+        dutyOffNextDay = isClassicHeavy;
+      }
+
+      if (table?.onPtNextDay !== undefined) {
+        onPtNextDay = table.onPtNextDay;
+      } else if (customDuty?.onPtNextDay !== undefined) {
+        onPtNextDay = customDuty.onPtNextDay;
+      } else {
+        onPtNextDay = true;
+      }
+
+      return { onParadeOnDutyDay, dutyOffNextDay, onPtNextDay, matchedTitle: table?.title || customDuty?.name };
+    };
+
     const assignmentMap = new Map<string, DutyAssignment>();
 
     const getAirmanKeyAliases = (rawId: string): string[] => {
@@ -2949,40 +3035,63 @@ export class LocalDatabaseEngine {
     } => {
       const ass = findInAssignmentMap(assignmentMap, airmanId);
       const isDep = ass && ['ATT', 'BAKE_N_BITE', 'CANTEEN', 'DEPLOYMENT'].includes(ass.dutyCode);
-      if (!isPT && (!ass || isDep)) {
+      if (!ass || isDep) {
         const yestAss = findInAssignmentMap(yestMap, airmanId);
         if (yestAss) {
-          let offShort = 'GD Off';
-          if (yestAss.dutyCode === 'GD') offShort = 'GD Off';
-          else if (yestAss.dutyCode === 'BTF') offShort = 'BTF Off';
-          else if (yestAss.dutyCode === 'NTF') offShort = 'NTF Off';
-          else if (yestAss.dutyCode === 'AIRPORT') offShort = 'Airfield Off';
-          else if (yestAss.dutyCode === 'HALISHAHAR') offShort = 'Halishahar Off';
-          else if ((yestAss.dutyCode === 'IDAC' || yestAss.dutyCode === 'IDA') && yestAss.idaShift === 'Night') offShort = 'IDAC Nt Off';
-          else if (yestAss.notes?.toLowerCase().includes('idac') || yestAss.previousDutyName?.toLowerCase().includes('idac')) offShort = 'IDAC Nt Off';
-          else if (yestAss.dutyCode === 'DUTY_OFF') offShort = yestAss.previousDutyName || yestAss.notes || 'GD Off';
-          else if (yestAss.dutyCode === 'ON_PARADE') offShort = 'GD Off';
-          else offShort = `${yestAss.dutyCode} Off`;
+          const yestRule = getDutyRule(yestAss);
 
-          offShort = (offShort || "")
-            .replace(/DUTY_OFF/g, 'Duty')
-            .replace(/Off Off/g, 'Off')
-            .replace(/Duty Off Off/g, 'Duty Off');
+          if (yestRule.dutyOffNextDay) {
+            let offShort = 'GD Off';
+            if (yestAss.dutyCode === 'GD') offShort = 'GD Off';
+            else if (yestAss.dutyCode === 'BTF') offShort = 'BTF Off';
+            else if (yestAss.dutyCode === 'NTF') offShort = 'NTF Off';
+            else if (yestAss.dutyCode === 'AIRPORT' || (yestAss.dutyCode as any) === 'AIRFIELD') offShort = 'Airfield Off';
+            else if (yestAss.dutyCode === 'HALISHAHAR') offShort = 'Halishahar Off';
+            else if ((yestAss.dutyCode === 'IDAC' || yestAss.dutyCode === 'IDA') && yestAss.idaShift === 'Night') offShort = 'IDAC Nt Off';
+            else if (yestAss.notes?.toLowerCase().includes('idac') || yestAss.previousDutyName?.toLowerCase().includes('idac')) offShort = 'IDAC Nt Off';
+            else if (yestAss.dutyCode === 'DUTY_OFF') offShort = yestAss.previousDutyName || yestAss.notes || 'GD Off';
+            else if (yestAss.dutyCode === 'ON_PARADE') offShort = 'GD Off';
+            else if (yestRule.matchedTitle) offShort = `${yestRule.matchedTitle} Off`;
+            else offShort = `${yestAss.dutyCode} Off`;
 
-          const isHeavy =
-            ['GD', 'BTF', 'NTF', 'AIRPORT', 'ATT', 'HALISHAHAR'].includes(yestAss.dutyCode) ||
-            ((yestAss.dutyCode === 'IDAC' || yestAss.dutyCode === 'IDA') && yestAss.idaShift === 'Night') ||
-            yestAss.notes?.toLowerCase().includes('idac');
+            offShort = (offShort || "")
+              .replace(/DUTY_OFF/g, 'Duty')
+              .replace(/Off Off/g, 'Off')
+              .replace(/Duty Off Off/g, 'Duty Off');
 
-          if (isHeavy) {
-            return { 
-              dutyCode: 'DUTY_OFF', 
-              dutyName: offShort, 
-              previousDutyName: offShort,
-              proxyForFlight: yestAss.proxyForFlight,
-              notes: offShort,
-              statusCategory: 'OFF',
-            };
+            if (!isPT) {
+              return { 
+                dutyCode: 'DUTY_OFF', 
+                dutyName: offShort, 
+                previousDutyName: offShort,
+                proxyForFlight: yestAss.proxyForFlight,
+                notes: offShort,
+                statusCategory: 'OFF',
+              };
+            } else {
+              // PT State
+              if (yestRule.onPtNextDay !== false) {
+                // On PT is ON -> On PT (On Parade)
+                return {
+                  dutyCode: 'ON_PARADE',
+                  dutyName: 'On PT',
+                  notes: '',
+                  statusCategory: 'PARADE',
+                  disposalScope: 'PT',
+                };
+              } else {
+                // On PT is OFF -> Duty Off in PT State!
+                return { 
+                  dutyCode: 'DUTY_OFF', 
+                  dutyName: offShort, 
+                  previousDutyName: offShort,
+                  proxyForFlight: yestAss.proxyForFlight,
+                  notes: offShort,
+                  statusCategory: 'OFF',
+                  disposalScope: 'PT',
+                };
+              }
+            }
           }
         }
       }
@@ -3131,17 +3240,8 @@ export class LocalDatabaseEngine {
           statusCategory = 'TDY';
         }
         else if (codeStr === 'DUTY_OFF') {
-          if (isPT) {
-            return {
-              dutyCode: 'ON_PARADE',
-              dutyName: 'On PT',
-              notes: '',
-              statusCategory: 'PARADE',
-              disposalScope: scope,
-            };
-          }
-
           const yestAss = yestMap.get(airmanId);
+          const yestRule = yestAss ? getDutyRule(yestAss) : undefined;
           let offShort = 'GD Off';
 
           if (yestAss) {
@@ -3155,6 +3255,7 @@ export class LocalDatabaseEngine {
             else if (yestAss.notes?.toLowerCase().includes('idac') || yestAss.previousDutyName?.toLowerCase().includes('idac')) offShort = 'IDAC Nt Off';
             else if (yestCodeStr === 'DUTY_OFF') offShort = yestAss.previousDutyName || 'GD Off';
             else if (yestCodeStr === 'ON_PARADE') offShort = 'GD Off';
+            else if (yestRule?.matchedTitle) offShort = `${yestRule.matchedTitle} Off`;
             else offShort = `${yestAss.dutyCode} Off`;
           } else if (ass.notes && !ass.notes.toLowerCase().includes('imported')) {
             if (ass.notes.toLowerCase().includes('idac')) offShort = 'IDAC Nt Off';
@@ -3173,6 +3274,29 @@ export class LocalDatabaseEngine {
 
           if (!offShort.toLowerCase().endsWith('off')) {
             offShort = `${offShort} Off`;
+          }
+
+          if (isPT) {
+            const isOnPt = yestRule ? (yestRule.onPtNextDay !== false) : true;
+            if (isOnPt) {
+              return {
+                dutyCode: 'ON_PARADE',
+                dutyName: 'On PT',
+                notes: '',
+                statusCategory: 'PARADE',
+                disposalScope: scope,
+              };
+            } else {
+              return {
+                dutyCode: 'DUTY_OFF',
+                dutyName: offShort,
+                previousDutyName: offShort,
+                proxyForFlight: ass.proxyForFlight,
+                notes: offShort,
+                statusCategory: 'OFF',
+                disposalScope: scope,
+              };
+            }
           }
 
           previousDutyName = offShort;
@@ -3262,6 +3386,16 @@ export class LocalDatabaseEngine {
         else if (codeStr === 'OTHERS') {
           dutyName = ass.notes || 'Other Disposal';
           statusCategory = 'OTHERS';
+        }
+
+        const todayRule = getDutyRule(ass);
+        if (todayRule.onParadeOnDutyDay && (statusCategory === 'DUTY' || statusCategory === 'PARADE')) {
+          if (!isPT && !isNightCount) {
+            statusCategory = 'PARADE';
+            dutyName = 'On Parade';
+          } else if (isPT) {
+            statusCategory = 'DUTY';
+          }
         }
 
         const safeNotes = (ass.notes || '').toLowerCase().includes('imported') ? '' : (ass.notes || '');

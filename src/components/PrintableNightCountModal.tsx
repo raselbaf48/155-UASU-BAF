@@ -1404,7 +1404,7 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  {/* DISPOSALS (ONLY SHOWN IF NOT EMPTY / >0 AIRMEN, NO EMPTY HEADINGS) */}
  <div className="flex-1 flex flex-wrap gap-5">
  {/* DISPOSAL COL A */}
- {(leaveList.length > 0 || dutyOnList.length > 0 || (!isPtDocument && dutyOffList.length > 0) || bakeBiteList.length > 0 || essnList.length > 0) && (
+ {(leaveList.length > 0 || dutyOnList.length > 0 || dutyOffList.length > 0 || bakeBiteList.length > 0 || essnList.length > 0) && (
  <div className="w-48 flex flex-col space-y-3">
  {leaveList.length > 0 && (
  <div>
@@ -1420,7 +1420,7 @@ export const PrintableNightCountModal: React.FC<NightCountStateViewProps & { onC
  </div>
  )}
 
- {!isPtDocument && dutyOffList.length > 0 && (
+ {dutyOffList.length > 0 && (
  <div>
  <h3 className="font-bold underline text-black dark:text-white mb-1">Duty Off</h3>
  {renderDisposalAirmenList(dutyOffList, 'DUTY_OFF', 'Duty Off')}
